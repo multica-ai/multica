@@ -309,16 +309,53 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 // They only prompt an early evaluation and never become run inputs.
 const conditionHintSQL = "wakeup_id=$1 AND processed_at IS NULL AND event_type NOT IN ('condition.met','wakeup.timeout','wakeup.manual')"
 
-func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (bool, error) {
-	tag, err := tx.Exec(ctx, "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE "+conditionHintSQL, id)
-	return tag.RowsAffected() > 0, err
+// consumeConditionHints marks the pending hints processed. It also returns the
+// agent runs that caused them, or nil when any hint came from elsewhere (a
+// person, the platform, or several merged events), so a satisfied condition
+// can tell whether the target agent brought it about itself.
+func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (bool, []string, error) {
+	rows, err := tx.Query(ctx, "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE "+conditionHintSQL+" RETURNING payload", id)
+	if err != nil {
+		return false, nil, err
+	}
+	defer rows.Close()
+	hinted, complete := false, true
+	var causes []string
+	for rows.Next() {
+		var raw []byte
+		if err = rows.Scan(&raw); err != nil {
+			return false, nil, err
+		}
+		hinted = true
+		var p struct {
+			SourceTaskID  string   `json:"source_task_id"`
+			SourceTaskIDs []string `json:"source_task_ids"`
+			Count         int64    `json:"coalesced_count"`
+		}
+		_ = json.Unmarshal(raw, &p)
+		switch {
+		case p.Count <= 1 && p.SourceTaskID != "":
+			causes = append(causes, p.SourceTaskID)
+		case len(p.SourceTaskIDs) > 0:
+			causes = append(causes, p.SourceTaskIDs...)
+		default:
+			complete = false
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return false, nil, err
+	}
+	if !complete {
+		causes = nil
+	}
+	return hinted, causes, nil
 }
 
 // pollCondition evaluates a condition rule when it is due or a related event
 // arrived, and returns the next scheduled evaluation. A newly satisfied
 // predicate becomes one condition.met input for the ordinary dispatch below.
 func pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) (pgtype.Timestamptz, error) {
-	hinted, err := consumeConditionHints(ctx, tx, w.ID)
+	hinted, causes, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return w.NextFireAt, err
 	}
@@ -333,8 +370,7 @@ func pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWake
 	// gets its own receipt key.
 	state := w.ConditionState
 	if met && fingerprint != state {
-		payload, _ := json.Marshal(map[string]any{"condition": json.RawMessage(w.Condition), "observed": observed, "observed_at": now.UTC().Format(time.RFC3339)})
-		if _, err = q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: "condition:" + now.UTC().Format(time.RFC3339Nano), EventType: wakeupConditionEventType, Payload: payload}); err != nil {
+		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
 			return w.NextFireAt, err
 		}
 		state = fingerprint
@@ -503,4 +539,16 @@ func stageProgress(children []subIssue) (bool, string, map[string]any) {
 		return true, fmt.Sprintf("stage:%d", closedStage), observed
 	}
 	return false, "", observed
+}
+
+// recordConditionMet turns a newly satisfied condition into one run input. It
+// names the agent runs whose changes satisfied it, when all of them are known.
+func recordConditionMet(ctx context.Context, q *db.Queries, w db.IssueWakeup, observed map[string]any, causes []string, now time.Time) error {
+	facts := map[string]any{"condition": json.RawMessage(w.Condition), "observed": observed, "observed_at": now.UTC().Format(time.RFC3339)}
+	if len(causes) > 0 {
+		facts["source_task_ids"] = causes
+	}
+	payload, _ := json.Marshal(facts)
+	_, err := q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: "condition:" + now.UTC().Format(time.RFC3339Nano), EventType: wakeupConditionEventType, Payload: payload})
+	return err
 }

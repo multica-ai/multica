@@ -219,6 +219,26 @@ func (q *Queries) ConsumeWakeupReceipts(ctx context.Context, arg ConsumeWakeupRe
 	return err
 }
 
+const countActiveIssueRunsOfAgent = `-- name: CountActiveIssueRunsOfAgent :one
+SELECT count(*) FROM agent_task_queue WHERE id=ANY($1::uuid[]) AND agent_id= $2 AND issue_id= $3
+ AND status IN ('dispatched','running','waiting_local_directory')
+`
+
+type CountActiveIssueRunsOfAgentParams struct {
+	Ids     []pgtype.UUID `json:"ids"`
+	AgentID pgtype.UUID   `json:"agent_id"`
+	IssueID pgtype.UUID   `json:"issue_id"`
+}
+
+// How many of these runs are the agent's own runs on this issue that have
+// not finished: the run that made a change still knows about it.
+func (q *Queries) CountActiveIssueRunsOfAgent(ctx context.Context, arg CountActiveIssueRunsOfAgentParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveIssueRunsOfAgent, arg.Ids, arg.AgentID, arg.IssueID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRecentWakeupTasks = `-- name: CountRecentWakeupTasks :one
 SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'= $1::text AND issue_id= $2 AND created_at> $3
 `
@@ -584,6 +604,24 @@ func (q *Queries) DiscardWakeupReceipts(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
+const dropJoinedWakeup = `-- name: DropJoinedWakeup :exec
+UPDATE agent_task_queue t SET context=t.context || jsonb_build_object('wakeup_joined',
+ (SELECT COALESCE(jsonb_agg(e),'[]'::jsonb) FROM jsonb_array_elements(t.context->'wakeup_joined') e WHERE e->>'wakeup_id' IS DISTINCT FROM $1::text))
+WHERE t.issue_id= $2 AND t.status='queued' AND jsonb_typeof(t.context->'wakeup_joined')='array'
+`
+
+type DropJoinedWakeupParams struct {
+	WakeupID string      `json:"wakeup_id"`
+	IssueID  pgtype.UUID `json:"issue_id"`
+}
+
+// A rule that is turned off or replaced withdraws what it handed to runs that
+// have not started, like its own unstarted runs.
+func (q *Queries) DropJoinedWakeup(ctx context.Context, arg DropJoinedWakeupParams) error {
+	_, err := q.db.Exec(ctx, dropJoinedWakeup, arg.WakeupID, arg.IssueID)
+	return err
+}
+
 const findPendingWakeupTask = `-- name: FindPendingWakeupTask :one
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot FROM agent_task_queue WHERE context->>'wakeup_id'= $1::text AND status IN ('queued','dispatched') ORDER BY created_at LIMIT 1 FOR UPDATE
 `
@@ -705,6 +743,98 @@ func (q *Queries) GetIssueWakeup(ctx context.Context, arg GetIssueWakeupParams) 
 		&i.MaxFires,
 		&i.FireCount,
 		&i.PausedReason,
+	)
+	return i, err
+}
+
+const joinQueuedIssueRun = `-- name: JoinQueuedIssueRun :one
+UPDATE agent_task_queue t SET context=COALESCE(t.context,'{}'::jsonb) || jsonb_build_object('wakeup_joined',
+ (SELECT COALESCE(jsonb_agg(e),'[]'::jsonb) FROM jsonb_array_elements(COALESCE(t.context->'wakeup_joined','[]'::jsonb)) e
+  WHERE e->>'wakeup_id' IS DISTINCT FROM $1::text) || jsonb_build_array($2::jsonb))
+WHERE t.id=(SELECT q.id FROM agent_task_queue q WHERE q.issue_id= $3 AND q.agent_id= $4 AND q.status='queued'
+  AND q.context->>'wakeup_id' IS DISTINCT FROM $1::text ORDER BY q.created_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED)
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot
+`
+
+type JoinQueuedIssueRunParams struct {
+	WakeupID string      `json:"wakeup_id"`
+	Entry    []byte      `json:"entry"`
+	IssueID  pgtype.UUID `json:"issue_id"`
+	AgentID  pgtype.UUID `json:"agent_id"`
+}
+
+// A rule that fires while the same agent already has a run waiting to start on
+// the issue (from any trigger but this rule) hands that run its instruction
+// and facts instead of queuing another. Only an unclaimed run qualifies: a
+// claimed prompt is fixed. A rule that joins again replaces its earlier entry.
+func (q *Queries) JoinQueuedIssueRun(ctx context.Context, arg JoinQueuedIssueRunParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, joinQueuedIssueRun,
+		arg.WakeupID,
+		arg.Entry,
+		arg.IssueID,
+		arg.AgentID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
+		&i.CommentThreadID,
+		&i.CancelledByType,
+		&i.CancelledByID,
+		&i.CancelledByName,
+		&i.IssueSnapshot,
 	)
 	return i, err
 }

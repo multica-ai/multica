@@ -417,7 +417,7 @@ current run. A wakeup persists on the issue; it is not a sleeping process.
 - `wakeup disable <issue> <id>` stops future triggers and withdraws unclaimed work. Users can also turn it off in the issue sidebar. Closing/cancelling/completing the issue disables its wakeups; reopening does not restore them.
 - `--parent <comment-id>` keeps result delivery in the original thread.
 - Give waits an end: `--expires-in 72h` (restarts if the rule is re-enabled) or `--expires-at <RFC3339>`. With `--on-timeout wake`, an event rule runs the target once with a `wakeup.timeout` fact when the deadline passes first; the default `end` stops quietly. Recurring checks should carry an end date.
-- Members create the same rules from the issue sidebar. The parent's stage wake (see Stages above) appears there as a system rule; a member may turn it off for one issue or add an instruction, which is appended to the stage-complete comment you receive.
+- Members create the same rules from the issue sidebar. The parent's stage wake (see Stages above) appears there as a system rule; a member may turn it off for one issue or set its instruction, which your `[WAKEUP]` block then carries.
 
 Read current state with issue get, comment list, and run inspection before
 judging business completion. For CI, use the existing GitHub tools from a time
@@ -428,6 +428,11 @@ continuous configuration. Every wakeup runs under ordinary execution and comment
 delivery rules, even when a periodic check finds no change.
 
 Self-trigger protection excludes the registering run and runs started by the
-same rule when their source identity is available. It does not prevent cycles
-between different rules. Avoid mutually triggering continuous comment subscriptions;
-when waiting for a person's reply, filter that member explicitly.
+same rule when their source identity is available. Your own comments and issue
+changes never wake you, and a condition your own unfinished run satisfies does
+not wake you when you or the platform set the rule up. A wakeup that fires
+while a run of yours is already waiting to start on the issue joins that run
+instead of starting another: its instruction and facts appear in that run's
+`[WAKEUP — joined this run]` block, so handle them there. None of this prevents
+cycles between different rules. Avoid mutually triggering continuous comment
+subscriptions; when waiting for a person's reply, filter that member explicitly.

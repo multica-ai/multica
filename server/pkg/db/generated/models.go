@@ -829,14 +829,15 @@ type Issue struct {
 }
 
 type IssueChildEvent struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	ParentID    pgtype.UUID        `json:"parent_id"`
-	ChildID     pgtype.UUID        `json:"child_id"`
-	Kind        string             `json:"kind"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	ClaimedAt   pgtype.Timestamptz `json:"claimed_at"`
-	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ParentID     pgtype.UUID        `json:"parent_id"`
+	ChildID      pgtype.UUID        `json:"child_id"`
+	Kind         string             `json:"kind"`
+	SourceTaskID pgtype.UUID        `json:"source_task_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ClaimedAt    pgtype.Timestamptz `json:"claimed_at"`
+	ProcessedAt  pgtype.Timestamptz `json:"processed_at"`
 }
 
 type IssueDependency struct {

@@ -164,11 +164,25 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 	ids := make([]pgtype.UUID, 0, len(events))
 	closing := map[pgtype.UUID]bool{}
 	kinds := map[string]bool{}
+	// The agent runs that made the changes that can satisfy a sub-issue
+	// condition (a sub-issue closing, leaving, or changing stage), when every
+	// such change came from one. Adding or reopening a sub-issue satisfies
+	// nothing, so it does not count.
+	var sources []string
+	allSourced := true
 	for _, e := range events {
 		ids = append(ids, e.ID)
 		kinds[e.Kind] = true
 		if e.Kind == "closed" {
 			closing[e.ChildID] = true
+		}
+		if e.Kind == "attached" || e.Kind == "reopened" {
+			continue
+		}
+		if e.SourceTaskID.Valid {
+			sources = append(sources, util.UUIDToString(e.SourceTaskID))
+		} else {
+			allSourced = false
 		}
 	}
 	finish := func() error {
@@ -202,7 +216,11 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 	for kind := range kinds {
 		changes = append(changes, kind)
 	}
-	payload, _ := json.Marshal(map[string]any{"changes": changes})
+	hint := map[string]any{"changes": changes}
+	if allSourced && len(sources) > 0 {
+		hint["source_task_ids"] = sources
+	}
+	payload, _ := json.Marshal(hint)
 	key := "children:" + util.UUIDToString(events[len(events)-1].ID)
 	for _, w := range rules {
 		if _, err = q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: key, EventType: childChangeHint, Payload: payload}); err != nil {
@@ -439,7 +457,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	// A parked parent holds: nothing fires and nothing is marked as seen, so
 	// a stage that closed meanwhile wakes the assignee once it leaves backlog.
 	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
-		if _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+		if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -448,7 +466,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = tx.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
 		return err
 	}
-	if _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+	_, causes, err := consumeConditionHints(ctx, tx, w.ID)
+	if err != nil {
 		return err
 	}
 	met, fingerprint, observed, err := evaluateCondition(ctx, tx, q, w)
@@ -458,8 +477,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	state := w.ConditionState
 	switch {
 	case met && fingerprint != state:
-		payload, _ := json.Marshal(map[string]any{"condition": json.RawMessage(w.Condition), "observed": observed, "observed_at": now.UTC().Format(time.RFC3339)})
-		if _, err = q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: "condition:" + now.UTC().Format(time.RFC3339Nano), EventType: wakeupConditionEventType, Payload: payload}); err != nil {
+		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
 			return err
 		}
 		state = fingerprint
@@ -555,6 +573,28 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		}
 		return commit()
 	}
+	// The agent's own unfinished run on the parent closed the stage, or a run
+	// of the agent is already waiting to start there: no second run.
+	outcome, joined, err := avoidRedundantRun(ctx, q, w, instruction.Instruction, agent.ID, issue.ID, receipts)
+	if err != nil {
+		return err
+	}
+	if outcome != "" {
+		facts["outcome"] = outcome
+		if joined.ID.Valid {
+			facts["task_id"] = util.UUIDToString(joined.ID)
+		}
+		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids, TaskID: joined.ID}); err != nil {
+			return err
+		}
+		if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: true, LastTaskID: joined.ID}); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityTriggered, facts); err != nil {
+			return err
+		}
+		return commit()
+	}
 	recent, err := q.CountRecentWakeupTasks(ctx, db.CountRecentWakeupTasksParams{WakeupID: util.UUIDToString(w.ID), IssueID: w.IssueID, Since: pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true}})
 	if err != nil {
 		return err
@@ -567,22 +607,6 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 			return err
 		}
 		if err = note(wakeupActivityPaused, map[string]any{"rule": SystemRuleChildDone, "reason": wakeupPausedRate, "limit": wakeupHourlyRunLimit}); err != nil {
-			return err
-		}
-		return commit()
-	}
-	// Another run of the same agent on this issue is still waiting to start:
-	// it reads the current sub-issues when it does, so join it.
-	pending, err := q.HasOtherPendingIssueRun(ctx, db.HasOtherPendingIssueRunParams{IssueID: issue.ID, AgentID: agent.ID, WakeupID: util.UUIDToString(w.ID), HeadSha: headSHA})
-	if err != nil {
-		return err
-	}
-	if pending {
-		facts["outcome"] = "merged"
-		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
-			return err
-		}
-		if err = note(wakeupActivityTriggered, facts); err != nil {
 			return err
 		}
 		return commit()
@@ -701,6 +725,9 @@ func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID pg
 			return out, err
 		}
 		if cancelled, err = q.CancelUnstartedWakeupTasks(ctx, util.UUIDToString(rule.ID)); err != nil {
+			return out, err
+		}
+		if err = q.DropJoinedWakeup(ctx, db.DropJoinedWakeupParams{WakeupID: util.UUIDToString(rule.ID), IssueID: rule.IssueID}); err != nil {
 			return out, err
 		}
 	}

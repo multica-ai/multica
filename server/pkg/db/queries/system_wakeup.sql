@@ -26,14 +26,6 @@ WHERE workspace_id= @workspace_id AND system_rule= @system_rule AND customized_a
  AND paused_reason IS NULL AND enabled<> @enabled::bool
 RETURNING *;
 
--- name: HasOtherPendingIssueRun :one
--- A run of this agent on the issue that has not started, from any trigger but
--- the given rule. The child_done rule joins it: the run reads the current
--- sub-issues when it starts.
-SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id= @issue_id AND agent_id= @agent_id
- AND status IN ('queued','dispatched') AND context->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text
- AND (context->>'wakeup_id' IS NOT NULL OR COALESCE(sqlc.narg('head_sha')::text,'')='' OR context->>'head_sha'=sqlc.narg('head_sha')::text))::bool;
-
 -- name: CountCustomizedSystemWakeups :one
 -- Open issues whose rule a person changed, for the workspace settings page.
 SELECT count(*) FROM issue_wakeup w JOIN issue i ON i.id=w.issue_id AND i.workspace_id=w.workspace_id

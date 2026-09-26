@@ -7,31 +7,35 @@
 --
 -- kind: closed | reopened (a sub-issue entered or left a closed status,
 -- built-in or custom), attached | detached (it joined or left the parent),
--- restaged (its stage changed).
+-- restaged (its stage changed). source_task_id is the agent run that made the
+-- change, when an agent made it, so a rule does not wake that run's agent for
+-- what it just did.
 CREATE TABLE IF NOT EXISTS issue_child_event (
  id uuid NOT NULL DEFAULT gen_random_uuid(),
  workspace_id uuid NOT NULL,
  parent_id uuid NOT NULL,
  child_id uuid NOT NULL,
  kind text NOT NULL CHECK (kind IN ('closed','reopened','attached','detached','restaged')),
+ source_task_id uuid,
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  claimed_at timestamptz,
  processed_at timestamptz
 );
 
 CREATE OR REPLACE FUNCTION record_issue_child_event() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE old_closed boolean; new_closed boolean;
+DECLARE old_closed boolean; new_closed boolean; source uuid;
 BEGIN
+ source := NULLIF(current_setting('multica.source_task_id',true),'')::uuid;
  IF TG_OP='INSERT' THEN
-  INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'attached');
+  INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind,source_task_id) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'attached',source);
   RETURN NULL;
  END IF;
  IF OLD.parent_issue_id IS DISTINCT FROM NEW.parent_issue_id THEN
   IF OLD.parent_issue_id IS NOT NULL THEN
-   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind) VALUES(OLD.workspace_id,OLD.parent_issue_id,OLD.id,'detached');
+   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind,source_task_id) VALUES(OLD.workspace_id,OLD.parent_issue_id,OLD.id,'detached',source);
   END IF;
   IF NEW.parent_issue_id IS NOT NULL THEN
-   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'attached');
+   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind,source_task_id) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'attached',source);
   END IF;
   RETURN NULL;
  END IF;
@@ -39,13 +43,13 @@ BEGIN
   new_closed := NEW.status IN ('done','cancelled') OR EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=NEW.workspace_id AND s.key=NEW.status AND s.category IN ('done','closed'));
   old_closed := OLD.status IN ('done','cancelled') OR EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=OLD.workspace_id AND s.key=OLD.status AND s.category IN ('done','closed'));
   IF new_closed AND NOT old_closed THEN
-   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'closed');
+   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind,source_task_id) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'closed',source);
   ELSIF old_closed AND NOT new_closed THEN
-   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'reopened');
+   INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind,source_task_id) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'reopened',source);
   END IF;
  END IF;
  IF OLD.stage IS DISTINCT FROM NEW.stage THEN
-  INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'restaged');
+  INSERT INTO issue_child_event(workspace_id,parent_id,child_id,kind,source_task_id) VALUES(NEW.workspace_id,NEW.parent_issue_id,NEW.id,'restaged',source);
  END IF;
  RETURN NULL;
 END $$;

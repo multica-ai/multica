@@ -89,7 +89,7 @@ const claimChildEvents = `-- name: ClaimChildEvents :many
 UPDATE issue_child_event SET claimed_at=clock_timestamp()
 WHERE parent_id= $1 AND processed_at IS NULL
  AND (claimed_at IS NULL OR claimed_at < clock_timestamp()-interval '5 minutes')
-RETURNING id, workspace_id, parent_id, child_id, kind, created_at, claimed_at, processed_at
+RETURNING id, workspace_id, parent_id, child_id, kind, source_task_id, created_at, claimed_at, processed_at
 `
 
 // Claim a parent's recorded sub-issue changes. A claim that was not finished
@@ -109,6 +109,7 @@ func (q *Queries) ClaimChildEvents(ctx context.Context, parentID pgtype.UUID) ([
 			&i.ParentID,
 			&i.ChildID,
 			&i.Kind,
+			&i.SourceTaskID,
 			&i.CreatedAt,
 			&i.ClaimedAt,
 			&i.ProcessedAt,
@@ -355,34 +356,6 @@ func (q *Queries) GetSystemWakeup(ctx context.Context, arg GetSystemWakeupParams
 		&i.PausedReason,
 	)
 	return i, err
-}
-
-const hasOtherPendingIssueRun = `-- name: HasOtherPendingIssueRun :one
-SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id= $1 AND agent_id= $2
- AND status IN ('queued','dispatched') AND context->>'wakeup_id' IS DISTINCT FROM $3::text
- AND (context->>'wakeup_id' IS NOT NULL OR COALESCE($4::text,'')='' OR context->>'head_sha'=$4::text))::bool
-`
-
-type HasOtherPendingIssueRunParams struct {
-	IssueID  pgtype.UUID `json:"issue_id"`
-	AgentID  pgtype.UUID `json:"agent_id"`
-	WakeupID string      `json:"wakeup_id"`
-	HeadSha  pgtype.Text `json:"head_sha"`
-}
-
-// A run of this agent on the issue that has not started, from any trigger but
-// the given rule. The child_done rule joins it: the run reads the current
-// sub-issues when it starts.
-func (q *Queries) HasOtherPendingIssueRun(ctx context.Context, arg HasOtherPendingIssueRunParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasOtherPendingIssueRun,
-		arg.IssueID,
-		arg.AgentID,
-		arg.WakeupID,
-		arg.HeadSha,
-	)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const listChildConditionWakeups = `-- name: ListChildConditionWakeups :many

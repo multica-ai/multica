@@ -457,11 +457,17 @@ func TestChildDoneJoinsPendingRun(t *testing.T) {
 	updateChildStatus(t, fx.child.ID, "done")
 
 	entries := childDoneEntries(t, fx.parent.ID)
-	if len(entries) != 1 || entries[0].Outcome != "merged" {
+	if len(entries) != 1 || entries[0].Outcome != "merged" || entries[0].TaskID == "" {
 		t.Fatalf("entries = %+v", entries)
 	}
 	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
 		t.Fatalf("pending runs = %d, want the existing one only", got)
+	}
+	// The waiting run carries the stage facts and the instruction.
+	var contextJSON []byte
+	dbfx.QueryRow(t, `SELECT context FROM agent_task_queue WHERE id = $1`, entries[0].TaskID).Scan(&contextJSON)
+	if notes := service.JoinedWakeupNotes(contextJSON); !strings.Contains(notes, service.ChildDoneDefaultInstruction) || !strings.Contains(notes, `"all":true`) {
+		t.Fatalf("joined notes = %q", notes)
 	}
 }
 

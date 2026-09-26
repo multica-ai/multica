@@ -227,3 +227,28 @@ WHERE w.workspace_id= @workspace_id AND NOT w.enabled AND w.paused_reason IN ('l
  AND i.status NOT IN ('done','cancelled')
  AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
 ORDER BY w.updated_at DESC LIMIT 200;
+
+-- name: JoinQueuedIssueRun :one
+-- A rule that fires while the same agent already has a run waiting to start on
+-- the issue (from any trigger but this rule) hands that run its instruction
+-- and facts instead of queuing another. Only an unclaimed run qualifies: a
+-- claimed prompt is fixed. A rule that joins again replaces its earlier entry.
+UPDATE agent_task_queue t SET context=COALESCE(t.context,'{}'::jsonb) || jsonb_build_object('wakeup_joined',
+ (SELECT COALESCE(jsonb_agg(e),'[]'::jsonb) FROM jsonb_array_elements(COALESCE(t.context->'wakeup_joined','[]'::jsonb)) e
+  WHERE e->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text) || jsonb_build_array(@entry::jsonb))
+WHERE t.id=(SELECT q.id FROM agent_task_queue q WHERE q.issue_id= @issue_id AND q.agent_id= @agent_id AND q.status='queued'
+  AND q.context->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text ORDER BY q.created_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED)
+RETURNING t.*;
+
+-- name: DropJoinedWakeup :exec
+-- A rule that is turned off or replaced withdraws what it handed to runs that
+-- have not started, like its own unstarted runs.
+UPDATE agent_task_queue t SET context=t.context || jsonb_build_object('wakeup_joined',
+ (SELECT COALESCE(jsonb_agg(e),'[]'::jsonb) FROM jsonb_array_elements(t.context->'wakeup_joined') e WHERE e->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text))
+WHERE t.issue_id= @issue_id AND t.status='queued' AND jsonb_typeof(t.context->'wakeup_joined')='array';
+
+-- name: CountActiveIssueRunsOfAgent :one
+-- How many of these runs are the agent's own runs on this issue that have
+-- not finished: the run that made a change still knows about it.
+SELECT count(*) FROM agent_task_queue WHERE id=ANY(@ids::uuid[]) AND agent_id= @agent_id AND issue_id= @issue_id
+ AND status IN ('dispatched','running','waiting_local_directory');

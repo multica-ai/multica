@@ -69,7 +69,18 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	}
 	b.WriteString(execenv.BuildOnBehalfOfBlock(task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
+	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
 	return b.String()
+}
+
+// buildJoinedWakeupsBlock carries wakeups that fired while this run was
+// waiting to start. The server folded them into this run instead of queuing a
+// second run of the same agent on the issue, so this run handles them too.
+func buildJoinedWakeupsBlock(notes string) string {
+	if strings.TrimSpace(notes) == "" {
+		return ""
+	}
+	return "[WAKEUP — joined this run]\n" + strings.TrimSpace(notes) + "\n\n"
 }
 
 // promptOpts carries per-run facts the claimed Task does not: things only the

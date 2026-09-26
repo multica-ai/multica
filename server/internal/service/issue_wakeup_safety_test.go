@@ -87,14 +87,18 @@ func TestWakeupLoopBetweenRulesPausesTheRule(t *testing.T) {
 		raw, _ := json.Marshal(out)
 		return string(raw)
 	}
+	// The other side of the review round is another agent: an agent's own
+	// comments never wake it.
+	var runtime string
+	f.QueryRow(t, "SELECT runtime_id::text FROM agent WHERE id=$1", agent).Scan(&runtime)
+	reviewer := f.Agent(t, "Reviewer", runtime)
 	run := func(ctx string) string {
-		return f.Task(t, agent, testutil.Cols{"issue_id": issue, "status": "running", "context": ctx,
-			"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')")})
+		return f.Task(t, reviewer, testutil.Cols{"issue_id": issue, "status": "running", "context": ctx, "runtime_id": runtime})
 	}
 	// Once through the loop is a normal review round: A's run wakes B's
 	// agent, whose comment wakes A again.
 	once := run(`{"wakeup_id":"` + util.UUIDToString(b.ID) + `","wakeup_chain":` + chain(a.ID, b.ID) + `}`)
-	f.Comment(t, util.UUIDToString(issue), "round one", testutil.Cols{"author_type": "agent", "author_id": agent, "source_task_id": once})
+	f.Comment(t, util.UUIDToString(issue), "round one", testutil.Cols{"author_type": "agent", "author_id": reviewer, "source_task_id": once})
 	got := wakeTick(t, f, s, a.ID)
 	if !got.Enabled || wakeRuns(t, f, a.ID) != 1 {
 		t.Fatalf("first round was blocked: enabled=%t runs=%d", got.Enabled, wakeRuns(t, f, a.ID))
@@ -113,7 +117,7 @@ func TestWakeupLoopBetweenRulesPausesTheRule(t *testing.T) {
 	finishWakeupRuns(t, f, a.ID)
 	// The third pass through A without a person in between is a loop.
 	again := run(`{"wakeup_id":"` + util.UUIDToString(b.ID) + `","wakeup_chain":` + chain(a.ID, b.ID, a.ID, b.ID) + `}`)
-	f.Comment(t, util.UUIDToString(issue), "round two", testutil.Cols{"author_type": "agent", "author_id": agent, "source_task_id": again})
+	f.Comment(t, util.UUIDToString(issue), "round two", testutil.Cols{"author_type": "agent", "author_id": reviewer, "source_task_id": again})
 	got = wakeTick(t, f, s, a.ID)
 	if got.Enabled || got.PausedReason.String != wakeupPausedLoop || wakeRuns(t, f, a.ID) != 1 {
 		t.Fatalf("loop not stopped: enabled=%t reason=%q runs=%d", got.Enabled, got.PausedReason.String, wakeRuns(t, f, a.ID))

@@ -512,6 +512,7 @@ type AgentTaskResponse struct {
 	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	WakeupID                 string               `json:"wakeup_id,omitempty"`
 	WakeupSystemRule         string               `json:"wakeup_system_rule,omitempty"`      // set when a platform rule (e.g. child_done) started the run
+	WakeupJoined             string               `json:"wakeup_joined,omitempty"`           // wakeups that fired while this run waited to start and joined it instead of queuing their own
 	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
 	SquadID                  string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
@@ -857,6 +858,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		HandoffNote:            handoffNote,
 		WakeupID:               wakeupContext.ID,
 		WakeupSystemRule:       wakeupContext.SystemRule,
+		WakeupJoined:           service.JoinedWakeupNotes(t.Context),
 		WorkDir:                workDir,
 		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		DurableWorkDir:         durableWorkDir,

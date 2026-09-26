@@ -509,6 +509,41 @@ server and the server before clients; older clients ignore the new fields.
 Issue and workspace deletion remove the rows with the issue's other wakeups
 and `issue_child_event` rows.
 
+## Repeat runs: acknowledged and merged firings
+
+Runs are serialized per issue and agent (`ClaimAgentTask`), so a wakeup never
+runs beside another run of its agent, but it can queue behind one and repeat it.
+Pending runs are unique per issue, agent and scope (`comment_thread_id`, which
+is the rule id for wakeup runs), so an assignment run, a comment run and each
+rule's run used to queue separately. Every rule, the system rule included, now
+checks two things before it creates a run (`avoidRedundantRun`):
+
+- **Acknowledged.** Every input came from the target agent itself. An issue,
+  comment, reaction or attachment event whose single actor is the agent never
+  wakes it (task events, times, "wake now" and deadlines never count as the
+  agent's own). A `condition.met` input counts when the rule is the platform's
+  or its creating run belonged to the agent, and every run that caused it is
+  the agent's unfinished run on this issue. Causes travel with the hints:
+  captured events carry `source_task_id`, and `issue_child_event.source_task_id`
+  records `multica.source_task_id` for closing, leaving and restaging (adding
+  or reopening a sub-issue satisfies nothing and is ignored). A person's
+  condition rule still runs after the agent's own change, because the running
+  agent does not have its instruction. This is the #8849 fix: a coordinator
+  closing its own stage is not woken again while that run is going.
+- **Merged.** The agent already has a queued (unclaimed) run on the issue from
+  another trigger. The rule appends `{wakeup_id, note}` to that run's
+  `context.wakeup_joined` (`JoinQueuedIssueRun`, replacing its own earlier
+  entry) instead of queuing another; the claim response carries the notes as
+  `wakeup_joined` and the daemon renders them as a `[WAKEUP — joined this run]`
+  block for every prompt kind. Older daemons ignore the field, so on them the
+  run starts without the rule's instruction.
+
+Both consume the inputs and write a `wakeup_triggered` entry with `outcome`
+(`acknowledged` or `merged`, plus `task_id` for a merge); a merge counts toward
+`max_fires`. A rule's own queued run still absorbs new inputs as before. The
+create form tells a member when a reply or comment rule would wake the issue's
+agent assignee, whose comment-triggered run it will join.
+
 ## Conditions, runaway protection and check-ins
 
 **Conditions.** `condition` on the create/update body is a structured predicate
