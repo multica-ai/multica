@@ -377,6 +377,12 @@ If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and call
 The daemon launches Qoder and Qoder CN as `qodercli --yolo --acp` and `qoderclicn --yolo --acp`, respectively, matching their ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`. It writes the task brief to `QWEN.md`; when an agent has managed `mcp_config`, the daemon writes a 0600 per-run JSON file and passes it through `--mcp-config <path>`, then removes it after the process exits. A null config preserves Qwen Code native MCP settings.
 
+#### Claude background-notification recovery
+
+When a resumed Claude process exits with code 1 within ten seconds, without an assistant or result event, the daemon checks for a background-task notification newly enqueued in that session's transcript during the attempt. Recovery requires a matching session ID, a readable unchanged transcript file, and no stderr diagnosis or malformed stream events. A quick failure alone does not trigger recovery.
+
+For this failure, the daemon retires only the affected session mapping and retries once with fresh context. It preserves the original transcript for diagnosis; it never edits or deletes Claude JSONL. A consequential closed stdin error does not replace the provider's exit error. Missing or ambiguous notification evidence keeps the session mapping unchanged.
+
 #### `mcp_config` on ACP runtimes
 
 ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.
