@@ -33,6 +33,16 @@ var (
 	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)
 	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9])402([^0-9]|$)`)
 	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9])(429|529)([^0-9]|$)`)
+
+	// planWindowLimitRe matches a subscription plan telling the user they are
+	// out of allowance. Claude Code names the window between "your" and
+	// "limit" — "You've hit your weekly limit · resets …", "…your session
+	// limit", "…your Opus limit" — so the bare "you've hit your limit"
+	// substring never matched the messages it was meant for, and every one
+	// of them landed in agent_error.unknown. Up to three words may sit in
+	// between, which also covers "your org's monthly usage limit". Both the
+	// ASCII and the U+2019 apostrophe are accepted.
+	planWindowLimitRe = regexp.MustCompile(`you['\x{2019}]ve hit your (?:[a-z0-9'\x{2019}-]+ ){0,3}limit`)
 )
 
 // concurrentRequestLimitWitness is emitted by Anthropic-compatible providers
@@ -136,17 +146,12 @@ func Classify(rawError string) Reason {
 	// 4. Quota / billing. 402 / insufficient balance / monthly usage
 	//    limit / credits exhausted.
 	case httpQuotaCodeRe.MatchString(lower),
+		planWindowLimitRe.MatchString(lower),
 		containsAny(lower,
 			"insufficient_balance",
 			"balance is too low",
 			"monthly usage limit",
 			"usage limit",
-			"you've hit your limit",
-			// Curly apostrophe variant: providers and copy-pasted error
-			// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE
-			// would not match the curly form either, so this is a small
-			// in-flight improvement on top of the SQL classifier.
-			"you\u2019ve hit your limit",
 			"credits",
 			"quota",
 		):

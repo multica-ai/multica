@@ -75,6 +75,13 @@ func TestClassifyRules(t *testing.T) {
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
+		// Claude Code names the plan window between "your" and "limit". These
+		// are the exact strings it prints, and each used to land in unknown.
+		{"weekly limit", "You've hit your weekly limit \u00b7 resets Sep 21, 2am (UTC)", ReasonAgentProviderQuotaLimit},
+		{"weekly limit no date", "You've hit your weekly limit \u00b7 resets 2am (UTC)", ReasonAgentProviderQuotaLimit},
+		{"session limit", "You've hit your session limit \u00b7 resets 7pm (Europe/Paris)", ReasonAgentProviderQuotaLimit},
+		{"model family limit", "You've hit your Opus limit \u00b7 resets Mon 9am", ReasonAgentProviderQuotaLimit},
+		{"weekly limit curly", "You\u2019ve hit your weekly limit", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
 		{"quota", "quota exceeded for project foo", ReasonAgentProviderQuotaLimit},
 
