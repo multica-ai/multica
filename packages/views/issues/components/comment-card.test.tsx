@@ -41,7 +41,10 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   };
 });
 
+import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
+import { renderWithI18n } from "../../test/i18n";
 import { AttachmentList } from "./comment-card";
+import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 
 function renderWithQuery(ui: ReactElement) {
   const qc = new QueryClient({
@@ -131,5 +134,85 @@ describe("AttachmentList — inline attachment filtering", () => {
 
     expect(screen.queryByText("report.pdf")).toBeNull();
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("AttachmentList — layout (MUL-7649)", () => {
+  const file = (id: string, filename: string, content_type: string) =>
+    ({
+      id,
+      url: `/uploads/${filename}`,
+      download_url: `/uploads/${filename}`,
+      filename,
+      content_type,
+      size_bytes: 2048,
+      created_at: "2026-09-20T10:00:00Z",
+    }) as any;
+
+  function renderList(ui: ReactElement) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    return renderWithI18n(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  }
+
+  it("shows files as cards, not full-width rows", () => {
+    renderList(
+      <AttachmentList
+        attachments={[file("a", "notes.md", "text/markdown"), file("b", "data.csv", "text/csv")]}
+        content=""
+      />,
+    );
+    expect(screen.getByRole("button", { name: "notes.md" })).toBeTruthy();
+    expect(screen.getByText("MD · 2 KB")).toBeTruthy();
+    expect(screen.getByText("CSV · 2 KB")).toBeTruthy();
+    // The row form's Eye button is gone — the whole card opens the file.
+    expect(screen.queryByTitle("Preview")).toBeNull();
+  });
+
+  it("puts several images in one row of tiles, and keeps a lone image full size", () => {
+    const { container, unmount } = renderList(
+      <AttachmentList
+        attachments={[file("a", "a.png", "image/png"), file("b", "b.png", "image/png")]}
+        content=""
+      />,
+    );
+    expect(container.querySelectorAll(".image-tile")).toHaveLength(2);
+    unmount();
+
+    const single = renderList(
+      <AttachmentList attachments={[file("c", "c.png", "image/png")]} content="" />,
+    );
+    expect(single.container.querySelector(".image-figure")).toBeTruthy();
+    expect(single.container.querySelector(".image-tile")).toBeNull();
+  });
+
+  it("lays groups out images, then files, whatever the upload order", () => {
+    const { container } = renderList(
+      <AttachmentList
+        attachments={[
+          file("a", "notes.md", "text/markdown"),
+          file("b", "a.png", "image/png"),
+          file("c", "b.png", "image/png"),
+        ]}
+        content=""
+      />,
+    );
+    const tile = container.querySelector(".image-tile")!;
+    const card = screen.getByRole("button", { name: "notes.md" });
+    expect(tile.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("marks a re-uploaded file with its version on the issue page", () => {
+    const v1 = { ...file("v1", "report.md", "text/markdown"), comment_id: "c1" };
+    const v2 = { ...file("v2", "report.md", "text/markdown"), comment_id: "c2", created_at: "2026-09-21T10:00:00Z" };
+    const files = collectDeliverableFiles([
+      { id: "c1", attachments: [v1] },
+      { id: "c2", attachments: [v2] },
+    ]);
+    renderList(
+      <AttachmentVersionsProvider files={files}>
+        <AttachmentList attachments={[v2]} content="" />
+      </AttachmentVersionsProvider>,
+    );
+    expect(screen.getByText("v2")).toBeTruthy();
   });
 });

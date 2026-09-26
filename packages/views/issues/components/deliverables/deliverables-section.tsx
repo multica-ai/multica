@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { ChevronRight, LayoutGrid } from "lucide-react";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
-import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
 import { formatBytes } from "../../../common/format-bytes";
+import { fileIcon } from "../../../editor/utils/file-icon";
 import { getPreviewKind } from "../../../editor/utils/preview";
 import { PullRequestsGroup } from "../pull-requests-section";
-import { deliverableIcon } from "./deliverable-kind";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
 import { useOpenAttachment, type IssueDeliverables } from "./use-issue-deliverables";
+import { VersionBadge } from "./version-badge";
 
 // The sidebar is a summary, not the list: the newest few of each, and the
 // overview for the rest.
@@ -137,7 +137,7 @@ function versionedName(file: DeliverableFile, t: IssuesT): string {
 function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }) {
   const { t } = useT("issues");
   const { latest } = file;
-  const Icon = deliverableIcon(latest.content_type, latest.filename);
+  const Icon = fileIcon(latest.content_type, latest.filename);
   return (
     <button
       type="button"
@@ -153,26 +153,5 @@ function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }
         {latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : null}
       </span>
     </button>
-  );
-}
-
-export function VersionBadge({
-  version,
-  className,
-}: {
-  version: number;
-  className?: string;
-}) {
-  const { t } = useT("issues");
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground",
-        className,
-      )}
-      aria-hidden
-    >
-      {t(($) => $.deliverables.version_short, { version })}
-    </span>
   );
 }

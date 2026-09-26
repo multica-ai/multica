@@ -11,8 +11,11 @@ export {
   indexOfImageKey,
   isImageAttachment,
   matchAttachmentByURL,
+  orderStandaloneAttachments,
   selectStandaloneAttachments,
+  standaloneAttachmentGroup,
   type ImageSequenceBlock,
   type ImageSequenceItem,
   type SequenceCandidate,
+  type StandaloneAttachmentGroup,
 } from "./image-sequence";

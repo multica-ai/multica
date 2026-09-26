@@ -111,6 +111,7 @@ import {
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
 import { useIssueDeliverables } from "./deliverables/use-issue-deliverables";
+import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -3819,14 +3820,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Hosts the one viewer this issue's files page through — see
   // PreviewSequenceProvider. Wraps the column and the sidebar, so the
   // description's files, the timeline's and the sidebar's deliverables all
-  // open into one sequence.
+  // open into one sequence. The versions provider lets each comment's file
+  // cards mark a re-uploaded file `v2`.
   const withPreview = (layout: ReactNode) => (
     <PreviewSequenceProvider
       items={previewSequence}
       describeItem={describeDeliverable}
       onOpenOverview={openOverviewFromViewer}
     >
-      {layout}
+      <AttachmentVersionsProvider files={deliverables.files}>{layout}</AttachmentVersionsProvider>
       <DeliverablesOverview
         open={overview.open}
         onClose={closeOverview}

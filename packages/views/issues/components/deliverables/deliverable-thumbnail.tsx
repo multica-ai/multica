@@ -6,7 +6,7 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 import { useResignedInlineMedia } from "../../../editor/hooks/use-inline-media-url";
 import { fileTypeLabel, getPreviewKind } from "../../../editor/utils/preview";
-import { deliverableIcon } from "./deliverable-kind";
+import { fileIcon } from "../../../editor/utils/file-icon";
 
 /**
  * A file's face in a grid or strip: the image itself for images, otherwise
@@ -43,7 +43,7 @@ function FileFace({
   showTypeLabel: boolean;
   className?: string;
 }) {
-  const Icon = deliverableIcon(attachment.content_type, attachment.filename);
+  const Icon = fileIcon(attachment.content_type, attachment.filename);
   const label = fileTypeLabel(attachment.filename);
   return (
     <div

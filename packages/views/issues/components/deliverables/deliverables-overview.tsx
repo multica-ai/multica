@@ -23,7 +23,7 @@ import {
   type DeliverableCategory,
 } from "./deliverable-kind";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
-import { VersionBadge } from "./deliverables-section";
+import { VersionBadge } from "./version-badge";
 import { useOpenAttachment, type IssueDeliverables } from "./use-issue-deliverables";
 
 type Filter = "all" | DeliverableCategory;

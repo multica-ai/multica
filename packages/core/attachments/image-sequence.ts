@@ -150,6 +150,38 @@ export function selectStandaloneAttachments(
   });
 }
 
+function isHtmlAttachment(contentType: string, filename: string): boolean {
+  if (normalizeContentType(contentType) === "text/html") return true;
+  const ext = extensionOf(filename);
+  return ext === "html" || ext === "htm";
+}
+
+/** How a standalone attachment is laid out under its body (MUL-7649). */
+export type StandaloneAttachmentGroup = "image" | "html" | "file";
+
+export function standaloneAttachmentGroup(
+  attachment: Pick<Attachment, "content_type" | "filename">,
+): StandaloneAttachmentGroup {
+  if (isImageAttachment(attachment.content_type, attachment.filename)) return "image";
+  if (isHtmlAttachment(attachment.content_type, attachment.filename)) return "html";
+  return "file";
+}
+
+/**
+ * The order a surface renders its standalone attachments in (MUL-7649):
+ * images first (a row of thumbnails), then HTML files (each an embedded
+ * preview), then everything else (a grid of file cards). Stable within each
+ * group. The sequence builder walks standalone attachments in this same
+ * order, so paging through the viewer follows the screen.
+ */
+export function orderStandaloneAttachments<T extends Pick<Attachment, "content_type" | "filename">>(
+  attachments: ReadonlyArray<T>,
+): T[] {
+  const groups: Record<StandaloneAttachmentGroup, T[]> = { image: [], html: [], file: [] };
+  for (const a of attachments) groups[standaloneAttachmentGroup(a)].push(a);
+  return [...groups.image, ...groups.html, ...groups.file];
+}
+
 // ---------------------------------------------------------------------------
 // Inline image references
 // ---------------------------------------------------------------------------
@@ -329,7 +361,8 @@ export interface SequenceCandidate {
  * Flatten blocks into the ordered sequence a viewer walks.
  *
  * Order is render order: for each block, references inline in the body in
- * text order, then the standalone attachment cards rendered under it. Repeats
+ * text order, then the standalone attachments rendered under it, grouped as
+ * `orderStandaloneAttachments` lays them out. Repeats
  * of the same attachment collapse to their first position, so the counter
  * matches the number of distinct files rather than the number of references.
  *
@@ -382,7 +415,9 @@ export function collectAttachmentSequence(
     }
 
     if (block.standalone === false) continue;
-    for (const attachment of selectStandaloneAttachments(content, attachments)) {
+    for (const attachment of orderStandaloneAttachments(
+      selectStandaloneAttachments(content, attachments),
+    )) {
       if (
         !include({
           contentType: attachment.content_type,

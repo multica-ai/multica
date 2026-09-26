@@ -29,6 +29,7 @@ import {
   Maximize2,
   Trash2,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -44,9 +45,9 @@ import {
   useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
-import { AttachmentCard } from "./attachment-card";
+import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 import { HtmlAttachmentPreview } from "./html-attachment-preview";
-import { getPreviewKind, type PreviewKind } from "./utils/preview";
+import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,15 @@ export interface AttachmentProps {
   selected?: boolean;
   /** Editor hint — wired to Tiptap deleteNode(). */
   onDelete?: () => void;
+  /**
+   * "block" (default) renders each kind at full width, as a body renders it.
+   * "card" is the compact form a list of standalone attachments lays out: an
+   * image becomes a fixed-height tile, any other file a card. HTML keeps its
+   * embedded preview in both — the preview is the point of attaching it.
+   */
+  layout?: "block" | "card";
+  /** Card layout only — rendered after the file name, e.g. a version badge. */
+  badge?: ReactNode;
   className?: string;
 }
 
@@ -316,6 +326,8 @@ export function Attachment({
   editable,
   selected,
   onDelete,
+  layout = "block",
+  badge,
   className,
 }: AttachmentProps) {
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
@@ -408,7 +420,7 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
-          className={className}
+          className={cn(layout === "card" && "image-tile", className)}
         />
         {preview.modal}
       </>
@@ -421,6 +433,27 @@ export function Attachment({
         <HtmlAttachmentPreview
           attachmentId={state.attachmentId}
           filename={state.filename}
+          onPreview={openPreview}
+          onDownload={handleDownload}
+          onDelete={editable ? onDelete : undefined}
+        />
+        {preview.modal}
+      </>
+    );
+  }
+
+  if (layout === "card") {
+    return (
+      <>
+        <AttachmentFileCard
+          filename={state.filename}
+          contentType={state.contentType}
+          sizeBytes={state.record?.size_bytes}
+          // Same gate as the row's Eye button: text kinds need the record.
+          canPreview={!!shareUrl && canOpenPreview(kind, !!state.attachmentId)}
+          canDownload={!!shareUrl || !!state.attachmentId}
+          uploading={state.uploading}
+          badge={badge}
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}

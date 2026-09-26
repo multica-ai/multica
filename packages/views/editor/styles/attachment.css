@@ -29,6 +29,24 @@
   border-radius: var(--radius);
 }
 
+/* A thumbnail in a row of standalone images (the "card" layout): every image
+   the same height at its own aspect ratio, so a set of screenshots reads as
+   one strip instead of a stack of full-width frames. */
+.image-figure.image-tile {
+  display: block;
+  margin: 0;
+  height: 9rem;
+  max-width: 100%;
+}
+
+.image-figure.image-tile .image-content {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
 .image-uploading {
   opacity: 0.5;
   animation: rte-upload-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
