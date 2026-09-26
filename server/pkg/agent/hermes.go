@@ -3155,8 +3155,8 @@ func (s *acpProviderErrorSniffer) resetEchoJSON() {
 }
 
 // message returns a single-line summary suitable for the task
-// error field. Prefers the most specific "Error:" / "detail:"
-// fragment; falls back to the first captured header line; empty
+// error field. Prefers the latest specific "Error:" / "detail:"
+// fragment; falls back to the latest captured header line; empty
 // when nothing useful was seen.
 //
 // NOTE: a non-empty message() can describe a *transient* per-attempt
@@ -3268,8 +3268,19 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 	}
 
 	// Common path: non-kimi or kimi without a terminal provider.api_error line.
-	// Return the first detail tag, then fall back to the first header line.
-	for _, line := range s.lines {
+	// Walk backwards so a terminal provider failure wins over an earlier
+	// fail-open diagnostic captured during startup (for example, an optional
+	// Relay import warning followed by an exhausted HTTP 429). Once a terminal
+	// marker exists, exclude every detail that preceded its error block.
+	firstDetail := 0
+	for i := len(s.lines) - 1; i >= 0; i-- {
+		if acpTerminalErrorRe.MatchString(s.lines[i]) {
+			firstDetail = i
+			break
+		}
+	}
+	for i := len(s.lines) - 1; i >= firstDetail; i-- {
+		line := s.lines[i]
 		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
 			if detail != "" {
@@ -3277,7 +3288,8 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 			}
 		}
 	}
-	for _, line := range s.lines {
+	for i := len(s.lines) - 1; i >= 0; i-- {
+		line := s.lines[i]
 		if acpErrorHeaderRe.MatchString(line) || (s.kimiStyle && kimiProviderApiErrorRe.MatchString(line)) {
 			return acpTruncateError(prefix + line)
 		}
