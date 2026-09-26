@@ -2425,6 +2425,15 @@ export class ApiClient {
   // as the per-runtime endpoints above).
   // ---------------------------------------------------------------------------
 
+  // SE infra health snapshot (SE-37641/SE-37663). Returns the raw JSON; the
+  // caller (packages/core/se/health.ts) parses it with the SE health schema,
+  // keeping SE-specific schemas out of the shared API client.
+  async getSEInfraHealthSnapshot(workspaceId: string): Promise<unknown> {
+    return this.fetch<unknown>(
+      `/api/se/health?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
   async getDashboardUsageDaily(
     params: { days?: number; project_id?: string | null; tz?: string },
   ): Promise<DashboardUsageDaily[]> {

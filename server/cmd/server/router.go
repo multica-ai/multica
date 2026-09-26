@@ -2295,6 +2295,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
 			})
 
+			// SE infra health — owner/admin gated snapshot of the infra host
+			// (targets, node metrics, 24h history) plus the live agent fleet
+			// section, for the "/{slug}/health" page (SE-37641/SE-37663). The
+			// handler self-enforces the owner/admin role.
+			r.Route("/api/se", func(r chi.Router) {
+				r.Get("/health", h.GetSEInfraHealth)
+			})
+
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
