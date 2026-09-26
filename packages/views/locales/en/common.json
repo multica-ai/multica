@@ -8,7 +8,15 @@
     "upload_image": "Upload image",
     "emoji_label": "Emoji",
     "more_emojis": "More emojis…",
-    "emoji_loading": "Loading…"
+    "emoji_loading": "Loading…",
+    "brand_label": "Brand",
+    "tier_label": "Capability tier",
+    "tier_gold": "Gold",
+    "tier_silver": "Silver",
+    "tier_copper": "Copper",
+    "tier_cyan": "Cyan",
+    "tier_diamond": "Diamond",
+    "tier_crown": "Crown"
   },
   "avatar_crop": {
     "title": "Edit avatar",
