@@ -35,8 +35,11 @@ var daemonCmd = &cobra.Command{
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the local agent runtime daemon",
-	Long:  "Start the daemon process that polls for runs and executes them using local agent CLIs (Claude, Codex).\nRuns in the background by default. Use --foreground to run in the current terminal.",
-	RunE:  runDaemonStart,
+	Long: "Start the daemon process that polls for runs and executes them using local agent CLIs (Claude, Codex).\n" +
+		"Runs in the background by default. Use --foreground to run in the current terminal.\n" +
+		"Registers this profile's daemon to start again at login/boot unless --no-autostart is passed " +
+		"(manage with 'multica daemon autostart').",
+	RunE: runDaemonStart,
 }
 
 var daemonStopCmd = &cobra.Command{
@@ -108,6 +111,7 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	f.Bool("no-autostart", false, "Skip registering this profile's daemon to start at login/boot")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -131,6 +135,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.Bool("no-autostart", false, "Skip registering this profile's daemon to start at login/boot")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
@@ -568,6 +573,12 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
 			return err
 		}
+		// The daemon this invocation asked for is already up. Still record
+		// the boot-autostart intent: `daemon start` means "this machine
+		// should keep this daemon across reboots", and making registration
+		// depend on whether a start was needed would leave exactly the
+		// long-lived daemons that matter unregistered.
+		ensureDaemonAutostart(cmd, profile, true)
 		label := "daemon"
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
@@ -579,6 +590,12 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	if err := requireDaemonAuth(profile); err != nil {
 		return err
 	}
+
+	// The start can now actually succeed, so the machine gets configured to
+	// bring the daemon back at login. Before this point (no stored token,
+	// port held by another profile) nothing would run at boot either, and
+	// leaving a registration behind would only seed a boot-time failure.
+	ensureDaemonAutostart(cmd, profile, true)
 
 	// Resolve current executable so the foreground child reuses this binary.
 	exePath, err := daemonExecutable()
@@ -901,6 +918,12 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if b, _ := cmd.Flags().GetBool("no-auto-reload"); b {
 		args = append(args, "--no-auto-reload")
 	}
+	// Forwarded so a `daemon start --no-autostart` parent's child (and the
+	// auto-reload re-exec below) keeps the opt-out instead of the foreground
+	// path re-registering what the parent just declined to register.
+	if b, _ := cmd.Flags().GetBool("no-autostart"); b {
+		args = append(args, "--no-autostart")
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -917,6 +940,15 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	util.EnsureHiddenConsole()
 
 	profile := resolveProfile(cmd)
+
+	// Refresh the boot-autostart registration this process may itself have
+	// been launched from: rewriting is idempotent, and it is what heals a
+	// stale executable path after a self-update or an in-place upgrade
+	// moved the binary. Announced only to a watching human (stderr is a
+	// terminal) — as a launchd/systemd/Run-key child the line would only
+	// echo into the daemon's own log, which the background launcher above
+	// already reported.
+	ensureDaemonAutostart(cmd, profile, logger_pkg.StderrIsTerminal())
 
 	// Load the profile config once — several daemon knobs fall back to
 	// values persisted here when both the CLI flag and the env var are
