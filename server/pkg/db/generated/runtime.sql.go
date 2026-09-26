@@ -1099,7 +1099,8 @@ func (q *Queries) MarkRuntimesOfflineByIDs(ctx context.Context, arg MarkRuntimes
 
 const reassignAgentsToRuntime = `-- name: ReassignAgentsToRuntime :execrows
 UPDATE agent
-SET runtime_id = $1
+SET runtime_id = $1,
+    revision = revision + 1
 WHERE runtime_id = $2
 `
 
@@ -1354,9 +1355,9 @@ func (q *Queries) UnbindTasksFromRuntime(ctx context.Context, runtimeID pgtype.U
 
 const unbindUserAgentsFromRuntime = `-- name: UnbindUserAgentsFromRuntime :many
 UPDATE agent
-SET runtime_id = NULL, updated_at = now()
+SET runtime_id = NULL, revision = revision + 1, updated_at = now()
 WHERE runtime_id = $1 AND kind = 'user'
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, revision
 `
 
 // MUL-5559: the runtime-delete replacement for archive-then-hard-delete. Every
@@ -1408,6 +1409,7 @@ func (q *Queries) UnbindUserAgentsFromRuntime(ctx context.Context, runtimeID pgt
 			&i.DisabledRuntimeSkills,
 			&i.ServiceTier,
 			&i.ConversationStarters,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}

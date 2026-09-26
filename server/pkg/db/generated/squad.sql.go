@@ -673,6 +673,7 @@ const transferSquadAutopilotsToLeader = `-- name: TransferSquadAutopilotsToLeade
 UPDATE autopilot
 SET assignee_type = 'agent',
     assignee_id = $2,
+    revision = revision + 1,
     updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1
 `

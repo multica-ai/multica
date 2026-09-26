@@ -35,6 +35,7 @@ func computeNextRun(cronExpr, timezone string) (time.Time, error) {
 type AutopilotResponse struct {
 	ID          string  `json:"id"`
 	WorkspaceID string  `json:"workspace_id"`
+	Revision    int64   `json:"revision"`
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
@@ -201,6 +202,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 	return AutopilotResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
+		Revision:           a.Revision,
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
 		ProjectID:          uuidToPtr(a.ProjectID),
@@ -370,6 +372,7 @@ type CreateAutopilotRequest struct {
 }
 
 type UpdateAutopilotRequest struct {
+	ExpectedRevision   *int64  `json:"expected_revision,omitempty"`
 	Title              *string `json:"title"`
 	Description        *string `json:"description"`
 	ProjectID          *string `json:"project_id"`
@@ -1064,6 +1067,26 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
+	for key := range rawFields {
+		if strings.EqualFold(key, "description") && key != "description" {
+			writeError(w, http.StatusBadRequest, "description must use the canonical JSON key")
+			return
+		}
+	}
+	if _, descriptionIncluded := rawFields["description"]; descriptionIncluded {
+		if req.ExpectedRevision == nil {
+			writeError(w, http.StatusBadRequest, "expected_revision is required when updating description")
+			return
+		}
+		if *req.ExpectedRevision < 1 {
+			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
+			return
+		}
+		if prev.Revision != *req.ExpectedRevision {
+			writeRevisionConflict(w, "autopilot", prev.ID, *req.ExpectedRevision, prev.Revision)
+			return
+		}
+	}
 
 	params := db.UpdateAutopilotParams{
 		ID:                 prev.ID,
@@ -1071,6 +1094,9 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
 		ProjectID:          prev.ProjectID,
+	}
+	if req.ExpectedRevision != nil {
+		params.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -1202,17 +1228,40 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 		return
 	}
-	if lockedPrev.UpdatedAt.Valid != prev.UpdatedAt.Valid ||
-		(lockedPrev.UpdatedAt.Valid && !lockedPrev.UpdatedAt.Time.Equal(prev.UpdatedAt.Time)) {
+	if req.ExpectedRevision != nil && lockedPrev.Revision != *req.ExpectedRevision {
+		writeRevisionConflict(w, "autopilot", lockedPrev.ID, *req.ExpectedRevision, lockedPrev.Revision)
+		return
+	}
+	if req.ExpectedRevision == nil && (lockedPrev.UpdatedAt.Valid != prev.UpdatedAt.Valid ||
+		(lockedPrev.UpdatedAt.Valid && !lockedPrev.UpdatedAt.Time.Equal(prev.UpdatedAt.Time))) {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "the autopilot changed while it was being edited; reload and try again.",
 			"code":  "autopilot_update_conflict",
 		})
 		return
 	}
+	if _, sent := rawFields["description"]; !sent {
+		params.Description = lockedPrev.Description
+	}
+	if _, sent := rawFields["issue_title_template"]; !sent {
+		params.IssueTitleTemplate = lockedPrev.IssueTitleTemplate
+	}
+	if _, sent := rawFields["project_id"]; !sent {
+		params.ProjectID = lockedPrev.ProjectID
+	}
+	if _, sent := rawFields["assignee_type"]; !sent {
+		params.AssigneeType = pgtype.Text{}
+	}
+	if _, sent := rawFields["assignee_id"]; !sent {
+		params.AssigneeID = pgtype.UUID{}
+	}
 
 	autopilot, err := qtx.UpdateAutopilot(r.Context(), params)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedRevision != nil {
+			writeRevisionConflict(w, "autopilot", lockedPrev.ID, *req.ExpectedRevision, lockedPrev.Revision)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 		return
 	}

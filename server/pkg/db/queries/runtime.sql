@@ -389,7 +389,7 @@ WHERE runtime_id = $1 AND completed_at IS NOT NULL;
 -- DeleteSystemAgentsByRuntime), so leaving them unbound would strand rows no
 -- one can repair.
 UPDATE agent
-SET runtime_id = NULL, updated_at = now()
+SET runtime_id = NULL, revision = revision + 1, updated_at = now()
 WHERE runtime_id = $1 AND kind = 'user'
 RETURNING *;
 
@@ -429,7 +429,8 @@ WHERE workspace_id = @workspace_id
 -- name: ReassignAgentsToRuntime :execrows
 -- Re-points every agent referencing old_runtime_id at new_runtime_id.
 UPDATE agent
-SET runtime_id = @new_runtime_id
+SET runtime_id = @new_runtime_id,
+    revision = revision + 1
 WHERE runtime_id = @old_runtime_id;
 
 -- name: LockWorkspaceForRuntimeMerge :exec

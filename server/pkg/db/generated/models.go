@@ -53,6 +53,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	Revision              int64       `json:"revision"`
 }
 
 type AgentBuilderDraft struct {
@@ -220,6 +221,7 @@ type Autopilot struct {
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	PauseReason        pgtype.Text        `json:"pause_reason"`
+	Revision           int64              `json:"revision"`
 }
 
 type AutopilotCollaborator struct {

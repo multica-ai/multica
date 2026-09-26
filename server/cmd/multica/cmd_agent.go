@@ -184,6 +184,7 @@ func init() {
 	agentUpdateCmd.Flags().String("name", "", "New name")
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
+	agentUpdateCmd.Flags().Int64("expected-revision", 0, "Revision from the agent edit snapshot; required with --instructions")
 	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
@@ -748,6 +749,19 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("instructions") {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
+		if !cmd.Flags().Changed("expected-revision") {
+			return fmt.Errorf("--expected-revision is required with --instructions")
+		}
+	}
+	if cmd.Flags().Changed("expected-revision") {
+		if !cmd.Flags().Changed("instructions") {
+			return fmt.Errorf("--expected-revision is only valid with --instructions")
+		}
+		v, _ := cmd.Flags().GetInt64("expected-revision")
+		if v < 1 {
+			return fmt.Errorf("--expected-revision must be a positive integer")
+		}
+		body["expected_revision"] = v
 	}
 	if err := applyConversationStartersFlag(cmd, body); err != nil {
 		return err
@@ -810,7 +824,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --expected-revision, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

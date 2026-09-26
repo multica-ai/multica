@@ -96,7 +96,14 @@ func TestUpdateAutopilot_PromptEditTransfersAllTriggers(t *testing.T) {
 	trig1 := seedScheduleTriggerPublishedBy(t, apID, creatorA)
 	trig2 := seedScheduleTriggerPublishedBy(t, apID, creatorA)
 
-	patchAutopilot(t, apID, map[string]any{"description": "Rewritten prompt: do the new thing"})
+	var revision int64
+	if err := testPool.QueryRow(context.Background(), `SELECT revision FROM autopilot WHERE id = $1`, parseUUID(apID)).Scan(&revision); err != nil {
+		t.Fatalf("load autopilot revision: %v", err)
+	}
+	patchAutopilot(t, apID, map[string]any{
+		"description":      "Rewritten prompt: do the new thing",
+		"expected_revision": revision,
+	})
 
 	if got := triggerPublisherMember(t, trig1); got != testUserID {
 		t.Errorf("trigger1 publisher = %s, want editor %s (prompt edit must transfer)", got, testUserID)

@@ -139,6 +139,7 @@ func init() {
 	// update
 	autopilotUpdateCmd.Flags().String("title", "", "New title")
 	autopilotUpdateCmd.Flags().String("description", "", "New description")
+	autopilotUpdateCmd.Flags().Int64("expected-revision", 0, "Revision from the autopilot edit snapshot; required with --description")
 	autopilotUpdateCmd.Flags().String("agent", "", "New assignee agent (name or ID)")
 	autopilotUpdateCmd.Flags().String("project", "", "New project ID (use empty string to clear)")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
@@ -479,6 +480,19 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("description") {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
+		if !cmd.Flags().Changed("expected-revision") {
+			return fmt.Errorf("--expected-revision is required with --description")
+		}
+	}
+	if cmd.Flags().Changed("expected-revision") {
+		if !cmd.Flags().Changed("description") {
+			return fmt.Errorf("--expected-revision is only valid with --description")
+		}
+		v, _ := cmd.Flags().GetInt64("expected-revision")
+		if v < 1 {
+			return fmt.Errorf("--expected-revision must be a positive integer")
+		}
+		body["expected_revision"] = v
 	}
 	if cmd.Flags().Changed("agent") {
 		v, _ := cmd.Flags().GetString("agent")
