@@ -44,6 +44,7 @@ type workerQueries interface {
 	GetInvitation(context.Context, pgtype.UUID) (db.WorkspaceInvitation, error)
 	MarkClaimedSeatCapacityIntentDeadLettered(context.Context, db.MarkClaimedSeatCapacityIntentDeadLetteredParams) (int64, error)
 	MarkClaimedSeatCapacityIntentFailed(context.Context, db.MarkClaimedSeatCapacityIntentFailedParams) (int64, error)
+	ExistsPendingSeatCapacityConfirmForMember(context.Context, db.ExistsPendingSeatCapacityConfirmForMemberParams) (bool, error)
 	TransitionClaimedSeatCapacityIntent(context.Context, db.TransitionClaimedSeatCapacityIntentParams) (int64, error)
 }
 
@@ -239,12 +240,15 @@ func (w *Worker) settle(ctx context.Context, intent db.SeatCapacityOutbox) error
 		}
 		return w.deleteCurrent(ctx, intent)
 	case ActionReleaseMember:
-		decision, err := w.executor.ReleaseMember(ctx, workspaceID, uuidFromPG(intent.MemberID))
-		if err != nil && !IsNotFound(err) {
+		if deferred, nextAttemptAt, err := DeferClaimedMemberReleaseIfPendingConfirm(ctx, w.queries, intent, w.now()); err != nil || deferred {
+			if deferred {
+				LogMemberReleaseDeferred(ctx, w.logger, workspaceID, uuidFromPG(intent.MemberID), nextAttemptAt)
+			}
 			return err
 		}
-		if err == nil && decision.Managed && !decision.Allowed && decision.Reason != "released" {
-			return errors.New("capacity member release rejected in state " + decision.Reason)
+		decision, err := w.executor.ReleaseMember(ctx, workspaceID, uuidFromPG(intent.MemberID))
+		if err := MemberReleaseSettleError(decision, err); err != nil {
+			return err
 		}
 		return w.deleteCurrent(ctx, intent)
 	default:
@@ -391,6 +395,10 @@ func uuidFromPG(value pgtype.UUID) uuid.UUID {
 		return uuid.Nil
 	}
 	return uuid.UUID(value.Bytes)
+}
+
+func uuidToPG(value uuid.UUID) pgtype.UUID {
+	return pgtype.UUID{Bytes: value, Valid: value != uuid.Nil}
 }
 
 func workspaceIDString(value pgtype.UUID) string { return uuidFromPG(value).String() }
