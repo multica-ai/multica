@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "sh -c 'next dev --webpack --port \"${FRONTEND_PORT:-3000}\"'",
+    "dev": "sh -c 'next dev --webpack --hostname \"${FRONTEND_HOST:-0.0.0.0}\" --port \"${FRONTEND_PORT:-3000}\"'",
     "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
