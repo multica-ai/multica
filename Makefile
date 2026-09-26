@@ -312,14 +312,17 @@ server: ## Run only the Go server for the current checkout
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server
 
-daemon: ## Restart the local agent daemon using the CLI's stored auth/session
-	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
+daemon: ## Build the CLI and restart the local agent daemon using its stored auth/session
+	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local --no-auto-update"
 
 cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
 
-multica: ## Run the multica CLI entrypoint directly from the Go source tree
-	cd server && go run -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" ./cmd/multica $(MULTICA_ARGS)
+multica: ## Build and run the multica CLI from server/bin
+# The daemon re-execs this binary to prepare each task. A go run launcher
+# deletes its temporary executable on exit, breaking the background daemon.
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica$(EXE) ./cmd/multica
+	cd server && ./bin/multica$(EXE) $(MULTICA_ARGS)
 
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -331,11 +334,11 @@ DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 # as a Make variable (`make build GOOS=windows`). The top-level `export` sends
 # both forms to the recipe, so `go build` honors both and the suffix has to as
 # well; `$(GOOS)` covers the Make-variable form, which a parse-time
-# `go env GOOS` cannot see. Target-specific so only `build` pays for the probe:
+# `go env GOOS` cannot see. Target-specific so only builds pay for the probe:
 # a global assignment runs `go env` on every target — `export` expands even a
 # recursive one — which prints `go: Command not found` on frontend-only
 # checkouts with no Go toolchain installed.
-build: EXE = $(if $(filter windows,$(or $(GOOS),$(shell go env GOOS))),.exe,)
+build multica: EXE = $(if $(filter windows,$(or $(GOOS),$(shell go env GOOS))),.exe,)
 build: ## Build the server, CLI, and migrate binaries into server/bin
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server$(EXE) ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica$(EXE) ./cmd/multica
