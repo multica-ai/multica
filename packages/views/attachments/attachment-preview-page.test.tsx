@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 import type { ScrollRestorationAdapter } from "../platform";
 import { ScrollRestorationProvider } from "../platform";
 import { renderWithI18n } from "../test/i18n";
-import { AttachmentPreviewPage } from "./attachment-preview-page";
+import { AttachmentPreviewPage, HTML_PREVIEW_ADDRESS_KEY } from "./attachment-preview-page";
 import { hashString } from "../editor/utils/hash-string";
 import { buildScrollBridge } from "../editor/utils/iframe-scroll-bridge";
+import { withFragmentNavShim } from "../editor/utils/iframe-fragment-nav";
+import { withLocationBridge } from "../editor/utils/iframe-location-bridge";
 
 const htmlText = "<html><body><h1>Report</h1></body></html>";
 
@@ -87,7 +89,8 @@ describe("AttachmentPreviewPage", () => {
     renderPage(<AttachmentPreviewPage attachmentId="att-1" filename="report.html" />);
 
     expect(await screen.findByTitle("report.html")).toBeTruthy();
-    expect(screen.getByText("report.html")).toBeTruthy();
+    expect(screen.getByText("report.html", { selector: "p" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("");
     expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
@@ -123,10 +126,42 @@ describe("AttachmentPreviewPage", () => {
       </ScrollRestorationProvider>,
     );
     const iframe = await screen.findByTitle("report.html");
-    expect(iframe.getAttribute("srcdoc")).not.toContain("__multica");
-    expect(iframe.getAttribute("srcdoc")).not.toContain(buildScrollBridge("x"));
-    // Still applies the fragment-nav shim on both surfaces.
-    expect(iframe.getAttribute("srcdoc")).toContain("scrollIntoView");
+    // The address bridge and the fragment-nav shim, but no scroll bridge.
+    expect(iframe.getAttribute("srcdoc")).toBe(
+      withLocationBridge(withFragmentNavShim(htmlText), ""),
+    );
+  });
+
+  it("opens an HTML file at the route's address", async () => {
+    renderPage(<AttachmentPreviewPage attachmentId="att-1" initialAddress="?s=ia" />);
+    const iframe = await screen.findByTitle("report.html");
+    expect(iframe.getAttribute("srcdoc")).toBe(
+      withLocationBridge(withFragmentNavShim(htmlText), "?s=ia"),
+    );
+    expect(screen.getByRole("textbox", { name: "Address" })).toHaveValue("?s=ia");
+  });
+
+  it("comes back to the address kept in the tab's view state, and keeps it there", async () => {
+    const views = new Map<string, string | undefined>([[HTML_PREVIEW_ADDRESS_KEY, "?s=kept"]]);
+    const adapter: ScrollRestorationAdapter = {
+      get: () => undefined,
+      getViewState: (key) => views.get(key),
+      setViewState: (key, value) => views.set(key, value),
+    };
+    renderPage(
+      <ScrollRestorationProvider adapter={adapter}>
+        <AttachmentPreviewPage attachmentId="att-1" initialAddress="?s=route" />
+      </ScrollRestorationProvider>,
+    );
+    const iframe = await screen.findByTitle("report.html");
+    expect(iframe.getAttribute("srcdoc")).toBe(
+      withLocationBridge(withFragmentNavShim(htmlText), "?s=kept"),
+    );
+
+    const input = screen.getByRole("textbox", { name: "Address" });
+    fireEvent.change(input, { target: { value: "?s=next" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(views.get(HTML_PREVIEW_ADDRESS_KEY)).toBe("?s=next");
   });
 
   it("shows an image", async () => {

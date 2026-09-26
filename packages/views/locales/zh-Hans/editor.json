@@ -81,7 +81,9 @@
     "tree_keys_other": "{{count}} 个键",
     "table_empty": "没有数据行",
     "table_rows_other": "{{count}} 行",
-    "table_columns_other": "{{count}} 列"
+    "table_columns_other": "{{count}} 列",
+    "address": "地址",
+    "reload": "刷新"
   },
   "link_hover": {
     "copy_link": "复制链接",

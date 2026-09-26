@@ -120,6 +120,11 @@ import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
 import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
 import type { Size } from "./utils/zoom-transform";
 import { HtmlPreviewBody } from "./html-preview-body";
+import { HtmlPreviewAddressBar } from "./html-preview-address-bar";
+import {
+  useHtmlPreviewLocation,
+  type HtmlPreviewLocation,
+} from "./hooks/use-html-preview-location";
 import { CodeBlockStatic } from "./code-block-static";
 import { TablePreview } from "./table-preview";
 import { StructuredTree } from "./structured-tree";
@@ -456,6 +461,17 @@ export function AttachmentPreviewModal({
   // workspace route instead of throwing, so the new-tab button just hides.
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
+  // The html kind's current address, for "Open in new tab". Tagged with its
+  // file so one document's address never follows the reader to the next.
+  const htmlAddressRef = useRef<{ attachmentId: string; address: string } | null>(
+    null,
+  );
+  const handleHtmlAddressChange = useCallback(
+    (attachmentId: string, address: string) => {
+      htmlAddressRef.current = { attachmentId, address };
+    },
+    [],
+  );
 
   const onPrev = sequence?.onPrev;
   const onNext = sequence?.onNext;
@@ -528,10 +544,16 @@ export function AttachmentPreviewModal({
   const canOpenInNewTab = kind !== null && !!slug && !!state.attachmentId;
   const handleOpenInNewTab = () => {
     if (!slug || !state.attachmentId) return;
-    const nameQuery = state.filename
-      ? `?name=${encodeURIComponent(state.filename)}`
-      : "";
-    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
+    const address =
+      htmlAddressRef.current?.attachmentId === state.attachmentId
+        ? htmlAddressRef.current.address
+        : "";
+    const params = [
+      state.filename ? `name=${encodeURIComponent(state.filename)}` : "",
+      address ? `loc=${encodeURIComponent(address)}` : "",
+    ].filter(Boolean);
+    const query = params.length > 0 ? `?${params.join("&")}` : "";
+    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${query}`;
     if (navigation.openInNewTab) {
       navigation.openInNewTab(path, state.filename, { activate: true });
     } else {
@@ -603,6 +625,7 @@ export function AttachmentPreviewModal({
             info={info}
             locate={locate}
             onOpenOverview={onOpenOverview}
+            onHtmlAddressChange={handleHtmlAddressChange}
           />
         </motion.div>
       )}
@@ -637,15 +660,22 @@ const VIEWPORT_ICONS: Record<HtmlViewport, LucideIcon> = {
 };
 
 /**
- * Renders an HTML attachment's iframe. The viewer's is plain; the full-page
- * preview's also reports its scroll position to the desktop tab restorer.
+ * Renders an HTML attachment's iframe, loaded at the address bar's address
+ * (`location`, see useHtmlPreviewLocation). The viewer's is plain; the
+ * full-page preview's also reports its scroll position to the desktop tab
+ * restorer.
  */
-export type HtmlFrameRenderer = (props: { html: string; title: string }) => ReactNode;
+export type HtmlFrameRenderer = (props: {
+  html: string;
+  title: string;
+  location: HtmlPreviewLocation;
+}) => ReactNode;
 
-const renderViewerHtmlFrame: HtmlFrameRenderer = ({ html, title }) => (
+const renderViewerHtmlFrame: HtmlFrameRenderer = ({ html, title, location }) => (
   <HtmlPreviewBody
     html={html}
     title={title}
+    location={location}
     className="h-full w-full"
     iframeClassName="rounded-none border-0"
   />
@@ -687,6 +717,8 @@ function PreviewPanel({
   locate,
   onOpenOverview,
   renderHtmlFrame = renderViewerHtmlFrame,
+  initialHtmlAddress = "",
+  onHtmlAddressChange,
 }: {
   surface: "viewer" | "page";
   kind: PreviewKind | null;
@@ -703,6 +735,10 @@ function PreviewPanel({
   locate?: PreviewLocateAction;
   onOpenOverview?: () => void;
   renderHtmlFrame?: HtmlFrameRenderer;
+  /** Query and fragment an HTML file opens at. */
+  initialHtmlAddress?: string;
+  /** Reports an HTML file's address as the reader or the document moves it. */
+  onHtmlAddressChange?: (attachmentId: string, address: string) => void;
 }) {
   const { t } = useT("editor");
 
@@ -726,6 +762,8 @@ function PreviewPanel({
     structuredView,
     structuredParse,
     renderHtmlFrame,
+    initialHtmlAddress,
+    onHtmlAddressChange,
   };
 
   // Gallery navigation hands this panel an attachment the reader never
@@ -1251,6 +1289,8 @@ interface StageView {
   /** The `structured` kind's parse, once its body has loaded. */
   structuredParse: ReturnType<typeof parseStructured> | null;
   renderHtmlFrame: HtmlFrameRenderer;
+  initialHtmlAddress: string;
+  onHtmlAddressChange?: (attachmentId: string, address: string) => void;
 }
 
 const TEXT_BACKED_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
@@ -1369,15 +1409,18 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
-          render={(text) =>
-            view.htmlSource ? (
-              code(text, "xml")
-            ) : (
-              <HtmlViewportFrame viewport={view.htmlViewport}>
-                {view.renderHtmlFrame({ html: text, title: state.filename })}
-              </HtmlViewportFrame>
-            )
-          }
+          render={(text) => (
+            // Keyed on the file: another document starts at its own address,
+            // not at the one the reader left.
+            <HtmlStage
+              key={state.attachmentId}
+              attachmentId={state.attachmentId!}
+              html={text}
+              title={state.filename}
+              view={view}
+              source={view.htmlSource ? code(text, "xml") : null}
+            />
+          )}
         />
       );
     case "table":
@@ -1439,6 +1482,49 @@ function PreviewContent({
         />
       );
   }
+}
+
+// An HTML file on the stage: the address bar over the document, laid out at
+// the chosen viewport. The address lives here rather than in the frame so it
+// survives the source view, which unmounts the frame; the bar stays out of
+// the viewport frame so a device width never scales it.
+function HtmlStage({
+  attachmentId,
+  html,
+  title,
+  view,
+  source,
+}: {
+  attachmentId: string;
+  html: string;
+  title: string;
+  view: StageView;
+  /** The source view, shown instead of the document when set. */
+  source: ReactNode;
+}) {
+  const location = useHtmlPreviewLocation(view.initialHtmlAddress);
+  const onAddressChange = view.onHtmlAddressChange;
+  useEffect(() => {
+    onAddressChange?.(attachmentId, location.address);
+  }, [attachmentId, location.address, onAddressChange]);
+
+  if (source) return <>{source}</>;
+  return (
+    <div className="flex h-full flex-col">
+      <HtmlPreviewAddressBar
+        filename={title}
+        address={location.address}
+        onNavigate={location.navigate}
+        onReload={location.reload}
+        className="dark shrink-0 pb-2 text-foreground"
+      />
+      <div className="min-h-0 flex-1">
+        <HtmlViewportFrame viewport={view.htmlViewport}>
+          {view.renderHtmlFrame({ html, title, location })}
+        </HtmlViewportFrame>
+      </div>
+    </div>
+  );
 }
 
 // A read-not-looked-at document: a centered sheet in the app's theme that
@@ -1564,9 +1650,14 @@ function UnsupportedFallback({
 export function AttachmentPreviewStandalone({
   attachment,
   renderHtmlFrame,
+  initialHtmlAddress,
+  onHtmlAddressChange,
 }: {
   attachment: Attachment;
   renderHtmlFrame?: HtmlFrameRenderer;
+  /** Query and fragment an HTML file opens at. */
+  initialHtmlAddress?: string;
+  onHtmlAddressChange?: (address: string) => void;
 }) {
   const download = useDownloadAttachment();
   const source = useMemo<PreviewSource>(
@@ -1574,6 +1665,10 @@ export function AttachmentPreviewStandalone({
     [attachment],
   );
   const state = normalize(source);
+  const handleHtmlAddressChange = useCallback(
+    (_attachmentId: string, address: string) => onHtmlAddressChange?.(address),
+    [onHtmlAddressChange],
+  );
 
   return (
     <div className="flex h-full w-full flex-col bg-black/95">
@@ -1585,6 +1680,8 @@ export function AttachmentPreviewStandalone({
         onDownload={() => download(attachment.id)}
         reduceMotion
         renderHtmlFrame={renderHtmlFrame}
+        initialHtmlAddress={initialHtmlAddress}
+        onHtmlAddressChange={handleHtmlAddressChange}
       />
     </div>
   );
