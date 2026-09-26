@@ -12,7 +12,9 @@ const BasePath = "/v1"
 
 const (
 	PathContext       = "/context"
+	PathIssues        = "/issues"
 	PathIssue         = "/issues/{issue_ref}"
+	PathIssueTasks    = "/issues/{issue_ref}/tasks"
 	PathIssueComments = "/issues/{issue_ref}/comments"
 	PathStorageScope  = "/storage/{scope}"
 	PathStorageValue  = "/storage/{scope}/{key}"
@@ -56,8 +58,10 @@ var pluginRateLimits = []RateLimitProfile{RateLimitPluginStrict}
 
 var Operations = []Operation{
 	{Method: http.MethodGet, Path: PathContext, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Risk: RiskRead, Audit: AuditNotRequired, RateLimits: pluginRateLimits}},
+	{Method: http.MethodGet, Path: PathIssues, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:read", Risk: RiskRead, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodGet, Path: PathIssue, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:read", Risk: RiskRead, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodPatch, Path: PathIssue, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:write", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
+	{Method: http.MethodPost, Path: PathIssueTasks, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "tasks:write", Risk: RiskHigh, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodGet, Path: PathIssueComments, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "comments:read", Risk: RiskRead, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodPost, Path: PathIssueComments, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "comments:write", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodGet, Path: PathStorageScope, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Risk: RiskRead, Audit: AuditNotRequired, RateLimits: pluginRateLimits}},
