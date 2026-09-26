@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -32,6 +33,33 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("cursor-agent executable not found at %q: %w", execName, err)
 	}
 
+	env := b.cfg.Env
+	removeConfigDir := func() {}
+	if modelID, contextValue, ok := splitCursorContextModel(opts.Model); ok {
+		sourceDir, err := cursorSourceConfigDir(env)
+		if err != nil {
+			return nil, fmt.Errorf("cursor model %q: %w", opts.Model, err)
+		}
+		configDir, err := prepareCursorContextConfigDir(env["TMPDIR"], sourceDir, modelID, contextValue)
+		if err != nil {
+			return nil, fmt.Errorf("cursor model %q: %w", opts.Model, err)
+		}
+		removeConfigDir = func() { _ = os.RemoveAll(configDir) }
+		env = make(map[string]string, len(b.cfg.Env)+1)
+		for k, v := range b.cfg.Env {
+			env[k] = v
+		}
+		env["CURSOR_CONFIG_DIR"] = configDir
+	}
+
+	// The reader goroutine takes ownership of the config dir once started.
+	ownsConfigDir := true
+	defer func() {
+		if ownsConfigDir {
+			removeConfigDir()
+		}
+	}()
+
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
@@ -43,7 +71,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd.Env = buildEnv(env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -85,11 +113,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		writeErrCh <- err
 	}()
 
+	ownsConfigDir = false
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 		defer background.Close()
+		// Runs first: the per-run config dir is gone before the channels close.
+		defer removeConfigDir()
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		// Closing stdin too releases a prompt write still blocked on a full pipe
@@ -1018,6 +1049,8 @@ var cursorBlockedArgs = map[string]blockedArgMode{
 //
 //	--workspace <cwd> --yolo [--model <m>] [--resume <id>]
 //
+// --model is omitted for a context-tagged model; see splitCursorContextModel.
+//
 // The prompt is deliberately NOT part of argv. cursor-agent's -p is a boolean
 // print-mode switch and the prompt is a positional argument; when no positional
 // prompt is present and stdin is not a TTY, the CLI reads stdin to EOF and uses
@@ -1041,7 +1074,9 @@ func buildCursorArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.Cwd != "" {
 		args = append(args, "--workspace", opts.Cwd)
 	}
-	if opts.Model != "" {
+	// A context-tagged model (`grok-4.7[500k]`) is selected through the per-run
+	// cli-config.json instead: `--model` would reset Cursor to the default window.
+	if _, _, tagged := splitCursorContextModel(opts.Model); opts.Model != "" && !tagged {
 		args = append(args, "--model", opts.Model)
 	}
 	// NOTE: cursor-agent CLI does not support --system-prompt or --max-turns.
