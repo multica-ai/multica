@@ -5,11 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import type {
+  Issue,
   WorkspaceWakeup,
   WorkspaceWakeupFilters,
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { WorkspaceWakeups } from "./workspace-wakeups";
+import { WorkspaceWakeupCreate, WorkspaceWakeups } from "./workspace-wakeups";
 
 vi.mock("../../issues/components/wakeup-condition-names", () => ({
   useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
@@ -51,6 +52,24 @@ vi.mock("../../navigation", () => ({
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: () => <button>Transcript</button>,
+}));
+// The real picker reports the choice and then closes itself, in that order.
+vi.mock("../../modals/issue-picker-modal", () => ({
+  IssuePickerModal: ({ open, onSelect, onOpenChange }: { open: boolean; onSelect: (issue: Issue) => void; onOpenChange: (open: boolean) => void }) =>
+    open ? (
+      <div role="dialog" aria-label="Pick issue">
+        <button onClick={() => { onSelect({ id: "issue-x", assignee_type: "agent", assignee_id: "agent-x" } as Issue); onOpenChange(false); }}>DEV-x</button>
+        <button onClick={() => onOpenChange(false)}>Dismiss</button>
+      </div>
+    ) : null,
+}));
+vi.mock("../../issues/components/wakeup-create", () => ({
+  WakeupCreateForm: ({ issueId, defaultAgentId, onClose }: { issueId: string; defaultAgentId: string; onClose: () => void }) => (
+    <div>
+      <p>{`Create for ${issueId} with ${defaultAgentId}`}</p>
+      <button onClick={onClose}>Close form</button>
+    </div>
+  ),
 }));
 
 let rows: WorkspaceWakeup[];
@@ -207,11 +226,12 @@ it("resets page and selection on scope or search changes and sends bounded page 
   expect(
     screen.queryByRole("button", { name: "Turn off selected" }),
   ).toBeNull();
+  // Search runs once typing pauses; there is no submit button.
   fireEvent.change(screen.getByRole("searchbox"), {
     target: { value: "CI & release" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Search" }));
   await waitFor(() => expect(queries.at(-1)?.search).toBe("CI & release"));
+  expect(queries.filter((q) => q.search).length).toBe(1);
 });
 
 it("makes read-only rules non-selectable and surfaces inventory failures", async () => {
@@ -320,4 +340,29 @@ it("warns about paused rules and jumps to them", async () => {
   expect(banner).toHaveTextContent("more than 12 runs in an hour");
   fireEvent.click(within(banner).getByRole("button", { name: "View" }));
   await waitFor(() => expect(queries.at(-1)).toMatchObject({ scope: "paused", limit: 50 }));
+});
+
+it("opens the create form for the picked issue", async () => {
+  const onOpenChange = vi.fn();
+  const client = new QueryClient();
+  const view = renderWithI18n(
+    <QueryClientProvider client={client}>
+      <WorkspaceWakeupCreate open onOpenChange={onOpenChange} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "DEV-x" }));
+  // Regression: the picker's own close after a selection used to end the flow.
+  expect(await screen.findByText("Create for issue-x with agent-x")).toBeVisible();
+  expect(onOpenChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Close form" }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+  view.unmount();
+  onOpenChange.mockClear();
+  renderWithI18n(
+    <QueryClientProvider client={client}>
+      <WorkspaceWakeupCreate open onOpenChange={onOpenChange} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });

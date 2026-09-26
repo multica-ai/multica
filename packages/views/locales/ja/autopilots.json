@@ -483,7 +483,6 @@
     "recurring": "繰り返し",
     "all_agents": "すべてのエージェント",
     "search": "タスク・エージェントを検索",
-    "search_action": "検索",
     "running": "実行中",
     "active_runs": "{{count}} 件の実行が進行中",
     "issue_closed": "タスクは終了済み",

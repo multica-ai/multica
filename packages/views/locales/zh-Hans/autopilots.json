@@ -483,7 +483,6 @@
     "recurring": "周期",
     "all_agents": "所有智能体",
     "search": "搜索任务或智能体",
-    "search_action": "搜索",
     "running": "运行中",
     "active_runs": "{{count}} 个运行未结束",
     "issue_closed": "任务已关闭",

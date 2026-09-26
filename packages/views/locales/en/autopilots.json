@@ -486,7 +486,6 @@
     "recurring": "Recurring",
     "all_agents": "All agents",
     "search": "Search issues or agents",
-    "search_action": "Search",
     "running": "Running",
     "active_runs": "{{count}} active runs",
     "issue_closed": "Issue closed",

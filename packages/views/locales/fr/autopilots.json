@@ -486,7 +486,6 @@
     "recurring": "Récurrent",
     "all_agents": "Tous les agents",
     "search": "Rechercher des tâches ou agents",
-    "search_action": "Rechercher",
     "running": "En cours",
     "active_runs": "{{count}} exécutions actives",
     "issue_closed": "Tâche fermée",

@@ -483,7 +483,6 @@
     "recurring": "반복",
     "all_agents": "모든 에이전트",
     "search": "작업 또는 에이전트 검색",
-    "search_action": "검색",
     "running": "실행 중",
     "active_runs": "진행 중인 실행 {{count}}개",
     "issue_closed": "종료된 작업",
