@@ -490,6 +490,8 @@ export interface MikaBootstrapResponse extends Agent {
 export interface Agent {
   id: string;
   workspace_id: string;
+  /** Monotonic prompt revision used to reject stale instruction writes. */
+  revision?: number;
   /**
    * Empty string when the agent is unbound: it kept its configuration, chats and
    * task history when its runtime was deleted, and needs a new runtime before it
@@ -757,6 +759,8 @@ export interface AgentBuilderRuntimeSwitch {
 }
 
 export interface UpdateAgentRequest {
+  /** Required when `instructions` is present; omitted for unrelated updates. */
+  expected_revision?: number;
   name?: string;
   description?: string;
   instructions?: string;

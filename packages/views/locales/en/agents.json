@@ -472,7 +472,14 @@
       "system_layer_hide": "Hide",
       "workspace_notes_label": "Workspace notes",
       "workspace_notes_intro": "Add your team's context and preferences below. They apply on top of the instructions Multica maintains for this agent. Markdown is supported.",
-      "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays."
+      "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays.",
+      "conflict_title": "This prompt changed elsewhere",
+      "conflict_hint": "Choose the server version or keep your draft before saving again.",
+      "conflict_refreshing": "Loading the latest server version…",
+      "conflict_server": "Server version · revision {{revision}}",
+      "conflict_draft": "Your draft",
+      "conflict_use_server": "Use server version",
+      "conflict_keep_draft": "Keep my draft"
     },
     "env": {
       "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",

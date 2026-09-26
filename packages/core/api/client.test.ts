@@ -88,6 +88,37 @@ describe("ApiClient agent conversation-starter compatibility", () => {
       conversation_starters: [prompt],
     });
   });
+
+  it("serializes prompt revisions for agent and autopilot writes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.updateAgent("agent-1", {
+      instructions: "New instructions",
+      expected_revision: 4,
+    });
+    await client.updateAutopilot("autopilot-1", {
+      description: "New description",
+      expected_revision: 9,
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      instructions: "New instructions",
+      expected_revision: 4,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      description: "New description",
+      expected_revision: 9,
+    });
+  });
 });
 
 describe("ApiClient edit guards", () => {

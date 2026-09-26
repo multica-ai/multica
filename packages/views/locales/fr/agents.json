@@ -472,7 +472,14 @@
       "system_layer_hide": "Masquer",
       "workspace_notes_label": "Notes de l'espace de travail",
       "workspace_notes_intro": "Ajoutez ci-dessous le contexte et les préférences de votre équipe. Ils s'appliquent par-dessus les instructions que Multica maintient pour cet agent. Le Markdown est pris en charge.",
-      "workspace_notes_placeholder": "Ajoutez le contexte que cet agent doit toujours avoir.\n\n# Exemple\nNotre dépôt principal est github.com/acme/platform.\nRédige les tâches en anglais même quand nous discutons en français.\nNous ne déployons pas le vendredi."
+      "workspace_notes_placeholder": "Ajoutez le contexte que cet agent doit toujours avoir.\n\n# Exemple\nNotre dépôt principal est github.com/acme/platform.\nRédige les tâches en anglais même quand nous discutons en français.\nNous ne déployons pas le vendredi.",
+      "conflict_title": "Ce prompt a changé ailleurs",
+      "conflict_hint": "Choisissez la version du serveur ou conservez votre brouillon avant de réessayer.",
+      "conflict_refreshing": "Chargement de la dernière version du serveur…",
+      "conflict_server": "Version du serveur · révision {{revision}}",
+      "conflict_draft": "Votre brouillon",
+      "conflict_use_server": "Utiliser la version du serveur",
+      "conflict_keep_draft": "Conserver mon brouillon"
     },
     "env": {
       "intro_readonly": "Injectées dans le processus de l'agent au lancement. Seuls les propriétaires et administrateurs de l'espace de travail peuvent lire ou modifier les valeurs ; chaque affichage et chaque modification sont consignés dans le journal d'audit de l'espace de travail.",

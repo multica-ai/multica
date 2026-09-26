@@ -461,7 +461,14 @@
       "system_layer_hide": "收起",
       "workspace_notes_label": "工作区补充",
       "workspace_notes_intro": "在下面补充你们团队的上下文和偏好，它们会叠加在 Multica 为这个智能体维护的指令之上。支持 Markdown。",
-      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
+      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。",
+      "conflict_title": "此提示词已在其他位置更改",
+      "conflict_hint": "再次保存前，请选择服务器版本或保留你的草稿。",
+      "conflict_refreshing": "正在加载最新服务器版本…",
+      "conflict_server": "服务器版本 · 修订版 {{revision}}",
+      "conflict_draft": "你的草稿",
+      "conflict_use_server": "使用服务器版本",
+      "conflict_keep_draft": "保留我的草稿"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
