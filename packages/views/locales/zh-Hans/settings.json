@@ -82,12 +82,7 @@
       "done": "已完成。",
       "cancelled": "决定不做。"
     },
-    "automation_title": "自动化",
-    "pr_auto_complete_label": "PR 合并后自动完成任务",
-    "pr_auto_complete_description": "任务关联的 PR 全部合并，且至少一个 PR 写了关闭语句时，状态改为「已完成」。只对之后合并的 PR 生效。",
-    "pr_auto_complete_example": "关闭语句写在 PR 标题或正文里，例如",
-    "pr_auto_complete_example_title": "Closes MUL-123",
-    "pr_auto_complete_badge": "PR 全部合并时自动进入"
+    "pr_auto_complete_badge": "PR 合并后自动进入"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -797,11 +792,7 @@
     "repositories_shortcut_label": "仓库 URL 仍在\"代码仓库\"标签页中管理",
     "repositories_shortcut_link": "前往管理 →",
     "toast_failed": "更新 GitHub 设置失败",
-    "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。",
-    "feature_pr_auto_complete_label": "PR 合并后自动完成任务",
-    "feature_pr_auto_complete_on": "已开启 · 所有代码托管平台共用",
-    "feature_pr_auto_complete_off": "未开启 · 所有代码托管平台共用",
-    "feature_pr_auto_complete_manage": "设置"
+    "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。"
   },
   "vcs": {
     "section_title": "Git 代码托管（自托管）",
@@ -1364,5 +1355,10 @@
     "status_loading": "正在检查...",
     "status_unknown": "状态暂不可用",
     "channel_hint": "在 {{channel}} 中与智能体对话、创建任务。"
+  },
+  "pr_merge_status": {
+    "label": "PR 合并后，任务状态改为",
+    "description": "关联的 PR 全部合并后生效，只影响之后合并的 PR。",
+    "none": "不改变"
   }
 }

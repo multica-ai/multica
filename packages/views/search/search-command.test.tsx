@@ -256,7 +256,7 @@ function resolveIssue(key: readonly unknown[]) {
   // issueDetailOptions key shape: ["issues", wsId, "detail", id]
   if (key[0] === "issues" && key[2] === "detail") {
     const id = key[3];
-    return mockAllIssues.current.find((i) => i.id === id);
+    return mockAllIssues.current.find((i) => i.id === id || i.identifier === id);
   }
   return undefined;
 }
@@ -704,6 +704,31 @@ describe("SearchCommand", () => {
     expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
     expect(mockCommentExpandAll).not.toHaveBeenCalled();
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("folds comments under the issue UUID when the URL carries the identifier", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/MUL-42";
+    mockAllIssues.current = [
+      { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+    ];
+    mockTimeline.current = [
+      { type: "comment", id: "root-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T01:00:00Z", parent_id: null },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "fold");
+
+    const foldItem = await screen.findByText(
+      (_, el) => el?.textContent === "Fold All Comments" && el?.tagName === "SPAN",
+    );
+    await user.click(foldItem);
+
+    await waitFor(() => {
+      expect(mockCommentCollapseAll).toHaveBeenCalledWith("issue-1", ["root-1"]);
+    });
+    expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
   });
 
   it("unfolds all comments and expands resolved threads", async () => {

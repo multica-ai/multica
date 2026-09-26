@@ -43,32 +43,33 @@ WHERE issue_id = $1 AND pull_request_id = $2;
 
 -- name: ListIssueLinkedPullRequestStates :many
 -- Every PR linked to the issue across GitHub and self-hosted providers, for
--- the auto-complete decision. Ordered by number so reasons read stably.
-SELECT pr.id, 'github'::text AS provider, pr.pr_number, pr.state, ipr.close_intent
+-- the merge decision. Ordered by number so reasons read stably.
+SELECT pr.id, 'github'::text AS provider, pr.pr_number, pr.state
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
 UNION ALL
-SELECT pr.id, pr.provider AS provider, pr.pr_number, pr.state, ipr.close_intent
+SELECT pr.id, pr.provider AS provider, pr.pr_number, pr.state
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
 ORDER BY pr_number;
 
--- name: CompleteIssueFromPullRequests :one
--- Conditional status write for PR auto-complete. It lands only if the issue is
--- still in the status the decision saw (two merges racing complete it once),
--- the linked PRs are still all merged when the write runs (a PR linked between
--- the decision and this statement keeps the issue open), and one of them still
--- closes the issue with a keyword. Repositions like UpdateIssueStatus does.
+-- name: MoveIssueFromPullRequests :one
+-- Conditional status write for the PR merge automation. It lands only if the
+-- issue is still in the status the decision saw (two merges racing move it
+-- once), is not already in the target, and the linked PRs are still all merged
+-- when the write runs (a PR linked between the decision and this statement
+-- keeps the issue where it is). Repositions and clears a duplicate mark like
+-- UpdateIssueStatus does; the target is never cancelled.
 UPDATE issue AS i SET
-    status = 'done',
+    status = sqlc.arg('target_status')::text,
     duplicate_of_issue_id = NULL,
     position = (
         SELECT COALESCE(MIN(target.position), 0) - 1
         FROM issue AS target
         WHERE target.workspace_id = i.workspace_id
-          AND target.status = 'done'
+          AND target.status = sqlc.arg('target_status')::text
     ),
     revision = i.revision + 1,
     last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
@@ -76,7 +77,7 @@ UPDATE issue AS i SET
 WHERE i.id = $1
   AND i.workspace_id = $2
   AND i.status = sqlc.arg('expected_status')::text
-  AND i.status <> 'done'
+  AND i.status <> sqlc.arg('target_status')::text
   AND EXISTS (
       SELECT 1 FROM issue_pull_request ipr WHERE ipr.issue_id = i.id
       UNION ALL
@@ -91,10 +92,5 @@ WHERE i.id = $1
       SELECT 1 FROM issue_vcs_pull_request ipr
       JOIN vcs_pull_request pr ON pr.id = ipr.pull_request_id
       WHERE ipr.issue_id = i.id AND pr.state <> 'merged'
-  )
-  AND EXISTS (
-      SELECT 1 FROM issue_pull_request ipr WHERE ipr.issue_id = i.id AND ipr.close_intent
-      UNION ALL
-      SELECT 1 FROM issue_vcs_pull_request ipr WHERE ipr.issue_id = i.id AND ipr.close_intent
   )
 RETURNING i.*;

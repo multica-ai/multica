@@ -82,11 +82,6 @@
       "done": "완료.",
       "cancelled": "진행하지 않기로 함."
     },
-    "automation_title": "자동화",
-    "pr_auto_complete_label": "PR 병합 시 태스크 자동 완료",
-    "pr_auto_complete_description": "연결된 PR이 모두 병합되고 그중 하나가 닫기 키워드로 태스크를 지정하면 태스크가 완료로 바뀝니다. 앞으로 병합되는 PR에만 적용됩니다.",
-    "pr_auto_complete_example": "키워드는 PR 제목이나 설명에 씁니다. 예:",
-    "pr_auto_complete_example_title": "Closes MUL-123",
     "pr_auto_complete_badge": "PR 병합 시 자동 설정"
   },
   "quick_actions": {
@@ -797,11 +792,7 @@
     "repositories_shortcut_label": "저장소 URL은 저장소 탭에 있습니다",
     "repositories_shortcut_link": "저장소 관리 →",
     "toast_failed": "GitHub 설정을 업데이트하지 못했습니다",
-    "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다.",
-    "feature_pr_auto_complete_label": "PR 병합 시 태스크 자동 완료",
-    "feature_pr_auto_complete_on": "켜짐 · 모든 코드 호스트에 공통 적용",
-    "feature_pr_auto_complete_off": "꺼짐 · 모든 코드 호스트에 공통 적용",
-    "feature_pr_auto_complete_manage": "설정"
+    "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다."
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -1364,5 +1355,10 @@
     "status_loading": "확인 중...",
     "status_unknown": "상태를 확인할 수 없음",
     "channel_hint": "{{channel}}에서 에이전트와 대화하고 태스크를 생성합니다."
+  },
+  "pr_merge_status": {
+    "label": "PR 병합 후 태스크 상태",
+    "description": "연결된 PR이 모두 병합되면 적용되며, 이후 병합에만 영향을 줍니다.",
+    "none": "변경하지 않음"
   }
 }

@@ -192,7 +192,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
 | 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 
-不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
+不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像，并在合并后改状态，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 
 配置步骤见 [GitHub 集成](/github-integration#自托管配置)、[飞书 Bot](/lark-bot-integration#自托管配置)、[Slack Bot](/slack-bot-integration#自托管配置)和 [Telegram Bot](/telegram-bot-integration#自托管配置)。
 

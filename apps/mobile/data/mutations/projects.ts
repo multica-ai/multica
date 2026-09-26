@@ -34,13 +34,12 @@ export function useCreateProject() {
     mutationFn: (body: CreateProjectRequest) => api.createProject(body),
     onSuccess: (project) => {
       // Seed the detail cache so the post-create navigation lands on a
-      // populated page (no spinner flash). The list cache gets a prepend
-      // — list ordering is server-driven, so a brief out-of-order render
-      // is acceptable and corrected by the WS `project:created` event
-      // (or the next refetch).
+      // populated page (no spinner flash). Only prepend to a loaded list:
+      // seeding an unfetched list would hide other projects until a refetch.
+      // The next refetch restores the server-driven list order.
       qc.setQueryData<Project>(projectKeys.detail(wsId, project.id), project);
       qc.setQueryData<Project[]>(projectKeys.list(wsId), (old) =>
-        old ? [project, ...old.filter((p) => p.id !== project.id)] : [project],
+        old ? [project, ...old.filter((p) => p.id !== project.id)] : old,
       );
     },
   });

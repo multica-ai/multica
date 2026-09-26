@@ -82,11 +82,6 @@
       "done": "Terminé.",
       "cancelled": "Abandonné."
     },
-    "automation_title": "Automatisation",
-    "pr_auto_complete_label": "Terminer les tâches quand leurs PR sont fusionnées",
-    "pr_auto_complete_description": "Une tâche passe à Terminé dès que toutes ses PR liées sont fusionnées et que l’une d’elles la ferme par un mot-clé. S’applique aux PR fusionnées à partir de maintenant.",
-    "pr_auto_complete_example": "Écrivez le mot-clé dans le titre ou la description de la PR, par ex.",
-    "pr_auto_complete_example_title": "Closes MUL-123",
     "pr_auto_complete_badge": "Définie à la fusion des PR"
   },
   "quick_actions": {
@@ -799,11 +794,7 @@
     "repositories_shortcut_label": "Les URL de dépôts se trouvent dans l'onglet Dépôts",
     "repositories_shortcut_link": "Gérer les dépôts →",
     "toast_failed": "Échec de la mise à jour des paramètres GitHub",
-    "feature_auto_link_description": "Lie une PR à la tâche dont l’identifiant, par ex. {{example}}, figure dans son titre ou sa branche, ou suit « Closes » dans sa description.",
-    "feature_pr_auto_complete_label": "Terminer les tâches quand leurs PR sont fusionnées",
-    "feature_pr_auto_complete_on": "Activé · commun à tous les hébergeurs de code",
-    "feature_pr_auto_complete_off": "Désactivé · commun à tous les hébergeurs de code",
-    "feature_pr_auto_complete_manage": "Gérer"
+    "feature_auto_link_description": "Lie une PR à la tâche dont l’identifiant, par ex. {{example}}, figure dans son titre ou sa branche, ou suit « Closes » dans sa description."
   },
   "vcs": {
     "section_title": "Fournisseurs git (auto-hébergés)",
@@ -1371,5 +1362,10 @@
     "status_loading": "Vérification...",
     "status_unknown": "État indisponible",
     "channel_hint": "Discutez avec les agents et créez des tâches depuis {{channel}}."
+  },
+  "pr_merge_status": {
+    "label": "Après la fusion des PR, passer la tâche à",
+    "description": "S’applique quand toutes les PR liées à une tâche sont fusionnées, pour les fusions à venir uniquement.",
+    "none": "Ne pas changer"
   }
 }
