@@ -869,6 +869,11 @@ jobs:
       - name: Test worktree database cleanup
         run: bash scripts/worktree-db.test.sh
 
+      - name: Test compose project guard
+        # Guards against a task-worktree `docker compose up` adopting the
+        # production `name: multica` project (RIC-951, P0 postmortem).
+        run: bash scripts/guard_compose_project.test.sh
+
       - name: Test development environment registry
         run: bash scripts/dev-env.test.sh
 

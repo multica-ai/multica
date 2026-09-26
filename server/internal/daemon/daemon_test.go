@@ -563,6 +563,8 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		"TMPDIR":                       "/task/tmp",
 		"TMP":                          "/task/tmp",
 		"TEMP":                         "/task/tmp",
+		"COMPOSE_PROJECT_NAME":         "multica-task-" + taskKeyTail(task.ID),
+		"MULTICA_COMPOSE_PROJECT_NAME": "multica-task-" + taskKeyTail(task.ID),
 	}
 	if !maps.Equal(env, want) {
 		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
@@ -581,6 +583,56 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 	if env["MULTICA_TOKEN"] != fakeToken {
 		t.Fatal("custom env replaced task-scoped token")
+	}
+}
+
+func TestComposeProjectNameForTask(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		task string
+		want string
+	}{
+		{
+			name: "short id keeps the whole tail",
+			task: "01a0c2d3-aa95-7317-a1c8-bfe47cb836fa",
+			want: "multica-task-bfe47cb836fa",
+		},
+		{
+			name: "uuidv7 uses the last 12 hex chars, dashes stripped",
+			task: "01a0c2d3-aaa2-7146-b147-623a1eccc954",
+			want: "multica-task-623a1eccc954",
+		},
+		{
+			name: "short non-uuid value is preserved as-is",
+			task: "task-test",
+			want: "multica-task-" + taskKeyTail("task-test"),
+		},
+		{
+			name: "empty id still yields a valid prefix",
+			task: "",
+			want: "multica-task-" + taskKeyTail(""),
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := composeProjectNameForTask(tt.task); got != tt.want {
+				t.Fatalf("composeProjectNameForTask(%q) = %q, want %q", tt.task, got, tt.want)
+			}
+		})
+	}
+
+	// The project name must never equal the production project name "multica"
+	// and must stay under Docker's 253-char limit for any task id.
+	if got := composeProjectNameForTask("01a0c2d3-aa95-7317-a1c8-bfe47cb836fa"); got == "multica" {
+		t.Fatal("composeProjectNameForTask must never produce the production project name")
+	}
+	if len(composeProjectNameForTask("01a0c2d3-aa95-7317-a1c8-bfe47cb836fa")) > 253 {
+		t.Fatal("compose project name exceeds Docker's 253-char limit")
 	}
 }
 

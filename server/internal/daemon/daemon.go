@@ -189,7 +189,38 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMPDIR":               tempDir,
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
+		// Every daemon task gets an isolated Docker Compose project name.
+		// Repo worktrees carry the upstream `name: multica` (and a bare
+		// 127.0.0.1:5432:5432 postgres bind), so a bare `docker compose up`
+		// inside a task would otherwise adopt the same project as the
+		// self-hosted production stack and clobber it. Pinning the project
+		// name per task makes any compose run in a task land on its own
+		// project instead. `multica-task-` is reserved by the daemon guard
+		// (scripts/guard_compose_project.sh); the production selfhost stack
+		// keeps its `name: multica` untouched.
+		"COMPOSE_PROJECT_NAME":         composeProjectNameForTask(task.ID),
+		"MULTICA_COMPOSE_PROJECT_NAME": composeProjectNameForTask(task.ID),
 	}
+}
+
+// composeProjectNameForTask derives the per-task Docker Compose project name
+// from the task's issue/chat key (the same tail used for worktree branch
+// names). It stays under Docker's 253-char project-name limit and is safe for
+// compose's [a-zA-Z0-9_.-] project-name alphabet.
+func composeProjectNameForTask(taskID string) string {
+	return "multica-task-" + taskKeyTail(taskID)
+}
+
+// taskKeyTail mirrors execenv.taskKey / repocache.taskKey: the LAST 12 hex
+// chars of the task id (dashes stripped). Kept package-local so the daemon
+// package does not reach into subpackages for a 12-line helper.
+func taskKeyTail(uuid string) string {
+	s := strings.ReplaceAll(uuid, "-", "")
+	const n = 12
+	if len(s) > n {
+		return s[len(s)-n:]
+	}
+	return s
 }
 
 // taskRunner executes a single agent task and returns the result.
