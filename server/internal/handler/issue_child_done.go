@@ -843,9 +843,9 @@ func sanitizeMentionLabel(name string) string {
 //     — child-done is a coordination signal, the leader decides whether
 //     and how to wake the rest of the squad. Documented here so reviewers
 //     don't read "system mention" as inheriting the full member fan-out. The
-//     actor that closed the child is irrelevant to routing: the target is the
-//     parent's own leader, chosen (and permission-checked) at squad-assign
-//     time, so no actor identity is threaded in — see triggerChildDoneSquad.
+//     target is the parent's own leader, chosen (and permission-checked) at
+//     squad-assign time. Source-task identity only prevents waking the run
+//     that just closed its own parent's stage.
 //   - notification_preference is not consulted: this is a platform routing
 //     signal targeted at the assignee that already owns the parent, not a
 //     general notification. Per-user mute settings are evaluated by the
@@ -856,20 +856,11 @@ func sanitizeMentionLabel(name string) string {
 //
 // Guards applied here:
 //   - No-op when the parent has no assignee row.
-//   - NO self-trigger guard on either the agent OR the squad path. Waking the
-//     parent assignee when one of its children finishes is a serial sub-task
-//     handoff across two DIFFERENT issues, not a self-loop — legitimate per
-//     isAgentRunningOnIssue and the @mention self-trigger path
-//     (computeMentionedAgentCommentTriggers). The squad path used to skip a
-//     same-squad or shared-leader child on the theory that the leader had
-//     already observed the work through its own coordination cycle on the
-//     child. That stranded the common pattern where a squad decomposes its
-//     parent into sub-issues assigned to its own squad: the stage-barrier
-//     system comment lands on the PARENT carrying the "advance the next stage /
-//     wrap up" instruction, which a child-side wake never delivers — so the
-//     parent silently stalled in in_progress (MUL-3969). The squad path now
-//     mirrors the agent path (MUL-2808): always dispatch, bounded only by
-//     idempotency.
+//   - Suppress only a completion authored by the target agent's running task
+//     on this parent. The coordinator already observed its own transition.
+//     Child ownership and unrelated running parent tasks never suppress a
+//     wake: same-agent cross-issue handoffs and independent completions still
+//     need to reach the parent (MUL-2808, MUL-3969).
 //   - Idempotency: HasPendingTaskForIssueAndAgent dedupes rapid-fire enqueues
 //     for the same parent (e.g. two children finishing back-to-back). It also
 //     bounds any re-trigger, since a leader waking on the parent does not by
@@ -892,22 +883,18 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.I
 // triggerChildDoneAgent enqueues a mention-style task for the parent's
 // agent assignee.
 //
-// There is intentionally NO same-agent self-trigger guard here, unlike the
-// squad path. Waking the parent agent when one of its children finishes is a
-// serial sub-task handoff between two DIFFERENT issues, which the platform
-// loop model treats as legitimate ("not a loop and must fire" — see
-// isAgentRunningOnIssue); only re-entering the SAME issue is a loop. A lone
-// agent that decomposes its parent into sub-issues it owns itself has no
-// other wake path, so the old "child owner == parent agent" guard silently
-// stranded those parents (MUL-2808). Runaway re-triggering is prevented by
-// the HasPendingTaskForIssueAndAgent dedup below, exactly as the @mention
-// self-trigger path relies on it (see computeMentionedAgentCommentTriggers).
+// A same-agent child run still wakes the parent. Only the parent's own
+// currently-running source task can suppress this handoff.
 func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return
+	}
+
+	if h.childDoneObservedBySourceTask(ctx, parent, agent.ID) {
 		return
 	}
 
@@ -932,14 +919,9 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 // triggerChildDoneSquad enqueues a leader-role task for the parent's squad
 // assignee. It mirrors the agent path (see triggerChildDoneAgent) exactly:
 //
-//   - NO self-trigger guard: even when the finished child is owned by the same
-//     squad or by another squad sharing this leader, the leader must still be
-//     woken on the PARENT to advance the next stage or wrap up. The prior
-//     same-squad / shared-leader guards assumed the leader had already observed
-//     the child via its own coordination cycle, but that wake lands on the
-//     CHILD and never carries the parent-level stage-barrier instruction, so it
-//     stranded the common "squad decomposes its parent into sub-issues assigned
-//     to its own squad" pattern (MUL-3969).
+//   - Only the parent's own running source task suppresses the wake. A child
+//     assigned to the same squad or a squad sharing its leader still wakes
+//     the parent, since a child-side run cannot replace parent coordination.
 //   - NO leader-invocation gate. Waking the parent's OWN squad leader on
 //     child-done is a coordination handoff on an issue the leader already owns,
 //     not a fresh invocation — invocation permission was already enforced when
@@ -968,6 +950,10 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
+	if h.childDoneObservedBySourceTask(ctx, parent, agent.ID) {
+		return
+	}
+
 	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: parent.ID,
 		AgentID: squad.LeaderID,
@@ -985,4 +971,18 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID))
 	}
+}
+
+// childDoneObservedBySourceTask deliberately checks the request's source task,
+// not whether any task is running on the parent. Otherwise an independent
+// completion arriving during a coordinator run could be lost. Missing or stale
+// source context falls back to the normal wake path.
+func (h *Handler) childDoneObservedBySourceTask(ctx context.Context, parent db.Issue, agentID pgtype.UUID) bool {
+	actor, ok := ctx.Value(wakeupActorKey{}).(wakeupActor)
+	if !ok || actor.kind != "agent" || actor.id != uuidToString(agentID) || actor.task == "" {
+		return false
+	}
+	// withWakeupActor stores only task IDs loaded from the database.
+	task, err := h.Queries.GetAgentTask(ctx, parseUUID(actor.task))
+	return err == nil && task.Status == "running" && task.AgentID == agentID && task.IssueID == parent.ID
 }
