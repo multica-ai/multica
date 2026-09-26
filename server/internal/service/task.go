@@ -4163,8 +4163,105 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 	)
 }
 
+// syncIssueStatusFromRun drives the issue status column from a run's status
+// transition so the board can never show run/issue inversions (RIC-1024).
+//
+// The agent brief still owns issue status for the fine-grained decisions
+// (blocked, done, squad dispatch turns that deliberately stay in_progress),
+// but the platform owns the two lifecycle boundaries where drift was observed:
+//
+//   - running → in_progress: a run actually starting means an agent is
+//     actively working, so an unstarted issue (todo / backlog) is promoted to
+//     in_progress, and an issue wrongly parked in in_review while a run starts
+//     is pulled back to in_progress (the "running 时提前 in_review" inversion).
+//   - completed → in_review: a completed direct delivery awaits acceptance, so
+//     an issue still unstarted or in_progress is promoted to in_review. Squad
+//     leader dispatch turns are exempt — the leader deliberately leaves the
+//     parent in_progress while members work (the runtime brief says so), so
+//     only the later confirming turn (where the leader sets in_review itself)
+//     ends the parent's active state.
+//
+// Statuses the platform never overwrites: done, cancelled, blocked, and
+// failed issues keep their authoritative human/external state. Comment- and
+// mention-triggered runs are exempt: a reply that happens to touch an issue
+// must not claim its status (the brief's "questions and acknowledgements never
+// touch status"). Chat runs have no issue.
+func (s *TaskService) syncIssueStatusFromRun(ctx context.Context, task db.AgentTaskQueue, target string) {
+	if !task.IssueID.Valid || task.TriggerCommentID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("sync issue status: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	switch target {
+	case "running":
+		if effective == issuestatus.InProgress {
+			return
+		}
+		switch effective {
+		case issuestatus.Todo, issuestatus.Backlog:
+			// An agent is working now; the board must show it as in_progress.
+			s.setIssueStatusFromRun(ctx, issue, issuestatus.InProgress)
+		case issuestatus.InReview:
+			// A run starting while the issue sits in review is the inverted
+			// state: active work is happening, not review. Pull it back.
+			s.setIssueStatusFromRun(ctx, issue, issuestatus.InProgress)
+		}
+	case "completed":
+		// A squad leader's dispatch turn is not delivery: the leader keeps the
+		// parent in_progress while members work and only the confirming turn
+		// (also a leader task) moves it to in_review.
+		if task.IsLeaderTask {
+			return
+		}
+		switch effective {
+		case issuestatus.Todo, issuestatus.Backlog, issuestatus.InProgress:
+			// Delivery is done; it awaits human acceptance.
+			s.setIssueStatusFromRun(ctx, issue, issuestatus.InReview)
+		case issuestatus.InReview:
+			// Already awaiting acceptance — nothing to do.
+		}
+	}
+}
+
+// setIssueStatusFromRun writes a new issue status via the SQL status updater
+// (same repositioning/meta side effects as a CLI status write) and publishes
+// issue:updated so the frontend reconcile moves the card. It intentionally
+// bypasses the HTTP UpdateIssue handler so no second run trigger is enqueued —
+// status sync here is a bookkeeping correction, not a new dispatch.
+func (s *TaskService) setIssueStatusFromRun(ctx context.Context, issue db.Issue, status string) {
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      status,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("sync issue status: update failed",
+			"issue_id", util.UUIDToString(issue.ID),
+			"status", status,
+			"error", err,
+		)
+		return
+	}
+	s.broadcastIssueUpdated(ctx, updated, issue.Status)
+	slog.Info("synced issue status from run",
+		"issue_id", util.UUIDToString(issue.ID),
+		"prev_status", issue.Status,
+		"status", status,
+	)
+}
+
 // StartTask transitions a dispatched task to running.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// Issue status follows the run lifecycle here (running → in_progress); the
+// fine-grained statuses the agent owns via the CLI remain untouched.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, supplementSupport ...bool) (*db.AgentTaskQueue, error) {
 	enableTaskSupplement := len(supplementSupport) > 0 && supplementSupport[0]
 	task, err := s.Queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
@@ -4219,6 +4316,7 @@ func (s *TaskService) taskStarted(ctx context.Context, task db.AgentTaskQueue) {
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
+	s.syncIssueStatusFromRun(ctx, task, "running")
 	// A local-directory waiter was reconciled out of the persisted working
 	// status while parked. Restore working as soon as it enters running; the
 	// normal dispatched -> running path is already working, so this is
@@ -4569,6 +4667,13 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
+
+	// Drive the issue status to the completed lifecycle boundary: a completed
+	// direct delivery awaits acceptance, so an unstarted or in_progress issue
+	// moves to in_review. Squad leader dispatch turns stay in_progress; the
+	// statuses a human or external dependency owns (done/cancelled/blocked)
+	// are never overwritten.
+	s.syncIssueStatusFromRun(ctx, task, "completed")
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)

@@ -3278,6 +3278,26 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// supplied parent only because the assignee gate must bind any autopilot
 	// authority fallback to that server-verified issue before admission.
 
+	if !assigneeType.Valid && !assigneeID.Valid && !parentIssueID.Valid {
+		// Default-assignee routing (RIC-1024): core-development, architecture,
+		// and security/complex work defaults to the workspace's core squad when
+		// the caller did not name an assignee; pure ops / inspection / light
+		// tasks and everything else stay unassigned so the single-agent fast
+		// track keeps working. Only top-level issues route (sub-issues inherit
+		// their parent's execution context), and terminal statuses never
+		// dispatch work.
+		if effective := issuestatus.Effective(r.Context(), h.Queries, wsUUID, status); effective != "done" && effective != "cancelled" {
+			desc := ""
+			if req.Description != nil {
+				desc = *req.Description
+			}
+			if defType, defID, applied := h.resolveDefaultAssignee(r, wsUUID, req.Title, desc); applied {
+				assigneeType = defType
+				assigneeID = defID
+			}
+		}
+	}
+
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return
@@ -4098,6 +4118,31 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// resolveDefaultAssignee applies the RIC-1024 default-assignee routing for
+// issue creation: when the caller did not name an assignee, a core-development
+// / architecture / security-complex task defaults to the workspace's core
+// squad (pge-core-squad by convention, or the squad named in
+// settings.default_core_squad_id). Ops / inspection / light tasks and anything
+// unclassified stay unassigned so the single-agent fast track keeps working.
+//
+// It returns the assignee pair to use, or applied=false when no default
+// applies. Callers guard against terminal statuses (done/cancelled never
+// dispatch work) and parent sub-issues before invoking it.
+func (h *Handler) resolveDefaultAssignee(r *http.Request, wsUUID pgtype.UUID, title, description string) (pgtype.Text, pgtype.UUID, bool) {
+	if !service.IsCoreTask(title, description) {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	ws, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	squadID, ok := service.ResolveCoreSquadID(r.Context(), h.Queries, wsUUID, ws.Settings)
+	if !ok {
+		return pgtype.Text{}, pgtype.UUID{}, false
+	}
+	return pgtype.Text{String: "squad", Valid: true}, squadID, true
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
