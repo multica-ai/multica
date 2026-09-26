@@ -150,36 +150,31 @@ export function selectStandaloneAttachments(
   });
 }
 
-function isHtmlAttachment(contentType: string, filename: string): boolean {
-  if (normalizeContentType(contentType) === "text/html") return true;
-  const ext = extensionOf(filename);
-  return ext === "html" || ext === "htm";
-}
-
-/** How a standalone attachment is laid out under its body (MUL-7649). */
-export type StandaloneAttachmentGroup = "image" | "html" | "file";
+/**
+ * How a standalone attachment is laid out under its body (MUL-7649): images
+ * as a row of thumbnails, everything else — HTML included — as file cards.
+ */
+export type StandaloneAttachmentGroup = "image" | "file";
 
 export function standaloneAttachmentGroup(
   attachment: Pick<Attachment, "content_type" | "filename">,
 ): StandaloneAttachmentGroup {
-  if (isImageAttachment(attachment.content_type, attachment.filename)) return "image";
-  if (isHtmlAttachment(attachment.content_type, attachment.filename)) return "html";
-  return "file";
+  return isImageAttachment(attachment.content_type, attachment.filename) ? "image" : "file";
 }
 
 /**
  * The order a surface renders its standalone attachments in (MUL-7649):
- * images first (a row of thumbnails), then HTML files (each an embedded
- * preview), then everything else (a grid of file cards). Stable within each
- * group. The sequence builder walks standalone attachments in this same
- * order, so paging through the viewer follows the screen.
+ * images first (a row of thumbnails), then everything else (a grid of file
+ * cards). Stable within each group. The sequence builder walks standalone
+ * attachments in this same order, so paging through the viewer follows the
+ * screen.
  */
 export function orderStandaloneAttachments<T extends Pick<Attachment, "content_type" | "filename">>(
   attachments: ReadonlyArray<T>,
 ): T[] {
-  const groups: Record<StandaloneAttachmentGroup, T[]> = { image: [], html: [], file: [] };
+  const groups: Record<StandaloneAttachmentGroup, T[]> = { image: [], file: [] };
   for (const a of attachments) groups[standaloneAttachmentGroup(a)].push(a);
-  return [...groups.image, ...groups.html, ...groups.file];
+  return [...groups.image, ...groups.file];
 }
 
 // ---------------------------------------------------------------------------

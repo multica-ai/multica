@@ -8,8 +8,12 @@
  *
  *   - image  → ImageAttachmentView (figure + hover toolbar + lightbox via
  *              the shared AttachmentPreviewModal)
- *   - html   → HtmlAttachmentPreview (inline iframe + hover toolbar)
- *   - others → AttachmentCard (icon + filename + Eye/Download row)
+ *   - others → AttachmentCard (icon + filename + Eye/Download row), or
+ *              AttachmentFileCard in the card layout
+ *
+ * An HTML file is a file like any other (MUL-7649): it shows as a card and
+ * opens in the viewer. HTML meant to be read in place is written as a
+ * ```html block in the body, which renders as a dynamic block.
  *
  * Call sites:
  *   - extensions/file-card.tsx FileCardView (Tiptap NodeView)
@@ -46,7 +50,6 @@ import {
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
-import { HtmlAttachmentPreview } from "./html-attachment-preview";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
 
@@ -421,21 +424,6 @@ export function Attachment({
           onDownload={handleDownload}
           onDelete={onDelete}
           className={cn(layout === "card" && "image-tile", className)}
-        />
-        {preview.modal}
-      </>
-    );
-  }
-
-  if (kind === "html" && state.attachmentId && !state.uploading) {
-    return (
-      <>
-        <HtmlAttachmentPreview
-          attachmentId={state.attachmentId}
-          filename={state.filename}
-          onPreview={openPreview}
-          onDownload={handleDownload}
-          onDelete={editable ? onDelete : undefined}
         />
         {preview.modal}
       </>

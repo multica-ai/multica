@@ -633,12 +633,10 @@ describe("ReadonlyContent HTML block rendering", () => {
   });
 });
 
-describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
-  // Regression pin for readonly-content.tsx:279. The `div data-type=fileCard`
-  // branch must render through <AttachmentBlock>, not the older
-  // <AttachmentCard>. Reverting that line would skip the html+attachmentId
-  // dispatcher branch and surface the bare file-card chrome (filename row)
-  // instead of the rendered iframe — the exact regression MUL-2330 fixed.
+describe("ReadonlyContent file-card routing", () => {
+  // The `div data-type=fileCard` branch renders through the unified
+  // <Attachment> renderer, which shows every non-image file — HTML included
+  // (MUL-7649) — as file-card chrome.
   function renderWithQuery(ui: ReactElement) {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -646,11 +644,9 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
   }
 
-  it("renders the !file[](url) HTML attachment as an iframe (no file-card chrome)", async () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>chart</p>",
-      originalContentType: "text/html",
-    });
+  // Reverses the MUL-2330 pin: a file referenced in the body is still a file.
+  // HTML meant to be read in place is written as a ```html block.
+  it("renders a !file[](url) HTML attachment as file-card chrome, not an embedded preview", () => {
     const attachment = {
       id: "att-1",
       url: "/uploads/report.html",
@@ -658,22 +654,15 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
       content_type: "text/html",
       size_bytes: 0,
     } as any;
-    const { container, queryByText } = renderWithQuery(
+    const { container, getByText } = renderWithQuery(
       <ReadonlyContent
         content="!file[report.html](/uploads/report.html)"
         attachments={[attachment]}
       />,
     );
-    const frame = await waitFor(() => {
-      const f = container.querySelector<HTMLIFrameElement>("iframe");
-      expect(f).not.toBeNull();
-      return f!;
-    });
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frame.getAttribute("srcdoc")).toContain("<p>chart</p>");
-    // AttachmentCard chrome surfaces the filename as visible text in a
-    // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
-    expect(queryByText("report.html")).toBeNull();
+    expect(getByText("report.html")).toBeTruthy();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
 
   it("renders a stable attachment download URL as file-card chrome", () => {

@@ -495,8 +495,8 @@ export function AttachmentPreviewModal({
     }
   };
 
-  // Open-in-new-tab mirrors HtmlAttachmentPreview's inline toolbar: only the
-  // `html` kind has a dedicated full-page route (/attachments/{id}/preview).
+  // Open-in-new-tab: only the `html` kind has a dedicated full-page route
+  // (/attachments/{id}/preview).
   // Gated on slug + attachmentId for the same reason — URL-only sources
   // can't address the /content proxy the page relies on.
   const canOpenInNewTab = kind === "html" && !!slug && !!state.attachmentId;
@@ -1119,7 +1119,7 @@ function PreviewContent({
           render={(text) => (
             <div className="h-full pb-4">
               <HtmlPreviewBody
-                source={{ kind: "inline", html: text }}
+                html={text}
                 title={state.filename}
                 className="h-full w-full"
                 iframeClassName="rounded-lg border-0"

@@ -3,12 +3,12 @@
 /**
  * AttachmentPreviewPage — full-page HTML attachment viewer.
  *
- * Destination for `openInNewTab` from HtmlAttachmentPreview's toolbar. The
- * inline preview (HtmlAttachmentPreview) renders the same content in a 480px
- * card with a hover toolbar; this is the same content edge-to-edge so the
- * user can resize / interact with the document at full size.
+ * Destination for "Open in new tab" in the attachment viewer's html kind. The
+ * viewer shows the same content inside its stage; this is the same content
+ * edge-to-edge so the user can resize / interact with the document at full
+ * size.
  *
- * Same security posture as the inline preview: iframe sandbox is
+ * Same security posture as the viewer: iframe sandbox is
  * "allow-scripts" only — no allow-same-origin, no allow-top-navigation. The
  * iframe runs in an opaque origin and cannot reach cookies, localStorage,
  * parent, or top-level navigation.

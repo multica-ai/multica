@@ -22,7 +22,7 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.restoreAllMocks());
 
 describe("AttachmentCard — chrome row", () => {
-  it("renders chrome only and never an inline iframe (HTML rich preview lives in HtmlAttachmentPreview)", () => {
+  it("renders chrome only and never an inline iframe", () => {
     render(
       <AttachmentCard
         filename="report.html"

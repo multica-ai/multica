@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -35,9 +35,9 @@ vi.mock("../attachment-preview-modal", () => ({
   useAttachmentPreview: () => ({ tryOpen: tryOpenMock, open: vi.fn(), modal: null }),
 }));
 
-// HtmlAttachmentPreview (the kind="html" route through AttachmentBlock) now
-// reads useNavigation() + useWorkspaceSlug() for its Open-in-new-tab button.
-// Provide minimal mocks so the component renders without a real provider.
+// The attachment renderer reads useNavigation() + useWorkspaceSlug() on some
+// paths. Provide minimal mocks so the component renders without a real
+// provider.
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({
     push: vi.fn(),
@@ -88,23 +88,17 @@ function renderWithQuery(ui: ReactElement) {
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.restoreAllMocks());
 
-describe("FileCardView — HTML attachment routes through AttachmentBlock to iframe", () => {
-  // Regression pin for file-card.tsx:59. The NodeView must render through
-  // <AttachmentBlock>, not the older <AttachmentCard>. If someone reverts that
-  // line, the dispatcher's html+attachmentId branch is bypassed and the user
-  // is left with the file-card chrome — exactly the bug MUL-2330 surfaced.
-  it("renders an iframe (no file-card chrome) when the node resolves to an HTML attachment", async () => {
+describe("FileCardView — HTML attachment", () => {
+  // Reverses the MUL-2330 pin: an HTML file is a file (MUL-7649), shown as the
+  // file-card row that opens the viewer. HTML meant to be read in place is a
+  // ```html block.
+  it("renders the file-card row, not an embedded preview, for an HTML attachment", () => {
     resolveAttachmentMock.mockReturnValue({
       id: "att-1",
       content_type: "text/html",
       url: "/uploads/report.html",
       filename: "report.html",
     });
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>chart</p>",
-      originalContentType: "text/html",
-    });
-
     const node = {
       attrs: {
         href: "/uploads/report.html",
@@ -115,16 +109,8 @@ describe("FileCardView — HTML attachment routes through AttachmentBlock to ifr
 
     renderWithQuery(<FileCardView node={node} {...({} as any)} />);
 
-    const frame = await waitFor(() => {
-      const f = document.querySelector("iframe") as HTMLIFrameElement | null;
-      expect(f).toBeTruthy();
-      return f!;
-    });
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frame.getAttribute("srcdoc")).toContain("<p>chart</p>");
-    // The AttachmentCard chrome surfaces the filename as text inside its row.
-    // HtmlAttachmentPreview replaces the chrome entirely, so the filename
-    // must not appear as visible text.
-    expect(screen.queryByText("report.html")).toBeNull();
+    expect(screen.getByText("report.html")).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
 });

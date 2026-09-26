@@ -231,7 +231,6 @@ export function AttachmentList({
   if (!standalone.length) return null;
 
   const images = standalone.filter((a) => standaloneAttachmentGroup(a) === "image");
-  const html = standalone.filter((a) => standaloneAttachmentGroup(a) === "html");
   const files = standalone.filter((a) => standaloneAttachmentGroup(a) === "file");
   const render = (a: Attachment, layout: "block" | "card") => {
     const version = versions?.get(a.id);
@@ -248,8 +247,9 @@ export function AttachmentList({
   };
 
   // A lone image keeps its full size; several form justified rows (one
-  // height per row, edge to edge). HTML keeps its embedded preview. Every
-  // other file is a card in a grid, not a full-width row each.
+  // height per row, edge to edge). Every other file — HTML too: an uploaded
+  // file is a deliverable to open, not part of the text — is a card in a
+  // grid, not a full-width row each.
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div className={cn("flex flex-col gap-2", className)}>
@@ -257,7 +257,6 @@ export function AttachmentList({
         {images.length > 1 && (
           <JustifiedImageRow items={images} renderTile={(a) => render(a, "card")} />
         )}
-        {html.map((a) => render(a, "block"))}
         {files.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-2">
             {files.map((a) => render(a, "card"))}

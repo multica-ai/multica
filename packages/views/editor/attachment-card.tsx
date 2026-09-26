@@ -6,9 +6,9 @@
  * lays out in a grid (MUL-7649).
  *
  * Subcomponents of the unified `<Attachment>` dispatcher (see attachment.tsx).
- * Rendered for every attachment kind that does not have a richer inline
- * renderer (image / html). Kind-aware routing lives in `<Attachment>` — keep
- * that decision out of this file so these stay single-purpose UI.
+ * Rendered for every attachment kind except images, which render inline.
+ * Kind-aware routing lives in `<Attachment>` — keep that decision out of this
+ * file so these stay single-purpose UI.
  */
 
 import type { ReactNode } from "react";

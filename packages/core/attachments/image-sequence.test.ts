@@ -326,14 +326,14 @@ describe("collectAttachmentSequence", () => {
 });
 
 describe("orderStandaloneAttachments", () => {
-  it("groups images, then HTML, then other files, keeping order within each", () => {
+  it("puts images first, then every other file — HTML included — keeping order within each", () => {
     const md = attachment({ id: "md", filename: "notes.md", content_type: "text/markdown" });
     const shot1 = attachment({ id: "s1", filename: "a.png" });
     const page = attachment({ id: "h", filename: "report.html", content_type: "text/html; charset=utf-8" });
     const csv = attachment({ id: "csv", filename: "data.csv", content_type: "text/csv" });
     const shot2 = attachment({ id: "s2", filename: "b.jpg", content_type: "" });
     expect(orderStandaloneAttachments([md, shot1, page, csv, shot2]).map((a) => a.id)).toEqual([
-      "s1", "s2", "h", "md", "csv",
+      "s1", "s2", "md", "h", "csv",
     ]);
   });
 
