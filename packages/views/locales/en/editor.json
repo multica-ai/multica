@@ -98,6 +98,19 @@
     "show_source": "Show source",
     "fullscreen": "Fullscreen"
   },
+  "dynamic_block": {
+    "preview": "Preview",
+    "source": "Source",
+    "view": "View",
+    "copy_source": "Copy source",
+    "show_all": "Show all",
+    "rendering": "Rendering...",
+    "error_html": "The preview hit a script error",
+    "error_mermaid": "Couldn't draw this diagram",
+    "error_at_line": "{{message}} (line {{line}})",
+    "view_source": "View source",
+    "copy_error": "Copy error"
+  },
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },

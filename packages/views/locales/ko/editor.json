@@ -91,6 +91,19 @@
     "show_source": "소스 표시",
     "fullscreen": "전체 화면"
   },
+  "dynamic_block": {
+    "preview": "미리보기",
+    "source": "소스",
+    "view": "보기",
+    "copy_source": "소스 복사",
+    "show_all": "모두 보기",
+    "rendering": "렌더링 중...",
+    "error_html": "미리보기에서 스크립트 오류가 발생했습니다",
+    "error_mermaid": "이 다이어그램을 그릴 수 없습니다",
+    "error_at_line": "{{message}} ({{line}}행)",
+    "view_source": "소스 보기",
+    "copy_error": "오류 복사"
+  },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"
   },

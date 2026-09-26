@@ -98,6 +98,19 @@
     "show_source": "Afficher la source",
     "fullscreen": "Plein écran"
   },
+  "dynamic_block": {
+    "preview": "Aperçu",
+    "source": "Source",
+    "view": "Affichage",
+    "copy_source": "Copier la source",
+    "show_all": "Tout afficher",
+    "rendering": "Rendu en cours...",
+    "error_html": "Erreur de script dans l’aperçu",
+    "error_mermaid": "Impossible de dessiner ce diagramme",
+    "error_at_line": "{{message}} (ligne {{line}})",
+    "view_source": "Voir la source",
+    "copy_error": "Copier l’erreur"
+  },
   "file_card": {
     "uploading": "Envoi de {{filename}}"
   },

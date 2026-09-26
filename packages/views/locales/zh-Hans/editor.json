@@ -98,6 +98,19 @@
     "show_source": "显示源码",
     "fullscreen": "放大"
   },
+  "dynamic_block": {
+    "preview": "预览",
+    "source": "源码",
+    "view": "视图",
+    "copy_source": "复制源码",
+    "show_all": "展开全部",
+    "rendering": "正在渲染...",
+    "error_html": "预览中的脚本出错",
+    "error_mermaid": "无法绘制这张图",
+    "error_at_line": "{{message}}（第 {{line}} 行）",
+    "view_source": "查看源码",
+    "copy_error": "复制错误"
+  },
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },

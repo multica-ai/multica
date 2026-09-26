@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -499,20 +499,20 @@ describe("ReadonlyContent Mermaid rendering", () => {
     expect(container.querySelector("pre")).toBeNull();
   });
 
-  it("opens the fullscreen viewer from the toolbar and closes it with Escape", async () => {
+  it("opens the fullscreen viewer from the block's title bar and closes it with Escape", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
       />,
     );
 
-    const expandButton = await waitFor(() => {
-      const found = container.querySelector<HTMLButtonElement>(
-        '.mermaid-diagram-toolbar button[aria-label="Open diagram viewer"]',
-      );
-      expect(found).not.toBeNull();
-      return found!;
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-frame")).not.toBeNull();
     });
+    const expandButton = container.querySelector<HTMLButtonElement>(
+      '[data-dynamic-block="mermaid"] button[aria-label="Fullscreen"]',
+    )!;
+    expect(expandButton).not.toBeNull();
 
     expect(document.querySelector(".zoom-canvas")).toBeNull();
 
@@ -536,7 +536,7 @@ describe("ReadonlyContent Mermaid rendering", () => {
     });
   });
 
-  it("keeps the inline toolbar outside the scroll container so wide diagrams stay openable", async () => {
+  it("keeps the controls in the title bar, outside the scroll container, so wide diagrams stay openable", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
@@ -544,18 +544,20 @@ describe("ReadonlyContent Mermaid rendering", () => {
     );
 
     await waitFor(() => {
-      expect(container.querySelector(".mermaid-diagram-toolbar")).not.toBeNull();
+      expect(container.querySelector(".mermaid-diagram-scroll")).not.toBeNull();
     });
 
-    // Previously the toolbar was an absolutely-positioned child of the
-    // horizontally-scrolling element, so on a wide diagram it scrolled out of
-    // view along with the content and left no way to open or copy it.
-    const scroller = container.querySelector(".mermaid-diagram-scroll");
-    expect(scroller).not.toBeNull();
-    expect(scroller?.querySelector(".mermaid-diagram-toolbar")).toBeNull();
+    // A control inside the horizontally-scrolling element would scroll out of
+    // view with a wide diagram and leave no way to open or copy it. The frame
+    // owns the controls, so the diagram's own hover toolbar is not drawn.
+    const scroller = container.querySelector(".mermaid-diagram-scroll")!;
+    expect(container.querySelector(".mermaid-diagram-toolbar")).toBeNull();
+    expect(scroller.querySelector("button")).toBeNull();
+    expect(container.querySelector('button[aria-label="Fullscreen"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Copy source"]')).not.toBeNull();
   });
 
-  it("shows the compact error state instead of embedding Mermaid's parser error SVG", async () => {
+  it("explains a parse error inside the block instead of embedding Mermaid's error SVG", async () => {
     // With suppressErrorRendering enabled, invalid syntax makes render() reject
     // instead of emitting Mermaid's built-in error graphic.
     vi.mocked(mermaid.render).mockRejectedValueOnce(
@@ -567,14 +569,17 @@ describe("ReadonlyContent Mermaid rendering", () => {
       <ReadonlyContent content={["```mermaid", chart, "```"].join("\n")} />,
     );
 
-    await waitFor(() => {
-      expect(container.querySelector(".mermaid-diagram-error")).not.toBeNull();
-    });
-
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't draw this diagram");
+    expect(alert.textContent).toContain("Parse error on line 3");
     expect(container.querySelector(".mermaid-diagram-frame")).toBeNull();
-    expect(container.querySelector(".mermaid-diagram-error code")?.textContent).toBe(
-      chart,
-    );
+    // Nothing to blow up once the diagram failed.
+    expect(container.querySelector('button[aria-label="Fullscreen"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
+    await waitFor(() => {
+      expect(container.querySelector("pre code")?.textContent).toBe(chart);
+    });
   });
 });
 

@@ -17,6 +17,11 @@
  * This component owns the inline presentation; the full-screen experience
  * lives in `MermaidViewer`. Both read the same rendered SVG, so what you
  * export or blow up is always what you were looking at.
+ *
+ * Standalone (the editable code block's preview) it draws its own box,
+ * toolbar and error state. Inside a DynamicBlock (`frame`, MUL-7649) the frame
+ * owns all of that: this renders only the diagram, and hands the viewer's open
+ * state and any render error up to the frame.
  */
 
 import {
@@ -27,12 +32,16 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
 } from "react";
 import { Check, Copy, Maximize2 } from "lucide-react";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
+import { DynamicBlockSkeleton } from "./dynamic-block";
 import { useDragToScroll } from "./hooks/use-drag-to-scroll";
+import { useThemeVersion } from "./hooks/use-theme-version";
 import { MermaidViewer } from "./mermaid-viewer";
+import { hashSource } from "./utils/source-hash";
 import type { Size } from "./utils/zoom-transform";
 
 type MermaidAPI = typeof import("mermaid").default;
@@ -102,9 +111,25 @@ function getMermaidThemeVariables(host: HTMLElement | null) {
 
 function getSandboxCssVariables(host: HTMLElement | null): string {
   const styles = host ? getComputedStyle(host) : null;
-  return ["--muted", "--primary", "--foreground", "--muted-foreground"]
+  const variables = ["--muted", "--primary", "--foreground", "--muted-foreground"]
     .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
     .join(" ");
+  // The diagram is drawn in the app's colors, so its document declares the
+  // app's scheme too. Without it a light document inside a dark page is
+  // painted on an opaque white canvas, under a diagram colored for dark.
+  const declared = styles?.colorScheme ?? "";
+  const scheme = /\bdark\b/.test(declared) && !/\blight\b/.test(declared) ? "dark" : "light";
+  return `${variables} color-scheme: ${scheme};`;
+}
+
+/**
+ * The host's font for the sandbox body. Mermaid measures label text in this
+ * page (its font is `inherit`), so the sandbox has to draw with the same font
+ * or the labels no longer fit the boxes laid out for them.
+ */
+function getSandboxFontFamily(host: HTMLElement | null): string {
+  const fontFamily = host ? getComputedStyle(host).fontFamily.trim() : "";
+  return fontFamily && !/[<>{};]/.test(fontFamily) ? fontFamily : "sans-serif";
 }
 
 /**
@@ -150,39 +175,32 @@ function getMermaidLayout(svg: string): Size | null {
 export const MERMAID_SKELETON_HEIGHT_PX = 280;
 const MERMAID_LAYOUT_CACHE_PREFIX = "multica:mermaid:layout:";
 
-// DJB2 — small, fast, sufficient for sessionStorage cache keys. The chart
-// text itself is too unwieldy as a key (length, special chars), and a
-// crypto-strength hash would have to be async.
-function hashChart(chart: string): string {
-  let hash = 5381;
-  for (let i = 0; i < chart.length; i++) {
-    hash = ((hash << 5) + hash) ^ chart.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36);
-}
+// `.mermaid-diagram` padding, top plus bottom (1rem each).
+const DIAGRAM_PADDING_Y_PX = 32;
 
 /**
- * Height to reserve for a diagram that has not rendered yet: the real height
- * when this exact chart already rendered in this session, otherwise the
- * skeleton default. Exported so the near-viewport lazy shell
- * (rich-content/lazy-rich-block.tsx) reserves the SAME space this component
- * would, instead of maintaining a second guess at the size.
+ * Height a framed diagram's body will take: the drawn height of this exact
+ * chart plus the container's padding when it already rendered in this
+ * session, otherwise the skeleton default. Exported so the near-viewport lazy
+ * shell (rich-content/lazy-rich-block.tsx) reserves the SAME space this
+ * component would, instead of maintaining a second guess at the size.
  *
  * NOT safe to call during render: it reads sessionStorage, which does not exist
  * on the server, so the value differs between the server frame and the browser's
  * hydration frame whenever the cache is warm. Callers must use the skeleton
  * default for the first frame and call this from an effect (see
- * useReservedMermaidHeightPx in rich-content/rich-code-block.tsx).
+ * useReservedHeightPx in rich-content/rich-code-block.tsx).
  */
-export function reservedMermaidHeightPx(chart: string): number {
-  return readCachedLayout(chart)?.height ?? MERMAID_SKELETON_HEIGHT_PX;
+export function framedMermaidBodyHeightPx(chart: string): number {
+  const cached = readCachedLayout(chart);
+  return cached ? cached.height + DIAGRAM_PADDING_Y_PX : MERMAID_SKELETON_HEIGHT_PX;
 }
 
 function readCachedLayout(chart: string): Size | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(
-      MERMAID_LAYOUT_CACHE_PREFIX + hashChart(chart),
+      MERMAID_LAYOUT_CACHE_PREFIX + hashSource(chart),
     );
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -205,7 +223,7 @@ function writeCachedLayout(chart: string, layout: Size | null): void {
   if (!layout) return;
   try {
     window.sessionStorage.setItem(
-      MERMAID_LAYOUT_CACHE_PREFIX + hashChart(chart),
+      MERMAID_LAYOUT_CACHE_PREFIX + hashSource(chart),
       JSON.stringify({ width: layout.width, height: layout.height }),
     );
   } catch {
@@ -217,7 +235,9 @@ function writeCachedLayout(chart: string, layout: Size | null): void {
 function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
   const cssVariables = getSandboxCssVariables(host);
 
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
+  const fontFamily = getSandboxFontFamily(host);
+
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; font-family: ${fontFamily}; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
 }
 
 /**
@@ -233,36 +253,9 @@ function buildViewerMermaidDocument(
 ): string {
   const cssVariables = getSandboxCssVariables(host);
 
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; } svg { display: block; width: ${layout.width}px; height: ${layout.height}px; max-width: none; }</style></head><body>${svg}</body></html>`;
-}
+  const fontFamily = getSandboxFontFamily(host);
 
-function useThemeVersion() {
-  const [themeVersion, setThemeVersion] = useState(0);
-
-  useEffect(() => {
-    const bumpThemeVersion = () => setThemeVersion((version) => version + 1);
-    const observer = new MutationObserver(bumpThemeVersion);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style", "data-theme"],
-    });
-    if (document.body) {
-      observer.observe(document.body, {
-        attributes: true,
-        attributeFilter: ["class", "style", "data-theme"],
-      });
-    }
-
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    mediaQuery.addEventListener("change", bumpThemeVersion);
-
-    return () => {
-      observer.disconnect();
-      mediaQuery.removeEventListener("change", bumpThemeVersion);
-    };
-  }, []);
-
-  return themeVersion;
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: ${fontFamily}; } svg { display: block; width: ${layout.width}px; height: ${layout.height}px; max-width: none; }</style></head><body>${svg}</body></html>`;
 }
 
 /**
@@ -329,7 +322,22 @@ interface RenderedDiagram {
   exportFontFamily: string;
 }
 
-export function MermaidDiagram({ chart }: { chart: string }) {
+/** What a DynamicBlock needs from the diagram it frames. */
+export interface MermaidFrameBinding {
+  viewerOpen: boolean;
+  onViewerOpenChange: (open: boolean) => void;
+  onErrorChange: (error: string | null) => void;
+  /** The frame's fullscreen button; focus returns there when the viewer closes. */
+  finalFocusRef: RefObject<HTMLButtonElement | null>;
+}
+
+export function MermaidDiagram({
+  chart,
+  frame,
+}: {
+  chart: string;
+  frame?: MermaidFrameBinding;
+}) {
   const { t } = useT("editor");
   const reactId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -351,7 +359,10 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     readCachedLayout(chart),
   );
   const [error, setError] = useState<string | null>(null);
-  const [viewerOpen, setViewerOpen] = useState(false);
+  const [ownViewerOpen, setOwnViewerOpen] = useState(false);
+  const viewerOpen = frame ? frame.viewerOpen : ownViewerOpen;
+  const setViewerOpen = frame ? frame.onViewerOpenChange : setOwnViewerOpen;
+  const onErrorChange = frame?.onErrorChange;
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -422,8 +433,12 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     };
   }, [chart, diagramId, themeVersion]);
 
+  useEffect(() => {
+    onErrorChange?.(error);
+  }, [error, onErrorChange]);
+
   const overflow = useHorizontalOverflow(scrollRef, [rendered?.inlineDocument]);
-  const openViewer = useCallback(() => setViewerOpen(true), []);
+  const openViewer = useCallback(() => setViewerOpen(true), [setViewerOpen]);
   const dragToScroll = useDragToScroll({ onTap: openViewer });
 
   const handleCopySource = useCallback(async () => {
@@ -432,6 +447,12 @@ export function MermaidDiagram({ chart }: { chart: string }) {
       setTimeout(() => setCopied(false), 2000);
     }
   }, [chart]);
+
+  if (error && frame) {
+    // The frame shows the error panel; keep the host so a theme switch can
+    // still resolve colors for the next attempt.
+    return <div ref={containerRef} className="mermaid-diagram" data-framed="" />;
+  }
 
   if (error) {
     return (
@@ -463,12 +484,17 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   // drives layout. If the cache was right, this transition is zero-shift.
   const containerStyle: CSSProperties | undefined = rendered
     ? undefined
-    : { minHeight: skeletonLayout?.height ?? MERMAID_SKELETON_HEIGHT_PX };
+    : {
+        minHeight: skeletonLayout
+          ? skeletonLayout.height + (frame ? DIAGRAM_PADDING_Y_PX : 0)
+          : MERMAID_SKELETON_HEIGHT_PX,
+      };
 
   return (
     <div
       ref={containerRef}
       className="mermaid-diagram"
+      data-framed={frame ? "" : undefined}
       aria-label={t(($) => $.mermaid.diagram_label)}
       style={containerStyle}
       data-overflow-start={overflow.start ? "" : undefined}
@@ -499,25 +525,27 @@ export function MermaidDiagram({ chart }: { chart: string }) {
               title={t(($) => $.mermaid.diagram_label)}
             />
           </div>
-          <div className="mermaid-diagram-toolbar">
-            <button
-              type="button"
-              onClick={handleCopySource}
-              title={t(($) => $.mermaid.copy_source)}
-              aria-label={t(($) => $.mermaid.copy_source)}
-            >
-              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            </button>
-            <button
-              ref={expandButtonRef}
-              type="button"
-              onClick={() => setViewerOpen(true)}
-              title={t(($) => $.mermaid.open_viewer)}
-              aria-label={t(($) => $.mermaid.open_viewer)}
-            >
-              <Maximize2 className="size-3.5" />
-            </button>
-          </div>
+          {!frame && (
+            <div className="mermaid-diagram-toolbar">
+              <button
+                type="button"
+                onClick={handleCopySource}
+                title={t(($) => $.mermaid.copy_source)}
+                aria-label={t(($) => $.mermaid.copy_source)}
+              >
+                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              </button>
+              <button
+                ref={expandButtonRef}
+                type="button"
+                onClick={() => setViewerOpen(true)}
+                title={t(($) => $.mermaid.open_viewer)}
+                aria-label={t(($) => $.mermaid.open_viewer)}
+              >
+                <Maximize2 className="size-3.5" />
+              </button>
+            </div>
+          )}
           <MermaidViewer
             open={viewerOpen}
             onOpenChange={setViewerOpen}
@@ -527,9 +555,11 @@ export function MermaidDiagram({ chart }: { chart: string }) {
             layout={rendered.viewerLayout}
             exportBackground={rendered.exportBackground}
             exportFontFamily={rendered.exportFontFamily}
-            finalFocusRef={expandButtonRef}
+            finalFocusRef={frame ? frame.finalFocusRef : expandButtonRef}
           />
         </>
+      ) : frame ? (
+        <DynamicBlockSkeleton className="absolute inset-0 p-4" />
       ) : (
         <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
       )}

@@ -91,6 +91,19 @@
     "show_source": "ソースを表示",
     "fullscreen": "全画面"
   },
+  "dynamic_block": {
+    "preview": "プレビュー",
+    "source": "ソース",
+    "view": "表示",
+    "copy_source": "ソースをコピー",
+    "show_all": "すべて表示",
+    "rendering": "レンダリング中...",
+    "error_html": "プレビューでスクリプトエラーが発生しました",
+    "error_mermaid": "この図を描画できませんでした",
+    "error_at_line": "{{message}}（{{line}} 行目）",
+    "view_source": "ソースを表示",
+    "copy_error": "エラーをコピー"
+  },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"
   },

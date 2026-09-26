@@ -75,6 +75,23 @@
   opacity: 1;
 }
 
+/* Inside a DynamicBlock (MUL-7649) the frame draws the border, background and
+   chrome; the diagram sits directly on the frame's surface. */
+.rich-text-editor .mermaid-diagram[data-framed] {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+
+.rich-text-editor .mermaid-diagram[data-framed]::before {
+  background: linear-gradient(to right, var(--surface), transparent);
+}
+
+.rich-text-editor .mermaid-diagram[data-framed]::after {
+  background: linear-gradient(to left, var(--surface), transparent);
+}
+
 .rich-text-editor .mermaid-diagram-loading,
 .rich-text-editor .mermaid-diagram-error p {
   color: var(--muted-foreground);
