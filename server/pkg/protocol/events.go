@@ -167,6 +167,10 @@ const (
 	EventDaemonRPCRequest  = "daemon:rpc_request"
 	EventDaemonRPCResponse = "daemon:rpc_response"
 
+	// Run code change events (MUL-7651). The daemon uploads a run's diff as the
+	// run ends; open issue pages refetch the issue's code changes.
+	EventCodeChangesCreated = "code_changes:created"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"

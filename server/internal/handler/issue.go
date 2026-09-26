@@ -4400,6 +4400,19 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 			return issueDeleteResult{}, fmt.Errorf("list issue attachment URLs: %w", err)
 		}
 		result.AttachmentURLs = append(result.AttachmentURLs, attachmentURLs...)
+		// Run code changes carry no foreign key to the issue; their rows and
+		// stored patches go with it here.
+		patchURLs, err := qtx.DeleteTaskCodeChangesByIssue(ctx, db.DeleteTaskCodeChangesByIssueParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return issueDeleteResult{}, fmt.Errorf("delete run code changes: %w", err)
+		}
+		for _, patchURL := range patchURLs {
+			if patchURL.Valid {
+				result.AttachmentURLs = append(result.AttachmentURLs, patchURL.String)
+			}
+		}
 		if sourceContext, contextErr := qtx.GetIssueSourceContextByIssue(ctx, db.GetIssueSourceContextByIssueParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID}); contextErr == nil {
 			contextAttachments, listErr := qtx.ListAttachmentsBySourceContext(ctx, db.ListAttachmentsBySourceContextParams{
 				WorkspaceID: issue.WorkspaceID, SourceContextID: sourceContext.ID,

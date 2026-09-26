@@ -1392,6 +1392,7 @@ func isTextPreviewable(contentType, filename string) bool {
 		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
 		".css", ".scss", ".sass", ".less",
 		".sql",
+		".patch", ".diff",
 		".java", ".kt", ".swift",
 		".c", ".cc", ".cpp", ".h", ".hpp",
 		".cs", ".php", ".lua", ".vim",
