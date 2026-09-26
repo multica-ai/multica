@@ -107,23 +107,18 @@ export function useDeleteProject(projectId: string) {
   return useMutation({
     mutationKey: ["deleteProject", projectId] as const,
     mutationFn: () => api.deleteProject(projectId),
-    onMutate: async () => {
+    onSuccess: async () => {
       const listKey = projectKeys.list(wsId);
+      // Cancel reads started during DELETE before applying confirmed removal.
       await qc.cancelQueries({ queryKey: listKey });
-      const prevList = qc.getQueryData<Project[]>(listKey);
       qc.setQueryData<Project[]>(listKey, (old) =>
         old ? old.filter((p) => p.id !== projectId) : old,
       );
-      return { prevList, listKey };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prevList !== undefined) {
-        qc.setQueryData(ctx.listKey, ctx.prevList);
-      }
-    },
-    onSettled: () => {
       qc.removeQueries({ queryKey: projectKeys.detail(wsId, projectId) });
       qc.removeQueries({ queryKey: projectKeys.resources(wsId, projectId) });
+      // Restart active lists, including a cancelled first fetch, without
+      // making successful navigation wait for another network response.
+      void qc.invalidateQueries({ queryKey: listKey });
     },
   });
 }
