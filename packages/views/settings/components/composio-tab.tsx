@@ -85,10 +85,12 @@ export function ComposioTab() {
     } else {
       toast.error(t(($) => $.composio.toast_connect_failed));
     }
-    // Drop only the Composio one-shot params; keep everything else (notably
-    // ?tab=integrations) so the user stays on this tab.
+    // The OAuth service returns to the retired `?tab=integrations` URL. Drop
+    // the one-shot params and point the URL at this page, keeping everything
+    // else, so a refresh neither re-toasts nor leaves the legacy tab behind.
     const params = new URLSearchParams(navigation.searchParams);
-    params.set("integration", "composio");
+    params.set("tab", "apps");
+    params.delete("integration");
     params.delete("connected");
     params.delete("error");
     const qs = params.toString();
@@ -177,10 +179,6 @@ export function ComposioTab() {
 
   return (
     <div className="space-y-6">
-      <section className="space-y-1">
-        <p className="text-body text-muted-foreground">{t(($) => $.composio.page_description)}</p>
-      </section>
-
       {toolkitsQuery.isLoading ? (
         <Card>
           <CardContent>

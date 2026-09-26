@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CircleOff, GitMerge } from "lucide-react";
+import { CircleOff } from "lucide-react";
 import { api } from "@multica/core/api";
 import { derivePRMergeStatus, PR_MERGE_STATUS_NONE } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -11,7 +11,6 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type { IssueStatusCategory, Workspace } from "@multica/core/types";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import { Label } from "@multica/ui/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -25,6 +24,7 @@ import {
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { useT } from "../../i18n";
+import { SettingsRow } from "./settings-layout";
 
 /** The categories a merge may move an issue into, with their built-ins.
  * Blocked is left out: a merge never blocks an issue. */
@@ -34,18 +34,16 @@ const TARGET_CATEGORIES: { category: IssueStatusCategory; builtIns: string[] }[]
 ];
 
 /**
- * "After PRs merge, move the issue to" (MUL-7726): the one PR merge setting,
- * shared by GitHub and self-hosted providers. It saves on change like the
- * other integration switches and only affects merges from now on.
+ * The status a merge moves issues to, and the statuses it may move them to.
+ * Shared by the editor on Statuses & transitions and the read-only summary on
+ * the Code page so both agree on what an archived choice means.
  */
-export function PRMergeStatusRow({ canManage, disabled = false }: { canManage: boolean; disabled?: boolean }) {
+export function usePRMergeStatus() {
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
-  const qc = useQueryClient();
   const catalog = useIssueStatuses(wsId);
   const statusLabel = useStatusLabel(wsId);
-  const [saving, setSaving] = useState(false);
 
   // Built-ins are always offered: the server accepts them before the catalog
   // is seeded, and the catalog may still be loading.
@@ -58,25 +56,7 @@ export function PRMergeStatusRow({ canManage, disabled = false }: { canManage: b
   // nothing on the server, so it reads as "no change" here too.
   const value = !catalog.isLoaded || groups.some((group) => group.keys.includes(stored)) ? stored : PR_MERGE_STATUS_NONE;
 
-  async function persist(next: string) {
-    if (!workspace || saving || next === value) return;
-    setSaving(true);
-    try {
-      const updated = await api.updateWorkspace(workspace.id, {
-        settings: { ...((workspace.settings as Record<string, unknown>) ?? {}), pr_merge_status: next },
-      });
-      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-      toast.success(t(($) => $.auto_save.toast_saved), { id: "settings-auto-save" });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.auto_save.failed));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const option = (key: string) =>
+  const renderOption = (key: string) =>
     key === PR_MERGE_STATUS_NONE ? (
       <>
         <CircleOff className="text-muted-foreground" />
@@ -95,19 +75,45 @@ export function PRMergeStatusRow({ canManage, disabled = false }: { canManage: b
       </>
     );
 
+  return { value, groups, renderOption, statusLabel };
+}
+
+/**
+ * "After PRs merge, move the issue to" (MUL-7726): the one PR merge rule,
+ * shared by GitHub and self-hosted providers. It lives with the other
+ * automatic transitions and only affects merges from now on.
+ */
+export function PRMergeStatusRow({ canManage }: { canManage: boolean }) {
+  const { t } = useT("settings");
+  const workspace = useCurrentWorkspace();
+  const qc = useQueryClient();
+  const { value, groups, renderOption, statusLabel } = usePRMergeStatus();
+  const [saving, setSaving] = useState(false);
+
+  async function persist(next: string) {
+    if (!workspace || saving || next === value) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: { ...((workspace.settings as Record<string, unknown>) ?? {}), pr_merge_status: next },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.auto_save.failed));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="flex items-start justify-between gap-4 px-4 py-3.5">
-      <div className="flex items-start gap-3">
-        <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground">
-          <GitMerge className="h-4 w-4" />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="pr-merge-status" className="text-body font-medium">
-            {t(($) => $.pr_merge_status.label)}
-          </Label>
-          <p className="text-body text-muted-foreground">{t(($) => $.pr_merge_status.description)}</p>
-        </div>
-      </div>
+    <SettingsRow
+      anchor="pr-merge-status"
+      label={t(($) => $.pr_merge_status.label)}
+      description={t(($) => $.pr_merge_status.description)}
+      size="select"
+    >
       <Select
         items={[
           { value: PR_MERGE_STATUS_NONE, label: t(($) => $.pr_merge_status.none) },
@@ -115,26 +121,31 @@ export function PRMergeStatusRow({ canManage, disabled = false }: { canManage: b
         ]}
         value={value}
         onValueChange={(next) => next && void persist(next)}
-        disabled={!canManage || disabled || saving}
+        disabled={!canManage || saving}
       >
-        <SelectTrigger id="pr-merge-status" className="w-48 shrink-0" aria-busy={saving || undefined}>
-          <SelectValue>{() => option(value)}</SelectValue>
+        <SelectTrigger
+          size="sm"
+          className="w-full"
+          aria-label={t(($) => $.pr_merge_status.label)}
+          aria-busy={saving || undefined}
+        >
+          <SelectValue>{() => renderOption(value)}</SelectValue>
         </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={PR_MERGE_STATUS_NONE}>{option(PR_MERGE_STATUS_NONE)}</SelectItem>
+        <SelectContent align="end">
+          <SelectItem value={PR_MERGE_STATUS_NONE}>{renderOption(PR_MERGE_STATUS_NONE)}</SelectItem>
           {groups.map((group) => (
             <SelectGroup key={group.category}>
               <SelectSeparator />
               <SelectLabel>{t(($) => $.issue_statuses.category_labels[group.category])}</SelectLabel>
               {group.keys.map((key) => (
                 <SelectItem key={key} value={key}>
-                  {option(key)}
+                  {renderOption(key)}
                 </SelectItem>
               ))}
             </SelectGroup>
           ))}
         </SelectContent>
       </Select>
-    </div>
+    </SettingsRow>
   );
 }

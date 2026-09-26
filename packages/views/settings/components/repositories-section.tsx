@@ -1,8 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoaderCircle, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ChevronDown,
+  FolderGit2,
+  LoaderCircle,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -31,16 +41,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   githubInstallationRepositoriesOptions,
   githubInstallationsOptions,
@@ -53,26 +69,16 @@ import type {
 } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
-import {
-  SettingsCard,
-  SettingsSaveState,
-  SettingsSection,
-  SettingsTab,
-} from "./settings-layout";
-import { useAutoSave } from "./use-auto-save";
+import { SettingsCard, SettingsSection } from "./settings-layout";
 import { GitHubMark } from "./github-mark";
 
 const EMPTY_REPOSITORIES: WorkspaceRepo[] = [];
 
-function repositoriesEqual(left: WorkspaceRepo[], right: WorkspaceRepo[]) {
-  if (left.length !== right.length) return false;
-  return left.every(
-    (repo, index) =>
-      repo.url === right[index]?.url &&
-      (repo.description ?? "") === (right[index]?.description ?? ""),
-  );
-}
-
+/**
+ * Host + path identity of a clone URL, so HTTPS and SSH forms of the same
+ * repository compare equal. Path casing is preserved: hosts are
+ * case-insensitive, repository paths are not guaranteed to be.
+ */
 export function repositoryIdentity(rawURL: string): string | null {
   const value = rawURL.trim();
   if (!value) return null;
@@ -103,17 +109,30 @@ export function repositoryIdentity(rawURL: string): string | null {
   return `${host.toLowerCase()}/${normalizedPath}`;
 }
 
-export function RepositoriesTab() {
+interface RepositoryDraft {
+  /** Index being edited, or null when adding. */
+  index: number | null;
+  url: string;
+  description: string;
+}
+
+/**
+ * The repositories agents may clone and push to. Rows are read-only; adding
+ * and editing happen in a dialog that saves on confirm, so a half-typed URL
+ * is never persisted and every change is one deliberate request.
+ */
+export function RepositoriesSection() {
   const { t } = useT("settings");
-  const user = useAuthStore((state) => state.user);
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const queryClient = useQueryClient();
   const navigation = useNavigation();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const [repositories, setRepositories] = useState<WorkspaceRepo[]>(
-    workspace?.repos ?? EMPTY_REPOSITORIES,
-  );
+  const { role } = useCurrentMember(wsId);
+  const canManageWorkspace = role === "owner" || role === "admin";
+  const repositories = workspace?.repos ?? EMPTY_REPOSITORIES;
+
+  const [draft, setDraft] = useState<RepositoryDraft | null>(null);
+  const [saving, setSaving] = useState(false);
   const [pendingRemovalIndex, setPendingRemovalIndex] = useState<number | null>(null);
   const [connectingGitHub, setConnectingGitHub] = useState(false);
   const [githubPickerOpen, setGitHubPickerOpen] = useState(false);
@@ -123,9 +142,6 @@ export function RepositoriesTab() {
   >(new Map());
   const [repositorySearch, setRepositorySearch] = useState("");
 
-  const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
-  const canManageWorkspace =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
   const {
     data: githubData,
     isPending: githubInstallationsPending,
@@ -174,13 +190,6 @@ export function RepositoriesTab() {
   }, [githubRepositories, repositorySearch]);
 
   useEffect(() => {
-    setRepositories(workspace?.repos ?? EMPTY_REPOSITORIES);
-    // A cache update after auto-save replaces the Workspace object. Keying on
-    // identity prevents that response from wiping a newer local keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on workspace identity
-  }, [workspace?.id]);
-
-  useEffect(() => {
     if (
       selectedInstallationID &&
       githubInstallations.some(
@@ -192,6 +201,9 @@ export function RepositoriesTab() {
     setSelectedInstallationID(githubInstallations[0]?.id ?? "");
   }, [githubInstallations, selectedInstallationID]);
 
+  // The GitHub App install flow returns with `github_connected=1` (or an
+  // error). Open the picker once the installation list reflects the new
+  // install, then drop the one-shot params so a refresh does not repeat it.
   useEffect(() => {
     const connected = navigation.searchParams.get("github_connected") === "1";
     const githubError = navigation.searchParams.get("github_error");
@@ -227,53 +239,58 @@ export function RepositoriesTab() {
     t,
   ]);
 
-  const savedRepositories = workspace?.repos ?? EMPTY_REPOSITORIES;
-  const draft = useMemo(() => repositories, [repositories]);
-  const saveRepositories = useCallback(
-    async (next: WorkspaceRepo[]) => {
-      if (!workspace) return;
+  const persist = async (next: WorkspaceRepo[]) => {
+    if (!workspace) return false;
+    setSaving(true);
+    try {
       const updated = await api.updateWorkspace(workspace.id, { repos: next });
       queryClient.setQueryData(
         workspaceKeys.list(),
         (old: Workspace[] | undefined) =>
           old?.map((item) => (item.id === updated.id ? updated : item)),
       );
-    },
-    [queryClient, workspace],
-  );
-  const allUrlsValid = repositories.every((repo) => repo.url.trim().length > 0);
-  const autoSave = useAutoSave({
-    value: draft,
-    savedValue: savedRepositories,
-    onSave: saveRepositories,
-    onSuccess: () =>
-      toast.success(t(($) => $.repositories.toast_saved), {
-        id: "settings-auto-save",
-      }),
-    onError: (error) =>
+      return true;
+    } catch (error) {
       toast.error(
         error instanceof Error
           ? error.message
           : t(($) => $.repositories.toast_save_failed),
-      ),
-    enabled: !!workspace && canManageWorkspace && allUrlsValid,
-    isEqual: repositoriesEqual,
-  });
-
-  const updateRepository = (
-    index: number,
-    field: keyof WorkspaceRepo,
-    value: string,
-  ) => {
-    setRepositories((current) =>
-      current.map((repo, repoIndex) =>
-        repoIndex === index ? { ...repo, [field]: value } : repo,
-      ),
-    );
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const addRepository = () => {
-    setRepositories((current) => [...current, { url: "" }]);
+  const draftIdentity = draft ? repositoryIdentity(draft.url) : null;
+  const draftDuplicate =
+    !!draftIdentity &&
+    repositories.some(
+      (repository, index) =>
+        index !== draft?.index &&
+        repositoryIdentity(repository.url) === draftIdentity,
+    );
+
+  const saveDraft = async () => {
+    if (!draft || !draft.url.trim() || draftDuplicate) return;
+    const entry: WorkspaceRepo = {
+      url: draft.url.trim(),
+      ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
+    };
+    const next =
+      draft.index === null
+        ? [...repositories, entry]
+        : repositories.map((repository, index) =>
+            index === draft.index ? entry : repository,
+          );
+    if (await persist(next)) setDraft(null);
+  };
+
+  const removeRepository = async (index: number) => {
+    const ok = await persist(
+      repositories.filter((_, repoIndex) => repoIndex !== index),
+    );
+    if (ok) setPendingRemovalIndex(null);
   };
 
   const openGitHubPicker = () => {
@@ -283,11 +300,7 @@ export function RepositoriesTab() {
     setGitHubPickerOpen(true);
   };
 
-  const handleGitHubAction = async () => {
-    if (githubInstallations.length > 0) {
-      openGitHubPicker();
-      return;
-    }
+  const connectGitHub = async () => {
     setConnectingGitHub(true);
     try {
       const response = await api.getGitHubConnectURL(wsId, "repositories");
@@ -325,11 +338,7 @@ export function RepositoriesTab() {
     });
   };
 
-  const importGitHubRepositories = () => {
-    if (!allUrlsValid) {
-      toast.error(t(($) => $.repositories.complete_manual_entry_first));
-      return;
-    }
+  const importGitHubRepositories = async () => {
     const additions: WorkspaceRepo[] = [];
     const known = new Set(existingRepositoryIdentities);
     for (const repository of selectedRepositories.values()) {
@@ -347,138 +356,232 @@ export function RepositoriesTab() {
       closeGitHubPicker();
       return;
     }
-    const next = [...repositories, ...additions];
-    setRepositories(next);
-    autoSave.saveNow(next);
-    closeGitHubPicker();
-  };
-
-  const removeRepository = (index: number) => {
-    const next = repositories.filter((_, repoIndex) => repoIndex !== index);
-    setRepositories(next);
-    autoSave.saveNow(next);
+    if (await persist([...repositories, ...additions])) closeGitHubPicker();
   };
 
   if (!workspace) return null;
 
-  return (
-    <SettingsTab title={t(($) => $.page.tabs.repositories)}>
-      <SettingsSection
-        description={t(($) => $.repositories.description)}
-        action={
-          <SettingsSaveState
-            status={autoSave.status}
-            savingLabel={t(($) => $.auto_save.saving)}
-            savedLabel={t(($) => $.auto_save.saved)}
-            errorLabel={t(($) => $.auto_save.failed)}
-          />
-        }
-      >
-        <SettingsCard>
-          {repositories.length === 0 ? (
-            <div className="px-4 py-8 text-center text-caption text-muted-foreground">
-              {t(($) => $.repositories.empty)}
-            </div>
-          ) : null}
+  const githubItemDisabled =
+    connectingGitHub ||
+    !githubBrowseConfigured ||
+    (!githubConnectConfigured && githubInstallations.length === 0);
 
-          {repositories.map((repository, index) => (
-            <div
-              key={index}
-              className="grid gap-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto] sm:items-center"
-            >
+  return (
+    <SettingsSection
+      title={t(($) => $.repositories.section_title)}
+      description={t(($) => $.repositories.description)}
+      anchor="repositories"
+      action={
+        canManageWorkspace ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button size="sm" />}>
+              <Plus />
+              {t(($) => $.repositories.add)}
+              <ChevronDown />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-auto min-w-56">
+              <DropdownMenuItem
+                disabled={githubItemDisabled}
+                onClick={() =>
+                  githubInstallations.length > 0
+                    ? openGitHubPicker()
+                    : void connectGitHub()
+                }
+              >
+                {connectingGitHub ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <GitHubMark className="size-4" />
+                )}
+                <span className="flex flex-col">
+                  <span>
+                    {githubInstallations.length > 0
+                      ? t(($) => $.repositories.choose_from_github)
+                      : t(($) => $.repositories.connect_github)}
+                  </span>
+                  {!githubBrowseConfigured ? (
+                    <span className="text-caption text-muted-foreground">
+                      {t(($) => $.repositories.github_browse_not_configured)}
+                    </span>
+                  ) : null}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setDraft({ index: null, url: "", description: "" })}
+              >
+                <Pencil />
+                {t(($) => $.repositories.add_manually)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null
+      }
+    >
+      <SettingsCard>
+        {repositories.length === 0 ? (
+          <div className="px-4 py-8 text-center text-caption text-muted-foreground">
+            {canManageWorkspace
+              ? t(($) => $.repositories.empty)
+              : t(($) => $.repositories.manage_hint)}
+          </div>
+        ) : (
+          repositories.map((repository, index) => {
+            const identity = repositoryIdentity(repository.url);
+            const onGitHub = identity?.startsWith("github.com/") ?? false;
+            return (
+              <div
+                key={`${index}:${repository.url}`}
+                className="flex min-h-14 items-center gap-3 px-4 py-2.5"
+              >
+                <span
+                  aria-hidden="true"
+                  className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
+                >
+                  {onGitHub ? (
+                    <GitHubMark className="size-4" />
+                  ) : (
+                    <FolderGit2 className="size-4" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-mono text-label" title={repository.url}>
+                    {repository.url}
+                  </p>
+                  {repository.description ? (
+                    <p className="mt-0.5 truncate text-caption text-muted-foreground">
+                      {repository.description}
+                    </p>
+                  ) : null}
+                </div>
+                {canManageWorkspace ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t(($) => $.repositories.actions_aria, {
+                            url: repository.url,
+                          })}
+                        />
+                      }
+                    >
+                      <MoreHorizontal />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-auto">
+                      <DropdownMenuItem
+                        onClick={() =>
+                          setDraft({
+                            index,
+                            url: repository.url,
+                            description: repository.description ?? "",
+                          })
+                        }
+                      >
+                        <Pencil />
+                        {t(($) => $.repositories.edit)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => setPendingRemovalIndex(index)}
+                      >
+                        <Trash2 />
+                        {t(($) => $.repositories.delete_confirm_action)}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+              </div>
+            );
+          })
+        )}
+      </SettingsCard>
+
+      <Dialog
+        open={draft !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) setDraft(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {draft?.index === null
+                ? t(($) => $.repositories.add_title)
+                : t(($) => $.repositories.edit_title)}
+            </DialogTitle>
+            <DialogDescription>{t(($) => $.repositories.description)}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveDraft();
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="repository-url">{t(($) => $.repositories.url_label)}</Label>
               <Input
-                type="text"
-                name={`repository-${index}-url`}
+                id="repository-url"
                 autoComplete="off"
                 spellCheck={false}
-                aria-label={t(($) => $.repositories.url_placeholder)}
-                value={repository.url}
+                value={draft?.url ?? ""}
                 onChange={(event) =>
-                  updateRepository(index, "url", event.target.value)
+                  setDraft((current) =>
+                    current ? { ...current, url: event.target.value } : current,
+                  )
                 }
-                onBlur={autoSave.flush}
-                disabled={!canManageWorkspace}
-                aria-invalid={!repository.url.trim()}
+                aria-invalid={draftDuplicate || undefined}
                 placeholder={t(($) => $.repositories.url_placeholder)}
                 className="font-mono text-caption"
               />
+              {draftDuplicate ? (
+                <p className="text-caption text-destructive">
+                  {t(($) => $.repositories.duplicate)}
+                </p>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="repository-description">
+                {t(($) => $.repositories.description_label)}
+              </Label>
               <Input
-                type="text"
-                name={`repository-${index}-description`}
+                id="repository-description"
                 autoComplete="off"
-                aria-label={t(($) => $.repositories.description_placeholder)}
-                value={repository.description ?? ""}
+                value={draft?.description ?? ""}
                 onChange={(event) =>
-                  updateRepository(index, "description", event.target.value)
+                  setDraft((current) =>
+                    current ? { ...current, description: event.target.value } : current,
+                  )
                 }
-                onBlur={autoSave.flush}
-                disabled={!canManageWorkspace}
                 placeholder={t(($) => $.repositories.description_placeholder)}
               />
-              {canManageWorkspace ? (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t(($) => $.repositories.delete_aria)}
-                  className="justify-self-end text-muted-foreground hover:text-destructive"
-                  onClick={() => setPendingRemovalIndex(index)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              ) : null}
             </div>
-          ))}
-
-          {canManageWorkspace ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" onClick={addRepository}>
-                  <Plus className="size-3.5" />
-                  {t(($) => $.repositories.add)}
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleGitHubAction}
-                  disabled={
-                    connectingGitHub ||
-                    !githubBrowseConfigured ||
-                    (!githubConnectConfigured &&
-                      githubInstallations.length === 0)
-                  }
-                  title={
-                    !githubBrowseConfigured
-                      ? t(($) => $.repositories.github_browse_not_configured)
-                      : undefined
-                  }
-                >
-                  {connectingGitHub ? (
-                    <LoaderCircle className="size-3.5 animate-spin" />
-                  ) : (
-                    <GitHubMark className="size-3.5" />
-                  )}
-                  {githubInstallations.length > 0
-                    ? t(($) => $.repositories.choose_from_github)
-                    : t(($) => $.repositories.connect_github)}
-                </Button>
-              </div>
-              {!allUrlsValid ? (
-                <span className="text-caption text-muted-foreground">
-                  {t(($) => $.repositories.url_empty)}
-                </span>
-              ) : null}
-            </div>
-          ) : (
-            <div className="px-4 py-3 text-caption text-muted-foreground">
-              {t(($) => $.repositories.manage_hint)}
-            </div>
-          )}
-        </SettingsCard>
-      </SettingsSection>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDraft(null)}
+                disabled={saving}
+              >
+                {t(($) => $.repositories.github_cancel)}
+              </Button>
+              <Button
+                type="submit"
+                disabled={saving || !draft?.url.trim() || draftDuplicate}
+                aria-busy={saving || undefined}
+              >
+                {saving ? t(($) => $.repositories.saving) : t(($) => $.repositories.save)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={githubPickerOpen}
         onOpenChange={(open) => {
-          if (!open) closeGitHubPicker();
+          if (!open && !saving) closeGitHubPicker();
         }}
       >
         <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-2xl">
@@ -643,12 +746,13 @@ export function RepositoriesTab() {
                 count: selectedRepositories.size,
               })}
             </p>
-            <Button variant="ghost" onClick={closeGitHubPicker}>
+            <Button variant="ghost" onClick={closeGitHubPicker} disabled={saving}>
               {t(($) => $.repositories.github_cancel)}
             </Button>
             <Button
-              onClick={importGitHubRepositories}
-              disabled={selectedRepositories.size === 0 || !allUrlsValid}
+              onClick={() => void importGitHubRepositories()}
+              disabled={selectedRepositories.size === 0 || saving}
+              aria-busy={saving || undefined}
             >
               {t(($) => $.repositories.github_import)}
             </Button>
@@ -659,7 +763,7 @@ export function RepositoriesTab() {
       <AlertDialog
         open={pendingRemovalIndex !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingRemovalIndex(null);
+          if (!open && !saving) setPendingRemovalIndex(null);
         }}
       >
         <AlertDialogContent>
@@ -672,16 +776,16 @@ export function RepositoriesTab() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>
+            <AlertDialogCancel disabled={saving}>
               {t(($) => $.repositories.delete_confirm_cancel)}
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
+              disabled={saving}
               onClick={() => {
                 if (pendingRemovalIndex !== null) {
-                  removeRepository(pendingRemovalIndex);
+                  void removeRepository(pendingRemovalIndex);
                 }
-                setPendingRemovalIndex(null);
               }}
             >
               {t(($) => $.repositories.delete_confirm_action)}
@@ -689,6 +793,6 @@ export function RepositoriesTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SettingsTab>
+    </SettingsSection>
   );
 }

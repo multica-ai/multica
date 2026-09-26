@@ -120,7 +120,9 @@
     "sort_by": "Trier par",
     "direction_asc": "Croissant",
     "direction_desc": "Décroissant",
-    "section_columns": "Colonnes"
+    "section_columns": "Colonnes",
+    "manage_labels": "Gérer les étiquettes...",
+    "manage_labels_title": "Étiquettes des skills"
   },
   "detail": {
     "all_skills": "Tous les skills",

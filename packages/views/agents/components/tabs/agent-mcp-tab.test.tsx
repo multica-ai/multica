@@ -185,7 +185,7 @@ describe("AgentMcpTab", () => {
 
     expect(screen.getByText(/No connected apps yet/i)).toBeTruthy();
     const link = screen.getByTestId("app-link");
-    expect(link.getAttribute("href")).toBe("/ws/settings?tab=integrations");
+    expect(link.getAttribute("href")).toBe("/ws/settings?tab=apps");
   });
 
   it("renders a defensive hidden state when the allowlist is redacted", () => {

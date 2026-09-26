@@ -6,7 +6,7 @@ description: ワークスペースごとにセルフホストの Forgejo、Gitea
 import { Callout } from "fumadocs-ui/components/callout";
 
 <Callout type="warn">
-**セルフホスト版 Multica 専用です。** この連携は Multica を**自分でデプロイしている**場合のみ利用でき、Multica Cloud では提供されません。ここでの「セルフホスト」は **Multica 自体**のセルフホストを意味します。通常は独自ネットワーク内の Git インスタンスへアクセスするために使用します。サーバー運用者が `MULTICA_VCS_INTEGRATION_ENABLED=true` を設定して機能を有効にし、`MULTICA_VCS_SECRET_KEY` も設定する必要があります。それまでは、設定 → 連携にこのセクションは表示されません。
+**セルフホスト版 Multica 専用です。** この連携は Multica を**自分でデプロイしている**場合のみ利用でき、Multica Cloud では提供されません。ここでの「セルフホスト」は **Multica 自体**のセルフホストを意味します。通常は独自ネットワーク内の Git インスタンスへアクセスするために使用します。サーバー運用者が `MULTICA_VCS_INTEGRATION_ENABLED=true` を設定して機能を有効にし、`MULTICA_VCS_SECRET_KEY` も設定する必要があります。それまでは、設定 → コードにこの行は表示されません。
 </Callout>
 
 Multica はワークスペースごとにセルフホストの Git ホスティング、**Forgejo**、**Gitea**、**GitLab** のいずれかへ接続します。接続後、ブランチ名かタイトルにタスク番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）、または本文で終了キーワードの直後にタスク番号を置いた PR は、対応する[タスク](/issues)へ**自動的に紐づけられ**、タスクサイドバーの **Pull requests** に表示されます。タスクに紐づく PR がすべてマージされると、タスクはワークスペースが選んだステータス（既定は「完了」）へ移動します。head commit の CI はカード上のチェックバーとして表示されます。
@@ -46,7 +46,7 @@ MULTICA_VCS_SECRET_KEY=<base64 32 バイト鍵>
 1. Git ホスティング側で、リポジトリの読み取り権限を持つアクセストークンを作成します。
    - **Forgejo / Gitea**: 設定 → アプリケーション。
    - **GitLab**: `read_api` 権限を持つ個人（またはグループ/プロジェクト）アクセストークン。
-2. Multica で **設定 → 連携 → Git ホスティング**を開きます。
+2. Multica で **設定 → コード**を開き、**セルフホスト Git** の行で **接続** をクリックします。
 3. **プロバイダー**を選択し、インスタンス URL（例: `https://forgejo.example.com`）とアクセストークンを入力して **接続**をクリックします。Multica は保存前に、そのトークンでインスタンスへアクセスして検証します。
 4. 接続後に表示される **Webhook URL** と **Webhook secret** をコピーします。
 

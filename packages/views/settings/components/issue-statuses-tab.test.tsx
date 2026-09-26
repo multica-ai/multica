@@ -135,11 +135,11 @@ describe("IssueStatusesTab", () => {
     const QA = entry({ key: "qa", name: "QA" });
     const badgeLink = () => screen.getByText(en.issue_statuses.pr_auto_complete_badge).closest("a");
 
-    it("badges Done by default and links to the GitHub setting", () => {
+    it("badges Done by default and links to the rule on this page", () => {
       catalog = [BUILT_IN_DONE, QA];
       render(<IssueStatusesTab />);
       expect(screen.getAllByText(en.issue_statuses.pr_auto_complete_badge)).toHaveLength(1);
-      expect(badgeLink()?.getAttribute("href")).toBe("/acme/settings?tab=integrations&integration=github");
+      expect(badgeLink()?.getAttribute("href")).toBe("/acme/settings?tab=issue-statuses&section=pr-merge-status");
       expect(badgeLink()?.closest(".group\\/row")).toHaveTextContent(en.issue_statuses.built_in_descriptions.done);
     });
 
@@ -443,34 +443,38 @@ describe("IssueStatusesTab", () => {
     ]);
   });
 
-  it.each([
-    ["edit", "click"], ["archive", "click"],
-    ["edit", "enter"], ["archive", "enter"],
-    ["edit", "escape"], ["archive", "escape"],
-  ] as const)("dismisses the built-in %s notice using %s", async (action, dismiss) => {
+  it("locks the definition of built-in statuses where the actions are", async () => {
     const user = userEvent.setup();
-    catalog = [BUILT_IN_IN_REVIEW];
+    catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA", position: 1 })];
     render(<IssueStatusesTab />);
     const trigger = screen.getByLabelText(
       en.issue_statuses.actions.open.replace("{{name}}", "in_review"),
     );
     expect(trigger.className).toContain("group-focus-within/row:opacity-100");
     expect(trigger.className).toContain("data-popup-open:opacity-100");
-    fireEvent.click(trigger);
-    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions[action] }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(en.issue_statuses.built_in_dialog.description)).toBeInTheDocument();
-    expect(screen.queryByLabelText(en.issue_statuses.editor.name)).toBeNull();
-    const close = within(dialog).getByRole("button", { name: en.issue_statuses.built_in_dialog.confirm });
-    if (dismiss === "click") {
-      await user.click(close);
-    } else {
-      close.focus();
-      await user.keyboard(dismiss === "enter" ? "{Enter}" : "{Escape}");
-    }
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    // Closing must release the modal layer, not leave Settings inaccessible.
-    await user.click(screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.click(trigger);
+    const edit = await screen.findByRole("menuitem", { name: en.issue_statuses.actions.edit });
+    const archive = screen.getByRole("menuitem", { name: en.issue_statuses.actions.archive });
+    expect(edit).toHaveAttribute("aria-disabled", "true");
+    expect(archive).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(en.issue_statuses.built_in_locked)).toBeInTheDocument();
+    // Reordering stays available for built-ins.
+    expect(
+      screen.getByRole("menuitem", { name: en.issue_statuses.actions.move_down }),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(edit);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("offers the PR merge rule as an automatic transition", () => {
+    catalog = [BUILT_IN_IN_REVIEW];
+    render(<IssueStatusesTab />);
+    const section = screen.getByRole("region", {
+      name: en.issue_statuses.auto_transitions.title,
+    });
+    expect(
+      within(section).getByRole("combobox", { name: en.pr_merge_status.label }),
+    ).toBeInTheDocument();
   });
 });

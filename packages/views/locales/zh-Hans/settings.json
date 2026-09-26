@@ -16,11 +16,7 @@
       "reorder": "拖动排序 {{name}}"
     },
     "reorder_hint": "在分类内拖动排序，同步用于看板、列表和菜单。",
-    "built_in_dialog": {
-      "title": "无法修改内置状态",
-      "description": "内置状态用于 Multica 的系统行为，不能编辑或归档。你仍可调整它们在分类内的顺序。",
-      "confirm": "知道了"
-    },
+    "built_in_dialog": {},
     "editor": {
       "create_title": "新建状态",
       "edit_title": "编辑状态",
@@ -82,7 +78,12 @@
       "done": "已完成。",
       "cancelled": "决定不做。"
     },
-    "pr_auto_complete_badge": "PR 合并后自动进入"
+    "pr_auto_complete_badge": "PR 合并后自动进入",
+    "statuses_title": "状态",
+    "auto_transitions": {
+      "title": "自动流转"
+    },
+    "built_in_locked": "内置状态驱动系统行为，不能编辑或归档，但可以调整顺序。"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -138,7 +139,6 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
-    "general_title": "常规",
     "theme": {
       "title": "主题",
       "light": "浅色",
@@ -155,10 +155,12 @@
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
     },
     "timezone": {
-      "title": "查看时区",
+      "title": "时区",
       "browser_suffix": "（浏览器）",
       "hint": "用于所有工作区的日期和图表。",
-      "sync_failed": "保存时区偏好失败。"
+      "sync_failed": "保存时区偏好失败。",
+      "search": "搜索时区...",
+      "empty": "没有匹配的时区"
     },
     "sticky_comment_bar": {
       "title": "固定底部评论栏"
@@ -169,10 +171,16 @@
       "after_run": "本轮结束后开始",
       "hint": "只决定默认选项，每条消息发送前仍可单独修改。"
     },
-    "issue_title": "任务创建",
-    "comments_title": "评论",
-    "device_hint": "保存在当前设备上。",
-    "issue_scope": "这些偏好仅对当前设备上的当前工作区生效，只影响创建任务时显示的字段。"
+    "comments_title": "评论与聊天",
+    "region_title": "语言与地区",
+    "appearance_title": "外观",
+    "issue_fields_title": "创建任务时显示的字段",
+    "issue_fields": {
+      "field": "字段",
+      "quick": "智能体创建",
+      "manual": "手动创建",
+      "unsupported": "智能体创建时不支持此字段"
+    }
   },
   "shortcuts": {
     "title": "快捷键",
@@ -307,14 +315,11 @@
     }
   },
   "chat": {
-    "floating_title": "悬浮窗",
     "floating_label": "悬浮聊天窗",
     "floating_hint": "在每个页面显示悬浮聊天按钮。"
   },
   "issue": {
     "description": "选择各创建方式的工具栏中常驻显示的字段。隐藏的字段仍可从 ⋯ 菜单使用，有值时会自动显示。",
-    "quick_create_title": "智能体创建工具栏字段",
-    "manual_create_title": "手动创建工具栏字段",
     "fields": {
       "status": "状态",
       "priority": "优先级",
@@ -326,7 +331,6 @@
     }
   },
   "mcp": {
-    "title": "MCP",
     "description": "添加后需在智能体的 MCP 页面分配。",
     "servers_title": "共享 MCP Server",
     "write_only_note": "为保护敏感信息，配置保存后不会再次显示。需要调整时，请填写一份完整的新配置；只修改名称不会影响当前配置和智能体分配。",
@@ -343,7 +347,6 @@
     "remove_action": "删除",
     "empty_title": "暂无共享 MCP Server",
     "disabled_badge": "已禁用",
-    "admin_only_note": "只有工作区 owner 和 admin 可以管理共享 MCP Server。",
     "delete_title": "移除共享 MCP Server？",
     "delete_description": "这会将 {{name}} 从工作区服务库和所有已分配的智能体中移除，从各智能体的下一次运行起生效。",
     "delete_confirm": "移除",
@@ -365,40 +368,42 @@
       "preferences": "偏好设置",
       "shortcuts": "快捷键",
       "issue": "任务",
-      "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",
       "general": "常规",
-      "repositories": "代码仓库",
       "github": "GitHub",
-      "integrations": "集成",
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "issue_statuses": "任务状态",
+      "issue_statuses": "状态与流转",
       "properties": "属性",
       "quick_actions": "快捷操作",
-      "plugins": "Plugins",
-      "mcp": "MCP",
-      "billing": "账单与套餐"
+      "plugins": "插件",
+      "mcp": "MCP 服务器",
+      "billing": "账单与套餐",
+      "code": "代码",
+      "channels": "消息渠道",
+      "apps": "已连接应用"
     },
     "groups": {
-      "personal": "个人设置",
-      "workspace": "工作区管理",
-      "issues": "任务配置",
+      "personal": "个人",
+      "workspace": "工作区",
+      "issues": "任务与工作流",
       "connections": "连接与扩展",
-      "device": "桌面应用"
+      "device": "本设备"
     },
     "navigate": "前往设置页面",
-    "device_scope": "当前设备"
+    "search": "搜索设置",
+    "search_clear": "清除搜索",
+    "search_empty": "没有匹配的设置",
+    "search_results_other": "{{count}} 个结果",
+    "admin_only": "只有所有者和管理员可以修改"
   },
   "plugins": {
-    "title": "Plugins",
+    "title": "插件",
     "loading": "正在加载 Plugins",
     "load_failed": "无法加载 Plugins",
     "load_failed_description": "请重试。已安装的 Plugin 不受影响。",
-    "read_only": "只读访问",
-    "read_only_description": "工作区 owner 和 admin 可以安装、配置和移除 Plugin。",
     "empty": "还没有安装任何 Plugin。",
     "action_failed": "Plugin 操作失败",
     "enabled": "Plugin 已启用",
@@ -553,7 +558,7 @@
   },
   "labels": {
     "title": "标签",
-    "description": "任务标签与 skill 标签互相独立。",
+    "description": "用于任务。Skill 标签在 Skills 页面中管理。",
     "scopes": {
       "issue": "任务",
       "skill": "Skill"
@@ -608,9 +613,7 @@
     "profile_description_too_long": "资料过长（最多 {{max}} 字符，当前 {{count}}）。",
     "save": "更新资料",
     "saving": "更新中...",
-    "toast_avatar_updated": "头像已更新",
     "toast_avatar_failed": "上传头像失败",
-    "toast_profile_updated": "资料已更新",
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
@@ -704,25 +707,20 @@
   },
   "workspace": {
     "section_general": "工作区信息",
-    "logo_label": "工作区标志",
+    "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",
     "click_logo_hint": "点击图标上传新图片",
-    "toast_logo_updated": "工作区图标已更新",
     "toast_logo_failed": "上传工作区图标失败",
     "name_label": "名称",
     "description_label": "描述",
     "description_placeholder": "这个工作区主要做什么？",
-    "context_label": "上下文",
+    "context_label": "智能体上下文",
     "context_placeholder": "供工作区中的智能体参考的背景信息和上下文",
     "slug_label": "Slug",
     "issue_prefix_label": "任务前缀",
     "issue_prefix_hint": "用于任务编号，例如 {{example}}。",
-    "prefix_confirm_title": "确认修改任务前缀？",
-    "prefix_confirm_description": "所有任务将从 {{oldPrefix}}-N 重命名为 {{newPrefix}}-N。任何使用旧编号的外部引用——PR 标题、分支名、文档与聊天中的链接——都会失效。",
     "save": "保存",
     "saving": "保存中...",
-    "manage_hint": "只有管理员和所有者可以修改工作区设置。",
-    "toast_saved": "已保存工作区设置",
     "toast_save_failed": "保存工作区设置失败",
     "danger_zone": "危险操作",
     "leave_title": "离开工作区",
@@ -740,7 +738,18 @@
     "deleting": "删除中...",
     "toast_delete_failed": "删除工作区失败",
     "confirm_cancel": "取消",
-    "confirm_action": "确认"
+    "confirm_action": "确认",
+    "context_hint": "每次运行都会提供给这个工作区里的智能体。",
+    "slug_hint": "用于所有工作区链接，创建后不能修改。",
+    "copy_slug": "复制 slug",
+    "copy_failed": "复制失败",
+    "change_prefix": "修改前缀...",
+    "prefix_dialog_title": "修改任务前缀",
+    "prefix_dialog_description": "所有任务都会重新编号，包括已完成和已取消的任务。",
+    "prefix_new_label": "新前缀",
+    "prefix_rule": "只能使用字母和数字，最多 10 个字符。",
+    "prefix_confirm_action": "修改为 {{prefix}}",
+    "prefix_external_warning": "PR 标题、分支名、文档和聊天里的旧编号（如 {{oldExample}}）不会自动更新，这些链接会失效。"
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",
@@ -757,15 +766,10 @@
     "toast_failed": "更新设置失败"
   },
   "github": {
-    "section_master": "启用 GitHub 功能",
-    "master_description_on": "关闭后暂停 GitHub 功能，保留已有数据。",
     "master_description_off": "GitHub 功能已暂停，已有数据保留。",
-    "section_connection": "连接",
-    "connection_title": "GitHub App",
     "connected_to": "已连接到 {{login}}",
     "connect_github": "连接 GitHub",
     "connect_opening": "正在打开…",
-    "connect_disabled_tooltip": "服务端未配置 GitHub App",
     "disconnect": "断开",
     "disconnecting": "断开中...",
     "disconnect_confirm_title": "断开 GitHub App",
@@ -774,28 +778,26 @@
     "disconnect_confirm_action": "断开",
     "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",
     "not_configured_and": "和",
-    "read_only_hint": "只读视图。只有管理员和所有者可以连接或断开 GitHub。",
     "contact_admin_to_connect": "当前工作区尚未连接 GitHub。请让管理员或所有者完成 GitHub App 的配置。",
     "connected_by": "由 {{name}} 连接",
     "toast_not_configured": "当前部署未配置 GitHub 集成",
     "toast_open_failed": "打开 GitHub 安装页失败",
     "toast_disconnect_failed": "断开 GitHub App 失败",
     "toast_disconnected": "已断开 GitHub App",
-    "section_features": "功能",
     "feature_pr_sidebar_label": "Pull Request 侧栏",
     "feature_pr_sidebar_description": "在任务详情侧栏中展示关联的 Pull Request。",
     "feature_co_author_label": "Co-authored-by trailer",
     "feature_co_author_description_prefix": "在智能体提交的 commit 中追加",
     "feature_co_author_description_suffix": "。",
     "feature_auto_link_label": "任务 ↔ PR 自动关联",
-    "section_repositories": "代码仓库",
-    "repositories_shortcut_label": "仓库 URL 仍在\"代码仓库\"标签页中管理",
-    "repositories_shortcut_link": "前往管理 →",
     "toast_failed": "更新 GitHub 设置失败",
-    "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。"
+    "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。",
+    "status_paused": "已暂停",
+    "pause": "暂停 GitHub 功能",
+    "resume": "恢复 GitHub 功能"
   },
   "vcs": {
-    "section_title": "Git 代码托管（自托管）",
+    "section_title": "自托管 Git",
     "page_description": "连接自托管的 Forgejo、Gitea 或 GitLab 实例，将 Pull Request 镜像到任务上。每个连接使用一个访问令牌；智能体使用运行时自身的 Git 凭据推送分支并创建 PR。",
     "connect_title": "连接代码托管实例",
     "connected_as": "已以 {{login}} 身份连接",
@@ -822,7 +824,6 @@
     "disconnect_confirm_description": "该连接镜像的 Pull Request 及其任务关联将被移除。此操作无法撤销。",
     "disconnect_confirm_cancel": "取消",
     "disconnect_confirm_action": "断开",
-    "toast_connected": "已连接代码托管",
     "toast_connect_failed": "无法连接代码托管",
     "toast_disconnected": "已断开代码托管连接",
     "toast_disconnect_failed": "断开连接失败",
@@ -832,8 +833,11 @@
     "rotate_confirm_cancel": "取消",
     "rotate_confirm_action": "重新生成",
     "rotating": "重新生成中…",
-    "toast_rotated": "已重新生成 Webhook 密钥",
-    "toast_rotate_failed": "重新生成 Webhook 密钥失败"
+    "toast_rotate_failed": "重新生成 Webhook 密钥失败",
+    "hosts_hint": "GitLab、Gitea 或 Forgejo。",
+    "connect_another": "再连接一个",
+    "connection_actions": "{{url}} 的操作",
+    "webhook_done": "我已保存"
   },
   "lark": {
     "section_title": "飞书",
@@ -911,7 +915,6 @@
     "install_error_generic": "安装失败，请重试。"
   },
   "composio": {
-    "section_title": "Composio",
     "page_description": "连接智能体可使用的应用。",
     "not_enabled_title": "Composio 集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
@@ -1141,7 +1144,6 @@
     "section_title": "代码仓库",
     "description": "智能体可使用这些仓库处理代码。",
     "url_placeholder": "https://git.example.com/org/repo.git 或 git@git.example.com:org/repo.git",
-    "url_empty": "（空 URL）",
     "description_placeholder": "描述（例如：Go 后端 + Next.js 前端）",
     "add": "添加仓库",
     "connect_github": "连接 GitHub",
@@ -1164,21 +1166,26 @@
     "github_selected_count": "已选择 {{count}} 个",
     "github_cancel": "取消",
     "github_import": "添加仓库",
-    "complete_manual_entry_first": "请先补全或删除空的手动仓库配置，再从 GitHub 导入。",
     "save": "保存",
     "saving": "保存中...",
     "saved_hint": "所有改动已保存",
     "empty": "暂无仓库。",
     "edit_aria": "编辑仓库",
     "cancel_aria": "取消编辑",
-    "delete_aria": "删除仓库",
     "delete_confirm_title": "删除代码仓库？",
     "delete_confirm_description": "此代码仓库将立即从工作区中移除。",
     "delete_confirm_cancel": "取消",
     "delete_confirm_action": "删除仓库",
     "manage_hint": "只有管理员和所有者可以管理代码仓库。",
-    "toast_saved": "已保存代码仓库",
-    "toast_save_failed": "保存代码仓库失败"
+    "toast_save_failed": "保存代码仓库失败",
+    "add_manually": "输入 URL...",
+    "add_title": "添加仓库",
+    "edit_title": "编辑仓库",
+    "edit": "编辑",
+    "url_label": "仓库 URL",
+    "description_label": "描述",
+    "duplicate": "这个仓库已经添加过了。",
+    "actions_aria": "{{url}} 的操作"
   },
   "desktop": {
     "tabs": {
@@ -1270,7 +1277,6 @@
     }
   },
   "members": {
-    "section_title": "成员（{{count}}）",
     "invite_title": "邀请成员",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "邀请",
@@ -1287,9 +1293,6 @@
     "seat_purchase_timeout": "席位购买已提交，但确认时间超出预期。邀请尚未发送；请在“账单”显示有可用席位后重新邀请。",
     "seat_purchase_capacity_taken": "新购买的席位已不可用，因此没有发送邀请。请检查当前席位后重试。",
     "no_members": "未找到成员。",
-    "pending_title": "待处理邀请（{{count}}）",
-    "pending_status": "待处理",
-    "revoke_invitation_tooltip": "撤销邀请",
     "revoke_invitation_title": "撤销邀请",
     "revoke_invitation_description": "撤销发给 {{email}} 的邀请？对方将不能再加入该工作区。",
     "toast_invitation_revoked": "已撤销邀请",
@@ -1320,9 +1323,6 @@
         "description": "创建并处理任务"
       }
     },
-    "share_links_title": "分享链接",
-    "role_field": "角色：",
-    "expiry_field": "有效期：",
     "share_links_create_title": "创建分享链接",
     "share_links_create_button": "生成",
     "share_links_creating": "生成中...",
@@ -1339,26 +1339,70 @@
     "expiry_24h": "24 小时",
     "expiry_7d": "7 天",
     "expiry_30d": "30 天",
-    "expiry_never": "永久有效"
+    "expiry_never": "永久有效",
+    "members_label": "成员",
+    "pending_label": "待接受邀请",
+    "share_links_label": "分享链接",
+    "share_links_description": "拿到链接的人都可以以所选角色加入，直到链接过期或被撤销。",
+    "search_placeholder": "搜索姓名或邮箱",
+    "no_results": "没有匹配的成员。",
+    "no_invitations": "没有待接受的邀请。",
+    "no_share_links": "还没有分享链接。",
+    "email_label": "邮箱",
+    "role_label": "角色",
+    "expiry_label": "有效期",
+    "you": "你",
+    "joined": "{{date}} 加入",
+    "member_actions": "{{name}} 的操作",
+    "invitation_meta": "{{sent}} 发送 · {{expires}} 过期",
+    "revoke_invitation_aria": "撤销发给 {{email}} 的邀请",
+    "seats_used": "已用 {{used}} / {{purchased}} 个席位",
+    "manage_seats": "管理席位"
   },
   "integrations": {
-    "code_title": "代码与仓库",
-    "messaging_title": "消息渠道",
-    "apps_title": "我的应用连接",
-    "apps_scope": "这些应用连接属于你的账号。工作区的消息渠道连接在上方管理。",
-    "github_hint": "连接 GitHub，配置拉取请求关联。",
-    "vcs_hint": "连接 GitLab、Gitea 或 Forgejo。",
-    "apps_hint": "通过 Composio 为智能体授权应用。",
-    "back": "全部集成",
     "status_connected": "已连接",
     "status_not_connected": "未连接",
     "status_loading": "正在检查...",
-    "status_unknown": "状态暂不可用",
-    "channel_hint": "在 {{channel}} 中与智能体对话、创建任务。"
+    "status_unknown": "状态暂不可用"
   },
   "pr_merge_status": {
     "label": "PR 合并后，任务状态改为",
     "description": "关联的 PR 全部合并后生效，只影响之后合并的 PR。",
     "none": "不改变"
+  },
+  "layout": {
+    "scope": {
+      "account": "账号 · 所有设备同步",
+      "device": "仅本设备",
+      "device_workspace": "仅本设备 · {{name}}",
+      "workspace": "{{name}} 工作区",
+      "workspace_only": "仅对 {{name}} 生效"
+    },
+    "read_only": {
+      "title": "你只能查看此页",
+      "description": "只有工作区所有者和管理员可以修改这些设置。",
+      "contact": "只有所有者和管理员可以修改这些设置。如需修改，请联系 {{names}}。",
+      "separator": "、"
+    }
+  },
+  "code": {
+    "hosting_title": "代码托管",
+    "pr_linking_title": "PR 与任务联动",
+    "github_actions": "GitHub 操作",
+    "edit_in_statuses": "在\"状态与流转\"中修改"
+  },
+  "channels": {
+    "breadcrumb": "路径"
+  },
+  "mcp_usage": {
+    "agent_count_other": "已分配给 {{count}} 个智能体",
+    "none": "未分配给任何智能体"
+  },
+  "mcp_sources": {
+    "title": "为智能体接入工具的方式",
+    "current": "当前页面",
+    "mcp": "由管理员添加、在工作区内共享，再按智能体分配。",
+    "apps": "用你自己的账号通过 Composio 授权，在你拥有的智能体上启用。",
+    "plugins": "安装后可提供工具、定时 hook 和存储，每个插件单独授权。"
   }
 }

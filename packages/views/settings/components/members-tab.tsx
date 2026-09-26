@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Clock,
   Copy,
   Crown,
   Link,
@@ -10,6 +9,7 @@ import {
   Mail,
   MoreHorizontal,
   Plus,
+  Search,
   Shield,
   Trash2,
   User,
@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useOptionalNavigation } from "../../navigation";
+import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
   Invitation,
   MemberRole,
@@ -28,7 +28,16 @@ import type {
 } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Label } from "@multica/ui/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import { cn } from "@multica/ui/lib/utils";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
   AlertDialog,
@@ -66,6 +75,8 @@ import {
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   invitationListOptions,
@@ -75,7 +86,12 @@ import {
 } from "@multica/core/workspace/queries";
 import { api, errorCode } from "@multica/core/api";
 import { useLocale, useT } from "../../i18n";
-import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
+import {
+  SettingsCard,
+  SettingsReadOnlyNotice,
+  SettingsTab,
+} from "./settings-layout";
+import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { formatStripeMinorAmount } from "./billing-format";
 import {
   isSingleSeatInvitePreview,
@@ -87,6 +103,8 @@ import {
 } from "./seat-invite-purchase";
 
 const SEAT_PURCHASE_CONFIRM_TIMEOUT_MS = 2 * 60_000;
+
+type MembersView = "members" | "invitations" | "links";
 
 type InviteSeatPurchase = {
   workspaceId: string;
@@ -170,6 +188,7 @@ function MemberRow({
   onRemove: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const roleConfig = useRoleLabels();
   const rc = roleConfig[member.role];
   const RoleIcon = rc.icon;
@@ -182,14 +201,36 @@ function MemberRow({
     <div className="flex items-center gap-3 px-4 py-3">
       <ActorAvatar actorType="member" actorId={member.user_id} size="lg" />
       <div className="min-w-0 flex-1">
-        <div className="text-body font-medium truncate">{member.name}</div>
-        <div className="text-caption text-muted-foreground truncate">{member.email}</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-body font-medium">{member.name}</span>
+          {isSelf ? (
+            <Badge variant="secondary" className="shrink-0">
+              {t(($) => $.members.you)}
+            </Badge>
+          ) : null}
+        </div>
+        <div className="truncate text-caption text-muted-foreground">{member.email}</div>
       </div>
+      <span className="hidden w-32 shrink-0 text-caption tabular-nums text-muted-foreground md:block">
+        {t(($) => $.members.joined, {
+          date: new Date(member.created_at).toLocaleDateString(locale),
+        })}
+      </span>
+      <span className="flex w-24 shrink-0 items-center gap-1.5 text-body">
+        <RoleIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        {rc.label}
+      </span>
+      <span className="flex size-7 shrink-0 items-center justify-center">
       {showMenu && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="icon-sm" disabled={busy}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={busy}
+                aria-label={t(($) => $.members.member_actions, { name: member.name })}
+              >
                 <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
               </Button>
             }
@@ -250,10 +291,7 @@ function MemberRow({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      <Badge variant="secondary">
-        <RoleIcon className="h-3 w-3" />
-        {rc.label}
-      </Badge>
+      </span>
     </div>
   );
 }
@@ -270,35 +308,40 @@ function InvitationRow({
   busy: boolean;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const roleConfig = useRoleLabels();
   const rc = roleConfig[invitation.role];
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-        <Mail className="h-4 w-4 text-muted-foreground" />
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+        <Mail className="size-4 text-muted-foreground" aria-hidden="true" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-body font-medium truncate">{invitation.invitee_email}</div>
-        <div className="flex items-center gap-1 text-caption text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          <span>{t(($) => $.members.pending_status)}</span>
+        <div className="truncate text-body font-medium">{invitation.invitee_email}</div>
+        <div className="truncate text-caption text-muted-foreground">
+          {t(($) => $.members.invitation_meta, {
+            sent: new Date(invitation.created_at).toLocaleDateString(locale),
+            expires: new Date(invitation.expires_at).toLocaleDateString(locale),
+          })}
         </div>
       </div>
-      {canManage && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={busy}
-          onClick={onRevoke}
-          title={t(($) => $.members.revoke_invitation_tooltip)}
-        >
-          <X className="h-4 w-4 text-muted-foreground" />
-        </Button>
-      )}
-      <Badge variant="outline">
-        {rc.label}
-      </Badge>
+      <span className="w-24 shrink-0 text-body">{rc.label}</span>
+      <span className="flex size-7 shrink-0 items-center justify-center">
+        {canManage && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={busy}
+            onClick={onRevoke}
+            aria-label={t(($) => $.members.revoke_invitation_aria, {
+              email: invitation.invitee_email,
+            })}
+          >
+            <X className="size-4 text-muted-foreground" />
+          </Button>
+        )}
+      </span>
     </div>
   );
 }
@@ -323,8 +366,8 @@ function ShareLinkRow({
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-        <Link className="h-4 w-4 text-muted-foreground" />
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+        <Link className="size-4 text-muted-foreground" aria-hidden="true" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-1 text-body font-medium">
@@ -338,26 +381,24 @@ function ShareLinkRow({
           {joinUrl}
         </div>
       </div>
+      <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <Button
         variant="ghost"
         size="icon-sm"
         onClick={onCopy}
-        title={t(($) => $.members.share_link_copy_tooltip)}
+        aria-label={t(($) => $.members.share_link_copy_tooltip)}
       >
-        <Copy className="h-4 w-4 text-muted-foreground" />
+        <Copy className="size-4 text-muted-foreground" />
       </Button>
       <Button
         variant="ghost"
         size="icon-sm"
         disabled={busy}
         onClick={onRevoke}
-        title={t(($) => $.members.share_link_revoke_tooltip)}
+        aria-label={t(($) => $.members.share_link_revoke_tooltip)}
       >
-        <Trash2 className="h-4 w-4 text-muted-foreground" />
+        <Trash2 className="size-4 text-muted-foreground" />
       </Button>
-      <Badge variant="outline">
-        {rc.label}
-      </Badge>
     </div>
   );
 }
@@ -375,6 +416,17 @@ export function MembersTab() {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
 
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [shareLinkOpen, setShareLinkOpen] = useState(false);
+  const requestedView = resolveSettingsLocation(
+    navigation?.searchParams ?? new URLSearchParams(),
+  ).section;
+  const [view, setView] = useState<MembersView>(
+    requestedView === "invitations" || requestedView === "links"
+      ? requestedView
+      : "members",
+  );
+  const [memberQuery, setMemberQuery] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -412,6 +464,19 @@ export function MembersTab() {
   // Only owners/admins may list share links; skip the request for plain
   // members (the server would 403) once the current member's role is known.
   const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
+  const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
+  const seats = useQuery({
+    ...workspaceSubscriptionSummaryOptions(wsId),
+    enabled: billingEnabled && canManageWorkspace,
+  }).data?.seatCapacity;
+  const needle = memberQuery.trim().toLocaleLowerCase();
+  const visibleMembers = needle
+    ? members.filter(
+        (m) =>
+          m.name.toLocaleLowerCase().includes(needle) ||
+          m.email.toLocaleLowerCase().includes(needle),
+      )
+    : members;
 
   const sendInvitation = useCallback(
     async (email: string, role: MemberRole) => {
@@ -434,6 +499,7 @@ export function MembersTab() {
     setInviteLoading(true);
     try {
       await sendInvitation(email, role);
+      setInviteOpen(false);
     } catch (e) {
       const code = errorCode(e);
       const capacityFailure = seatInvitationCapacityFailure(code);
@@ -482,6 +548,9 @@ export function MembersTab() {
             );
             return;
           }
+          // Hand over to the purchase confirmation rather than stacking a
+          // second modal on the invite dialog.
+          setInviteOpen(false);
           setInviteSeatPurchase({
             workspaceId: workspace.id,
             email,
@@ -736,6 +805,7 @@ export function MembersTab() {
     try {
       await api.createShareLink(workspace.id, { role: shareLinkRole, expires_in: parseInt(shareLinkExpiry) || undefined });
       qc.invalidateQueries({ queryKey: workspaceKeys.shareLinks(wsId) });
+      setShareLinkOpen(false);
       toast.success(t(($) => $.members.toast_share_link_created));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_share_link_failed));
@@ -784,178 +854,323 @@ export function MembersTab() {
 
   if (!workspace) return null;
 
+  const roleItems = (["member", "admin"] as const).map((value) => ({
+    value,
+    label: roleConfig[value].label,
+  }));
+  const expiryOptions = [
+    { value: "24", label: t(($) => $.members.expiry_24h) },
+    { value: "168", label: t(($) => $.members.expiry_7d) },
+    { value: "720", label: t(($) => $.members.expiry_30d) },
+    { value: "0", label: t(($) => $.members.expiry_never) },
+  ];
+  const views: { value: MembersView; label: string; count: number }[] = [
+    { value: "members", label: t(($) => $.members.members_label), count: members.length },
+    { value: "invitations", label: t(($) => $.members.pending_label), count: invitations.length },
+    ...(canManageWorkspace
+      ? [{ value: "links" as const, label: t(($) => $.members.share_links_label), count: shareLinks.length }]
+      : []),
+  ];
+  const activeView = views.some((item) => item.value === view) ? view : "members";
+
   return (
-    <SettingsTab title={t(($) => $.page.tabs.members)}>
-      <SettingsSection title={t(($) => $.members.section_title, { count: members.length })}>
-
-        {canManageWorkspace && (
-          <Card>
-            <CardContent className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-body font-medium">{t(($) => $.members.invite_title)}</h3>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
-                <Input
-                  type="email"
-                  name="invite-email"
-                  autoComplete="email"
-                  spellCheck={false}
-                  aria-label={t(($) => $.members.invite_email_placeholder)}
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder={t(($) => $.members.invite_email_placeholder)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
-                  }}
+    <SettingsTab
+      title={t(($) => $.page.tabs.members)}
+      scope="workspace"
+      actions={
+        canManageWorkspace ? (
+          <Button onClick={() => setInviteOpen(true)}>
+            <Plus />
+            {t(($) => $.members.invite_title)}
+          </Button>
+        ) : undefined
+      }
+    >
+      {currentMember && !canManageWorkspace ? (
+        <SettingsReadOnlyNotice wsId={wsId} />
+      ) : null}
+      <section className="space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            role="tablist"
+            aria-label={t(($) => $.page.tabs.members)}
+            className="inline-flex w-fit items-center gap-0.5 rounded-lg bg-muted p-0.5"
+          >
+            {views.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                role="tab"
+                aria-selected={activeView === item.value}
+                onClick={() => setView(item.value)}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-label font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+                  activeView === item.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {item.label}{" "}
+                <span className="text-caption font-normal tabular-nums text-muted-foreground">
+                  {item.count}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="flex min-w-0 items-center gap-3">
+            {seats && billingEnabled ? (
+              <span className="shrink-0 text-caption text-muted-foreground">
+                {t(($) => $.members.seats_used, {
+                  used: seats.used + seats.reserved,
+                  purchased: seats.purchased,
+                })}
+                {" · "}
+                <AppLink
+                  href={
+                    navigation
+                      ? settingsHref(navigation.pathname, navigation.searchParams, "billing")
+                      : "?tab=billing"
+                  }
+                  className="text-foreground underline-offset-4 hover:underline"
+                >
+                  {t(($) => $.members.manage_seats)}
+                </AppLink>
+              </span>
+            ) : null}
+            {activeView === "members" ? (
+              <div className="relative w-full sm:w-56">
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                 />
-                <Select
-                  items={(["member", "admin"] as const).map((value) => ({
-                    value,
-                    label: roleConfig[value].label,
-                  }))}
-                  value={inviteRole}
-                  onValueChange={(value) => setInviteRole(value as MemberRole)}
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="member">{roleConfig.member.label}</SelectItem>
-                    <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleInviteMember}
-                  disabled={inviteLoading || !inviteEmail.trim()}
-                >
-                  {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
-                </Button>
+                <Input
+                  type="search"
+                  value={memberQuery}
+                  onChange={(event) => setMemberQuery(event.target.value)}
+                  placeholder={t(($) => $.members.search_placeholder)}
+                  aria-label={t(($) => $.members.search_placeholder)}
+                  className="pl-8"
+                />
               </div>
-            </CardContent>
-          </Card>
-        )}
+            ) : activeView === "links" ? (
+              <Button variant="outline" size="sm" onClick={() => setShareLinkOpen(true)}>
+                <Plus />
+                {t(($) => $.members.share_links_create_title)}
+              </Button>
+            ) : null}
+          </div>
+        </div>
 
-        {members.length > 0 ? (
+        {activeView === "members" ? (
+          visibleMembers.length > 0 ? (
+            <SettingsCard>
+              {visibleMembers.map((m) => (
+                <div key={m.id}>
+                  <MemberRow
+                    member={m}
+                    canManage={canManageWorkspace}
+                    canManageOwners={isOwner}
+                    ownerCount={ownerCount}
+                    isSelf={m.user_id === user?.id}
+                    busy={memberActionId === m.id}
+                    onRoleChange={(role) => handleRoleChange(m.id, role)}
+                    onRemove={() => handleRemoveMember(m)}
+                  />
+                </div>
+              ))}
+            </SettingsCard>
+          ) : (
+            <EmptyList>
+              {needle ? t(($) => $.members.no_results) : t(($) => $.members.no_members)}
+            </EmptyList>
+          )
+        ) : activeView === "invitations" ? (
+          invitations.length > 0 ? (
+            <SettingsCard>
+              {invitations.map((inv) => (
+                <div key={inv.id}>
+                  <InvitationRow
+                    invitation={inv}
+                    canManage={canManageWorkspace}
+                    onRevoke={() => handleRevokeInvitation(inv)}
+                    busy={invitationActionId === inv.id}
+                  />
+                </div>
+              ))}
+            </SettingsCard>
+          ) : (
+            <EmptyList>{t(($) => $.members.no_invitations)}</EmptyList>
+          )
+        ) : shareLinks.length > 0 ? (
           <SettingsCard>
-            {members.map((m) => (
-              <div key={m.id}>
-                <MemberRow
-                  member={m}
-                  canManage={canManageWorkspace}
-                  canManageOwners={isOwner}
-                  ownerCount={ownerCount}
-                  isSelf={m.user_id === user?.id}
-                  busy={memberActionId === m.id}
-                  onRoleChange={(role) => handleRoleChange(m.id, role)}
-                  onRemove={() => handleRemoveMember(m)}
+            {shareLinks.map((link) => (
+              <div key={link.id}>
+                <ShareLinkRow
+                  link={link}
+                  onRevoke={() => handleRevokeShareLink(link)}
+                  busy={shareLinkActionId === link.id}
+                  onCopy={() => handleCopyShareLink(link)}
                 />
               </div>
             ))}
           </SettingsCard>
         ) : (
-          <p className="text-body text-muted-foreground">{t(($) => $.members.no_members)}</p>
+          <EmptyList>{t(($) => $.members.no_share_links)}</EmptyList>
         )}
-      </SettingsSection>
+      </section>
 
-      {invitations.length > 0 && (
-        <SettingsSection title={t(($) => $.members.pending_title, { count: invitations.length })}>
-          <SettingsCard>
-            {invitations.map((inv) => (
-              <div key={inv.id}>
-                <InvitationRow
-                  invitation={inv}
-                  canManage={canManageWorkspace}
-                  onRevoke={() => handleRevokeInvitation(inv)}
-                  busy={invitationActionId === inv.id}
-                />
-              </div>
-            ))}
-          </SettingsCard>
-        </SettingsSection>
-      )}
+      <Dialog
+        open={inviteOpen}
+        onOpenChange={(open) => {
+          if (!open && !inviteLoading) setInviteOpen(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.members.invite_title)}</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (inviteEmail.trim()) void handleInviteMember();
+            }}
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-email">{t(($) => $.members.email_label)}</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                name="invite-email"
+                autoComplete="email"
+                spellCheck={false}
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder={t(($) => $.members.invite_email_placeholder)}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-role">{t(($) => $.members.role_label)}</Label>
+              <Select
+                items={roleItems}
+                value={inviteRole}
+                onValueChange={(value) => setInviteRole(value as MemberRole)}
+              >
+                <SelectTrigger id="invite-role" className="w-full">
+                  <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {roleItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      <span className="flex flex-col">
+                        <span>{item.label}</span>
+                        <span className="text-caption text-muted-foreground">
+                          {roleConfig[item.value].description}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setInviteOpen(false)}
+                disabled={inviteLoading}
+              >
+                {t(($) => $.members.confirm_cancel)}
+              </Button>
+              <Button
+                type="submit"
+                disabled={inviteLoading || !inviteEmail.trim()}
+                aria-busy={inviteLoading || undefined}
+              >
+                {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {canManageWorkspace && (
-        <SettingsSection title={t(($) => $.members.share_links_title, { count: shareLinks.length })}>
-          <Card>
-            <CardContent className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Link className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-body font-medium">{t(($) => $.members.share_links_create_title)}</h3>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
-                  <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.role_field)}</span>
-                  <Select
-                    items={(["member", "admin"] as const).map((value) => ({
-                      value,
-                      label: roleConfig[value].label,
-                    }))}
-                    value={shareLinkRole}
-                    onValueChange={(value) => setShareLinkRole(value as MemberRole)}
-                  >
-                    <SelectTrigger size="sm">
-                      <SelectValue>{() => roleConfig[shareLinkRole].label}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent className="min-w-0">
-                      <SelectItem value="member">{roleConfig.member.label}</SelectItem>
-                      <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
-                  <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.expiry_field)}</span>
-                  <Select
-                    items={[
-                      { value: "24", label: t(($) => $.members.expiry_24h) },
-                      { value: "168", label: t(($) => $.members.expiry_7d) },
-                      { value: "720", label: t(($) => $.members.expiry_30d) },
-                      { value: "0", label: t(($) => $.members.expiry_never) },
-                    ]}
-                    value={shareLinkExpiry}
-                    onValueChange={(v) => v && setShareLinkExpiry(v)}
-                  >
-                    <SelectTrigger size="sm">
-                      <SelectValue>{() => {
-                        const opts: Record<string, string> = {
-                          "24": t(($) => $.members.expiry_24h),
-                          "168": t(($) => $.members.expiry_7d),
-                          "720": t(($) => $.members.expiry_30d),
-                          "0": t(($) => $.members.expiry_never),
-                        };
-                        return opts[shareLinkExpiry] || shareLinkExpiry;
-                      }}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent className="min-w-0">
-                      <SelectItem value="24">{t(($) => $.members.expiry_24h)}</SelectItem>
-                      <SelectItem value="168">{t(($) => $.members.expiry_7d)}</SelectItem>
-                      <SelectItem value="720">{t(($) => $.members.expiry_30d)}</SelectItem>
-                      <SelectItem value="0">{t(($) => $.members.expiry_never)}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button onClick={handleCreateShareLink} disabled={shareLinkLoading} className="shrink-0">
-                  {shareLinkLoading ? t(($) => $.members.share_links_creating) : t(($) => $.members.share_links_create_button)}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          {shareLinks.length > 0 && (
-            <SettingsCard>
-              {shareLinks.map((link) => (
-                <div key={link.id}>
-                  <ShareLinkRow
-                    link={link}
-                    onRevoke={() => handleRevokeShareLink(link)}
-                    busy={shareLinkActionId === link.id}
-                    onCopy={() => handleCopyShareLink(link)}
-                  />
-                </div>
-              ))}
-            </SettingsCard>
-          )}
-        </SettingsSection>
-      )}
+      <Dialog
+        open={shareLinkOpen}
+        onOpenChange={(open) => {
+          if (!open && !shareLinkLoading) setShareLinkOpen(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.members.share_links_create_title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.members.share_links_description)}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="share-link-role">{t(($) => $.members.role_label)}</Label>
+              <Select
+                items={roleItems}
+                value={shareLinkRole}
+                onValueChange={(value) => setShareLinkRole(value as MemberRole)}
+              >
+                <SelectTrigger id="share-link-role" className="w-full">
+                  <SelectValue>{() => roleConfig[shareLinkRole].label}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {roleItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="share-link-expiry">{t(($) => $.members.expiry_label)}</Label>
+              <Select
+                items={expiryOptions}
+                value={shareLinkExpiry}
+                onValueChange={(v) => v && setShareLinkExpiry(v)}
+              >
+                <SelectTrigger id="share-link-expiry" className="w-full">
+                  <SelectValue>
+                    {() =>
+                      expiryOptions.find((option) => option.value === shareLinkExpiry)?.label ??
+                      shareLinkExpiry
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {expiryOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShareLinkOpen(false)}
+              disabled={shareLinkLoading}
+            >
+              {t(($) => $.members.confirm_cancel)}
+            </Button>
+            <Button
+              onClick={() => void handleCreateShareLink()}
+              disabled={shareLinkLoading}
+              aria-busy={shareLinkLoading || undefined}
+            >
+              {shareLinkLoading
+                ? t(($) => $.members.share_links_creating)
+                : t(($) => $.members.share_links_create_button)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={inviteSeatPurchase !== null}
@@ -1091,5 +1306,13 @@ export function MembersTab() {
         </AlertDialogContent>
       </AlertDialog>
     </SettingsTab>
+  );
+}
+
+function EmptyList({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-dashed border-surface-border px-4 py-10 text-center text-body text-muted-foreground">
+      {children}
+    </div>
   );
 }

@@ -120,6 +120,7 @@ export function McpServerRow({
   name,
   transport,
   status,
+  meta,
   canManage,
   actionsDisabled = false,
   rename,
@@ -131,6 +132,8 @@ export function McpServerRow({
   name: string;
   transport: string;
   status?: ReactNode;
+  /** Extra context after the transport, e.g. how many agents use it. */
+  meta?: ReactNode;
   canManage: boolean;
   actionsDisabled?: boolean;
   rename?: McpServerRenameState;
@@ -215,6 +218,7 @@ export function McpServerRow({
         </div>
         <p className="text-caption text-muted-foreground">
           {mcpTransportLabel(transport)}
+          {meta ? <> · {meta}</> : null}
         </p>
       </div>
 

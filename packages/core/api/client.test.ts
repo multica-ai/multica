@@ -2551,6 +2551,19 @@ describe("ApiClient workspace MCP servers", () => {
     expect(result[0]?.transport).toBe("websocket");
   });
 
+  it("keeps the agent count and degrades a malformed one to unknown", async () => {
+    stubJSON([
+      { ...server, id: "srv-1", agent_count: 3 },
+      { ...server, id: "srv-2", agent_count: "many" },
+      { ...server, id: "srv-3" },
+    ]);
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(result.map((item) => item.agent_count)).toEqual([3, undefined, undefined]);
+  });
+
   it("POSTs a name and entry when creating a library server", async () => {
     const fetchMock = stubJSON(server);
 

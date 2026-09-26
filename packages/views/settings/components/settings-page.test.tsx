@@ -16,25 +16,48 @@ const stub = vi.hoisted(() => (name: string) => () => ({
 }));
 vi.mock("./account-tab", stub("AccountTab"));
 vi.mock("./preferences-tab", stub("PreferencesTab"));
-vi.mock("./chat-tab", stub("ChatTab"));
-vi.mock("./issue-tab", stub("IssueTab"));
 vi.mock("./tokens-tab", stub("TokensTab"));
 vi.mock("./workspace-tab", stub("WorkspaceTab"));
 vi.mock("./members-tab", stub("MembersTab"));
-vi.mock("./repositories-tab", stub("RepositoriesTab"));
-vi.mock("./github-tab", stub("GitHubTab"));
-vi.mock("./integrations-tab", stub("IntegrationsTab"));
+vi.mock("./code-tab", stub("CodeTab"));
+vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
+vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
+vi.mock("./mcp-tab", stub("McpTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
 
-vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ name: "Acme" }),
+const shell = vi.hoisted(() => ({
+  appsAvailable: false,
+  role: "owner" as "owner" | "admin" | "member",
 }));
+vi.mock("./connected-apps-tab", () => ({
+  ConnectedAppsTab: () => <div>ConnectedAppsTab</div>,
+  useComposioAvailable: () => shell.appsAvailable,
+}));
+
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),
+}));
+vi.mock("@multica/core/workspace/avatar-url", () => ({
+  resolvePublicFileUrl: (url: string | null | undefined) => url ?? null,
+}));
+vi.mock("@multica/core/permissions", () => ({
+  useCurrentMember: () => ({ role: shell.role, isLoading: false }),
+}));
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "user-1", name: "Ada Lovelace", avatar_url: null } };
+  const useAuthStore = Object.assign(
+    (selector?: (s: typeof state) => unknown) =>
+      selector ? selector(state) : state,
+    { getState: () => state },
+  );
+  return { useAuthStore };
+});
 
 const replace = vi.fn();
 const push = vi.fn();
@@ -69,11 +92,18 @@ function trigger() {
   return screen.getByRole("button", { name: "Toggle left sidebar" });
 }
 
+function nav() {
+  return screen.getByRole("navigation", { name: "Settings" });
+}
+
 beforeEach(() => {
   layout.compact = true;
   navigationState.search = "";
+  shell.appsAvailable = false;
+  shell.role = "owner";
   configStore.getState().setFeatureFlags({});
   replace.mockClear();
+  push.mockClear();
 });
 
 describe("SettingsPage nav trigger", () => {
@@ -115,7 +145,7 @@ describe("SettingsPage nav trigger", () => {
     expect(
       screen.queryByRole("button", { name: "Toggle left sidebar" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   });
 });
 
@@ -170,17 +200,32 @@ describe("SettingsPage workspace subscription feature flag", () => {
 });
 
 describe("SettingsPage information architecture", () => {
-  it("groups workspace configuration and keeps retired pages out of navigation", () => {
+  it("groups pages by who they affect, then by topic", () => {
     renderWithI18n(<SettingsPage />);
-    const nav = screen.getByRole("navigation", { name: "Settings" });
-    const issues = within(nav).getByRole("region", {
-      name: "Issue configuration",
-    });
+    const personal = within(nav()).getByRole("region", { name: /Personal/ });
+    expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
+    expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
+
+    // The workspace group is named after the workspace it configures.
+    const workspace = within(nav()).getByRole("region", { name: /Acme/ });
+    const issues = within(workspace).getByRole("group", { name: "Issues & workflow" });
     expect(
-      within(issues).getByRole("link", { name: "Issue Statuses" }),
+      within(issues).getByRole("link", { name: "Statuses & transitions" }),
     ).toBeInTheDocument();
+    const connections = within(workspace).getByRole("group", {
+      name: "Connections & extensions",
+    });
+    for (const name of ["Code", "Messaging", "MCP servers"]) {
+      expect(within(connections).getByRole("link", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("keeps retired pages out of navigation", () => {
+    renderWithI18n(<SettingsPage />);
     expect(
-      within(nav).queryByRole("link", { name: /^(Issue|Chat|GitHub|Labs)$/ }),
+      within(nav()).queryByRole("link", {
+        name: /^(Issue|Chat|GitHub|Labs|Integrations|Repositories)$/,
+      }),
     ).not.toBeInTheDocument();
   });
 
@@ -192,6 +237,43 @@ describe("SettingsPage information architecture", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("opens the GitHub App return URL on the Code page", () => {
+    navigationState.search = "tab=repositories&github_connected=1";
+    renderWithI18n(<SettingsPage />);
+    expect(screen.getByText("CodeTab")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Code" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("lists Connected apps with the personal pages only when Composio is available", () => {
+    const first = renderWithI18n(<SettingsPage />);
+    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
+    first.unmount();
+
+    shell.appsAvailable = true;
+    navigationState.search = "tab=integrations&connected=notion";
+    renderWithI18n(<SettingsPage />);
+    const personal = within(nav()).getByRole("region", { name: /Personal/ });
+    expect(
+      within(personal).getByRole("link", { name: "Connected apps" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
+  });
+
+  it("marks pages a member can only view", () => {
+    shell.role = "member";
+    renderWithI18n(<SettingsPage />);
+    const general = screen.getByRole("link", { name: /^General/ });
+    expect(
+      within(general).getByLabelText("Only owners and admins can change this"),
+    ).toBeInTheDocument();
+    // Labels stay editable for every member, so they carry no lock.
+    const labels = screen.getByRole("link", { name: "Labels" });
+    expect(within(labels).queryByLabelText(/Only owners/)).toBeNull();
   });
 
   it("places platform settings in a device group", () => {
@@ -207,19 +289,61 @@ describe("SettingsPage information architecture", () => {
         ]}
       />,
     );
-    const device = screen.getByRole("region", { name: "Desktop app" });
+    const device = screen.getByRole("region", { name: "This device" });
     expect(
       within(device).getByRole("link", { name: "Updates" }),
     ).toBeInTheDocument();
   });
 
   it("navigates from the compact selector and clears the old detail", () => {
-    navigationState.search = "tab=integrations&integration=github&keep=1";
+    navigationState.search = "tab=channels&integration=slack&keep=1";
     renderWithI18n(<SettingsPage />);
     fireEvent.change(
       screen.getByRole("combobox", { name: "Go to settings page" }),
       { target: { value: "preferences" } },
     );
     expect(push).toHaveBeenCalledWith("/acme/settings?tab=preferences&keep=1");
+  });
+});
+
+describe("SettingsPage search", () => {
+  it("finds settings inside pages and opens the one chosen", () => {
+    renderWithI18n(<SettingsPage />);
+    const input = screen.getByRole("searchbox", { name: "Search settings" });
+
+    fireEvent.change(input, { target: { value: "time zone" } });
+
+    const results = screen.getByRole("listbox", { name: "Search settings" });
+    const option = within(results).getByRole("option", { name: /Time zone/ });
+    expect(option).toHaveTextContent("Personal › Preferences");
+
+    fireEvent.click(option);
+    expect(push).toHaveBeenCalledWith(
+      "/acme/settings?tab=preferences&section=timezone",
+    );
+  });
+
+  it("opens the highlighted result from the keyboard and clears on Escape", () => {
+    renderWithI18n(<SettingsPage />);
+    const input = screen.getByRole("searchbox", { name: "Search settings" });
+
+    fireEvent.change(input, { target: { value: "slack" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(push).toHaveBeenCalledWith(
+      "/acme/settings?tab=channels&integration=slack",
+    );
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue("");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("does not offer pages hidden by feature flags", () => {
+    renderWithI18n(<SettingsPage />);
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search settings" }),
+      { target: { value: "plugins" } },
+    );
+    expect(screen.getByText("No matching settings")).toBeInTheDocument();
   });
 });

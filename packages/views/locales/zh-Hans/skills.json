@@ -112,7 +112,9 @@
     "sort_by": "排序",
     "direction_asc": "升序",
     "direction_desc": "降序",
-    "section_columns": "显示列"
+    "section_columns": "显示列",
+    "manage_labels": "管理标签...",
+    "manage_labels_title": "Skill 标签"
   },
   "detail": {
     "all_skills": "全部 skill",

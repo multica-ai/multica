@@ -127,7 +127,7 @@ describe("PullRequestsSection (MUL-7429)", () => {
     renderSection();
     fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "PR merge settings" }));
-    expect(navigatePush).toHaveBeenCalledWith("/acme/settings?tab=integrations&integration=github");
+    expect(navigatePush).toHaveBeenCalledWith("/acme/settings?tab=code");
   });
 
   it("offers only the settings link while the workspace leaves status alone", async () => {
