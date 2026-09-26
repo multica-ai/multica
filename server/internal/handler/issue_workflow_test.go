@@ -566,3 +566,59 @@ func TestWorkflowSwitchIntoDoneEndsWakeups(t *testing.T) {
 		t.Fatalf("after the switch into done: wakeup enabled=%v, pending wakeup run %s", enabled, taskStatus)
 	}
 }
+
+// A write that hands an issue to an agent delivers the change to that agent
+// as its run, so the agent's event wakeups skip it; other agents' wakeups
+// still capture it. Holds for workflow handoffs and plain assignment alike.
+func TestHandoffDoesNotAlsoWakeTheHandler(t *testing.T) {
+	seedTestCatalog(t)
+	handler := seededReadyAgentID(t)
+	var runtimeID string
+	dbfx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id = $1`, handler).Scan(&runtimeID)
+	watcher := dbfx.Agent(t, "Workflow wakeup watcher "+workflowTestSuffix(), runtimeID)
+	wf := createTestWorkflow(t, "Wakeup dedupe "+workflowTestSuffix(), "todo", deliveryWorkflowSteps(handler))
+	projectID := createWorkflowTestProject(t, "Workflow wakeup dedupe project")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	subscribe := func(issueID, agentID string) string {
+		t.Helper()
+		w, err := svc.Create(context.Background(), parseUUID(issueID), parseUUID(testUserID), pgtype.UUID{}, service.WakeupInput{
+			AgentID: agentID, Kind: "event", EventTypes: []string{"issue.status_changed", "issue.assignee_changed"}, Instruction: "look again",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue_wakeup_receipt WHERE wakeup_id = $1`, w.ID)
+		})
+		return uuidToString(w.ID)
+	}
+	pending := func(wakeupID string) int {
+		t.Helper()
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id = $1 AND processed_at IS NULL`, wakeupID).Scan(&n)
+		return n
+	}
+
+	handedOff := dbfx.Issue(t, "handed off", testutil.Cols{"project_id": projectID, "status": "todo"})
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_wakeup WHERE issue_id = $1`, handedOff) })
+	handlerWakeup, watcherWakeup := subscribe(handedOff, handler), subscribe(handedOff, watcher)
+	updateIssueForTest(t, handedOff, map[string]any{"status": "in_progress"}).Want(http.StatusOK)
+	if n := pending(handlerWakeup); n != 0 {
+		t.Fatalf("the handoff also woke its handler: %d receipt(s)", n)
+	}
+	if n := pending(watcherWakeup); n == 0 {
+		t.Fatal("another agent's wakeup missed the handoff")
+	}
+
+	assigned := dbfx.Issue(t, "assigned", testutil.Cols{"status": "todo"})
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_wakeup WHERE issue_id = $1`, assigned) })
+	handlerWakeup, watcherWakeup = subscribe(assigned, handler), subscribe(assigned, watcher)
+	updateIssueForTest(t, assigned, map[string]any{"assignee_type": "agent", "assignee_id": handler}).Want(http.StatusOK)
+	if n := pending(handlerWakeup); n != 0 {
+		t.Fatalf("assignment also woke the assignee: %d receipt(s)", n)
+	}
+	if n := pending(watcherWakeup); n == 0 {
+		t.Fatal("another agent's wakeup missed the assignment")
+	}
+}

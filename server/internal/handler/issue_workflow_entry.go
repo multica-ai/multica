@@ -144,6 +144,29 @@ func (h *Handler) agentRunOnIssue(r *http.Request, actorType string, issue db.Is
 	return &task
 }
 
+// handedToAgent names the agent a write hands the issue to: its new agent
+// assignee, the leader of its new squad assignee, or a workflow step's
+// handler even when that handler already owned the issue. Empty when the
+// write leaves the issue with whoever had it.
+func (h *Handler) handedToAgent(ctx context.Context, prev db.Issue, params db.UpdateIssueParams, handoff bool) string {
+	if !params.AssigneeID.Valid {
+		return ""
+	}
+	if !handoff && params.AssigneeType == prev.AssigneeType && params.AssigneeID == prev.AssigneeID {
+		return ""
+	}
+	switch params.AssigneeType.String {
+	case "agent":
+		return uuidToString(params.AssigneeID)
+	case "squad":
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: params.AssigneeID, WorkspaceID: prev.WorkspaceID})
+		if err == nil && squad.LeaderID.Valid {
+			return uuidToString(squad.LeaderID)
+		}
+	}
+	return ""
+}
+
 // advanceRunStep moves a run's workflow step along with a status change the
 // run made itself, so its next change is judged from where it put the issue.
 func (h *Handler) advanceRunStep(ctx context.Context, run *db.AgentTaskQueue, prev, issue db.Issue) {
