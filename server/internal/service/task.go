@@ -4607,9 +4607,9 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// valid JSON; an empty Output is the only case this branch cares about.
 	var payload protocol.TaskCompletedPayload
 	_ = json.Unmarshal(result, &payload)
-	// Same unescape as the issue-comment path: literal `\n` from agent stdout
-	// becomes a real newline so the chat panel renders paragraph breaks.
-	body := util.UnescapeBackslashEscapes(payload.Output)
+	// JSON decoding already restores escaped newlines. Preserve literal
+	// backslashes in the output, including LaTeX commands and code snippets.
+	body := payload.Output
 	// Strip any in-band quick-actions footer from EVERY chat completion — the
 	// reserved syntax must never reach a stored transcript. This includes the
 	// agent-initiated intro turn (chat_input_task_id NULL), which previously
