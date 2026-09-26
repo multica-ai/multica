@@ -44,6 +44,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `APP_ENV` | 空 | 生产环境设为 `production` |
 | `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数。会话会滑动续期：剩余有效期过半后，持续使用的会话会被续期而不是到期。低于 `60s` 的取值会按 `60s` 处理 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
+| `LOG_COLOR` | 空 | 强制日志 ANSI 颜色：`true` 或 `false`。未设置时仅当 stderr 是交互终端才着色；容器分配了 TTY 导致采集到的日志带转义符时，设为 `false` 即可去除颜色 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
 

@@ -44,6 +44,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
 | `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます。セッションは有効期間の半分を過ぎるとスライド更新され、使い続けている限り失効しません。`60s` 未満は `60s` に補正されます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
+| `LOG_COLOR` | 未設定 | ログの ANSI カラーを強制: `true` または `false`。未設定では stderr が対話端末のときだけ着色します。コンテナが TTY を割り当て、収集したログにエスケープシーケンスが残る場合は `false` に設定してください |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
 
