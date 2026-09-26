@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "motion/react";
 import { LayoutGrid, MessageSquareText, X } from "lucide-react";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
+import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { useLocale, useT, useTimeAgo } from "../../../i18n";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { formatBytes } from "../../../common/format-bytes";
@@ -46,6 +44,10 @@ interface FileGroup {
  * Files grouped by the comment that posted them, in page order, each group
  * one click from that comment. Files show their latest version only, so the
  * count here always equals the sidebar's.
+ *
+ * A full-window Dialog: the primitive owns focus (moved in on open, trapped
+ * while open, returned to the opener on close) and Escape; this only restyles
+ * the popup to cover the window.
  */
 export function DeliverablesOverview({
   open,
@@ -80,63 +82,47 @@ export function DeliverablesOverview({
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !onReturn) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      } else if (!e.shiftKey && e.key.toLowerCase() === "g" && onReturn) {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() === "g") {
         e.preventDefault();
         onReturn();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose, onReturn]);
-
-  if (typeof document === "undefined") return null;
+  }, [open, onReturn]);
 
   return (
     <>
-      {createPortal(
-        <AnimatePresence>
-          {open && (
-            <motion.div
-              className="dark fixed inset-0 z-50 flex flex-col bg-black/95 text-foreground backdrop-blur-xl"
-              role="dialog"
-              aria-modal="true"
-              aria-label={identifier}
-              style={NO_DRAG}
-              initial={{ opacity: 0 }}
-              animate={{
-                opacity: 1,
-                transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
-              }}
-              exit={{
-                opacity: 0,
-                transition: { duration: UI_MOTION_DURATION.fast, ease: UI_EASE_OUT },
-              }}
-            >
-              <OverviewBody
-                identifier={identifier}
-                files={files}
-                commentById={commentById}
-                onClose={onClose}
-                onOpenFile={(file) => {
-                  onClose();
-                  openAttachment(file.latest);
-                }}
-                onLocate={(origin) => {
-                  onClose();
-                  onLocate(origin);
-                }}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>,
-        document.body,
-      )}
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) onClose();
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          style={NO_DRAG}
+          className="dark top-0 left-0 flex h-dvh max-h-none w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-black/95 p-0 text-foreground shadow-none ring-0 backdrop-blur-xl sm:max-w-none"
+        >
+          <OverviewBody
+            identifier={identifier}
+            files={files}
+            commentById={commentById}
+            onClose={onClose}
+            onOpenFile={(file) => {
+              onClose();
+              openAttachment(file.latest);
+            }}
+            onLocate={(origin) => {
+              onClose();
+              onLocate(origin);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
       {modal}
     </>
   );
@@ -227,9 +213,9 @@ function OverviewBody({
             <LayoutGrid className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-body font-medium">
+            <DialogTitle className="truncate text-body leading-(--text-body--line-height) font-medium">
               {t(($) => $.deliverables.overview_title, { identifier })}
-            </p>
+            </DialogTitle>
             <p className="truncate text-caption text-muted-foreground tabular-nums">
               {totalBytes > 0
                 ? t(($) => $.deliverables.overview_summary_with_size, {

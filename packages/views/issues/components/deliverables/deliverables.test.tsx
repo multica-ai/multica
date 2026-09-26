@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   collectDeliverableFiles,
   type DeliverableFile,
@@ -191,7 +191,7 @@ describe("DeliverablesOverview", () => {
 
   it("counts exactly what the sidebar counts", () => {
     renderOverview();
-    const dialog = screen.getByRole("dialog", { name: "MUL-7588" });
+    const dialog = screen.getByRole("dialog", { name: "MUL-7588 deliverables" });
     expect(within(dialog).getByText(/^3 deliverables/)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /^All\s*3$/ })).toBeInTheDocument();
     // One group per posting comment; the report sits with its v2.
@@ -235,6 +235,43 @@ describe("DeliverablesOverview", () => {
       fireEvent.keyDown(document, { key: "Escape" });
     });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("DeliverablesOverview focus", () => {
+  // A full-window overlay the keyboard can't reach is not a dialog: focus
+  // must move in when it opens and go back to the opener when it closes.
+  it("takes focus when it opens and returns it to the opener on close", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            View all
+          </button>
+          <DeliverablesOverview
+            open={open}
+            onClose={() => setOpen(false)}
+            identifier="MUL-7588"
+            files={FILES}
+            commentById={new Map(TIMELINE.map((entry) => [entry.id, entry]))}
+            onLocate={vi.fn()}
+            returnKey={null}
+          />
+        </>
+      );
+    }
+    renderWithI18n(withQuery(<Harness />));
+    const opener = screen.getByRole("button", { name: "View all" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const dialog = await screen.findByRole("dialog", { name: "MUL-7588 deliverables" });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 });
 
