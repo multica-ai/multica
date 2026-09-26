@@ -10,7 +10,15 @@ import { parseCron } from "./cron-mapping";
 // unreachable preview endpoint must not keep anyone from saving a schedule the
 // server would have accepted.
 
-const behavior: { mode: "ok" | "invalid_cron" | "invalid_timezone" | "transport" | "no_code" } = {
+const behavior: {
+  mode:
+    | "ok"
+    | "invalid_cron"
+    | "invalid_timezone"
+    | "transport"
+    | "no_code"
+    | "legacy_route_mismatch";
+} = {
   mode: "ok",
 };
 
@@ -35,6 +43,11 @@ vi.mock("@multica/core/autopilots/queries", () => ({
       }
       if (behavior.mode === "no_code") {
         throw new ApiError("bad request", 400, "Bad Request", "bad request");
+      }
+      if (behavior.mode === "legacy_route_mismatch") {
+        throw new ApiError("invalid autopilot id", 400, "Bad Request", {
+          error: "invalid autopilot id",
+        });
       }
       return { next_runs: ["2126-07-14T01:00:00Z"] };
     },
@@ -71,6 +84,11 @@ describe("findScheduleRejection", () => {
     behavior.mode = "no_code";
     const rejection = await run();
     expect(rejection?.code).toBe("invalid_cron");
+  });
+
+  it("does not reject a schedule when an older backend routes cron-preview as an autopilot id", async () => {
+    behavior.mode = "legacy_route_mismatch";
+    await expect(run()).resolves.toBeNull();
   });
 
   it("does not block the save on a transport or server failure", async () => {
