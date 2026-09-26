@@ -1006,7 +1006,7 @@ export function ManualCreatePanel({
                   onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
                   triggerRender={<PillButton />}
                   align="start"
-                  open={fieldPickerOpen === "status" ? true : undefined}
+                  open={fieldPickerOpen === "status"}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
                 />
               )}
@@ -1018,7 +1018,7 @@ export function ManualCreatePanel({
                   onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
                   triggerRender={<PillButton />}
                   align="start"
-                  open={fieldPickerOpen === "priority" ? true : undefined}
+                  open={fieldPickerOpen === "priority"}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
                 />
               )}
@@ -1034,7 +1034,7 @@ export function ManualCreatePanel({
                   )}
                   triggerRender={<PillButton />}
                   align="start"
-                  open={fieldPickerOpen === "assignee" ? true : undefined}
+                  open={fieldPickerOpen === "assignee"}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
                 />
               )}
@@ -1049,7 +1049,7 @@ export function ManualCreatePanel({
                   onSelectedIdsChange={updateLabelIds}
                   triggerRender={<PillButton />}
                   align="start"
-                  open={fieldPickerOpen === "labels" ? true : undefined}
+                  open={fieldPickerOpen === "labels"}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "labels" : null)}
                 />
               )}
@@ -1066,7 +1066,7 @@ export function ManualCreatePanel({
                     />
                   }
                   align="start"
-                  open={fieldPickerOpen === "project" ? true : undefined}
+                  open={fieldPickerOpen === "project"}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
                 />
               )}
