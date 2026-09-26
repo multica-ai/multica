@@ -4,6 +4,9 @@ import {
   extensionToLanguage,
   getPreviewKind,
   isPreviewable,
+  structuredFormat,
+  tableDelimiter,
+  wrapsByDefault,
   type PreviewKind,
 } from "./preview";
 
@@ -26,9 +29,21 @@ describe("getPreviewKind", () => {
     // Code / config — fallback to text after sniffer guesses "text/plain"
     ["text/plain", "main.go", "text"],
     ["application/octet-stream", "main.go", "text"],
-    ["text/plain", "config.yml", "text"],
     ["application/javascript", "bundle.js", "text"],
-    ["application/json", "data.json", "text"],
+
+    // Tables — the sniffer usually says text/plain, so the extension decides
+    ["text/csv", "report.csv", "table"],
+    ["text/plain", "report.csv", "table"],
+    ["application/octet-stream", "export.tsv", "table"],
+    ["text/tab-separated-values", "export", "table"],
+
+    // Structured data — tree view
+    ["application/json", "data.json", "structured"],
+    ["text/plain", "config.yml", "structured"],
+    ["application/octet-stream", "compose.yaml", "structured"],
+    ["text/plain", "events.jsonl", "structured"],
+    ["application/octet-stream", "events.ndjson", "structured"],
+    ["application/x-yaml", "values", "structured"],
 
     // Plain text
     ["text/plain", "log.txt", "text"],
@@ -56,6 +71,39 @@ describe("getPreviewKind", () => {
   // PDF should dispatch from extension alone when content_type is wrong.
   it("falls through to extension when content_type is mislabeled", () => {
     expect(getPreviewKind("application/octet-stream", "manual.pdf")).toBe("pdf");
+  });
+});
+
+describe("structuredFormat", () => {
+  it("reads the format from the extension first", () => {
+    expect(structuredFormat("text/plain", "a.json")).toBe("json");
+    expect(structuredFormat("application/json", "a.jsonl")).toBe("jsonl");
+    expect(structuredFormat("text/plain", "a.ndjson")).toBe("jsonl");
+    expect(structuredFormat("text/plain", "a.yml")).toBe("yaml");
+  });
+
+  it("falls back to the content type for extension-less files", () => {
+    expect(structuredFormat("application/json; charset=utf-8", "payload")).toBe("json");
+    expect(structuredFormat("application/yaml", "values")).toBe("yaml");
+    expect(structuredFormat("text/plain", "notes.txt")).toBeNull();
+  });
+});
+
+describe("tableDelimiter", () => {
+  it("is a tab for TSV and a comma otherwise", () => {
+    expect(tableDelimiter("text/plain", "export.tsv")).toBe("\t");
+    expect(tableDelimiter("text/tab-separated-values", "export")).toBe("\t");
+    expect(tableDelimiter("text/csv", "report.csv")).toBe(",");
+  });
+});
+
+describe("wrapsByDefault", () => {
+  it("wraps prose and logs, keeps code lines intact", () => {
+    expect(wrapsByDefault("server.log")).toBe(true);
+    expect(wrapsByDefault("notes.txt")).toBe(true);
+    expect(wrapsByDefault("LICENSE")).toBe(true);
+    expect(wrapsByDefault("main.go")).toBe(false);
+    expect(wrapsByDefault("page.html")).toBe(false);
   });
 });
 
@@ -100,4 +148,51 @@ describe("extensionToLanguage", () => {
     expect(extensionToLanguage("blob.bin")).toBeUndefined();
     expect(extensionToLanguage("noextension")).toBeUndefined();
   });
+});
+
+// Mirror of TestIsTextPreviewable in server/internal/handler/file_test.go,
+// the text proxy's whitelist. Keep the two tables identical: a type only the
+// client accepts opens to a 415, one only the server accepts never opens.
+describe("text preview whitelist (mirrors the server)", () => {
+  const TEXT_BACKED = new Set<PreviewKind>(["markdown", "html", "table", "structured", "text"]);
+  const cases: Array<[string, string, string, boolean]> = [
+    ["markdown by ext", "application/octet-stream", "README.md", true],
+    ["markdown by mime", "text/markdown", "README", true],
+    ["plain text", "text/plain", "log.txt", true],
+    ["json by mime", "application/json", "data.json", true],
+    ["yaml by ext", "application/octet-stream", "config.yml", true],
+    ["csv by ext", "application/octet-stream", "report.csv", true],
+    ["tsv by ext", "application/octet-stream", "export.tsv", true],
+    ["json lines by ext", "application/octet-stream", "events.jsonl", true],
+    ["ndjson by ext", "application/octet-stream", "events.ndjson", true],
+    ["ndjson by mime", "application/x-ndjson", "events", true],
+    ["log by ext", "application/octet-stream", "server.log", true],
+    ["go source", "text/plain", "main.go", true],
+    ["typescript", "application/octet-stream", "index.ts", true],
+    ["html", "text/html", "page.html", true],
+    ["dockerfile no ext", "application/octet-stream", "Dockerfile", true],
+    ["makefile no ext", "application/octet-stream", "Makefile", true],
+    ["env dotfile", "application/octet-stream", ".env", true],
+    ["gitignore dotfile", "application/octet-stream", ".gitignore", true],
+    ["dockerfile extension", "application/octet-stream", "service.dockerfile", true],
+    ["makefile extension", "application/octet-stream", "rules.makefile", true],
+
+    ["pdf rejected", "application/pdf", "doc.pdf", false],
+    ["png rejected", "image/png", "shot.png", false],
+    ["video rejected", "video/mp4", "clip.mp4", false],
+    ["binary fallthrough", "application/octet-stream", "blob.bin", false],
+    [
+      "docx rejected",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "report.docx",
+      false,
+    ],
+  ];
+
+  for (const [name, contentType, filename, want] of cases) {
+    it(name, () => {
+      const kind = getPreviewKind(contentType, filename);
+      expect(kind !== null && TEXT_BACKED.has(kind)).toBe(want);
+    });
+  }
 });

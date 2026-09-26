@@ -118,7 +118,8 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "catalog:",
     "sonner": "^2.0.7",
-    "unist-util-visit": "^5.1.0"
+    "unist-util-visit": "^5.1.0",
+    "yaml": "catalog:"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

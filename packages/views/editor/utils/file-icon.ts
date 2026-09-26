@@ -54,7 +54,10 @@ export function fileIcon(contentType: string, filename: string): LucideIcon {
     case "pdf":
     case "markdown":
       return FileText;
+    case "table":
+      return FileSpreadsheet;
     case "html":
+    case "structured":
     case "text":
       return FileCode;
     default:
