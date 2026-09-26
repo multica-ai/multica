@@ -12,35 +12,31 @@ import (
 	"unicode/utf8"
 )
 
-// aibot markdown size cap. WeCom rejects the whole frame if we
-// push more than ~4096 chars, so we truncate the body on that budget. We
-// use 4000 to leave headroom for the prefix + link suffix.
+// inboxMarkdownMaxLen is the budget this card is written to, in RUNES.
+//
+// It is not the platform's cap and never was. The documented cap on one
+// aibot_send_msg markdown body is 20480 utf8 bytes — sendMsgContentLimit in
+// ws_frame.go, sourced to
+// https://developer.work.weixin.qq.com/document/path/101138 — and a body past
+// it is refused whole with errcode 45002. This constant used to be justified
+// by a "~4096 chars" figure with no source behind it, which is both a
+// different number and a different unit: 4000 runes of Chinese is around
+// 12000 bytes, comfortably inside the real ceiling.
+//
+// So what this bounds is the card's length as a product choice, not as a
+// protocol limit. It stays where it is because an inbox card is a pointer to
+// the item and not the item, and truncating it here keeps the whole card —
+// prefix, body and the "view detail" link — inside the frame with room to
+// spare. Raising it would be a deliberate decision about how long a
+// notification should be, and the ceiling that decision has to respect is
+// sendMsgContentLimit measured in bytes, not this number.
 const inboxMarkdownMaxLen = 4000
 
-// inboxTypeLabels are the Chinese display names used in the notification
-// preamble. Kept locally so wecom does not reach into cmd/server for it;
-// the two lists agree by convention.
-var inboxTypeLabels = map[string]string{
-	"issue_assigned":     "任务指派",
-	"mentioned":          "提及你",
-	"status_changed":     "状态变更",
-	"comment_added":      "新评论",
-	"new_comment":        "新评论",
-	"reaction_added":     "表情反应",
-	"task_failed":        "task 失败",
-	"unassigned":         "取消指派",
-	"assignee_changed":   "指派人变更",
-	"priority_changed":   "优先级变更",
-	"due_date_changed":   "截止日期变更",
-	"start_date_changed": "开始日期变更",
-}
-
-func inboxTypeLabel(t string) string {
-	if label, ok := inboxTypeLabels[t]; ok {
-		return label
-	}
-	return "新消息"
-}
+// The notification type labels and the deep link's anchor text live in the
+// copy pack (strings.go), read through copyPack.label / InboxDetailLink. The
+// pack's zh-Hans labels are the same table this file used to hold, character
+// for character; the card is a 1:1 push to a named Multica member, so it is
+// their own profile language that picks the pack (outbound.go).
 
 // inboxAppURL resolves the frontend URL for building the "view detail" link.
 // Priority: WECOM_APP_URL → MULTICA_APP_URL → FRONTEND_ORIGIN. Only HTTPS
@@ -65,11 +61,12 @@ func inboxAppURL() string {
 //
 //	**[{type}] {title}**
 //	{body}
-//	[查看详情]({appURL}/{slug|workspaceID}/inbox?issue={issueID})
+//	[{detail link}]({appURL}/{slug|workspaceID}/inbox?issue={issueID})
 //
+// The type label and the link's anchor text come from the reader's copyPack.
 // The link segment is omitted entirely when no appURL is configured — we
 // would rather send a title-only card than a broken link.
-func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
+func buildInboxMarkdown(item map[string]any, workspaceID, slug string, c copyPack) string {
 	title, _ := item["title"].(string)
 	typeStr, _ := item["type"].(string)
 	if title == "" && typeStr == "" {
@@ -102,7 +99,7 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 
 	var b strings.Builder
 	b.WriteString("**[")
-	b.WriteString(inboxTypeLabel(typeStr))
+	b.WriteString(c.label(typeStr))
 	b.WriteString("] ")
 	b.WriteString(title)
 	b.WriteString("**")
@@ -111,7 +108,7 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 		b.WriteString(body)
 	}
 	if link != "" {
-		b.WriteString("\n[查看详情](")
+		b.WriteString("\n[" + c.InboxDetailLink + "](")
 		b.WriteString(link)
 		b.WriteString(")")
 	}
@@ -121,10 +118,10 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 	}
 	// Truncate the body only. Prefix + link must survive intact so the
 	// user still gets the "view detail" affordance.
-	prefix := "**[" + inboxTypeLabel(typeStr) + "] " + title + "**"
+	prefix := "**[" + c.label(typeStr) + "] " + title + "**"
 	suffix := ""
 	if link != "" {
-		suffix = "\n[查看详情](" + link + ")"
+		suffix = "\n[" + c.InboxDetailLink + "](" + link + ")"
 	}
 	// Neither cut below can put a "]" back next to a "(" or a ":".
 	// truncateRunes only drops a suffix, so it cannot recreate a pair
@@ -155,7 +152,7 @@ func buildInboxMarkdown(item map[string]any, workspaceID, slug string) string {
 		// that exists can ask for it.
 		titleRoom = 0
 	}
-	return "**[" + inboxTypeLabel(typeStr) + "] " +
+	return "**[" + c.label(typeStr) + "] " +
 		truncateRunes(title, titleRoom) + "...**" + suffix
 }
 

@@ -391,6 +391,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		ChatID:         said.addr.ChatID,
 		ChatType:       said.addr.ChatType,
 		SessionID:      e.ChatSessionID,
+		// Resolved here rather than at the failure, which happens on a detached
+		// goroutine with no context left to read a profile with. In a 1:1 the
+		// bound chatid IS the reader's userid, which is what localeFor wants; a
+		// room ignores it and reads the deployment's language (language.go).
+		Locale: localeFor(ctx, o.q, said.addr.InstallationID, said.addr.ChatType, said.addr.ChatID),
 	}, !said.spoke)
 	return nil
 }
@@ -827,11 +832,16 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 
 	// Resolve slug for the link. Best-effort — a missing slug just falls
 	// back to the workspace UUID in the URL.
+	// The card is a 1:1 push to a known Multica member, so their own profile
+	// language decides what it says — the one surface where the reader is
+	// always resolvable by construction.
+	cp := copyFor(localeForUser(ctx, o.q, recipientID))
+
 	slug := ""
 	if ws, err := o.q.GetWorkspace(ctx, workspaceID); err == nil {
 		slug = ws.Slug
 	}
-	content := buildInboxMarkdown(item, workspaceIDStr, slug)
+	content := buildInboxMarkdown(item, workspaceIDStr, slug, cp)
 	if content == "" {
 		return false
 	}

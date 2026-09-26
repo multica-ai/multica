@@ -265,7 +265,7 @@ func TestTraceNeverLogsABindingToken(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: senderID,
 	}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 
