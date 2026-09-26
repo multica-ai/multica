@@ -332,8 +332,14 @@ SELECT
     $21,
     $22,
     $23,
-    -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
-    (SELECT i.status FROM issue i WHERE i.id = $3),
+    -- The workflow step this run works on (MUL-7420). A wakeup continues the
+    -- run that registered it, so it keeps that run's step: a status change it
+    -- makes after someone else moved the issue is refused like the run's own
+    -- would be. A wakeup a member registered starts from the issue's status.
+    COALESCE(
+        (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = $19 AND s.issue_id = $3),
+        (SELECT i.status FROM issue i WHERE i.id = $3)
+    ),
     COALESCE($24::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step

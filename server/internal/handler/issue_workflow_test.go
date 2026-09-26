@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -525,5 +527,42 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&memberName)
 	if status != "cancelled" || stoppedBy == nil || *stoppedBy != memberName {
 		t.Fatalf("squad run = %s stopped by %v, want cancelled by %s", status, stoppedBy, memberName)
+	}
+}
+
+// Remapping an issue into a done status on a workflow switch ends its wakeups,
+// as any status write into done does.
+func TestWorkflowSwitchIntoDoneEndsWakeups(t *testing.T) {
+	seedTestCatalog(t)
+	agentID := seededReadyAgentID(t)
+	projectID := createWorkflowTestProject(t, "Workflow switch wakeups project")
+	issueID := dbfx.Issue(t, "wakeups end with the issue", testutil.Cols{"project_id": projectID, "status": "in_review"})
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	wakeup, err := svc.Create(context.Background(), parseUUID(issueID), parseUUID(testUserID), pgtype.UUID{},
+		service.WakeupInput{AgentID: agentID, Kind: "at", AfterSeconds: 600, Instruction: "check the PR"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_wakeup WHERE issue_id = $1`, issueID) })
+	var runtimeID string
+	dbfx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
+	pending := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "runtime_id": runtimeID, "status": "queued",
+		"context": testutil.Raw("jsonb_build_object('wakeup_id', '" + uuidToString(wakeup.ID) + "')"),
+	})
+
+	wf := createTestWorkflow(t, "Wakeup switch "+workflowTestSuffix(), "todo", []map[string]any{
+		{"status_key": "todo"}, {"status_key": "done"},
+	})
+	setProjectWorkflow(t, projectID, map[string]any{
+		"workflow_id": wf.ID, "status_mapping": map[string]string{"in_review": "done"},
+	}).Want(http.StatusOK)
+
+	var enabled bool
+	var taskStatus string
+	dbfx.QueryRow(t, `SELECT enabled FROM issue_wakeup WHERE id = $1`, uuidToString(wakeup.ID)).Scan(&enabled)
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, pending).Scan(&taskStatus)
+	if enabled || taskStatus != "cancelled" {
+		t.Fatalf("after the switch into done: wakeup enabled=%v, pending wakeup run %s", enabled, taskStatus)
 	}
 }

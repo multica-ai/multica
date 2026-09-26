@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -399,8 +400,12 @@ func writeMappingRequired(w http.ResponseWriter, plan workflowMappingPlan, msg s
 }
 
 // remapIssues applies a validated mapping inside the caller's transaction.
-func remapIssues(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UUID, projectIDs []pgtype.UUID, plan workflowMappingPlan, mapping map[string]string) ([]db.Issue, error) {
+// An issue it moves into a done or closed status ends its wakeups, as any
+// status write does; the returned runs are for the caller's post-commit
+// broadcast.
+func remapIssues(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UUID, projectIDs []pgtype.UUID, plan workflowMappingPlan, mapping map[string]string) ([]db.Issue, []db.AgentTaskQueue, error) {
 	var changed []db.Issue
+	var cancelled []db.AgentTaskQueue
 	for _, req := range plan.Required {
 		rows, err := qtx.RemapProjectIssueStatus(ctx, db.RemapProjectIssueStatusParams{
 			WorkspaceID: wsUUID,
@@ -409,11 +414,18 @@ func remapIssues(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UUID, proje
 			ToStatus:    mapping[req.StatusKey],
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		for _, issue := range rows {
+			stopped, err := service.StopClosedIssueWakeups(ctx, qtx, issue)
+			if err != nil {
+				return nil, nil, err
+			}
+			cancelled = append(cancelled, stopped...)
 		}
 		changed = append(changed, rows...)
 	}
-	return changed, nil
+	return changed, cancelled, nil
 }
 
 func (h *Handler) UpdateIssueWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -541,7 +553,7 @@ func (h *Handler) UpdateIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save workflow")
 		return
 	}
-	changed, err := remapIssues(ctx, qtx, wsUUID, projectIDs, plan, req.StatusMapping)
+	changed, cancelledWakeups, err := remapIssues(ctx, qtx, wsUUID, projectIDs, plan, req.StatusMapping)
 	if err != nil {
 		slog.Warn("UpdateIssueWorkflow remap failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to move issues to the new statuses")
@@ -554,6 +566,7 @@ func (h *Handler) UpdateIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 	// Remapping is an administrative move: snapshots only, so it neither
 	// notifies subscribers per issue nor looks like a handoff.
 	h.publishIssueSnapshots(ctx, changed, "member", uuidToString(member.UserID))
+	h.broadcastCancelledWakeups(ctx, wsUUID, cancelledWakeups)
 	h.publishIssueWorkflowChanged(workspaceID, member, "updated")
 	h.writeIssueWorkflow(w, r, http.StatusOK, row)
 }
@@ -745,7 +758,7 @@ func (h *Handler) SetProjectWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to change workflow")
 		return
 	}
-	changed, err := remapIssues(ctx, qtx, wsUUID, []pgtype.UUID{project.ID}, plan, req.StatusMapping)
+	changed, cancelledWakeups, err := remapIssues(ctx, qtx, wsUUID, []pgtype.UUID{project.ID}, plan, req.StatusMapping)
 	if err != nil {
 		slog.Warn("SetProjectWorkflow remap failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to move issues to the new statuses")
@@ -757,6 +770,7 @@ func (h *Handler) SetProjectWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	actorID := uuidToString(member.UserID)
 	h.publishIssueSnapshots(ctx, changed, "member", actorID)
+	h.broadcastCancelledWakeups(ctx, wsUUID, cancelledWakeups)
 	resp := projectToResponse(updated)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(ctx, wsUUID, updated.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(ctx, updated.ID)
