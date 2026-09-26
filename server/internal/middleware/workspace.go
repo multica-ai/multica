@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// defaultSlugCache is the package-level cache for slug→UUID lookups.
+// Initialized once; slugs are immutable so a 10-minute TTL is safe.
+var defaultSlugCache = NewSlugCache(10 * time.Minute)
 
 // Context keys for workspace-scoped request data.
 type contextKey int
@@ -79,13 +84,13 @@ func ResolveWorkspaceIDFromRequest(r *http.Request, queries *db.Queries) string 
 		return id
 	}
 	if slug := r.Header.Get("X-Workspace-Slug"); slug != "" {
-		if ws, err := queries.GetWorkspaceBySlug(r.Context(), slug); err == nil {
-			return util.UUIDToString(ws.ID)
+		if uuid, err := resolveSlugToUUID(r, queries, slug); err == nil {
+			return uuid
 		}
 	}
 	if slug := r.URL.Query().Get("workspace_slug"); slug != "" {
-		if ws, err := queries.GetWorkspaceBySlug(r.Context(), slug); err == nil {
-			return util.UUIDToString(ws.ID)
+		if uuid, err := resolveSlugToUUID(r, queries, slug); err == nil {
+			return uuid
 		}
 	}
 	if id := r.Header.Get("X-Workspace-ID"); id != "" {
@@ -109,7 +114,8 @@ type workspaceResolver func(r *http.Request) (string, error)
 //  2. X-Workspace-Slug header / ?workspace_slug query → GetWorkspaceBySlug → UUID
 //  3. X-Workspace-ID header / ?workspace_id query → UUID directly (CLI/daemon compat)
 //
-// TODO: cache slug→UUID lookup (slug is immutable, safe to cache with short TTL)
+// Slug→UUID lookups are cached in-memory with a 10-minute TTL since slugs
+// are immutable. This eliminates redundant DB queries on every request.
 func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 	return func(r *http.Request) (string, error) {
 		// Task-token-authenticated requests must operate on the
@@ -125,18 +131,10 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 		}
 		// Slug path (preferred — frontend sends this after the URL refactor)
 		if slug := r.URL.Query().Get("workspace_slug"); slug != "" {
-			ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
-			if err != nil {
-				return "", errWorkspaceNotFound
-			}
-			return util.UUIDToString(ws.ID), nil
+			return resolveSlugToUUID(r, queries, slug)
 		}
 		if slug := r.Header.Get("X-Workspace-Slug"); slug != "" {
-			ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
-			if err != nil {
-				return "", errWorkspaceNotFound
-			}
-			return util.UUIDToString(ws.ID), nil
+			return resolveSlugToUUID(r, queries, slug)
 		}
 		// UUID fallback (CLI, daemon, legacy clients)
 		if id := r.URL.Query().Get("workspace_id"); id != "" {
@@ -147,6 +145,24 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 		}
 		return "", nil
 	}
+}
+
+// resolveSlugToUUID resolves a workspace slug to its UUID, using the cache
+// when available and falling back to a database query on miss.
+func resolveSlugToUUID(r *http.Request, queries *db.Queries, slug string) (string, error) {
+	// Check cache first
+	if uuid, ok := defaultSlugCache.Get(slug); ok {
+		return uuid, nil
+	}
+	// Cache miss — query the database
+	ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
+	if err != nil {
+		return "", errWorkspaceNotFound
+	}
+	uuid := util.UUIDToString(ws.ID)
+	// Store in cache for future requests
+	defaultSlugCache.Set(slug, uuid)
+	return uuid, nil
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
