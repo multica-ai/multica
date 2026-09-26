@@ -300,9 +300,35 @@ interface SearchResults {
   query: string;
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
+  /**
+   * Per-stream truncation. Either endpoint can overflow independently, so the
+   * footer continues only the streams that still report has_more.
+   */
+  issuesHasMore: boolean;
+  projectsHasMore: boolean;
 }
 
-const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
+const NO_RESULTS: SearchResults = {
+  query: "",
+  issues: [],
+  projects: [],
+  issuesHasMore: false,
+  projectsHasMore: false,
+};
+
+const ISSUE_PAGE_SIZE = 20;
+const PROJECT_PAGE_SIZE = 10;
+
+function appendUniqueById<T extends { id: string }>(existing: T[], next: T[]): T[] {
+  const seen = new Set(existing.map((item) => item.id));
+  const out = [...existing];
+  for (const item of next) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push(item);
+  }
+  return out;
+}
 
 // One heading treatment for every group. Headings go through cmdk's `heading`
 // prop rather than a hand-rolled div: cmdk renders it into a
@@ -375,8 +401,12 @@ export function SearchCommand() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults>(NO_RESULTS);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Key of the in-flight continuation (`query|i:off|p:off`). Blocks a second
+  // request for the same offsets while the first is still loading.
+  const loadingMoreKeyRef = useRef<string | null>(null);
 
   const filteredPages = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -610,18 +640,24 @@ export function SearchCommand() {
     };
   }, []);
 
-  // Reset state when dialog closes
+  // Reset state when dialog closes — also abort any in-flight continuation so
+  // a late response cannot repaint rows for a closed palette.
   useEffect(() => {
     if (!open) {
+      if (abortRef.current) abortRef.current.abort();
+      loadingMoreKeyRef.current = null;
       setQuery("");
       setResults(NO_RESULTS);
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
   }, [open]);
 
   const search = useCallback((q: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (abortRef.current) abortRef.current.abort();
+    loadingMoreKeyRef.current = null;
+    setIsLoadingMore(false);
 
     if (!q.trim()) {
       setResults(NO_RESULTS);
@@ -637,13 +673,13 @@ export function SearchCommand() {
         const [issueRes, projectRes] = await Promise.all([
           api.searchIssues({
             q: q.trim(),
-            limit: 20,
+            limit: ISSUE_PAGE_SIZE,
             include_closed: true,
             signal: controller.signal,
           }),
           api.searchProjects({
             q: q.trim(),
-            limit: 10,
+            limit: PROJECT_PAGE_SIZE,
             include_closed: true,
             signal: controller.signal,
           }),
@@ -653,6 +689,8 @@ export function SearchCommand() {
             query: q.trim(),
             issues: issueRes.issues,
             projects: projectRes.projects,
+            issuesHasMore: issueRes.has_more,
+            projectsHasMore: projectRes.has_more,
           });
           setIsLoading(false);
         }
@@ -661,7 +699,13 @@ export function SearchCommand() {
           // Drop the previous query's rows rather than leaving them on screen
           // permanently greyed out: the request that would have replaced them
           // is never coming. The list falls through to the empty state.
-          setResults({ query: q.trim(), issues: [], projects: [] });
+          setResults({
+            query: q.trim(),
+            issues: [],
+            projects: [],
+            issuesHasMore: false,
+            projectsHasMore: false,
+          });
           setIsLoading(false);
         }
       }
@@ -703,6 +747,79 @@ export function SearchCommand() {
     },
     [intentNavigate, consumeIntent, setOpen, p],
   );
+
+  // Append the next page for each truncated stream inside the palette. Offset
+  // equals the number of rows already loaded for that stream; a second click
+  // for the same offsets is ignored while the request is in flight.
+  const handleMoreResultsSelect = useCallback(() => {
+    const snapshot = results;
+    const q = snapshot.query;
+    if (!q) return;
+    if (!snapshot.issuesHasMore && !snapshot.projectsHasMore) return;
+
+    const issuesOffset = snapshot.issues.length;
+    const projectsOffset = snapshot.projects.length;
+    const loadKey = `${q}|i:${issuesOffset}|p:${projectsOffset}`;
+    if (loadingMoreKeyRef.current === loadKey) return;
+
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    loadingMoreKeyRef.current = loadKey;
+    setIsLoadingMore(true);
+
+    void (async () => {
+      try {
+        const [issueRes, projectRes] = await Promise.all([
+          snapshot.issuesHasMore
+            ? api.searchIssues({
+                q,
+                limit: ISSUE_PAGE_SIZE,
+                offset: issuesOffset,
+                include_closed: true,
+                signal: controller.signal,
+              })
+            : Promise.resolve(null),
+          snapshot.projectsHasMore
+            ? api.searchProjects({
+                q,
+                limit: PROJECT_PAGE_SIZE,
+                offset: projectsOffset,
+                include_closed: true,
+                signal: controller.signal,
+              })
+            : Promise.resolve(null),
+        ]);
+        if (controller.signal.aborted) return;
+        setResults((prev) => {
+          // Query changed (or a fresh search replaced the snapshot) — discard.
+          if (prev.query !== q) return prev;
+          return {
+            query: q,
+            issues: issueRes
+              ? appendUniqueById(prev.issues, issueRes.issues)
+              : prev.issues,
+            projects: projectRes
+              ? appendUniqueById(prev.projects, projectRes.projects)
+              : prev.projects,
+            issuesHasMore: issueRes ? issueRes.has_more : prev.issuesHasMore,
+            projectsHasMore: projectRes
+              ? projectRes.has_more
+              : prev.projectsHasMore,
+          };
+        });
+      } catch {
+        // Aborted or failed — leave the already-loaded page as-is.
+      } finally {
+        if (loadingMoreKeyRef.current === loadKey) {
+          loadingMoreKeyRef.current = null;
+        }
+        if (!controller.signal.aborted) {
+          setIsLoadingMore(false);
+        }
+      }
+    })();
+  }, [results]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -929,6 +1046,23 @@ export function SearchCommand() {
                     onSelect={handleSelect}
                   />
                 ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {!resultsAreStale &&
+              (results.issuesHasMore || results.projectsHasMore) && (
+              <CommandPrimitive.Group className={GROUP_CLASS}>
+                <CommandPrimitive.Item
+                  value={`more-results:${results.query}`}
+                  disabled={isLoadingMore}
+                  onSelect={handleMoreResultsSelect}
+                  className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                >
+                  <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {t(($) => $.empty.more_results, { query: results.query })}
+                  </span>
+                </CommandPrimitive.Item>
               </CommandPrimitive.Group>
             )}
 

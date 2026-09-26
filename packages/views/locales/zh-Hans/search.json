@@ -29,7 +29,8 @@
   },
   "empty": {
     "no_results": "未找到结果。",
-    "type_to_search": "输入关键词搜索任务和项目"
+    "type_to_search": "输入关键词搜索任务和项目",
+    "more_results": "加载「{{query}}」的更多结果"
   },
   "trigger": {
     "label": "搜索..."

@@ -804,7 +804,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		%s AS match_source
 	FROM project p
 	WHERE p.workspace_id = %s AND %s
-	ORDER BY %s, %s, p.updated_at DESC
+	ORDER BY %s, %s, p.updated_at DESC, p.id ASC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		wsParam,
@@ -854,7 +854,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
 	args[1] = wsUUID
-	args[len(args)-2] = limit
+	// Fetch one extra row to detect overflow; see SearchIssues for the
+	// has_more contract.
+	args[len(args)-2] = limit + 1
 	args[len(args)-1] = offset
 
 	type projectSearchRow struct {
@@ -902,6 +904,11 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
 		return
+	}
+
+	hasMore := len(results) > limit
+	if hasMore {
+		results = results[:limit]
 	}
 
 	// Batch-fetch issue stats and resource counts
@@ -958,5 +965,6 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects": resp,
+		"has_more": hasMore,
 	})
 }

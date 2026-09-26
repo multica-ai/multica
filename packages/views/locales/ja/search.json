@@ -29,7 +29,8 @@
   },
   "empty": {
     "no_results": "結果が見つかりませんでした。",
-    "type_to_search": "タスクやプロジェクトを検索するには入力してください"
+    "type_to_search": "タスクやプロジェクトを検索するには入力してください",
+    "more_results": "「{{query}}」の結果をさらに読み込む"
   },
   "trigger": {
     "label": "検索..."

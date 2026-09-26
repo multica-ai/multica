@@ -505,14 +505,35 @@ describe("ApiClient schema fallback", () => {
       stubFetchJson({ issues: "not-an-array", total: 0 });
       const client = new ApiClient("https://api.example.test");
       const res = await client.searchIssues({ q: "bug" });
-      expect(res).toEqual({ issues: [] });
+      expect(res).toEqual({ issues: [], has_more: false });
     });
 
     it("accepts a response without an exact total", async () => {
       stubFetchJson({ issues: [] });
       const client = new ApiClient("https://api.example.test");
       const res = await client.searchIssues({ q: "bug" });
-      expect(res).toEqual({ issues: [] });
+      expect(res).toEqual({ issues: [], has_more: false });
+    });
+
+    it("defaults has_more to false when the backend omits it", async () => {
+      stubFetchJson({ issues: [] });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res.has_more).toBe(false);
+    });
+
+    it("forwards has_more when the backend truncates results", async () => {
+      stubFetchJson({ issues: [], has_more: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res.has_more).toBe(true);
+    });
+
+    it("coerces a malformed has_more to false", async () => {
+      stubFetchJson({ issues: [], has_more: "banana" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res.has_more).toBe(false);
     });
   });
 
@@ -521,14 +542,21 @@ describe("ApiClient schema fallback", () => {
       stubFetchJson({ projects: "not-an-array", total: 0 });
       const client = new ApiClient("https://api.example.test");
       const res = await client.searchProjects({ q: "roadmap" });
-      expect(res).toEqual({ projects: [] });
+      expect(res).toEqual({ projects: [], has_more: false });
     });
 
     it("accepts a response without an exact total", async () => {
       stubFetchJson({ projects: [] });
       const client = new ApiClient("https://api.example.test");
       const res = await client.searchProjects({ q: "roadmap" });
-      expect(res).toEqual({ projects: [] });
+      expect(res).toEqual({ projects: [], has_more: false });
+    });
+
+    it("forwards has_more when the backend truncates results", async () => {
+      stubFetchJson({ projects: [], has_more: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchProjects({ q: "roadmap" });
+      expect(res.has_more).toBe(true);
     });
   });
 
