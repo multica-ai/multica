@@ -75,6 +75,7 @@ import { ChatInput } from "./chat-input";
 import { ChatQueue } from "./chat-queue";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
+import { SessionHistoryList } from "./session-history-list";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
@@ -1620,7 +1621,7 @@ function SessionDropdown({
         </div>
         <PopoverContent
           align="start"
-          className="max-h-96 w-auto min-w-[max(16rem,var(--anchor-width,16rem))] max-w-96 gap-0 overflow-y-auto p-1"
+          className="max-h-96 w-auto min-w-[max(16rem,var(--anchor-width,16rem))] max-w-96 gap-0 overflow-hidden p-1"
           onClick={(e) => e.stopPropagation()}
         >
           {historySessions.length === 0 ? (
@@ -1632,7 +1633,12 @@ function SessionDropdown({
               <div className="px-1.5 py-1 text-caption font-medium text-muted-foreground">
                 {t(($) => $.window.history_group)}
               </div>
-              {historySessions.map(renderRow)}
+              <SessionHistoryList
+                sessions={historySessions}
+                renderRow={renderRow}
+                estimatedRowHeight={44}
+                maxHeight={320}
+              />
             </div>
           )}
         </PopoverContent>
