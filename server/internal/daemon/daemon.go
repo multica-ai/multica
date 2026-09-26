@@ -7547,13 +7547,14 @@ func resolveTaskModelSelection(
 
 	// service_tier is catalog-owned and currently Codex-only. As with
 	// thinking_level, stale or incompatible persisted values degrade to the
-	// runtime default instead of failing the task. Catalog lookup errors pass
-	// through so a transient discovery failure does not silently disable a
-	// previously valid user choice.
+	// runtime default instead of failing the task. A catalog that cannot
+	// validate — a lookup error, or a fallback catalog standing in for a
+	// failed discovery — passes the value through, so a discovery failure does
+	// not silently disable a previously valid user choice (MUL-7691).
 	if sel.ServiceTier != "" {
 		ok, err := agent.ValidateServiceTierWith(loadCatalog, provider, sel.Model, sel.ServiceTier)
 		if err != nil {
-			taskLog.Warn("service_tier: catalog lookup failed; passing through",
+			taskLog.Warn("service_tier: catalog cannot validate; passing through",
 				"provider", provider,
 				"model", sel.Model,
 				"service_tier", sel.ServiceTier,
@@ -7569,21 +7570,22 @@ func resolveTaskModelSelection(
 		}
 	}
 	// Per-model guard: the server validates the literal token against the
-	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
-	// model, Codex's per-model `supported_reasoning_levels`) only resolve
-	// here, against the daemon's local CLI catalog. Invalid combinations
-	// log a warning and drop the level rather than failing the task, so a
-	// stale persisted value never blocks execution. An empty model is
-	// resolved by ValidateThinkingLevelWith to the provider's default model so
-	// default-model tasks aren't misjudged — except for codex, whose empty
+	// provider's enum, but per-model gaps (Codex's per-model
+	// `supported_reasoning_levels`, Claude's per-model `supportedEffortLevels`)
+	// only resolve here, against the daemon's local CLI catalog. Invalid
+	// combinations log a warning and drop the level rather than failing the
+	// task, so a stale persisted value never blocks execution. An empty model
+	// is resolved by ValidateThinkingLevelWith to the provider's default model
+	// so default-model tasks aren't misjudged — except for codex, whose empty
 	// model follows config.toml (any model) and so fails closed, dropping the
-	// level here without a catalog read at all. Discovery errors fail open for
-	// resolved models: if we can't list models, we keep the persisted level
-	// and let the CLI object.
+	// level here without a catalog read at all. Only a verified catalog can
+	// drop a level: on a lookup error or a fallback/empty catalog we keep the
+	// persisted level and let the CLI object, unless the binary itself has no
+	// such effort flag (MUL-7691).
 	if sel.ThinkingLevel != "" {
 		ok, err := agent.ValidateThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
 		if err != nil {
-			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+			taskLog.Warn("thinking_level: catalog cannot validate; passing through",
 				"provider", provider,
 				"model", sel.Model,
 				"thinking_level", sel.ThinkingLevel,

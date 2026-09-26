@@ -1,19 +1,20 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, Brain, ChevronRight, CirclePause, Clock3, ExternalLink, Loader2, MessageSquare, MessageSquarePlus, RotateCcw, ScrollText, Send, Square, Terminal } from "lucide-react";
+import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
-import { useCancelIssueRun, useCreateTaskSupplement, useRetryIssueRun } from "@multica/core/issues/mutations";
-import { useCommentDraftStore, useTaskSupplementDraftStore } from "@multica/core/issues/stores";
+import { useCancelIssueRun, useRetryIssueRun } from "@multica/core/issues/mutations";
+import { issueTimelineOptions } from "@multica/core/issues/queries";
+import { commentSupplementReceipts } from "@multica/core/issues/run-steering";
 import { dispatchReasonCode } from "@multica/core/api";
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
@@ -55,12 +56,8 @@ export function useInlineCommentRunState() {
 export type InlineCommentRunState = ReturnType<typeof useInlineCommentRunState>;
 
 export function PlacedInlineCommentRun({ presentation = "inline", ...props }: Parameters<typeof InlineCommentRun>[0]) {
-  const draft = useTaskSupplementDraftStore((store) => store.drafts[props.run.task.id]);
-  // A live reply normally compacts its run into the comment header. Once the
-  // user opens a task draft, keep the full run mounted at its timeline slot so
-  // reply arrival and supplement-driven re-anchoring cannot discard the text.
-  const inHeader = showCommentRunInHeader(props.run) && !draft?.open;
-  if ((presentation === "header") !== inHeader) return null;
+  // A live reply compacts its run into the comment header.
+  if ((presentation === "header") !== showCommentRunInHeader(props.run)) return null;
   return <InlineCommentRun {...props} presentation={presentation} />;
 }
 
@@ -99,11 +96,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const [confirmStop, setConfirmStop] = useState(false);
   const [now, setNow] = useState(Date.now);
   const [visibleCount, setVisibleCount] = useState(12);
-  const supplementDraft = useTaskSupplementDraftStore((store) => store.drafts[task.id]);
   const animationVisibility = useRunAnimationVisibility<HTMLDivElement>();
   const cancel = useCancelIssueRun(task.issue_id);
   const retry = useRetryIssueRun(task.issue_id);
-  const supplement = useCreateTaskSupplement(task.issue_id);
   const regionId = useId();
   // Keep one disclosure button mounted across queued, live, and historical states.
   // Historical, collapsed runs still don't fetch transcripts.
@@ -113,6 +108,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
+  // Messages that steered this turn, placed in its step list where it read them.
+  const { data: steers = NO_STEERS } = useQuery({
+    ...issueTimelineOptions(task.issue_id),
+    enabled: false,
+    select: (entries: TimelineEntry[]) => deliveredSteers(entries, task.id),
+  });
   useEffect(() => {
     if (!active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -141,42 +142,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const activityLabel = t(($) => $.inline_run.view_activity);
   const stepLabel = steps.length > 0 ? t(($) => $.inline_run.steps, { count: steps.length }) : "";
   const stopLabel = cancel.isPending || cancel.isSuccess ? t(($) => $.inline_run.stopping) : t(($) => $.inline_run.stop);
-  const canSupplement = task.status === "running"
-    && task.supplement_capability === "task-supplement-v1"
-    && task.can_supplement === true
-    && !supplementDraft?.ended;
-  const supplementDisabledReason = supplementDraft?.ended
-    ? t(($) => $.inline_run.supplement_ended)
-    : t(($) => $.inline_run.supplement_forbidden);
-  useEffect(() => {
-    if (supplementDraft && task.status !== "running" && !active) {
-      useTaskSupplementDraftStore.getState().markEnded(task.id);
-    }
-  }, [active, supplementDraft, task.id, task.status]);
-  const closeSupplement = () => {
-    if (!supplement.isPending) useTaskSupplementDraftStore.getState().clear(task.id);
-  };
-  const submitSupplement = () => {
-    const content = supplementDraft?.content.trim() ?? "";
-    if (!content || !canSupplement || supplement.isPending) return;
-    const clientRequestId = supplementDraft?.clientRequestId ?? crypto.randomUUID();
-    useTaskSupplementDraftStore.getState().setRequestId(task.id, clientRequestId);
-    supplement.mutate({ taskId: task.id, content, clientRequestId }, {
-      onError: (error) => {
-        const code = dispatchReasonCode(error);
-        if (code === "task_supplement_turn_ended") {
-          useTaskSupplementDraftStore.getState().markEnded(task.id);
-        }
-        toast.error(code === "task_supplement_turn_ended"
-          ? t(($) => $.inline_run.supplement_ended)
-          : code === "task_supplement_unsupported"
-            ? t(($) => $.inline_run.supplement_unsupported)
-            : code === "invocation_not_allowed"
-              ? t(($) => $.inline_run.supplement_forbidden)
-              : t(($) => $.inline_run.supplement_failed));
-      },
-    });
-  };
   const transcript = fullLogOpen && <AgentTranscriptDialog open onOpenChange={setFullLogOpen}
     task={task} items={items} agentName={name} isLive={active} finalFocus={logFromKeyboard}
     contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
@@ -188,21 +153,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     onClick={() => setConfirmStop(true)}>
     {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
   </Button>;
-  const supplementButton = active
-    && task.supplement_capability === "task-supplement-v1"
-    && <Tooltip>
-    <TooltipTrigger render={<span className="inline-flex">
-      <Button type="button" size="sm" variant="ghost" className="text-muted-foreground"
-        aria-label={t(($) => $.inline_run.supplement_action)}
-        aria-expanded={!!supplementDraft?.open}
-        disabled={supplement.isPending || (!supplementDraft?.open && !canSupplement)}
-        onClick={() => supplementDraft?.open ? closeSupplement() : useTaskSupplementDraftStore.getState().open(task.id, task.issue_id)}>
-        <MessageSquarePlus className="size-3.5" />
-        <span className="@max-[32rem]/run:sr-only">{t(($) => $.inline_run.supplement_action)}</span>
-      </Button>
-    </span>} />
-    <TooltipContent>{canSupplement ? t(($) => $.inline_run.supplement_action) : supplementDisabledReason}</TooltipContent>
-  </Tooltip>;
   const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
     showRunningNote={task.status !== "queued"}
     onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
@@ -262,7 +212,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
-        {supplementButton}
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
@@ -274,51 +223,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       </div>
       <div className={cn(showIdentity && "pl-8")}>
         {replyTo}
-        {supplementDraft?.open && <div className="mt-2 space-y-2 rounded-md border bg-muted/20 p-2"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              closeSupplement();
-            }
-          }}>
-          <Textarea value={supplementDraft.content} autoFocus rows={3}
-            placeholder={t(($) => $.inline_run.supplement_placeholder)}
-            disabled={supplement.isPending}
-            onChange={(event) => {
-              useTaskSupplementDraftStore.getState().setContent(task.id, task.issue_id, event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                event.preventDefault();
-                submitSupplement();
-              }
-            }} />
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-micro text-muted-foreground">{canSupplement
-              ? t(($) => $.inline_run.supplement_notice)
-              : supplementDraft.ended || task.status !== "running" ? t(($) => $.inline_run.supplement_ended) : supplementDisabledReason}</p>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button type="button" size="sm" variant="outline" disabled={supplement.isPending} onClick={closeSupplement}>
-                {supplementDraft.ended ? t(($) => $.inline_run.supplement_discard) : t(($) => $.comment.cancel_action)}
-              </Button>
-              {supplementDraft.ended && supplementDraft.content.trim() && <Button type="button" size="sm" variant="outline"
-                disabled={supplement.isPending}
-                onClick={() => {
-                  useCommentDraftStore.getState().appendToDraftContent(`new:${task.issue_id}`, supplementDraft.content);
-                  useTaskSupplementDraftStore.getState().clear(task.id);
-                  toast.success(t(($) => $.inline_run.supplement_moved));
-                }}>
-                {t(($) => $.inline_run.supplement_move_to_new)}
-              </Button>}
-              {!supplementDraft.ended && <Button type="button" size="sm" disabled={!supplementDraft.content.trim() || supplement.isPending || !canSupplement}
-                onClick={submitSupplement}>
-                {supplement.isPending ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Send className="size-3.5" />}
-                {t(($) => $.inline_run.supplement_send)}
-              </Button>}
-            </div>
-          </div>
-        </div>}
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
         {needsAction && rawError && <p title={rawError}
           className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
@@ -331,7 +235,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
-          {rows.slice(-visibleCount).map((row) => <InlineStep key={row.seq} row={row} live={active} formatText={formatText} />)}
+          {interleaveSteers(rows.slice(-visibleCount), steers, rows.length > visibleCount).map((item) => "steer" in item
+            ? <InlineSteer key={`steer:${item.steer.id}`} steer={item.steer} />
+            : <InlineStep key={item.row.seq} row={item.row} live={active} formatText={formatText} />)}
           <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
@@ -340,6 +246,73 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       {stopDialog}
     </section>
   );
+}
+
+interface DeliveredSteer {
+  id: string;
+  actorType: string;
+  actorId: string;
+  content: string;
+  deliveredAt: string;
+}
+
+const NO_STEERS: DeliveredSteer[] = [];
+
+function deliveredSteers(entries: TimelineEntry[], taskId: string): DeliveredSteer[] {
+  const out: DeliveredSteer[] = [];
+  for (const entry of entries) {
+    if (entry.type !== "comment") continue;
+    const receipt = commentSupplementReceipts(entry)
+      .find((r) => r.task_id === taskId && r.status === "delivered" && r.delivered_at);
+    if (!receipt) continue;
+    out.push({ id: entry.id, actorType: entry.actor_type, actorId: entry.actor_id, content: entry.content ?? "", deliveredAt: receipt.delivered_at! });
+  }
+  return out.length ? out : NO_STEERS;
+}
+
+function rowStartedAt(row: TraceRow): number {
+  const at = isGroupRow(row) ? row.steps[0]?.startedAt : row.startedAt;
+  return at ? Date.parse(at) : Number.NaN;
+}
+
+// A steer sits right before the first step that started after the turn read
+// it. With earlier steps folded away, a steer read before the first visible
+// step folds away with them.
+function interleaveSteers(rows: TraceRow[], steers: DeliveredSteer[], hasEarlier: boolean): ({ row: TraceRow } | { steer: DeliveredSteer })[] {
+  if (steers.length === 0) return rows.map((row) => ({ row }));
+  const pending = [...steers].sort((a, b) => Date.parse(a.deliveredAt) - Date.parse(b.deliveredAt));
+  const firstVisible = rows.length ? rowStartedAt(rows[0]!) : Number.NaN;
+  const out: ({ row: TraceRow } | { steer: DeliveredSteer })[] = [];
+  let next = 0;
+  if (hasEarlier && Number.isFinite(firstVisible)) {
+    while (next < pending.length && Date.parse(pending[next]!.deliveredAt) < firstVisible) next++;
+  }
+  for (const row of rows) {
+    const started = rowStartedAt(row);
+    while (next < pending.length && Number.isFinite(started) && Date.parse(pending[next]!.deliveredAt) < started) {
+      out.push({ steer: pending[next++]! });
+    }
+    out.push({ row });
+  }
+  while (next < pending.length) out.push({ steer: pending[next++]! });
+  return out;
+}
+
+function InlineSteer({ steer }: { steer: DeliveredSteer }) {
+  const { t } = useT("issues");
+  const { getActorName } = useActorName();
+  const name = getActorName(steer.actorType, steer.actorId);
+  const summary = traceEventSummary({ type: "text", content: steer.content });
+  return <div className="flex min-w-0 items-center gap-2 rounded-xs bg-brand/7 px-1 py-1.5 text-caption dark:bg-brand/12" data-steer-comment={steer.id}>
+    <CornerDownRight aria-hidden className="size-3.5 shrink-0 text-brand" />
+    <span className="min-w-0 flex-1 truncate" title={steer.content}>
+      <span className="font-medium">{t(($) => $.inline_run.steer_step, { name })}</span>
+      <span className="text-muted-foreground"> · {summary}</span>
+    </span>
+    <span className="inline-flex shrink-0 items-center gap-0.5 text-micro text-success">
+      <Check aria-hidden className="size-3" />{t(($) => $.inline_run.steer_step_read)}
+    </span>
+  </div>;
 }
 
 function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; formatText: (text: string) => string }) {

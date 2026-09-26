@@ -1,5 +1,6 @@
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
+import { commentSupplementReceipts } from "@multica/core/issues/run-steering";
 
 export interface CommentRun {
   task: AgentTask;
@@ -59,10 +60,12 @@ export function buildCommentRunView(
   const comments = new Map(timeline.filter((entry) => entry.type === "comment").map((entry) => [entry.id, entry]));
   const supplementalByTask = new Map<string, string[]>();
   for (const entry of comments.values()) {
-    if (!entry.supplement_task_id) continue;
-    const ids = supplementalByTask.get(entry.supplement_task_id) ?? [];
-    ids.push(entry.id);
-    supplementalByTask.set(entry.supplement_task_id, ids);
+    // One message can steer several turns; it is input to each of them.
+    for (const receipt of commentSupplementReceipts(entry)) {
+      const ids = supplementalByTask.get(receipt.task_id) ?? [];
+      ids.push(entry.id);
+      supplementalByTask.set(receipt.task_id, ids);
+    }
   }
   const timelineOrder = new Map(timeline.map((entry, index) => [entry.id, index]));
   const threadRoot = (id: string): string | undefined => {

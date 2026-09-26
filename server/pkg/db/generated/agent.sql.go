@@ -5069,6 +5069,19 @@ func (q *Queries) HasTaskCoveringDelegatedFailureComment(ctx context.Context, ar
 	return covered, err
 }
 
+const hasTaskForIssue = `-- name: HasTaskForIssue :one
+SELECT EXISTS (SELECT 1 FROM agent_task_queue WHERE issue_id = $1)
+`
+
+// Returns true if the issue has any task in any status. Webhook recovery
+// treats even a terminal task as proof that ownership moved downstream.
+func (q *Queries) HasTaskForIssue(ctx context.Context, issueID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasTaskForIssue, issueID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2
@@ -5775,7 +5788,7 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
-SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id, recovery.via_plugin_id, recovery.revision, recovery.recovery_settled_at, recovery.deleted_at, recovery.suppressed_agent_ids
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
@@ -5893,6 +5906,7 @@ func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, max
 			&i.Revision,
 			&i.RecoverySettledAt,
 			&i.DeletedAt,
+			&i.SuppressedAgentIds,
 		); err != nil {
 			return nil, err
 		}

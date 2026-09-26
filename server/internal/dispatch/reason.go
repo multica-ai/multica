@@ -19,6 +19,8 @@ const (
 	ReasonQueued    ReasonCode = "queued"
 	ReasonCoalesced ReasonCode = "coalesced"
 	ReasonDeferred  ReasonCode = "deferred"
+	// ReasonSteered: the comment went into the target's running turn.
+	ReasonSteered ReasonCode = "steered"
 
 	// ReasonInvocationNotAllowed: the acting principal may not trigger this
 	// target under the invocation-permission model. Deliberately generic — it

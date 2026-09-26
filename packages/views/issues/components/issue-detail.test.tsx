@@ -439,17 +439,13 @@ vi.mock("@multica/core/issues/stores", async () => ({
       }),
     },
   ),
-  useTaskSupplementDraftStore: (await import("zustand")).create(() => ({
-    drafts: {}, open: vi.fn(), setContent: vi.fn(), setRequestId: vi.fn(),
-    markEnded: vi.fn(), clear: vi.fn(),
-  })),
   useCommentComposerStore: Object.assign(
     (selector?: any) => {
-      const state = { sticky: true, toggleSticky: () => {} };
+      const state = { sticky: true, runningAgentReply: "steer", toggleSticky: () => {} };
       return selector ? selector(state) : state;
     },
     {
-      getState: () => ({ sticky: true, toggleSticky: () => {} }),
+      getState: () => ({ sticky: true, runningAgentReply: "steer", toggleSticky: () => {} }),
     },
   ),
 }));

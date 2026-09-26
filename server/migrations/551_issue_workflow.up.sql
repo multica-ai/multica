@@ -15,8 +15,8 @@
 -- queries individual steps across workflows. Status keys and handler ids are
 -- validated in application code; no foreign keys by project rule.
 --
--- id is attached as the primary key in 550 from the index built CONCURRENTLY
--- in 549 (repo convention, see 332-334).
+-- id is attached as the primary key in 553 from the index built CONCURRENTLY
+-- in 552 (repo convention, see 332-334).
 CREATE TABLE IF NOT EXISTS issue_workflow (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL,

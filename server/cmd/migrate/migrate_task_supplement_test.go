@@ -27,6 +27,8 @@ func TestTaskSupplementMigrationsUpDownUpInIsolatedSchema(t *testing.T) {
 			"542_task_supplement_primary_key",
 			"543_task_supplement_teardown_guard",
 			"544_task_supplement_application_settlement",
+			"548_task_supplement_comment_task_index",
+			"549_task_supplement_comment_task_primary_key",
 		}
 		if direction == "down" {
 			slices.Reverse(versions)
@@ -91,6 +93,30 @@ func TestTaskSupplementMigrationsUpDownUpInIsolatedSchema(t *testing.T) {
 			_ = tx.Rollback(ctx)
 			if err != nil || status != "pending" {
 				t.Fatalf("task update had hidden receipt settlement: %s, %v", status, err)
+			}
+			// One comment may steer several runs, but never the same run twice.
+			var receipts int
+			tx, err = pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = tx.Exec(ctx, `
+				INSERT INTO task_supplement (task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status)
+				SELECT task_id, gen_random_uuid(), gen_random_uuid(), '00000000-0000-0000-0000-0000000000c1', gen_random_uuid(), gen_random_uuid(), 'pending'
+				FROM (VALUES ('00000000-0000-0000-0000-00000000000a'::uuid), ('00000000-0000-0000-0000-00000000000b'::uuid)) AS runs(task_id)`)
+			if err == nil {
+				err = tx.QueryRow(ctx, `SELECT count(*) FROM task_supplement WHERE comment_id = '00000000-0000-0000-0000-0000000000c1'`).Scan(&receipts)
+			}
+			if err != nil || receipts != 2 {
+				_ = tx.Rollback(ctx)
+				t.Fatalf("one comment bound to two runs: %d receipts, %v", receipts, err)
+			}
+			_, err = tx.Exec(ctx, `
+				INSERT INTO task_supplement (task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status)
+				VALUES ('00000000-0000-0000-0000-00000000000a', gen_random_uuid(), gen_random_uuid(), '00000000-0000-0000-0000-0000000000c1', gen_random_uuid(), gen_random_uuid(), 'pending')`)
+			_ = tx.Rollback(ctx)
+			if err == nil {
+				t.Fatal("the same comment was bound to the same run twice")
 			}
 		}
 	}

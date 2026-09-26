@@ -202,19 +202,27 @@ func TestInboundGroupHumanReplyUsesCaptionAndHandlesNonText(t *testing.T) {
 		name   string
 		reply  *Message
 		wanted string
+		file   string // the quoted file carried for the resolver, if any
 	}{
 		{
 			name: "caption",
 			reply: &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"},
 				Caption: "diagram caption", Photo: []PhotoSize{{FileID: "p1"}},
 			},
-			wanted: "diagram caption",
+			wanted: "[Image]\ndiagram caption",
+			file:   "p1",
 		},
 		{
-			name: "empty non-text",
+			name: "file without caption",
 			reply: &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"},
 				Document: &FileRef{FileID: "d1", FileName: "notes.txt"},
 			},
+			wanted: "[File: notes.txt]",
+			file:   "d1",
+		},
+		{
+			name:   "empty non-text",
+			reply:  &Message{MessageID: 9, From: &User{ID: 222, Username: "ada"}, Sticker: &struct{}{}},
 			wanted: "[empty or non-text message]",
 		},
 	} {
@@ -227,6 +235,14 @@ func TestInboundGroupHumanReplyUsesCaptionAndHandlesNonText(t *testing.T) {
 			if !ok || !msg.AddressedToBot || msg.CommandText != "inspect this" ||
 				!strings.Contains(msg.Text, "sender=\"ada\"") || !strings.Contains(msg.Text, tc.wanted) {
 				t.Fatalf("message = %+v", msg)
+			}
+			raw, _ := decodeTelegramRaw(msg)
+			file := ""
+			if len(raw.Media) == 1 {
+				file = raw.Media[0].FileID
+			}
+			if file != tc.file || len(raw.Media) > 1 {
+				t.Fatalf("media = %+v, want quoted file %q", raw.Media, tc.file)
 			}
 		})
 	}
