@@ -1,0 +1,113 @@
+{
+  "title": "Analítica",
+  "tab_usage": "Uso",
+  "header": {
+    "timezone_and_updated": "{{tz}} · actualizado {{time}}",
+    "refresh": "Actualizar"
+  },
+  "filter": {
+    "project_label": "Proyecto",
+    "all_projects": "Todos los proyectos",
+    "period_label": "Periodo"
+  },
+  "kpi": {
+    "cost_label": "Coste · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Entrada {{input}} · Salida {{output}}",
+    "run_time_label": "Tiempo de ejecución · {{days}}D",
+    "run_time_hint": "En {{tasks}} ejecuciones",
+    "tasks_label": "Ejecuciones · {{days}}D",
+    "tasks_hint": "{{failed}} fallaron"
+  },
+  "dim": {
+    "label": "Dimensión",
+    "daily": "Diario",
+    "weekly": "Semanal"
+  },
+  "daily": {
+    "title_cost": "Coste diario",
+    "title_tokens": "Tokens diarios",
+    "title_time": "Tiempo de ejecución diario",
+    "title_tasks": "Ejecuciones diarias",
+    "title_errors": "Errores diarios",
+    "metric_cost": "Coste",
+    "metric_tokens": "Tokens",
+    "metric_time": "Tiempo",
+    "metric_tasks": "Ejecuciones",
+    "no_data": "Sin uso en este periodo.",
+    "metric_label": "Métrica"
+  },
+  "weekly": {
+    "title_cost": "Coste semanal",
+    "title_tokens": "Tokens semanales",
+    "title_time": "Tiempo de ejecución semanal",
+    "title_tasks": "Ejecuciones semanales",
+    "title_errors": "Errores semanales",
+    "partial_label": "{{range}} (parcial · {{covered}} / 7 días)"
+  },
+  "errors": {
+    "kpi_failed_label": "Ejecuciones fallidas · {{days}}D",
+    "kpi_failed_hint": "De {{total}} ejecuciones",
+    "kpi_rate_label": "Tasa de fallo · {{days}}D",
+    "kpi_agents_label": "Agentes afectados · {{days}}D",
+    "kpi_agents_hint": "Peor: {{name}} · {{count}}",
+    "tooltip_rate": "Tasa de error",
+    "class": {
+      "auth": "Autenticación",
+      "rate_limit": "Límite de peticiones",
+      "timeout": "Timeout",
+      "provider": "Proveedor",
+      "runtime": "Runtime",
+      "agent": "Agente",
+      "other": "Otros"
+    },
+    "title": "Errores",
+    "summary": "{{failed}} de {{total}} ejecuciones fallaron · {{rate}}",
+    "mix_title": "Distribución de fallos · {{failed}}",
+    "mix_label": "Distribución de fallos",
+    "codes_label": "Códigos de error",
+    "by_agent": "Principales responsables",
+    "sort_label": "Ordenar responsables por",
+    "sort_failed": "Fallos",
+    "sort_rate": "Tasa",
+    "header_agent": "Agente",
+    "header_failed": "Fallidas",
+    "header_runs": "Ejecuciones",
+    "header_rate": "Tasa",
+    "other_agents": "Otros agentes",
+    "low_sample": "Menos de {{count}} ejecuciones en este periodo - esta tasa no es significativa.",
+    "no_data": "No hay ejecuciones fallidas en este periodo.",
+    "show_reasons": "Mostrar códigos de error",
+    "hide_reasons": "Ocultar códigos de error",
+    "show_all": "Mostrar todos ({{count}})",
+    "show_less": "Mostrar los {{count}} principales"
+  },
+  "leaderboard": {
+    "title": "Clasificación",
+    "caption": "{{count}} agentes",
+    "caption_with_deleted": "{{count}} agentes · {{deleted}} eliminados",
+    "sort_label": "Ordenar agentes por",
+    "deleted_agents": "Agentes eliminados",
+    "other_agents": "Otros agentes",
+    "header_agent": "Agente",
+    "header_tokens": "Tokens",
+    "header_cost": "Coste",
+    "header_time": "Tiempo",
+    "header_tasks": "Ejecuciones",
+    "usage_unreported_one": "{{count}} ejecución no informó del uso",
+    "usage_unreported_other": "{{count}} ejecuciones no informaron del uso",
+    "usage_unreported_pending_one": "{{count}} ejecución no informó del uso · los totales se están procesando",
+    "usage_unreported_pending_other": "{{count}} ejecuciones no informaron del uso · los totales se están procesando",
+    "usage_totals_pending": "Los totales de uso se están procesando",
+    "show_all": "Mostrar todos",
+    "show_less": "Mostrar los {{count}} principales",
+    "no_data": "Sin actividad de agentes en este periodo."
+  },
+  "empty": {
+    "title": "Aún no hay uso",
+    "body": "Ejecuta agentes para ver el uso de tokens y el tiempo de ejecución."
+  },
+  "duration": {
+    "less_than_minute": "<1 min"
+  }
+}

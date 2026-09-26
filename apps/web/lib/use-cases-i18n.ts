@@ -53,6 +53,16 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "続きを読む →",
     tableOfContents: "このページの内容",
   },
+  es: {
+    indexTitle: "Casos de uso",
+    indexSubtitle:
+      "Descubre cómo los equipos organizan a personas y agentes con Multica.",
+    indexMetadataTitle: "Casos de uso",
+    indexMetadataDescription:
+      "Descubre cómo los equipos hacen trabajar juntas a personas y agentes con Multica.",
+    cardReadMore: "Leer →",
+    tableOfContents: "En esta página",
+  },
   fr: {
     indexTitle: "Cas d'usage",
     indexSubtitle:

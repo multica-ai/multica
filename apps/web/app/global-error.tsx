@@ -45,9 +45,7 @@ export default function GlobalError({
       >
         <div style={{ maxWidth: 420, textAlign: "center" }}>
           <h1 style={{ fontSize: 18, fontWeight: 600 }}>{copy.title}</h1>
-          <p style={{ marginTop: 8, color: "#666" }}>
-            {copy.description}
-          </p>
+          <p style={{ marginTop: 8, color: "#666" }}>{copy.description}</p>
           <button
             type="button"
             onClick={reset}
@@ -86,7 +84,8 @@ const EMERGENCY_COPY = {
   },
   ja: {
     title: "問題が発生しました",
-    description: "ページで予期しないエラーが発生しました。再読み込みしてください。",
+    description:
+      "ページで予期しないエラーが発生しました。再読み込みしてください。",
     reload: "再読み込み",
   },
   ko: {
@@ -96,7 +95,14 @@ const EMERGENCY_COPY = {
   },
   fr: {
     title: "Une erreur s'est produite",
-    description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
+    description:
+      "La page a rencontré une erreur inattendue. Essayez de la recharger.",
     reload: "Recharger",
+  },
+  es: {
+    title: "Algo ha ido mal",
+    description:
+      "La página ha tenido un error inesperado. Prueba a recargarla.",
+    reload: "Recargar",
   },
 } as const;

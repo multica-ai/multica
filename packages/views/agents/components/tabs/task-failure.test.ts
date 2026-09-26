@@ -7,6 +7,7 @@ import enAgents from "../../../locales/en/agents.json";
 import frAgents from "../../../locales/fr/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
+import esAgents from "../../../locales/es/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 
 import {
@@ -25,6 +26,7 @@ const AGENT_RESOURCES = {
   ja: jaAgents,
   ko: koAgents,
   fr: frAgents,
+  es: esAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -43,29 +45,49 @@ const enT = fixedT("en");
 
 describe("cancellationActorLabel", () => {
   it("names the member that cancelled a run", () => {
-    expect(cancellationActorLabel({
-      status: "cancelled",
-      cancelled_by: { type: "member", name: "Jiayuan" },
-    }, enT)).toBe("Cancelled by Jiayuan");
+    expect(
+      cancellationActorLabel(
+        {
+          status: "cancelled",
+          cancelled_by: { type: "member", name: "Jiayuan" },
+        },
+        enT,
+      ),
+    ).toBe("Cancelled by Jiayuan");
   });
 
   it("localizes system cancellation and preserves the legacy fallback", () => {
-    expect(cancellationActorLabel({
-      status: "cancelled",
-      cancelled_by: { type: "system" },
-    }, fixedT("zh-Hans"))).toBe("已由系统取消");
-    expect(cancellationActorLabel({
-      status: "cancelled",
-      cancelled_by: { type: "member", name: "Jiayuan" },
-    }, fixedT("zh-Hans"))).toBe("已由 Jiayuan 取消");
+    expect(
+      cancellationActorLabel(
+        {
+          status: "cancelled",
+          cancelled_by: { type: "system" },
+        },
+        fixedT("zh-Hans"),
+      ),
+    ).toBe("已由系统取消");
+    expect(
+      cancellationActorLabel(
+        {
+          status: "cancelled",
+          cancelled_by: { type: "member", name: "Jiayuan" },
+        },
+        fixedT("zh-Hans"),
+      ),
+    ).toBe("已由 Jiayuan 取消");
     expect(cancellationActorLabel({ status: "cancelled" }, enT)).toBeNull();
   });
 
   it("preserves the legacy fallback for an unknown actor type", () => {
-    expect(cancellationActorLabel({
-      status: "cancelled",
-      cancelled_by: { type: "future_actor", name: "Someone" },
-    }, enT)).toBeNull();
+    expect(
+      cancellationActorLabel(
+        {
+          status: "cancelled",
+          cancelled_by: { type: "future_actor", name: "Someone" },
+        },
+        enT,
+      ),
+    ).toBeNull();
   });
 });
 
@@ -111,6 +133,7 @@ describe("cancelReasonLabel", () => {
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
+      es: "Cancelada por el sistema",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {
@@ -130,12 +153,17 @@ describe("cancelReasonLabel", () => {
   it.each(["system", "member", "agent"])(
     "does not add a generic system reason when %s actor provenance exists",
     (type) => {
-      expect(cancelReasonLabel({
-        status: "cancelled",
-        error: "automatic cancellation",
-        failure_reason: null,
-        cancelled_by: { type },
-      }, enT)).toBeNull();
+      expect(
+        cancelReasonLabel(
+          {
+            status: "cancelled",
+            error: "automatic cancellation",
+            failure_reason: null,
+            cancelled_by: { type },
+          },
+          enT,
+        ),
+      ).toBeNull();
     },
   );
 });
@@ -179,24 +207,19 @@ describe("failureReasonLabel", () => {
   });
 
   it("localizes the legacy user cancellation value retained by the service", () => {
-    expect(failureReasonLabel("user_cancelled", enT)).toBe(
-      "Cancelled by user",
-    );
+    expect(failureReasonLabel("user_cancelled", enT)).toBe("Cancelled by user");
   });
 
   it("uses native copy for representative refined reasons", () => {
     expect(
-      failureReasonLabel(
-        "agent_error.provider_quota_limit",
-        fixedT("zh-Hans"),
-      ),
+      failureReasonLabel("agent_error.provider_quota_limit", fixedT("zh-Hans")),
     ).toBe("提供商配额已用尽");
     expect(
       failureReasonLabel("agent_error.context_overflow", fixedT("ja")),
     ).toBe("コンテキストウィンドウを超過しました");
-    expect(
-      failureReasonLabel("agent_error.missing_config", fixedT("ko")),
-    ).toBe("API 키 또는 설정 누락");
+    expect(failureReasonLabel("agent_error.missing_config", fixedT("ko"))).toBe(
+      "API 키 또는 설정 누락",
+    );
   });
 
   it("still falls back to the raw wire value for unknown reasons", () => {

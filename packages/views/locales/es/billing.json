@@ -1,0 +1,264 @@
+{
+  "title": "Facturación (página de prueba)",
+  "subtitle": "Pasarela directa a /api/v1/billing/* de multica-cloud. No es una UI terminada - solo todos los endpoints metidos en una página para poder verificar el proxy y el flujo de Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Saldo",
+    "credits_suffix": "créditos",
+    "meta": "micros en bruto: {{micro}} · propietario: {{owner}}… · actualizado {{updated}}"
+  },
+  "buy": {
+    "title": "Comprar créditos / Gestionar facturación",
+    "no_tiers": "No hay niveles de precio configurados. Es probable que Cloud no tenga clave de Stripe - checkout devolverá 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} créditos",
+    "tier_bonus": " + {{credits}} de bonus",
+    "tier_bonus_with_expiry": " + {{credits}} de bonus ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Abrir el portal de facturación de Stripe",
+    "portal_hint": "400 es lo esperado para usuarios que aún no han pagado (no existe registro de cliente en Stripe).",
+    "toast_no_url": "Cloud no devolvió URL de checkout",
+    "toast_checkout_failed": "El checkout falló",
+    "toast_no_portal_url": "No se devolvió URL del portal",
+    "toast_portal_failed": "El portal falló"
+  },
+  "checkout": {
+    "session_label": "Sesión de checkout {{prefix}}…",
+    "loading": "Cargando el estado del pedido…",
+    "fetch_failed": "No se pudo obtener el estado: {{error}}",
+    "fetch_failed_unknown": "error desconocido",
+    "final_status": "Estado final: {{status}}",
+    "polling_status": "Consultando el estado… actual: {{status}}",
+    "status_unknown": "desconocido",
+    "label_order": "Pedido",
+    "label_tier": "Nivel",
+    "label_charged": "Cobrado",
+    "charged_value": "{{money}} · {{credits}} créditos",
+    "charged_with_bonus": "{{money}} · {{credits}} créditos + {{bonus}} de bonus",
+    "clear_url": "Quitar de la URL"
+  },
+  "transactions": {
+    "title": "Transacciones",
+    "empty": "Aún no hay transacciones.",
+    "credits_value": "{{value}} créditos",
+    "row_meta": "{{date}} · saldo después: {{balance}} créditos · ref: {{ref}}",
+    "ref_empty": "-"
+  },
+  "batches": {
+    "title": "Lotes de crédito",
+    "empty": "Aún no hay lotes.",
+    "remaining_over_total": "{{remaining}} / {{total}} créditos",
+    "id_suffix": "{{id}}…",
+    "consumed": "Consumidos: {{value}} créditos",
+    "expires_suffix": " · caduca {{value}}",
+    "never_expires_suffix": " · nunca caduca"
+  },
+  "topups": {
+    "title": "Pedidos de recarga",
+    "empty": "Aún no hay pedidos de recarga.",
+    "amount_to_credits": "{{money}} → {{credits}} créditos",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} créditos + {{bonus}} de bonus",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "-"
+  },
+  "workspace": {
+    "title": "Facturación",
+    "description": "Gestiona el plan, los límites, los asientos humanos y la facturación de Stripe de este espacio de trabajo.",
+    "loading": "Cargando la facturación del espacio de trabajo",
+    "plan": {
+      "free": "Gratis",
+      "pro": "Pro",
+      "unknown": "Plan desconocido"
+    },
+    "status": {
+      "inactive": "Inactiva",
+      "active": "Activa",
+      "trialing": "En prueba",
+      "past_due": "Pago atrasado",
+      "canceled": "Cancelada",
+      "incomplete": "Incompleta",
+      "incomplete_expired": "Configuración caducada",
+      "paused": "En pausa",
+      "unpaid": "Sin pagar",
+      "unknown": "Estado desconocido"
+    },
+    "load_failed": {
+      "title": "La facturación no está disponible temporalmente",
+      "description": "No se pudieron cargar los detalles de la suscripción. Inténtalo de nuevo."
+    },
+    "actions": {
+      "retry": "Reintentar",
+      "retry_autopilots": "Reintentar el uso de automatización",
+      "upgrade": "Actualizar a Pro",
+      "manage": "Gestionar facturación",
+      "add_seats": "Añadir asientos",
+      "cancel": "Cancelar",
+      "continue_to_stripe": "Continuar a Stripe"
+    },
+    "errors": {
+      "action_title": "La acción de facturación falló",
+      "temporarily_unavailable": "La facturación no está disponible temporalmente. Reintenta en un momento.",
+      "not_enabled": "Las suscripciones de espacios de trabajo no están habilitadas en este despliegue. Contacta con tu administrador.",
+      "permission_changed": "Tu rol en el espacio de trabajo ya no permite esta acción. Actualiza la página para ver tu acceso actual.",
+      "checkout_response": "No se pudo abrir el checkout porque la respuesta del servidor era ilegible. Reintenta sin cambiar el intervalo seleccionado.",
+      "already_subscribed": "Este espacio de trabajo ya tiene una suscripción. El plan actual se ha actualizado.",
+      "checkout_failed": "No se pudo crear el checkout. Reintenta en un momento.",
+      "portal_response": "No se pudo abrir el portal de facturación porque la respuesta del servidor era ilegible.",
+      "portal_unavailable": "El portal de facturación no está disponible para este espacio de trabajo. El plan actual se ha actualizado.",
+      "portal_failed": "No se pudo abrir el portal de facturación. Reintenta en un momento."
+    },
+    "return": {
+      "cancel_title": "Checkout cancelado",
+      "cancel_description": "No se realizó ningún cambio de plan.",
+      "portal_title": "Detalles de facturación actualizados",
+      "syncing_title": "Activando tu suscripción",
+      "syncing_description": "El pago se ha completado. Estamos esperando a que Stripe confirme el cambio de plan.",
+      "timeout_description": "Se recibió el pago, pero la suscripción aún se está sincronizando. Actualiza esta página en un momento.",
+      "active_title": "Pro está activo",
+      "active_description": "Este espacio de trabajo ya tiene acceso a Pro."
+    },
+    "past_due": {
+      "title": "El pago necesita atención",
+      "description": "Actualiza tu método de pago en la gestión de facturación.",
+      "grace_description": "Actualiza tu método de pago antes del {{date}} para mantener el acceso a Pro."
+    },
+    "subscription_notice": {
+      "canceling_title": "La cancelación está programada",
+      "canceling_description": "Tu suscripción se cancelará el {{date}}.",
+      "canceling_description_without_date": "Esta suscripción está programada para cancelarse al final de su periodo actual.",
+      "incomplete_title": "La configuración de la suscripción está incompleta",
+      "incomplete_description": "Abre la gestión de facturación para terminar o revisar la configuración del pago.",
+      "incomplete_expired_title": "La configuración de la suscripción caducó",
+      "incomplete_expired_description": "La configuración de pago anterior caducó sin activar Pro. Inicia una nueva actualización cuando quieras.",
+      "paused_title": "La suscripción está en pausa",
+      "paused_description": "Abre la gestión de facturación para revisar la pausa y las opciones de recuperación disponibles.",
+      "unpaid_title": "La suscripción está sin pagar",
+      "unpaid_description": "Abre la gestión de facturación para resolver el saldo pendiente.",
+      "canceled_title": "La suscripción está cancelada"
+    },
+    "current": {
+      "title": "Plan actual",
+      "plan": "Plan del espacio de trabajo",
+      "members": "Miembros humanos",
+      "members_description": "Los agentes y las invitaciones pendientes no cuentan como asientos.",
+      "member_count_one": "{{count}} miembro",
+      "member_count_other": "{{count}} miembros",
+      "billing_interval": "Intervalo de facturación",
+      "period_end": "El periodo actual termina"
+    },
+    "upgrade": {
+      "title": "Actualizar a Pro",
+      "description": "Elige un intervalo de facturación y luego confirma los asientos actuales y el importe final en Stripe Checkout.",
+      "interval_label": "Intervalo de facturación",
+      "monthly": "Mensual",
+      "yearly": "Anual",
+      "pro_for_team_one": "Pro para {{count}} asiento humano",
+      "pro_for_team_other": "Pro para {{count}} asientos humanos",
+      "price_loading": "Cargando precios de suscripción",
+      "unit_price": "{{price}} por asiento humano",
+      "price_at_checkout": "El servidor vuelve a contar los miembros humanos antes de la compra. Stripe Checkout muestra el precio por asiento y el total autorizados antes de que pagues."
+    },
+    "management": {
+      "title": "Gestión de la suscripción",
+      "description": "Métodos de pago, facturas y cancelación.",
+      "portal": "Portal de facturación de Stripe",
+      "portal_unavailable": "No hay ningún portal de facturación de Stripe disponible para este espacio de trabajo."
+    },
+    "limits": {
+      "title": "Uso y límites",
+      "issues": "Incidencias",
+      "autopilots": "Ejecuciones de automatización",
+      "unlimited": "Ilimitado",
+      "per_month": "{{count}} / mes",
+      "usage_loading": "Cargando el uso de automatización",
+      "usage_label": "Uso de la cuota de automatización",
+      "current_usage": "Uso actual",
+      "reached": "Límite alcanzado",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "{{used}} completadas · {{reserved}} en curso",
+      "resets_at": "Se reinicia el {{date}}",
+      "usage_unavailable": "El uso no está disponible temporalmente"
+    },
+    "seats": {
+      "title": "Asientos",
+      "description": "Los asientos comprados cubren a los miembros humanos actuales y a las invitaciones pendientes. Los agentes nunca usan un asiento.",
+      "human_members": "Asientos usados",
+      "billed": "Asientos comprados",
+      "pending_invitations": "Invitaciones pendientes",
+      "pending_invitations_description": "Las invitaciones activas reservan asientos comprados hasta que se aceptan o caducan.",
+      "available": "Asientos disponibles",
+      "available_description": "Asientos comprados menos miembros e invitaciones reservadas.",
+      "pending": "Cantidad de asientos programada",
+      "pending_description": "Entra en vigor en el próximo periodo de facturación.",
+      "seat_count_one": "{{count}} asiento",
+      "seat_count_other": "{{count}} asientos",
+      "pending_with_date_one": "{{count}} asiento desde el {{date}}",
+      "pending_with_date_other": "{{count}} asientos desde el {{date}}",
+      "none_pending": "Sin cambio programado",
+      "not_subscribed": "Sin suscripción activa",
+      "unavailable": "No disponible",
+      "summary_loading": "Cargando los detalles de asientos de la suscripción",
+      "summary_unavailable_title": "Algunos detalles de asientos no están disponibles",
+      "summary_unavailable_description": "El plan actual se sigue mostrando, pero no se pudieron cargar las cantidades de asientos comprados y programados.",
+      "members_over_capacity_title": "Los miembros superan los asientos comprados",
+      "members_over_capacity_description": "Este espacio de trabajo tiene {{actual}} miembros pero solo {{purchased}} asientos comprados. Añade suficientes asientos o quita miembros antes de enviar más invitaciones.",
+      "occupancy_over_capacity_description": "Este espacio de trabajo ocupa {{occupied}} de {{purchased}} asientos comprados ({{members}} miembros y {{reserved}} invitaciones pendientes). Añade asientos, quita un miembro o revoca una invitación pendiente antes de invitar a otra persona.",
+      "updated": "Compra de asientos enviada",
+      "available_help": "Cómo se calculan los asientos disponibles"
+    },
+    "seat_purchase": {
+      "title": "Añadir asientos",
+      "description": "Introduce el número de asientos a añadir. Aparece un cálculo nuevo de Stripe antes de que confirmes.",
+      "additional_label": "Asientos adicionales",
+      "additional_hint": "Introduce los asientos a añadir, no el total nuevo.",
+      "preview_loading": "Actualizando el cálculo...",
+      "preview_unreadable": "No se pudo leer el cálculo. Cambia el número de asientos o reintenta.",
+      "preview_failed": "El cálculo no está disponible temporalmente. Reintenta en un momento.",
+      "capacity_out_of_sync": "El número de asientos en Stripe no coincide con el registro de facturación. Contacta con soporte antes de reintentar esta compra.",
+      "in_progress": "Se está procesando otra compra de asientos. Espera a que termine; contacta con soporte si sigue así.",
+      "purchase_unreadable": "No se pudo leer la respuesta de la compra. Reintenta este presupuesto; se reutilizará la misma solicitud de compra.",
+      "purchase_failed": "No se pudieron añadir los asientos. Reintenta con el mismo presupuesto, o actualiza si ha caducado.",
+      "payment_failed": "No se pudo completar el pago. Actualiza el método de pago en Stripe y solicita un presupuesto nuevo.",
+      "quote_changed": "El número de asientos o el cálculo cambió. Revisa el presupuesto actualizado antes de confirmar de nuevo.",
+      "seats_after": "Asientos tras la compra",
+      "charge_today": "Cobro estimado hoy",
+      "next_invoice": "Próxima renovación estimada",
+      "tax_notice": "Stripe determina los impuestos, créditos y detalles finales de la factura. Los asientos quedan disponibles después de que Stripe confirme la actualización de la suscripción.",
+      "confirm_one": "Añadir {{count}} asiento",
+      "confirm_other": "Añadir {{count}} asientos",
+      "pending_title": "Procesando la compra de asientos",
+      "pending_description_one": "Stripe está confirmando la actualización de la suscripción a {{count}} asiento.",
+      "pending_description_other": "Stripe está confirmando la actualización de la suscripción a {{count}} asientos.",
+      "delayed_title": "La confirmación de asientos está tardando más de lo esperado",
+      "delayed_description": "La comprobación automática se ha detenido. La compra aún puede completarse; compruébalo más tarde o contacta con soporte antes de iniciar otra compra.",
+      "delayed_description_with_expiry": "La comprobación automática se ha detenido. Si el intento sigue pendiente después del {{date}}, recarga esta página antes de solicitar otro presupuesto; contacta con soporte si sigue pendiente.",
+      "submitted_one": "Se envió una compra de {{count}} asiento. La nueva capacidad aparecerá cuando Stripe la confirme.",
+      "submitted_other": "Se envió una compra de {{count}} asientos. La nueva capacidad aparecerá cuando Stripe la confirme.",
+      "error_title": "No se pudo actualizar el cálculo"
+    },
+    "confirm": {
+      "title": "¿Continuar a Stripe Checkout?",
+      "description": "Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los asientos y mostrará el importe final antes del pago."
+    }
+  },
+  "shared": {
+    "request_failed": "La solicitud falló",
+    "refresh": "Actualizar",
+    "paging": "página {{page}} / {{totalPages}} · {{total}} en total",
+    "date_dash": "-"
+  },
+  "return_page": {
+    "redirecting": "Volviendo a la facturación del espacio de trabajo…",
+    "load_failed_title": "No se pudo abrir la facturación del espacio de trabajo",
+    "load_failed_description": "Has vuelto de Stripe, pero no pudimos cargar tu lista de espacios de trabajo para abrir la página de facturación correcta. Abre Ajustes del espacio de trabajo → Facturación para comprobar el estado actual.",
+    "workspace_missing_title": "No se pudo encontrar ese espacio de trabajo",
+    "workspace_missing_description": "Has vuelto de Stripe, pero este espacio de trabajo ya no está disponible para ti - puede que se haya eliminado o que tu acceso haya cambiado. Abre Facturación en el espacio de trabajo que esperabas para comprobar el estado actual.",
+    "retry": "Reintentar",
+    "go_to_app": "Ir a Multica"
+  }
+}

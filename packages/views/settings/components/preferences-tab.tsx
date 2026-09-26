@@ -46,9 +46,7 @@ export function PreferencesTab() {
   const section =
     requested === "issue" || requested === "chat" ? requested : "general";
   return (
-    <SettingsTab
-      title={t(($) => $.page.tabs.preferences)}
-    >
+    <SettingsTab title={t(($) => $.page.tabs.preferences)}>
       <Tabs
         value={section}
         onValueChange={(next) =>
@@ -116,6 +114,7 @@ function GeneralPreferences() {
     { value: "ko", label: t(($) => $.preferences.language.korean) },
     { value: "ja", label: t(($) => $.preferences.language.japanese) },
     { value: "fr", label: t(($) => $.preferences.language.french) },
+    { value: "es", label: t(($) => $.preferences.language.spanish) },
   ];
 
   // Persist locally → sync to user.language → reload. Reload (vs in-place
@@ -254,9 +253,7 @@ function StickyCommentBarRow() {
   const toggleSticky = useCommentComposerStore((s) => s.toggleSticky);
 
   return (
-    <SettingsRow
-      label={t(($) => $.preferences.sticky_comment_bar.title)}
-    >
+    <SettingsRow label={t(($) => $.preferences.sticky_comment_bar.title)}>
       <Switch
         checked={sticky}
         onCheckedChange={() => {

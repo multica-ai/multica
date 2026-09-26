@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "Bandeja de entrada",
+    "back": "Bandeja de entrada"
+  },
+  "menu": {
+    "mark_all_read": "Marcar todo como leído",
+    "archive_all": "Archivar todo",
+    "archive_all_read": "Archivar todo lo leído",
+    "archive_completed": "Archivar lo completado"
+  },
+  "filters": {
+    "tooltip": "Filtrar bandeja",
+    "active_count_one": "{{count}} filtro activo",
+    "active_count_other": "{{count}} filtros activos",
+    "status": "Estado",
+    "priority": "Prioridad",
+    "from": "De",
+    "unread_only": "Solo no leídos",
+    "notification_count_one": "{{count}} notificación",
+    "notification_count_other": "{{count}} notificaciones",
+    "clear": "Limpiar filtros",
+    "empty": "Ninguna notificación coincide con tus filtros"
+  },
+  "context_menu": {
+    "mark_read": "Marcar como leído",
+    "mark_unread": "Marcar como no leído",
+    "archive": "Archivar",
+    "unarchive": "Desarchivar",
+    "open_in_new_tab": "Abrir en una pestaña nueva"
+  },
+  "list": {
+    "loading_selection": "Cargando notificación…",
+    "empty": "No hay notificaciones",
+    "mark_done_tooltip": "Marcar como hecho",
+    "archive_tooltip": "Archivar",
+    "time": {
+      "just_now": "ahora mismo",
+      "minutes": "{{count}} min",
+      "hours": "{{count}} h",
+      "days": "{{count}} d"
+    },
+    "archived_title": "Archivado",
+    "archived_empty": "No hay notificaciones archivadas",
+    "unarchive_tooltip": "Desarchivar",
+    "actions_aria": "Acciones de la notificación",
+    "load_more": "Cargar más",
+    "loading_more": "Cargando…",
+    "retry": "Reintentar"
+  },
+  "detail": {
+    "select_prompt": "Selecciona una notificación para ver los detalles",
+    "empty": "Tu bandeja de entrada está vacía",
+    "original_input": "Entrada original",
+    "retry_with_context": "Reintentar con contexto",
+    "edit_advanced": "Editar como formulario avanzado",
+    "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de piloto automático para el periodo actual. No se iniciarán más ejecuciones de piloto automático hasta que se reinicie la cuota {{resetAt}}.",
+    "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
+    "archive": "Archivar",
+    "unarchive": "Desarchivar"
+  },
+  "types": {
+    "issue_assigned": "Asignada",
+    "issue_subscribed": "Suscrito",
+    "unassigned": "Desasignada",
+    "assignee_changed": "Asignado cambiado",
+    "status_changed": "Estado cambiado",
+    "priority_changed": "Prioridad cambiada",
+    "start_date_changed": "Fecha de inicio cambiada",
+    "due_date_changed": "Fecha de entrega cambiada",
+    "new_comment": "Nuevo comentario",
+    "mentioned": "Mención",
+    "review_requested": "Revisión solicitada",
+    "task_completed": "Ejecución completada",
+    "task_failed": "Ejecución fallida",
+    "agent_blocked": "Agente bloqueado",
+    "agent_completed": "Agente completado",
+    "reaction_added": "Reaccionó",
+    "quick_create_done": "Creada con agente",
+    "quick_create_failed": "Error al crear con agente",
+    "quick_create_unconfirmed": "Creación con agente sin confirmar",
+    "autopilot_paused": "Piloto automático en pausa",
+    "autopilot_quota_exceeded": "Límite de ejecuciones de piloto automático alcanzado"
+  },
+  "labels": {
+    "set_status_to": "Establecer estado en",
+    "set_priority_to": "Establecer prioridad en",
+    "assigned_to": "Asignada a {{name}}",
+    "removed_assignee": "Asignado eliminado",
+    "set_start_date_to": "Establecer fecha de inicio en {{date}}",
+    "removed_start_date": "Fecha de inicio eliminada",
+    "set_due_date_to": "Establecer fecha de entrega en {{date}}",
+    "removed_due_date": "Fecha de entrega eliminada",
+    "reacted_to_comment": "Reaccionó {{emoji}} a tu comentario",
+    "created_with_agent": "Creada con agente: {{identifier}}",
+    "failed_with_detail": "Falló: {{detail}}",
+    "autopilot_quota_blocked": "Ejecución bloqueada porque se alcanzó el límite"
+  },
+  "toasts": {
+    "source_context_retry_started": "Reintento iniciado con el contexto original",
+    "archived": "Notificación archivada",
+    "unarchived": "Notificación restaurada"
+  },
+  "errors": {
+    "archived_lookup_failed": "No se pudo cargar la notificación enlazada",
+    "source_context_retry_failed": "No se pudo reintentar con el contexto original",
+    "source_context_retry_unavailable": "Este contexto ya no se puede reintentar. Vuelve a empezar desde el punto de ramificación.",
+    "mark_read_failed": "No se pudo marcar como leído",
+    "mark_unread_failed": "No se pudo marcar como no leído",
+    "archive_failed": "No se pudo archivar",
+    "mark_done_failed": "No se pudo marcar como hecho",
+    "mark_all_read_failed": "No se pudo marcar todo como leído",
+    "archive_all_failed": "No se pudo archivar todo",
+    "archive_all_read_failed": "No se pudo archivar los elementos leídos",
+    "archive_completed_failed": "No se pudo archivar lo completado",
+    "unarchive_failed": "No se pudo desarchivar",
+    "archived_load_failed": "No se pudieron cargar las notificaciones archivadas",
+    "filters_load_failed": "No se pudieron cargar los filtros"
+  }
+}
