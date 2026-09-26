@@ -1859,6 +1859,22 @@ func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 // regardless of whether it is public or private.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
+	// Machine credentials (mat_ task tokens, mcn_ cloud PATs) carry the
+	// runtime owner's stamped X-User-ID. Without this guard an agent
+	// process running on an admin-owned runtime would inherit that
+	// owner's manage rights over every agent in the workspace — including
+	// another member's private agent — and could rewrite its instructions
+	// (#8459). Agent management is a human-only action, so reject machine
+	// and agent actors before the role/ownership check. Mirrors
+	// authorizeAgentEnv (MUL-2600) and requireAgentMcpWriter.
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "agents may not manage agents")
+		return false
+	}
+	if actorType, _ := h.resolveActor(r, requestUserID(r), wsID); actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents may not manage agents")
+		return false
+	}
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
 	if !ok {
 		return false
