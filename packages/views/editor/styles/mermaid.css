@@ -16,9 +16,6 @@
 
 .rich-text-editor .mermaid-diagram-scroll {
   display: flex;
-  /* Small diagrams sit centered at natural size; only oversized ones scroll.
-     Upscaling a small diagram to fill the column would just coarsen it. */
-  justify-content: center;
   overflow-x: auto;
   overflow-y: hidden;
   cursor: zoom-in;
@@ -38,6 +35,13 @@
      labels are unreadable. `flex: none` stops the flex parent from shrinking
      it; a `max-width` here would defeat the scroll entirely. */
   flex: none;
+  /* Small diagrams sit centered at natural size; only oversized ones scroll.
+     Upscaling a small diagram to fill the column would just coarsen it.
+     Centered with auto margins, not `justify-content: center` on the
+     scroller: that pushes an oversized diagram's left part past the scroll
+     origin, where it is cut off and cannot be scrolled to (MUL-7733). Auto
+     margins never go negative, so a wide diagram starts at its left edge. */
+  margin-inline: auto;
   /* The iframe cannot forward clicks to this document, so it would swallow
      the click-to-open gesture. Disabling pointer events hands wheel, click,
      and drag to the scroll container instead. */
