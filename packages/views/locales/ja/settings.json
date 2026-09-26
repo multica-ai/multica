@@ -16,11 +16,7 @@
       "reorder": "{{name}} を並べ替え"
     },
     "reorder_hint": "カテゴリ内でドラッグすると、ボード・一覧・メニューの順序が変わります。",
-    "built_in_dialog": {
-      "title": "組み込みステータスは変更できません",
-      "description": "組み込みステータスは Multica のシステム動作に使われるため、編集やアーカイブはできません。カテゴリー内の順序は変更できます。",
-      "confirm": "確認"
-    },
+    "built_in_dialog": {},
     "editor": {
       "create_title": "新しいステータス",
       "edit_title": "ステータスを編集",
@@ -82,7 +78,12 @@
       "done": "完了。",
       "cancelled": "見送り。"
     },
-    "pr_auto_complete_badge": "PR のマージで自動設定"
+    "pr_auto_complete_badge": "PR のマージで自動設定",
+    "statuses_title": "ステータス",
+    "auto_transitions": {
+      "title": "自動遷移"
+    },
+    "built_in_locked": "組み込みステータスはシステムの動作に使われるため、編集やアーカイブはできません。並び順は変更できます。"
   },
   "quick_actions": {
     "title": "クイックアクション",
@@ -138,7 +139,6 @@
     "toast_saved": "変更を保存しました"
   },
   "preferences": {
-    "general_title": "一般",
     "theme": {
       "title": "テーマ",
       "light": "ライト",
@@ -155,10 +155,12 @@
       "sync_failed": "このデバイスに言語を保存しましたが、アカウントへの同期に失敗しました。他のデバイスでは以前の言語が表示される場合があります。"
     },
     "timezone": {
-      "title": "表示タイムゾーン",
+      "title": "タイムゾーン",
       "browser_suffix": " (ブラウザ)",
       "hint": "すべてのワークスペースの日付とグラフに適用します。",
-      "sync_failed": "タイムゾーン設定を保存できませんでした。"
+      "sync_failed": "タイムゾーン設定を保存できませんでした。",
+      "search": "タイムゾーンを検索...",
+      "empty": "一致するタイムゾーンはありません"
     },
     "sticky_comment_bar": {
       "title": "コメント欄を下部に固定"
@@ -169,10 +171,16 @@
       "after_run": "この実行の後に開始",
       "hint": "既定の動作だけを決めます。送信前にメッセージごとに変更できます。"
     },
-    "issue_title": "タスク作成",
-    "comments_title": "コメント",
-    "device_hint": "このデバイスに保存されます。",
-    "issue_scope": "この設定は、このデバイスの現在のワークスペースに適用され、タスク作成時に表示するフィールドのみを変更します。"
+    "comments_title": "コメントとチャット",
+    "region_title": "言語と地域",
+    "appearance_title": "外観",
+    "issue_fields_title": "タスク作成時に表示するフィールド",
+    "issue_fields": {
+      "field": "フィールド",
+      "quick": "エージェントで作成",
+      "manual": "手動作成",
+      "unsupported": "エージェントでの作成では使用できません"
+    }
   },
   "shortcuts": {
     "title": "キーボードショートカット",
@@ -307,14 +315,11 @@
     }
   },
   "chat": {
-    "floating_title": "フローティングウィンドウ",
     "floating_label": "フローティングチャット",
     "floating_hint": "すべてのページにフローティングチャットボタンを表示します。"
   },
   "issue": {
     "description": "各作成ダイアログのツールバーに常時表示するフィールドを選択します。非表示のフィールドは ⋯ メニューから引き続き使用でき、値がある間は自動的に表示されます。",
-    "quick_create_title": "エージェントで作成する際のツールバー項目",
-    "manual_create_title": "手動作成ツールバーの項目",
     "fields": {
       "status": "ステータス",
       "priority": "優先度",
@@ -326,7 +331,6 @@
     }
   },
   "mcp": {
-    "title": "MCP",
     "description": "追加後、エージェントの MCP タブで割り当てます。",
     "servers_title": "共有サーバー",
     "write_only_note": "機密情報を保護するため、保存した URL、コマンド、ヘッダー、環境変数は再表示されません。変更する場合は、新しい設定をすべて入力してください。名前だけを変更しても、現在の設定とエージェントへの割り当ては維持されます。",
@@ -343,7 +347,6 @@
     "remove_action": "削除",
     "empty_title": "共有 MCP サーバーはありません",
     "disabled_badge": "無効",
-    "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
     "delete_title": "共有サーバーを削除しますか？",
     "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次の実行から反映されます。",
     "delete_confirm": "削除",
@@ -365,40 +368,42 @@
       "preferences": "環境設定",
       "shortcuts": "ショートカット",
       "issue": "タスク",
-      "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",
       "general": "一般",
-      "repositories": "リポジトリ",
       "github": "GitHub",
-      "integrations": "連携",
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
-      "issue_statuses": "タスクステータス",
+      "issue_statuses": "ステータスと遷移",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
-      "plugins": "Plugins",
-      "mcp": "MCP",
-      "billing": "請求とプラン"
+      "plugins": "プラグイン",
+      "mcp": "MCP サーバー",
+      "billing": "請求とプラン",
+      "code": "コード",
+      "channels": "メッセージング",
+      "apps": "接続済みアプリ"
     },
     "groups": {
-      "personal": "個人設定",
-      "workspace": "ワークスペース管理",
-      "issues": "タスク設定",
+      "personal": "個人",
+      "workspace": "ワークスペース",
+      "issues": "タスクとワークフロー",
       "connections": "接続と拡張機能",
-      "device": "デスクトップアプリ"
+      "device": "このデバイス"
     },
     "navigate": "設定ページへ移動",
-    "device_scope": "このデバイス"
+    "search": "設定を検索",
+    "search_clear": "検索をクリア",
+    "search_empty": "一致する設定はありません",
+    "search_results_other": "{{count}} 件の結果",
+    "admin_only": "オーナーと管理者のみ変更できます"
   },
   "plugins": {
-    "title": "Plugins",
+    "title": "プラグイン",
     "loading": "Plugins を読み込み中",
     "load_failed": "Plugins を読み込めませんでした",
     "load_failed_description": "再試行してください。インストール済みの Plugin には影響しません。",
-    "read_only": "読み取り専用",
-    "read_only_description": "ワークスペースの owner と admin が Plugin をインストール、設定、削除できます。",
     "empty": "インストール済みの Plugin はありません。",
     "action_failed": "Plugin 操作に失敗しました",
     "enabled": "Plugin を有効にしました",
@@ -553,7 +558,7 @@
   },
   "labels": {
     "title": "ラベル",
-    "description": "タスクと skill のラベルは別々です。",
+    "description": "タスク用のラベルです。スキルのラベルはスキルページで管理します。",
     "scopes": {
       "issue": "タスク",
       "skill": "Skill"
@@ -608,9 +613,7 @@
     "profile_description_too_long": "プロフィールが長すぎます（最大 {{max}} 文字、現在 {{count}} 文字）。",
     "save": "プロフィールを更新",
     "saving": "更新中...",
-    "toast_avatar_updated": "アバターを更新しました",
     "toast_avatar_failed": "アバターをアップロードできませんでした",
-    "toast_profile_updated": "プロフィールを更新しました",
     "toast_profile_failed": "プロフィールを更新できませんでした"
   },
   "notifications": {
@@ -704,21 +707,17 @@
   },
   "workspace": {
     "section_general": "ワークスペース情報",
-    "logo_label": "ワークスペースロゴ",
+    "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",
     "description_label": "説明",
     "description_placeholder": "このワークスペースは何に注力していますか？",
-    "context_label": "コンテキスト",
+    "context_label": "エージェントのコンテキスト",
     "context_placeholder": "このワークスペースで作業する AI エージェント向けの背景情報とコンテキスト",
     "slug_label": "スラッグ",
     "issue_prefix_label": "タスク接頭辞",
     "issue_prefix_hint": "{{example}} のようなタスク番号に使用されます。",
-    "prefix_confirm_title": "タスク接頭辞を変更しますか？",
-    "prefix_confirm_description": "すべてのタスク番号が {{oldPrefix}}-N から {{newPrefix}}-N に振り直されます。Pull request のタイトル、ブランチ名、ドキュメントやチャットのリンクなど、{{oldPrefix}}-N を使用している外部参照は解決されなくなります。",
     "save": "保存",
     "saving": "保存中...",
-    "manage_hint": "ワークスペース設定を更新できるのは admin と owner のみです。",
-    "toast_saved": "ワークスペース設定を保存しました",
     "toast_save_failed": "ワークスペース設定を保存できませんでした",
     "danger_zone": "危険な操作",
     "leave_title": "ワークスペースを退出",
@@ -739,8 +738,18 @@
     "confirm_action": "確認",
     "change_logo_aria": "ワークスペースのロゴを変更",
     "click_logo_hint": "ロゴをクリックして新しい画像をアップロード",
-    "toast_logo_updated": "ワークスペースのロゴを更新しました",
-    "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした"
+    "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした",
+    "context_hint": "このワークスペースのエージェントに、実行のたびに渡されます。",
+    "slug_hint": "ワークスペースの URL に使われます。作成後は変更できません。",
+    "copy_slug": "slug をコピー",
+    "copy_failed": "コピーできませんでした",
+    "change_prefix": "プレフィックスを変更...",
+    "prefix_dialog_title": "タスクのプレフィックスを変更",
+    "prefix_dialog_description": "完了済み・キャンセル済みを含むすべてのタスクの番号が変わります。",
+    "prefix_new_label": "新しいプレフィックス",
+    "prefix_rule": "英字と数字のみ、最大 10 文字です。",
+    "prefix_confirm_action": "{{prefix}} に変更",
+    "prefix_external_warning": "PR タイトル、ブランチ名、ドキュメント、チャット内の古いキー（{{oldExample}} など）は更新されないため、それらのリンクは機能しなくなります。"
   },
   "delete_workspace_dialog": {
     "title": "ワークスペースを削除",
@@ -757,15 +766,10 @@
     "toast_failed": "設定を更新できませんでした"
   },
   "github": {
-    "section_master": "GitHub 機能を有効にする",
-    "master_description_on": "オフにすると GitHub 機能を停止し、既存データは保持します。",
     "master_description_off": "GitHub 機能は停止中です。既存データは保持されています。",
-    "section_connection": "接続",
-    "connection_title": "GitHub App",
     "connected_to": "{{login}} に接続済み",
     "connect_github": "GitHub を接続",
     "connect_opening": "開いています…",
-    "connect_disabled_tooltip": "このサーバーには GitHub App が設定されていません",
     "disconnect": "接続解除",
     "disconnecting": "接続解除中…",
     "disconnect_confirm_title": "GitHub App の接続を解除",
@@ -774,28 +778,26 @@
     "disconnect_confirm_action": "接続解除",
     "not_configured": "このデプロイには GitHub 連携が設定されていません。運営者が次の値を設定する必要があります:",
     "not_configured_and": "および",
-    "read_only_hint": "読み取り専用ビューです。GitHub を接続または解除できるのはワークスペースの admin と owner のみです。",
     "contact_admin_to_connect": "このワークスペースには GitHub が接続されていません。admin または owner に GitHub App のセットアップを依頼してください。",
     "connected_by": "{{name}} が接続",
     "toast_not_configured": "このデプロイには GitHub 連携が設定されていません",
     "toast_open_failed": "GitHub のインストール画面を開けませんでした",
     "toast_disconnect_failed": "GitHub App の接続を解除できませんでした",
     "toast_disconnected": "GitHub App の接続を解除しました",
-    "section_features": "機能",
     "feature_pr_sidebar_label": "Pull request サイドバー",
     "feature_pr_sidebar_description": "リンクされた Pull request をタスク詳細サイドバーに表示します。",
     "feature_co_author_label": "Co-authored-by トレーラー",
     "feature_co_author_description_prefix": "エージェントが作成したコミットに",
     "feature_co_author_description_suffix": "を追加します。",
     "feature_auto_link_label": "タスクと PR を自動リンク",
-    "section_repositories": "リポジトリ",
-    "repositories_shortcut_label": "リポジトリ URL はリポジトリタブにあります",
-    "repositories_shortcut_link": "リポジトリを管理 →",
     "toast_failed": "GitHub 設定を更新できませんでした",
-    "feature_auto_link_description": "タイトルかブランチ名にタスク番号（例: {{example}}）を含む PR、または説明に「Closes {{example}}」と書いた PR を、そのタスクに関連付けます。"
+    "feature_auto_link_description": "タイトルかブランチ名にタスク番号（例: {{example}}）を含む PR、または説明に「Closes {{example}}」と書いた PR を、そのタスクに関連付けます。",
+    "status_paused": "一時停止中",
+    "pause": "GitHub 機能を一時停止",
+    "resume": "GitHub 機能を再開"
   },
   "vcs": {
-    "section_title": "Git providers (self-hosted)",
+    "section_title": "セルフホスト Git",
     "page_description": "セルフホストの Forgejo、Gitea、GitLab インスタンスを接続し、Pull request をタスクにミラーリングします。接続ごとにアクセストークンを使用し、エージェントはランタイム自身の Git 認証情報でブランチを push して PR を作成します。",
     "connect_title": "Connect a provider instance",
     "connected_as": "Connected as {{login}}",
@@ -822,7 +824,6 @@
     "disconnect_confirm_description": "この接続でミラーリングされた Pull request と、そのタスクへのリンクが削除されます。この操作は元に戻せません。",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
-    "toast_connected": "Provider connected",
     "toast_connect_failed": "Could not connect to the provider",
     "toast_disconnected": "Provider disconnected",
     "toast_disconnect_failed": "Could not disconnect",
@@ -832,8 +833,11 @@
     "rotate_confirm_cancel": "Cancel",
     "rotate_confirm_action": "Regenerate",
     "rotating": "Regenerating...",
-    "toast_rotated": "Webhook secret regenerated",
-    "toast_rotate_failed": "Could not regenerate webhook secret"
+    "toast_rotate_failed": "Could not regenerate webhook secret",
+    "hosts_hint": "GitLab、Gitea、Forgejo に対応しています。",
+    "connect_another": "さらに接続",
+    "connection_actions": "{{url}} の操作",
+    "webhook_done": "保存しました"
   },
   "lark": {
     "section_title": "Lark",
@@ -911,7 +915,6 @@
     "install_error_generic": "設置に失敗しました。もう一度お試しください。"
   },
   "composio": {
-    "section_title": "Composio",
     "page_description": "エージェントが使えるアプリに接続します。",
     "not_enabled_title": "Composio integration not enabled",
     "not_enabled_description_prefix": "Set",
@@ -1141,7 +1144,6 @@
     "section_title": "リポジトリ",
     "description": "エージェントはこれらのリポジトリでコードを扱えます。",
     "url_placeholder": "https://git.example.com/org/repo.git または git@git.example.com:org/repo.git",
-    "url_empty": "（空の URL）",
     "description_placeholder": "説明（例: Go バックエンド + Next.js フロントエンド）",
     "add": "リポジトリを追加",
     "connect_github": "GitHub に接続",
@@ -1164,21 +1166,26 @@
     "github_selected_count": "{{count}} 件選択",
     "github_cancel": "キャンセル",
     "github_import": "リポジトリを追加",
-    "complete_manual_entry_first": "空の手動リポジトリを入力するか削除してからインポートしてください。",
     "save": "保存",
     "saving": "保存中...",
     "saved_hint": "すべての変更を保存しました",
     "empty": "まだリポジトリがありません。",
     "edit_aria": "リポジトリを編集",
     "cancel_aria": "編集をキャンセル",
-    "delete_aria": "リポジトリを削除",
     "delete_confirm_title": "リポジトリを削除しますか？",
     "delete_confirm_description": "このリポジトリはワークスペースから直ちに削除されます。",
     "delete_confirm_cancel": "キャンセル",
     "delete_confirm_action": "リポジトリを削除",
     "manage_hint": "リポジトリを管理できるのは admin と owner のみです。",
-    "toast_saved": "リポジトリを保存しました",
-    "toast_save_failed": "リポジトリを保存できませんでした"
+    "toast_save_failed": "リポジトリを保存できませんでした",
+    "add_manually": "URL を入力...",
+    "add_title": "リポジトリを追加",
+    "edit_title": "リポジトリを編集",
+    "edit": "編集",
+    "url_label": "リポジトリ URL",
+    "description_label": "説明",
+    "duplicate": "このリポジトリは追加済みです。",
+    "actions_aria": "{{url}} の操作"
   },
   "desktop": {
     "tabs": {
@@ -1270,7 +1277,6 @@
     }
   },
   "members": {
-    "section_title": "メンバー（{{count}}）",
     "invite_title": "メンバーを招待",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "招待",
@@ -1287,9 +1293,6 @@
     "seat_purchase_timeout": "席の購入は送信されましたが、確認に時間がかかっています。招待は送信されていません。請求画面に空き席が表示された後、もう一度招待してください。",
     "seat_purchase_capacity_taken": "購入した席はすでに利用できないため、招待は送信されませんでした。現在の席を確認してから再試行してください。",
     "no_members": "メンバーが見つかりません。",
-    "pending_title": "保留中の招待（{{count}}）",
-    "pending_status": "保留中",
-    "revoke_invitation_tooltip": "招待を取り消し",
     "revoke_invitation_title": "招待を取り消し",
     "revoke_invitation_description": "{{email}} への招待を取り消しますか？このワークスペースに参加できなくなります。",
     "toast_invitation_revoked": "招待を取り消しました",
@@ -1320,9 +1323,6 @@
         "description": "タスクの作成と作業"
       }
     },
-    "share_links_title": "共有リンク",
-    "role_field": "ロール：",
-    "expiry_field": "有効期限：",
     "share_links_create_title": "共有リンクを作成",
     "share_links_create_button": "生成",
     "share_links_creating": "生成中...",
@@ -1339,26 +1339,70 @@
     "expiry_24h": "24時間",
     "expiry_7d": "7日",
     "expiry_30d": "30日",
-    "expiry_never": "無期限"
+    "expiry_never": "無期限",
+    "members_label": "メンバー",
+    "pending_label": "承認待ちの招待",
+    "share_links_label": "共有リンク",
+    "share_links_description": "リンクを知っている人は、期限切れまたは取り消しまで、選択したロールで参加できます。",
+    "search_placeholder": "名前またはメールで検索",
+    "no_results": "一致するメンバーはいません。",
+    "no_invitations": "承認待ちの招待はありません。",
+    "no_share_links": "共有リンクはまだありません。",
+    "email_label": "メールアドレス",
+    "role_label": "ロール",
+    "expiry_label": "有効期限",
+    "you": "あなた",
+    "joined": "{{date}} に参加",
+    "member_actions": "{{name}} の操作",
+    "invitation_meta": "{{sent}} に送信 · {{expires}} に期限切れ",
+    "revoke_invitation_aria": "{{email}} への招待を取り消す",
+    "seats_used": "{{purchased}} 席中 {{used}} 席を使用",
+    "manage_seats": "席を管理"
   },
   "integrations": {
-    "code_title": "コードとリポジトリ",
-    "messaging_title": "メッセージチャネル",
-    "apps_title": "自分のアプリ接続",
-    "apps_scope": "これらのアプリ接続はあなたのアカウントに属します。ワークスペースのチャネル接続は上で管理します。",
-    "github_hint": "GitHub を接続し、プルリクエストの関連付けを設定します。",
-    "vcs_hint": "GitLab、Gitea、Forgejo を接続します。",
-    "apps_hint": "Composio 経由でエージェント用のアプリを認可します。",
-    "back": "すべての連携",
     "status_connected": "接続済み",
     "status_not_connected": "未接続",
     "status_loading": "確認中...",
-    "status_unknown": "状態を取得できません",
-    "channel_hint": "{{channel}} でエージェントと会話し、タスクを作成します。"
+    "status_unknown": "状態を取得できません"
   },
   "pr_merge_status": {
     "label": "PR マージ後のタスクのステータス",
     "description": "紐づいた PR がすべてマージされたときに適用され、今後のマージにのみ影響します。",
     "none": "変更しない"
+  },
+  "layout": {
+    "scope": {
+      "account": "アカウント · 全デバイスで同期",
+      "device": "このデバイスのみ",
+      "device_workspace": "このデバイスのみ · {{name}}",
+      "workspace": "{{name}} ワークスペース",
+      "workspace_only": "{{name}} のみに適用"
+    },
+    "read_only": {
+      "title": "閲覧のみ",
+      "description": "これらの設定を変更できるのはワークスペースのオーナーと管理者だけです。",
+      "contact": "これらの設定を変更できるのはオーナーと管理者だけです。{{names}} に依頼してください。",
+      "separator": "、"
+    }
+  },
+  "code": {
+    "hosting_title": "コードホスティング",
+    "pr_linking_title": "プルリクエストとタスク",
+    "github_actions": "GitHub の操作",
+    "edit_in_statuses": "\"ステータスと遷移\" で変更"
+  },
+  "channels": {
+    "breadcrumb": "パンくずリスト"
+  },
+  "mcp_usage": {
+    "agent_count_other": "{{count}} 個のエージェントが使用中",
+    "none": "どのエージェントにも割り当てられていません"
+  },
+  "mcp_sources": {
+    "title": "エージェントにツールを与える方法",
+    "current": "このページ",
+    "mcp": "管理者が追加してワークスペースで共有し、エージェントごとに割り当てます。",
+    "apps": "自分のアカウントで Composio 経由で承認し、自分が所有するエージェントで有効にします。",
+    "plugins": "インストールするとツール、定期フック、ストレージを追加でき、プラグインごとに権限を付与します。"
   }
 }

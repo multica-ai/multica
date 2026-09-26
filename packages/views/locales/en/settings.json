@@ -16,11 +16,7 @@
       "reorder": "Reorder {{name}}"
     },
     "reorder_hint": "Drag within a category to reorder boards, lists, and menus.",
-    "built_in_dialog": {
-      "title": "Built-in status cannot be changed",
-      "description": "Built-in statuses are used by Multica and cannot be edited or archived. You can still change their order within the category.",
-      "confirm": "Got it"
-    },
+    "built_in_dialog": {},
     "editor": {
       "create_title": "New status",
       "edit_title": "Edit status",
@@ -82,7 +78,12 @@
       "done": "Completed.",
       "cancelled": "Decided not to do."
     },
-    "pr_auto_complete_badge": "Set when PRs merge"
+    "pr_auto_complete_badge": "Set when PRs merge",
+    "statuses_title": "Statuses",
+    "auto_transitions": {
+      "title": "Automatic transitions"
+    },
+    "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them."
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -138,7 +139,6 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
-    "general_title": "General",
     "theme": {
       "title": "Theme",
       "light": "Light",
@@ -155,10 +155,12 @@
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     },
     "timezone": {
-      "title": "Viewing Timezone",
+      "title": "Time zone",
       "browser_suffix": " (browser)",
       "hint": "Used for dates and charts across all your workspaces.",
-      "sync_failed": "Failed to save your timezone preference."
+      "sync_failed": "Failed to save your timezone preference.",
+      "search": "Search time zones...",
+      "empty": "No matching time zone"
     },
     "sticky_comment_bar": {
       "title": "Pin comment bar to bottom"
@@ -169,10 +171,16 @@
       "after_run": "Start after this run",
       "hint": "Sets the default only. You can still change it for any message before sending."
     },
-    "issue_title": "Issue creation",
-    "comments_title": "Comments",
-    "device_hint": "Saved on this device.",
-    "issue_scope": "These preferences apply to this workspace on this device. They only change which fields you see when creating an issue."
+    "comments_title": "Comments & chat",
+    "region_title": "Language & region",
+    "appearance_title": "Appearance",
+    "issue_fields_title": "Fields shown when creating issues",
+    "issue_fields": {
+      "field": "Field",
+      "quick": "Create with agent",
+      "manual": "Manual create",
+      "unsupported": "Not available when creating with an agent"
+    }
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
@@ -307,14 +315,11 @@
     }
   },
   "chat": {
-    "floating_title": "Floating window",
     "floating_label": "Floating chat window",
     "floating_hint": "Show the floating chat button on every page."
   },
   "issue": {
     "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
-    "quick_create_title": "Create with agent toolbar fields",
-    "manual_create_title": "Manual create toolbar fields",
     "fields": {
       "status": "Status",
       "priority": "Priority",
@@ -326,7 +331,6 @@
     }
   },
   "mcp": {
-    "title": "MCP",
     "description": "After adding a server, assign it from an agent's MCP tab.",
     "servers_title": "Shared servers",
     "write_only_note": "For security, saved URLs, commands, headers, and environment values aren't shown again. To change them, enter a complete new configuration. Renaming keeps the current configuration and agent assignments.",
@@ -343,7 +347,6 @@
     "remove_action": "Delete",
     "empty_title": "No shared MCP servers",
     "disabled_badge": "Disabled",
-    "admin_only_note": "Only workspace owners and admins can change the shared MCP servers.",
     "delete_title": "Remove shared server?",
     "delete_description": "{{name}} will be removed from the library and from every agent it is assigned to, taking effect on their next run.",
     "delete_confirm": "Remove",
@@ -365,40 +368,43 @@
       "preferences": "Preferences",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
-      "chat": "Chat",
       "notifications": "Notifications",
       "tokens": "API Tokens",
       "general": "General",
-      "repositories": "Repositories",
       "github": "GitHub",
-      "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
-      "issue_statuses": "Issue Statuses",
+      "issue_statuses": "Statuses & transitions",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
       "plugins": "Plugins",
-      "mcp": "MCP",
-      "billing": "Billing"
+      "mcp": "MCP servers",
+      "billing": "Billing",
+      "code": "Code",
+      "channels": "Messaging",
+      "apps": "Connected apps"
     },
     "groups": {
       "personal": "Personal",
       "workspace": "Workspace",
-      "issues": "Issue configuration",
+      "issues": "Issues & workflow",
       "connections": "Connections & extensions",
-      "device": "Desktop app"
+      "device": "This device"
     },
     "navigate": "Go to settings page",
-    "device_scope": "This device"
+    "search": "Search settings",
+    "search_clear": "Clear search",
+    "search_empty": "No matching settings",
+    "search_results_one": "{{count}} result",
+    "search_results_other": "{{count}} results",
+    "admin_only": "Only owners and admins can change this"
   },
   "plugins": {
     "title": "Plugins",
     "loading": "Loading Plugins",
     "load_failed": "Plugins couldn't be loaded",
     "load_failed_description": "Try again. Installed Plugins are unaffected.",
-    "read_only": "Read-only access",
-    "read_only_description": "Workspace owners and admins can install, configure, and remove Plugins.",
     "empty": "No Plugins are installed yet.",
     "action_failed": "Plugin action failed",
     "enabled": "Plugin enabled",
@@ -555,7 +561,7 @@
   },
   "labels": {
     "title": "Labels",
-    "description": "Issue labels and skill labels are separate.",
+    "description": "Labels for issues. Skill labels are managed on the Skills page.",
     "scopes": {
       "issue": "Issues",
       "skill": "Skills"
@@ -610,9 +616,7 @@
     "profile_description_too_long": "Profile is too long (max {{max}} characters; currently {{count}}).",
     "save": "Update Profile",
     "saving": "Updating...",
-    "toast_avatar_updated": "Avatar updated",
     "toast_avatar_failed": "Failed to upload avatar",
-    "toast_profile_updated": "Profile updated",
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
@@ -709,22 +713,17 @@
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
     "click_logo_hint": "Click the logo to upload a new image",
-    "toast_logo_updated": "Workspace logo updated",
     "toast_logo_failed": "Failed to upload workspace logo",
     "name_label": "Name",
     "description_label": "Description",
     "description_placeholder": "What does this workspace focus on?",
-    "context_label": "Context",
+    "context_label": "Agent context",
     "context_placeholder": "Background information and context for AI agents working in this workspace",
     "slug_label": "Slug",
     "issue_prefix_label": "Issue prefix",
     "issue_prefix_hint": "Used in issue numbers like {{example}}.",
-    "prefix_confirm_title": "Change issue prefix?",
-    "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
     "save": "Save",
     "saving": "Saving...",
-    "manage_hint": "Only admins and owners can update workspace settings.",
-    "toast_saved": "Workspace settings saved",
     "toast_save_failed": "Failed to save workspace settings",
     "danger_zone": "Danger Zone",
     "leave_title": "Leave workspace",
@@ -742,7 +741,18 @@
     "deleting": "Deleting...",
     "toast_delete_failed": "Failed to delete workspace",
     "confirm_cancel": "Cancel",
-    "confirm_action": "Confirm"
+    "confirm_action": "Confirm",
+    "context_hint": "Given to every agent in this workspace on every run.",
+    "slug_hint": "Part of every workspace URL. It can't be changed.",
+    "copy_slug": "Copy slug",
+    "copy_failed": "Couldn't copy to clipboard",
+    "change_prefix": "Change prefix...",
+    "prefix_dialog_title": "Change issue prefix",
+    "prefix_dialog_description": "Every issue is renumbered, including done and cancelled ones.",
+    "prefix_new_label": "New prefix",
+    "prefix_rule": "Letters and numbers only, up to 10 characters.",
+    "prefix_confirm_action": "Change to {{prefix}}",
+    "prefix_external_warning": "Old keys such as {{oldExample}} in PR titles, branch names, docs, and chat are not updated, so those links stop working."
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",
@@ -759,15 +769,10 @@
     "toast_failed": "Failed to update setting"
   },
   "github": {
-    "section_master": "Enable GitHub features",
-    "master_description_on": "Turning this off pauses GitHub features and keeps existing data.",
     "master_description_off": "GitHub features are paused. Existing data is kept.",
-    "section_connection": "Connection",
-    "connection_title": "GitHub App",
     "connected_to": "Connected to {{login}}",
     "connect_github": "Connect GitHub",
     "connect_opening": "Opening…",
-    "connect_disabled_tooltip": "GitHub App is not configured on this server",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect GitHub App",
@@ -776,28 +781,26 @@
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
     "not_configured_and": "and",
-    "read_only_hint": "Read-only view. Only workspace admins and owners can connect or disconnect GitHub.",
     "contact_admin_to_connect": "GitHub is not connected for this workspace. Ask an admin or owner to set up the GitHub App.",
     "connected_by": "Connected by {{name}}",
     "toast_not_configured": "GitHub integration is not configured for this deployment",
     "toast_open_failed": "Failed to open GitHub install",
     "toast_disconnect_failed": "Failed to disconnect GitHub App",
     "toast_disconnected": "GitHub App disconnected",
-    "section_features": "Features",
     "feature_pr_sidebar_label": "Pull Request sidebar",
     "feature_pr_sidebar_description": "Show linked pull requests inside the issue detail sidebar.",
     "feature_co_author_label": "Co-authored-by trailer",
     "feature_co_author_description_prefix": "Append",
     "feature_co_author_description_suffix": "to commits authored by agents.",
     "feature_auto_link_label": "Auto-link issues and PRs",
-    "section_repositories": "Repositories",
-    "repositories_shortcut_label": "Repository URLs live in the Repositories tab",
-    "repositories_shortcut_link": "Manage repositories →",
     "toast_failed": "Failed to update GitHub settings",
-    "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description."
+    "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
+    "status_paused": "Paused",
+    "pause": "Pause GitHub features",
+    "resume": "Resume GitHub features"
   },
   "vcs": {
-    "section_title": "Git providers (self-hosted)",
+    "section_title": "Self-hosted Git",
     "page_description": "Connect a self-hosted Forgejo, Gitea, or GitLab instance to mirror pull requests onto issues. Each connection uses an access token; agents push branches and open PRs using the runtime's own Git credentials.",
     "connect_title": "Connect a provider instance",
     "connected_as": "Connected as {{login}}",
@@ -824,7 +827,6 @@
     "disconnect_confirm_description": "Mirrored pull requests and their issue links for this connection will be removed. This cannot be undone.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
-    "toast_connected": "Provider connected",
     "toast_connect_failed": "Could not connect to the provider",
     "toast_disconnected": "Provider disconnected",
     "toast_disconnect_failed": "Could not disconnect",
@@ -834,8 +836,11 @@
     "rotate_confirm_cancel": "Cancel",
     "rotate_confirm_action": "Regenerate",
     "rotating": "Regenerating...",
-    "toast_rotated": "Webhook secret regenerated",
-    "toast_rotate_failed": "Could not regenerate webhook secret"
+    "toast_rotate_failed": "Could not regenerate webhook secret",
+    "hosts_hint": "GitLab, Gitea, or Forgejo.",
+    "connect_another": "Connect another",
+    "connection_actions": "Actions for {{url}}",
+    "webhook_done": "I've saved it"
   },
   "lark": {
     "section_title": "Lark",
@@ -913,7 +918,6 @@
     "install_error_generic": "Install failed. Try again."
   },
   "composio": {
-    "section_title": "Composio",
     "page_description": "Connect apps your agents can use.",
     "not_enabled_title": "Composio integration not enabled",
     "not_enabled_description_prefix": "Set",
@@ -1144,7 +1148,6 @@
     "section_title": "Repositories",
     "description": "Agents can use these repositories to work on code.",
     "url_placeholder": "https://git.example.com/org/repo.git or git@git.example.com:org/repo.git",
-    "url_empty": "(empty URL)",
     "description_placeholder": "Description (e.g. Go backend + Next.js frontend)",
     "add": "Add repository",
     "connect_github": "Connect GitHub",
@@ -1167,21 +1170,26 @@
     "github_selected_count": "{{count}} selected",
     "github_cancel": "Cancel",
     "github_import": "Add repositories",
-    "complete_manual_entry_first": "Complete or remove the empty manual repository before importing.",
     "save": "Save",
     "saving": "Saving...",
     "saved_hint": "All changes saved",
     "empty": "No repositories yet.",
     "edit_aria": "Edit repository",
     "cancel_aria": "Cancel edit",
-    "delete_aria": "Delete repository",
     "delete_confirm_title": "Delete repository?",
     "delete_confirm_description": "This repository will be removed from the workspace immediately.",
     "delete_confirm_cancel": "Cancel",
     "delete_confirm_action": "Delete repository",
     "manage_hint": "Only admins and owners can manage repositories.",
-    "toast_saved": "Repositories saved",
-    "toast_save_failed": "Failed to save repositories"
+    "toast_save_failed": "Failed to save repositories",
+    "add_manually": "Enter a URL...",
+    "add_title": "Add repository",
+    "edit_title": "Edit repository",
+    "edit": "Edit",
+    "url_label": "Repository URL",
+    "description_label": "Description",
+    "duplicate": "This repository is already added.",
+    "actions_aria": "Actions for {{url}}"
   },
   "desktop": {
     "tabs": {
@@ -1277,7 +1285,6 @@
     }
   },
   "members": {
-    "section_title": "Members ({{count}})",
     "invite_title": "Invite member",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "Invite",
@@ -1294,9 +1301,6 @@
     "seat_purchase_timeout": "The seat purchase was submitted, but confirmation is taking longer than expected. No invitation was sent. Retry the invitation after Billing shows an available seat.",
     "seat_purchase_capacity_taken": "The purchased seat is no longer available, so the invitation was not sent. Review current seats before trying again.",
     "no_members": "No members found.",
-    "pending_title": "Pending invitations ({{count}})",
-    "pending_status": "Pending",
-    "revoke_invitation_tooltip": "Revoke invitation",
     "revoke_invitation_title": "Revoke invitation",
     "revoke_invitation_description": "Revoke the invitation to {{email}}? They will no longer be able to join this workspace.",
     "toast_invitation_revoked": "Invitation revoked",
@@ -1327,9 +1331,6 @@
         "description": "Create and work on issues"
       }
     },
-    "share_links_title": "Share links",
-    "role_field": "Role:",
-    "expiry_field": "Expiry:",
     "share_links_create_title": "Create share link",
     "share_links_create_button": "Generate",
     "share_links_creating": "Generating...",
@@ -1346,26 +1347,71 @@
     "expiry_24h": "24 hours",
     "expiry_7d": "7 days",
     "expiry_30d": "30 days",
-    "expiry_never": "Never"
+    "expiry_never": "Never",
+    "members_label": "Members",
+    "pending_label": "Pending invitations",
+    "share_links_label": "Share links",
+    "share_links_description": "Anyone with the link can join with the chosen role until it expires or you revoke it.",
+    "search_placeholder": "Search name or email",
+    "no_results": "No members match this search.",
+    "no_invitations": "No pending invitations.",
+    "no_share_links": "No share links yet.",
+    "email_label": "Email",
+    "role_label": "Role",
+    "expiry_label": "Expires after",
+    "you": "You",
+    "joined": "Joined {{date}}",
+    "member_actions": "Actions for {{name}}",
+    "invitation_meta": "Sent {{sent}} · Expires {{expires}}",
+    "revoke_invitation_aria": "Revoke invitation for {{email}}",
+    "seats_used": "{{used}} of {{purchased}} seats used",
+    "manage_seats": "Manage seats"
   },
   "integrations": {
-    "code_title": "Code & repositories",
-    "messaging_title": "Messaging channels",
-    "apps_title": "Your connected apps",
-    "apps_scope": "These app connections belong to your account. Workspace channel connections are managed above.",
-    "github_hint": "Connect GitHub and configure pull request linking.",
-    "vcs_hint": "Connect GitLab, Gitea, or Forgejo.",
-    "apps_hint": "Authorize apps for your agents through Composio.",
-    "back": "All integrations",
     "status_connected": "Connected",
     "status_not_connected": "Not connected",
     "status_loading": "Checking...",
-    "status_unknown": "Status unavailable",
-    "channel_hint": "Chat with agents and create issues from {{channel}}."
+    "status_unknown": "Status unavailable"
   },
   "pr_merge_status": {
     "label": "After PRs merge, move the issue to",
     "description": "Applies once every PR linked to an issue has merged, and only to merges from now on.",
     "none": "Don’t change"
+  },
+  "layout": {
+    "scope": {
+      "account": "Account · synced",
+      "device": "This device only",
+      "device_workspace": "This device · {{name}}",
+      "workspace": "{{name}} workspace",
+      "workspace_only": "Only in {{name}}"
+    },
+    "read_only": {
+      "title": "View only",
+      "description": "Only workspace owners and admins can change these settings.",
+      "contact": "Only owners and admins can change these settings. Ask {{names}}.",
+      "separator": ", "
+    }
+  },
+  "code": {
+    "hosting_title": "Code hosting",
+    "pr_linking_title": "Pull requests & issues",
+    "github_actions": "GitHub actions",
+    "edit_in_statuses": "Change in Statuses & transitions"
+  },
+  "channels": {
+    "breadcrumb": "Breadcrumb"
+  },
+  "mcp_usage": {
+    "agent_count_one": "Used by {{count}} agent",
+    "agent_count_other": "Used by {{count}} agents",
+    "none": "Not assigned to any agent"
+  },
+  "mcp_sources": {
+    "title": "Ways to give agents tools",
+    "current": "This page",
+    "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
+    "apps": "Authorized with your own account through Composio and enabled on agents you own.",
+    "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
   }
 }

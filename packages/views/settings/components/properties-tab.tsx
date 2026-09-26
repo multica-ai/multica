@@ -77,7 +77,7 @@ import {
   PropertyIconPicker,
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
-import { SettingsTab } from "./settings-layout";
+import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -141,7 +141,9 @@ export function PropertiesTab() {
     <SettingsTab
       title={t(($) => $.properties.title)}
       description={t(($) => $.properties.description)}
+      scope="workspace"
     >
+      {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-sm">

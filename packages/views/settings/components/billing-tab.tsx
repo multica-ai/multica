@@ -747,6 +747,7 @@ function BillingTabContent() {
     return (
       <SettingsTab
         title={t(($) => $.workspace.title)}
+        scope="workspace"
       >
         <SettingsCard>
           <div
@@ -766,6 +767,7 @@ function BillingTabContent() {
     return (
       <SettingsTab
         title={t(($) => $.workspace.title)}
+        scope="workspace"
       >
         <Alert variant="destructive">
           <AlertCircle />
@@ -858,6 +860,7 @@ function BillingTabContent() {
   return (
     <SettingsTab
       title={t(($) => $.workspace.title)}
+      scope="workspace"
     >
       {returnResult === "cancel" ? (
         <Alert>

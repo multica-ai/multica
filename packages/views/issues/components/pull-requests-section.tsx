@@ -227,7 +227,7 @@ function AutoCompleteMenu({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=integrations&integration=github`)}>
+        <DropdownMenuItem onClick={() => navigation.push(`${paths.settings()}?tab=code`)}>
           <Settings />
           {t(($) => $.pr_automation.settings)}
         </DropdownMenuItem>
