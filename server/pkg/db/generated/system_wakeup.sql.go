@@ -516,6 +516,31 @@ func (q *Queries) ListStaleChildEventParents(ctx context.Context) ([]pgtype.UUID
 	return items, nil
 }
 
+const listUnprocessedClosedChildren = `-- name: ListUnprocessedClosedChildren :many
+SELECT DISTINCT child_id FROM issue_child_event WHERE parent_id= $1 AND kind='closed' AND processed_at IS NULL
+`
+
+// Sub-issues whose closing is recorded but not processed yet.
+func (q *Queries) ListUnprocessedClosedChildren(ctx context.Context, parentID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnprocessedClosedChildren, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var child_id pgtype.UUID
+		if err := rows.Scan(&child_id); err != nil {
+			return nil, err
+		}
+		items = append(items, child_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const mergeWorkspaceSettings = `-- name: MergeWorkspaceSettings :exec
 UPDATE workspace SET settings=COALESCE(settings,'{}'::jsonb) || $1::jsonb,updated_at=now() WHERE id= $2
 `

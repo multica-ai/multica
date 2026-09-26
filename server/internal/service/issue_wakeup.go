@@ -546,9 +546,6 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		if _, err = q.CancelUnstartedWakeupTasks(ctx, util.UUIDToString(old.ID)); err != nil {
 			return out, err
 		}
-		if err = q.DropJoinedWakeup(ctx, db.DropJoinedWakeupParams{WakeupID: util.UUIDToString(old.ID), IssueID: issueID}); err != nil {
-			return out, err
-		}
 	}
 	var target db.AgentTaskQueue
 	if filterTask.Valid {
@@ -903,18 +900,19 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		enabled = false
 		next = pgtype.Timestamptz{}
 	}
-	// A firing the agent already knows about, or one a waiting run of the
-	// agent can take along, starts no run of its own.
+	// A firing the agent already knows about starts no run. One that a run of
+	// the agent waiting to start can take along keeps its inputs for that run
+	// (JoinWaitingWakeups).
 	if !taskExists {
-		outcome, joined, err := avoidRedundantRun(ctx, q, w, w.Instruction, w.AgentID, issue.ID, receipts)
+		self, err := acknowledgedBySelf(ctx, q, w, w.AgentID, issue.ID, receipts)
 		if err != nil {
 			return err
 		}
-		if outcome != "" {
-			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids, TaskID: joined.ID}); err != nil {
+		if self {
+			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
 				return err
 			}
-			if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: enabled, NextFireAt: next, LastTaskID: joined.ID}); err != nil {
+			if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: enabled, NextFireAt: next}); err != nil {
 				return err
 			}
 			if timedOut {
@@ -922,18 +920,28 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 					return err
 				}
 			}
-			if outcome == wakeupOutcomeMerged {
-				if err = q.CountWakeupFires(ctx, w.ID); err != nil {
-					return err
-				}
-			}
-			details := wakeupTriggerDetails(joined, receipts)
-			details["outcome"] = outcome
-			if !joined.ID.Valid {
-				delete(details, "task_id")
-			}
+			details := wakeupTriggerDetails(db.AgentTaskQueue{}, receipts)
+			details["outcome"] = wakeupOutcomeAcknowledged
+			delete(details, "task_id")
 			if err = note(wakeupActivityTriggered, details); err != nil {
 				return err
+			}
+			return commit()
+		}
+		waiting, err := hasWaitingRun(ctx, q, issue.ID, w.AgentID, w.CreatedBy)
+		if err != nil {
+			return err
+		}
+		if waiting {
+			// As while its own run is claimed: timers advance, inputs stay,
+			// and a once rule stays on until its input is handed over.
+			if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: w.Enabled, NextFireAt: next}); err != nil {
+				return err
+			}
+			if timedOut {
+				if err = markTimedOut(); err != nil {
+					return err
+				}
 			}
 			return commit()
 		}
@@ -1077,9 +1085,6 @@ func (s *IssueWakeupService) Disable(ctx context.Context, issueID, id, member pg
 	}
 	tasks, err := q.CancelUnstartedWakeupTasks(ctx, util.UUIDToString(id))
 	if err != nil {
-		return out, err
-	}
-	if err = q.DropJoinedWakeup(ctx, db.DropJoinedWakeupParams{WakeupID: util.UUIDToString(id), IssueID: issue.ID}); err != nil {
 		return out, err
 	}
 	out, err = q.LockIssueWakeup(ctx, id)

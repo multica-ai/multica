@@ -447,27 +447,41 @@ func TestChildDoneStagesThenWrapUp(t *testing.T) {
 }
 
 // Another run of the same agent that has not started yet reads the current
-// sub-issues when it does, so the rule joins it instead of queuing a second.
+// sub-issues when it does, so the rule hands it the stage facts when it is
+// claimed instead of queuing a second run. Claimed by a daemon that cannot
+// render them, the rule wakes the agent with its own run.
 func TestChildDoneJoinsPendingRun(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
-	agentID := handlerTestAgentID(t)
-	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
-	dbfx.Task(t, agentID, testutil.Cols{"issue_id": fx.parent.ID, "runtime_id": testRuntimeID, "status": "queued"})
+	for _, rendersJoined := range []bool{true, false} {
+		t.Run(fmt.Sprintf("renders joined wakeups %t", rendersJoined), func(t *testing.T) {
+			fx := newChildDoneFixture(t, "in_progress")
+			agentID := handlerTestAgentID(t)
+			setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+			waiting := dbfx.Task(t, agentID, testutil.Cols{"issue_id": fx.parent.ID, "runtime_id": testRuntimeID, "status": "queued", "originator_user_id": testUserID, "accountable_user_id": testUserID})
 
-	updateChildStatus(t, fx.child.ID, "done")
+			updateChildStatus(t, fx.child.ID, "done")
+			if entries := childDoneEntries(t, fx.parent.ID); len(entries) != 0 {
+				t.Fatalf("entries before the claim = %+v", entries)
+			}
+			if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+				t.Fatalf("pending runs = %d, want the existing one only", got)
+			}
 
-	entries := childDoneEntries(t, fx.parent.ID)
-	if len(entries) != 1 || entries[0].Outcome != "merged" || entries[0].TaskID == "" {
-		t.Fatalf("entries = %+v", entries)
-	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
-		t.Fatalf("pending runs = %d, want the existing one only", got)
-	}
-	// The waiting run carries the stage facts and the instruction.
-	var contextJSON []byte
-	dbfx.QueryRow(t, `SELECT context FROM agent_task_queue WHERE id = $1`, entries[0].TaskID).Scan(&contextJSON)
-	if notes := service.JoinedWakeupNotes(contextJSON); !strings.Contains(notes, service.ChildDoneDefaultInstruction) || !strings.Contains(notes, `"all":true`) {
-		t.Fatalf("joined notes = %q", notes)
+			notes := claimRun(t, waiting, rendersJoined)
+			runWakeupTick(t)
+			entries := childDoneEntries(t, fx.parent.ID)
+			if !rendersJoined {
+				if notes != "" || len(entries) != 1 || entries[0].Outcome != "woke" || len(childDoneRuns(t, fx.parent.ID)) != 1 {
+					t.Fatalf("notes = %q entries = %+v", notes, entries)
+				}
+				return
+			}
+			if !strings.Contains(notes, service.ChildDoneDefaultInstruction) || !strings.Contains(notes, `"all":true`) {
+				t.Fatalf("joined notes = %q", notes)
+			}
+			if len(entries) != 1 || entries[0].Outcome != "merged" || entries[0].TaskID != waiting || len(childDoneRuns(t, fx.parent.ID)) != 0 {
+				t.Fatalf("entries = %+v", entries)
+			}
+		})
 	}
 }
 
@@ -489,11 +503,13 @@ func TestChildDoneAndConditionRuleWakeOnce(t *testing.T) {
 	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
 		t.Fatalf("pending runs = %d, want 1", got)
 	}
-	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND context->>'wakeup_system' IS NULL AND context->>'wakeup_id' IS NOT NULL`, fx.parent.ID); n != 1 {
-		t.Fatalf("the person's rule ran %d times, want 1", n)
+	var run string
+	dbfx.QueryRow(t, `SELECT id FROM agent_task_queue WHERE issue_id = $1 AND context->>'wakeup_system' IS NULL AND context->>'wakeup_id' IS NOT NULL`, fx.parent.ID).Scan(&run)
+	if notes := claimRun(t, run, true); !strings.Contains(notes, service.ChildDoneDefaultInstruction) {
+		t.Fatalf("the person's run lacks the system rule: %q", notes)
 	}
 	entries := childDoneEntries(t, fx.parent.ID)
-	if len(entries) != 1 || entries[0].Outcome != "merged" {
+	if len(entries) != 1 || entries[0].Outcome != "merged" || entries[0].TaskID != run {
 		t.Fatalf("system entries = %+v", entries)
 	}
 }

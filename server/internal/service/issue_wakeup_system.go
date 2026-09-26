@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -92,10 +91,10 @@ func baselineChildDone(ctx context.Context, tx pgx.Tx, q *db.Queries, rule db.Is
 }
 
 // EnsureChildDoneRule returns the parent's rule, creating it when missing.
-// asOpen lists sub-issues whose closing is being processed: the new rule's
-// baseline treats them as still open, so the change that led to creating the
-// rule still wakes the assignee.
-func EnsureChildDoneRule(ctx context.Context, tx pgx.Tx, q *db.Queries, parent db.Issue, asOpen map[pgtype.UUID]bool) (db.IssueWakeup, error) {
+// The new rule's baseline treats sub-issues whose closing is recorded but not
+// yet processed as still open, so that change still wakes the assignee,
+// whichever writer creates the rule first.
+func EnsureChildDoneRule(ctx context.Context, tx pgx.Tx, q *db.Queries, parent db.Issue) (db.IssueWakeup, error) {
 	rule, err := q.GetSystemWakeup(ctx, db.GetSystemWakeupParams{IssueID: parent.ID, SystemRule: systemRuleText(SystemRuleChildDone)})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return rule, err
@@ -108,6 +107,14 @@ func EnsureChildDoneRule(ctx context.Context, tx pgx.Tx, q *db.Queries, parent d
 	children, err := loadSubIssues(ctx, tx, q, parent.ID, parent.WorkspaceID)
 	if err != nil {
 		return rule, err
+	}
+	closing, err := q.ListUnprocessedClosedChildren(ctx, parent.ID)
+	if err != nil {
+		return rule, err
+	}
+	asOpen := make(map[pgtype.UUID]bool, len(closing))
+	for _, id := range closing {
+		asOpen[id] = true
 	}
 	for i := range children {
 		if asOpen[children[i].ID] {
@@ -162,7 +169,6 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 		return err
 	}
 	ids := make([]pgtype.UUID, 0, len(events))
-	closing := map[pgtype.UUID]bool{}
 	kinds := map[string]bool{}
 	// The agent runs that made the changes that can satisfy a sub-issue
 	// condition (a sub-issue closing, leaving, or changing stage), when every
@@ -173,9 +179,6 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 	for _, e := range events {
 		ids = append(ids, e.ID)
 		kinds[e.Kind] = true
-		if e.Kind == "closed" {
-			closing[e.ChildID] = true
-		}
 		if e.Kind == "attached" || e.Kind == "reopened" {
 			continue
 		}
@@ -205,7 +208,7 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 	if !active {
 		return finish()
 	}
-	if _, err = EnsureChildDoneRule(ctx, tx, q, parent, closing); err != nil {
+	if _, err = EnsureChildDoneRule(ctx, tx, q, parent); err != nil {
 		return err
 	}
 	rules, err := q.ListChildConditionWakeups(ctx, parent.ID)
@@ -231,7 +234,7 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 		return err
 	}
 	// People's and agents' rules first, so the system rule sees their run and
-	// joins it instead of starting a second one for the same fact.
+	// waits to join it instead of starting a second one for the same fact.
 	var errs []error
 	for _, w := range rules {
 		if w.SystemRule.Valid {
@@ -289,7 +292,7 @@ func (s *IssueWakeupService) ensureRule(ctx context.Context, parent db.Issue) er
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = EnsureChildDoneRule(ctx, tx, s.Tasks.Queries.WithTx(tx), parent, nil); err != nil {
+	if _, err = EnsureChildDoneRule(ctx, tx, s.Tasks.Queries.WithTx(tx), parent); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -573,26 +576,32 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		}
 		return commit()
 	}
-	// The agent's own unfinished run on the parent closed the stage, or a run
-	// of the agent is already waiting to start there: no second run.
-	outcome, joined, err := avoidRedundantRun(ctx, q, w, instruction.Instruction, agent.ID, issue.ID, receipts)
+	// The agent's own unfinished run on the parent closed the stage: no second
+	// run. A run of the agent waiting to start there takes the facts along
+	// when it is claimed (JoinWaitingWakeups).
+	self, err := acknowledgedBySelf(ctx, q, w, agent.ID, issue.ID, receipts)
 	if err != nil {
 		return err
 	}
-	if outcome != "" {
-		facts["outcome"] = outcome
-		if joined.ID.Valid {
-			facts["task_id"] = util.UUIDToString(joined.ID)
-		}
-		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids, TaskID: joined.ID}); err != nil {
-			return err
-		}
-		if err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: w.ID, Enabled: true, LastTaskID: joined.ID}); err != nil {
+	if self {
+		facts["outcome"] = wakeupOutcomeAcknowledged
+		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
 			return err
 		}
 		if err = note(wakeupActivityTriggered, facts); err != nil {
 			return err
 		}
+		return commit()
+	}
+	attr, err := s.childDoneRunAs(ctx, issue, agent)
+	if err != nil {
+		return err
+	}
+	waiting, err := hasWaitingRun(ctx, q, issue.ID, agent.ID, attr.UserID)
+	if err != nil {
+		return err
+	}
+	if waiting {
 		return commit()
 	}
 	recent, err := q.CountRecentWakeupTasks(ctx, db.CountRecentWakeupTasksParams{WakeupID: util.UUIDToString(w.ID), IssueID: w.IssueID, Since: pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true}})
@@ -612,12 +621,6 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		return commit()
 	}
 	if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginDerived); err != nil {
-		return err
-	}
-	// The run is accountable to whoever caused the parent to exist, as a run
-	// the parent's own assignment would start.
-	attr := s.Tasks.attributionForIssueTask(ctx, issue, pgtype.UUID{}, attribution.SourceDelegation, pgtype.UUID{})
-	if attr, err = s.Tasks.applyAttributionFallback(ctx, attr, agent); err != nil {
 		return err
 	}
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
@@ -694,7 +697,7 @@ func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID pg
 	if err != nil {
 		return out, err
 	}
-	rule, err := EnsureChildDoneRule(ctx, tx, q, issue, nil)
+	rule, err := EnsureChildDoneRule(ctx, tx, q, issue)
 	if err != nil {
 		return out, err
 	}
@@ -725,9 +728,6 @@ func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID pg
 			return out, err
 		}
 		if cancelled, err = q.CancelUnstartedWakeupTasks(ctx, util.UUIDToString(rule.ID)); err != nil {
-			return out, err
-		}
-		if err = q.DropJoinedWakeup(ctx, db.DropJoinedWakeupParams{WakeupID: util.UUIDToString(rule.ID), IssueID: rule.IssueID}); err != nil {
 			return out, err
 		}
 	}

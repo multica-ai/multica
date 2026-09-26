@@ -431,8 +431,8 @@ Self-trigger protection excludes the registering run and runs started by the
 same rule when their source identity is available. Your own comments and issue
 changes never wake you, and a condition your own unfinished run satisfies does
 not wake you when you or the platform set the rule up. A wakeup that fires
-while a run of yours is already waiting to start on the issue joins that run
-instead of starting another: its instruction and facts appear in that run's
-`[WAKEUP — joined this run]` block, so handle them there. None of this prevents
+while a run of yours for the same person is waiting to start on the issue
+joins that run instead of starting another: its instruction and facts appear
+in that run's `[WAKEUP — joined this run]` block, so handle them there. None of this prevents
 cycles between different rules. Avoid mutually triggering continuous comment
 subscriptions; when waiting for a person's reply, filter that member explicitly.

@@ -467,9 +467,9 @@ of people's rules; what differs is owned by the platform:
   parent keeps the rule (the platform never disables a system rule for a
   closed issue); it rests until the parent reopens.
 - **Joining a waiting run.** If the target agent already has an unstarted run
-  on the parent (any trigger but this rule), the rule consumes its facts into
-  a `merged` timeline entry instead of queuing a second run; that run reads the
-  current sub-issues when it starts. Runaway protection is the hourly limit
+  on the parent that runs as the person the rule's own run would (see "Repeat
+  runs" below), the rule keeps its facts for that run instead of queuing a
+  second one. Runaway protection is the hourly limit
   (12 runs, then `paused_reason=rate`); loop detection does not apply because
   stage hand-offs cross issues by design, and there is no fire cap.
 - **Instruction.** The run's `[WAKEUP]` block carries the instruction and the
@@ -498,10 +498,10 @@ admins). Changing the default applies to every rule nobody customized and the
 platform did not pause, re-baselining the ones it turns on.
 
 Open parents that predate the rule get it from the sweep job's one-time
-backfill, with what already holds recorded so nothing fires. A parent whose
-sub-issues change before the backfill reaches it gets its rule when the change
-is processed, with the closing sub-issues treated as still open in the
-baseline, so that change still wakes the assignee. System rows do not count
+backfill, with what already holds recorded so nothing fires. Whichever writer
+creates a rule (the backfill or processing a change), sub-issues whose closing
+is recorded in `issue_child_event` but not yet processed count as still open
+in its baseline, so that closing still wakes the assignee. System rows do not count
 toward the per-issue and per-workspace capacity (`guard_issue_wakeup_capacity`).
 
 Migrations 551–558 are additive for existing rows. Deploy them before the
@@ -516,7 +516,7 @@ runs beside another run of its agent, but it can queue behind one and repeat it.
 Pending runs are unique per issue, agent and scope (`comment_thread_id`, which
 is the rule id for wakeup runs), so an assignment run, a comment run and each
 rule's run used to queue separately. Every rule, the system rule included, now
-checks two things before it creates a run (`avoidRedundantRun`):
+checks two things before it creates a run:
 
 - **Acknowledged.** Every input came from the target agent itself. An issue,
   comment, reaction or attachment event whose single actor is the agent never
@@ -528,21 +528,35 @@ checks two things before it creates a run (`avoidRedundantRun`):
   records `multica.source_task_id` for closing, leaving and restaging (adding
   or reopening a sub-issue satisfies nothing and is ignored). A person's
   condition rule still runs after the agent's own change, because the running
-  agent does not have its instruction. This is the #8849 fix: a coordinator
-  closing its own stage is not woken again while that run is going.
-- **Merged.** The agent already has a queued (unclaimed) run on the issue from
-  another trigger. The rule appends `{wakeup_id, note}` to that run's
-  `context.wakeup_joined` (`JoinQueuedIssueRun`, replacing its own earlier
-  entry) instead of queuing another; the claim response carries the notes as
-  `wakeup_joined` and the daemon renders them as a `[WAKEUP — joined this run]`
-  block for every prompt kind. Older daemons ignore the field, so on them the
-  run starts without the rule's instruction.
+  agent does not have its instruction. The inputs are consumed with a
+  `wakeup_triggered` entry (`outcome=acknowledged`). This is the #8849 fix: a
+  coordinator closing its own stage is not woken again while that run is going.
+- **Merged.** The agent has a queued run on the issue that runs as the same
+  person the rule's own run would: the rule's creator, or for `child_done` the
+  person `childDoneRunAs` resolves from the parent. The rule then starts
+  nothing and keeps its inputs (`FindWaitingIssueRun`); timers advance and a
+  `once` rule stays on, as while its own run is claimed. When a daemon that
+  advertises `joined-wakeups-v1` claims that run, `JoinWaitingWakeups` runs
+  after every claim gate: for each such rule, locked with `SKIP LOCKED`, it
+  checks again that the rule is on, has no run of its own, targets this agent,
+  runs as this run's originator, the creator may still use the agent, the
+  inputs are not the agent's own and do not close a loop. It then consumes the
+  inputs into the run, advances the rule (a `once` rule ends, a merge counts
+  toward `max_fires` and can pause the rule there), adds the rule's chain to
+  the run's `wakeup_chain`, writes a `wakeup_triggered` entry
+  (`outcome=merged`, `task_id`) and appends `{wakeup_id, wakeup_revision,
+  note}` to the run's `context.wakeup_joined`. The claim response carries the
+  notes as `wakeup_joined`; the daemon renders them as a
+  `[WAKEUP — joined this run]` block for every prompt kind. A re-claim drops
+  entries whose rule was deleted, turned off or changed since.
 
-Both consume the inputs and write a `wakeup_triggered` entry with `outcome`
-(`acknowledged` or `merged`, plus `task_id` for a merge); a merge counts toward
-`max_fires`. A rule's own queued run still absorbs new inputs as before. The
-create form tells a member when a reply or comment rule would wake the issue's
-agent assignee, whose comment-triggered run it will join.
+Nothing is handed over before the claim, so a rule never loses inputs to a run
+that does not take them: if the waiting run is cancelled, or an older daemon
+claims it, the rule still has its inputs and starts its own run on a later
+tick. Joining skips the hourly run limit, which counts the rule's own runs;
+every join needs a run some other trigger queued, so joins alone cannot run
+away. The create form tells a member when a reply or comment rule would wake
+the issue's agent assignee, whose comment-triggered run it will join.
 
 ## Conditions, runaway protection and check-ins
 

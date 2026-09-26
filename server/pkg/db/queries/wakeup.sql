@@ -228,24 +228,31 @@ WHERE w.workspace_id= @workspace_id AND NOT w.enabled AND w.paused_reason IN ('l
  AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=i.workspace_id AND s.key=i.status AND s.category IN ('done','closed'))
 ORDER BY w.updated_at DESC LIMIT 200;
 
--- name: JoinQueuedIssueRun :one
--- A rule that fires while the same agent already has a run waiting to start on
--- the issue (from any trigger but this rule) hands that run its instruction
--- and facts instead of queuing another. Only an unclaimed run qualifies: a
--- claimed prompt is fixed. A rule that joins again replaces its earlier entry.
-UPDATE agent_task_queue t SET context=COALESCE(t.context,'{}'::jsonb) || jsonb_build_object('wakeup_joined',
- (SELECT COALESCE(jsonb_agg(e),'[]'::jsonb) FROM jsonb_array_elements(COALESCE(t.context->'wakeup_joined','[]'::jsonb)) e
-  WHERE e->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text) || jsonb_build_array(@entry::jsonb))
-WHERE t.id=(SELECT q.id FROM agent_task_queue q WHERE q.issue_id= @issue_id AND q.agent_id= @agent_id AND q.status='queued'
-  AND q.context->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text ORDER BY q.created_at,q.id LIMIT 1 FOR UPDATE SKIP LOCKED)
-RETURNING t.*;
+-- name: FindWaitingIssueRun :one
+-- A run of the agent on the issue that has not been claimed and runs as this
+-- person. A rule that fires meanwhile keeps its inputs for that run instead
+-- of queuing another.
+SELECT id FROM agent_task_queue WHERE issue_id= @issue_id AND agent_id= @agent_id AND status='queued'
+ AND originator_user_id= @originator_user_id::uuid ORDER BY created_at,id LIMIT 1;
 
--- name: DropJoinedWakeup :exec
--- A rule that is turned off or replaced withdraws what it handed to runs that
--- have not started, like its own unstarted runs.
-UPDATE agent_task_queue t SET context=t.context || jsonb_build_object('wakeup_joined',
- (SELECT COALESCE(jsonb_agg(e),'[]'::jsonb) FROM jsonb_array_elements(t.context->'wakeup_joined') e WHERE e->>'wakeup_id' IS DISTINCT FROM @wakeup_id::text))
-WHERE t.issue_id= @issue_id AND t.status='queued' AND jsonb_typeof(t.context->'wakeup_joined')='array';
+-- name: ListWaitingWakeups :many
+-- Rules on the issue with inputs a run of this agent can take along: the
+-- agent's own rules and the platform's. Read without locks; each one is
+-- locked and checked again before it joins.
+SELECT w.id FROM issue_wakeup w
+WHERE w.issue_id= @issue_id AND (w.agent_id= @agent_id OR w.system_rule IS NOT NULL) AND w.disabled_at IS NULL
+ AND EXISTS(SELECT 1 FROM issue_wakeup_receipt r WHERE r.wakeup_id=w.id AND r.revision=w.revision AND r.processed_at IS NULL
+  AND (w.condition IS NULL OR r.event_type IN ('condition.met','wakeup.timeout','wakeup.manual')))
+ORDER BY w.created_at,w.id;
+
+-- name: TryLockIssueWakeup :one
+-- A rule another writer holds is skipped; it keeps its inputs.
+SELECT * FROM issue_wakeup WHERE id= @id FOR UPDATE SKIP LOCKED;
+
+-- name: SetClaimedTaskContext :one
+-- Only the claim being answered may change its task's context.
+UPDATE agent_task_queue SET context= @context::jsonb
+WHERE id= @id AND status='dispatched' AND dispatched_at= @dispatched_at RETURNING *;
 
 -- name: CountActiveIssueRunsOfAgent :one
 -- How many of these runs are the agent's own runs on this issue that have

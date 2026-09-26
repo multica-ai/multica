@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // actAsRun makes a request come from an agent's run, as the CLI does inside a
@@ -64,6 +65,32 @@ func lastWakeupOutcome(t *testing.T, issueID string) (outcome, taskID string) {
 	}
 	_ = json.Unmarshal(raw, &details)
 	return details.Outcome, details.TaskID
+}
+
+// claimRun claims a queued run as a daemon does and returns what its prompt
+// gets from wakeups that joined it. Only a daemon that advertises
+// joined-wakeups-v1 takes them along.
+func claimRun(t *testing.T, taskID string, rendersJoined bool) string {
+	t.Helper()
+	ctx := context.Background()
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = clock_timestamp() WHERE id = $1`, taskID)
+	task, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := testHandler.Queries.GetAgentRuntime(ctx, task.RuntimeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := newDaemonTokenRequest("POST", "/claim", nil, testWorkspaceID, "joined-wakeups-test")
+	if rendersJoined {
+		req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityJoinedWakeupsV1)
+	}
+	resp, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(req, &task, runtime, uuidToString(task.RuntimeID), testWorkspaceID)
+	if failure != nil {
+		t.Fatalf("claim: %+v", failure)
+	}
+	return resp.WakeupJoined
 }
 
 func createRule(t *testing.T, issueID, agentID string, source pgtype.UUID, in service.WakeupInput) string {
@@ -138,37 +165,54 @@ func TestWakeupSkipsTheAgentsOwnComment(t *testing.T) {
 }
 
 // A rule that fires while its agent already has a run waiting on the issue
-// joins that run: no second run, and the waiting run carries the instruction.
+// keeps its inputs for that run: no second run, and the run carries the
+// instruction and every fact once it is claimed.
 func TestWakeupJoinsTheAgentsWaitingRun(t *testing.T) {
 	issue := dbfx.Issue(t, "join waiting run")
 	t.Cleanup(func() { cleanupChildDoneIssue(issue) })
 	agentID := handlerTestAgentID(t)
 	setIssueAssigneeDirect(t, issue, "agent", agentID)
-	waiting := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issue, "runtime_id": testRuntimeID, "status": "queued"})
+	waiting := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issue, "runtime_id": testRuntimeID, "status": "queued", "originator_user_id": testUserID, "accountable_user_id": testUserID})
 	rule := createRule(t, issue, agentID, pgtype.UUID{}, service.WakeupInput{Instruction: "Summarize the discussion", Kind: "event", Mode: "continuous", EventTypes: []string{"comment.created"}})
 
 	commentOn(t, issue, "Here is more context.", "", "")
 	runWakeupTick(t)
-
+	commentOn(t, issue, "One more thing.", "", "")
+	runWakeupTick(t)
 	if n := wakeupRunsOf(t, rule); n != 0 {
 		t.Fatalf("the rule queued %d runs of its own", n)
+	}
+
+	notes := claimRun(t, waiting, true)
+	if strings.Count(notes, "Wakeup "+rule) != 1 || !strings.Contains(notes, "Summarize the discussion") || strings.Count(notes, "comment.created") != 2 {
+		t.Fatalf("joined notes = %q", notes)
 	}
 	outcome, taskID := lastWakeupOutcome(t, issue)
 	if outcome != "merged" || taskID != waiting {
 		t.Fatalf("outcome = %q task = %q, want merged into %s", outcome, taskID, waiting)
 	}
-	var contextJSON []byte
-	dbfx.QueryRow(t, `SELECT context FROM agent_task_queue WHERE id = $1`, waiting).Scan(&contextJSON)
-	notes := service.JoinedWakeupNotes(contextJSON)
-	if !strings.Contains(notes, rule) || !strings.Contains(notes, "Summarize the discussion") || !strings.Contains(notes, "comment.created") {
-		t.Fatalf("joined notes = %q", notes)
+	if n := wakeupRunsOf(t, rule); n != 0 {
+		t.Fatalf("the rule queued %d runs of its own", n)
 	}
-	// Firing again replaces its entry instead of piling up.
-	commentOn(t, issue, "One more thing.", "", "")
+}
+
+// A daemon that cannot render joined wakeups claims the waiting run without
+// them; the rule then starts its own run.
+func TestWakeupRunsOnItsOwnAfterAnOlderDaemonsClaim(t *testing.T) {
+	issue := dbfx.Issue(t, "older daemon")
+	t.Cleanup(func() { cleanupChildDoneIssue(issue) })
+	agentID := handlerTestAgentID(t)
+	waiting := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issue, "runtime_id": testRuntimeID, "status": "queued", "originator_user_id": testUserID, "accountable_user_id": testUserID})
+	rule := createRule(t, issue, agentID, pgtype.UUID{}, service.WakeupInput{Instruction: "Summarize the discussion", Kind: "event", EventTypes: []string{"comment.created"}})
+
+	commentOn(t, issue, "Here is more context.", "", "")
 	runWakeupTick(t)
-	dbfx.QueryRow(t, `SELECT context FROM agent_task_queue WHERE id = $1`, waiting).Scan(&contextJSON)
-	if got := strings.Count(service.JoinedWakeupNotes(contextJSON), "Wakeup "+rule); got != 1 {
-		t.Fatalf("rule appears %d times in the joined notes", got)
+	if notes := claimRun(t, waiting, false); notes != "" {
+		t.Fatalf("an older daemon's claim got %q", notes)
+	}
+	runWakeupTick(t)
+	if n := wakeupRunsOf(t, rule); n != 1 {
+		t.Fatalf("runs of the rule = %d, want 1", n)
 	}
 }
 

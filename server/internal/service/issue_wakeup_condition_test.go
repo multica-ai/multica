@@ -145,14 +145,14 @@ func TestWakeupConditionChildrenAndOtherIssue(t *testing.T) {
 	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", other)
 	wakeTick(t, f, s, stage.ID)
 	wakeTick(t, f, s, watch.ID)
-	// Both hold for the same agent: the second joins the first one's run
-	// instead of queuing another behind it.
+	// Both hold for the same agent: the second waits for the first one's run
+	// and joins it when it is claimed, instead of queuing another behind it.
 	if wakeRuns(t, f, stage.ID) != 1 || wakeRuns(t, f, watch.ID) != 0 {
 		t.Fatalf("stage runs=%d, other-issue runs=%d, want one shared run", wakeRuns(t, f, stage.ID), wakeRuns(t, f, watch.ID))
 	}
-	var shared []byte
-	f.QueryRow(t, "SELECT context FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(stage.ID)).Scan(&shared)
-	if notes := JoinedWakeupNotes(shared); !strings.Contains(notes, "Continue after the blocker") || !strings.Contains(notes, `"state":"done"`) {
+	var shared string
+	f.QueryRow(t, "SELECT id FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(stage.ID)).Scan(&shared)
+	if notes := wakeClaim(t, f, s, shared); !strings.Contains(notes, "Continue after the blocker") || !strings.Contains(notes, `"state":"done"`) {
 		t.Fatalf("shared run lacks the joined rule: %q", notes)
 	}
 }

@@ -58,6 +58,10 @@ WHERE parent_id= @parent_id AND processed_at IS NULL
  AND (claimed_at IS NULL OR claimed_at < clock_timestamp()-interval '5 minutes')
 RETURNING *;
 
+-- name: ListUnprocessedClosedChildren :many
+-- Sub-issues whose closing is recorded but not processed yet.
+SELECT DISTINCT child_id FROM issue_child_event WHERE parent_id= @parent_id AND kind='closed' AND processed_at IS NULL;
+
 -- name: FinishChildEvents :exec
 UPDATE issue_child_event SET processed_at=clock_timestamp() WHERE id=ANY(@ids::uuid[]);
 
