@@ -85,6 +85,10 @@ type outboundQueries interface {
 	// roundTaker's taskLookup.
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	// The two member lookups the inbox push picks its bot with, in the order it
+	// tries them: the acting agent's own bot first, then the recipient-wide one
+	// as the fallback. See memberBindingFor.
+	FindChannelBindingForMemberOnAgentInstallation(ctx context.Context, arg db.FindChannelBindingForMemberOnAgentInstallationParams) (db.ChannelUserBinding, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
@@ -808,11 +812,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if err != nil || !workspaceID.Valid {
 		return false
 	}
-	binding, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
-		WorkspaceID:   workspaceID,
-		MulticaUserID: recipientID,
-		ChannelType:   channelTypeWecom,
-	})
+	binding, err := o.memberBindingFor(ctx, item, workspaceID, recipientID)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			o.logger.WarnContext(ctx, "wecom outbound: lookup member binding failed",
@@ -878,6 +878,92 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 		"recipient_id", recipientIDStr,
 		"inbox_type", item["type"])
 	return true
+}
+
+// memberBindingFor resolves which of the recipient's WeCom bots carries this
+// notification.
+//
+// The recipient-wide lookup is deliberately no longer the only answer.
+// FindChannelBindingForMember keys on the RECIPIENT and on nothing else, so in
+// a multi-bot org — one bot per agent, one person bound to several of them —
+// the member reads every agent's activity through whichever bot they bound
+// most recently, and the bot↔agent mapping they set up disappears.
+// When the notification names an AGENT as its actor, the bot that agent owns
+// is the one the recipient talks to about that agent's work, so the agent's
+// bot is tried first, through the recipient's binding ON it.
+//
+// The recipient-wide lookup stays as the fallback rather than a peer: an
+// agent-attributed notification from an agent this person never bound still
+// has to reach them, and that is precisely the case the old lookup answers. A
+// member-authored notification names no agent and keeps the old answer
+// unchanged.
+func (o *Outbound) memberBindingFor(ctx context.Context, item map[string]any, workspaceID, recipientID pgtype.UUID) (db.ChannelUserBinding, error) {
+	if agentID, ok := inboxActorAgent(item); ok {
+		binding, err := o.q.FindChannelBindingForMemberOnAgentInstallation(ctx, db.FindChannelBindingForMemberOnAgentInstallationParams{
+			WorkspaceID:   workspaceID,
+			MulticaUserID: recipientID,
+			ChannelType:   channelTypeWecom,
+			AgentID:       agentID,
+		})
+		switch {
+		case err == nil:
+			o.logger.DebugContext(ctx, "wecom outbound: inbox push follows the acting agent's bot",
+				"agent_id", uuidStringPub(agentID),
+				"installation_id", uuidStringPub(binding.InstallationID))
+			return binding, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			// A read failure must not silence a notification the fallback can
+			// still deliver: the fallback's own error is the one the caller
+			// reports and counts, and it is the same query the old path made.
+			o.logger.WarnContext(ctx, "wecom outbound: agent-bot binding lookup failed",
+				"error", err, "agent_id", uuidStringPub(agentID))
+		}
+	}
+	return o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: recipientID,
+		ChannelType:   channelTypeWecom,
+	})
+}
+
+// inboxActorAgent reads the agent an inbox notification names as its actor,
+// when it names one. The payload is the map inboxItemToResponse builds, whose
+// actor fields are pointers (util.TextToPtr / util.UUIDToPtr) and nil for a
+// notification a member authored. Both spellings are accepted, the same
+// defensive shape itemIDOf uses, so a payload that was re-encoded on its way
+// here reads like a native one.
+func inboxActorAgent(item map[string]any) (pgtype.UUID, bool) {
+	if inboxStringField(item["actor_type"]) != "agent" {
+		return pgtype.UUID{}, false
+	}
+	id := inboxStringField(item["actor_id"])
+	if id == "" {
+		return pgtype.UUID{}, false
+	}
+	agentID, err := util.ParseUUID(id)
+	if err != nil || !agentID.Valid {
+		return pgtype.UUID{}, false
+	}
+	return agentID, true
+}
+
+// inboxStringField reads one payload string that may arrive plain or behind a
+// pointer — which is how the two publishers of an inbox item spell the actor
+// fields. Anything else, including a nil pointer, reads as absent.
+func inboxStringField(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case *string:
+		if s != nil {
+			return *s
+		}
+	case pgtype.Text:
+		if s.Valid {
+			return s.String
+		}
+	}
+	return ""
 }
 
 // uuidStringPub renders a pgtype.UUID for a log line without depending on

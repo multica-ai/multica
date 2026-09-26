@@ -1382,6 +1382,68 @@ func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChann
 	return i, err
 }
 
+const findChannelBindingForMemberOnAgentInstallation = `-- name: FindChannelBindingForMemberOnAgentInstallation :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+  AND ci.channel_type = $3
+  AND ci.agent_id = $4
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindChannelBindingForMemberOnAgentInstallationParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+}
+
+// Agent-attributed notification lookup: the same member lookup as
+// FindChannelBindingForMember, pinned to the ONE installation the agent whose
+// activity raised the notification owns.
+//
+// Why this exists. FindChannelBindingForMember answers by the
+// RECIPIENT alone, so in a multi-bot org — one bot per agent, several of them
+// bound by the same person — every notification a member receives is pushed
+// through whichever bot they bound most recently, no matter which agent the
+// notification is about. The recipient reads three agents' activity as if it
+// all came from one of them. Pinning the lookup to the acting agent's bot is
+// what makes the notification follow the bot↔agent mapping the sender is
+// reading.
+//
+// The tiebreak stays for the case where one member holds two channel users on
+// the same bot (two WeCom accounts, one Multica account): both rows answer,
+// and `:one` cannot take more than one, so the newest binding wins here
+// exactly as it does in the recipient-wide lookup.
+//
+// channel_type is named once and used for both columns: the installation's
+// own discriminator and the binding's must agree, or installs of two
+// platforms could cross-answer here.
+func (q *Queries) FindChannelBindingForMemberOnAgentInstallation(ctx context.Context, arg FindChannelBindingForMemberOnAgentInstallationParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findChannelBindingForMemberOnAgentInstallation,
+		arg.WorkspaceID,
+		arg.MulticaUserID,
+		arg.ChannelType,
+		arg.AgentID,
+	)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
 const findLiveChannelBindingToken = `-- name: FindLiveChannelBindingToken :one
 SELECT token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at, consumed_at, created_at FROM channel_binding_token
 WHERE installation_id = $1
