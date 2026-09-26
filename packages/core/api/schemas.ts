@@ -1792,6 +1792,38 @@ const RuntimeUsageByHourSchema = z.object({
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
+// Plan-limit snapshots reported by the local daemon. Numbers and strings stay
+// optional so an older or partial payload degrades instead of failing the
+// whole response. Unknown fields pass through `.loose()`.
+const ProviderUsageWindowSchema = z.object({
+  id: z.string().default(""),
+  percent_used: z.number().optional(),
+  resets_at: z.string().optional(),
+}).loose();
+
+const ProviderUsageSnapshotSchema = z.object({
+  provider: z.string().default(""),
+  plan_name: z.string().optional(),
+  collected_at: z.string().optional(),
+  reason_code: z.string().optional(),
+  windows: z.array(ProviderUsageWindowSchema).optional(),
+}).loose();
+
+export const ProviderUsageResponseSchema = z.object({
+  providers: z.array(ProviderUsageSnapshotSchema).default([]),
+}).loose();
+
+export const EMPTY_PROVIDER_USAGE_RESPONSE = { providers: [] };
+
+export const RuntimeProviderUsageListSchema = z.object({
+  runtimes: z.array(z.object({
+    runtime_id: z.string().default(""),
+    providers: z.array(ProviderUsageSnapshotSchema).default([]),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_RUNTIME_PROVIDER_USAGE_LIST = { runtimes: [] };
+
 // ---------------------------------------------------------------------------
 // Agent task responses. The base object stays loose so daemon/runtime fields
 // can drift while task-list consumers still validate the fields they render.

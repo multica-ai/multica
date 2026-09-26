@@ -972,6 +972,38 @@ export interface RuntimeHourlyActivity {
   count: number;
 }
 
+// Derived plan-limit snapshot for one provider on a runtime. Older backends
+// omit the endpoint entirely; fields stay optional so a partial payload still
+// renders. This is not task token accounting.
+export interface ProviderUsageWindow {
+  id: string;
+  percent_used?: number;
+  resets_at?: string;
+}
+
+export interface ProviderUsageSnapshot {
+  provider: string;
+  plan_name?: string;
+  collected_at?: string;
+  reason_code?: string;
+  windows?: ProviderUsageWindow[];
+}
+
+export interface ProviderUsageResponse {
+  providers: ProviderUsageSnapshot[];
+}
+
+// One machine's plan-limit snapshots, keyed by the runtime that stored them.
+// The snapshot objects are the same shape as ProviderUsageResponse.providers.
+export interface RuntimeProviderUsageListItem {
+  runtime_id: string;
+  providers: ProviderUsageSnapshot[];
+}
+
+export interface RuntimeProviderUsageListResponse {
+  runtimes: RuntimeProviderUsageListItem[];
+}
+
 // One (agent, provider, model) row of the "Cost by agent" tab on the runtime
 // detail page. provider + model stay on the wire because cost is computed
 // client-side from a per-model pricing table (provider disambiguates bare

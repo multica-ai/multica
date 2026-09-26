@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_runtime_provider_usage_snapshot_workspace;

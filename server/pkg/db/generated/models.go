@@ -1337,6 +1337,21 @@ type RuntimeProfile struct {
 	RuntimeType    string             `json:"runtime_type"`
 }
 
+type RuntimeProviderUsageSnapshot struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	Provider    string             `json:"provider"`
+	WindowID    string             `json:"window_id"`
+	PercentUsed pgtype.Float8      `json:"percent_used"`
+	ResetsAt    pgtype.Timestamptz `json:"resets_at"`
+	PlanName    pgtype.Text        `json:"plan_name"`
+	CollectedAt pgtype.Timestamptz `json:"collected_at"`
+	ReasonCode  pgtype.Text        `json:"reason_code"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SeatCapacityOutbox struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	OperationToken pgtype.UUID        `json:"operation_token"`

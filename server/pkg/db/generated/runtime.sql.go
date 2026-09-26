@@ -178,7 +178,10 @@ func (q *Queries) CountUndrainedTasksByRuntimeOrAgent(ctx context.Context, arg C
 }
 
 const deleteAgentRuntime = `-- name: DeleteAgentRuntime :exec
-DELETE FROM agent_runtime WHERE id = $1
+WITH deleted_provider_usage AS (
+    DELETE FROM runtime_provider_usage_snapshot AS snap WHERE snap.runtime_id = $1
+)
+DELETE FROM agent_runtime AS rt WHERE rt.id = $1
 `
 
 func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error {

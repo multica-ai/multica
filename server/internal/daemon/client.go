@@ -653,6 +653,27 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+// ProviderUsageWindowReport is one derived limit window. It never carries a
+// token, cookie, or auth.json field.
+type ProviderUsageWindowReport struct {
+	ID          string     `json:"id"`
+	PercentUsed float64    `json:"percent_used"`
+	ResetsAt    *time.Time `json:"resets_at,omitempty"`
+}
+
+// ProviderUsageReport is the daemon upload for one provider's plan limits.
+type ProviderUsageReport struct {
+	Provider    string                      `json:"provider"`
+	PlanName    string                      `json:"plan_name,omitempty"`
+	CollectedAt time.Time                   `json:"collected_at"`
+	ReasonCode  string                      `json:"reason_code,omitempty"`
+	Windows     []ProviderUsageWindowReport `json:"windows,omitempty"`
+}
+
+func (c *Client) ReportProviderUsage(ctx context.Context, runtimeID string, report ProviderUsageReport) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/provider-usage", runtimeID), report, nil)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
 }

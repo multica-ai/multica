@@ -21,6 +21,9 @@ const runtimeUsageOptions = vi.hoisted(() =>
 const runtimeUsageByAgentOptions = vi.hoisted(() =>
   vi.fn((..._args: unknown[]) => ({ kind: "by-agent" as const })),
 );
+const runtimeProviderUsageOptions = vi.hoisted(() =>
+  vi.fn((..._args: unknown[]) => ({ kind: "provider-usage" as const })),
+);
 
 vi.mock("../../common/use-viewing-timezone", () => ({
   useViewingTimezone: () => VIEWER_TZ,
@@ -29,6 +32,7 @@ vi.mock("../../common/use-viewing-timezone", () => ({
 vi.mock("@multica/core/runtimes/queries", () => ({
   runtimeUsageOptions,
   runtimeUsageByAgentOptions,
+  runtimeProviderUsageOptions,
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -102,7 +106,12 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (opts: { kind?: string }) => ({
-      data: opts?.kind === "usage" ? (usageOverride.rows ?? usageRows) : [],
+      data:
+        opts?.kind === "usage"
+          ? (usageOverride.rows ?? usageRows)
+          : opts?.kind === "provider-usage"
+            ? { providers: [] }
+            : [],
       isLoading: false,
     }),
   };
