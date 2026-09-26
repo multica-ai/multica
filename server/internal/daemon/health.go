@@ -126,6 +126,9 @@ type activeRepoCheckoutTask struct {
 	AgentID     string
 	AgentName   string
 	WorkDir     string
+	// CodeChanges records each checkout's starting HEAD, so the run's code
+	// change can be read out when it ends. Nil for runs that report none.
+	CodeChanges *checkoutChangeTracker
 }
 
 // registerActiveRepoCheckoutTask binds checkout identity to the active task.
@@ -530,6 +533,8 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		activeTask.CodeChanges.noteCheckout(r.Context(), result.Path, result.Kept != "")
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)

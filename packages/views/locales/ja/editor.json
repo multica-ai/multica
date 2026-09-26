@@ -158,5 +158,21 @@
     "commands": {
       "note": "メモを追加 — エージェントをトリガーしません"
     }
+  },
+  "diff": {
+    "layout": "差分の表示",
+    "unified": "統合",
+    "split": "並列",
+    "filter_files": "ファイルを絞り込む",
+    "files_count_other": "{{count}} ファイル",
+    "no_matching_files": "一致するファイルはありません",
+    "binary": "バイナリファイル",
+    "file_not_in_patch": "このファイルの行単位の差分は保存されていません",
+    "no_text_changes": "名前または権限のみ変更されています",
+    "show_more_lines_other": "残り {{count}} 行を表示",
+    "copy_path": "パスをコピー",
+    "path_copied": "パスをコピーしました",
+    "copy_failed": "コピーできませんでした",
+    "no_changes": "変更はありません"
   }
 }

@@ -158,5 +158,21 @@
     "export_png": "下载 PNG",
     "export_svg": "下载 SVG",
     "export_source": "下载 .mmd"
+  },
+  "diff": {
+    "layout": "差异布局",
+    "unified": "统一",
+    "split": "并排",
+    "filter_files": "筛选文件",
+    "files_count_other": "{{count}} 个文件",
+    "no_matching_files": "没有匹配的文件",
+    "binary": "二进制文件",
+    "file_not_in_patch": "这个文件没有保留逐行差异",
+    "no_text_changes": "只改了文件名或权限",
+    "show_more_lines_other": "显示剩余 {{count}} 行",
+    "copy_path": "复制路径",
+    "path_copied": "已复制路径",
+    "copy_failed": "复制失败",
+    "no_changes": "没有改动"
   }
 }

@@ -71,6 +71,9 @@ import type {
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
+  ListTaskCodeChangesResponse,
+  PullRequestDiff,
+  TaskCodeChangeDetail,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -414,6 +417,10 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
+  EMPTY_LIST_TASK_CODE_CHANGES_RESPONSE,
+  ListTaskCodeChangesResponseSchema,
+  PullRequestDiffSchema,
+  TaskCodeChangeDetailSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -2704,6 +2711,25 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
 
+  /** Every run's code change on an issue, without file lists (MUL-7651). */
+  async listIssueCodeChanges(issueId: string): Promise<ListTaskCodeChangesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/code-changes`);
+    return parseWithFallback(raw, ListTaskCodeChangesResponseSchema, EMPTY_LIST_TASK_CODE_CHANGES_RESPONSE, {
+      endpoint: "GET /api/issues/:id/code-changes",
+    });
+  }
+
+  /** One code change with its file list and patch. A malformed body rejects:
+   *  an empty diff would read as "nothing changed". */
+  async getIssueCodeChange(issueId: string, changeId: string): Promise<TaskCodeChangeDetail> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/code-changes/${changeId}`);
+    const parsed = parseWithFallback<TaskCodeChangeDetail | null>(raw, TaskCodeChangeDetailSchema, null, {
+      endpoint: "GET /api/issues/:id/code-changes/:changeId",
+    });
+    if (!parsed) throw new Error("Malformed code change");
+    return parsed;
+  }
+
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
@@ -4700,6 +4726,18 @@ export class ApiClient {
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/pull-requests" },
     );
+  }
+
+  /** A linked GitHub PR's changes, read through the GitHub App (MUL-7651).
+   *  Rejects when the server cannot read it; callers fall back to the branch
+   *  diff the daemon captured. */
+  async getIssuePullRequestDiff(issueId: string, pullRequestId: string): Promise<PullRequestDiff> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/pull-requests/${pullRequestId}/diff`);
+    const parsed = parseWithFallback<PullRequestDiff | null>(raw, PullRequestDiffSchema, null, {
+      endpoint: "GET /api/issues/:id/pull-requests/:prId/diff",
+    });
+    if (!parsed) throw new Error("Malformed pull request diff");
+    return parsed;
   }
 
   /** Link a PR the workspace already mirrors, by pasted URL or by id (undo). */

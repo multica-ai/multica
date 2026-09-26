@@ -1150,5 +1150,29 @@
     "overview_close": "닫기",
     "overview_empty": "이 유형의 산출물이 없습니다.",
     "group_comment_by": "{{name}}의 댓글"
+  },
+  "code_changes": {
+    "card_title": "이번 실행의 변경",
+    "viewer_title": "코드 변경",
+    "files_other": "파일 {{count}}개",
+    "run_number": "실행 #{{number}}",
+    "scope_label": "표시할 변경 범위",
+    "scope_run": "이번 실행",
+    "scope_run_numbered": "이번 실행 #{{number}}",
+    "scope_issue": "태스크 전체",
+    "scope_issue_pr": "태스크 전체 · PR #{{number}}",
+    "list_run_other": "이번 실행 · 파일 {{count}}개",
+    "list_issue_other": "태스크 전체 · 파일 {{count}}개",
+    "copy_patch": "패치 복사",
+    "download_patch": "패치 다운로드",
+    "patch_copied": "패치를 복사했습니다",
+    "copy_failed": "복사하지 못했습니다",
+    "open_pr": "PR #{{number}} 열기",
+    "patch_too_large": "변경이 너무 커서 파일 목록만 보관했습니다.",
+    "patch_unavailable": "줄 단위 차이를 읽지 못해 파일 목록만 표시합니다.",
+    "files_truncated": "처음 {{count}}개 파일만 표시합니다.",
+    "pr_fallback": "GitHub에서 PR #{{number}}을(를) 읽지 못했습니다. 작업 시작점 대비 브랜치 차이를 표시합니다.",
+    "loading": "변경 사항을 불러오는 중…",
+    "load_failed": "변경 사항을 불러오지 못했습니다"
   }
 }

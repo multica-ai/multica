@@ -162,5 +162,23 @@
     "export_png": "Télécharger en PNG",
     "export_svg": "Télécharger en SVG",
     "export_source": "Télécharger le .mmd"
+  },
+  "diff": {
+    "layout": "Disposition du diff",
+    "unified": "Unifié",
+    "split": "Côte à côte",
+    "filter_files": "Filtrer les fichiers",
+    "files_count_one": "{{count}} fichier",
+    "files_count_other": "{{count}} fichiers",
+    "no_matching_files": "Aucun fichier ne correspond",
+    "binary": "Fichier binaire",
+    "file_not_in_patch": "Aucun diff ligne par ligne n'a été conservé pour ce fichier",
+    "no_text_changes": "Seul le nom ou le mode a changé",
+    "show_more_lines_one": "Afficher {{count}} ligne de plus",
+    "show_more_lines_other": "Afficher {{count}} lignes de plus",
+    "copy_path": "Copier le chemin",
+    "path_copied": "Chemin copié",
+    "copy_failed": "Copie impossible",
+    "no_changes": "Aucune modification"
   }
 }

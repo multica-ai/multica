@@ -1667,6 +1667,8 @@ func TestIsTextPreviewable(t *testing.T) {
 		{"gitignore dotfile", "application/octet-stream", ".gitignore", true},
 		{"dockerfile extension", "application/octet-stream", "service.dockerfile", true},
 		{"makefile extension", "application/octet-stream", "rules.makefile", true},
+		{"patch file", "application/octet-stream", "fix.patch", true},
+		{"diff file", "application/octet-stream", "changes.diff", true},
 
 		{"pdf rejected", "application/pdf", "doc.pdf", false},
 		{"png rejected", "image/png", "shot.png", false},

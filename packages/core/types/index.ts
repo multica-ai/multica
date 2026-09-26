@@ -210,6 +210,15 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  CodeChangeFile,
+  CodeChangeFileStatus,
+  CodeChangeScope,
+  ListTaskCodeChangesResponse,
+  PullRequestDiff,
+  TaskCodeChange,
+  TaskCodeChangeDetail,
+} from "./code-change";
+export type {
   VCSProvider,
   VCSConnection,
   ListVCSConnectionsResponse,

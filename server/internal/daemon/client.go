@@ -653,6 +653,20 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+// codeChangeRetrySchedule retries a code change upload briefly. It is best
+// effort and idempotent server-side, and it delays the run's completion report.
+var codeChangeRetrySchedule = []time.Duration{2 * time.Second, 5 * time.Second}
+
+// ReportTaskCodeChanges uploads what a finished run changed (MUL-7651).
+func (c *Client) ReportTaskCodeChanges(ctx context.Context, taskID string, changes []TaskCodeChangeReport) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/code-changes", taskID), map[string]any{
+		"changes": changes,
+	}, nil, codeChangeRetrySchedule)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
 }

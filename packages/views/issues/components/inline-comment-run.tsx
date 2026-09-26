@@ -32,6 +32,7 @@ import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
+import { RunCodeChanges } from "./code-changes/run-code-changes";
 
 function thinkingPreview(content: string | undefined, formatText: (text: string) => string): string {
   // Redact the complete content before clipping so a split credential cannot leak.
@@ -228,6 +229,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
           {rawError}
         </p>}
+        {/* A run without a reply shows its changes here; a reply carries them. */}
+        {(!hasReply || replacesFailureNotice) && !active && <RunCodeChanges issueId={task.issue_id} taskId={task.id} className="mt-2" />}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}

@@ -1186,5 +1186,32 @@
     "overview_close": "Fermer",
     "overview_empty": "Aucun livrable de ce type.",
     "group_comment_by": "Commentaire de {{name}}"
+  },
+  "code_changes": {
+    "card_title": "Modifications de cette exécution",
+    "viewer_title": "Modifications du code",
+    "files_one": "{{count}} fichier",
+    "files_other": "{{count}} fichiers",
+    "run_number": "Exécution n° {{number}}",
+    "scope_label": "Modifications à afficher",
+    "scope_run": "Cette exécution",
+    "scope_run_numbered": "Cette exécution n° {{number}}",
+    "scope_issue": "Toute la tâche",
+    "scope_issue_pr": "Toute la tâche · PR n° {{number}}",
+    "list_run_one": "Cette exécution · {{count}} fichier",
+    "list_run_other": "Cette exécution · {{count}} fichiers",
+    "list_issue_one": "Toute la tâche · {{count}} fichier",
+    "list_issue_other": "Toute la tâche · {{count}} fichiers",
+    "copy_patch": "Copier le patch",
+    "download_patch": "Télécharger le patch",
+    "patch_copied": "Patch copié",
+    "copy_failed": "Copie impossible",
+    "open_pr": "Ouvrir la PR n° {{number}}",
+    "patch_too_large": "Trop volumineux pour un affichage ligne par ligne ; seule la liste des fichiers a été conservée.",
+    "patch_unavailable": "Le diff ligne par ligne est illisible ; seule la liste des fichiers est affichée.",
+    "files_truncated": "Seuls les {{count}} premiers fichiers sont listés.",
+    "pr_fallback": "Impossible de lire la PR n° {{number}} depuis GitHub. Affichage de la branche par rapport au point de départ du travail.",
+    "loading": "Chargement des modifications…",
+    "load_failed": "Impossible de charger les modifications"
   }
 }

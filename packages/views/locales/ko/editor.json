@@ -158,5 +158,21 @@
     "commands": {
       "note": "메모 추가 — 에이전트를 트리거하지 않음"
     }
+  },
+  "diff": {
+    "layout": "차이 표시 방식",
+    "unified": "통합",
+    "split": "나란히",
+    "filter_files": "파일 필터",
+    "files_count_other": "파일 {{count}}개",
+    "no_matching_files": "일치하는 파일이 없습니다",
+    "binary": "바이너리 파일",
+    "file_not_in_patch": "이 파일의 줄 단위 차이는 보관되지 않았습니다",
+    "no_text_changes": "이름 또는 권한만 변경되었습니다",
+    "show_more_lines_other": "나머지 {{count}}줄 보기",
+    "copy_path": "경로 복사",
+    "path_copied": "경로를 복사했습니다",
+    "copy_failed": "복사하지 못했습니다",
+    "no_changes": "변경 사항 없음"
   }
 }

@@ -1434,6 +1434,32 @@ type SysCronExecution struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TaskCodeChange struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	Scope          string             `json:"scope"`
+	Source         string             `json:"source"`
+	RepoKey        string             `json:"repo_key"`
+	RepoLabel      string             `json:"repo_label"`
+	RepoUrl        string             `json:"repo_url"`
+	Branch         string             `json:"branch"`
+	BaseRef        string             `json:"base_ref"`
+	BaseCommit     string             `json:"base_commit"`
+	HeadCommit     string             `json:"head_commit"`
+	FileCount      int32              `json:"file_count"`
+	Additions      int32              `json:"additions"`
+	Deletions      int32              `json:"deletions"`
+	Files          []byte             `json:"files"`
+	FilesTruncated bool               `json:"files_truncated"`
+	PatchUrl       pgtype.Text        `json:"patch_url"`
+	PatchSize      int64              `json:"patch_size"`
+	PatchOmitted   pgtype.Text        `json:"patch_omitted"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type TaskMessage struct {
 	ID              pgtype.UUID        `json:"id"`
 	TaskID          pgtype.UUID        `json:"task_id"`

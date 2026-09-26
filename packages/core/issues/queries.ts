@@ -186,6 +186,15 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
+  /** Prefix across all issues — `code_changes:created` invalidates here. */
+  codeChangesAll: () => ["issues", "code-changes"] as const,
+  /** Every run's code change on one issue, summaries only (MUL-7651). */
+  codeChanges: (issueId: string) => [...issueKeys.codeChangesAll(), issueId] as const,
+  /** One code change with its file list and patch. Immutable once stored,
+   *  so deliberately outside the list's prefix: refreshing the list never
+   *  refetches a patch. */
+  codeChange: (issueId: string, changeId: string) =>
+    ["issues", "code-change", issueId, changeId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
@@ -626,6 +635,29 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+// Run code changes (MUL-7651). The summary list backs every run's changes
+// card on the issue page, so it is one request per issue, not one per card.
+export function issueCodeChangesOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.codeChanges(issueId),
+    queryFn: async () => (await api.listIssueCodeChanges(issueId)).code_changes,
+    enabled: !!issueId,
+  });
+}
+
+// A stored code change never changes, so its detail (file list + patch) is
+// fetched once per session. Not held after the viewer closes: patches run to
+// a megabyte each.
+export function issueCodeChangeOptions(issueId: string, changeId: string) {
+  return queryOptions({
+    queryKey: issueKeys.codeChange(issueId, changeId),
+    queryFn: () => api.getIssueCodeChange(issueId, changeId),
+    enabled: !!issueId && !!changeId,
+    staleTime: Infinity,
+    gcTime: 60_000,
   });
 }
 

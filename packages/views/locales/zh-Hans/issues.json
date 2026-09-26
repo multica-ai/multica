@@ -1150,5 +1150,29 @@
     "overview_close": "关闭",
     "overview_empty": "没有这类产物。",
     "group_comment_by": "{{name}} 的评论"
+  },
+  "code_changes": {
+    "card_title": "本次改动",
+    "viewer_title": "代码变更",
+    "files_other": "{{count}} 个文件",
+    "run_number": "运行 #{{number}}",
+    "scope_label": "改动范围",
+    "scope_run": "本次运行",
+    "scope_run_numbered": "本次运行 #{{number}}",
+    "scope_issue": "整个任务",
+    "scope_issue_pr": "整个任务 · PR #{{number}}",
+    "list_run_other": "本次运行 · {{count}} 个文件",
+    "list_issue_other": "整个任务 · {{count}} 个文件",
+    "copy_patch": "复制补丁",
+    "download_patch": "下载补丁",
+    "patch_copied": "已复制补丁",
+    "copy_failed": "复制失败",
+    "open_pr": "打开 PR #{{number}}",
+    "patch_too_large": "改动太大，只保留了文件列表。",
+    "patch_unavailable": "逐行差异暂时读不到，只显示文件列表。",
+    "files_truncated": "只列出前 {{count}} 个文件。",
+    "pr_fallback": "无法从 GitHub 读取 PR #{{number}}，这里显示的是分支相对起点的差异。",
+    "loading": "正在加载改动…",
+    "load_failed": "改动加载失败"
   }
 }

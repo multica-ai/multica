@@ -144,6 +144,22 @@ vi.mock("../i18n", () => ({
           table_rows: "rows",
           table_columns: "columns",
         },
+        diff: {
+          layout: "Diff layout",
+          unified: "Unified",
+          split: "Split",
+          filter_files: "Filter files",
+          files_count: "files",
+          no_matching_files: "No files match",
+          binary: "Binary file",
+          file_not_in_patch: "No diff kept",
+          no_text_changes: "Only the name or mode changed",
+          show_more_lines: "Show more",
+          copy_path: "Copy path",
+          path_copied: "Path copied",
+          copy_failed: "Couldn't copy",
+          no_changes: "No changes",
+        },
       }),
   }),
 }));
@@ -291,6 +307,54 @@ describe("AttachmentPreviewModal — dispatch", () => {
       expect(screen.getByTestId("readonly-content")).toBeTruthy();
     });
     expect(screen.getByTestId("readonly-content").textContent).toContain("# heading");
+  });
+
+  it("opens a .patch file in the diff viewer, with the layout toggle in the top bar (MUL-7651)", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: [
+        "diff --git a/src/one.ts b/src/one.ts",
+        "--- a/src/one.ts",
+        "+++ b/src/one.ts",
+        "@@ -1 +1 @@",
+        "-const a = 1;",
+        "+const a = 2;",
+        "diff --git a/two.md b/two.md",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/two.md",
+        "@@ -0,0 +1 @@",
+        "+hello",
+        "",
+      ].join("\n"),
+      originalContentType: "text/plain",
+    });
+    const att = makeAttachment({ filename: "fix.patch", content_type: "text/plain; charset=utf-8" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    const second = await screen.findByRole("button", { name: /two\.md/ });
+    // The first file with hunks opens first.
+    expect(screen.getByRole("button", { name: /one\.ts/ }).getAttribute("aria-current")).toBe("true");
+    const diffText = () => document.querySelector(".transcript-code")?.textContent ?? "";
+    expect(diffText()).toContain("const a = 2;");
+    fireEvent.click(second);
+    await waitFor(() => expect(diffText()).toContain("hello"));
+
+    const split = screen.getByRole("button", { name: "Split" });
+    expect(split.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(split);
+    expect(split.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("falls back to the text view for a .diff file that holds no diff", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "just some notes\n",
+      originalContentType: "text/plain",
+    });
+    const att = makeAttachment({ filename: "notes.diff", content_type: "text/plain" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(document.querySelector("pre code")?.textContent).toContain("just some notes");
+    });
   });
 
   it("renders an iframe with srcdoc + sandbox='allow-scripts' for HTML", async () => {

@@ -8,6 +8,7 @@ import {
   FileArchive,
   FileAudio,
   FileCode,
+  FileDiff,
   FileSpreadsheet,
   FileText,
   FileVideo,
@@ -60,6 +61,8 @@ export function fileIcon(contentType: string, filename: string): LucideIcon {
     case "structured":
     case "text":
       return FileCode;
+    case "diff":
+      return FileDiff;
     default:
       return DOCUMENT_EXTENSIONS.has(ext) ? FileText : File;
   }

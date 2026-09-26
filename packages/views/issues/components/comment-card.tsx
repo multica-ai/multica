@@ -62,6 +62,7 @@ import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { JustifiedImageRow } from "./justified-image-row";
 import { useRunCommentMotion } from "./use-run-comment-motion";
+import { CommentRunCodeChanges } from "./code-changes/run-code-changes";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
@@ -907,6 +908,7 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
+          <CommentRunCodeChanges issueId={issueId} entry={entry} className="mt-2 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
           </div>
@@ -1441,6 +1443,7 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
+                <CommentRunCodeChanges issueId={issueId} entry={entry} className="mt-2 pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
                 </div>

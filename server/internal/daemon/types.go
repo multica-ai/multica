@@ -310,6 +310,10 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	// CodeChanges is what the run changed in each repository it worked in,
+	// uploaded before the run is reported done (MUL-7651). Collected on every
+	// exit path, a failed run included: its partial work is still delivered.
+	CodeChanges []TaskCodeChangeReport `json:"-"`
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

@@ -278,6 +278,12 @@ type LocalWorktreeOutcome struct {
 	// changes. The worktree at this path was intentionally left on disk because
 	// it is the only remaining copy of that work.
 	PreservedPath string
+	// BaseCommit and HeadCommit bound what this run delivered onto Branch:
+	// `git diff BaseCommit..HeadCommit` in the user's repository is the run's
+	// own change, with the user's replayed edits on the baseline side. Both
+	// are set only when Branch is, and only when the run moved it.
+	BaseCommit string
+	HeadCommit string
 }
 
 // PrepareLocalWorktree creates the task's worktree and replays the user's
@@ -690,6 +696,9 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	if dropped {
 		dropBranch(w.GitRoot, w.Branch, logger)
 		outcome.Branch = ""
+	} else if err == nil && tip != w.BaseCommit {
+		outcome.BaseCommit = w.BaseCommit
+		outcome.HeadCommit = tip
 	}
 
 	if logger != nil {
@@ -752,6 +761,25 @@ func (w *LocalWorktree) AbortWithReason(err error) {
 	w.aborted = err
 }
 
+// baselineMessagePrefix opens the message of the commit a line of work starts
+// from on a task branch — the first commit a prepare makes on a branch it
+// created. A continued branch's per-turn increment uses a different message.
+const baselineMessagePrefix = "chore(agent): baseline — "
+
+// LocalWorktreeLineStart finds the commit the line of work ending at tip
+// started from: the newest baseline on tip's first-parent history. Diffing it
+// against tip gives everything the conversation's turns delivered on the
+// branch, without the user's uncommitted work the first turn started from.
+// Empty when tip has no baseline (a branch this code did not create).
+func LocalWorktreeLineStart(gitRoot, tip string) (string, error) {
+	out, err := runGitTrimmed(gitRoot, "log", "--first-parent", "-n", "1", "--format=%H",
+		"--fixed-strings", "--grep="+baselineMessagePrefix, tip)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 // commitBaseline records the user's replayed uncommitted state as its own
 // commit on the task branch, returning the new tip. On a continued branch that
 // state is the increment since the previous turn, so the message says so rather
@@ -762,12 +790,12 @@ func (w *LocalWorktree) AbortWithReason(err error) {
 // that makes it distinguishable later from a branch the user creates at the
 // same place — see LocalWorktree.BaseCommit.
 func commitBaseline(worktreePath string, continued, dirty bool) (string, error) {
-	message := "chore(agent): baseline — uncommitted work from the local directory"
+	message := baselineMessagePrefix + "uncommitted work from the local directory"
 	switch {
 	case continued:
 		message = "chore(agent): uncommitted work from the local directory since the previous turn"
 	case !dirty:
-		message = "chore(agent): baseline — the task worktree started here"
+		message = baselineMessagePrefix + "the task worktree started here"
 	}
 	if _, err := commitEverything(worktreePath, message, !dirty); err != nil {
 		return "", err

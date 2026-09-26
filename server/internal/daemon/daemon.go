@@ -5859,6 +5859,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	// Before the terminal report, so the run's reply shows its changes the
+	// moment the run reads as finished. A cancelled or failed run uploads too:
+	// whatever it committed is on its branch.
+	d.reportTaskCodeChanges(ctx, task.ID, result.CodeChanges, taskLog)
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -8264,6 +8268,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				if localAssignment != nil {
 					taskResult.DurableWorkDir = localAssignment.AbsPath
 				}
+				if task.IssueID != "" {
+					taskResult.CodeChanges = append(taskResult.CodeChanges,
+						worktreeCodeChanges(ctx, env.LocalWorktree, outcome, taskLog)...)
+				}
 				return
 			}
 			// Finalize could not complete its delivery contract, so the task
@@ -8741,12 +8749,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// branch ownership from this in-memory record instead of trusting request
 	// fields or ambient process environment. Register only for the provider
 	// execution window and always remove the credential afterwards.
+	// A run on an issue reports what it changed in the repositories it checks
+	// out. Local-directory runs are measured by their worktree instead (see
+	// the Finalize defer above), or not at all in place.
+	var checkoutChanges *checkoutChangeTracker
+	if task.IssueID != "" && env.LocalWorktree == nil && !env.LocalDirectory {
+		checkoutChanges = newCheckoutChangeTracker(ctx, env.WorkDir)
+		defer func() {
+			taskResult.CodeChanges = append(taskResult.CodeChanges, checkoutChanges.collect(ctx, taskLog)...)
+		}()
+	}
 	d.registerActiveRepoCheckoutTask(agentToken, activeRepoCheckoutTask{
 		WorkspaceID: task.WorkspaceID,
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		AgentName:   task.Agent.Name,
 		WorkDir:     env.WorkDir,
+		CodeChanges: checkoutChanges,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
 
