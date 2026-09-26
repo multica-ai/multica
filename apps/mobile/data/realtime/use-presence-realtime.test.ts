@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invalidateQueries, subscriptionSetups } = vi.hoisted(() => ({
@@ -33,6 +34,28 @@ describe("usePresenceRealtime", () => {
     invalidateQueries.mockReset();
     subscriptionSetups.length = 0;
   });
+
+  it.each(["task:waiting_local_directory", "task:running"])(
+    "refreshes the workload snapshot on %s without refetching identity lists",
+    (event) => {
+      usePresenceRealtime();
+      const handlers = new Map<string, EventHandler>();
+      const ws: MockWS = {
+        on: vi.fn((type: string, handler: EventHandler) => {
+          handlers.set(type, handler);
+          return () => {};
+        }),
+        onReconnect: vi.fn(() => () => {}),
+      };
+      subscriptionSetups[0](ws, "workspace-1");
+
+      handlers.get(event)?.({ task_id: "task-1", agent_id: "agent-1" });
+
+      expect(invalidateQueries.mock.calls.map(([query]) => query.queryKey)).toEqual([
+        ["agent-task-snapshot", "workspace-1"],
+      ]);
+    },
+  );
 
   it("refreshes hidden agent liveness on daemon register and reconnect", () => {
     usePresenceRealtime();

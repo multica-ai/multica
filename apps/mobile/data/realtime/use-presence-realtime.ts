@@ -5,8 +5,8 @@
  * Invalidates the queries that back the presence dot:
  *   - runtimeListOptions      ← daemon:register, runtime sweeper transitions
  *   - agentListOptions        ← agent:status / created / archived / restored
- *   - agentTaskSnapshotOptions← task:queued / dispatch / completed / failed /
- *                               cancelled
+ *   - agentTaskSnapshotOptions← task lifecycle transitions, including local
+ *                               directory waits and resumed execution
  *
  * Deliberately NOT subscribed (cellular-data rule, apps/mobile/CLAUDE.md):
  *   - daemon:heartbeat — every 15s × in-online runtime; web also skips it
@@ -55,6 +55,8 @@ export function usePresenceRealtime() {
         // reserved-for-P1 peek sheet. progress / message intentionally absent.
         ws.on("task:queued", invalidateSnapshot),
         ws.on("task:dispatch", invalidateSnapshot),
+        ws.on("task:waiting_local_directory", invalidateSnapshot),
+        ws.on("task:running", invalidateSnapshot),
         ws.on("task:completed", invalidateSnapshot),
         ws.on("task:failed", invalidateSnapshot),
         ws.on("task:cancelled", invalidateSnapshot),
