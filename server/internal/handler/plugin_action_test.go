@@ -435,47 +435,49 @@ func TestPluginIssueListIsScopedFilteredAndPaginated(t *testing.T) {
 		return response
 	}
 
-	page := listIssues("?limit=2")
-	if len(page.Issues) != 2 || page.NextCursor == "" {
-		t.Fatalf("first page = %+v, want two issues and a cursor", page)
+	projectQuery := "?project_id=" + projectID
+	page := listIssues(projectQuery + "&limit=1")
+	if len(page.Issues) != 1 || page.Issues[0].ID != inProgressIssue || page.NextCursor == "" {
+		t.Fatalf("first page = %+v, want the newest issue and a cursor", page)
 	}
-	if page.Issues[0].ID != otherProjectIssue || page.Issues[1].ID != todoIssue {
-		t.Fatalf("first page ids = [%s %s], want number-descending project order", page.Issues[0].ID, page.Issues[1].ID)
-	}
-	if page.Issues[0].ActiveTaskCount != 0 || page.Issues[1].ActiveTaskCount != 0 {
-		t.Fatalf("first page active counts = [%d %d], want zeros", page.Issues[0].ActiveTaskCount, page.Issues[1].ActiveTaskCount)
+	if page.Issues[0].ActiveTaskCount != 1 {
+		t.Fatalf("first page active count = %d, want 1", page.Issues[0].ActiveTaskCount)
 	}
 
-	next := listIssues("?limit=2&cursor=" + page.NextCursor)
-	if len(next.Issues) != 1 || next.Issues[0].ID != inProgressIssue || next.NextCursor != "" {
-		t.Fatalf("second page = %+v, want only the final issue", next)
+	next := listIssues(projectQuery + "&limit=1&cursor=" + page.NextCursor)
+	if len(next.Issues) != 1 || next.Issues[0].ID != todoIssue || next.NextCursor != "" {
+		t.Fatalf("second page = %+v, want only the final project issue", next)
 	}
-	if next.Issues[0].ActiveTaskCount != 1 {
-		t.Fatalf("active_task_count = %d, want 1", next.Issues[0].ActiveTaskCount)
+	if next.Issues[0].ActiveTaskCount != 0 {
+		t.Fatalf("second page active count = %d, want 0", next.Issues[0].ActiveTaskCount)
 	}
 
-	status := listIssues("?status=todo")
-	if len(status.Issues) != 2 || status.Issues[0].ID != otherProjectIssue || status.Issues[1].ID != todoIssue {
+	status := listIssues(projectQuery + "&status=todo")
+	if len(status.Issues) != 1 || status.Issues[0].ID != todoIssue {
 		t.Fatalf("status filter result = %+v", status)
 	}
-	started := listIssues("?status_category=started")
+	started := listIssues(projectQuery + "&status_category=started")
 	if len(started.Issues) != 1 || started.Issues[0].ID != inProgressIssue {
 		t.Fatalf("status category filter result = %+v", started)
 	}
-	project := listIssues("?project_id=" + projectID)
-	if len(project.Issues) != 2 || project.Issues[0].ID != todoIssue || project.Issues[1].ID != inProgressIssue {
+	project := listIssues(projectQuery)
+	if len(project.Issues) != 2 || project.Issues[0].ID != inProgressIssue || project.Issues[1].ID != todoIssue {
 		t.Fatalf("project filter result = %+v", project)
 	}
-	assignee := listIssues("?assignee_id=" + assigneeID)
+	otherProject := listIssues("?project_id=" + otherProjectID)
+	if len(otherProject.Issues) != 1 || otherProject.Issues[0].ID != otherProjectIssue {
+		t.Fatalf("other project filter result = %+v", otherProject)
+	}
+	assignee := listIssues(projectQuery + "&assignee_id=" + assigneeID)
 	if len(assignee.Issues) != 1 || assignee.Issues[0].ID != todoIssue {
 		t.Fatalf("assignee filter result = %+v", assignee)
 	}
-	active := listIssues("?has_active_tasks=true")
+	active := listIssues(projectQuery + "&has_active_tasks=true")
 	if len(active.Issues) != 1 || active.Issues[0].ID != inProgressIssue {
 		t.Fatalf("active filter result = %+v", active)
 	}
 
-	combined := listIssues("?status=todo&assignee_id=" + assigneeID + "&has_active_tasks=false")
+	combined := listIssues(projectQuery + "&status=todo&assignee_id=" + assigneeID + "&has_active_tasks=false")
 	if len(combined.Issues) != 1 || combined.Issues[0].ID != todoIssue || combined.NextCursor != "" {
 		t.Fatalf("combined filter result = %+v", combined)
 	}
