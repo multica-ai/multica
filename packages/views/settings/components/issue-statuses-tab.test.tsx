@@ -25,7 +25,16 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: { updateWorkspace },
 }));
-vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: navigatePush }) }));
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    push: navigatePush,
+    pathname: "/acme/settings",
+    searchParams: new URLSearchParams("tab=issue-statuses"),
+  }),
+  AppLink: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
+    <a href={href} className={className}>{children}</a>
+  ),
+}));
 vi.mock("../../issues/surface/issue-surface", () => ({
   IssueSurfaceWithStore: ({ store, scope }: { store: { getState: () => { statusFilters: string[] } }; scope: { actorKind: string } }) =>
     <div data-testid="inspection-list">{scope.actorKind}:{store.getState().statusFilters.join(",")}</div>,
@@ -121,38 +130,28 @@ afterEach(() => {
 });
 
 describe("IssueStatusesTab", () => {
-  describe("PR auto-complete (MUL-7429)", () => {
+  describe("PR merge status badge (MUL-7726)", () => {
     const BUILT_IN_DONE = entry({ id: "done", key: "done", name: "Done", category: "done", is_system: true, position: 0 });
+    const QA = entry({ key: "qa", name: "QA" });
+    const badgeLink = () => screen.getByText(en.issue_statuses.pr_auto_complete_badge).closest("a");
 
-    it("saves the workspace setting as soon as the switch changes", async () => {
-      workspaceSettings = { github_enabled: true };
-      updateWorkspace.mockResolvedValue({ id: "ws-1", settings: {} });
+    it("badges Done by default and links to the GitHub setting", () => {
+      catalog = [BUILT_IN_DONE, QA];
       render(<IssueStatusesTab />);
-      const toggle = screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label });
-      expect(toggle).toHaveAttribute("aria-checked", "true");
-      fireEvent.click(toggle);
-      await waitFor(() =>
-        expect(updateWorkspace).toHaveBeenCalledWith("ws-1", {
-          settings: { github_enabled: true, pr_auto_complete_enabled: false },
-        }),
-      );
+      expect(screen.getAllByText(en.issue_statuses.pr_auto_complete_badge)).toHaveLength(1);
+      expect(badgeLink()?.getAttribute("href")).toBe("/acme/settings?tab=integrations&integration=github");
+      expect(badgeLink()?.closest(".group\\/row")).toHaveTextContent(en.issue_statuses.built_in_descriptions.done);
     });
 
-    it("badges the built-in Done row only while the setting is on", () => {
-      catalog = [BUILT_IN_DONE];
+    it("moves the badge to the chosen status and drops it for no change", () => {
+      catalog = [BUILT_IN_DONE, QA];
+      workspaceSettings = { pr_merge_status: "qa" };
       render(<IssueStatusesTab />);
-      expect(screen.getByText(en.issue_statuses.pr_auto_complete_badge)).toBeInTheDocument();
+      expect(badgeLink()?.closest(".group\\/row")).toHaveTextContent("QA");
       cleanup();
-      workspaceSettings = { pr_auto_complete_enabled: false };
+      workspaceSettings = { pr_merge_status: "none" };
       render(<IssueStatusesTab />);
       expect(screen.queryByText(en.issue_statuses.pr_auto_complete_badge)).toBeNull();
-      expect(screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label })).toHaveAttribute("aria-checked", "false");
-    });
-
-    it("shows the setting read-only to a member", () => {
-      role = "member";
-      render(<IssueStatusesTab />);
-      expect(screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label })).toHaveAttribute("aria-disabled", "true");
     });
   });
 

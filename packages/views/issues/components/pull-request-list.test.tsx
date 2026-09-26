@@ -33,9 +33,11 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
 }));
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+  useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme", settings: {} }),
 }));
 vi.mock("../../navigation", () => ({
   AppLink: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
@@ -377,9 +379,9 @@ describe("PullRequestList sidebar rows", () => {
   });
 });
 
-// MUL-7429: the line under the list says what "every linked PR merged, one says
-// Closes → Done" will do, straight from the server's decision, and each row can
-// be removed.
+// MUL-7429 / MUL-7726: the line under the list says what merging will do to the
+// issue's status, straight from the server's decision, and each row can be
+// removed.
 describe("PullRequestList auto-complete", () => {
   beforeEach(() => {
     mockAutoComplete = null;
@@ -394,14 +396,22 @@ describe("PullRequestList auto-complete", () => {
     pull_request_ids: ids,
     issue_disabled: false,
     workspace_enabled: true,
+    target_status: "done",
     ...extra,
   });
 
-  it("names the PR the issue is waiting on", async () => {
+  it("names the PR the issue is waiting on and the status it moves to", async () => {
     mockPRs = [makePR({ id: "a", number: 12, state: "merged" }), makePR({ id: "b", number: 19 })];
-    mockAutoComplete = decision("waiting", ["b"]);
+    mockAutoComplete = decision("waiting", ["b"], { target_status: "in_review" });
     renderList();
-    expect(await screen.findByText("Completes when #19 merges")).toBeInTheDocument();
+    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("Moves to In Review when #19 merges");
+  });
+
+  it("falls back to Done on a backend that does not name the target", async () => {
+    mockPRs = [makePR({ id: "b", number: 19 })];
+    mockAutoComplete = decision("waiting", ["b"], { target_status: undefined });
+    renderList();
+    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("Moves to Done when #19 merges");
   });
 
   it("offers to remove a PR that closed without merging", async () => {
@@ -413,45 +423,31 @@ describe("PullRequestList auto-complete", () => {
     expect(line).toHaveTextContent("#19 closed without merging");
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(apiMock.unlinkIssuePullRequest).toHaveBeenCalledWith("issue-1", "b"));
-    // Removing the last unmerged PR completed the issue; the toast says so and
+    // Removing the last unmerged PR moved the issue; the toast says so and
     // offers no undo.
     await waitFor(() =>
-      expect(toastMock.success).toHaveBeenCalledWith("Removed #19. Every remaining PR is merged, so the issue is done."),
+      expect(toastMock.success).toHaveBeenCalledWith("Removed #19. Every remaining PR is merged, so the issue moved to Done."),
     );
   });
 
-  it("says merging won't complete the issue when no PR closes it", async () => {
-    mockPRs = [makePR({ id: "a", number: 12, link_source: "title" })];
-    mockAutoComplete = decision("no_close_intent");
-    renderList();
-    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent(
-      "Won’t complete: no “Closes MUL-1”",
-    );
-  });
-
-  it("links the workspace setting when auto-complete is off there", async () => {
+  // The workspace chose to leave status alone: a team choice, not repeated on
+  // every issue. An older backend's no_close_intent says nothing either.
+  it.each(["workspace_disabled", "no_close_intent", "at_target", "terminal"])("says nothing for %s", async (state) => {
     mockPRs = [makePR({ id: "a", number: 12, state: "merged" })];
-    mockAutoComplete = decision("workspace_disabled", [], { workspace_enabled: false });
+    mockAutoComplete = decision(state, [], state === "workspace_disabled" ? { workspace_enabled: false, target_status: "none" } : {});
     renderList();
-    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("PR auto-complete is off for this workspace");
-    expect(screen.getByText("Settings").closest("a")?.getAttribute("href")).toBe("/acme/settings?tab=issue-statuses");
+    await waitForRender();
+    expect(screen.queryByTestId("pr-auto-complete-line")).toBeNull();
   });
 
-  it("turns auto-complete back on for the issue from the line", async () => {
+  it("turns the merge status change back on for the issue from the line", async () => {
     mockPRs = [makePR({ id: "a", number: 12 })];
     mockAutoComplete = decision("issue_disabled", [], { issue_disabled: true });
     apiMock.setIssuePRAutoComplete.mockResolvedValue({ pull_requests: mockPRs, auto_complete: decision("waiting", ["a"]) });
     renderList();
-    fireEvent.click(await screen.findByRole("button", { name: "Turn on" }));
+    expect(await screen.findByTestId("pr-auto-complete-line")).toHaveTextContent("PR merges won’t change this issue");
+    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
     await waitFor(() => expect(apiMock.setIssuePRAutoComplete).toHaveBeenCalledWith("issue-1", false));
-  });
-
-  it("says nothing for a finished issue", async () => {
-    mockPRs = [makePR({ id: "a", number: 12, state: "merged" })];
-    mockAutoComplete = decision("terminal");
-    renderList();
-    await waitForRender();
-    expect(screen.queryByTestId("pr-auto-complete-line")).toBeNull();
   });
 
   it("hides row actions and the line on a backend without auto-complete", async () => {

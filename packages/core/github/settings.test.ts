@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveGitHubSettings, derivePRAutoCompleteEnabled } from "./settings";
+import { deriveGitHubSettings, derivePRMergeStatus } from "./settings";
 import type { Workspace } from "../types";
 
 function ws(settings: Record<string, unknown>): Pick<Workspace, "settings"> {
@@ -65,14 +65,21 @@ describe("deriveGitHubSettings", () => {
   });
 });
 
-describe("derivePRAutoCompleteEnabled", () => {
-  it("is on unless explicitly turned off", () => {
-    expect(derivePRAutoCompleteEnabled(null)).toBe(true);
-    expect(derivePRAutoCompleteEnabled(ws({}))).toBe(true);
-    expect(derivePRAutoCompleteEnabled(ws({ pr_auto_complete_enabled: false }))).toBe(false);
+describe("derivePRMergeStatus", () => {
+  it("defaults to Done and reads the chosen key", () => {
+    expect(derivePRMergeStatus(null)).toBe("done");
+    expect(derivePRMergeStatus(ws({}))).toBe("done");
+    expect(derivePRMergeStatus(ws({ pr_merge_status: "none" }))).toBe("none");
+    expect(derivePRMergeStatus(ws({ pr_merge_status: " In_Review " }))).toBe("in_review");
   });
 
-  it("does not follow the GitHub master switch", () => {
-    expect(derivePRAutoCompleteEnabled(ws({ github_enabled: false }))).toBe(true);
+  it("fails closed on a malformed value", () => {
+    expect(derivePRMergeStatus(ws({ pr_merge_status: "" }))).toBe("none");
+    expect(derivePRMergeStatus(ws({ pr_merge_status: 5 }))).toBe("none");
+  });
+
+  it("ignores the retired switch and the GitHub master switch", () => {
+    expect(derivePRMergeStatus(ws({ pr_auto_complete_enabled: false }))).toBe("done");
+    expect(derivePRMergeStatus(ws({ github_enabled: false }))).toBe("done");
   });
 });

@@ -508,8 +508,8 @@
     "duplicate_added": "把 {{identifier}} 标记为这个任务的重复",
     "duplicate_removed": "取消了 {{identifier}} 对这个任务的重复标记",
     "status_changed_pr": "所有关联 PR 均已合并（{{prs}}），状态从 {{from}} 改为 {{to}}",
-    "pr_auto_complete_disabled": "关闭了此任务的 PR 自动完成",
-    "pr_auto_complete_enabled": "恢复了此任务的 PR 自动完成"
+    "pr_auto_complete_disabled": "设置此任务合并后不改状态",
+    "pr_auto_complete_enabled": "恢复了此任务合并后改状态"
   },
   "comment": {
     "add_reaction": "添加表情回应",
@@ -1106,21 +1106,18 @@
     "source_auto": "自动关联",
     "unlink": "移除关联",
     "unlinked": "已移除 {{pr}}",
-    "unlinked_completed": "已移除 {{pr}}。其余 PR 均已合并，任务已完成。",
+    "unlinked_moved": "已移除 {{pr}}。其余 PR 均已合并，任务已改为 {{status}}。",
     "unlink_failed": "移除关联失败。",
     "undo": "撤销",
-    "disable": "此任务不自动完成",
-    "enable": "恢复自动完成",
-    "settings": "自动完成设置",
-    "update_failed": "更新自动完成失败。",
-    "waiting_other": "等待 {{prs}} 合并后自动完成",
+    "disable": "此任务合并后不改状态",
+    "enable": "恢复合并后改状态",
+    "settings": "PR 合并设置",
+    "update_failed": "更新 PR 合并设置失败。",
+    "waiting_to_other": "等待 {{prs}} 合并后改为 {{status}}",
     "not_merged": "{{prs}} 已关闭，未合并",
     "not_merged_action": "移除",
-    "no_close_intent": "不会自动完成：缺少 \"Closes {{identifier}}\"",
-    "all_merged": "PR 均已合并。之后有新 PR 合并时会自动完成。",
-    "issue_disabled": "此任务不自动完成",
-    "issue_disabled_action": "恢复",
-    "workspace_disabled": "工作区未开启 PR 自动完成",
-    "workspace_disabled_action": "设置"
+    "all_merged_to": "PR 均已合并。之后有新 PR 合并时会改为 {{status}}。",
+    "issue_disabled": "此任务合并后不改状态",
+    "issue_disabled_action": "恢复"
   }
 }

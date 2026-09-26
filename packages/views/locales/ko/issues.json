@@ -508,8 +508,8 @@
     "duplicate_added": "{{identifier}}을(를) 이 태스크의 중복으로 표시했습니다",
     "duplicate_removed": "{{identifier}}의 중복 표시를 해제했습니다",
     "status_changed_pr": "연결된 PR이 모두 병합되어({{prs}}) 상태를 {{from}}에서 {{to}}로 변경했습니다",
-    "pr_auto_complete_disabled": "이 태스크의 PR 자동 완료를 껐습니다",
-    "pr_auto_complete_enabled": "이 태스크의 PR 자동 완료를 다시 켰습니다"
+    "pr_auto_complete_disabled": "이 태스크가 PR 병합 시 상태를 유지하도록 설정했습니다",
+    "pr_auto_complete_enabled": "이 태스크의 PR 병합 후 상태 변경을 다시 켰습니다"
   },
   "comment": {
     "add_reaction": "반응 추가",
@@ -1106,21 +1106,18 @@
     "source_auto": "자동으로 연결됨",
     "unlink": "태스크에서 제거",
     "unlinked": "{{pr}}을(를) 제거했습니다",
-    "unlinked_completed": "{{pr}}을(를) 제거했습니다. 나머지 PR이 모두 병합되어 태스크가 완료되었습니다.",
+    "unlinked_moved": "{{pr}}을(를) 제거했습니다. 남은 PR이 모두 병합되어 태스크를 {{status}}(으)로 변경했습니다.",
     "unlink_failed": "PR을 제거하지 못했습니다.",
     "undo": "실행 취소",
-    "disable": "이 태스크는 자동 완료하지 않음",
-    "enable": "자동 완료 다시 켜기",
-    "settings": "자동 완료 설정",
-    "update_failed": "자동 완료를 변경하지 못했습니다.",
-    "waiting_other": "{{prs}} 병합 시 자동 완료",
+    "disable": "PR 병합 후에도 상태 유지",
+    "enable": "PR 병합 후 상태 변경 다시 켜기",
+    "settings": "PR 병합 설정",
+    "update_failed": "PR 병합 설정을 업데이트하지 못했습니다.",
+    "waiting_to_other": "{{prs}} 병합 시 {{status}}(으)로 변경",
     "not_merged": "{{prs}}이(가) 병합되지 않고 닫혔습니다",
     "not_merged_action": "제거",
-    "no_close_intent": "자동 완료되지 않음: \"Closes {{identifier}}\" 없음",
-    "all_merged": "PR이 모두 병합되었습니다. 다음 PR이 병합되면 자동 완료됩니다.",
-    "issue_disabled": "이 태스크는 자동 완료하지 않습니다",
-    "issue_disabled_action": "다시 켜기",
-    "workspace_disabled": "이 워크스페이스는 PR 자동 완료가 꺼져 있습니다",
-    "workspace_disabled_action": "설정"
+    "all_merged_to": "PR이 모두 병합되었습니다. 다음 PR이 병합되면 {{status}}(으)로 변경합니다.",
+    "issue_disabled": "이 태스크는 PR 병합 시 상태를 바꾸지 않음",
+    "issue_disabled_action": "다시 켜기"
   }
 }

@@ -508,8 +508,8 @@
     "duplicate_added": "{{identifier}} をこのタスクの重複としてマークしました",
     "duplicate_removed": "{{identifier}} の重複マークを解除しました",
     "status_changed_pr": "関連するすべての PR がマージされたため（{{prs}}）、ステータスを {{from}} から {{to}} に変更しました",
-    "pr_auto_complete_disabled": "このタスクの PR による自動完了をオフにしました",
-    "pr_auto_complete_enabled": "このタスクの PR による自動完了を再開しました"
+    "pr_auto_complete_disabled": "このタスクを PR マージでステータスを変えないように設定しました",
+    "pr_auto_complete_enabled": "このタスクの PR マージ後のステータス変更を再開しました"
   },
   "comment": {
     "add_reaction": "リアクションを追加",
@@ -1106,21 +1106,18 @@
     "source_auto": "自動で関連付け",
     "unlink": "タスクから外す",
     "unlinked": "{{pr}} を外しました",
-    "unlinked_completed": "{{pr}} を外しました。残りの PR はすべてマージ済みのため、タスクは完了しました。",
+    "unlinked_moved": "{{pr}} を外しました。残りの PR はすべてマージ済みのため、タスクを {{status}} に変更しました。",
     "unlink_failed": "PR を外せませんでした。",
     "undo": "元に戻す",
-    "disable": "このタスクは自動完了しない",
-    "enable": "自動完了を再開",
-    "settings": "自動完了の設定",
-    "update_failed": "自動完了を更新できませんでした。",
-    "waiting_other": "{{prs}} がマージされると自動完了",
+    "disable": "PR マージ後もステータスを変えない",
+    "enable": "PR マージ後のステータス変更を再開",
+    "settings": "PR マージ設定",
+    "update_failed": "PR マージ設定を更新できませんでした。",
+    "waiting_to_other": "{{prs}} がマージされると {{status}} に変更",
     "not_merged": "{{prs}} はマージされずにクローズされました",
     "not_merged_action": "外す",
-    "no_close_intent": "自動完了しません：「Closes {{identifier}}」なし",
-    "all_merged": "PR はすべてマージ済みです。次に PR がマージされると自動完了します。",
-    "issue_disabled": "このタスクは自動完了しません",
-    "issue_disabled_action": "再開",
-    "workspace_disabled": "このワークスペースでは PR による自動完了がオフです",
-    "workspace_disabled_action": "設定"
+    "all_merged_to": "PR はすべてマージ済みです。次に PR がマージされると {{status}} に変更します。",
+    "issue_disabled": "このタスクは PR マージでステータスを変えません",
+    "issue_disabled_action": "再開"
   }
 }

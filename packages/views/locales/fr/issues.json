@@ -517,8 +517,8 @@
     "duplicate_added": "a marqué {{identifier}} comme doublon de cette tâche",
     "duplicate_removed": "a retiré la marque de doublon de {{identifier}}",
     "status_changed_pr": "a changé le statut de {{from}} à {{to}} après la fusion de toutes les PR liées ({{prs}})",
-    "pr_auto_complete_disabled": "a désactivé la fin automatique par PR pour cette tâche",
-    "pr_auto_complete_enabled": "a réactivé la fin automatique par PR pour cette tâche"
+    "pr_auto_complete_disabled": "a configuré cette tâche pour garder son statut à la fusion des PR",
+    "pr_auto_complete_enabled": "a de nouveau fait changer le statut de cette tâche à la fusion des PR"
   },
   "comment": {
     "add_reaction": "Ajouter une réaction",
@@ -1138,22 +1138,19 @@
     "source_auto": "Liée automatiquement",
     "unlink": "Retirer de la tâche",
     "unlinked": "{{pr}} retirée",
-    "unlinked_completed": "{{pr}} retirée. Les autres PR sont fusionnées, la tâche est terminée.",
+    "unlinked_moved": "{{pr}} retirée. Toutes les PR restantes sont fusionnées, la tâche est passée à {{status}}.",
     "unlink_failed": "Impossible de retirer la pull request.",
     "undo": "Annuler",
-    "disable": "Désactiver la fin automatique",
-    "enable": "Réactiver la fin automatique",
-    "settings": "Réglages de fin automatique",
-    "update_failed": "Impossible de modifier la fin automatique.",
-    "waiting_one": "Se termine quand {{prs}} est fusionnée",
-    "waiting_other": "Se termine quand {{prs}} sont fusionnées",
+    "disable": "Garder le statut à la fusion des PR",
+    "enable": "Changer le statut à la fusion des PR",
+    "settings": "Paramètres de fusion des PR",
+    "update_failed": "Impossible de mettre à jour le paramètre de fusion des PR.",
+    "waiting_to_one": "Passe à {{status}} quand {{prs}} est fusionnée",
+    "waiting_to_other": "Passe à {{status}} quand {{prs}} sont fusionnées",
     "not_merged": "{{prs}} fermée sans fusion",
     "not_merged_action": "Retirer",
-    "no_close_intent": "Ne se termine pas : pas de « Closes {{identifier}} »",
-    "all_merged": "Toutes les PR sont fusionnées. La prochaine PR fusionnée terminera la tâche.",
-    "issue_disabled": "Fin automatique désactivée pour cette tâche",
-    "issue_disabled_action": "Réactiver",
-    "workspace_disabled": "La fin automatique par PR est désactivée pour cet espace",
-    "workspace_disabled_action": "Réglages"
+    "all_merged_to": "Toutes les PR sont fusionnées. La prochaine PR fusionnée fera passer la tâche à {{status}}.",
+    "issue_disabled": "Les fusions de PR ne changent pas cette tâche",
+    "issue_disabled_action": "Réactiver"
   }
 }

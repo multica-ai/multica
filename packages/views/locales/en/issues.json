@@ -517,8 +517,8 @@
     "duplicate_added": "marked {{identifier}} as a duplicate of this issue",
     "duplicate_removed": "unmarked {{identifier}} as a duplicate of this issue",
     "status_changed_pr": "changed status from {{from}} to {{to}} after every linked PR merged ({{prs}})",
-    "pr_auto_complete_disabled": "turned off PR auto-complete for this issue",
-    "pr_auto_complete_enabled": "turned PR auto-complete back on for this issue"
+    "pr_auto_complete_disabled": "set this issue to keep its status when PRs merge",
+    "pr_auto_complete_enabled": "set this issue to change status when PRs merge again"
   },
   "comment": {
     "add_reaction": "Add reaction",
@@ -1138,22 +1138,19 @@
     "source_auto": "Linked automatically",
     "unlink": "Remove from issue",
     "unlinked": "Removed {{pr}}",
-    "unlinked_completed": "Removed {{pr}}. Every remaining PR is merged, so the issue is done.",
+    "unlinked_moved": "Removed {{pr}}. Every remaining PR is merged, so the issue moved to {{status}}.",
     "unlink_failed": "Couldn’t remove the pull request.",
     "undo": "Undo",
-    "disable": "Turn off auto-complete",
-    "enable": "Turn on auto-complete",
-    "settings": "Auto-complete settings",
-    "update_failed": "Couldn’t update auto-complete.",
-    "waiting_one": "Completes when {{prs}} merges",
-    "waiting_other": "Completes when {{prs}} merge",
+    "disable": "Keep status when PRs merge",
+    "enable": "Change status when PRs merge",
+    "settings": "PR merge settings",
+    "update_failed": "Couldn’t update the PR merge setting.",
+    "waiting_to_one": "Moves to {{status}} when {{prs}} merges",
+    "waiting_to_other": "Moves to {{status}} when {{prs}} merge",
     "not_merged": "{{prs}} closed without merging",
     "not_merged_action": "Remove",
-    "no_close_intent": "Won’t complete: no “Closes {{identifier}}”",
-    "all_merged": "All PRs merged. The next merged PR completes this issue.",
-    "issue_disabled": "Auto-complete is off for this issue",
-    "issue_disabled_action": "Turn on",
-    "workspace_disabled": "PR auto-complete is off for this workspace",
-    "workspace_disabled_action": "Settings"
+    "all_merged_to": "All PRs merged. The next merged PR moves this issue to {{status}}.",
+    "issue_disabled": "PR merges won’t change this issue",
+    "issue_disabled_action": "Turn on"
   }
 }
