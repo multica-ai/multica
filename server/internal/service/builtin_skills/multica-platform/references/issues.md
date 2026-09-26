@@ -346,6 +346,11 @@ Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
 `backlog` sub-issues to `todo`.
 
+If your own running task on the parent closes the last open child, the server
+records the barrier comment without queuing another turn for you (for a squad,
+this applies only to its leader turn). Read the stage progress and evaluate
+advancement or wrap-up before ending this turn.
+
 ```bash
 # Stage 1 runs now; later stages parked until promoted
 multica issue create --title "Research A" --parent <id> --assignee <agent> --stage 1 --status todo
