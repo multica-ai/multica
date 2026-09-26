@@ -2296,68 +2296,45 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [timeline],
   );
 
-  // "Show in comments" from the viewer and the overview: the minimap's jump
-  // and flash, after unfolding a resolved thread that hides the comment. An
-  // effect drives it because the unfold has to render before the comment has
-  // a row to land on.
-  const [locateRequest, setLocateRequest] = useState<string | null>(null);
-  const locateFrameRef = useRef(0);
-  useEffect(() => () => cancelAnimationFrame(locateFrameRef.current), []);
+  // "Show in comments" from the viewer and the overview. A reply goes through
+  // the quick-jump rail's path, which already undoes everything that hides one
+  // (the reader's collapse, a resolution folding the thread) and waits for the
+  // reply to mount. A root is visible unless its own thread is collapsed or
+  // folded into a resolved bar: open that, then jump once the open thread has
+  // rendered, so the flash lands on the comment and not on the bar.
+  const [locateRootRequest, setLocateRootRequest] = useState<string | null>(null);
   const locateOrigin = useCallback(
     (origin: DeliverableOrigin) => {
       if (origin.kind === "description") {
         scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
-      setLocateRequest(origin.commentId);
-    },
-    [scrollContainerEl],
-  );
-  useEffect(() => {
-    if (!locateRequest) return;
-    const commentId = locateRequest;
-    const rootId = replyToRoot.get(commentId) ?? commentId;
-    const rootItem = items.find((it) => it.id === rootId);
-    if (rootItem && !expandedResolved.has(rootId)) {
-      const folded =
-        rootItem.kind === "resolved-bar" ||
-        (rootItem.kind === "run" && !!rootItem.entry?.resolved_at);
-      const hiddenReply =
-        commentId !== rootId &&
-        (rootItem.kind === "comment" || rootItem.kind === "run") &&
-        !!rootItem.entry &&
-        (() => {
-          const resolution = deriveThreadResolution(
-            rootItem.entry,
-            timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
-          );
-          return resolution.kind === "reply" && resolution.resolutionId !== commentId;
-        })();
-      if (folded || hiddenReply) {
-        toggleResolvedExpand(rootId, true);
+      const { commentId } = origin;
+      if (replyToRoot.has(commentId)) {
+        jumpToReply(commentId);
         return;
       }
-    }
-    setLocateRequest(null);
-    if (!rootItem) return;
-    if (commentId === rootId) {
-      jumpToThread(rootId);
-      return;
-    }
-    // A reply renders inside its root's row: bring the row in, then land on
-    // the reply once it has mounted.
-    if (!isFlatTimeline) jumpToThread(rootId);
-    let frames = 0;
-    const land = () => {
-      if (document.getElementById(`comment-${commentId}`)) {
-        jumpToComment(commentId);
-      } else if (++frames < 30) {
-        locateFrameRef.current = requestAnimationFrame(land);
+      const rootItem = items.find((it) => it.id === commentId);
+      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      if (!root) return;
+      const collapse = useCommentCollapseStore.getState();
+      if (collapse.isCollapsed(id, commentId)) collapse.toggle(id, commentId);
+      if (
+        !expandedResolved.has(commentId) &&
+        deriveThreadResolution(root, timelineView.threadReplies.get(commentId) ?? EMPTY_REPLIES)
+          .kind === "root"
+      ) {
+        toggleResolvedExpand(commentId, true);
       }
-    };
-    cancelAnimationFrame(locateFrameRef.current);
-    locateFrameRef.current = requestAnimationFrame(land);
-  }, [locateRequest, items, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, jumpToThread, jumpToComment]);
+      setLocateRootRequest(commentId);
+    },
+    [scrollContainerEl, replyToRoot, jumpToReply, items, id, expandedResolved, timelineView.threadReplies, toggleResolvedExpand],
+  );
+  useEffect(() => {
+    if (!locateRootRequest) return;
+    setLocateRootRequest(null);
+    jumpToThread(locateRootRequest);
+  }, [locateRootRequest, jumpToThread]);
 
   const describeDeliverable = useDeliverableDetails({
     files: deliverableFiles,
