@@ -91,7 +91,7 @@ func TestEnrichRecentContextGroupMention(t *testing.T) {
 </recent_context>
 
 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if len(fake.listCalls) != 1 || fake.listCalls[0] != "oc_g" {
@@ -151,7 +151,7 @@ func TestEnrichRecentContextTopicExcludesOtherTopics(t *testing.T) {
 </recent_context>
 
 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	// Exactly one fetch, scoped to the trigger's topic, with no end_time
@@ -198,7 +198,7 @@ func TestEnrichRecentContextTopicFailsClosedOnThreadID(t *testing.T) {
 </recent_context>
 
 怎么办`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 }
@@ -234,7 +234,7 @@ func TestEnrichRecentContextTopicDropsMessagesAfterTrigger(t *testing.T) {
 </recent_context>
 
 看下上面`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 }
@@ -262,7 +262,7 @@ func TestEnrichRecentContextTopicFetchErrorNoChatFallback(t *testing.T) {
 	want := `[Recent Lark context unavailable; continuing with the latest message.]
 
 在干嘛`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -304,7 +304,7 @@ func TestEnrichRecentContextExcludesBotInteractiveCards(t *testing.T) {
 </recent_context>
 
 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if strings.Contains(out.Body, "[interactive card]") {
@@ -338,7 +338,7 @@ func TestEnrichRecentContextRendersDeletedItems(t *testing.T) {
 </recent_context>
 
 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 }
@@ -379,7 +379,7 @@ func TestEnrichRecentContextResolvesNames(t *testing.T) {
 </recent_context>
 
 [Charlie]: 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if len(fake.userCalls) != 1 {
@@ -428,7 +428,7 @@ func TestEnrichRecentContextNameFallback(t *testing.T) {
 </recent_context>
 
 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 }
@@ -475,7 +475,7 @@ func TestEnrichRecentContextWithQuotedReply(t *testing.T) {
 </quoted_message>
 
 去做`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if len(fake.listCalls) != 1 || fake.listCalls[0] != "oc_g" {
@@ -529,7 +529,7 @@ func TestEnrichForwardedResolvesNames(t *testing.T) {
 [Jiayuan]: 你们线上的 Multica 能用吗
 [Bohan]: 我这边都能登陆
 </forwarded_messages>`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if len(fake.userCalls) != 1 {
@@ -558,7 +558,7 @@ func TestEnrichRecentContextFetchError(t *testing.T) {
 	want := `[Recent Lark context unavailable; continuing with the latest message.]
 
 在干嘛`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -599,7 +599,7 @@ func TestEnrichRecentContextRetriesTransientNetworkError(t *testing.T) {
 </recent_context>
 
 总结一下`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if len(fake.listCalls) != 2 {
@@ -634,7 +634,7 @@ func TestEnrichRecentContextDoneContextDoesNotRetry(t *testing.T) {
 	want := `[Recent Lark context temporarily unavailable; continuing with the latest message.]
 
 在干嘛`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -666,7 +666,7 @@ func TestEnrichRecentContextRateLimitedDoesNotRetry(t *testing.T) {
 	want := `[Recent Lark context temporarily unavailable; continuing with the latest message.]
 
 在干嘛`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -755,7 +755,7 @@ func TestEnrichRecentContextProductionErrorShapes(t *testing.T) {
 			out := enrich(t, fake, in, groupCfg())
 
 			want := tc.wantLine + "\n\n在干嘛"
-			if out.Body != want {
+			if contextPayload(t, out.Body) != want {
 				t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 			}
 			assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -784,7 +784,7 @@ func TestEnrichRecentContextPermissionDeniedDoesNotRetry(t *testing.T) {
 	want := `[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]
 
 查一下上下文`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -811,7 +811,7 @@ func TestEnrichRecentContextDeletedOrInvisibleError(t *testing.T) {
 	want := `[Recent Lark context unavailable: the referenced chat history is deleted or no longer visible. Continuing with the latest message.]
 
 接着处理`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -836,7 +836,7 @@ func TestEnrichRecentContextMissingChatBinding(t *testing.T) {
 	want := `[Recent Lark context unavailable: chat binding is missing. Continuing with the latest message.]
 
 查一下上下文`
-	if out.Body != want {
+	if contextPayload(t, out.Body) != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	assertNoRecentContextFetchPlaceholder(t, out.Body)
@@ -864,7 +864,7 @@ func TestEnrichRecentContextEmptyWindow(t *testing.T) {
 
 	out := enrich(t, fake, in, groupCfg())
 
-	if out.Body != "在吗" {
+	if contextPayload(t, out.Body) != "在吗" {
 		t.Errorf("body = %q, want unchanged %q", out.Body, "在吗")
 	}
 	if len(fake.listCalls) != 1 {
@@ -911,4 +911,29 @@ func TestEnrichRecentContextSkippedCases(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Existing fixtures pin history selection and error degradation. Strip only the
+// transport framing here; inbound_current_request_test.go owns its semantics.
+func contextPayload(t *testing.T, body string) string {
+	t.Helper()
+	marker := strings.Index(body, "<current_request ")
+	if marker < 0 {
+		return body
+	}
+	start := strings.Index(body[marker:], ">\n")
+	end := strings.LastIndex(body, "\n</current_request>")
+	if start < 0 || end < marker+start+2 {
+		t.Fatalf("malformed request: %s", body)
+	}
+	current := body[marker+start+2 : end]
+	refStart := strings.Index(body, "<reference_context>\n")
+	if refStart < 0 {
+		return current
+	}
+	refEnd := strings.Index(body, "\n</reference_context>")
+	if refEnd < refStart {
+		t.Fatalf("malformed reference: %s", body)
+	}
+	return body[refStart+len("<reference_context>\n"):refEnd] + "\n\n" + current
 }
