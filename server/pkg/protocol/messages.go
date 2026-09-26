@@ -82,6 +82,33 @@ const (
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
 
+// DaemonTaskClaimGenerationMismatchCode is the machine-readable code a daemon
+// terminal callback receives (HTTP 409) when the atomic terminal UPDATE
+// refused it because a later claim generation owns the task row. The report
+// belongs to an older claim and can never settle that row, so the daemon
+// stops replaying it: it must NOT be treated as a transient outage. The code
+// is the contract; the human sentence next to it may change freely.
+const DaemonTaskClaimGenerationMismatchCode = "task_claim_generation_mismatch"
+
+// DaemonTaskNotFoundCode is the machine-readable twin of the daemon endpoints'
+// "task not found" message. It exists so a generation-aware terminal report can
+// tell a server that genuinely has no such task row from a server whose
+// versioned terminal route does not exist at all (which answers an ordinary
+// unstructured 404): the first is a semantic absence the daemon settles, the
+// second is a mixed deployment the daemon must retry.
+const DaemonTaskNotFoundCode = "task_not_found"
+
+// TerminalReportGenerationFenceV1 marks a claim whose dispatched_at may be used
+// as an authoritative terminal-report generation: the server round-trips that
+// timestamp exactly and compares it inside the terminal UPDATE. Claims without
+// the flag stay legacy even when they carry dispatched_at, because older servers
+// send that timestamp while ignoring the terminal callback's fence.
+//
+// It is a claim-only capability. Whether a particular request is fenced is
+// settled per request by the versioned terminal endpoint, which has no unfenced
+// mode.
+const TerminalReportGenerationFenceV1 = "terminal_report_generation_fence_v1"
+
 // ChatQuickAction is a server-validated follow-up attached to one assistant
 // reply. Label is the concise chip text; Prompt is the full next user turn.
 type ChatQuickAction struct {

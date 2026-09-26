@@ -105,7 +105,10 @@ func TestHealthHandlerReportsTerminalReportQueueCountsAndBytes(t *testing.T) {
 		DaemonID:       "health-terminal-reports",
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	d.ready.Store(true)
-	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "pending", output: "private output"}
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "pending", output: "private output",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
+	}
 	if err := d.terminalReports.enqueue(report); err != nil {
 		t.Fatalf("enqueue pending report: %v", err)
 	}

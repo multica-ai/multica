@@ -90,6 +90,80 @@ type TaskService struct {
 	analyticsContextOrder []string
 }
 
+// ErrTaskClaimGenerationMismatch reports that a terminal callback was fenced
+// out: the row is still live, but a later claim generation owns it, so this
+// callback's result can never settle it. Handlers map the sentinel to a stable
+// 409 so the daemon stops replaying the report instead of retrying forever.
+// It is deliberately distinct from an infrastructure failure, which stays
+// retryable.
+var ErrTaskClaimGenerationMismatch = errors.New("task claim generation mismatch")
+
+// expectedTaskClaimGeneration converts the optional claim generation a caller
+// passes to a nullable SQL argument. An absent or zero value means "no
+// generation supplied" (a caller that predates the fence, or a row without a
+// dispatched_at), which keeps the pre-fence behaviour for that request.
+func expectedTaskClaimGeneration(values []time.Time) pgtype.Timestamptz {
+	if len(values) == 0 || values[0].IsZero() {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: values[0].UTC(), Valid: true}
+}
+
+func isTerminalAgentTaskStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+// sameClaimGeneration compares the generation a callback claims against the one
+// its row currently carries. Both are timestamptz instants: compare the
+// instants, never a rendered string, and treat a row without a generation as
+// ownership that cannot be the caller's.
+func sameClaimGeneration(row, expected pgtype.Timestamptz) bool {
+	return row.Valid && expected.Valid && row.Time.Equal(expected.Time)
+}
+
+// classifyFencedTerminalMiss decides what a fenced terminal UPDATE that
+// returned no rows means. The ownership decision already happened atomically
+// inside that UPDATE, so this lookup only classifies its outcome — and it never
+// mutates anything:
+//
+//   - the row is terminal on the callback's own generation: the transition this
+//     very report already committed and whose response was lost. Idempotent
+//     success.
+//   - the row carries another generation (or none at all): the report belongs to
+//     an older or unknown claim, reported as ErrTaskClaimGenerationMismatch so
+//     the daemon retires it. This holds whether the row is still live or was
+//     already settled, which is what keeps an old completion from being
+//     acknowledged as if it had produced the newer claim's outcome.
+//   - the lookup itself failed: unknown, so the caller keeps its existing
+//     retryable error path rather than guessing.
+func (s *TaskService) classifyFencedTerminalMiss(ctx context.Context, taskID pgtype.UUID, expected pgtype.Timestamptz) (db.AgentTaskQueue, bool, error) {
+	existing, err := s.Queries.GetAgentTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, false, fmt.Errorf("%w: task %s no longer exists",
+			ErrTaskClaimGenerationMismatch, util.UUIDToString(taskID))
+	}
+	if err != nil {
+		return db.AgentTaskQueue{}, false, err
+	}
+	if !sameClaimGeneration(existing.DispatchedAt, expected) {
+		return existing, false, fmt.Errorf("%w: task %s is owned by another claim generation",
+			ErrTaskClaimGenerationMismatch, util.UUIDToString(taskID))
+	}
+	if isTerminalAgentTaskStatus(existing.Status) {
+		return existing, true, nil
+	}
+	// Same generation, non-terminal: the row moved (requeued or settled by a
+	// concurrent transition) between the UPDATE and this read. Nothing here can
+	// settle it, and retrying forever helps no one.
+	return existing, false, fmt.Errorf("%w: task %s is no longer on the claimed generation",
+		ErrTaskClaimGenerationMismatch, util.UUIDToString(taskID))
+}
+
 type SourceContextObjectStore interface {
 	DeleteObject(ctx context.Context, key string) error
 	KeyFromURL(rawURL string) string
@@ -4361,8 +4435,8 @@ func startsWithAbsolutePath(s string) bool {
 // causing the new task to resume against a stale (or NULL) session.
 // durableWorkDir is terminal delivery metadata, not a resume pointer: it is
 // populated only after the daemon confirms a disposable worktree is gone.
-func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
-	task, _, err := s.CompleteTaskWithTransition(ctx, taskID, result, sessionID, workDir, branchName, sessionRolloutMissing, retiredSessionID, durableWorkDir)
+func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, expectedGeneration ...time.Time) (*db.AgentTaskQueue, error) {
+	task, _, err := s.CompleteTaskWithTransition(ctx, taskID, result, sessionID, workDir, branchName, sessionRolloutMissing, retiredSessionID, durableWorkDir, expectedGeneration...)
 	return task, err
 }
 
@@ -4370,7 +4444,13 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // completed compare-and-swap. Callers with transaction-external side effects
 // must only run them when transitioned is true; a replay against an already
 // terminal task is still an idempotent success but must not emit them again.
-func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+//
+// expectedGeneration, when supplied, is the server-issued dispatched_at of the
+// claim that produced this result. It is compared inside the terminal UPDATE,
+// so a report from an older claim generation cannot settle a reclaim of the
+// same task id.
+func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, expectedGeneration ...time.Time) (*db.AgentTaskQueue, bool, error) {
+	expectedDispatchedAt := expectedTaskClaimGeneration(expectedGeneration)
 	var task db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -4389,6 +4469,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			BranchName:            pgtype.Text{String: branchName, Valid: branchName != ""},
 			SessionRolloutMissing: sessionRolloutMissing,
 			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
+			ExpectedDispatchedAt:  expectedDispatchedAt,
 		})
 		if err != nil {
 			return err
@@ -4451,6 +4532,24 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) && expectedDispatchedAt.Valid {
+			existing, idempotent, classifyErr := s.classifyFencedTerminalMiss(ctx, taskID, expectedDispatchedAt)
+			switch {
+			case idempotent:
+				// A duplicate callback after the terminal transition committed
+				// is still success: the caller's response was lost, not its write.
+				slog.Info("complete task: already finalized",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return &existing, false, nil
+			case errors.Is(classifyErr, ErrTaskClaimGenerationMismatch):
+				return nil, false, classifyErr
+			}
+			// A failed classification lookup leaves the outcome unknown; fall
+			// through to the pre-fence handling so the callback stays retryable.
+		}
 		// When parallel agents race, a task may already be completed,
 		// cancelled, or failed by the time this call runs. The UPDATE
 		// … WHERE status = 'running' returns no rows in that case.
@@ -4785,15 +4884,21 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // coarse bucket. Daemon callers that already produced a refined reason
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
-	task, _, err := s.FailTaskWithTransition(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir)
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, expectedGeneration ...time.Time) (*db.AgentTaskQueue, error) {
+	task, _, err := s.FailTaskWithTransition(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, expectedGeneration...)
 	return task, err
 }
 
 // FailTaskWithTransition is the failure counterpart to
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
-func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+//
+// expectedGeneration, when supplied, is the server-issued dispatched_at of the
+// claim whose run reported this failure. It is checked in the same UPDATE that
+// performs the terminal transition, so a stale claim cannot fail a task a
+// later claim now owns.
+func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, expectedGeneration ...time.Time) (*db.AgentTaskQueue, bool, error) {
+	expectedDispatchedAt := expectedTaskClaimGeneration(expectedGeneration)
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -4838,6 +4943,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
+		} else if expectedDispatchedAt.Valid && !sameClaimGeneration(parent.DispatchedAt, expectedDispatchedAt) {
+			return nil, false, fmt.Errorf("%w: task %s", ErrTaskClaimGenerationMismatch, util.UUIDToString(taskID))
 		} else if retryEligible(failureReason, parent) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
@@ -4882,6 +4989,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			BranchName:            pgtype.Text{String: branchName, Valid: branchName != ""},
 			SessionRolloutMissing: sessionRolloutMissing,
 			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},
+			ExpectedDispatchedAt:  expectedDispatchedAt,
 		})
 		if err != nil {
 			return err
@@ -5084,6 +5192,24 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) && expectedDispatchedAt.Valid {
+			existing, idempotent, classifyErr := s.classifyFencedTerminalMiss(ctx, taskID, expectedDispatchedAt)
+			switch {
+			case idempotent:
+				// The failure already landed (or the row was cancelled); the
+				// report is a replay, not a new transition.
+				slog.Info("fail task: already finalized",
+					"task_id", util.UUIDToString(taskID),
+					"current_status", existing.Status,
+					"agent_id", util.UUIDToString(existing.AgentID),
+				)
+				return &existing, false, nil
+			case errors.Is(classifyErr, ErrTaskClaimGenerationMismatch):
+				return nil, false, classifyErr
+			}
+			// A failed classification lookup leaves the outcome unknown; fall
+			// through to the pre-fence handling so the callback stays retryable.
+		}
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				slog.Info("fail task: already finalized",

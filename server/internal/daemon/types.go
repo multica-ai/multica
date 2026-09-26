@@ -69,7 +69,9 @@ type IssueStatusData struct {
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
 	// StartClaimSupported gates retries when talking to older servers.
-	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
+	StartClaimSupported bool `json:"start_claim_supported,omitempty"`
+	// DispatchedAt is the server-issued claim generation used by StartTask and,
+	// when the claim advertises TerminalReportGenerationFenceV1, terminal reports.
 	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
@@ -176,6 +178,10 @@ type Task struct {
 	// Empty or non-task-scoped values are fatal for writable agent tasks; the
 	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+	// TerminalReportGenerationFenceV1 is the claim-only capability that says this
+	// server enforces the terminal-report generation fence. Older servers may
+	// send dispatched_at without enforcing it; their reports remain durable v1.
+	TerminalReportGenerationFenceV1 bool `json:"terminal_report_generation_fence_v1,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon
