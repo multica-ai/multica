@@ -4043,7 +4043,7 @@ func TestRunIssueAssignRejectsNoStartWithUnassign(t *testing.T) {
 func TestIssueReadCommandsUseInjectedTaskToken(t *testing.T) {
 	const fakeTaskToken = "mat_task_issue_sentinel"
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
@@ -4109,7 +4109,7 @@ func TestIssueReadCommandsUseInjectedTaskToken(t *testing.T) {
 
 func TestIssueReadCommandsFailClosedWithoutTaskToken(t *testing.T) {
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TOKEN", "")

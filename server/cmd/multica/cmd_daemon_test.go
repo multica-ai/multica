@@ -222,7 +222,7 @@ func TestPrintDaemonStatusOmitsVersionWhenMissing(t *testing.T) {
 // already died with "not authenticated".
 func TestRequireDaemonAuth(t *testing.T) {
 	t.Run("not logged in", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		err := requireDaemonAuth("")
 		if err == nil || !strings.Contains(err.Error(), "multica login") {
 			t.Fatalf("requireDaemonAuth() = %v, want error mentioning 'multica login'", err)
@@ -230,7 +230,7 @@ func TestRequireDaemonAuth(t *testing.T) {
 	})
 
 	t.Run("not logged in with profile", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		err := requireDaemonAuth("staging")
 		if err == nil || !strings.Contains(err.Error(), "multica login --profile staging") {
 			t.Fatalf("requireDaemonAuth(staging) = %v, want error mentioning profile login hint", err)
@@ -238,7 +238,7 @@ func TestRequireDaemonAuth(t *testing.T) {
 	})
 
 	t.Run("authenticated", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		redirectTestHome(t, t.TempDir())
 		if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_test_token"}); err != nil {
 			t.Fatalf("SaveCLIConfig: %v", err)
 		}
@@ -256,10 +256,7 @@ func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
 	// from the CWD for a daemon-task marker, and this suite may run inside a
 	// real task workdir — mkProfiles makes the same move for the same reason.
 	t.Chdir(t.TempDir())
-	// HOME alone isolates on unix; Windows resolves the profile directory
-	// from USERPROFILE, so redirect both (see mkProfiles).
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	redirectTestHome(t, t.TempDir())
 
 	// A start that cannot succeed must not reach the autostart hook at all:
 	// there is nothing to hint about or refresh when the start dies on auth.
@@ -439,13 +436,11 @@ list workspaces: GET /api/workspaces returned 401: {"error":"invalid token"}
 // The spawned child is stubbed to `false` via daemonExecutable so it dies
 // immediately with a non-zero status, the same shape as a failed preflight.
 func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
-	// Out of the marker walk first (see the unauthenticated test above), then
-	// redirect both home env vars (see mkProfiles): on Windows the config
-	// layer reads USERPROFILE, and this test writes a profile config through
-	// it — leaving USERPROFILE alone would write into the real home.
+	// Out of the marker walk first (see the unauthenticated test above); the
+	// home redirect keeps the profile config this test writes inside the
+	// scratch home instead of the real one on Windows.
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	redirectTestHome(t, t.TempDir())
 
 	falseBin, err := exec.LookPath("false")
 	if err != nil {
@@ -499,7 +494,7 @@ func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
 // and only then discovers it cannot start a replacement, leaving the user
 // with no daemon at all.
 func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	const profile = "restart-authtest"
 
@@ -562,7 +557,7 @@ func newRestartTestCmd(t *testing.T, profile string) *cobra.Command {
 // running daemon is stopped. Otherwise restart kills the working daemon and
 // the replacement child dies in preflight, leaving no daemon at all (#5165).
 func TestDaemonRestartRejectedTokenFailsBeforeStopping(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 
 	const profile = "restart-401test"
@@ -597,7 +592,7 @@ func TestDaemonRestartRejectedTokenFailsBeforeStopping(t *testing.T) {
 // restart must abort before stopping the running daemon, because the
 // replacement child would die in preflight against the same dead server.
 func TestDaemonRestartUnreachableServerFailsBeforeStopping(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 
 	const profile = "restart-unreachable-test"
@@ -664,7 +659,7 @@ func TestPrintDaemonStatusAlignsValuesWithProfileLabel(t *testing.T) {
 
 func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	mkdirProfile(t, home, "empty")
@@ -712,7 +707,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 // a non-empty default root.
 func TestPrintDiskUsageOtherRootsHintFiresWhenCurrentRootNonEmpty(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	mkdirProfile(t, home, "desktop-host")
@@ -732,7 +727,7 @@ func TestPrintDiskUsageOtherRootsHintFiresWhenCurrentRootNonEmpty(t *testing.T) 
 
 func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	writeDefaultDiskUsageTaskFile(t, home, "ws0", "task0", "workdir/main.go")
@@ -751,7 +746,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.
 func TestPrintDiskUsageOtherRootsHintUsesProfileConfig(t *testing.T) {
 	home := t.TempDir()
 	customRoot := filepath.Join(t.TempDir(), "custom-profile-root")
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: customRoot}, "custom"); err != nil {
 		t.Fatalf("SaveCLIConfigForProfile: %v", err)
@@ -774,7 +769,7 @@ func TestPrintDiskUsageOtherRootsHintUsesProfileConfig(t *testing.T) {
 
 func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	mkdirProfile(t, home, "has-task")
@@ -792,7 +787,7 @@ func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 
 func TestEnumerateDiskUsageRoots(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 
 	// Two profiles configured under ~/.multica/profiles, but only one has its
