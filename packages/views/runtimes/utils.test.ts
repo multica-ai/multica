@@ -365,6 +365,8 @@ describe("estimateCost", () => {
       ).toBeCloseTo(4 + 20 + 0.2 + 5, 5);
       expect(isModelPriced(model)).toBe(true);
     }
+  });
+
   it("prices the provider-prefixed OpenAI form (openai/gpt-4o)", () => {
     const cost = estimateCost({
       ...zeroUsage,
