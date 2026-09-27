@@ -178,6 +178,13 @@ INSERT INTO issue_vcs_pull_request (
 )
 ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
 
+-- name: SyncVCSPullRequestCloseIntent :exec
+-- Mirrors SyncPullRequestCloseIntent.
+UPDATE issue_vcs_pull_request
+SET close_intent = (issue_id = ANY(sqlc.arg('closing_issue_ids')::uuid[]))
+WHERE pull_request_id = sqlc.arg('pull_request_id')
+  AND close_intent <> (issue_id = ANY(sqlc.arg('closing_issue_ids')::uuid[]));
+
 -- name: LinkIssueToVCSPullRequestManually :execrows
 INSERT INTO issue_vcs_pull_request (
     issue_id, pull_request_id, linked_by_type, linked_by_id

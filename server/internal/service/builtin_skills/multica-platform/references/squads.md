@@ -173,8 +173,11 @@ Current behavior:
   new assignee path;
 - parent issue status is agent-managed (same model as direct agent assignment):
   the leader's first assignment turn should move the parent to `in_progress`
-  and keep it there while members work; the leader moves the parent to
-  `in_review` only when a later re-trigger confirms the overall goal is met.
+  and keep it there while members work; on a later re-trigger the leader marks
+  a fully evidenced goal `done`, or uses `in_review` only after routing a named
+  acceptance question to a named human or external provider reviewer with a
+  live return path. Internal agent review is a separate child that becomes
+  `done` when its bounded review is complete.
   Completing a leader task (including the first dispatch) does not itself
   change issue status;
 - that status authority is granted only when the issue's `assignee_type` /
@@ -252,9 +255,10 @@ These actions can trigger agent work or mutate durable state:
 - `role` is roster context, not automatic scheduling.
 - Backlog assignment does not immediately start work.
 - First leader dispatch is not parent completion — parent stays `in_progress`
-  until the leader later confirms the overall goal and moves it to `in_review`.
+  until the leader later inspects the whole goal and chooses its truthful state.
 - The server does not auto-flip parent status when child issues finish; it only
-  wakes the leader with an explicit ask (including `in_review` when wrapping up).
+  wakes the leader to choose `done`, continue `in_progress`, record an exact
+  `blocked` reason, or use `in_review` only for a live named external/human route.
 - Getting the leader briefing does NOT imply status authority. A squad
   `@`-mentioned into an issue assigned to someone else is a guest: roster and
   delegation rules yes, `multica issue status` no.

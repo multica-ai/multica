@@ -44,12 +44,12 @@ WHERE issue_id = $1 AND pull_request_id = $2;
 -- name: ListIssueLinkedPullRequestStates :many
 -- Every PR linked to the issue across GitHub and self-hosted providers, for
 -- the merge decision. Ordered by number so reasons read stably.
-SELECT pr.id, 'github'::text AS provider, pr.pr_number, pr.state
+SELECT pr.id, 'github'::text AS provider, pr.pr_number, pr.state, ipr.close_intent
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
 UNION ALL
-SELECT pr.id, pr.provider AS provider, pr.pr_number, pr.state
+SELECT pr.id, pr.provider AS provider, pr.pr_number, pr.state, ipr.close_intent
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
@@ -60,8 +60,9 @@ ORDER BY pr_number;
 -- issue is still in the status the decision saw (two merges racing move it
 -- once), is not already in the target, and the linked PRs are still all merged
 -- when the write runs (a PR linked between the decision and this statement
--- keeps the issue where it is). Repositions and clears a duplicate mark like
--- UpdateIssueStatus does; the target is never cancelled.
+-- keeps the issue where it is). At least one linked PR must still carry close
+-- intent. Repositions and clears a duplicate mark like UpdateIssueStatus does;
+-- the target is never cancelled.
 UPDATE issue AS i SET
     status = sqlc.arg('target_status')::text,
     duplicate_of_issue_id = NULL,
@@ -92,5 +93,10 @@ WHERE i.id = $1
       SELECT 1 FROM issue_vcs_pull_request ipr
       JOIN vcs_pull_request pr ON pr.id = ipr.pull_request_id
       WHERE ipr.issue_id = i.id AND pr.state <> 'merged'
+  )
+  AND EXISTS (
+      SELECT 1 FROM issue_pull_request ipr WHERE ipr.issue_id = i.id AND ipr.close_intent
+      UNION ALL
+      SELECT 1 FROM issue_vcs_pull_request ipr WHERE ipr.issue_id = i.id AND ipr.close_intent
   )
 RETURNING i.*;

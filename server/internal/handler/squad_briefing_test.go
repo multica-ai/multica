@@ -34,6 +34,7 @@ func TestSquadOperatingProtocolScopesParentStatusOwnership(t *testing.T) {
 	// The grant must be entirely absent — not merely qualified.
 	for _, forbidden := range []string{
 		"Own the parent issue status",
+		"multica issue status <issue-id> done",
 		"multica issue status <issue-id> in_review",
 	} {
 		if strings.Contains(compactGuest, forbidden) {

@@ -431,7 +431,7 @@ describe("PullRequestList auto-complete", () => {
   });
 
   // The workspace chose to leave status alone: a team choice, not repeated on
-  // every issue. An older backend's no_close_intent says nothing either.
+  // every issue. A link without close intent says nothing either.
   it.each(["workspace_disabled", "no_close_intent", "at_target", "terminal"])("says nothing for %s", async (state) => {
     mockPRs = [makePR({ id: "a", number: 12, state: "merged" })];
     mockAutoComplete = decision(state, [], state === "workspace_disabled" ? { workspace_enabled: false, target_status: "none" } : {});

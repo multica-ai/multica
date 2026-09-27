@@ -29,11 +29,12 @@ import (
 //   - A PR whose title or branch name carries an issue identifier is linked to
 //     that issue, and so is one whose title or body puts it after a closing
 //     keyword ("Closes MUL-1"). A member can also link or remove a PR by hand.
-//     The keyword only links; it has no say in what the merge does.
 //   - The workspace picks what a merge does: move the issue to one status (Done
 //     by default, or any started or done status, custom ones included) or leave
-//     it alone. When every PR linked to an issue is merged, the issue moves to
-//     that status, unless someone turned the automation off for that one issue.
+//     it alone. When every PR linked to an issue is merged and at least one of
+//     them carries close intent, the issue moves to that status, unless someone
+//     turned the automation off for that one issue. A PR linked only by title
+//     or branch is related work and never completes the issue by itself.
 //
 // The decision is evaluated only when a PR event touches the issue: a linked PR
 // merges, a PR is linked, or a link is removed. Changing a setting, reopening an
@@ -50,6 +51,7 @@ const (
 	prAutoCompleteTerminal          = "terminal"           // already done / cancelled
 	prAutoCompleteTriage            = "triage"             // not accepted yet
 	prAutoCompleteAtTarget          = "at_target"          // already in the target status
+	prAutoCompleteNoCloseIntent     = "no_close_intent"    // no PR closes the issue with a keyword
 	prAutoCompleteWaiting           = "waiting"            // some PRs still open / draft
 	prAutoCompleteNotMerged         = "not_merged"         // some PRs closed without merging
 	prAutoCompleteAllMerged         = "all_merged"         // every linked PR merged
@@ -207,15 +209,21 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 		return d, nil
 	}
 	var open, closed []db.ListIssueLinkedPullRequestStatesRow
+	closes := false
 	for _, pr := range prs {
 		switch pr.State {
 		case "open", "draft":
 			open = append(open, pr)
 		case "closed":
 			closed = append(closed, pr)
+			// A PR closed without merging never delivers, whatever it says.
+			continue
 		}
+		closes = closes || pr.CloseIntent
 	}
 	switch {
+	case !closes:
+		d.State = prAutoCompleteNoCloseIntent
 	case len(open) > 0:
 		d.State, d.PRs = prAutoCompleteWaiting, open
 	case len(closed) > 0:
@@ -227,7 +235,8 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 }
 
 // maybeAutoCompleteIssue runs the decision for one issue after a PR event and
-// moves it to the workspace's target status when every linked PR is merged.
+// moves it to the workspace's target status when every linked PR is merged and
+// at least one carries close intent.
 // Safe to call for any issue: every guard lives in decidePRAutoComplete, and
 // the status write is conditional on the status the decision saw, so
 // concurrent merges move the issue once. It starts no agent run: a merge is not

@@ -746,11 +746,11 @@ func writeWorkflowAutopilot(b *strings.Builder) {
 // step is what made this one bloat in the first place.
 //
 // Squad leaders keep one status bullet: a dispatch turn leaves the parent
-// mid-flight, so its end-of-turn fact is in_progress, and in_review waits for
-// the re-trigger (member update / stage barrier) that confirms the overall
-// goal is met. Flipping the parent on the dispatch turn would mark unfinished
-// multi-stage work as ready for review; see the Squad Operating Protocol and
-// child-done system comments.
+// mid-flight, so its end-of-turn fact is in_progress. The re-trigger (member
+// update / stage barrier) is when the leader applies the same completion and
+// routed-review rules as any other assignee to the whole goal. Flipping the
+// parent on the dispatch turn would misstate unfinished multi-stage work; see
+// the Squad Operating Protocol and child-done system comments.
 //
 // ctx.IsSquadLeader is a PER-TASK role, not agent configuration: branching on
 // it here does move brief bytes when the same agent runs leader one turn and
@@ -772,11 +772,12 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 
 	b.WriteString("**Issue status — write the state the issue is in, whenever it changes** (skip any status call your Agent Identity forbids)\n\n")
 	b.WriteString("Status reflects the state the ISSUE is in, not your run's lifecycle — keep it true at every point in the turn, not only at checkpoints: write the new value the moment your work changes it, mid-turn included. Write only when the new value differs from the current one, whoever the assignee is:\n\n")
-	b.WriteString("- You delivered what the issue itself asks for and it awaits acceptance → `in_review`. Delivering an issue assigned to you — including a sub-issue in a chain or stage — always lands here; stage barriers and parent notifications depend on that signal. `done` stays human.\n")
+	b.WriteString("- The issue's bounded deliverable is fully evidenced and no required work remains → `done`. A completed child becomes `done`, including a child whose deliverable is internal agent review, so stage barriers and parent callbacks can fire.\n")
 	b.WriteString("- The issue's work continues beyond this turn — you dispatched sub-issues, or delivered one part with more underway → `in_progress`.\n")
+	b.WriteString("- The issue is awaiting a specifically named human or external provider reviewer, and you have routed a named acceptance question with a live return path → `in_review`. Record the next actor and acceptance question in the result comment. Internal agent review is a separate child, and that child becomes `done` when its bounded review is complete.\n")
 	b.WriteString("- You cannot proceed without something you are missing → `blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n")
 	if ctx.IsSquadLeader {
-		b.WriteString("- Squad leader: dispatching members is not delivery — a dispatch turn leaves the parent `in_progress`, and it moves to `in_review` only on the later turn (a member update or stage-barrier re-trigger) where you confirm the overall goal is met.\n")
+		b.WriteString("- Squad leader: dispatching members is not delivery — a dispatch turn leaves the parent `in_progress`. On the later member-update or stage-barrier turn, inspect the whole goal and apply the same completion, continuation, blocker, or routed-review rule above.\n")
 	}
 	// A custom catalog needs one reminder that workflow updates use exact keys.
 	if len(ctx.IssueStatuses) > 0 {

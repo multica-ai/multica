@@ -93,9 +93,10 @@ A merged PR doesn't necessarily mean the issue is finished, so the workspace dec
 An issue moves to the chosen status when all of the following hold:
 
 1. every linked PR is `Merged` — an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
-2. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Pull requests → ⋯ → Keep status when PRs merge**).
+2. at least one linked PR puts the issue identifier directly after a closing keyword such as `Closes MUL-123` in its title or body;
+3. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Pull requests → ⋯ → Keep status when PRs merge**).
 
-How a PR was linked doesn't matter: the title, the branch name and a `Closes MUL-123` in the body all link it, and none of them changes what the merge does. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep that issue's status from its **Pull requests** menu.
+The issue key in a PR title or branch links related work, but does not authorize its merge to move the issue. Use a closing keyword only when merging that PR should move the issue to the workspace's chosen status. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep the key in the title or branch without a closing keyword.
 
 The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back — the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
 

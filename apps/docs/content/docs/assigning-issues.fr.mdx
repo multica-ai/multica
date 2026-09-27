@@ -38,7 +38,7 @@ Ce qu'il peut réellement faire reste limité par la configuration de l'agent, l
 
 Pendant l'exécution, l'agent gère le statut de la tâche en évaluant ce que son travail change : commencer à traiter la demande propre à la tâche la fait passer immédiatement à `in_progress`, une livraison la fait passer à `in_review`, un travail qui se poursuit au-delà du tour la maintient en `in_progress`, et une consultation ou une discussion laisse le statut inchangé — ces actions apparaissent sous l'identité de l'agent dans la chronologie. Le cycle de vie de l'exécution et le statut de la tâche sont distincts : la fin d'une exécution ne change pas à elle seule le statut de la tâche.
 
-Lorsque l'assigné est un [squad](/squads), la même règle s'applique : Multica met le chef en file, et répartir le travail entre les membres n'est pas une livraison — un tour de répartition laisse la tâche parente en `in_progress`, et le chef ne la passe en `in_review` qu'une fois l'objectif global atteint.
+Lorsque l'assigné est un [squad](/squads), Multica met le chef en file. Répartir le travail entre les membres n'est pas une livraison : ce tour laisse la tâche parente en `in_progress`. Lors d'un rappel ultérieur, le chef examine l'objectif global : un travail entièrement démontré et sans reste passe à `done` ; `in_review` est réservé à une relecture humaine ou par un fournisseur externe nommé, réellement transmise avec un chemin de retour actif.
 
 ## Assigner sans démarrer
 

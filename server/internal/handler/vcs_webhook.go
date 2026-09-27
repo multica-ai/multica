@@ -226,10 +226,11 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID)
 	if err == nil {
 		var touched map[pgtype.UUID]struct{}
-		idents := prClaimedIdentifiers(ev.Title, ev.Body, ev.Branch)
+		idents, closing := prClaimedIdentifiers(ev.Title, ev.Body, ev.Branch)
+		permits := func(string) bool { return true }
 		linkedIssueIDs, touched = h.reconcileAutoLinks(ctx, ws, pr.ID, ev.State, prAutoLinkInput{
 			idents:    idents,
-			permits:   func(string) bool { return true },
+			permits:   permits,
 			ambiguous: func(string) bool { return false },
 			link: func(issueID pgtype.UUID) (int64, error) {
 				return h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{IssueID: issueID, PullRequestID: pr.ID})
@@ -241,6 +242,16 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				return h.Queries.ListAutoLinkedIssueIDsForVCSPullRequest(ctx, pr.ID)
 			},
 		})
+		// Close intent follows PR text up to and including the merge/close
+		// event, on every link of the PR.
+		if ev.Terminal() || (ev.State != "merged" && ev.State != "closed") {
+			if err := h.Queries.SyncVCSPullRequestCloseIntent(ctx, db.SyncVCSPullRequestCloseIntentParams{
+				PullRequestID:   pr.ID,
+				ClosingIssueIds: h.closingIssueIDs(ctx, ws, closing, permits),
+			}); err != nil {
+				slog.Warn("vcs: sync close intent failed", "err", err)
+			}
+		}
 		if ev.State == "merged" && prevState != "merged" {
 			issueIDs, err := h.Queries.ListIssueIDsForVCSPullRequest(ctx, pr.ID)
 			if err != nil {

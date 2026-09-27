@@ -68,20 +68,26 @@ func TestSquadAssignedLeaderCanWrapUpOnCommentTurn(t *testing.T) {
 	for _, want := range []string{
 		// MUL-6417: the brief's status rule is a fact judgment, and the
 		// leader bullet must point the same way as the briefing's grant —
-		// in_review is reached on the confirming turn, not on dispatch.
+		// completion is decided on the confirming turn, not on dispatch.
 		"dispatching members is not delivery",
 		"a dispatch turn leaves the parent `in_progress`",
-		"where you confirm the overall goal is met",
+		"inspect the whole goal",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("leader runtime brief missing %q\n--- brief ---\n%s", want, brief)
 		}
 	}
 
-	// End to end: both halves must agree that in_review is reachable here.
+	// End to end: both halves must agree that completed bounded work closes and
+	// In Review requires a named external route.
 	combined := briefing + "\n" + brief
-	if !strings.Contains(combined, "multica issue status <issue-id> in_review") {
+	if !strings.Contains(combined, "multica issue status <issue-id> done") {
 		t.Error("combined instructions never tell the owning leader how to wrap up")
+	}
+	for _, want := range []string{"named acceptance question", "named human or external provider reviewer", "live return path", "Internal agent review is a separate child"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("combined instructions missing routed-review contract %q", want)
+		}
 	}
 }
 
@@ -119,9 +125,10 @@ func TestGuestLeaderCannotChangeStatusOnCommentTurn(t *testing.T) {
 		t.Errorf("guest leader must not receive the status-ownership grant:\n%s", briefing)
 	}
 	combined := briefing + "\n" + brief
-	if strings.Contains(combined, "multica issue status <issue-id> in_review") {
-		t.Error("combined instructions hand a guest leader an in_review command for " +
-			"an issue assigned to someone else")
+	for _, forbidden := range []string{"multica issue status <issue-id> done", "multica issue status <issue-id> in_review"} {
+		if strings.Contains(combined, forbidden) {
+			t.Errorf("combined instructions hand a guest leader a status command %q for an issue assigned to someone else", forbidden)
+		}
 	}
 	// The prohibition wraps across source lines, so match on compacted text.
 	compact := strings.Join(strings.Fields(briefing), " ")

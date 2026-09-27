@@ -171,17 +171,30 @@ func TestStageAdvanceInstruction(t *testing.T) {
 		}
 		// It must make clear that finishing the stage != the whole issue is
 		// done, and hand both paths (wrap up / create the next stage) to the
-		// leader. The explicit in_review command marks the wrap-up moment;
-		// the write itself is authorized by the standing status-ownership
-		// grant (MUL-6300), not by this ask.
+		// leader without prescribing a generic review stop.
 		if !strings.Contains(got, "does not mean the whole issue is done") {
 			t.Fatalf("expected stage-done != issue-done framing, got %q", got)
 		}
 		if !strings.Contains(got, "next stage") {
 			t.Fatalf("expected create-next-stage guidance, got %q", got)
 		}
-		if !strings.Contains(got, "multica issue status "+parentID+" in_review") {
-			t.Fatalf("expected explicit in_review instruction for confirmed completion, got %q", got)
+		for _, want := range []string{
+			"multica issue status " + parentID + " done",
+			"`in_progress`",
+			"multica issue status " + parentID + " blocked",
+			"record the exact blocker",
+			"named acceptance question",
+			"named human or external provider reviewer",
+			"live return path",
+			"Internal agent review belongs in a separate child",
+			"child becomes `done`",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("expected parent status decision guidance %q, got %q", want, got)
+			}
+		}
+		if strings.Contains(got, "mark the parent ready for review") {
+			t.Fatalf("must not prescribe the retired generic review stop, got %q", got)
 		}
 	})
 }

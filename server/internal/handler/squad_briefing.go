@@ -106,8 +106,8 @@ Your responsibilities, in order:
 // layer (Instruction Precedence puts it above the workflow). The owning
 // leader needs the standing wrap-up instruction below — the @mention-dispatch
 // shape (no child issues, so no child-done system comment) never produces a
-// comment that asks for in_review, so without it the parent would sit in
-// in_progress forever; the guest leader gets the prohibition instead
+// completion prompt, so without it the parent would sit in in_progress forever;
+// the guest leader gets the prohibition instead
 // (squadParentStatusNotOwned). Both compositions are pinned by
 // handler/squad_parent_status_contract_test.go.
 const squadParentStatusOwned = `6. **Own the parent issue status.** This issue is assigned to your squad,
@@ -115,11 +115,14 @@ const squadParentStatusOwned = `6. **Own the parent issue status.** This issue i
    changes). On the first assignment turn, move the parent to
    ` + "`" + `in_progress` + "`" + ` and keep it there while members work — a successful
    dispatch is not completion. On later turns, do not flip status for
-   routine progress updates. When you confirm the overall goal is met, run
-   ` + "`" + `multica issue status <issue-id> in_review` + "`" + ` — this responsibility is
-   itself the standing instruction that authorizes that change, so do it even
-   when no comment asked you to. Leave ` + "`" + `done` + "`" + ` to a human reviewer or
-   existing integrations (for example a PR with close intent that merges).`
+   routine progress updates. When you confirm every acceptance criterion is
+   evidenced and no required work remains, run
+   ` + "`" + `multica issue status <issue-id> done` + "`" + `. Use
+   ` + "`" + `in_review` + "`" + ` only after routing a named acceptance question to a named
+   human or external provider reviewer with a live return path; if that route
+   cannot be established, use ` + "`" + `blocked` + "`" + ` and record the exact missing route.
+   Internal agent review is a separate child that becomes ` + "`" + `done` + "`" + ` when its
+   bounded review is complete.`
 
 // squadParentStatusNotOwned is responsibility 6 for every other leader path:
 // an @squad mention on an issue owned by someone else (MUL-3724), and

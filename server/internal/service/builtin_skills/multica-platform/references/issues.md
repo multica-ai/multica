@@ -2,7 +2,7 @@
 
 Product contracts the runtime brief does not fully encode.
 
-- [PR linking](#pr-linking)
+- [PR linking and merge intent](#pr-linking-and-merge-intent)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
@@ -13,7 +13,7 @@ Product contracts the runtime brief does not fully encode.
 
 To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
 
-## PR linking
+## PR linking and merge intent
 
 A PR is linked to an issue when its **title** or **branch name** contains a
 routable issue key (`PREFIX-NUMBER`, e.g. `MUL-123`), or when its title or body
@@ -25,12 +25,21 @@ the issue page; a removed PR is not linked again by later webhooks.
 ```text
 MUL-123: add the thing the issue asks for     # key in title  → links
 agent/dana/mul-123-add-the-thing              # key in branch → links
-Closes MUL-123   (body)                       # key after a keyword → links
+Closes MUL-123   (body)                       # links and carries close intent
 Related to MUL-123   (body only)              # no link
 ```
 
-While a PR is open, its automatic links follow the live title, branch, and
-body: removing the key drops the link. After merge or close, existing links stay.
+**Only a closing keyword carries merge intent.** A routable key in a PR title
+or branch links the PR but does not authorize its merge to complete the issue.
+When every linked PR is merged and at least one puts a closing keyword directly
+before the key (`Closes MUL-123`; `Closes login MUL-123` does not count), the
+merge automation may move the issue to the workspace's configured target. Use
+the keyword only when merging that PR should complete the issue.
+
+While a PR is open, its automatic links and close intent follow the live title,
+branch, and body. After merge or close, existing links and the close decision
+stay fixed. Adding a key to an already-merged PR can link it, but that late link
+does not complete the issue.
 
 ### Default for code-changing issue work
 
@@ -43,10 +52,12 @@ instead of pretending the run is complete.
 
 To make the PR show on the issue, put a routable issue key in the PR **title**
 (preferred) or the **branch**. A key that appears only as a bare mention in the
-body links nothing.
+body links nothing. Do not use a closing keyword (`Closes` / `Fixes` /
+`Resolves`) unless merging the PR should complete the issue.
 
 ```text
-MUL-123: fix login redirect        # key in title → links
+MUL-123: fix login redirect        # key in title → links, does not complete
+Closes MUL-123                     # only when merge should complete the issue
 Part of MUL-123                    # body mention only → no link at all
 ```
 
@@ -64,7 +75,10 @@ an earlier run.
 multica issue pull-requests <issue-id> --output json
 ```
 
-Returns `{"pull_requests": [...], ...}`. Each element of `pull_requests` exposes:
+Returns `{"pull_requests": [...], "auto_complete": {...}}`.
+`auto_complete.state` says what the merge rule will do for this issue;
+`no_close_intent` means no linked PR carries the required closing keyword.
+Each element of `pull_requests` exposes:
 
 - `number`, `html_url`, `title`
 - `link_source` — why the PR is on the issue: `title`, `branch`, `manual`, or
@@ -221,21 +235,29 @@ archived statuses remain readable via an explicit status filter.
   assignee. Writes happen whenever the state changes, mid-turn included: a
   turn that advances the issue's own ask sets `in_progress` as soon as that
   is known, so the board shows the work while it runs; a blocker is recorded
-  when it is hit; and the turn must not exit with a stale value — delivered
-  the issue's own ask → `in_review`; work continues beyond the turn
-  (dispatched sub-issues, partial delivery) → `in_progress`; stuck →
-  `blocked`. A turn that produces none of the issue's own deliverable —
+  when it is hit; and the turn must not exit with a stale value — a fully
+  evidenced bounded deliverable with no required work remaining → `done`;
+  work continuing beyond the turn (dispatched sub-issues, partial delivery) →
+  `in_progress`; a real named human or external provider review route →
+  `in_review`; stuck → `blocked`. A turn that produces none of the issue's own deliverable —
   answering a question, consulting on work owned elsewhere — writes nothing
   at any point. The kind of activity never decides this: research, design,
   planning, and review all count as the work exactly when they are what the
   issue asks for (a review-the-PR issue is being worked the moment reviewing
   starts). Questions, discussion, or acknowledgements never move the status.
-  Squad leaders: dispatching members is not delivery — a dispatch turn
-  leaves the parent `in_progress`, and it moves to `in_review` only when a
-  later re-trigger confirms the overall goal is met.
-- **`in_review`** is an accepted issue status. Some workflows use it while a PR
-  is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent.
+  Squad leaders: dispatching members is not delivery — a dispatch turn leaves
+  the parent `in_progress`; a later re-trigger applies these same rules to the
+  whole goal.
+- **`in_review`** means a specifically named human or external provider
+  reviewer has actually been asked a named acceptance question and has a live
+  return path. Record that next actor and question in the result comment. If
+  the route cannot be established, use `blocked` with the exact missing route.
+- **Internal agent review** is a separate child issue, not `in_review`. A
+  completed review — including a negative verdict — is bounded work and the
+  review child becomes `done`.
+- **`done`** on a child issue posts a system comment on its parent. When every
+  linked PR is merged and at least one carries close intent, merge automation
+  can also move the issue to the workspace's configured target.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
@@ -348,6 +370,12 @@ terminal children.
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
 breakdown, leave it `backlog` and comment to confirm first.
+
+A closed stage is a callback, not a prescribed status. Inspect the whole goal:
+choose `done` when every acceptance criterion is evidenced, keep `in_progress`
+when work or an internal agent-review child remains, use `blocked` with the
+exact blocker when progress cannot continue, and use `in_review` only for the
+named human/external review route described above.
 
 ## Charts and files in a comment
 

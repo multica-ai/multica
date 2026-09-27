@@ -532,6 +532,24 @@ func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg Rota
 	return i, err
 }
 
+const syncVCSPullRequestCloseIntent = `-- name: SyncVCSPullRequestCloseIntent :exec
+UPDATE issue_vcs_pull_request
+SET close_intent = (issue_id = ANY($1::uuid[]))
+WHERE pull_request_id = $2
+  AND close_intent <> (issue_id = ANY($1::uuid[]))
+`
+
+type SyncVCSPullRequestCloseIntentParams struct {
+	ClosingIssueIds []pgtype.UUID `json:"closing_issue_ids"`
+	PullRequestID   pgtype.UUID   `json:"pull_request_id"`
+}
+
+// Mirrors SyncPullRequestCloseIntent.
+func (q *Queries) SyncVCSPullRequestCloseIntent(ctx context.Context, arg SyncVCSPullRequestCloseIntentParams) error {
+	_, err := q.db.Exec(ctx, syncVCSPullRequestCloseIntent, arg.ClosingIssueIds, arg.PullRequestID)
+	return err
+}
+
 const unlinkIssueFromVCSPullRequest = `-- name: UnlinkIssueFromVCSPullRequest :execrows
 DELETE FROM issue_vcs_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2

@@ -473,6 +473,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"redelivered once the receiving side is fixed",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
+				"Only a closing keyword carries merge intent",
+				"Use the keyword only when merging that PR should complete the issue",
+				"key in title → links, does not complete",
+				"`no_close_intent`",
 				"--status backlog",
 				// The link table is the only sanctioned source of PR state,
 				// and the guard against stale data survives MUL-6966 without
@@ -510,6 +514,15 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--resolve-properties",
 				"display_values",
 				"`value` keeps the stored ids",
+				// Closure and review routing must agree with the runtime brief and
+				// child-done callback instead of reviving generic In Review handoffs.
+				"fully evidenced bounded deliverable with no required work remaining → `done`",
+				"specifically named human or external provider reviewer",
+				"named acceptance question",
+				"live return path",
+				"Internal agent review** is a separate child issue",
+				"including a negative verdict",
+				"A closed stage is a callback, not a prescribed status",
 			},
 			notWant: []string{
 				"--no-start",
@@ -531,6 +544,8 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Start from the trigger, not from memory",
 				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
 				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
+				"delivered the issue's own ask → `in_review`",
+				"`done` stays human",
 			},
 		},
 		{
@@ -597,6 +612,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--roots-only --summary",
 				"--thread <thread-id> --tail 30",
 				"scan the roots first, then open the threads",
+				"fully evidenced goal `done`",
+				"Internal agent review is a separate child",
+				"live return path",
 				// MUL-5850: the reads carry --compact, matching the brief and
 				// the router's bounded-reads rule.
 				"--roots-only --summary --compact --output json",

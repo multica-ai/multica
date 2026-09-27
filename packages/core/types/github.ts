@@ -61,9 +61,9 @@ export interface GitHubInstallation {
  * "auto" is any other automatic link, such as "Closes MUL-1" in the body. */
 export type PullRequestLinkSource = "manual" | "title" | "branch" | "auto";
 
-/** What "every linked PR merged → move the issue to the workspace's target
- * status" will do for one issue. The server computes it; the issue page only
- * renders it. Older backends may still send `no_close_intent`. */
+/** What "every linked PR merged with close intent → move the issue to the
+ * workspace's target status" will do for one issue. The server computes it;
+ * the issue page only renders it. */
 export type PRAutoCompleteState =
   | "none"
   | "workspace_disabled"
@@ -71,6 +71,7 @@ export type PRAutoCompleteState =
   | "terminal"
   | "triage"
   | "at_target"
+  | "no_close_intent"
   | "waiting"
   | "not_merged"
   | "all_merged";

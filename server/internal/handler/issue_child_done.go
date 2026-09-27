@@ -389,17 +389,17 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		}
 	} else {
 		hasCancelled := anyCancelledChildren(children, statuses.status)
+		decision := parentStatusDecisionInstruction(parentID)
 		if !hasCancelled {
-			// Keep the historical no-cancellation wording byte-identical.
 			if batch {
 				content = fmt.Sprintf(
-					"%sAll sub-issues are complete — they just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-					mentionPrefix, identifier, childID, title, parentID,
+					"%sAll sub-issues are complete — they just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\".%s",
+					mentionPrefix, identifier, childID, title, decision,
 				)
 			} else {
 				content = fmt.Sprintf(
-					"%sAll sub-issues are complete — the last one, [%s](mention://issue/%s) — \"%s\", just finished. Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-					mentionPrefix, identifier, childID, title, parentID,
+					"%sAll sub-issues are complete — the last one, [%s](mention://issue/%s) — \"%s\", just finished.%s",
+					mentionPrefix, identifier, childID, title, decision,
 				)
 			}
 		} else {
@@ -414,13 +414,13 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 					lastAction = "was just cancelled"
 				}
 				content = fmt.Sprintf(
-					"%sAll sub-issues are closed — the last one, [%s](mention://issue/%s) — \"%s\", %s.%s Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-					mentionPrefix, identifier, childID, title, lastAction, warning, parentID,
+					"%sAll sub-issues are closed — the last one, [%s](mention://issue/%s) — \"%s\", %s.%s%s",
+					mentionPrefix, identifier, childID, title, lastAction, warning, decision,
 				)
 			} else {
 				content = fmt.Sprintf(
-					"%sAll sub-issues are closed — they reached terminal states together in a batch update; most recently, [%s](mention://issue/%s) — \"%s\" — %s.%s Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-					mentionPrefix, identifier, childID, title, lastAction, warning, parentID,
+					"%sAll sub-issues are closed — they reached terminal states together in a batch update; most recently, [%s](mention://issue/%s) — \"%s\" — %s.%s%s",
+					mentionPrefix, identifier, childID, title, lastAction, warning, decision,
 				)
 			}
 		}
@@ -731,8 +731,9 @@ func stageAdvanceInstruction(nextStage int32, parentID string, stageCancelled in
 		if stageCancelled > 0 {
 			verb = "Closing"
 		}
-		instruction = fmt.Sprintf(" %s this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", verb, parentID)
+		instruction = fmt.Sprintf(" %s this stage does not mean the whole issue is done. Inspect the whole goal and decide whether another stage still needs to be created; if so, create that stage and its sub-issues now.", verb)
 	}
+	instruction += parentStatusDecisionInstruction(parentID)
 	if !scopeCancelled {
 		return instruction
 	}
@@ -746,6 +747,13 @@ func stageAdvanceInstruction(nextStage int32, parentID string, stageCancelled in
 		return instruction + fmt.Sprintf(" The stage that just closed has %s cancelled: confirm that the cancelled work is not something Stage %d depends on before advancing. If unsure, do not promote yet; post a comment to confirm first.", subIssueCount(stageCancelled), nextStage)
 	}
 	return instruction + fmt.Sprintf(" The stage that just closed has %s cancelled: confirm that the cancelled work is not a dependency of whatever comes next before advancing. If unsure, do not create the next stage yet; post a comment to confirm first.", subIssueCount(stageCancelled))
+}
+
+// parentStatusDecisionInstruction is the one completion contract shared by
+// staged and unstaged child-done callbacks. A closed barrier wakes the
+// coordinator; it does not imply either finality or a review route.
+func parentStatusDecisionInstruction(parentID string) string {
+	return fmt.Sprintf(" Inspect the whole parent goal and choose its truthful status: run `multica issue status %s done` when every acceptance criterion is evidenced and no required work remains; leave or move it to `in_progress` when implementation or an internal agent-review child remains; run `multica issue status %s blocked` and record the exact blocker when progress cannot continue; use `in_review` only after routing a named acceptance question to a named human or external provider reviewer with a live return path. Internal agent review belongs in a separate child, and that child becomes `done` when its bounded review is complete.", parentID, parentID)
 }
 
 func unstagedCancellationInstruction() string {
