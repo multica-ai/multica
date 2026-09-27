@@ -119,7 +119,10 @@ const squadParentStatusOwned = `6. **Own the parent issue status.** This issue i
    ` + "`" + `multica issue status <issue-id> in_review` + "`" + ` — this responsibility is
    itself the standing instruction that authorizes that change, so do it even
    when no comment asked you to. Leave ` + "`" + `done` + "`" + ` to a human reviewer or
-   existing integrations (for example a PR with close intent that merges).`
+   existing integrations (for example a PR with close intent that merges).
+   If your current parent turn closes the last open child in a stage, read
+   the stage progress and evaluate advancement or wrap-up in this turn; the
+   barrier comment is recorded without queuing another leader turn.`
 
 // squadParentStatusNotOwned is responsibility 6 for every other leader path:
 // an @squad mention on an issue owned by someone else (MUL-3724), and

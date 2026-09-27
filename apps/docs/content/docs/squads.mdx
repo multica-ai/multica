@@ -63,6 +63,8 @@ After the first dispatch, the leader is woken up automatically by **most subsequ
 
 Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
 
+If the squad's running leader turn on the parent closes the last open sub-issue of a stage, the server records the stage-barrier comment without queuing another leader run. The current turn evaluates stage advancement or wraps up the parent. Completions from other actors or from runs on child issues still wake the leader.
+
 <Callout type="info">
 **Why the leader doesn't trigger when a member posts an `@`-mention.** Once a squad member directly `@`s someone, that comment is a deliberate hand-off — having the leader wake up to "observe" the routing would just produce a no-op turn and clutter the timeline. Agent-authored comments are the exception: when an agent posts a result that `@`s another agent, the leader still wakes up so it can coordinate the thread.
 </Callout>
