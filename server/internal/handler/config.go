@@ -100,6 +100,13 @@ type AppConfig struct {
 	// which is continuously deployed so its users can't act on the version —
 	// and empty for dev builds that aren't stamped via -X main.version.
 	ServerVersion string `json:"server_version,omitempty"`
+
+	// TOTPSupported reports whether the server has MULTICA_USER_TOTP_KEY
+	// configured (the base64 32-byte secretbox key for at-rest TOTP secret
+	// encryption). When false, the frontend Security tab renders an
+	// "Unavailable" hint and the login form never offers the authenticator
+	// option; the backend rejects setup/login-totp with 503.
+	TOTPSupported bool `json:"totp_supported,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -131,6 +138,13 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	if !isOfficialCloudDeployment() {
 		config.ServerVersion = h.cfg.ServerVersion
 	}
+
+	// Reflect whether TOTPService actually initialized — not just env presence.
+	// If MULTICA_USER_TOTP_KEY is set but malformed (e.g. wrong length),
+	// NewTOTPService fails at boot, h.TOTPService stays nil, and every TOTP
+	// endpoint would return 503. Advertising support based on env alone
+	// would make the UI offer setup that always fails.
+	config.TOTPSupported = h.TOTPService != nil
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.

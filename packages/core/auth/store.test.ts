@@ -188,4 +188,24 @@ describe("authStore", () => {
     expect(store.getState().status).toBe("authenticated");
     expect(store.getState().expired).toBe(false);
   });
+
+  it("publishes an authenticated session after a TOTP login", async () => {
+    const storage = makeStorage();
+    const api = {
+      setToken: vi.fn(),
+      loginWithTOTP: vi.fn().mockResolvedValue({ token: "totp-token", user: fakeUser }),
+    } as unknown as ApiClient;
+    const store = createAuthStore({ api, storage });
+
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().sessionExpired();
+    expect(store.getState().status).toBe("unauthenticated");
+
+    await store.getState().verifyTOTPLogin("alice@example.com", "123456");
+
+    expect(store.getState().user).toEqual(fakeUser);
+    expect(store.getState().status).toBe("authenticated");
+    expect(store.getState().isLoading).toBe(false);
+    expect(store.getState().expired).toBe(false);
+  });
 });
