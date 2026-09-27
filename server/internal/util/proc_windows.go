@@ -8,12 +8,12 @@ import (
 )
 
 var (
-	kernel32                    = syscall.NewLazyDLL("kernel32.dll")
-	user32                      = syscall.NewLazyDLL("user32.dll")
-	procAllocConsole            = kernel32.NewProc("AllocConsole")
-	procGetConsoleWnd           = kernel32.NewProc("GetConsoleWindow")
-	procGetConsoleProcessList   = kernel32.NewProc("GetConsoleProcessList")
-	procShowWindow              = user32.NewProc("ShowWindow")
+	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	user32                    = syscall.NewLazyDLL("user32.dll")
+	procAllocConsole          = kernel32.NewProc("AllocConsole")
+	procGetConsoleWnd         = kernel32.NewProc("GetConsoleWindow")
+	procGetConsoleProcessList = kernel32.NewProc("GetConsoleProcessList")
+	procShowWindow            = user32.NewProc("ShowWindow")
 )
 
 const swHide = 0

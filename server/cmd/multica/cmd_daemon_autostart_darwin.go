@@ -13,6 +13,14 @@ import (
 
 func platformAutostartSupported() bool { return true }
 
+// platformAutostartRefreshAllowed is unconditional on macOS: launchd has no
+// cgroup-style cleanup that could punish a rewrite, and a file at our path
+// is only ever rewritten when it carries our marker.
+func platformAutostartRefreshAllowed(string) bool { return true }
+
+// platformDaemonUnderOwnSystemdUnit is always false outside Linux.
+func platformDaemonUnderOwnSystemdUnit(string) bool { return false }
+
 // launchAgentsDir is where launchd loads per-user login agents from. Files
 // dropped here are picked up at the next login without an explicit
 // `launchctl load`, which is what makes the plist the registration itself.
@@ -47,6 +55,14 @@ func platformWriteAutostart(profile string, spec autostartSpec) (autostartState,
 		return autostartState{}, false, err
 	}
 	previous, readErr := os.ReadFile(path)
+	// Second line of defense behind the shared guard: never overwrite a file
+	// at our path that lacks the Multica marker — it is the user's own agent.
+	if readErr == nil && !launchAgentManaged(previous) {
+		return autostartState{
+			Mechanism: autostartMechanismLaunchd,
+			Location:  path,
+		}, false, errAutostartUnmanaged
+	}
 	changed := readErr != nil || string(previous) != content
 	if changed {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -61,6 +77,7 @@ func platformWriteAutostart(profile string, spec autostartSpec) (autostartState,
 
 	return autostartState{
 		Enabled:   true,
+		Managed:   true,
 		Mechanism: autostartMechanismLaunchd,
 		Location:  path,
 		Command:   autostartCommandDisplay(spec),
@@ -113,6 +130,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 	}
 	return autostartState{
 		Enabled:   true,
+		Managed:   launchAgentManaged(content),
 		Mechanism: autostartMechanismLaunchd,
 		Location:  path,
 		Command:   launchAgentStoredCommand(content),

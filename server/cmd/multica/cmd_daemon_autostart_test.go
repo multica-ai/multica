@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -9,12 +10,10 @@ import (
 )
 
 // autostartCmdFor builds a command carrying the flags the autostart commands
-// read (profile, output) plus the opt-out flag `daemon start` consults.
+// read (profile, output).
 func autostartCmdFor(t *testing.T, profile, output string) *cobra.Command {
 	t.Helper()
-	cmd := daemonStatusCmdFor(t, profile, output)
-	cmd.Flags().Bool("no-autostart", false, "")
-	return cmd
+	return daemonStatusCmdFor(t, profile, output)
 }
 
 func TestAutostartArgs(t *testing.T) {
@@ -125,6 +124,10 @@ func TestLaunchAgentPlistContent(t *testing.T) {
 
 	content := launchAgentPlistContent(spec, label)
 	for _, want := range []string{
+		// Ownership marker: refresh and enable/disable refuse the file
+		// without it, so it has to be there in everything we write.
+		"<key>" + autostartPlistMarkerKey + "</key>",
+		"<string>" + autostartPlistMarkerValue + "</string>",
 		"<string>ai.multica.daemon.staging</string>",
 		"<key>RunAtLoad</key>",
 		"<key>ProgramArguments</key>",
@@ -144,6 +147,13 @@ func TestLaunchAgentPlistContent(t *testing.T) {
 	// logout) just stopped.
 	if strings.Contains(content, "KeepAlive") {
 		t.Errorf("plist must not set KeepAlive:\n%s", content)
+	}
+
+	if !launchAgentManaged([]byte(content)) {
+		t.Errorf("launchAgentManaged() = false for a plist we just wrote")
+	}
+	if launchAgentManaged([]byte(`<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>x</string></dict></plist>`)) {
+		t.Errorf("launchAgentManaged() = true for a plist without our marker")
 	}
 
 	// status must be able to read the argv back out of the written file.
@@ -177,10 +187,15 @@ func TestSystemdUnitContent(t *testing.T) {
 	content := systemdUnitContent(spec)
 
 	for _, want := range []string{
+		// Ownership marker on the first line.
+		autostartManagedComment,
 		"ExecStart=/usr/local/bin/multica daemon start --foreground --profile staging",
 		`Environment="PATH=/home/u/.local/bin:/usr/bin"`,
 		"Restart=on-failure",
 		"RestartSec=10",
+		// The binary-update handoff contract: runDaemonForeground exits with
+		// this status under our unit and systemd must restart the new binary.
+		"RestartForceExitStatus=" + strconv.Itoa(daemonSystemdHandoffExitStatus),
 		// Bounded retries: enough for a boot racing the network, few enough
 		// that a persistent failure stops instead of spinning.
 		"StartLimitIntervalSec=120",
@@ -191,6 +206,12 @@ func TestSystemdUnitContent(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("unit missing %q:\n%s", want, content)
 		}
+	}
+	if !autostartCommentMarked(content) {
+		t.Errorf("autostartCommentMarked() = false for a unit we just wrote")
+	}
+	if autostartCommentMarked("Description=Some user unit\nExecStart=/other\n") {
+		t.Errorf("autostartCommentMarked() = true for a foreign unit")
 	}
 
 	if got := systemdStoredCommand(content); !strings.HasPrefix(got, "/usr/local/bin/multica daemon start") {
@@ -227,6 +248,8 @@ func TestXdgAutostartContent(t *testing.T) {
 	content := xdgAutostartContent(spec)
 
 	for _, want := range []string{
+		"[Desktop Entry]",
+		autostartManagedComment,
 		"Type=Application",
 		// Autostart only — it must not show up as an application.
 		"NoDisplay=true",
@@ -236,6 +259,9 @@ func TestXdgAutostartContent(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("desktop entry missing %q:\n%s", want, content)
 		}
+	}
+	if !autostartCommentMarked(content) {
+		t.Errorf("autostartCommentMarked() = false for a .desktop we just wrote")
 	}
 
 	if got := xdgStoredCommand(content); !strings.HasPrefix(got, "env PATH=") {
@@ -253,10 +279,11 @@ func TestXdgAutostartContent(t *testing.T) {
 // stubAutostartPlatform replaces the platform seams for the duration of the
 // test so no registry / LaunchAgents / systemd state is touched.
 type stubAutostartPlatform struct {
-	supported bool
-	write     func(profile string, spec autostartSpec) (autostartState, bool, error)
-	remove    func(profile string) (autostartState, bool, error)
-	read      func(profile string) (autostartState, error)
+	supported      bool
+	refreshAllowed bool
+	write          func(profile string, spec autostartSpec) (autostartState, bool, error)
+	remove         func(profile string) (autostartState, bool, error)
+	read           func(profile string) (autostartState, error)
 }
 
 func stubPlatform(t *testing.T, s stubAutostartPlatform) {
@@ -265,119 +292,199 @@ func stubPlatform(t *testing.T, s stubAutostartPlatform) {
 	origWrite := writeAutostart
 	origRemove := removeAutostart
 	origRead := readAutostart
+	origRefreshAllowed := autostartRefreshAllowed
 	autostartSupported = func() bool { return s.supported }
-	writeAutostart = s.write
-	removeAutostart = s.remove
-	readAutostart = s.read
+	autostartRefreshAllowed = func(string) bool { return s.refreshAllowed }
+	if s.write != nil {
+		writeAutostart = s.write
+	}
+	if s.remove != nil {
+		removeAutostart = s.remove
+	}
+	if s.read != nil {
+		readAutostart = s.read
+	}
 	t.Cleanup(func() {
 		autostartSupported = origSupported
 		writeAutostart = origWrite
 		removeAutostart = origRemove
 		readAutostart = origRead
+		autostartRefreshAllowed = origRefreshAllowed
 	})
 }
 
-func TestShouldRegisterAutostart(t *testing.T) {
-	newCmd := func() *cobra.Command {
-		cmd := &cobra.Command{}
-		cmd.Flags().Bool("no-autostart", false, "")
-		return cmd
-	}
-
-	t.Run("registers by default", func(t *testing.T) {
+func TestShouldManageAutostart(t *testing.T) {
+	t.Run("plain human starts are managed", func(t *testing.T) {
 		t.Setenv("MULTICA_LAUNCHED_BY", "")
 		stubPlatform(t, stubAutostartPlatform{supported: true})
-		if !shouldRegisterAutostart(newCmd()) {
-			t.Fatal("shouldRegisterAutostart() = false, want true for a plain human start")
-		}
-	})
-
-	t.Run("--no-autostart skips", func(t *testing.T) {
-		t.Setenv("MULTICA_LAUNCHED_BY", "")
-		stubPlatform(t, stubAutostartPlatform{supported: true})
-		cmd := newCmd()
-		if err := cmd.Flags().Set("no-autostart", "true"); err != nil {
-			t.Fatalf("set flag: %v", err)
-		}
-		if shouldRegisterAutostart(cmd) {
-			t.Fatal("shouldRegisterAutostart() = true, want false under --no-autostart")
+		if !shouldManageAutostart() {
+			t.Fatal("shouldManageAutostart() = false, want true for a plain human start")
 		}
 	})
 
 	t.Run("manager-launched daemons are left to their manager", func(t *testing.T) {
 		t.Setenv("MULTICA_LAUNCHED_BY", "desktop")
 		stubPlatform(t, stubAutostartPlatform{supported: true})
-		if shouldRegisterAutostart(newCmd()) {
-			t.Fatal("shouldRegisterAutostart() = true, want false when a manager owns the daemon")
+		if shouldManageAutostart() {
+			t.Fatal("shouldManageAutostart() = true, want false when a manager owns the daemon")
 		}
 	})
 
 	t.Run("unsupported platform skips", func(t *testing.T) {
 		t.Setenv("MULTICA_LAUNCHED_BY", "")
 		stubPlatform(t, stubAutostartPlatform{supported: false})
-		if shouldRegisterAutostart(newCmd()) {
-			t.Fatal("shouldRegisterAutostart() = true, want false on an unsupported platform")
+		if shouldManageAutostart() {
+			t.Fatal("shouldManageAutostart() = true, want false on an unsupported platform")
 		}
 	})
 }
 
-func TestEnsureDaemonAutostartRegistersAndAnnounces(t *testing.T) {
-	var wrote []string
-	stubPlatform(t, stubAutostartPlatform{
-		supported: true,
-		write: func(profile string, spec autostartSpec) (autostartState, bool, error) {
-			wrote = append(wrote, profile+"|"+strings.Join(spec.Args, " "))
-			return autostartState{Enabled: true, Mechanism: autostartMechanismWindowsRun}, true, nil
-		},
+// TestSyncDaemonAutostart pins the opt-in contract of `daemon start`: it may
+// hint and it may heal an owned entry — it must never create one, and it
+// must never touch a foreign file or refresh under an external supervisor.
+func TestSyncDaemonAutostart(t *testing.T) {
+	t.Run("nothing registered prints the hint and writes nothing", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		writes := 0
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Mechanism: autostartMechanismWindowsRun}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				writes++
+				return autostartState{}, false, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("staging", true)
+		out := sc.read()
+		if writes != 0 {
+			t.Fatalf("writeAutostart calls = %d, want 0 — only 'enable' may create", writes)
+		}
+		if !strings.Contains(out, "multica daemon autostart enable") {
+			t.Errorf("stderr = %q, want the enable hint", out)
+		}
 	})
 
-	cmd := autostartCmdFor(t, "staging", "")
-	sc := captureStderr(t)
-	ensureDaemonAutostart(cmd, "staging", true)
-	out := sc.read()
+	t.Run("unregistered but unannounced stays silent", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{}, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("staging", false)
+		if out := sc.read(); out != "" {
+			t.Errorf("stderr = %q, want silence when announce is false", out)
+		}
+	})
 
-	if len(wrote) != 1 || wrote[0] != "staging|daemon start --foreground --profile staging" {
-		t.Fatalf("writeAutostart calls = %q, want one registration for the profile", wrote)
-	}
-	if !strings.Contains(out, "Boot autostart: enabled") {
-		t.Errorf("announce output = %q, want the boot-autostart line", out)
-	}
+	t.Run("owned entry is healed silently", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		var wroteArgs []string
+		stubPlatform(t, stubAutostartPlatform{
+			supported:      true,
+			refreshAllowed: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Enabled: true, Managed: true}, nil
+			},
+			write: func(_ string, spec autostartSpec) (autostartState, bool, error) {
+				wroteArgs = spec.Args
+				return autostartState{Enabled: true, Managed: true}, false, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("staging", true)
+		out := sc.read()
+		if strings.Join(wroteArgs, " ") != "daemon start --foreground --profile staging" {
+			t.Fatalf("refresh args = %q, want the profile's foreground command", wroteArgs)
+		}
+		if out != "" {
+			t.Errorf("stderr = %q, a healing refresh must stay silent", out)
+		}
+	})
 
-	// Silent mode (the foreground path under a supervisor) still registers.
-	wrote = nil
-	sc = captureStderr(t)
-	ensureDaemonAutostart(cmd, "staging", false)
-	out = sc.read()
-	if len(wrote) != 1 {
-		t.Fatalf("writeAutostart calls = %d, want 1 even when not announcing", len(wrote))
-	}
-	if out != "" {
-		t.Errorf("stderr = %q, want no announcement when announce is false", out)
-	}
+	t.Run("external supervisor blocks the refresh", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		writes := 0
+		stubPlatform(t, stubAutostartPlatform{
+			supported:      true,
+			refreshAllowed: false,
+			read: func(string) (autostartState, error) {
+				return autostartState{Enabled: true, Managed: true}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				writes++
+				return autostartState{}, false, nil
+			},
+		})
+		syncDaemonAutostart("staging", true)
+		if writes != 0 {
+			t.Fatalf("writeAutostart calls = %d, want 0 under an external supervisor", writes)
+		}
+	})
 
-	// The opt-out must prevent the registration itself, not just silence it.
-	wrote = nil
-	if err := cmd.Flags().Set("no-autostart", "true"); err != nil {
-		t.Fatalf("set flag: %v", err)
-	}
-	sc = captureStderr(t)
-	ensureDaemonAutostart(cmd, "staging", true)
-	out = sc.read()
-	if len(wrote) != 0 || out != "" {
-		t.Fatalf("under --no-autostart: writes=%d stderr=%q, want neither", len(wrote), out)
-	}
+	t.Run("foreign entry is never rewritten and gets no hint", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		writes := 0
+		stubPlatform(t, stubAutostartPlatform{
+			supported:      true,
+			refreshAllowed: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Enabled: true, Managed: false}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				writes++
+				return autostartState{}, false, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("staging", true)
+		out := sc.read()
+		if writes != 0 {
+			t.Fatalf("writeAutostart calls = %d, want 0 for a file Multica does not own", writes)
+		}
+		if out != "" {
+			t.Errorf("stderr = %q, want silence — it IS registered, just not ours", out)
+		}
+	})
+
+	t.Run("manager-launched daemons get nothing", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "desktop")
+		reads := 0
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				reads++
+				return autostartState{}, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("", true)
+		out := sc.read()
+		if reads != 0 || out != "" {
+			t.Fatalf("reads=%d stderr=%q, want no interaction at all", reads, out)
+		}
+	})
 }
 
 func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
-	t.Run("enable registers and reports", func(t *testing.T) {
+	t.Run("enable registers and reports the PATH-only caveat", func(t *testing.T) {
 		mkProfiles(t, "staging")
 		var gotProfile string
 		stubPlatform(t, stubAutostartPlatform{
 			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Mechanism: autostartMechanismLaunchd}, nil
+			},
 			write: func(profile string, spec autostartSpec) (autostartState, bool, error) {
 				gotProfile = profile
 				return autostartState{
 					Enabled:   true,
+					Managed:   true,
 					Mechanism: autostartMechanismLaunchd,
 					Location:  "/tmp/agent.plist",
 				}, true, nil
@@ -393,7 +500,12 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		if gotProfile != "staging" {
 			t.Errorf("registered profile = %q, want staging", gotProfile)
 		}
-		for _, want := range []string{"Boot autostart enabled", "staging", "launchd LaunchAgent", "/tmp/agent.plist"} {
+		for _, want := range []string{
+			"Boot autostart enabled", "staging", "launchd LaunchAgent", "/tmp/agent.plist",
+			// The review's requirement: spell out what does NOT survive into
+			// the login session, at the moment of registration.
+			"only PATH is carried",
+		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("enable output %q missing %q", out, want)
 			}
@@ -404,8 +516,11 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		mkProfiles(t)
 		stubPlatform(t, stubAutostartPlatform{
 			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Mechanism: autostartMechanismWindowsRun}, nil
+			},
 			write: func(string, autostartSpec) (autostartState, bool, error) {
-				return autostartState{Enabled: true, Mechanism: autostartMechanismWindowsRun}, false, nil
+				return autostartState{Enabled: true, Managed: true, Mechanism: autostartMechanismWindowsRun}, false, nil
 			},
 		})
 		sc := captureStderr(t)
@@ -416,6 +531,29 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		}
 		if !strings.Contains(out, "already enabled") {
 			t.Errorf("enable output = %q, want 'already enabled' when nothing changed", out)
+		}
+	})
+
+	t.Run("enable refuses to overwrite a file Multica does not own", func(t *testing.T) {
+		mkProfiles(t)
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{
+					Enabled:   true,
+					Managed:   false,
+					Mechanism: autostartMechanismSystemd,
+					Location:  "/home/u/.config/systemd/user/multica-daemon.service",
+				}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				t.Fatal("writeAutostart must not run for an unmanaged file")
+				return autostartState{}, false, nil
+			},
+		})
+		err := runDaemonAutostartEnable(autostartCmdFor(t, "", ""), nil)
+		if err == nil || !strings.Contains(err.Error(), "not created by Multica") {
+			t.Fatalf("runDaemonAutostartEnable = %v, want a refusal naming the foreign file", err)
 		}
 	})
 
@@ -439,6 +577,9 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		mkProfiles(t)
 		stubPlatform(t, stubAutostartPlatform{
 			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Enabled: true, Managed: true, Mechanism: autostartMechanismSystemd}, nil
+			},
 			remove: func(string) (autostartState, bool, error) {
 				return autostartState{Mechanism: autostartMechanismSystemd}, true, nil
 			},
@@ -454,10 +595,36 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		}
 	})
 
+	t.Run("disable refuses to remove a file Multica does not own", func(t *testing.T) {
+		mkProfiles(t)
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{
+					Enabled:   true,
+					Managed:   false,
+					Mechanism: autostartMechanismSystemd,
+					Location:  "/home/u/.config/systemd/user/multica-daemon.service",
+				}, nil
+			},
+			remove: func(string) (autostartState, bool, error) {
+				t.Fatal("removeAutostart must not run for an unmanaged file")
+				return autostartState{}, false, nil
+			},
+		})
+		err := runDaemonAutostartDisable(autostartCmdFor(t, "", ""), nil)
+		if err == nil || !strings.Contains(err.Error(), "not created by Multica") {
+			t.Fatalf("runDaemonAutostartDisable = %v, want a refusal naming the foreign file", err)
+		}
+	})
+
 	t.Run("disable of a never-enabled profile says so without failing", func(t *testing.T) {
 		mkProfiles(t)
 		stubPlatform(t, stubAutostartPlatform{
 			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Mechanism: autostartMechanismWindowsRun}, nil
+			},
 			remove: func(string) (autostartState, bool, error) {
 				return autostartState{Mechanism: autostartMechanismWindowsRun}, false, nil
 			},
@@ -479,6 +646,7 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 			read: func(string) (autostartState, error) {
 				return autostartState{
 					Enabled:   true,
+					Managed:   true,
 					Mechanism: autostartMechanismSystemd,
 					Location:  "/home/u/.config/systemd/user/multica-daemon-staging.service",
 					Command:   "/usr/local/bin/multica daemon start --foreground --profile staging",
@@ -506,6 +674,8 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 			supported: true,
 			read: func(string) (autostartState, error) {
 				return autostartState{
+					Enabled:   true,
+					Managed:   true,
 					Mechanism: autostartMechanismWindowsRun,
 					Location:  `HKCU\Run\Multica`,
 				}, nil
@@ -517,10 +687,34 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runDaemonAutostartStatus = %v", err)
 		}
-		for _, want := range []string{"Profile", "disabled", "Windows Run key", `HKCU\Run\Multica`} {
+		for _, want := range []string{"Profile", "enabled", "Windows Run key", `HKCU\Run\Multica`} {
 			if !strings.Contains(out, want) {
 				t.Errorf("status table = %q, want it to contain %q", out, want)
 			}
+		}
+	})
+
+	t.Run("status flags an entry Multica does not own", func(t *testing.T) {
+		mkProfiles(t)
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{
+					Enabled:   true,
+					Managed:   false,
+					Mechanism: autostartMechanismSystemd,
+					Location:  "/home/u/.config/systemd/user/multica-daemon.service",
+				}, nil
+			},
+		})
+		out, err := captureStdout(t, func() error {
+			return runDaemonAutostartStatus(daemonStatusCmdFor(t, "", ""), nil)
+		})
+		if err != nil {
+			t.Fatalf("runDaemonAutostartStatus = %v", err)
+		}
+		if !strings.Contains(out, "not created by Multica") {
+			t.Errorf("status = %q, want it to flag the unmanaged entry", out)
 		}
 	})
 }

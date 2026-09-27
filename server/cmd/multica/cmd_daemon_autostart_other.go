@@ -2,13 +2,17 @@
 
 package main
 
-// Boot autostart has no registration mechanism on this platform. The four
+// Boot autostart has no registration mechanism on this platform. These
 // functions exist so the package still builds (and `daemon start` still
-// works) on every GOOS the toolchain accepts; shouldRegisterAutostart skips
+// works) on every GOOS the toolchain accepts; shouldManageAutostart skips
 // silently there, while the explicit `daemon autostart` commands report that
 // there is nothing to do.
 
 func platformAutostartSupported() bool { return false }
+
+func platformAutostartRefreshAllowed(string) bool { return false }
+
+func platformDaemonUnderOwnSystemdUnit(string) bool { return false }
 
 func platformWriteAutostart(string, autostartSpec) (autostartState, bool, error) {
 	return autostartState{Mechanism: autostartMechanismUnsupported}, false, nil

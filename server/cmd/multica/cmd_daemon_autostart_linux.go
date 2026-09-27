@@ -14,6 +14,47 @@ import (
 
 func platformAutostartSupported() bool { return true }
 
+// procSelfCgroupPath is a variable so tests can point the ownership check at
+// a fixture instead of this process's real cgroup.
+var procSelfCgroupPath = "/proc/self/cgroup"
+
+// platformAutostartRefreshAllowed gates the silent heal on `daemon start`.
+// Outside systemd it is always fine. Under systemd, a daemon launched by an
+// external unit (a hand-written service with its own EnvironmentFile=, a
+// container manager that happens to run under systemd) must not let Multica
+// rewrite anything: only our own unit gets to refresh its own file.
+func platformAutostartRefreshAllowed(profile string) bool {
+	if os.Getenv("INVOCATION_ID") == "" {
+		return true
+	}
+	return runningUnderOwnSystemdUnit(profile)
+}
+
+// platformDaemonUnderOwnSystemdUnit reports whether THIS process was started
+// by the user unit Multica itself generates. Used by the foreground daemon's
+// binary-update handoff: under our unit it exits with
+// daemonSystemdHandoffExitStatus instead of spawning a successor, because
+// systemd's cgroup cleanup would kill a successor spawned before a clean
+// exit 0 (see runDaemonForeground).
+func platformDaemonUnderOwnSystemdUnit(profile string) bool {
+	if os.Getenv("INVOCATION_ID") == "" {
+		return false
+	}
+	return runningUnderOwnSystemdUnit(profile)
+}
+
+// runningUnderOwnSystemdUnit matches the unit name against this process's
+// cgroup path — systemd puts the unit name there for user services, so a
+// daemon started by the user's own differently-named unit (INVOCATION_ID set,
+// unit not ours) reads false and keeps the portable spawn handoff.
+func runningUnderOwnSystemdUnit(profile string) bool {
+	data, err := os.ReadFile(procSelfCgroupPath)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), systemdUnitName(profile))
+}
+
 // systemdAvailable reports whether registration should target a systemd user
 // unit. It is the preferred mechanism: it supervises restarts (bounded — see
 // systemdUnitContent) and is what headless servers actually have, since a
@@ -82,6 +123,15 @@ func writeSystemdAutostart(profile string, spec autostartSpec) (autostartState, 
 		return autostartState{}, false, err
 	}
 	previous, readErr := os.ReadFile(path)
+	// Second line of defense behind the shared guard: never overwrite a unit
+	// at our path that lacks the Multica marker — a user's hand-written unit
+	// (e.g. one with an EnvironmentFile=) lives at this exact name.
+	if readErr == nil && !autostartCommentMarked(string(previous)) {
+		return autostartState{
+			Mechanism: autostartMechanismSystemd,
+			Location:  path,
+		}, false, errAutostartUnmanaged
+	}
 	changed := readErr != nil || string(previous) != content
 	if changed {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -107,10 +157,11 @@ func writeSystemdAutostart(profile string, spec autostartSpec) (autostartState, 
 
 	return autostartState{
 		Enabled:   true,
+		Managed:   true,
 		Mechanism: autostartMechanismSystemd,
 		Location:  path,
 		Command:   autostartCommandDisplay(spec),
-		Note:      ensureLinger(),
+		Note:      lingerNote(),
 	}, changed, nil
 }
 
@@ -125,6 +176,12 @@ func writeXdgAutostart(profile string, spec autostartSpec) (autostartState, bool
 		return autostartState{}, false, err
 	}
 	previous, readErr := os.ReadFile(path)
+	if readErr == nil && !autostartCommentMarked(string(previous)) {
+		return autostartState{
+			Mechanism: autostartMechanismXDG,
+			Location:  path,
+		}, false, errAutostartUnmanaged
+	}
 	changed := readErr != nil || string(previous) != content
 	if changed {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -133,18 +190,21 @@ func writeXdgAutostart(profile string, spec autostartSpec) (autostartState, bool
 	}
 	return autostartState{
 		Enabled:   true,
+		Managed:   true,
 		Mechanism: autostartMechanismXDG,
 		Location:  path,
 		Command:   autostartCommandDisplay(spec),
 	}, changed, nil
 }
 
-// ensureLinger tries to make this user's manager start at boot (not first
-// login) — the difference between "boot autostart" and "login autostart" on a
-// server nobody logs into. Returns a user-facing note when it could not, and
-// never fails the registration: login-time start still works, the note just
-// says how to get boot-time.
-func ensureLinger() string {
+// lingerNote reports whether this user's manager starts at boot (linger) or
+// only at first login — the difference between boot autostart and login
+// autostart on a server nobody logs into. It only READS state: enabling
+// linger is a system-level change the review explicitly reserved for the
+// user to make, so the note hands them the exact command instead of running
+// it. Empty when already lingering, when loginctl is missing, or when the
+// query fails (we cannot claim either way).
+func lingerNote() string {
 	u, err := user.Current()
 	if err != nil {
 		return ""
@@ -156,11 +216,7 @@ func ensureLinger() string {
 	if strings.TrimSpace(string(out)) == "yes" {
 		return ""
 	}
-	if out, err := exec.Command("loginctl", "enable-linger", u.Username).CombinedOutput(); err != nil {
-		return "starts at login; to start at boot without logging in, run: loginctl enable-linger " + u.Username +
-			systemdOutputSuffix(out)
-	}
-	return ""
+	return "starts at login; to start at boot without logging in, run: loginctl enable-linger " + u.Username
 }
 
 // platformRemoveAutostart clears the registration from both mechanisms: a
@@ -236,6 +292,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 		case err == nil:
 			return autostartState{
 				Enabled:   systemdUnitLinked(path),
+				Managed:   autostartCommentMarked(string(content)),
 				Mechanism: autostartMechanismSystemd,
 				Location:  path,
 				Command:   systemdStoredCommand(string(content)),
@@ -263,6 +320,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 	}
 	return autostartState{
 		Enabled:   true,
+		Managed:   autostartCommentMarked(string(content)),
 		Mechanism: autostartMechanismXDG,
 		Location:  path,
 		Command:   xdgStoredCommand(string(content)),
@@ -283,6 +341,7 @@ func readXdgAutostart(profile string) (autostartState, error) {
 	}
 	return autostartState{
 		Enabled:   true,
+		Managed:   autostartCommentMarked(string(content)),
 		Mechanism: autostartMechanismXDG,
 		Location:  path,
 		Command:   xdgStoredCommand(string(content)),
@@ -311,10 +370,3 @@ func (e *autostartCommandFailure) Error() string {
 }
 
 func (e *autostartCommandFailure) Unwrap() error { return e.Err }
-
-func systemdOutputSuffix(out []byte) string {
-	if s := strings.TrimSpace(string(out)); s != "" {
-		return " (" + s + ")"
-	}
-	return ""
-}

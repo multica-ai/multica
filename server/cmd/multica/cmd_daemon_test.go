@@ -56,11 +56,11 @@ func TestDaemonLocalCommandsFailClosedInTaskContext(t *testing.T) {
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
 
 	cases := map[string]func() error{
-		"probe-runtimes":   func() error { return runDaemonProbeRuntimes(daemonProbeRuntimesCmd, nil) },
-		"start":            func() error { return runDaemonStart(daemonStartCmd, nil) },
-		"restart":          func() error { return runDaemonRestart(daemonRestartCmd, nil) },
-		"stop":             func() error { return runDaemonStop(daemonStopCmd, nil) },
-		"logs":             func() error { return runDaemonLogs(daemonLogsCmd, nil) },
+		"probe-runtimes":    func() error { return runDaemonProbeRuntimes(daemonProbeRuntimesCmd, nil) },
+		"start":             func() error { return runDaemonStart(daemonStartCmd, nil) },
+		"restart":           func() error { return runDaemonRestart(daemonRestartCmd, nil) },
+		"stop":              func() error { return runDaemonStop(daemonStopCmd, nil) },
+		"logs":              func() error { return runDaemonLogs(daemonLogsCmd, nil) },
 		"autostart enable":  func() error { return runDaemonAutostartEnable(daemonAutostartEnableCmd, nil) },
 		"autostart disable": func() error { return runDaemonAutostartDisable(daemonAutostartDisableCmd, nil) },
 		"autostart status":  func() error { return runDaemonAutostartStatus(daemonAutostartStatusCmd, nil) },
@@ -261,13 +261,13 @@ func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 
-	// A start that cannot succeed must not leave boot autostart behind: a
-	// registration for a daemon that dies at every login only seeds a
-	// boot-time failure. The seam keeps that assertion off the real registry.
-	origEnsure := ensureDaemonAutostart
+	// A start that cannot succeed must not reach the autostart hook at all:
+	// there is nothing to hint about or refresh when the start dies on auth.
+	// The seam keeps the assertion off the real registry / LaunchAgents.
+	origSync := syncDaemonAutostart
 	autostartCalls := 0
-	ensureDaemonAutostart = func(*cobra.Command, string, bool) { autostartCalls++ }
-	t.Cleanup(func() { ensureDaemonAutostart = origEnsure })
+	syncDaemonAutostart = func(string, bool) { autostartCalls++ }
+	t.Cleanup(func() { syncDaemonAutostart = origSync })
 
 	cmd := &cobra.Command{Use: "start"}
 	cmd.Flags().Bool("foreground", false, "")
@@ -290,7 +290,7 @@ func TestDaemonStartBackgroundUnauthenticatedFailsFast(t *testing.T) {
 		t.Fatalf("runDaemonStart took %s, want fail-fast before the readiness wait", elapsed)
 	}
 	if autostartCalls != 0 {
-		t.Fatalf("ensureDaemonAutostart called %d times before login, want 0", autostartCalls)
+		t.Fatalf("syncDaemonAutostart called %d times before login, want 0", autostartCalls)
 	}
 }
 
@@ -455,14 +455,15 @@ func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
 	daemonExecutable = func() (string, error) { return falseBin, nil }
 	t.Cleanup(func() { daemonExecutable = orig })
 
-	// Authenticated starts register boot autostart (seammed so this test
-	// never writes the machine's real Run key / LaunchAgents / user units).
-	origEnsure := ensureDaemonAutostart
-	ensured := make([]string, 0, 1)
-	ensureDaemonAutostart = func(_ *cobra.Command, profile string, _ bool) {
-		ensured = append(ensured, profile)
+	// An authenticated start reaches the autostart hook (hint / owned-entry
+	// refresh) — seammed so this test never touches the machine's real Run
+	// key / LaunchAgents / user units.
+	origSync := syncDaemonAutostart
+	synced := make([]string, 0, 1)
+	syncDaemonAutostart = func(profile string, _ bool) {
+		synced = append(synced, profile)
 	}
-	t.Cleanup(func() { ensureDaemonAutostart = origEnsure })
+	t.Cleanup(func() { syncDaemonAutostart = origSync })
 
 	const profile = "child-exit-test"
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake"}, profile); err != nil {
@@ -487,8 +488,8 @@ func TestDaemonStartBackgroundReportsEarlyChildExit(t *testing.T) {
 	if elapsed > 15*time.Second {
 		t.Fatalf("runDaemonStart took %s, want early-exit detection well before the 45s readiness window", elapsed)
 	}
-	if len(ensured) != 1 || ensured[0] != profile {
-		t.Fatalf("ensureDaemonAutostart calls = %q, want exactly one for profile %q", ensured, profile)
+	if len(synced) != 1 || synced[0] != profile {
+		t.Fatalf("syncDaemonAutostart calls = %q, want exactly one for profile %q", synced, profile)
 	}
 }
 

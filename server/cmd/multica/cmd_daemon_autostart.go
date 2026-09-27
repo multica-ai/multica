@@ -1,30 +1,34 @@
 package main
 
-// Boot autostart for the local agent runtime daemon.
+// Boot autostart for the local agent runtime daemon — strictly opt-in.
 //
-// `multica daemon start` registers the profile's daemon with the OS so the
-// machine brings it back after a reboot / re-login — without that, every
-// reboot silently takes the runtime offline and queued runs sit unclaimed
-// until someone notices. Each platform registers a start-at-login entry that
-// re-invokes `multica daemon start --foreground` for the same profile:
+// A login entry re-invokes the profile's daemon so the machine brings it back
+// after a reboot / re-login. Registration is created ONLY by an explicit
+// `multica daemon autostart enable`:
 //
-//	Windows   HKCU\...\Run value           (per-user, no elevation)
-//	macOS     ~/Library/LaunchAgents plist (per-user, runs at login)
+//	Windows   HKCU\...\Run value            (per-user, no elevation)
+//	macOS     ~/Library/LaunchAgents plist  (per-user, runs at login)
 //	Linux     systemd user unit, or an XDG autostart .desktop fallback
 //	          when no systemd user session is available
 //
-// Registration is a side effect of `daemon start` (skip with
-// --no-autostart) and is managed explicitly through
-// `multica daemon autostart enable|disable|status`. Daemons spawned by a
-// manager — the Desktop app, which has its own start-at-login preference —
-// are never registered: the manager owns that daemon's lifecycle.
+// `daemon start` never registers. It prints a one-line hint when nothing is
+// registered, and may silently REFRESH an existing Multica-owned entry to
+// heal a moved executable path — "owned" means carrying our marker (a
+// comment line in a unit/.desktop, a ManagedBy key in a plist; the Run value
+// name itself), so a hand-written file at the same path is never rewritten.
+// Refresh is also skipped under an external supervisor (a user's own unit,
+// a container) that we do not own. Daemons spawned by a manager
+// (MULTICA_LAUNCHED_BY, e.g. the Desktop app's own app-launch toggle) are
+// never touched: the manager owns that daemon's lifecycle.
 //
 // The registered command runs the FOREGROUND daemon on purpose: launchd,
 // systemd, and a login session all supervise one long-lived process, whereas
 // the background launcher would spawn a child and sit polling for up to 45s.
 
 import (
+	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -37,6 +41,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+// errAutostartUnmanaged is the platform writers' backstop refusal: a file at
+// a path Multica owns that lacks the ownership marker. The shared enable/
+// sync flows check Managed before writing, so hitting this means a race or a
+// caller that skipped the guard — either way the safe answer is to not touch
+// the user's file.
+var errAutostartUnmanaged = errors.New("the existing file was not created by Multica; refusing to overwrite it")
+
 // Mechanism keys reported by status (`--output json`). Each maps to a human
 // label through mechanismLabel for table output.
 const (
@@ -47,22 +58,50 @@ const (
 	autostartMechanismUnsupported = "unsupported"
 )
 
+// Ownership markers. A file at our path that does NOT carry the platform's
+// marker was written by the user (their own systemd unit with an
+// EnvironmentFile=, a hand-crafted LaunchAgent, ...): refresh skips it and
+// enable/disable refuse to touch it rather than silently overwriting.
+//
+// The Windows Run value has no comment channel, but its value name
+// ("Multica" / "Multica (<profile>)") is ours alone, so name presence IS the
+// marker there.
+const (
+	// autostartManagedComment prefixes the first line of every unit and
+	// .desktop file Multica writes.
+	autostartManagedComment = "# Managed by Multica (multica daemon autostart); remove with 'multica daemon autostart disable'"
+	// autostartPlistMarkerKey/Value are a key/value pair Multica writes into
+	// every LaunchAgent; launchd ignores unknown plist keys.
+	autostartPlistMarkerKey   = "ManagedBy"
+	autostartPlistMarkerValue = "multica-daemon-autostart"
+)
+
+// daemonSystemdHandoffExitStatus is what the foreground daemon exits with
+// when it hands a binary-update restart over to OUR OWN systemd unit
+// instead of spawning a successor (see runDaemonForeground). The generated
+// unit carries RestartForceExitStatus=<this> so systemd restarts the new
+// binary; spawning + exit 0 under Type=simple would let cgroup cleanup kill
+// the successor and leave the runtime offline. The two sites MUST agree —
+// systemdUnitContent renders this constant into the unit.
+const daemonSystemdHandoffExitStatus = 42
+
 // autostartState is the platform-agnostic view of one profile's boot
 // autostart entry: whether it is registered, under which mechanism, where the
-// registration lives, and what command it launches.
+// registration lives, what command it launches, and whether Multica itself
+// created it (Managed).
 //
 // Location is populated even while disabled — it names the file / registry
 // value `enable` would write, so `status` answers "where would this go?"
 // before the user commits to anything.
 type autostartState struct {
 	Enabled   bool   `json:"enabled"`
+	Managed   bool   `json:"managed,omitempty"`
 	Mechanism string `json:"mechanism"`
 	Location  string `json:"location,omitempty"`
 	Command   string `json:"command,omitempty"`
-	// Note carries an optional platform follow-up the user should act on
-	// (currently: systemd machines that cannot start the user manager at
-	// boot without linger). Kept in the state rather than printed inside
-	// the platform writer so both `enable` and `daemon start` render it.
+	// Note carries an optional platform follow-up the user should act on:
+	// the linger hint on systemd machines, or the warning that an entry at
+	// our path was not created by Multica.
 	Note string `json:"note,omitempty"`
 }
 
@@ -72,30 +111,34 @@ type autostartState struct {
 // PathEnv matters on macOS and Linux, where launchd / the systemd user
 // manager start daemons with a minimal PATH that would miss agent CLIs
 // installed through Homebrew, nvm, or a user-level bin directory. Windows
-// needs no capture: a Run-key entry inherits the user's registry environment,
-// which is what a fresh login would get anyway. The snapshot refreshes on
-// every `daemon start`, so it tracks the shell the user actually runs from.
+// needs no capture: a Run-key entry inherits the user's registry environment.
+// The snapshot refreshes whenever an entry is written, so it tracks the shell
+// the user actually runs from — and it is the ONLY environment that survives
+// into the login session; `enable` says so explicitly.
 type autostartSpec struct {
 	Exe     string
 	Args    []string
 	PathEnv string
 }
 
-// Platform seams. Each build defines the four platform* functions; they are
-// variables so tests can exercise the enable/disable/status flows without
-// touching the developer's real registry, LaunchAgents, or systemd user
-// directory.
+// Platform seams. Each build defines the platform* functions; they are
+// variables so tests can exercise the enable/disable/status/sync flows
+// without touching the developer's real registry, LaunchAgents, or systemd
+// user directory.
 var (
-	autostartSupported = platformAutostartSupported
-	writeAutostart     = platformWriteAutostart
-	removeAutostart    = platformRemoveAutostart
-	readAutostart      = platformReadAutostart
+	autostartSupported        = platformAutostartSupported
+	writeAutostart            = platformWriteAutostart
+	removeAutostart           = platformRemoveAutostart
+	readAutostart             = platformReadAutostart
+	autostartRefreshAllowed   = platformAutostartRefreshAllowed
+	daemonUnderOwnSystemdUnit = platformDaemonUnderOwnSystemdUnit
 )
 
-// ensureDaemonAutostart is the `daemon start` hook, behind a seam for the
-// same reason: the lifecycle paths under test must not write autostart state
-// onto the machine running the tests.
-var ensureDaemonAutostart = ensureDaemonAutostartDefault
+// syncDaemonAutostart is the `daemon start` hook: hint when nothing is
+// registered, silently heal an entry we own, do nothing otherwise. Behind a
+// seam so the lifecycle paths under test never write (or read) autostart
+// state on the machine running the tests.
+var syncDaemonAutostart = syncDaemonAutostartDefault
 
 // ---------------------------------------------------------------------------
 // command wiring
@@ -105,11 +148,12 @@ var daemonAutostartCmd = &cobra.Command{
 	Use:   "autostart",
 	Short: "Manage boot autostart for this profile's daemon",
 	Long: "Manage whether this profile's daemon starts automatically at login/boot.\n\n" +
-		"'multica daemon start' registers autostart by default (skip with --no-autostart). " +
-		"The OS entry re-runs 'multica daemon start --foreground' for this profile: a Run key " +
-		"on Windows, a launchd LaunchAgent on macOS, a systemd user unit — or an XDG autostart " +
-		"entry when systemd is unavailable — on Linux. 'daemon stop' stops the daemon for now " +
-		"and does not remove the registration.",
+		"Registration is opt-in: only 'multica daemon autostart enable' creates it. The OS entry " +
+		"re-runs 'multica daemon start --foreground' for this profile — a Run key on Windows, a " +
+		"launchd LaunchAgent on macOS, a systemd user unit (or an XDG autostart entry when systemd " +
+		"is unavailable) on Linux. 'multica daemon start' never registers on its own; it only hints " +
+		"and refreshes an existing Multica-created entry. 'daemon stop' stops the daemon for now and " +
+		"does not remove the registration.",
 }
 
 var daemonAutostartEnableCmd = &cobra.Command{
@@ -150,6 +194,25 @@ func requireAutostartSupported() error {
 	return fmt.Errorf("boot autostart is not supported on %s", runtime.GOOS)
 }
 
+// refuseUnmanagedAutostart is the shared guard for enable and disable: an
+// entry at our path that lacks our marker was written by the user (their own
+// unit with an EnvironmentFile=, a hand-written LaunchAgent, ...). Overwriting
+// or deleting it would silently destroy their configuration, so both commands
+// stop and say which file is in the way instead.
+func refuseUnmanagedAutostart(profile string, action string) error {
+	cur, err := readAutostart(profile)
+	if err != nil {
+		return err
+	}
+	if cur.Enabled && !cur.Managed {
+		return fmt.Errorf(
+			"%s exists at %s but was not created by Multica; refusing to %s it.\n"+
+				"Remove that file yourself if you want Multica to manage autostart, then rerun the command",
+			mechanismLabel(cur.Mechanism), cur.Location, action)
+	}
+	return nil
+}
+
 func runDaemonAutostartEnable(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon autostart enable"); err != nil {
 		return err
@@ -159,6 +222,9 @@ func runDaemonAutostartEnable(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if err := requireAutostartSupported(); err != nil {
+		return err
+	}
+	if err := refuseUnmanagedAutostart(profile, "overwrite"); err != nil {
 		return err
 	}
 	spec, err := autostartSpecFor(profile)
@@ -179,6 +245,12 @@ func runDaemonAutostartEnable(cmd *cobra.Command, _ []string) error {
 	if state.Location != "" {
 		fmt.Fprintf(os.Stderr, "Location: %s\n", state.Location)
 	}
+	// The login session only inherits what the entry itself carries. Spell
+	// out the consequence — and where the rest has to live — at the moment
+	// of registration, not as a surprise after a reboot.
+	fmt.Fprintln(os.Stderr, "Note: only PATH is carried into the login session; shell-exported variables "+
+		"(API keys, HTTPS_PROXY, ...) are not. Persist daemon settings with 'multica config set' and put "+
+		"other variables in your user environment.")
 	if state.Note != "" {
 		fmt.Fprintf(os.Stderr, "Note: %s\n", state.Note)
 	}
@@ -192,10 +264,11 @@ func runDaemonAutostartDisable(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
 	// Deliberately no requireKnownProfile here: removal has to keep working
 	// after the profile's state directory is gone — cleaning up a stale
-	// registration is exactly when the profile may no longer exist. A typo
-	// still reports honestly ("not enabled") instead of silently no-opping
-	// behind a validation error.
+	// registration is exactly when the profile may no longer exist.
 	if err := requireAutostartSupported(); err != nil {
+		return err
+	}
+	if err := refuseUnmanagedAutostart(profile, "remove"); err != nil {
 		return err
 	}
 	_, changed, err := removeAutostart(profile)
@@ -229,6 +302,12 @@ func runDaemonAutostartStatus(cmd *cobra.Command, _ []string) error {
 	state, err := readAutostart(profile)
 	if err != nil {
 		return err
+	}
+	// An entry at our path without our marker is still "enabled" (the OS
+	// will run it), but it is not ours: say so before the user assumes
+	// `enable`/`disable`/refresh will act on it.
+	if state.Enabled && !state.Managed && state.Note == "" {
+		state.Note = "not created by Multica; enable, disable and daemon start leave it alone"
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -295,53 +374,56 @@ func mechanismLabel(key string) string {
 // the `daemon start` hook
 // ---------------------------------------------------------------------------
 
-// shouldRegisterAutostart decides whether an implicit registration (from
-// `daemon start`) applies to this invocation:
+// shouldManageAutostart decides whether the hint/refresh side of
+// `daemon start` applies to this invocation:
 //
-//   - --no-autostart is an explicit opt-out for this run.
 //   - MULTICA_LAUNCHED_BY names a manager (the Desktop app) that spawned the
-//     daemon and owns its lifecycle — including its own start-at-login
-//     preference — so registering underneath it would fight that setting.
+//     daemon and owns its lifecycle — including its own app-start toggle for
+//     the daemon — so hinting or refreshing underneath it would fight that
+//     setting.
 //   - unsupported platforms skip silently; see requireAutostartSupported.
-func shouldRegisterAutostart(cmd *cobra.Command) bool {
+func shouldManageAutostart() bool {
 	if !autostartSupported() {
-		return false
-	}
-	if v, _ := cmd.Flags().GetBool("no-autostart"); v {
 		return false
 	}
 	return os.Getenv("MULTICA_LAUNCHED_BY") == ""
 }
 
-// ensureDaemonAutostartDefault refreshes the profile's registration so every
-// successful `daemon start` leaves the machine configured to bring the daemon
-// back at login. Rewriting is idempotent: a registration that already matches
-// is left untouched, which is also what heals a stale executable path after
-// the binary moved (a Homebrew upgrade, a self-update).
+// syncDaemonAutostartDefault implements the `daemon start` contract:
 //
-// Failures warn instead of failing the start — the daemon itself is the
-// deliverable of `daemon start`; autostart is the persistence layer on top.
-func ensureDaemonAutostartDefault(cmd *cobra.Command, profile string, announce bool) {
-	if !shouldRegisterAutostart(cmd) {
+//   - nothing registered → print a one-line hint (only where a human can see
+//     it) pointing at `multica daemon autostart enable`;
+//   - a Multica-owned entry exists → silently rewrite it so a moved
+//     executable (Homebrew upgrade, self-update) or a refreshed PATH heals;
+//   - an entry exists but is not ours, or we are under an external
+//     supervisor → leave it completely alone.
+//
+// It never creates a registration and never fails the start: the daemon
+// itself is the deliverable of `daemon start`.
+func syncDaemonAutostartDefault(profile string, announce bool) {
+	if !shouldManageAutostart() {
 		return
 	}
-	spec, err := autostartSpecFor(profile)
+	state, err := readAutostart(profile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not register boot autostart: %v\n", err)
 		return
 	}
-	state, _, err := writeAutostart(profile, spec)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not register boot autostart: %v\n", err)
+	if state.Enabled {
+		if !state.Managed || !autostartRefreshAllowed(profile) {
+			return
+		}
+		spec, err := autostartSpecFor(profile)
+		if err != nil {
+			return
+		}
+		// Best-effort and silent: a failed heal leaves a stale path for the
+		// next explicit `enable` to fix, and a warning on every start would
+		// be noise the user cannot act on anyway.
+		_, _, _ = writeAutostart(profile, spec)
 		return
 	}
-	if !announce {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "Boot autostart: enabled (%s) — this profile's daemon starts at login. Manage: multica daemon autostart status\n",
-		mechanismLabel(state.Mechanism))
-	if state.Note != "" {
-		fmt.Fprintf(os.Stderr, "Note: %s\n", state.Note)
+	if announce {
+		fmt.Fprintln(os.Stderr, "Tip: run 'multica daemon autostart enable' to start this daemon at login")
 	}
 }
 
@@ -432,7 +514,8 @@ func windowsQuoteArg(s string) string {
 }
 
 // windowsRunValueName is the HKCU Run value this profile owns. Distinct per
-// profile so several daemons on one machine never overwrite each other.
+// profile so several daemons on one machine never overwrite each other, and
+// the name doubles as the ownership marker (see autostartManagedComment).
 func windowsRunValueName(profile string) string {
 	if profile == "" {
 		return "Multica"
@@ -469,6 +552,9 @@ func launchAgentPlistContent(spec autostartSpec, label string) string {
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	b.WriteString("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n")
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
+	// Ownership marker first: launchd ignores unknown keys, refresh and
+	// enable/disable key off this pair before touching the file.
+	writePlistEntry(&b, autostartPlistMarkerKey, autostartPlistMarkerValue)
 	writePlistEntry(&b, "Label", label)
 	b.WriteString("\t<key>ProgramArguments</key>\n\t<array>\n")
 	for _, arg := range append([]string{spec.Exe}, spec.Args...) {
@@ -512,7 +598,7 @@ func autostartCommandDisplay(spec autostartSpec) string {
 
 // launchAgentStoredCommand extracts ProgramArguments from a written plist so
 // status reports the registered command as stored — including an executable
-// path a later `daemon start` has not refreshed yet — rather than a freshly
+// path a later refresh has not rewritten yet — rather than a freshly
 // resolved guess. The plist's only <array> is ProgramArguments.
 func launchAgentStoredCommand(content []byte) string {
 	var doc struct {
@@ -526,6 +612,46 @@ func launchAgentStoredCommand(content []byte) string {
 		return ""
 	}
 	return strings.Join(doc.Dict.Arrays[0].Strings, " ")
+}
+
+// launchAgentManaged reports whether a plist at our path carries the
+// Multica ownership marker.
+func launchAgentManaged(content []byte) bool {
+	dec := xml.NewDecoder(bytes.NewReader(content))
+	lastKey := ""
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			var v string
+			switch t.Name.Local {
+			case "key":
+				lastKey = ""
+				if err := dec.DecodeElement(&v, &t); err == nil {
+					lastKey = v
+				}
+			case "string":
+				if err := dec.DecodeElement(&v, &t); err == nil &&
+					lastKey == autostartPlistMarkerKey && v == autostartPlistMarkerValue {
+					return true
+				}
+			}
+		}
+	}
+}
+
+// autostartCommentMarked reports whether a unit / .desktop file body carries
+// the Multica ownership comment on any line.
+func autostartCommentMarked(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, autostartManagedComment) {
+			return true
+		}
+	}
+	return false
 }
 
 // systemdStoredCommand extracts the ExecStart line from a written unit.
@@ -580,6 +706,12 @@ func systemdExecArg(s string) string {
 // failure (a manual daemon already holding the health port, a missing login)
 // stops after StartLimitBurst attempts instead of spinning forever.
 // `multica daemon stop` exits 0, so the restart policy never undoes it.
+//
+// RestartForceExitStatus pairs with daemonSystemdHandoffExitStatus: a
+// binary-update restart under this unit exits with that status instead of
+// spawning a successor and exiting 0 (which would let systemd's cgroup
+// cleanup kill the successor), and this directive makes systemd restart the
+// new binary — even if a user edited Restart= away from on-failure.
 func systemdUnitContent(spec autostartSpec) string {
 	exec := make([]string, 0, len(spec.Args)+1)
 	exec = append(exec, systemdExecArg(spec.Exe))
@@ -588,6 +720,7 @@ func systemdUnitContent(spec autostartSpec) string {
 	}
 
 	var b strings.Builder
+	b.WriteString(autostartManagedComment + "\n")
 	b.WriteString("[Unit]\n")
 	b.WriteString("Description=Multica agent runtime daemon\n")
 	b.WriteString("StartLimitIntervalSec=120\n")
@@ -600,6 +733,7 @@ func systemdUnitContent(spec autostartSpec) string {
 	}
 	b.WriteString("Restart=on-failure\n")
 	b.WriteString("RestartSec=10\n")
+	b.WriteString(fmt.Sprintf("RestartForceExitStatus=%d\n", daemonSystemdHandoffExitStatus))
 	b.WriteString("\n[Install]\n")
 	b.WriteString("WantedBy=default.target\n")
 	return b.String()
@@ -657,6 +791,7 @@ func xdgAutostartContent(spec autostartSpec) string {
 
 	var b strings.Builder
 	b.WriteString("[Desktop Entry]\n")
+	b.WriteString(autostartManagedComment + "\n")
 	b.WriteString("Type=Application\n")
 	b.WriteString("Version=1.0\n")
 	b.WriteString("Name=Multica daemon\n")

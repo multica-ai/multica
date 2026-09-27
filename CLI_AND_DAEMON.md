@@ -171,9 +171,11 @@ CLI's lifecycle.
 
 ### Boot autostart
 
-`multica daemon start` registers the profile's daemon with the OS so the
-machine brings it back after a reboot or re-login — without that, every reboot
-takes the runtime offline and queued runs sit unclaimed. What gets registered:
+Opt-in: only `multica daemon autostart enable` registers the profile's
+daemon with the OS, so the machine brings it back after a reboot or re-login
+— without that, every reboot takes the runtime offline and queued runs sit
+unclaimed. `daemon start` never registers on its own: it prints a one-line
+hint when nothing is registered, and otherwise stays out of the way.
 
 | Platform | Mechanism | Where |
 | --- | --- | --- |
@@ -184,26 +186,35 @@ takes the runtime offline and queued runs sit unclaimed. What gets registered:
 Each entry runs `multica daemon start --foreground` for that profile — named
 profiles get their own entry, so several daemons on one machine never collide.
 Daemon settings are read from the profile's config (`multica config set ...`)
-at start; shell environment variables do not travel into a login session,
-except `PATH`, which registration snapshots from the shell you start from and
-refreshes on every `daemon start` (that is what keeps agent CLIs installed via
-Homebrew, nvm, or a user bin directory discoverable). On Linux, enabling also
-tries `loginctl enable-linger $USER` so a headless machine starts the unit at
-boot rather than at first login; if the policy refuses, the note in
-`multica daemon autostart status` spells out the command to run.
+at start. Shell environment variables do **not** travel into a login session:
+only `PATH` is snapshotted at registration (and refreshed while Multica owns
+the entry), which is what keeps agent CLIs installed via Homebrew, nvm, or a
+user bin directory discoverable — persist everything else with
+`multica config set` or your user environment. On Linux, `enable` also tells
+you (it does not run it for you) how to `loginctl enable-linger $USER` so a
+headless machine starts the unit at boot rather than at first login.
 
 ```bash
-multica daemon start --no-autostart     # start now, leave autostart untouched
+multica daemon autostart enable         # the only thing that registers
 multica daemon autostart status         # what is registered, and where
 multica daemon autostart status --output json
-multica daemon autostart enable         # register without starting the daemon
 multica daemon autostart disable        # remove the registration
 ```
 
+Refresh: while an entry exists and carries Multica's ownership marker,
+`daemon start` silently rewrites it so a moved executable (a Homebrew
+upgrade, a self-update) heals. An entry at the same path that Multica did
+not create — your own systemd unit, a hand-written LaunchAgent — is never
+refreshed and never overwritten: `enable`/`disable` refuse it and say which
+file is in the way, and the refresh is additionally skipped when the daemon
+was launched by an external supervisor (systemd `INVOCATION_ID` for a unit
+that is not ours).
+
 `daemon stop` stops the daemon but keeps the registration — it says nothing
 about the next boot; `autostart disable` is what turns that off. Daemons
-started by the Multica Desktop app are never registered here: the app owns
-that daemon's lifecycle and has its own start-at-login preference.
+started by the Multica Desktop app are never registered or refreshed here:
+the app owns that daemon's lifecycle through its own app-start daemon
+preference.
 
 ### Stop
 

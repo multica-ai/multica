@@ -37,8 +37,8 @@ var daemonStartCmd = &cobra.Command{
 	Short: "Start the local agent runtime daemon",
 	Long: "Start the daemon process that polls for runs and executes them using local agent CLIs (Claude, Codex).\n" +
 		"Runs in the background by default. Use --foreground to run in the current terminal.\n" +
-		"Registers this profile's daemon to start again at login/boot unless --no-autostart is passed " +
-		"(manage with 'multica daemon autostart').",
+		"Boot autostart is opt-in: when this profile's daemon has none, a hint points at " +
+		"'multica daemon autostart enable'; an existing Multica-created entry is refreshed in place.",
 	RunE: runDaemonStart,
 }
 
@@ -111,7 +111,6 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
-	f.Bool("no-autostart", false, "Skip registering this profile's daemon to start at login/boot")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -135,7 +134,6 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
-	rf.Bool("no-autostart", false, "Skip registering this profile's daemon to start at login/boot")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
@@ -573,12 +571,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
 			return err
 		}
-		// The daemon this invocation asked for is already up. Still record
-		// the boot-autostart intent: `daemon start` means "this machine
-		// should keep this daemon across reboots", and making registration
-		// depend on whether a start was needed would leave exactly the
-		// long-lived daemons that matter unregistered.
-		ensureDaemonAutostart(cmd, profile, true)
+		// Even a no-op start keeps the autostart contract: hint when nothing
+		// is registered, silently refresh an entry Multica owns.
+		syncDaemonAutostart(profile, true)
 		label := "daemon"
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
@@ -591,11 +586,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return err
 	}
 
-	// The start can now actually succeed, so the machine gets configured to
-	// bring the daemon back at login. Before this point (no stored token,
-	// port held by another profile) nothing would run at boot either, and
-	// leaving a registration behind would only seed a boot-time failure.
-	ensureDaemonAutostart(cmd, profile, true)
+	// Hint about boot autostart / refresh an owned entry. Never creates a
+	// registration — only 'multica daemon autostart enable' does that.
+	syncDaemonAutostart(profile, true)
 
 	// Resolve current executable so the foreground child reuses this binary.
 	exePath, err := daemonExecutable()
@@ -918,12 +911,6 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if b, _ := cmd.Flags().GetBool("no-auto-reload"); b {
 		args = append(args, "--no-auto-reload")
 	}
-	// Forwarded so a `daemon start --no-autostart` parent's child (and the
-	// auto-reload re-exec below) keeps the opt-out instead of the foreground
-	// path re-registering what the parent just declined to register.
-	if b, _ := cmd.Flags().GetBool("no-autostart"); b {
-		args = append(args, "--no-autostart")
-	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -941,14 +928,13 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 	profile := resolveProfile(cmd)
 
-	// Refresh the boot-autostart registration this process may itself have
-	// been launched from: rewriting is idempotent, and it is what heals a
-	// stale executable path after a self-update or an in-place upgrade
-	// moved the binary. Announced only to a watching human (stderr is a
-	// terminal) — as a launchd/systemd/Run-key child the line would only
-	// echo into the daemon's own log, which the background launcher above
-	// already reported.
-	ensureDaemonAutostart(cmd, profile, logger_pkg.StderrIsTerminal())
+	// Keep an entry this process may itself have been launched from fresh:
+	// rewriting is idempotent, and it heals a stale executable path after a
+	// self-update or an in-place upgrade moved the binary. Never creates an
+	// entry, never touches one without our marker, and never runs under an
+	// external supervisor (see syncDaemonAutostartDefault). The hint is
+	// announced only to a watching human (stderr is a terminal).
+	syncDaemonAutostart(profile, logger_pkg.StderrIsTerminal())
 
 	// Load the profile config once — several daemon knobs fall back to
 	// values persisted here when both the CLI flag and the env var are
@@ -1136,6 +1122,22 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		if logRotator != nil {
 			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
 			_ = logRotator.Close()
+		}
+
+		// Under OUR OWN systemd unit, spawning a successor and exiting 0
+		// loses it: systemd sees a clean stop of Type=simple and kills
+		// everything left in the cgroup — successor included (Setsid escapes
+		// a session, not a cgroup) — while Restart=on-failure never fires
+		// for exit 0. The first auto-update after a boot-autostarted start
+		// would leave the runtime offline until the next reboot. Exit with
+		// the dedicated handoff status instead; the generated unit carries
+		// RestartForceExitStatus for it, so systemd restarts the new binary.
+		// Any other supervisor (launchd's process-group kill, no supervisor
+		// at all) keeps the portable spawn handoff below.
+		if daemonUnderOwnSystemdUnit(profile) {
+			logger.Info("handing off to systemd for the updated binary",
+				"path", restartBin, "exit_code", daemonSystemdHandoffExitStatus)
+			os.Exit(daemonSystemdHandoffExitStatus)
 		}
 
 		args := buildDaemonStartArgs(cmd)

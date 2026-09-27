@@ -15,6 +15,15 @@ var autostartRunKeyPath = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 func platformAutostartSupported() bool { return true }
 
+// platformAutostartRefreshAllowed is unconditional on Windows: a Run-key
+// entry is not supervised by anything that could object to a rewrite, and
+// ownership is the value name itself (see windowsRunValueName).
+func platformAutostartRefreshAllowed(string) bool { return true }
+
+// platformDaemonUnderOwnSystemdUnit is always false outside Linux: there is
+// no systemd to hand a binary-update restart over to.
+func platformDaemonUnderOwnSystemdUnit(string) bool { return false }
+
 // platformWriteAutostart sets the profile's Run value. The HKCU hive needs
 // no elevation, and the value is rewritten only when the command line
 // actually changed — a no-op refresh on every `daemon start`.
@@ -43,6 +52,7 @@ func platformWriteAutostart(profile string, spec autostartSpec) (autostartState,
 	}
 	return autostartState{
 		Enabled:   true,
+		Managed:   true, // the value name is ours alone; see windowsRunValueName
 		Mechanism: autostartMechanismWindowsRun,
 		Location:  `HKCU\` + autostartRunKeyPath + `\` + name,
 		Command:   command,
@@ -105,6 +115,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 	}
 	return autostartState{
 		Enabled:   true,
+		Managed:   true, // the value name is ours alone; see windowsRunValueName
 		Mechanism: autostartMechanismWindowsRun,
 		Location:  location,
 		Command:   command,
