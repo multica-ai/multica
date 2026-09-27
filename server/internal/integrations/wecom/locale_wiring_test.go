@@ -98,6 +98,7 @@ func TestReplierNoticesReadTheAskersLanguage(t *testing.T) {
 			}{
 				{"offline", engine.Result{Outcome: engine.OutcomeAgentOffline}, want.AgentOffline},
 				{"archived", engine.Result{Outcome: engine.OutcomeAgentArchived}, want.AgentArchived},
+				{"invoke denied", engine.Result{Outcome: engine.OutcomeInvokeDenied}, want.InvokeDenied},
 				{
 					"issue created",
 					engine.Result{
@@ -175,6 +176,36 @@ func TestReplierGroupNoticeReadsTheRoomNotTheMember(t *testing.T) {
 	// everybody else in it.
 	if got, want := sentMarkdown(t, conn, 0), copyFor(deploymentLocale()).AgentOffline; got != want {
 		t.Fatalf("group notice = %q, want the room's language %q", got, want)
+	}
+}
+
+// TestInvokeDeniedFromAGroupReadsTheSendersLanguage — the refusal for a group
+// trigger goes to the sender's own 1:1, never the room, so it is the one group
+// outcome whose reader is a single person. It reads their profile, not the
+// deployment default the room's notices use.
+func TestInvokeDeniedFromAGroupReadsTheSendersLanguage(t *testing.T) {
+	t.Parallel()
+	reg := newSendersRegistry()
+	inst := engine.ResolvedInstallation{ID: mustTestUUID(t)}
+	conn := &recordingConn{}
+	reg.set(inst.ID, conn.autoAck(newWSSender(conn, nil)))
+	r := NewOutboundReplier(OutboundReplierConfig{
+		Senders:   reg,
+		Languages: languagesFor("en"),
+		AppURL:    "https://multica.example",
+	})
+	msg := channel.InboundMessage{Source: channel.Source{
+		ChatID:   "GROUP_CHAT",
+		ChatType: channel.ChatTypeGroup,
+		SenderID: "T-asker",
+	}}
+	r.Reply(context.Background(), inst, msg, engine.Result{Outcome: engine.OutcomeInvokeDenied})
+
+	if got := conn.sendBody(t, 0)["chatid"]; got != "T-asker" {
+		t.Fatalf("refusal went to chatid %v, want the sender's own 1:1 T-asker", got)
+	}
+	if got, want := sentMarkdown(t, conn, 0), copyPacks[LocaleEn].InvokeDenied; got != want {
+		t.Fatalf("refusal = %q, want the sender's language %q", got, want)
 	}
 }
 
