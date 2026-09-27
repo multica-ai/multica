@@ -61,7 +61,31 @@
     "remove": "Remove attachment",
     "previous": "Previous",
     "next": "Next",
-    "sequence_position": "{{index}} / {{total}}"
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "All deliverables",
+    "info": "Info",
+    "wrap_lines": "Wrap lines",
+    "viewport": "Viewport width",
+    "viewport_fill": "Fit",
+    "viewport_desktop": "Desktop",
+    "viewport_tablet": "Tablet",
+    "viewport_phone": "Phone",
+    "viewport_scale": "Scaled to {{percent}}%",
+    "view_source": "View source",
+    "view_mode": "View",
+    "view_tree": "Tree",
+    "view_raw": "Raw",
+    "structured_parse_failed": "Couldn't parse this file, so it's shown as text.",
+    "tree_show_more": "Show more ({{count}} left)",
+    "tree_items_one": "{{count}} item",
+    "tree_items_other": "{{count}} items",
+    "tree_keys_one": "{{count}} key",
+    "tree_keys_other": "{{count}} keys",
+    "table_empty": "No rows",
+    "table_rows_one": "{{count}} row",
+    "table_rows_other": "{{count}} rows",
+    "table_columns_one": "{{count}} column",
+    "table_columns_other": "{{count}} columns"
   },
   "link_hover": {
     "copy_link": "Copy link",
@@ -95,6 +119,19 @@
     "show_preview": "Show preview",
     "show_source": "Show source",
     "fullscreen": "Fullscreen"
+  },
+  "dynamic_block": {
+    "preview": "Preview",
+    "source": "Source",
+    "view": "View",
+    "copy_source": "Copy source",
+    "show_all": "Show all",
+    "rendering": "Rendering...",
+    "error_html": "The preview hit a script error",
+    "error_mermaid": "Couldn't draw this diagram",
+    "error_at_line": "{{message}} (line {{line}})",
+    "view_source": "View source",
+    "copy_error": "Copy error"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

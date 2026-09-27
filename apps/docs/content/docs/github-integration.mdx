@@ -9,7 +9,7 @@ Once GitHub is connected, Multica automatically links pull requests based on iss
 
 The GitHub integration only reads the repositories authorized at install time; it never pushes commits, comments, or status checks.
 
-Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab instances in parallel, with the same PR auto-linking, merge-to-Done, and CI display. The entry point is **Settings → Integrations → Git hosting**; see [Self-hosted Git hosting](/vcs-integration). Multica Cloud does not offer this entry point.
+Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab instances in parallel, with the same PR auto-linking, merge-driven status changes, and CI display. The entry point is **Settings → Integrations → Git hosting**; see [Self-hosted Git hosting](/vcs-integration). Multica Cloud does not offer this entry point.
 
 ## Connect GitHub
 
@@ -29,7 +29,7 @@ The **GitHub connection** decides which repositories Multica receives PR events 
 
 ## Feature switches
 
-**Settings → GitHub** has four switches:
+**Settings → GitHub** has these settings:
 
 | Switch | Effect |
 |---|---|
@@ -37,11 +37,12 @@ The **GitHub connection** decides which repositories Multica receives PR events 
 | PR sidebar | Shows linked pull requests in issue detail. |
 | Co-authored-by | Adds `Co-authored-by: multica-agent <github@multica.ai>` to commits created by agents. |
 | Auto-link PRs | Links a PR to the issue whose identifier is in its branch name or title, or follows a closing keyword in its body. |
+| After PRs merge, move the issue to | What merging every PR linked to an issue does: move it to a status (`Done` by default) or leave it alone. See [When merged PRs move an issue](#when-merged-prs-move-an-issue). |
 | **PR card → CI & mergeability** | For each linked PR, Multica fetches an authenticated GitHub API snapshot and mirrors its **CI status** and **mergeability** onto the card (see **What the PR card shows** below). |
 
 
 
-Whether a merged PR completes its issue is a separate, workspace-wide setting: **Settings → Issue statuses → Automation → Complete issues when their PRs merge**. It applies to every code host, including [self-hosted Git hosting](/vcs-integration).
+**After PRs merge, move the issue to** applies to every code host, including [self-hosted Git hosting](/vcs-integration), whose page shows the same setting.
 
 ## Link a PR to an issue
 
@@ -81,21 +82,22 @@ Once linked, PRs appear in the **Pull requests** block of issue detail. Each ent
 
 CI status and mergeability come from snapshots Multica pulls from the GitHub API, and the two are independent; merged or closed PRs no longer show either. When GitHub is temporarily unavailable, the card keeps the last snapshot and marks it stale instead of going blank.
 
-Under the list, one line says what happens next — for example *Completes when #19 merges*, that no PR says `Closes MUL-123`, or which PR closed without merging.
+Under the list, one line says what happens next — for example *Moves to Done when #19 merges*, or which PR closed without merging. There's no line when the workspace leaves status alone or the issue already has the target status.
 
 Click an entry to open the PR on GitHub. Turning off the **PR sidebar** only hides this block; it doesn't disconnect anything.
 
-## When a merged PR moves an issue to Done
+## When merged PRs move an issue
 
-A merged PR doesn't necessarily mean the issue is finished. With **Complete issues when their PRs merge** on (the default), an issue moves to `Done` only when all of the following hold:
+A merged PR doesn't necessarily mean the issue is finished, so the workspace decides what a merge does: **Settings → Integrations → GitHub → After PRs merge, move the issue to**. Pick `Done` (the default for new workspaces), another started or done status — a custom one such as *Awaiting regression* works too — or **Don't change**. Workspaces that existed before this setting keep their behavior: if merging didn't always complete their issues, they start on **Don't change**.
 
-1. at least one merged linked PR puts a closing keyword right before the identifier in its title or body, such as `Closes MUL-123` (forms with words in between, like `Closes login MUL-123`, don't count, and neither does a branch name);
-2. every linked PR is `Merged` — an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
-3. the issue isn't `done` or `cancelled`, and auto-complete hasn't been turned off for it (**Pull requests → ⋯ → Turn off auto-complete**).
+An issue moves to the chosen status when all of the following hold:
 
-So writing `MUL-123` only in the branch name or title links the PR but doesn't complete the issue by itself — use a closing keyword only when merging the PR should finish the issue. The keyword counts as of the merge: adding it to a PR that has already merged links the PR but doesn't complete the issue.
+1. every linked PR is `Merged` — an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
+2. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Pull requests → ⋯ → Keep status when PRs merge**).
 
-The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't bring it back to `Done` — the next linked PR that merges does. Turning the setting on doesn't complete issues whose PRs merged earlier.
+How a PR was linked doesn't matter: the title, the branch name and a `Closes MUL-123` in the body all link it, and none of them changes what the merge does. When a PR delivers only part of the issue, or a release or a check has to follow the merge, keep that issue's status from its **Pull requests** menu.
+
+The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back — the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
 
 The status change is written to the timeline as a system action naming the PRs, and members subscribed to the issue are notified.
 
@@ -169,7 +171,7 @@ GITHUB_APP_ID=<the GitHub App's numeric ID>
 GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
 ```
 
-Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without them the integration degrades gracefully: PRs still mirror, issues still auto-link and move to Done on merge — the PR card just shows no CI or merge state.
+Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without them the integration degrades gracefully: PRs still mirror, issues still auto-link and move on merge — the PR card just shows no CI or merge state.
 
 ### 3. Update the database and connect
 
@@ -188,10 +190,10 @@ Restart the API server, then complete the connection in **Settings → GitHub**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, the identifier belongs to the current workspace, and nobody removed the PR from the issue.
 - **Identifier in the body but not linked**: put it right after a closing keyword (`Closes MUL-123`), or in the branch name or PR title, or link the PR by hand.
 - **No CI status**: confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, and that the App has read-only Contents, Checks, and Commit statuses permissions with the matching events subscribed. Without Contents the whole snapshot fails, so the PR card shows neither CI nor merge state. After adding permissions to an installed App, each installation's owner must also approve them on GitHub before they take effect.
-- **Issue not completed after the PR merged**: read the line under the issue's **Pull requests** list. It says when no PR used a closing keyword, names any PR still open or closed without merging, or says auto-complete is off for the issue or the workspace.
+- **Issue didn't move after the PR merged**: read the line under the issue's **Pull requests** list. It names any PR still open or closed without merging, or says the issue keeps its status when PRs merge. No line means the workspace setting is **Don't change**, or the issue already has the target status.
 
 ## Next steps
 
-- [Issues](/issues) — how status transitions relate to merge-to-Done.
+- [Issues](/issues) — how status transitions relate to merged PRs.
 - [Project resources](/project-resources) — which repositories agents use when running.
 - [Environment variables](/environment-variables) — the full self-hosted GitHub App configuration.

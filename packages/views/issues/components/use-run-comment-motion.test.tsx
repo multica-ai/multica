@@ -128,6 +128,32 @@ describe("run comment motion", () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps ambient run motion when one notification ends in view (MUL-7729)", async () => {
+    let notify!: IntersectionObserverCallback;
+    const observe = vi.fn();
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: IntersectionObserverCallback) {
+        notify = callback;
+      }
+      observe = observe;
+      disconnect = vi.fn();
+    });
+    render(<Visibility />);
+    await waitFor(() => expect(observe).toHaveBeenCalledWith(screen.getByTestId("visibility")));
+    // A keyed move (a steer reply lands above the run) reports the detached
+    // row, then its new place, in a single callback.
+    act(() => notify([
+      { isIntersecting: false } as IntersectionObserverEntry,
+      { isIntersecting: true } as IntersectionObserverEntry,
+    ], {} as IntersectionObserver));
+    expect(screen.getByTestId("visibility")).toHaveAttribute("data-visible", "true");
+    act(() => notify([
+      { isIntersecting: true } as IntersectionObserverEntry,
+      { isIntersecting: false } as IntersectionObserverEntry,
+    ], {} as IntersectionObserver));
+    expect(screen.getByTestId("visibility")).toHaveAttribute("data-visible", "false");
+  });
+
   it("rotates pointer disclosure with shared timing and keeps keyboard disclosure immediate", () => {
     render(<Disclosure />);
     const toggle = () => screen.getByRole("button", { name: "Toggle" });

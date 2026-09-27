@@ -17,7 +17,6 @@ const historyState = vi.hoisted(() => ({
   goToHistoryIndex: vi.fn(),
 }));
 
-const navigationState = vi.hoisted(() => ({ push: vi.fn() }));
 const sidebarState = vi.hoisted(() => ({
   state: "expanded" as "expanded" | "collapsed",
   isCompact: false,
@@ -25,10 +24,6 @@ const sidebarState = vi.hoisted(() => ({
 
 vi.mock("@/hooks/use-tab-history", () => ({
   useTabHistory: () => historyState,
-}));
-
-vi.mock("@multica/views/navigation", () => ({
-  useNavigation: () => navigationState,
 }));
 
 vi.mock("@multica/views/layout", () => ({
@@ -46,12 +41,8 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   ),
 }));
 
-const {
-  WINDOW_TOOLBAR_CLEARANCE,
-  WindowToolbar,
-  browsingHistoryForMenu,
-  historyIndicesForMenu,
-} = await import("./window-toolbar");
+const { WINDOW_TOOLBAR_CLEARANCE, WindowToolbar, historyIndicesForMenu } =
+  await import("./window-toolbar");
 
 beforeEach(() => {
   historyState.canGoBack = true;
@@ -70,7 +61,6 @@ beforeEach(() => {
   historyState.goBack.mockReset();
   historyState.goForward.mockReset();
   historyState.goToHistoryIndex.mockReset();
-  navigationState.push.mockReset();
   sidebarState.state = "expanded";
   sidebarState.isCompact = false;
   vi.useFakeTimers();
@@ -96,62 +86,16 @@ describe("historyIndicesForMenu", () => {
   });
 });
 
-describe("browsingHistoryForMenu", () => {
-  it("uses workspace browsing history across tabs and excludes the current resource", () => {
-    expect(
-      browsingHistoryForMenu(
-        [
-          { url: "/acme/issues/issue-2", title: "Issue 2" },
-          { url: "/acme/issues?filter=mine", title: "Issues" },
-          { url: "/acme/projects", title: "Projects" },
-        ],
-        "/acme/issues",
-      ),
-    ).toEqual([
-      { url: "/acme/issues/issue-2", title: "Issue 2" },
-      { url: "/acme/projects", title: "Projects" },
-    ]);
-  });
-
-  it("excludes only the current Inbox issue while keeping other Inbox visits", () => {
-    expect(
-      browsingHistoryForMenu(
-        [
-          { url: "/acme/inbox?issue=issue-b", title: "Issue B" },
-          { url: "/acme/inbox?issue=issue-a", title: "Issue A" },
-          { url: "/acme/inbox", title: "Inbox" },
-          { url: "/acme/projects", title: "Projects" },
-        ],
-        "/acme/inbox?view=archived&issue=issue-b",
-      ),
-    ).toEqual([
-      { url: "/acme/inbox?issue=issue-a", title: "Issue A" },
-      { url: "/acme/inbox", title: "Inbox" },
-      { url: "/acme/projects", title: "Projects" },
-    ]);
-  });
-
-  it("bounds the recently viewed menu to thirty entries", () => {
-    const entries = Array.from(
-      { length: 60 },
-      (_, index) => ({
-        url: `/acme/issues/issue-${index}`,
-        title: `Issue ${index}`,
-      }),
-    );
-    expect(browsingHistoryForMenu(entries, "/acme/settings")).toHaveLength(30);
-  });
-});
-
 describe("WindowToolbar history controls", () => {
-  it("right-aligns the controls to the expanded sidebar edge", () => {
+  it("left-aligns the controls past the traffic lights across the expanded sidebar", () => {
     render(<WindowToolbar />);
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(toolbar).toHaveClass("justify-end");
+    expect(toolbar).not.toHaveClass("justify-end");
     expect(toolbar).toHaveStyle({
+      paddingLeft: "88px",
       width:
-        "max(var(--sidebar-live-width, var(--sidebar-width)), 256px)",
+        "max(var(--sidebar-live-width, var(--sidebar-width)), 200px)",
     });
     expect(toolbar).toHaveAttribute("data-sidebar-resize-consumer");
     expect(toolbar).not.toHaveClass("transition-[width]");
@@ -163,40 +107,27 @@ describe("WindowToolbar history controls", () => {
     rerender(<WindowToolbar />);
 
     const toolbar = document.querySelector('[data-slot="window-toolbar"]');
-    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(256);
-    expect(toolbar).toHaveClass("justify-end");
-    expect(toolbar).toHaveStyle({ width: "256px" });
+    expect(WINDOW_TOOLBAR_CLEARANCE).toBe(200);
+    expect(toolbar).toHaveStyle({ paddingLeft: "88px", width: "200px" });
   });
 
-  it("opens workspace browsing history and navigates the active tab to a selected entry", () => {
+  it("orders Back, Forward, then the sidebar toggle with no separate History button", () => {
     render(<WindowToolbar />);
 
-    fireEvent.click(screen.getByRole("button", { name: "History" }));
-    expect(screen.getByText("Recently viewed")).toBeInTheDocument();
-    expect(screen.getByTitle("MUL-1: Fix history")).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "MUL-1: Fix history" }),
-    );
-    expect(navigationState.push).toHaveBeenCalledWith(
-      "/acme/issues/issue-1",
-    );
-    expect(historyState.goToHistoryIndex).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByRole("button").map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Go back", "Go forward", "Toggle sidebar"]);
+    expect(screen.queryByRole("button", { name: "History" })).toBeNull();
   });
 
-  it("keeps browsing history available in a fresh tab while its Back and Forward stay disabled", () => {
+  it("disables Back and Forward in a fresh tab", () => {
     historyState.canGoBack = false;
     historyState.canGoForward = false;
     historyState.historyEntries = ["/acme/issues"];
     historyState.historyIndex = 0;
-    historyState.browsingHistory = [
-      { url: "/acme/issues", title: "Issues" },
-      { url: "/acme/issues/issue-1", title: "MUL-1: Fix history" },
-    ];
 
     render(<WindowToolbar />);
 
-    expect(screen.getByRole("button", { name: "History" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Go back" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Go forward" })).toBeDisabled();
   });

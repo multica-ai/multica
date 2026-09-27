@@ -125,6 +125,24 @@ vi.mock("../i18n", () => ({
           close: "Close",
           download_failed: "",
           open_in_new_tab: "Open in new tab",
+          wrap_lines: "Wrap lines",
+          viewport: "Viewport width",
+          viewport_fill: "Fit",
+          viewport_desktop: "Desktop",
+          viewport_tablet: "Tablet",
+          viewport_phone: "Phone",
+          viewport_scale: "Scaled",
+          view_source: "View source",
+          view_mode: "View",
+          view_tree: "Tree",
+          view_raw: "Raw",
+          structured_parse_failed: "Couldn't parse this file, so it's shown as text.",
+          tree_show_more: "Show more",
+          tree_items: "items",
+          tree_keys: "keys",
+          table_empty: "No rows",
+          table_rows: "rows",
+          table_columns: "columns",
         },
       }),
   }),
@@ -179,6 +197,9 @@ function ClosablePreview({ attachment }: { attachment: Attachment }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Drops any body a test queued but never consumed (a media kind skips the
+  // text fetch), so it cannot answer the next test's request.
+  getAttachmentTextContentMock.mockReset();
   navState.hasOpenInNewTab = true;
   slugState.value = "acme";
   // Default to web's same-origin empty base so existing absolute-URL tests
@@ -645,7 +666,7 @@ describe("AttachmentPreviewModal — URL-only source", () => {
   });
 });
 
-describe("AttachmentPreviewModal — open-in-new-tab (HTML only)", () => {
+describe("AttachmentPreviewModal — open-in-new-tab", () => {
   it("renders the open-in-new-tab button in the header for HTML attachments", async () => {
     getAttachmentTextContentMock.mockResolvedValueOnce({
       text: "<p>hi</p>",
@@ -722,14 +743,50 @@ describe("AttachmentPreviewModal — open-in-new-tab (HTML only)", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("does not render the new-tab button for non-HTML kinds", () => {
+  it.each([
+    ["manual.pdf", "application/pdf"],
+    ["shot.png", "image/png"],
+    ["clip.mp4", "video/mp4"],
+    ["report.csv", "text/csv"],
+    ["data.json", "application/json"],
+    ["server.log", "text/plain"],
+  ])("opens %s in a new tab too — the page shows every kind", (filename, contentType) => {
+    getAttachmentTextContentMock.mockResolvedValue({ text: "a", originalContentType: contentType });
+    const att = makeAttachment({ filename, content_type: contentType });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("Open in new tab"));
+    expect(openInNewTabMock).toHaveBeenCalledWith(
+      `/acme/attachments/att-1/preview?name=${filename}`,
+      filename,
+      { activate: true },
+    );
+  });
+
+  it("does not render the new-tab button for a file the viewer cannot show", () => {
     const att = makeAttachment({
-      filename: "manual.pdf",
-      content_type: "application/pdf",
+      filename: "archive.zip",
+      content_type: "application/zip",
     });
     render(
       <AttachmentPreviewModal
         source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByTitle("Open in new tab")).toBeNull();
+  });
+
+  it("does not render the new-tab button for a URL-only source — the page loads by id", () => {
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "url", url: "https://cdn.example/manual.pdf", filename: "manual.pdf" }}
         open
         onClose={() => {}}
       />,
@@ -1089,5 +1146,154 @@ describe("AttachmentPreviewModal — image zoom", () => {
 
     expect(screen.queryByRole("button", { name: "Zoom in" })).toBeNull();
     expect(screen.queryByRole("application")).toBeNull();
+  });
+});
+
+describe("AttachmentPreviewModal — text views", () => {
+  function openText(filename: string, text: string, contentType = "text/plain") {
+    getAttachmentTextContentMock.mockResolvedValue({ text, originalContentType: contentType });
+    const att = makeAttachment({ filename, content_type: contentType });
+    return render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+  }
+
+  it("numbers the lines of a code file and leaves them unwrapped", async () => {
+    openText("main.go", "package main\n\nfunc main() {}\n");
+    await waitFor(() => expect(document.querySelectorAll(".code-line")).toHaveLength(3));
+    expect(document.querySelector("pre.code-lines")).not.toHaveClass("code-lines-wrap");
+    expect(screen.getByTitle("Wrap lines")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("wraps a log by default and lets the reader turn it off", async () => {
+    openText("server.log", "a very long line\n");
+    await waitFor(() => expect(document.querySelector("pre.code-lines")).toBeTruthy());
+    const pre = document.querySelector("pre.code-lines");
+    expect(pre).toHaveClass("code-lines-wrap");
+
+    fireEvent.click(screen.getByTitle("Wrap lines"));
+    expect(document.querySelector("pre.code-lines")).not.toHaveClass("code-lines-wrap");
+    expect(screen.getByTitle("Wrap lines")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps the reader's wrap choice when the viewer moves to another file", async () => {
+    getAttachmentTextContentMock.mockResolvedValue({ text: "x\n", originalContentType: "text/plain" });
+    const first = makeAttachment({ id: "att-1", filename: "a.go", content_type: "text/plain" });
+    const second = makeAttachment({ id: "att-2", filename: "b.go", content_type: "text/plain" });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const viewer = (attachment: Attachment) => (
+      <QueryClientProvider client={qc}>
+        <AttachmentPreviewModal source={{ kind: "full", attachment }} open onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    const { rerender } = rtlRender(viewer(first));
+    await waitFor(() => expect(document.querySelector("pre.code-lines")).toBeTruthy());
+    fireEvent.click(screen.getByTitle("Wrap lines"));
+
+    rerender(viewer(second));
+    await waitFor(() => expect(document.querySelector("pre.code-lines")).toBeTruthy());
+    expect(document.querySelector("pre.code-lines")).toHaveClass("code-lines-wrap");
+  });
+});
+
+describe("AttachmentPreviewModal — html viewports", () => {
+  function openHtml() {
+    getAttachmentTextContentMock.mockResolvedValue({
+      text: "<h1>Prototype</h1>",
+      originalContentType: "text/html",
+    });
+    const att = makeAttachment({ filename: "prototype.html", content_type: "text/html" });
+    render(
+      <AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />,
+    );
+  }
+
+  it("fills the stage by default and switches to a device width without reloading", async () => {
+    openHtml();
+    const iframe = await screen.findByTitle("prototype.html");
+    expect(screen.getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("html-viewport").style.width).toBe("100%");
+
+    fireEvent.click(screen.getByRole("button", { name: "Phone" }));
+    expect(screen.getByRole("button", { name: "Phone" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("html-viewport").style.width).toBe("390px");
+    expect(screen.getByText("390")).toBeTruthy();
+    // Same element: the document keeps its state across the switch.
+    expect(screen.getByTitle("prototype.html")).toBe(iframe);
+
+    fireEvent.click(screen.getByRole("button", { name: "Desktop" }));
+    expect(screen.getByTestId("html-viewport").style.width).toBe("1440px");
+  });
+
+  it("shows the source with line numbers, and holds the viewport while it does", async () => {
+    openHtml();
+    await screen.findByTitle("prototype.html");
+    expect(screen.getByTitle("Wrap lines")).toBeDisabled();
+
+    fireEvent.click(screen.getByTitle("View source"));
+    expect(screen.getByTitle("View source")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTitle("prototype.html")).toBeNull();
+    expect(document.querySelector(".code-line")?.textContent).toBe("<h1>Prototype</h1>");
+    expect(screen.getByRole("button", { name: "Phone" })).toBeDisabled();
+    expect(screen.getByTitle("Wrap lines")).toBeEnabled();
+  });
+});
+
+describe("AttachmentPreviewModal — structured data", () => {
+  function openData(filename: string, text: string, contentType = "application/json") {
+    getAttachmentTextContentMock.mockResolvedValue({ text, originalContentType: contentType });
+    const att = makeAttachment({ filename, content_type: contentType });
+    render(
+      <AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />,
+    );
+  }
+
+  it("shows JSON as a tree, with the source one switch away", async () => {
+    openData("config.json", '{"name":"web","ports":[80,443]}');
+    await screen.findByText("name");
+    expect(screen.getByText('"web"')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Tree" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTitle("Wrap lines")).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Raw" }));
+    expect(screen.queryByText("name")).toBeNull();
+    expect(document.querySelector(".code-line")?.textContent).toBe(
+      '{"name":"web","ports":[80,443]}',
+    );
+    expect(screen.getByTitle("Wrap lines")).toBeEnabled();
+  });
+
+  it("parses YAML into the same tree", async () => {
+    openData("compose.yaml", "services:\n  web:\n    image: nginx\n", "text/plain");
+    await screen.findByText("services");
+  });
+
+  it("falls back to the source, and says why, when the file does not parse", async () => {
+    openData("broken.json", '{"name": ');
+    await screen.findByText("Couldn't parse this file, so it's shown as text.");
+    expect(document.querySelector(".code-line")?.textContent).toBe('{"name": ');
+    expect(screen.getByRole("button", { name: "Tree" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Raw" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTitle("Wrap lines")).toBeEnabled();
+  });
+});
+
+describe("AttachmentPreviewModal — tables", () => {
+  it("shows a CSV as a table", async () => {
+    getAttachmentTextContentMock.mockResolvedValue({
+      text: "name,count\nalpha,3\n",
+      originalContentType: "text/csv",
+    });
+    const att = makeAttachment({ filename: "report.csv", content_type: "text/csv" });
+    render(
+      <AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />,
+    );
+    const table = await screen.findByTestId("table-preview");
+    expect(table.querySelector("th[data-column-id='c0']")?.textContent).toBe("name");
+    expect(table.querySelector("th[data-column-id='c1']")?.textContent).toBe("count");
   });
 });

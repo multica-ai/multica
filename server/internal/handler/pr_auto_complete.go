@@ -22,40 +22,55 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// PR auto-complete (MUL-7429).
+// PR merge automation (MUL-7429, MUL-7726).
 //
 // The whole rule, as users see it:
 //
 //   - A PR whose title or branch name carries an issue identifier is linked to
-//     that issue, and so is one that closes it with a keyword ("Closes MUL-1")
-//     in its title or body. A member can also link or remove a PR by hand.
-//   - When every PR linked to an issue is merged and at least one of them
-//     closes it with a keyword, the issue moves to Done — unless the workspace
-//     turned the setting off or someone turned it off for that one issue. A
-//     PR linked only by its title or branch is related work: it has to merge
-//     too, but it never completes the issue by itself.
+//     that issue, and so is one whose title or body puts it after a closing
+//     keyword ("Closes MUL-1"). A member can also link or remove a PR by hand.
+//     The keyword only links; it has no say in what the merge does.
+//   - The workspace picks what a merge does: move the issue to one status (Done
+//     by default, or any started or done status, custom ones included) or leave
+//     it alone. When every PR linked to an issue is merged, the issue moves to
+//     that status, unless someone turned the automation off for that one issue.
 //
 // The decision is evaluated only when a PR event touches the issue: a linked PR
 // merges, a PR is linked, or a link is removed. Changing a setting, reopening an
-// issue, or accepting it from Triage is not a PR event, so it never completes an
+// issue, or accepting it from Triage is not a PR event, so it never moves an
 // issue by itself. That is what keeps a reopened issue open until new work
 // lands, without any hidden per-issue switch.
 
 // Decision states, shared with the issue page (see prAutoCompleteResponse).
+// The names predate the configurable target and stay for installed clients.
 const (
 	prAutoCompleteNone              = "none"               // no linked PR
-	prAutoCompleteWorkspaceDisabled = "workspace_disabled" // workspace setting off
+	prAutoCompleteWorkspaceDisabled = "workspace_disabled" // workspace leaves status alone
 	prAutoCompleteIssueDisabled     = "issue_disabled"     // turned off for this issue
 	prAutoCompleteTerminal          = "terminal"           // already done / cancelled
 	prAutoCompleteTriage            = "triage"             // not accepted yet
-	prAutoCompleteNoCloseIntent     = "no_close_intent"    // no PR closes the issue with a keyword
+	prAutoCompleteAtTarget          = "at_target"          // already in the target status
 	prAutoCompleteWaiting           = "waiting"            // some PRs still open / draft
 	prAutoCompleteNotMerged         = "not_merged"         // some PRs closed without merging
 	prAutoCompleteAllMerged         = "all_merged"         // every linked PR merged
 )
 
+// Workspace settings keys. pr_auto_complete_enabled is the switch desktop
+// clients before MUL-7726 still show and write; prMergeStatusFromSettings
+// reads it when pr_merge_status is absent, and reconcilePRMergeSettings keeps
+// the two in step on every write.
+const (
+	prMergeStatusKey        = "pr_merge_status"
+	prAutoCompleteLegacyKey = "pr_auto_complete_enabled"
+	// prMergeStatusNone is the value that leaves an issue's status alone.
+	prMergeStatusNone = "none"
+)
+
 type prAutoCompleteDecision struct {
 	State string
+	// Target is the status a merge moves the issue to, or "" when the
+	// workspace leaves status alone (or its choice no longer resolves).
+	Target string
 	// PRs the state is about: still open for waiting, closed-unmerged for
 	// not_merged, every linked PR for all_merged.
 	PRs []db.ListIssueLinkedPullRequestStatesRow
@@ -64,20 +79,89 @@ type prAutoCompleteDecision struct {
 	IssueDisabled bool
 }
 
-// prAutoCompleteEnabledForWorkspace reads the workspace-wide switch. Absent
-// means on. An unreadable settings blob means off: this switch authorizes a
-// status write, so it must not default to the permissive side.
-func prAutoCompleteEnabledForWorkspace(ws db.Workspace) bool {
+// prMergeStatusSetting reads the workspace's choice: "none", or the key of the
+// status a merge moves an issue to. An unreadable settings blob means none:
+// the setting authorizes a status write, so it must not default to the
+// permissive side.
+func prMergeStatusSetting(ws db.Workspace) string {
 	if len(ws.Settings) == 0 {
+		return issuestatus.Done
+	}
+	var s map[string]any
+	if err := json.Unmarshal(ws.Settings, &s); err != nil {
+		return prMergeStatusNone
+	}
+	return prMergeStatusFromSettings(s)
+}
+
+// prMergeStatusFromSettings is prMergeStatusSetting on decoded settings.
+// Without pr_merge_status it follows the retired switch (a pod or client from
+// before MUL-7726 may have written only that): off means none, else Done.
+func prMergeStatusFromSettings(s map[string]any) string {
+	raw, ok := s[prMergeStatusKey]
+	if !ok || raw == nil {
+		if prAutoCompleteLegacyOn(s) {
+			return issuestatus.Done
+		}
+		return prMergeStatusNone
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return prMergeStatusNone
+	}
+	if key := strings.ToLower(strings.TrimSpace(value)); key != "" {
+		return key
+	}
+	return prMergeStatusNone
+}
+
+// prAutoCompleteLegacyOn reads the retired switch the way releases before
+// MUL-7726 did: absent means on, anything but a boolean means off.
+func prAutoCompleteLegacyOn(s map[string]any) bool {
+	raw, ok := s[prAutoCompleteLegacyKey]
+	if !ok || raw == nil {
 		return true
 	}
-	var s struct {
-		Enabled *bool `json:"pr_auto_complete_enabled"`
+	on, ok := raw.(bool)
+	return ok && on
+}
+
+// reconcilePRMergeSettings adjusts a settings write so desktop clients from
+// before MUL-7726 keep working. Those clients show and flip only the retired
+// switch, and send back the rest of the settings they hold. A flip of that
+// switch becomes a choice here (off → none, on → Done). Every write then
+// mirrors the switch from the effective choice, so an old client shows it
+// correctly. stored may be nil when the current settings could not be read.
+func reconcilePRMergeSettings(stored, incoming map[string]any) {
+	if _, sent := incoming[prAutoCompleteLegacyKey]; sent && prAutoCompleteLegacyOn(incoming) != prAutoCompleteLegacyOn(stored) {
+		if prAutoCompleteLegacyOn(incoming) {
+			incoming[prMergeStatusKey] = issuestatus.Done
+		} else {
+			incoming[prMergeStatusKey] = prMergeStatusNone
+		}
 	}
-	if err := json.Unmarshal(ws.Settings, &s); err != nil {
-		return false
+	if prMergeStatusFromSettings(incoming) == prMergeStatusNone {
+		incoming[prAutoCompleteLegacyKey] = false
+	} else {
+		delete(incoming, prAutoCompleteLegacyKey)
 	}
-	return s.Enabled == nil || *s.Enabled
+}
+
+// resolvePRMergeTarget returns the status a merge moves issues to in this
+// workspace, or "" to leave status alone. The chosen key must still name a
+// live started or done status other than Blocked; anything else (an archived
+// custom status, a failed catalog read) fails closed to no write. It shares
+// the delivery's resolver, so a built-in target costs no catalog read.
+func (h *Handler) resolvePRMergeTarget(ctx context.Context, ws db.Workspace, resolver *issuestatus.Resolver) string {
+	key := prMergeStatusSetting(ws)
+	if key == prMergeStatusNone || key == issuestatus.Blocked {
+		return ""
+	}
+	switch resolver.WritableCategory(ctx, h.issueStatusCatalog(), key) {
+	case issuestatus.CategoryStarted, issuestatus.CategoryDone:
+		return key
+	}
+	return ""
 }
 
 // decidePRAutoComplete computes the decision for one issue. resolver may be
@@ -92,48 +176,46 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 	if err != nil {
 		return prAutoCompleteDecision{}, err
 	}
-	d := prAutoCompleteDecision{IssueDisabled: disabled}
-	switch {
-	case len(prs) == 0:
+	if resolver == nil {
+		resolver = issuestatus.NewResolver(issue.WorkspaceID)
+	}
+	d := prAutoCompleteDecision{IssueDisabled: disabled, Target: h.resolvePRMergeTarget(ctx, ws, resolver)}
+	if len(prs) == 0 {
 		d.State = prAutoCompleteNone
 		return d, nil
-	case !prAutoCompleteEnabledForWorkspace(ws):
+	}
+	// An unresolvable custom key is returned unchanged and treated as not
+	// terminal, the same direction the previous merge gate took.
+	effective := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status)
+	// The guards that make a merge change nothing come first, so the issue page
+	// only speaks when a merge would move the issue.
+	switch {
+	case effective == issuestatus.Done || effective == issuestatus.Cancelled:
+		d.State = prAutoCompleteTerminal
+		return d, nil
+	case issue.TriageState.Valid:
+		d.State = prAutoCompleteTriage
+		return d, nil
+	case d.Target == "":
 		d.State = prAutoCompleteWorkspaceDisabled
 		return d, nil
 	case disabled:
 		d.State = prAutoCompleteIssueDisabled
 		return d, nil
-	}
-	if resolver == nil {
-		resolver = issuestatus.NewResolver(issue.WorkspaceID)
-	}
-	// An unresolvable custom key is returned unchanged and treated as not
-	// terminal, the same direction the previous merge gate took.
-	effective := resolver.Effective(ctx, h.issueStatusCatalog(), issue.Status)
-	if effective == "done" || effective == "cancelled" {
-		d.State = prAutoCompleteTerminal
-		return d, nil
-	}
-	if issue.TriageState.Valid {
-		d.State = prAutoCompleteTriage
+	case issue.Status == d.Target:
+		d.State = prAutoCompleteAtTarget
 		return d, nil
 	}
 	var open, closed []db.ListIssueLinkedPullRequestStatesRow
-	closes := false
 	for _, pr := range prs {
 		switch pr.State {
 		case "open", "draft":
 			open = append(open, pr)
 		case "closed":
 			closed = append(closed, pr)
-			// A PR closed without merging never delivers, whatever it says.
-			continue
 		}
-		closes = closes || pr.CloseIntent
 	}
 	switch {
-	case !closes:
-		d.State = prAutoCompleteNoCloseIntent
 	case len(open) > 0:
 		d.State, d.PRs = prAutoCompleteWaiting, open
 	case len(closed) > 0:
@@ -145,10 +227,11 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 }
 
 // maybeAutoCompleteIssue runs the decision for one issue after a PR event and
-// moves it to Done when every linked PR is merged and one of them closes it.
+// moves it to the workspace's target status when every linked PR is merged.
 // Safe to call for any issue: every guard lives in decidePRAutoComplete, and
 // the status write is conditional on the status the decision saw, so
-// concurrent merges complete the issue once.
+// concurrent merges move the issue once. It starts no agent run: a merge is not
+// a person handing the issue to anyone.
 func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issueID pgtype.UUID, resolver *issuestatus.Resolver) {
 	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: workspaceID})
 	if err != nil {
@@ -178,9 +261,10 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
-	updated, err := qtx.CompleteIssueFromPullRequests(ctx, db.CompleteIssueFromPullRequestsParams{
+	updated, err := qtx.MoveIssueFromPullRequests(ctx, db.MoveIssueFromPullRequestsParams{
 		ID:             issue.ID,
 		WorkspaceID:    issue.WorkspaceID,
+		TargetStatus:   d.Target,
 		ExpectedStatus: issue.Status,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -189,6 +273,7 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 	}
 	var cancelledWakeups []db.AgentTaskQueue
 	if err == nil {
+		// A no-op unless the target closes the issue.
 		cancelledWakeups, err = service.StopClosedIssueWakeups(ctx, qtx, updated)
 	}
 	if err == nil {
@@ -214,8 +299,8 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "pr_automation",
 		"pull_requests":  prNumberList(d.PRs),
-		// Reaching done clears a duplicate mark (MUL-7349); carry both ends so
-		// the activity log and clients see the mark go.
+		// Moving out of cancelled clears a duplicate mark (MUL-7349); carry
+		// both ends so the activity log and clients see the mark go.
 		"duplicate_of_issue_id":      liveDuplicateMark(updated.Status, updated.DuplicateOfIssueID),
 		"prev_duplicate_of_issue_id": liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 	})
@@ -235,21 +320,29 @@ func prNumberList(prs []db.ListIssueLinkedPullRequestStatesRow) string {
 type prAutoCompleteResponse struct {
 	State string `json:"state"`
 	// PR ids the state refers to (see prAutoCompleteDecision.PRs).
-	PullRequestIDs   []string `json:"pull_request_ids"`
-	IssueDisabled    bool     `json:"issue_disabled"`
-	WorkspaceEnabled bool     `json:"workspace_enabled"`
+	PullRequestIDs []string `json:"pull_request_ids"`
+	IssueDisabled  bool     `json:"issue_disabled"`
+	// WorkspaceEnabled is true when a merge moves issues at all.
+	WorkspaceEnabled bool `json:"workspace_enabled"`
+	// TargetStatus is the status key a merge moves the issue to, or "none".
+	TargetStatus string `json:"target_status"`
 }
 
-func prAutoCompleteToResponse(ws db.Workspace, d prAutoCompleteDecision) prAutoCompleteResponse {
+func prAutoCompleteToResponse(d prAutoCompleteDecision) prAutoCompleteResponse {
 	ids := make([]string, 0, len(d.PRs))
 	for _, pr := range d.PRs {
 		ids = append(ids, uuidToString(pr.ID))
+	}
+	target := d.Target
+	if target == "" {
+		target = prMergeStatusNone
 	}
 	return prAutoCompleteResponse{
 		State:            d.State,
 		PullRequestIDs:   ids,
 		IssueDisabled:    d.IssueDisabled,
-		WorkspaceEnabled: prAutoCompleteEnabledForWorkspace(ws),
+		WorkspaceEnabled: d.Target != "",
+		TargetStatus:     target,
 	}
 }
 

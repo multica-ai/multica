@@ -30,6 +30,7 @@ import { vcsConnectionsOptions } from "@multica/core/vcs";
 import { api } from "@multica/core/api";
 import type { ConnectVCSResponse, VCSProvider } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { PRMergeStatusRow } from "./pr-merge-status-row";
 
 const PROVIDERS: VCSProvider[] = ["forgejo", "gitea", "gitlab"];
 const PROVIDER_LABELS: Record<VCSProvider, string> = {
@@ -167,6 +168,16 @@ export function VCSTab() {
             </Card>
           ))}
         </div>
+      )}
+
+      {/* The PR merge setting is shared with GitHub; shown here once a
+          provider is connected, since that is when it starts to matter. */}
+      {connections.length > 0 && (
+        <Card className="py-0">
+          <CardContent className="px-0">
+            <PRMergeStatusRow canManage={canManage} />
+          </CardContent>
+        </Card>
       )}
 
       {justConnected && (

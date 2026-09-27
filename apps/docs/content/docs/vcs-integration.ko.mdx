@@ -1,6 +1,6 @@
 ---
 title: 자체 호스팅 Git 코드 호스팅
-description: 워크스페이스마다 자체 호스팅 Forgejo, Gitea, GitLab 인스턴스를 연결해 브랜치 이름이나 제목에 태스크 번호가 있거나 본문의 종료 키워드 뒤에 태스크 번호가 있는 Pull Request / Merge Request를 해당 태스크에 자동 연결하고, 종료 키워드가 있는 PR이 merge되면 완료로 옮기며 CI 상태를 표시합니다.
+description: 워크스페이스마다 자체 호스팅 Forgejo, Gitea, GitLab 인스턴스를 연결해 브랜치 이름이나 제목에 태스크 번호가 있거나 본문의 종료 키워드 뒤에 태스크 번호가 있는 Pull Request / Merge Request를 해당 태스크에 자동 연결하고, merge되면 워크스페이스가 정한 상태로 옮기며 CI 상태를 표시합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 **자체 배포한 Multica에서만 사용할 수 있습니다.** 이 연동은 Multica를 **직접 배포해 운영할 때만** 제공되며 Multica Cloud에서는 사용할 수 없습니다. 여기서 "자체 호스팅"은 **Multica 자체를 배포하는 것**을 뜻합니다. 일반적으로 자체 네트워크의 Git 인스턴스에 접근하기 위해 사용합니다. 서버 운영자가 `MULTICA_VCS_INTEGRATION_ENABLED=true`로 기능을 켜고 `MULTICA_VCS_SECRET_KEY`도 설정해야 합니다. 그전에는 설정 → 연동에 이 영역이 표시되지 않습니다.
 </Callout>
 
-Multica는 워크스페이스별로 자체 호스팅 Git 코드 호스팅인 **Forgejo**, **Gitea**, **GitLab** 중 하나에 연결합니다. 연결하면 브랜치 이름이나 제목에 태스크 번호(예: `MUL-123`)가 포함되거나 본문의 종료 키워드 뒤에 태스크 번호(`Closes MUL-123`)가 있는 Pull Request(GitLab에서는 Merge Request)가 해당 [태스크](/issues)에 **자동으로 연결**되고 태스크 사이드바의 **Pull requests**에 표시됩니다. 태스크에 연결된 PR이 모두 merge되고 그중 하나에 종료 키워드가 있으면 태스크가 완료로 이동합니다. head commit의 CI는 카드에 check bar로 표시됩니다.
+Multica는 워크스페이스별로 자체 호스팅 Git 코드 호스팅인 **Forgejo**, **Gitea**, **GitLab** 중 하나에 연결합니다. 연결하면 브랜치 이름이나 제목에 태스크 번호(예: `MUL-123`)가 포함되거나 본문의 종료 키워드 뒤에 태스크 번호(`Closes MUL-123`)가 있는 Pull Request(GitLab에서는 Merge Request)가 해당 [태스크](/issues)에 **자동으로 연결**되고 태스크 사이드바의 **Pull requests**에 표시됩니다. 태스크에 연결된 PR이 모두 merge되면 태스크가 워크스페이스가 정한 상태(기본값 완료)로 이동합니다. head commit의 CI는 카드에 check bar로 표시됩니다.
 
 이 코드 호스팅은 GitHub와 동시에 사용할 수 있으며 워크스페이스 하나에서 원하는 대로 조합할 수 있습니다.
 
@@ -82,7 +82,7 @@ Multica는 저장된 secret으로 모든 delivery를 검증하므로 일치하�
 ## 미러링되는 내용
 
 - **Pull / Merge Request** — open, closed, merged, draft 상태와 작성자, 브랜치, 그리고 코드 호스팅이 제공하는 경우 diff 통계.
-- **태스크 연결** — 제목이나 브랜치의 번호, 그리고 본문에서 종료 키워드 바로 뒤에 쓴 번호가 PR을 태스크에 연결합니다. 본문의 단순 언급은 연결하지 않습니다. 태스크에 연결된 PR(GitHub와 자체 호스팅 모두)이 모두 merge되고 그중 하나에 종료 키워드(`Closes`/`Fixes`/`Resolves MUL-123`)가 있으면 [GitHub](/github-integration)와 같은 워크스페이스 설정과 규칙에 따라 태스크를 완료로 옮깁니다.
+- **태스크 연결** — 제목이나 브랜치의 번호, 그리고 본문에서 종료 키워드 바로 뒤에 쓴 번호가 PR을 태스크에 연결합니다. 본문의 단순 언급은 연결하지 않습니다. 태스크에 연결된 PR(GitHub와 자체 호스팅 모두)이 모두 merge되면 [GitHub](/github-integration)와 같은 설정과 규칙에 따라 워크스페이스가 정한 상태로 태스크를 옮깁니다. 제공자를 연결하면 이 페이지에도 같은 **PR 병합 후 태스크 상태** 설정이 표시됩니다.
 - **CI** — Forgejo/Gitea commit status와 GitLab pipeline을 head commit의 통과/실패/진행 중 check bar로 집계합니다.
 
 ## 에이전트의 Pull Request 생성

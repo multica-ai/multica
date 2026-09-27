@@ -29,7 +29,8 @@ import {
   type PullRequestChecksStatus,
   type PullRequestMergeStatus,
 } from "@multica/core/github";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type {
   GitHubPullRequest,
   GitHubPullRequestState,
@@ -45,8 +46,9 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
-import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
+import { useStatusLabel } from "../utils/status-label";
+import { StatusIcon } from "./status-icon";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -123,7 +125,7 @@ export function PullRequestList({
         </div>
       ) : null}
       {autoComplete ? (
-        <AutoCompleteLine issueId={issueId} identifier={identifier} prs={prs} autoComplete={autoComplete} />
+        <AutoCompleteLine issueId={issueId} prs={prs} autoComplete={autoComplete} />
       ) : null}
     </div>
   );
@@ -138,23 +140,35 @@ interface RowActions {
 
 const prLabel = (pr: Pick<GitHubPullRequest, "number">) => `#${pr.number}`;
 
+/** Where a merge moves the issue; older backends only ever moved it to Done. */
+const mergeTarget = (autoComplete: PRAutoComplete) => autoComplete.target_status ?? "done";
+
+/** States in which the merge has nothing left to do for this issue. */
+const SETTLED = new Set(["terminal", "at_target"]);
+
 /**
  * Remove a PR from the issue. The server remembers the removal (webhooks will
  * not link it again) and treats it as a PR event, so removing the last
- * unmerged PR can complete the issue — the toast says so, and offers undo only
+ * unmerged PR can move the issue — the toast says so, and offers undo only
  * when nothing else changed.
  */
 function useUnlinkPullRequest(issueId: string, before: PRAutoComplete) {
   const { t } = useT("issues");
+  const statusLabel = useStatusLabel(useWorkspaceId());
   const unlink = useUnlinkIssuePullRequest(issueId);
   const relink = useLinkIssuePullRequest(issueId);
   return (pr: GitHubPullRequest) => {
     unlink.mutate(pr.id, {
       onSuccess: (after) => {
-        const completed =
-          before.state !== "terminal" && after.auto_complete?.state === "terminal";
-        if (completed) {
-          toast.success(t(($) => $.pr_automation.unlinked_completed, { pr: prLabel(pr) }));
+        const moved =
+          !SETTLED.has(before.state) && !!after.auto_complete && SETTLED.has(after.auto_complete.state);
+        if (moved) {
+          toast.success(
+            t(($) => $.pr_automation.unlinked_moved, {
+              pr: prLabel(pr),
+              status: statusLabel(mergeTarget(after.auto_complete!)),
+            }),
+          );
           return;
         }
         toast.success(t(($) => $.pr_automation.unlinked, { pr: prLabel(pr) }), {
@@ -214,24 +228,30 @@ function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: R
   );
 }
 
+// Splits a translated sentence around the target status so each language keeps
+// its own word order and the status renders as a chip, not plain text.
+const STATUS_SLOT = "\u2063status\u2063";
+
 /**
- * One line under the PR list saying what the "every linked PR merged, one says
- * Closes → Done" rule will do for this issue, straight from the server's
- * decision. Terminal, triage and unknown states render nothing.
+ * One line under the PR list saying what "every linked PR merged → move the
+ * issue to the workspace's target status" will do for this issue, straight
+ * from the server's decision. It speaks only when a merge would move the issue
+ * or this issue opted out: a workspace that leaves status alone, a finished or
+ * triaged issue, one already in the target, and unknown states render nothing.
  */
 function AutoCompleteLine({
   issueId,
-  identifier,
   prs,
   autoComplete,
 }: {
   issueId: string;
-  identifier: string;
   prs: GitHubPullRequest[];
   autoComplete: PRAutoComplete;
 }) {
   const { t } = useT("issues");
-  const paths = useWorkspacePaths();
+  const wsId = useWorkspaceId();
+  const catalog = useIssueStatuses(wsId);
+  const statusLabel = useStatusLabel(wsId);
   const unlink = useUnlinkPullRequest(issueId, autoComplete);
   const setAutoComplete = useSetIssuePRAutoComplete(issueId);
   const named = autoComplete.pull_request_ids
@@ -247,6 +267,26 @@ function AutoCompleteLine({
       {label}
     </button>
   );
+  const target = mergeTarget(autoComplete);
+  const withTarget = (sentence: string) => {
+    const [before, after = ""] = sentence.split(STATUS_SLOT);
+    return (
+      <>
+        {before}
+        <span className="inline-flex items-center gap-1 align-[-2px] font-medium text-foreground">
+          <StatusIcon
+            status={target}
+            category={catalog.categoryOf(target)}
+            color={catalog.colorOf(target)}
+            icon={catalog.iconOf(target)}
+            className="size-3"
+          />
+          {statusLabel(target)}
+        </span>
+        {after}
+      </>
+    );
+  };
 
   let icon: React.ReactNode;
   let body: React.ReactNode;
@@ -254,7 +294,7 @@ function AutoCompleteLine({
     case "waiting":
       if (named.length === 0) return null;
       icon = <CircleDashed className="text-muted-foreground" />;
-      body = t(($) => $.pr_automation.waiting, { count: named.length, prs: list });
+      body = withTarget(t(($) => $.pr_automation.waiting_to, { count: named.length, prs: list, status: STATUS_SLOT }));
       break;
     case "not_merged": {
       if (named.length === 0) return null;
@@ -268,13 +308,9 @@ function AutoCompleteLine({
       );
       break;
     }
-    case "no_close_intent":
-      icon = <CircleSlash className="text-muted-foreground" />;
-      body = t(($) => $.pr_automation.no_close_intent, { identifier });
-      break;
     case "all_merged":
       icon = <CheckCircle2 className="text-muted-foreground" />;
-      body = t(($) => $.pr_automation.all_merged);
+      body = withTarget(t(($) => $.pr_automation.all_merged_to, { status: STATUS_SLOT }));
       break;
     case "issue_disabled":
       icon = <CircleSlash className="text-muted-foreground" />;
@@ -286,20 +322,6 @@ function AutoCompleteLine({
               onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
             }),
           )}
-        </>
-      );
-      break;
-    case "workspace_disabled":
-      icon = <CircleSlash className="text-muted-foreground" />;
-      body = (
-        <>
-          {t(($) => $.pr_automation.workspace_disabled)} ·{" "}
-          <AppLink
-            href={`${paths.settings()}?tab=issue-statuses`}
-            className="font-medium text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
-          >
-            {t(($) => $.pr_automation.workspace_disabled_action)}
-          </AppLink>
         </>
       );
       break;

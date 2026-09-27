@@ -105,6 +105,15 @@ import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
+import { DeliverablesSection } from "./deliverables/deliverables-section";
+import { DeliverablesOverview } from "./deliverables/deliverables-overview";
+import {
+  DESCRIPTION_BLOCK_ID,
+  useDeliverableDetails,
+  type DeliverableOrigin,
+} from "./deliverables/deliverable-details";
+import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
+import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -2253,6 +2262,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const previewSequence = useMemo(() => {
     const blocks: ImageSequenceBlock[] = [
       {
+        id: DESCRIPTION_BLOCK_ID,
         content: issue?.description,
         attachments: descEditorAttachments,
         standalone: false,
@@ -2261,15 +2271,94 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     for (const item of items) {
       if (item.kind === "activity-group" || !item.entry) continue;
       blocks.push({
+        id: item.entry.id,
         content: item.entry.content,
         attachments: item.entry.attachments,
       });
       for (const reply of timelineView.threadReplies.get(item.entry.id) ?? []) {
-        blocks.push({ content: reply.content, attachments: reply.attachments });
+        blocks.push({ id: reply.id, content: reply.content, attachments: reply.attachments });
       }
     }
     return collectPreviewSequence(blocks);
   }, [issue?.description, descEditorAttachments, items, timelineView.threadReplies]);
+
+  // The files this issue has delivered as a whole: the sidebar section, the
+  // overview grid, the viewer's info panel and the comments' version badges
+  // all read this (MUL-7649).
+  const deliverableFiles = useMemo(() => collectDeliverableFiles(timeline), [timeline]);
+  const commentById = useMemo(
+    () =>
+      new Map(
+        timeline
+          .filter((entry) => entry.type === "comment")
+          .map((entry) => [entry.id, entry] as const),
+      ),
+    [timeline],
+  );
+
+  // "Show in comments" from the viewer and the overview. A reply goes through
+  // the quick-jump rail's path, which already undoes everything that hides one
+  // (the reader's collapse, a resolution folding the thread) and waits for the
+  // reply to mount. A root is visible unless its own thread is collapsed or
+  // folded into a resolved bar: open that, then jump once the open thread has
+  // rendered, so the flash lands on the comment and not on the bar.
+  const [locateRootRequest, setLocateRootRequest] = useState<string | null>(null);
+  const locateOrigin = useCallback(
+    (origin: DeliverableOrigin) => {
+      if (origin.kind === "description") {
+        scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      const { commentId } = origin;
+      if (replyToRoot.has(commentId)) {
+        jumpToReply(commentId);
+        return;
+      }
+      const rootItem = items.find((it) => it.id === commentId);
+      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      if (!root) return;
+      const collapse = useCommentCollapseStore.getState();
+      if (collapse.isCollapsed(id, commentId)) collapse.toggle(id, commentId);
+      if (
+        !expandedResolved.has(commentId) &&
+        deriveThreadResolution(root, timelineView.threadReplies.get(commentId) ?? EMPTY_REPLIES)
+          .kind === "root"
+      ) {
+        toggleResolvedExpand(commentId, true);
+      }
+      setLocateRootRequest(commentId);
+    },
+    [scrollContainerEl, replyToRoot, jumpToReply, items, id, expandedResolved, timelineView.threadReplies, toggleResolvedExpand],
+  );
+  useEffect(() => {
+    if (!locateRootRequest) return;
+    setLocateRootRequest(null);
+    jumpToThread(locateRootRequest);
+  }, [locateRootRequest, jumpToThread]);
+
+  const describeDeliverable = useDeliverableDetails({
+    files: deliverableFiles,
+    commentById,
+    onLocate: locateOrigin,
+  });
+  // The overview remembers the file the viewer was showing, so `G` can go
+  // back to it.
+  const [overview, setOverview] = useState<{ open: boolean; returnKey: string | null }>({
+    open: false,
+    returnKey: null,
+  });
+  useEffect(() => {
+    setOverview({ open: false, returnKey: null });
+  }, [id]);
+  const openOverview = useCallback(() => setOverview({ open: true, returnKey: null }), []);
+  const openOverviewFromViewer = useCallback(
+    (key: string) => setOverview({ open: true, returnKey: key }),
+    [],
+  );
+  const closeOverview = useCallback(
+    () => setOverview((current) => ({ ...current, open: false })),
+    [],
+  );
 
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
@@ -2770,6 +2859,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         />
       )}
 
+      {/* Deliverables — the files this issue's comments delivered. Hidden
+          while there are none. */}
+      <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
+
       {/* Execution log — active runs + collapsed past runs, each carrying its
           own token spend, with the issue total on the section header.
           Self-contained; owns its own collapse state and WS subscriptions.
@@ -2959,11 +3052,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       : [];
 
   const detailContent = (
-    // Hosts the one viewer this issue's files page through — see
-    // PreviewSequenceProvider. Wraps the whole column so the description
-    // editor's files and the timeline's files share one sequence.
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
-    <PreviewSequenceProvider items={previewSequence}>
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
@@ -3712,12 +3801,35 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           />
         )}
       </div>
-    </PreviewSequenceProvider>
     </CurrentIssueRenderContextProvider>
   );
 
+  // Hosts the one viewer this issue's files page through — see
+  // PreviewSequenceProvider. Wraps the column and the sidebar, so the
+  // description's files, the timeline's and the sidebar's deliverables all
+  // open into one sequence. The versions provider lets each comment's file
+  // cards mark a re-uploaded file `v2`.
+  const withPreview = (layout: ReactNode) => (
+    <PreviewSequenceProvider
+      items={previewSequence}
+      describeItem={describeDeliverable}
+      onOpenOverview={openOverviewFromViewer}
+    >
+      <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
+      <DeliverablesOverview
+        open={overview.open}
+        onClose={closeOverview}
+        returnKey={overview.returnKey}
+        identifier={issue.identifier}
+        files={deliverableFiles}
+        commentById={commentById}
+        onLocate={locateOrigin}
+      />
+    </PreviewSequenceProvider>
+  );
+
   if (isMobile) {
-    return (
+    return withPreview(
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
@@ -3725,11 +3837,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {sidebarContent}
           </SheetContent>
         </Sheet>
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return withPreview(
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         {detailContent}
@@ -3751,6 +3863,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>
-    </ResizablePanelGroup>
+    </ResizablePanelGroup>,
   );
 }

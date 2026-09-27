@@ -61,7 +61,27 @@
     "remove": "移除附件",
     "previous": "上一个",
     "next": "下一个",
-    "sequence_position": "{{index}} / {{total}}"
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "全部产物",
+    "info": "信息",
+    "wrap_lines": "自动换行",
+    "viewport": "视口宽度",
+    "viewport_fill": "自适应",
+    "viewport_desktop": "桌面",
+    "viewport_tablet": "平板",
+    "viewport_phone": "手机",
+    "viewport_scale": "缩放 {{percent}}%",
+    "view_source": "查看源码",
+    "view_mode": "视图",
+    "view_tree": "树形",
+    "view_raw": "原文",
+    "structured_parse_failed": "无法解析这个文件，已按原文显示。",
+    "tree_show_more": "显示更多（还有 {{count}} 项）",
+    "tree_items_other": "{{count}} 项",
+    "tree_keys_other": "{{count}} 个键",
+    "table_empty": "没有数据行",
+    "table_rows_other": "{{count}} 行",
+    "table_columns_other": "{{count}} 列"
   },
   "link_hover": {
     "copy_link": "复制链接",
@@ -95,6 +115,19 @@
     "show_preview": "显示预览",
     "show_source": "显示源码",
     "fullscreen": "放大"
+  },
+  "dynamic_block": {
+    "preview": "预览",
+    "source": "源码",
+    "view": "视图",
+    "copy_source": "复制源码",
+    "show_all": "展开全部",
+    "rendering": "正在渲染...",
+    "error_html": "预览中的脚本出错",
+    "error_mermaid": "无法绘制这张图",
+    "error_at_line": "{{message}}（第 {{line}} 行）",
+    "view_source": "查看源码",
+    "copy_error": "复制错误"
   },
   "file_card": {
     "uploading": "正在上传 {{filename}}"

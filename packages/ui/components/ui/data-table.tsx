@@ -411,6 +411,7 @@ export function DataTable<TData>({
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => {
                   const isPinned = header.column.getIsPinned();
+                  const sorted = header.column.getIsSorted();
                   const columnHasExplicitSize = hasExplicitSize(
                     header.column.id,
                   );
@@ -425,6 +426,16 @@ export function DataTable<TData>({
                       // Lets a drag measure every column by id instead of
                       // pairing <th> elements with columns positionally.
                       data-column-id={header.column.id}
+                      // Only a table sorted through TanStack's own sorting
+                      // state says so; views that order rows themselves
+                      // leave every header unmarked.
+                      aria-sort={
+                        sorted === "asc"
+                          ? "ascending"
+                          : sorted === "desc"
+                            ? "descending"
+                            : undefined
+                      }
                       // Marks the frozen block's trailing edge for the scroll
                       // shadow to measure against. Rendered widths differ from
                       // configured ones under fixed table-layout, so the

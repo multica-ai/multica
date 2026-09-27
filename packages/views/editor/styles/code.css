@@ -52,69 +52,128 @@ pre.rich-text-editor code {
   line-height: 1.6;
 }
 
-/* Syntax highlighting — lowlight (hljs). Scoped to the editor surface and to
-   the task transcript, which highlights file bodies with the same engine so a
-   file reads identically in a comment and in an execution trace. */
-:is(.rich-text-editor, .transcript-code) .hljs-keyword,
-:is(.rich-text-editor, .transcript-code) .hljs-selector-tag,
-:is(.rich-text-editor, .transcript-code) .hljs-built_in { color: oklch(0.55 0.16 255); }
+/* Syntax highlighting — lowlight (hljs). Scoped to the editor surface, to the
+   task transcript, which highlights file bodies with the same engine so a
+   file reads identically in a comment and in an execution trace, and to the
+   attachment viewer's data tree, whose keys and values borrow the same token
+   colours as the file's source. */
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-keyword,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-selector-tag,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-built_in { color: oklch(0.55 0.16 255); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-string,
-:is(.rich-text-editor, .transcript-code) .hljs-addition { color: oklch(0.55 0.14 155); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-string,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-addition { color: oklch(0.55 0.14 155); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-comment,
-:is(.rich-text-editor, .transcript-code) .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-comment,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-quote { color: var(--muted-foreground); font-style: italic; }
 
-:is(.rich-text-editor, .transcript-code) .hljs-number,
-:is(.rich-text-editor, .transcript-code) .hljs-literal { color: oklch(0.58 0.16 30); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-number,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-literal { color: oklch(0.58 0.16 30); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-title,
-:is(.rich-text-editor, .transcript-code) .hljs-section,
-:is(.rich-text-editor, .transcript-code) .hljs-title\.function_ { color: oklch(0.55 0.14 280); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-title,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-section,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-title\.function_ { color: oklch(0.55 0.14 280); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-attr,
-:is(.rich-text-editor, .transcript-code) .hljs-attribute { color: oklch(0.58 0.12 60); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-attr,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-attribute { color: oklch(0.58 0.12 60); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-variable,
-:is(.rich-text-editor, .transcript-code) .hljs-template-variable { color: oklch(0.58 0.14 20); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-variable,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-template-variable { color: oklch(0.58 0.14 20); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-type,
-:is(.rich-text-editor, .transcript-code) .hljs-title\.class_ { color: oklch(0.55 0.14 200); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-type,
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-title\.class_ { color: oklch(0.55 0.14 200); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-deletion { color: oklch(0.55 0.2 25); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-deletion { color: oklch(0.55 0.2 25); }
 
-:is(.rich-text-editor, .transcript-code) .hljs-meta { color: var(--muted-foreground); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-meta { color: var(--muted-foreground); }
 
 /* XML / HTML — lowlight emits .hljs-tag for `<` `>` brackets and .hljs-name
    for the element name. Without these rules, HTML source renders mostly in
    the default text color and looks unhighlighted. */
-:is(.rich-text-editor, .transcript-code) .hljs-tag { color: var(--muted-foreground); }
-:is(.rich-text-editor, .transcript-code) .hljs-name { color: oklch(0.55 0.16 255); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-tag { color: var(--muted-foreground); }
+:is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-name { color: oklch(0.55 0.16 255); }
 
 /* Dark mode overrides */
-.dark :is(.rich-text-editor, .transcript-code) .hljs-keyword,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-selector-tag,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-built_in { color: oklch(0.7 0.14 255); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-keyword,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-selector-tag,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-built_in { color: oklch(0.7 0.14 255); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-string,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-addition { color: oklch(0.7 0.14 155); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-string,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-addition { color: oklch(0.7 0.14 155); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-number,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-literal { color: oklch(0.72 0.14 30); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-number,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-literal { color: oklch(0.72 0.14 30); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-title,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-section,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-title\.function_ { color: oklch(0.72 0.12 280); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-title,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-section,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-title\.function_ { color: oklch(0.72 0.12 280); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-attr,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-attribute { color: oklch(0.72 0.1 60); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-attr,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-attribute { color: oklch(0.72 0.1 60); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-variable,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-template-variable { color: oklch(0.72 0.12 20); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-variable,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-template-variable { color: oklch(0.72 0.12 20); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-type,
-.dark :is(.rich-text-editor, .transcript-code) .hljs-title\.class_ { color: oklch(0.72 0.12 200); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-type,
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-title\.class_ { color: oklch(0.72 0.12 200); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-deletion { color: oklch(0.7 0.18 25); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-deletion { color: oklch(0.7 0.18 25); }
 
-.dark :is(.rich-text-editor, .transcript-code) .hljs-name { color: oklch(0.72 0.14 255); }
+.dark :is(.rich-text-editor, .transcript-code, .structured-tree) .hljs-name { color: oklch(0.72 0.14 255); }
+
+/* Numbered lines — CodeBlockStatic with `lineNumbers` (the attachment viewer's
+   code, text and log files). A whole document rather than a block inside
+   prose: no margin, no rounded panel, just the page it sits on. Each line is a
+   flex row: a gutter pseudo-element carrying `data-line`, then the code. Lines
+   keep their shape and the block scrolls sideways; `.code-lines-wrap` wraps
+   them under their own number instead. The gutter is sticky so numbers stay
+   in view while scrolling sideways, and opaque so code passing beneath it
+   never shows through — a host on another surface sets `--code-gutter-bg`. */
+pre.code-lines {
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 1rem 0;
+  white-space: pre;
+}
+
+pre.code-lines code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+pre.code-lines.code-lines-wrap code {
+  width: auto;
+}
+
+pre.code-lines .code-line {
+  display: flex;
+}
+
+pre.code-lines .code-line::before {
+  content: attr(data-line);
+  position: sticky;
+  left: 0;
+  flex: none;
+  box-sizing: content-box;
+  width: calc(var(--line-digits, 1) * 1ch);
+  padding-inline: 1rem 1.25rem;
+  text-align: right;
+  color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+  background: var(--code-gutter-bg, var(--background));
+  user-select: none;
+}
+
+pre.code-lines .code-text {
+  flex: 1 0 auto;
+  padding-right: 1.5rem;
+  white-space: pre;
+}
+
+pre.code-lines.code-lines-wrap .code-text {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

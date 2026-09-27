@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CircleCheck, ExternalLink, GitCommitHorizontal, Link2, PanelRight } from "lucide-react";
+import { ExternalLink, GitCommitHorizontal, Link2, PanelRight } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Label } from "@multica/ui/components/ui/label";
@@ -22,17 +22,14 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
-import {
-  deriveGitHubSettings,
-  derivePRAutoCompleteEnabled,
-  githubInstallationsOptions,
-} from "@multica/core/github";
+import { deriveGitHubSettings, githubInstallationsOptions } from "@multica/core/github";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 import { GitHubMark } from "./github-mark";
+import { PRMergeStatusRow } from "./pr-merge-status-row";
 
 type SettingsKey =
   | "github_enabled"
@@ -67,7 +64,6 @@ export function GitHubTab() {
   const primaryInstallation = installations[0] ?? null;
 
   const flags = deriveGitHubSettings(workspace);
-  const prAutoComplete = derivePRAutoCompleteEnabled(workspace);
   const [savingKey, setSavingKey] = useState<SettingsKey | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
@@ -296,32 +292,10 @@ export function GitHubTab() {
               onCheckedChange={(v) => persistSetting("github_auto_link_prs_enabled", v)}
             />
 
-            {/* Completion is not a GitHub setting: it is shared by every code
-                host and lives with the statuses it writes. This row only
-                reports it and points there. */}
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5">
-              <div className="flex items-start gap-3">
-                <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground">
-                  <CircleCheck className="h-4 w-4" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-body font-medium">{t(($) => $.github.feature_pr_auto_complete_label)}</p>
-                  <p className="text-body text-muted-foreground">
-                    {prAutoComplete
-                      ? t(($) => $.github.feature_pr_auto_complete_on)
-                      : t(($) => $.github.feature_pr_auto_complete_off)}
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                render={<AppLink href={`${navigation.pathname}?tab=issue-statuses`} />}
-                nativeButton={false}
-              >
-                {t(($) => $.github.feature_pr_auto_complete_manage)}
-              </Button>
-            </div>
+            {/* Shared by every code host; the self-hosted Git page shows the
+                same value. Greyed out with the rest of the GitHub features when
+                the master switch is off. */}
+            <PRMergeStatusRow canManage={canManage} disabled={!flags.enabled} />
           </CardContent>
         </Card>
       </section>

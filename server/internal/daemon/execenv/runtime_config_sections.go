@@ -953,6 +953,21 @@ func writeDeliveryInvariant(b *strings.Builder) {
 	b.WriteString("**Runtime-local paths are never deliverables.** Your working directory exists only on the machine running you — NEVER write an absolute path or a `file://` URL as a clickable link or an embedded image. Reference code locations as inline code, never a link: `path/to/file.ts:42`. Deliver files through this surface's mechanism (above); if it has none, say so in words — never link the path and imply the file was delivered.\n\n")
 }
 
+// writeInlineBlocksPolicy tells a surface that renders the reply as rich text
+// where a chart or diagram goes (MUL-7649). A fenced `html` / `mermaid` block
+// renders in place as a dynamic block; an attachment, HTML included, is a file
+// and shows as a card. Agents that uploaded report.html expecting an inline
+// chart now get a card, and the platform skill's reference is only opened on
+// demand, so the one-line rule sits here, beside the file-delivery line, where
+// it is in front of the agent when it writes the reply. The detail (theme
+// variables, sizing) stays in the reference.
+//
+// Only surfaces the web renders get it: channel chats, autopilot run results
+// and quick-create stdout do not render these blocks.
+func writeInlineBlocksPolicy(b *strings.Builder) {
+	b.WriteString("\n**Charts and diagrams:** put them in the text as a fenced `html` or `mermaid` code block — it renders in place (name it with `title=\"...\"` after the language). An attached file, HTML included, shows as a card instead. Theming and sizing: the multica-platform issues reference.\n")
+}
+
 // writeOutput emits the kind-specific Output section: the always-on delivery
 // invariant plus one per-surface file-delivery policy line per kind.
 func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
@@ -990,6 +1005,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 			fmt.Fprintf(b, "**Delivering files here:** whether Multica can push a file you produce into this %s conversation depends on how this deployment is configured, so it is stated per turn rather than here: the per-turn user message tells you, every turn. Follow what it says about files, and never report a file as delivered unless it told you how to deliver one.\n", ChannelDisplayName(ctx.ChatChannelType))
 		} else {
 			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
+			writeInlineBlocksPolicy(b)
 		}
 	default:
 		if ctx.IsSquadLeader {
@@ -1000,6 +1016,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates or plans along the way.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n\n")
 		b.WriteString("**Delivering files here:** pass `--attachment <path>` to `multica issue comment add` (repeatable) — the only way a screenshot or artifact reaches the reader.\n")
+		writeInlineBlocksPolicy(b)
 	}
 	b.WriteString("\n")
 	writeDeliveryInvariant(b)

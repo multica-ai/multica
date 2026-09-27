@@ -436,6 +436,7 @@ export const PRAutoCompleteSchema = z.object({
   pull_request_ids: z.array(z.string()).default([]),
   issue_disabled: z.boolean().default(false),
   workspace_enabled: z.boolean().default(true),
+  target_status: z.string().optional().catch(undefined),
 }).loose();
 
 export const IssuePullRequestsResponseSchema = z.object({

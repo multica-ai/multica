@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
+import enIssues from "../../locales/en/issues.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
@@ -117,7 +118,7 @@ vi.mock("sonner", () => ({
 import { GitHubTab } from "./github-tab";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, settings: enSettings },
+  en: { common: enCommon, issues: enIssues, settings: enSettings },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -155,18 +156,39 @@ describe("GitHubTab", () => {
     expect(row.getByText(/e\.g\. MUL-123, is in its title or branch name, or follows “Closes” in its description/)).toBeTruthy();
   });
 
-  // Completion is shared by every code host and lives with the statuses; the
-  // GitHub page only reports it and points there.
-  it("reports PR auto-complete and links to the issue statuses page", () => {
+  // MUL-7726: what a merge does is chosen here, with the other PR features.
+  it("picks the status a merge moves issues to, Done by default", () => {
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByText("Complete issues when their PRs merge")).toBeTruthy();
-    expect(screen.getByText(/^On · /)).toBeTruthy();
-    expect(screen.getByText("Manage").closest("a")?.getAttribute("href")).toContain("tab=issue-statuses");
+    const select = screen.getByRole("combobox", { name: "After PRs merge, move the issue to" });
+    expect(select).toHaveTextContent("Done");
 
     cleanup();
-    workspaceRef.current.settings = { pr_auto_complete_enabled: false };
+    workspaceRef.current.settings = { pr_merge_status: "none" };
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByText(/^Off · /)).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "After PRs merge, move the issue to" })).toHaveTextContent("Don’t change");
+  });
+
+  it("saves the chosen status into the workspace settings", async () => {
+    const user = userEvent.setup();
+    workspaceRef.current.settings = { github_enabled: true };
+    mockUpdateWorkspace.mockResolvedValue({ ...workspaceRef.current, settings: { github_enabled: true, pr_merge_status: "in_review" } });
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+    await user.click(screen.getByRole("combobox", { name: "After PRs merge, move the issue to" }));
+    const inReview = await screen.findByRole("option", { name: "In Review" });
+    // A merge never blocks an issue.
+    expect(screen.queryByRole("option", { name: "Blocked" })).toBeNull();
+    await user.click(inReview);
+    await waitFor(() =>
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        settings: { github_enabled: true, pr_merge_status: "in_review" },
+      }),
+    );
+  });
+
+  it("greys out the merge status with the other features when GitHub is off", () => {
+    workspaceRef.current.settings = { github_enabled: false };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+    expect(screen.getByRole("combobox", { name: "After PRs merge, move the issue to" })).toBeDisabled();
   });
 
   it("offers the master switch without a separate turn-off callout", () => {

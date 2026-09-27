@@ -4,6 +4,7 @@ import {
   fireEvent,
   render as rtlRender,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
@@ -66,6 +67,8 @@ const STRINGS: Record<string, Record<string, string>> = {
     previous: "Previous",
     next: "Next",
     sequence_position: "{{index}} / {{total}}",
+    overview: "All deliverables",
+    info: "Info",
   },
 };
 
@@ -468,6 +471,139 @@ describe("PreviewSequenceProvider", () => {
     });
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  });
+});
+
+// What the issue page layers on top of the generic viewer (MUL-7649): an
+// info panel, "show in comments", a way to the overview, a version switcher.
+describe("host details", () => {
+  function openFirst() {
+    act(() => {
+      fireEvent.click(screen.getByText("open"));
+    });
+  }
+
+  it("toggles the info panel with I and lets its controls move the viewer", () => {
+    render(
+      <PreviewSequenceProvider
+        items={sequenceOf(THREE)}
+        describeItem={(item, controls) => ({
+          info: (
+            <button type="button" onClick={() => controls.goTo(THREE[2]!.id)}>
+              {`about ${item.filename}`}
+            </button>
+          ),
+        })}
+      >
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    expect(screen.queryByRole("complementary", { name: "Info" })).toBeNull();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "i" });
+    });
+    expect(screen.getByRole("complementary", { name: "Info" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Info" })).toHaveAttribute("aria-pressed", "true");
+
+    act(() => {
+      fireEvent.click(screen.getByText("about shot-1.png"));
+    });
+    expectCounter("3 / 3");
+    // The panel follows the file on screen.
+    expect(screen.getByText("about shot-3.png")).toBeInTheDocument();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "I" });
+    });
+    expect(screen.queryByRole("complementary", { name: "Info" })).toBeNull();
+  });
+
+  it("closes the viewer, then locates", async () => {
+    const onSelect = vi.fn();
+    render(
+      <PreviewSequenceProvider
+        items={sequenceOf(THREE)}
+        describeItem={() => ({ locate: { label: "Show in comments", onSelect } })}
+      >
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("hands the overview the file on screen when G is pressed", async () => {
+    const onOpenOverview = vi.fn();
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)} onOpenOverview={onOpenOverview}>
+        <Opener openKey={THREE[1]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    expect(screen.getByRole("button", { name: "All deliverables" })).toHaveAttribute(
+      "aria-keyshortcuts",
+      "G",
+    );
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "g" });
+    });
+    expect(onOpenOverview).toHaveBeenCalledWith(THREE[1]!.id);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("offers no overview or info controls to a surface without them", () => {
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)}>
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    expect(screen.queryByRole("button", { name: "All deliverables" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Info" })).toBeNull();
+  });
+
+  it("leaves letter keys to a field and every key to an open menu", () => {
+    const onOpenOverview = vi.fn();
+    render(
+      <PreviewSequenceProvider
+        items={sequenceOf(THREE)}
+        onOpenOverview={onOpenOverview}
+        describeItem={() => ({
+          titleAccessory: (
+            <>
+              <input aria-label="field" />
+              <div role="menu">
+                <button type="button">v1</button>
+              </div>
+            </>
+          ),
+        })}
+      >
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+
+    act(() => {
+      fireEvent.keyDown(screen.getByLabelText("field"), { key: "g" });
+    });
+    expect(onOpenOverview).not.toHaveBeenCalled();
+
+    const menuItem = screen.getByRole("button", { name: "v1" });
+    act(() => {
+      fireEvent.keyDown(menuItem, { key: "ArrowRight" });
+      fireEvent.keyDown(menuItem, { key: "Escape" });
+    });
+    expectCounter("1 / 3");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
 

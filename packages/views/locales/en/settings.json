@@ -82,11 +82,6 @@
       "done": "Completed.",
       "cancelled": "Decided not to do."
     },
-    "automation_title": "Automation",
-    "pr_auto_complete_label": "Complete issues when their PRs merge",
-    "pr_auto_complete_description": "An issue moves to Done once every linked PR is merged and one of them closes it with a keyword. Applies to PRs merged from now on.",
-    "pr_auto_complete_example": "Write the keyword in the PR title or description, e.g.",
-    "pr_auto_complete_example_title": "Closes MUL-123",
     "pr_auto_complete_badge": "Set when PRs merge"
   },
   "quick_actions": {
@@ -799,11 +794,7 @@
     "repositories_shortcut_label": "Repository URLs live in the Repositories tab",
     "repositories_shortcut_link": "Manage repositories →",
     "toast_failed": "Failed to update GitHub settings",
-    "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
-    "feature_pr_auto_complete_label": "Complete issues when their PRs merge",
-    "feature_pr_auto_complete_on": "On · shared by every code host",
-    "feature_pr_auto_complete_off": "Off · shared by every code host",
-    "feature_pr_auto_complete_manage": "Manage"
+    "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description."
   },
   "vcs": {
     "section_title": "Git providers (self-hosted)",
@@ -1371,5 +1362,10 @@
     "status_loading": "Checking...",
     "status_unknown": "Status unavailable",
     "channel_hint": "Chat with agents and create issues from {{channel}}."
+  },
+  "pr_merge_status": {
+    "label": "After PRs merge, move the issue to",
+    "description": "Applies once every PR linked to an issue has merged, and only to merges from now on.",
+    "none": "Don’t change"
   }
 }
