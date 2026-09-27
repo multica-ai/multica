@@ -102,6 +102,10 @@ func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
 				"do not add a Markdown H1 (`# ...`) to an issue body or description",
 				"start with prose or `##` subheadings",
 				"Only add an H1 when the user specifically requests one",
+				"current question, acceptance criteria, owner, and current disposition",
+				"Put immutable evidence, run output, decisions, and history in comments or attachments",
+				"never prepend a new stage packet above superseded descriptions",
+				"create a new bounded parent issue",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("brief is missing issue-body formatting guidance %q\n---\n%s", want, out)

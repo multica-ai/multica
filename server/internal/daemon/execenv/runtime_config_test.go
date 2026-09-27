@@ -69,6 +69,9 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
+				"Create later dependent stages as `backlog`",
+				"promote only the next stage whose dependencies are satisfied",
+				"new bounded parent",
 				"read `references/issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {

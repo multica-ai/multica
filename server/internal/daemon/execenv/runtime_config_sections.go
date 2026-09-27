@@ -377,6 +377,7 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 func writeIssueBodyFormatting(b *strings.Builder) {
 	b.WriteString("## Issue Body Formatting\n\n")
 	b.WriteString("An issue title already serves as its H1. By default, do not add a Markdown H1 (`# ...`) to an issue body or description; start with prose or `##` subheadings. Only add an H1 when the user specifically requests one.\n\n")
+	b.WriteString("Keep the description as the current working contract, readable in one screen: the current question, acceptance criteria, owner, and current disposition. Treat the assignee and status fields as canonical; the description is a compact snapshot, not a second event log. Put immutable evidence, run output, decisions, and history in comments or attachments. When the contract changes, edit the current sections in place; never prepend a new stage packet above superseded descriptions. If the question changes materially, create a new bounded parent issue and link the old issue as context instead of extending a permanent program.\n\n")
 }
 
 // commentReceiptRule picks the receipt mode for a posting command. It trails
@@ -794,7 +795,7 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 // brief keeps the one-line map so the flags remain discoverable without it.
 func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Sub-issue Creation\n\n")
-	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages.")
+	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages. Create later dependent stages as `backlog`, then promote only the next stage whose dependencies are satisfied. A materially changed question belongs in a new bounded parent instead of another stage on a permanent parent.")
 	if where, ok := issueContractsSkill(modelVisibleSkills(ctx.AgentSkills)); ok {
 		b.WriteString(" Before creating sub-issues, read " + where + " — it covers serial chains, promotion, and stage wake semantics.")
 	}

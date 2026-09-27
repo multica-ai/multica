@@ -17,7 +17,7 @@ When you only need the agent to handle one specific request without changing own
 
 ![Assignment confirmation dialog: confirm the assignment, or choose not to start yet](/images/docs/assign-confirm-dialog.webp)
 
-Everything the agent should know about this work belongs in the issue itself — its description, its discussion, or the project description and agent instructions.
+Everything the agent should know about this work belongs in the issue record. Keep the description to the current question, acceptance criteria, owner, and current disposition. Put evidence, run history, and superseded state in the discussion or attachments; shared durable context belongs in the project description and agent instructions.
 
 When you assign to a squad, the squad becomes the issue's assignee and the squad leader starts first. It decides whether to hand work to other members, following how the squad operates.
 
@@ -36,7 +36,7 @@ While executing, the agent can:
 
 What it can actually do is still limited by the agent's configuration, the runtime environment, and your permission to run it.
 
-During the run, the agent manages the issue's status by judging what its work changes: starting on the issue's own ask moves it to `in_progress` right away, delivery moves it to `in_review`, work continuing beyond the turn keeps it `in_progress`, and consultation or discussion leaves the status untouched — these actions appear under the agent's identity in the timeline. Run lifecycle and issue status are separate: a run completing does not by itself change the issue status.
+During the run, the agent manages the issue's status by judging what its work changes: starting on the issue's own ask moves it to `in_progress` right away; fully evidenced bounded work with nothing remaining moves to `done`; work continuing beyond the turn stays `in_progress`; a missing dependency moves it to `blocked`; and consultation or discussion leaves the status untouched. `in_review` is used only after a named acceptance question has been routed to a named human or external provider reviewer with a live return path. These actions appear under the agent's identity in the timeline. Run lifecycle and issue status are separate: a run completing does not by itself change the issue status.
 
 When the assignee is a [squad](/squads), Multica enqueues the leader. Dispatching members is not delivery, so the dispatch turn leaves the parent issue `in_progress`. On a later callback, the leader inspects the whole goal: fully evidenced work with nothing remaining moves to `done`; `in_review` is reserved for a named human or external provider review that has actually been routed with a live return path.
 

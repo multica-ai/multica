@@ -2,6 +2,7 @@
 
 Product contracts the runtime brief does not fully encode.
 
+- [Writing readable, bounded issues](#writing-readable-bounded-issues)
 - [PR linking and merge intent](#pr-linking-and-merge-intent)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
@@ -10,6 +11,43 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
+
+## Writing readable, bounded issues
+
+Treat an issue description as the current working contract, not the execution
+journal. Keep it readable in one screen and limited to:
+
+- the current question or deliverable;
+- acceptance criteria;
+- the owner; and
+- the current disposition, including a concise blocker or next action when one
+  exists.
+
+The assignee and status fields are canonical. The description is a compact
+snapshot that explains those fields, not a second history. Put immutable
+evidence, run output, decisions, and prior state in comments or attachments.
+When the contract changes, edit its current sections in place. Never prepend a
+new stage packet above superseded copies of the same plan.
+
+If the question changes materially, create a new bounded parent and link the
+old issue as context. Do not keep extending a permanent program parent with new
+stages and unrelated children. A parent should have one question and one
+whole-goal closeout.
+
+```markdown
+## Current question
+
+What bounded outcome is needed now?
+
+## Acceptance criteria
+
+- The observable result that proves completion.
+
+## Owner and current disposition
+
+Owner: Agent or squad name
+Disposition: In progress — next action or exact dependency
+```
 
 To attach a local file to an existing issue description, use `multica issue update <id> --attachment <local-path>`. The CLI appends the file's Markdown reference to the end of the description; to replace an image, also use `--description-file` to remove the old reference. Do not put local filesystem paths in the description.
 
@@ -326,6 +364,11 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 ```
 
 Creating every serial step as `todo` enqueues the whole chain at once.
+
+Before adding another stage, confirm it still answers the parent's current
+question. A materially different question starts a new bounded parent. For the
+same question, create later dependent stages as `backlog` and promote only the
+next stage whose stated dependencies are satisfied.
 
 ### Stages: order sub-issues into barrier groups
 

@@ -457,6 +457,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 		{
 			file: "references/issues.md",
 			want: []string{
+				"Writing readable, bounded issues",
+				"current question or deliverable",
+				"immutable evidence, run output, decisions, and prior state in comments or attachments",
+				"Never prepend a new stage packet",
+				"create a new bounded parent",
 				"multica issue pull-requests <issue-id> --output json",
 				"Default for code-changing issue work",
 				"open or update a PR before posting the final Multica issue comment",

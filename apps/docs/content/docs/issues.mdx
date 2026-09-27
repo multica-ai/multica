@@ -11,7 +11,7 @@ An issue is Multica's basic unit for organizing work: a feature, a bug, an inves
 
 | Part | Purpose |
 |---|---|
-| **Title and description** | Goal, background, requirements, and acceptance criteria. |
+| **Title and description** | The current question, acceptance criteria, owner, and current disposition. |
 | **Status and priority** | Where the work stands and what to handle first. |
 | **Assignee** | A workspace member, an agent, or a squad. |
 | **Dates, labels, and custom properties** | Planning, categorization, and your team's own fields. |
@@ -25,6 +25,29 @@ An issue is Multica's basic unit for organizing work: a feature, a bug, an inves
 Create one from the **Issues** page or inside a project — a title is enough, and every other property can be filled in later.
 
 Each issue has a number, such as `MUL-123`. The digits increment within the workspace; after an admin changes the workspace's issue prefix, numbers display with the new prefix. See [Workspaces](/workspaces#create-a-workspace).
+
+### Keep the working contract compact
+
+An issue description should answer what is true now in one screen. Keep it to the current question or deliverable, acceptance criteria, owner, and current disposition. The Assignee and Status properties remain canonical; the description briefly explains the ownership, next action, or exact blocker.
+
+Use comments and attachments for immutable evidence, run results, decisions, and prior state. When the working contract changes, edit the current sections in place. Do not prepend a new stage packet above superseded copies of the plan.
+
+```markdown
+## Current question
+
+What bounded outcome is needed now?
+
+## Acceptance criteria
+
+- The observable result that proves completion.
+
+## Owner and current disposition
+
+Owner: Agent or squad name
+Disposition: In progress — next action or exact dependency
+```
+
+If the question changes materially, start a new bounded parent issue and link the previous issue as context. A long-running parent should not become a permanent program of unrelated stages and children.
 
 ## Choose an assignee
 
@@ -106,7 +129,7 @@ An issue belongs to at most one [project](/projects); the project provides share
 
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
-Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish.
+Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. Start the first ready stage and create later dependent stages in `backlog`; promote only the next stage whose dependencies are satisfied. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish.
 
 ## Switch views
 

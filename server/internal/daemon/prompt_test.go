@@ -23,6 +23,8 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 
 	mustContain := []string{
 		// high-fidelity invariant
+		"compact working contract",
+		"**Current question**",
 		"Faithfully restate what the user wants",
 		"Preserve specific names, identifiers, file paths",
 		// strip non-spec material: verbal routing wrappers + conversational fillers
@@ -35,6 +37,12 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		// context section is conditional and must not be an apology log
 		"include ONLY when the input cited external resources",
 		"never use it as an apology log",
+		// compact descriptions expose the four current-state fields without
+		// inventing missing requirements.
+		"**Acceptance criteria**",
+		"Not specified by requester",
+		"**Owner and current disposition**",
+		"assignee and status fields remain canonical",
 		// hard rules
 		"never invent requirements",
 		"never reduce multi-sentence input",
@@ -53,6 +61,9 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 
 	if strings.Contains(out, "do NOT pass `--attachment`") {
 		t.Errorf("buildQuickCreatePrompt carries the unconditional --attachment ban that conflicts with the quick-create ## Output delivery channel (MUL-5696)\n--- output ---\n%s", out)
+	}
+	if strings.Contains(out, "Use a two-section structure") {
+		t.Errorf("buildQuickCreatePrompt still asks for the superseded narrative description shape\n--- output ---\n%s", out)
 	}
 
 	// How to run the create, what to print, and how to pass a long
