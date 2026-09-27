@@ -13,7 +13,6 @@ package wecom
 
 import (
 	"context"
-	"github.com/multica-ai/multica/server/internal/util"
 	"strings"
 	"testing"
 
@@ -22,6 +21,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -264,6 +264,39 @@ func TestInboxCardUnknownTypeUsesTheSamePacksFallback(t *testing.T) {
 // by the caller and handed down in attachmentTarget — the delivery itself runs
 // detached, with no context left to read a profile with. Constructing the
 // target by hand here would test the pack and skip the wiring.
+func TestAttachmentSendFailureNoticeReadsTheDestinationsLanguage(t *testing.T) {
+	t.Parallel()
+	for _, tc := range localeCases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := oneAttachmentQueries(t, db.Attachment{
+				ID: mustTestUUID(t), Filename: "big.bin", Url: "https://cdn.example/obj/bin",
+			})
+			// A 1:1 with the asker, so their own profile answers.
+			q.sessionBinding.ChannelChatID = "T-asker"
+			q.sessionBinding.ChatType = string(channel.ChatTypeP2P)
+			q.userLanguage = tc.language
+			q.userBindingID = localeTestUserID
+
+			o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/bin", data: []byte("DATA")})
+			q.sessionBinding.InstallationID = instID
+			q.installation.ID = instID
+			conn.refuse[cmdUploadMediaInit] = 40058 // the server will not take the file
+
+			if err := o.processEvent(context.Background(), chatDoneEvent("See the attached dump.")); err != nil {
+				t.Fatalf("processEvent: %v", err)
+			}
+			// A turn that carries a file puts its answer on the socket too,
+			// ahead of the file, so the notice is the LAST thing here rather
+			// than the only thing.
+			got := markdownSends(t, conn)
+			want := copyPacks[tc.locale].MediaSendFailed
+			if len(got) == 0 || got[len(got)-1] != want {
+				t.Fatalf("sends = %q, want the %s failure notice %q last", got, tc.locale, want)
+			}
+		})
+	}
+}
+
 // The relayed path builds its own attachmentTarget, so "the notice reads the
 // destination's language" has to be true twice. On a multi-replica deployment
 // the relayed one is the common case: chat:done lands wherever the run
@@ -310,39 +343,6 @@ func TestRelayedAttachmentFailureNoticeAlsoReadsTheDestinationsLanguage(t *testi
 			if len(got) == 0 || got[len(got)-1] != want {
 				t.Fatalf("sends = %q, want the %s failure notice %q last — a relayed reply reaches the "+
 					"same reader as a direct one", got, tc.locale, want)
-			}
-		})
-	}
-}
-
-func TestAttachmentSendFailureNoticeReadsTheDestinationsLanguage(t *testing.T) {
-	t.Parallel()
-	for _, tc := range localeCases {
-		t.Run(tc.name, func(t *testing.T) {
-			q := oneAttachmentQueries(t, db.Attachment{
-				ID: mustTestUUID(t), Filename: "big.bin", Url: "https://cdn.example/obj/bin",
-			})
-			// A 1:1 with the asker, so their own profile answers.
-			q.sessionBinding.ChannelChatID = "T-asker"
-			q.sessionBinding.ChatType = string(channel.ChatTypeP2P)
-			q.userLanguage = tc.language
-			q.userBindingID = localeTestUserID
-
-			o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/bin", data: []byte("DATA")})
-			q.sessionBinding.InstallationID = instID
-			q.installation.ID = instID
-			conn.refuse[cmdUploadMediaInit] = 40058 // the server will not take the file
-
-			if err := o.processEvent(context.Background(), chatDoneEvent("See the attached dump.")); err != nil {
-				t.Fatalf("processEvent: %v", err)
-			}
-			// A turn that carries a file puts its answer on the socket too,
-			// ahead of the file, so the notice is the LAST thing here rather
-			// than the only thing.
-			got := markdownSends(t, conn)
-			want := copyPacks[tc.locale].MediaSendFailed
-			if len(got) == 0 || got[len(got)-1] != want {
-				t.Fatalf("sends = %q, want the %s failure notice %q last", got, tc.locale, want)
 			}
 		})
 	}
