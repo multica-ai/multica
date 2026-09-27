@@ -216,6 +216,10 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      # WeChat integration: the Weixin host (apps/weixin-host) and the shared
+      # secret the backend calls it with. Empty keeps WeChat off.
+      MULTICA_WEIXIN_HOST_URL: ${MULTICA_WEIXIN_HOST_URL:-}
+      MULTICA_WEIXIN_HOST_SECRET: ${MULTICA_WEIXIN_HOST_SECRET:-}
     restart: unless-stopped
 
   frontend:

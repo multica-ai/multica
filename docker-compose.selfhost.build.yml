@@ -19,3 +19,23 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_PUBLIC_APP_VERSION: dev
+
+  # WeChat relay. Opt in with COMPOSE_PROFILES=weixin plus
+  # MULTICA_WEIXIN_HOST_URL=http://weixin-host:8790 and a
+  # MULTICA_WEIXIN_HOST_SECRET in .env.
+  weixin-host:
+    profiles: ["weixin"]
+    image: multica-weixin-host:dev
+    build:
+      context: ./apps/weixin-host
+    depends_on:
+      - backend
+    environment:
+      WEIXIN_HOST_SECRET: ${MULTICA_WEIXIN_HOST_SECRET:-}
+      MULTICA_API_URL: http://backend:8080
+    volumes:
+      - weixin_state:/data
+    restart: unless-stopped
+
+volumes:
+  weixin_state:
