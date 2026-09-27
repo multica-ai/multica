@@ -71,6 +71,16 @@ const (
 	TaskSupplementFailureProviderRejected = "provider_rejected"
 	TaskSupplementFailureTimeout          = "timeout"
 	TaskSupplementFailureTurnEnded        = "turn_ended"
+	// DaemonCapabilityTaskIdentityTokensV1 advertises that the daemon injects
+	// the claim response's task_tokens into the agent process environment.
+	//
+	// A capability rather than a version check, and gated before signing rather
+	// than after: issuing writes an activity row stating that a credential was
+	// minted in a named person's name. A daemon without the implementation
+	// json-skips the field and runs the task with no token, which would leave
+	// that row asserting an issuance nothing ever received — the audit trail
+	// this feature exists for, saying something untrue.
+	DaemonCapabilityTaskIdentityTokensV1 = "task-identity-tokens-v1"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:

@@ -1,0 +1,95 @@
+---
+title: Task identity tokens
+description: Let an agent act on your internal systems as the person who asked, instead of as a shared service account — and how a receiving system verifies that.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Task identity tokens let an agent reach your internal systems — ERP, admin backends, wikis — **as the person who triggered the run**, rather than through a shared service account.
+
+At claim time the server signs a short-lived JWT naming the run's accountable human, and the daemon injects it into the agent process. The agent presents that token to your internal system, which sees a request from that person and applies the permissions it already has for them.
+
+Off unless configured. An unconfigured deployment behaves exactly as before, and the **Identity Tokens** tab stays hidden.
+
+<Callout type="info">
+This is a self-hosting feature. It signs a credential for a **different trust domain** — systems outside Multica that opt into accepting it. The agent's access to Multica's own API is unchanged and stays owner-scoped.
+</Callout>
+
+## Why a service account is not enough
+
+Connecting an agent to an internal system normally means issuing it a service account, and that breaks two things at once:
+
+- **Permissions collapse to one level.** Every user's agent acts with the same fixed identity — a junior engineer's agent can reach whatever the service account can.
+- **Audit goes anonymous.** The internal system logs "the bot did it". Who actually asked is lost, which is usually the one thing an audit needs.
+
+Task identity tokens remove that trade-off. Your permission model does not change: your system keeps checking who this is, applying their rights, and logging their name — it simply receives a real person instead of a shared bot.
+
+## How it works
+
+1. **A human triggers a run, or their schedule fires** — by assignment, comment, delegation or a scheduled dispatch.
+2. **The server resolves the authorizing human** from the run's attribution and, for each identity token the agent has enabled, signs a JWT with that person as the `sub` and the acting agent as the `act_*` claims.
+3. **The daemon injects the token** into the agent process environment under the template's variable name (e.g. `BOT_TOKEN_ERP`).
+4. **The agent calls your system** with the token as a bearer credential.
+5. **Your system verifies the token** against the published public keys, maps `sub` to its own user record, and applies that user's existing permissions and audit.
+
+Steps 1–3 happen in Multica; steps 4–5 are the [integration you build](#the-two-integration-paths). Multica never gains authority over your system — it only states, verifiably, who is asking and which agent acts for them.
+
+<Callout type="info">
+Named precisely, this is **delegated user impersonation** in the [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) sense: `sub` is the delegating human, `act_sub` / `act_name` name the agent executing on their behalf. It is *not* workload attestation like GitHub Actions OIDC, and should be reviewed with the trust obligations delegation carries.
+</Callout>
+
+## Who gets an identity
+
+The identity belongs to the **human who triggered the run**, or to the **immutable creator of its schedule**. Each agent delegation must preserve that human in `originator_user_id`. An issue's creator, an agent's owner, a rule publisher or a later schedule editor cannot replace them. The person must still be a workspace member when the run is claimed.
+
+| Source | Signed |
+| --- | --- |
+| `direct_human` | yes, for the member who acted |
+| `trigger_owner` | only for a verified scheduled dispatch, as the schedule's member creator |
+| `delegation`, `comment_source` | only when every hop preserves the human from a permitted root |
+| webhook `trigger_owner`, `rule_owner`, `owner_fallback`, `backfill`, `unattributed` | no |
+
+Both schedule execution modes (`run_only` and `create_issue`) are supported, including descendants of completed runs. Missing provenance, a changed identity or an unproven creator yields no generated token. The run continues; operations requiring that credential remain unauthorized.
+
+Tokens are only signed for a daemon that advertises it can inject them (`task-identity-tokens-v1`), so upgrade daemons before enabling the feature: issuing for an older one would record an issuance nothing ever received.
+
+Every successful issuance writes an `agent_task_tokens_issued` row to the activity log — the accountable human, the agent, the task, and each token's `jti` and expiry — and fails closed: if that row cannot be written, the tokens are withheld.
+
+## The two integration paths
+
+The feature has two distinct audiences, and each has its own guide in the repository.
+
+### 1. Enabling it (operators)
+
+A workspace owner or admin enables it in two steps:
+
+1. **Configure the server.** Set `MULTICA_TASK_TOKEN_PRIVATE_KEY` (a PEM signing key) and `MULTICA_TASK_TOKEN_TEMPLATES` (a JSON catalog of what may be signed, into which variable, with what claims). See [Environment variables](/environment-variables). Setting one without the other is a startup error; leaving both unset keeps the feature off.
+2. **Enable per agent.** Open **Settings → Agents →** pick the agent **→ Identity Tokens** and turn on the subset that agent needs. The catalog lives only in server configuration, so the UI can pick from what an operator allowed but can never define what may be signed.
+
+The full operator guide — catalog format, interpolation variables, the `allowed_domains` allowlist, security boundaries (blast radius, what a server compromise buys, rotation), and troubleshooting — is [`TASK_IDENTITY_TOKENS.md`](https://github.com/multica-ai/multica/blob/main/TASK_IDENTITY_TOKENS.md) in the repository.
+
+<Callout type="warn">
+Default `sub` to the full corporate email, and require verified corporate email as a prerequisite — the whole trust chain roots in the address Multica stores. If you map the email local part instead, pair it with the template's `allowed_domains` so only your own domain can be signed.
+</Callout>
+
+### 2. Verifying tokens (receiving-system developers)
+
+The system that receives these tokens verifies them against a JWK Set that Multica serves, unauthenticated, at:
+
+```
+GET https://<your-multica-host>/.well-known/jwks.json
+```
+
+Any mainstream JWT library consumes it directly. If your internal systems sit behind an API gateway (Kong, APISIX, nginx, a cloud gateway), verification is often zero-code: point the gateway's bearer-JWT validation at the expected `iss` and this URL as the `jwks_uri`.
+
+The integration itself is a security boundary — pinning the algorithm allowlist, mapping `sub` to a local user without auto-provisioning, recording both the human and the acting agent in your audit trail. The step-by-step guide, worked verification code, and the mistakes that actually bite are in [`TASK_IDENTITY_TOKENS_AI.md`](https://github.com/multica-ai/multica/blob/main/TASK_IDENTITY_TOKENS_AI.md), written to be handed to an AI agent working inside your legacy codebase.
+
+<Callout type="warn">
+Pin an explicit algorithm allowlist in your verifier. A verifier that trusts the token's own `alg` is trivially forged — `alg: none`, or `HS256` using the public key as the HMAC secret. The public JWKS makes both free if a symmetric algorithm is allowed.
+</Callout>
+
+## Related
+
+- [Environment variables](/environment-variables) — the server configuration reference
+- [Security model](/security-model) — what a task can reach on the machine that runs it
+- [Agents](/agents) — where the Identity Tokens tab lives

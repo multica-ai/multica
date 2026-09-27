@@ -15,6 +15,8 @@ import {
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
   TaskMessageListSchema,
+  AgentTaskTokensSchema,
+  EMPTY_AGENT_TASK_TOKENS,
   AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
@@ -2336,5 +2338,33 @@ describe("TaskMessageListSchema", () => {
   it("downgrades an unknown message type instead of dropping the transcript", () => {
     const parsed = TaskMessageListSchema.parse([{ ...row, type: "video" }]);
     expect(parsed[0]?.type).toBe("text");
+  });
+});
+
+describe("AgentTaskTokensSchema", () => {
+  it("parses a well-formed response", () => {
+    const parsed = AgentTaskTokensSchema.parse({
+      agent_id: "a-1",
+      available: [{ id: "erp", label: "ERP", description: "erp.example.com", env: "BOT_TOKEN_ERP" }],
+      enabled: ["erp"],
+    });
+    expect(parsed.available[0]?.env).toBe("BOT_TOKEN_ERP");
+    expect(parsed.enabled).toEqual(["erp"]);
+  });
+
+  it("defaults missing collections so the UI never sees undefined", () => {
+    const parsed = AgentTaskTokensSchema.parse({ agent_id: "a-1" });
+    expect(parsed.available).toEqual([]);
+    expect(parsed.enabled).toEqual([]);
+  });
+
+  it("falls back instead of throwing on a malformed response", () => {
+    const result = parseWithFallback(
+      { available: "not-an-array", enabled: 7 },
+      AgentTaskTokensSchema,
+      EMPTY_AGENT_TASK_TOKENS,
+      { endpoint: "GET /api/agents/{id}/task-tokens" },
+    );
+    expect(result).toEqual(EMPTY_AGENT_TASK_TOKENS);
   });
 });

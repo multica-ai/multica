@@ -1195,9 +1195,10 @@ func (s *TaskService) EnqueueTaskForIssueByActor(ctx context.Context, issue db.I
 // EnqueueTaskForIssueWithHandoff is the backward-compatible assign/promote
 // variant used when an installed client still sends handoff_note. The note is
 // persisted on the task so both old and current daemons can render it in the
-// run's opening prompt. Empty text behaves like EnqueueTaskForIssueByActor.
-func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived)
+// run's opening prompt. Attribution is resolved from this request's actor and
+// passed explicitly, including an unattributed result when lineage is missing.
+func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string, attr attribution.Result) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithAttribution(ctx, issue, pgtype.UUID{}, nil, false, handoffNote, attr, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -1250,6 +1251,11 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, actorUserID)
+	return s.enqueueIssueTaskWithAttribution(ctx, issue, triggerCommentID, coalescedCommentIDs, forceFreshSession, handoffNote, attr, rerunOfTaskID, fireAt, origin)
+}
+
+func (s *TaskService) enqueueIssueTaskWithAttribution(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, attr attribution.Result, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1272,12 +1278,6 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	// The issue assignee reacting to an agent-authored comment is a
-	// comment_source attribution (a special case of delegation); a member
-	// comment or direct member assignment is direct_human. attr.UserID is the
-	// same value the pre-MUL-4302 resolver produced, so overlay/authorization
-	// are unchanged; the extra fields are audit provenance.
-	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, actorUserID)
 	// No precise human resolved → owner_fallback (accountable = agent owner), or
 	// refuse the enqueue if the workspace is fail-closed (MUL-4302 §3.5).
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
@@ -1418,8 +1418,8 @@ func (s *TaskService) EnqueueTaskForSquadLeaderByActor(ctx context.Context, issu
 
 // EnqueueTaskForSquadLeaderWithHandoff is the squad equivalent of
 // EnqueueTaskForIssueWithHandoff.
-func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, OriginDerived)
+func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string, attr attribution.Result) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithAttribution(ctx, issue, leaderID, pgtype.UUID{}, nil, true, squadID, false, handoffNote, attr, pgtype.UUID{}, OriginDerived)
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
@@ -1427,6 +1427,11 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation, actorUserID)
+	return s.enqueueMentionTaskWithAttribution(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, forceFreshSession, handoffNote, attr, rerunOfTaskID, origin)
+}
+
+func (s *TaskService) enqueueMentionTaskWithAttribution(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, attr attribution.Result, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1444,11 +1449,6 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	// An explicit mention / thread-parent / squad-leader hop from an
-	// agent-authored comment is a delegation (the parent task's human is
-	// copied); a member mention is direct_human. attr.UserID matches the
-	// pre-MUL-4302 value, so authorization is unchanged.
-	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceDelegation, actorUserID)
 	// No precise human resolved → owner_fallback (accountable = agent owner), or
 	// refuse the enqueue if the workspace is fail-closed (MUL-4302 §3.5).
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
