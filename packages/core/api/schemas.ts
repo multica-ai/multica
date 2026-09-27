@@ -44,6 +44,9 @@ import type {
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
+  WeixinInstallation,
+  ListWeixinInstallationsResponse,
+  WeixinLogin,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -3334,6 +3337,56 @@ export const EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE: RedeemTelegramBinding
   workspace_id: "",
   installation_id: "",
   telegram_user_id: "",
+};
+
+export const WeixinInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  account_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("error"),
+  last_error: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_WEIXIN_INSTALLATION: WeixinInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  account_id: "",
+  installer_user_id: "",
+  status: "error",
+  last_error: null,
+  created_at: "",
+};
+
+export const ListWeixinInstallationsResponseSchema = z.object({
+  installations: z.array(WeixinInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_WEIXIN_INSTALLATIONS_RESPONSE: ListWeixinInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const WeixinLoginSchema = z.object({
+  id: z.string(),
+  // Unknown future states read as "failed" so the dialog never spins forever.
+  state: z.string().default("failed"),
+  qr_content: z.string().default(""),
+  message: z.string().default(""),
+  verify_code_invalid: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_WEIXIN_LOGIN: WeixinLogin = {
+  id: "",
+  state: "failed",
+  qr_content: "",
+  message: "",
+  verify_code_invalid: false,
 };
 
 // Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from

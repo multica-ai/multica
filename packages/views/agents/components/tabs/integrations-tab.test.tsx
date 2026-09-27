@@ -169,6 +169,14 @@ vi.mock("../../../settings/components/telegram-tab", () => ({
   ),
 }));
 
+// The WeChat card has its own coverage in weixin-tab.test.tsx; here it is a
+// marker so the tests assert where it renders.
+vi.mock("../../../settings/components/weixin-tab", () => ({
+  WeixinAgentSection: ({ agent }: { agent: Agent }) => (
+    <div data-testid="weixin-agent-section" data-agent-id={agent.id} />
+  ),
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 const TEST_RESOURCES = {
@@ -553,6 +561,17 @@ describe("IntegrationsTab", () => {
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
     expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
     expect(screen.queryByTestId("telegram-bind-button")).toBeNull();
+  });
+
+  it("offers WeChat to plain members and managers alike", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    renderTab(<IntegrationsTab agent={{ ...agent, owner_id: "user-2" }} />);
+    expect(screen.getByTestId("weixin-agent-section").dataset.agentId).toBe("agent-1");
+    cleanup();
+
+    membersRef.current = [{ user_id: "user-1", role: "owner" }];
+    renderTab(<IntegrationsTab agent={agent} />);
+    expect(screen.getByTestId("weixin-agent-section").dataset.agentId).toBe("agent-1");
   });
 
   it("lets a non-admin agent owner bind Lark and DingTalk", () => {

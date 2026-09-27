@@ -28,6 +28,7 @@ import { WecomAgentBindButton } from "../../../settings/components/wecom-tab";
 import { WecomMark } from "../../../settings/components/wecom-mark";
 import { TelegramAgentBindButton } from "../../../settings/components/telegram-tab";
 import { TelegramMark } from "../../../settings/components/telegram-mark";
+import { WeixinAgentSection } from "../../../settings/components/weixin-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -164,6 +165,9 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   ) {
     return (
       <div className="space-y-6">
+        {/* Weixin is per member: anyone who can chat with the agent may
+            connect their own, so it renders outside the admin gate. */}
+        <WeixinAgentSection agent={agent} />
         {dingtalkInstallation ? (
           <section className="rounded-lg border">
             <div className="flex items-start gap-3 p-4">
@@ -438,6 +442,8 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
           )}
         </div>
       </section>
+
+      <WeixinAgentSection agent={agent} />
     </div>
   );
 }

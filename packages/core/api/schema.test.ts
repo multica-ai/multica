@@ -709,6 +709,55 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("Weixin integration", () => {
+    it("falls back to a safe empty installation list when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listWeixinInstallations("ws-1")).resolves.toEqual({
+        installations: [],
+        configured: false,
+      });
+    });
+
+    it("defaults fields omitted by an older server", async () => {
+      stubFetchJson({ installations: [{ id: "wx-1", status: "active" }], configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWeixinInstallations("ws-1");
+      expect(res.installations[0]).toMatchObject({
+        id: "wx-1",
+        agent_id: "",
+        account_id: "",
+        last_error: null,
+      });
+      expect(res.install_supported).toBeUndefined();
+    });
+
+    it("treats a malformed or unknown login as failed so polling stops", async () => {
+      stubFetchJson({ id: 7 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getWeixinLogin("ws-1", "login-1")).resolves.toMatchObject({
+        id: "",
+        state: "failed",
+      });
+
+      stubFetchJson({ id: "login-1", qr_content: "https://qr" });
+      await expect(client.startWeixinLogin("ws-1", "agent-1")).resolves.toMatchObject({
+        id: "login-1",
+        state: "failed",
+        verify_code_invalid: false,
+      });
+    });
+
+    it("falls back safely when completing a login returns a malformed installation", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.completeWeixinLogin("ws-1", "login-1")).resolves.toMatchObject({
+        id: "",
+        status: "error",
+      });
+    });
+  });
+
   describe("listDingTalkGroups", () => {
     it("preserves bot activity metadata for each group relationship", async () => {
       stubFetchJson({
