@@ -548,6 +548,60 @@ export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
 }
 
+// Local search index sync (MUL-7754): GET /api/search-index/manifest,
+// GET /api/search-index/snapshot, POST /api/search-index/changes.
+
+/** Issue as the local search index stores it: a search row without match fields. */
+export interface SearchIndexIssue extends Issue {
+  /** Sub-second `updated_at`, which server search breaks ranking ties with. */
+  search_updated_at: string;
+}
+
+/** Project as the local index stores it. Issue and resource counts are not synced. */
+export interface SearchIndexProject extends Project {
+  search_updated_at: string;
+}
+
+export interface SearchIndexComment {
+  id: string;
+  issue_id: string;
+  content: string;
+  /** Sub-second RFC 3339 timestamp. */
+  created_at: string;
+}
+
+export interface SearchIndexManifest {
+  /** Opaque catch-up cursor for the snapshot the new copy starts from. */
+  cursor: string;
+  issue_count: number;
+  comment_count: number;
+  project_count: number;
+  /** UTF-8 bytes of every title, description, and live comment. */
+  text_bytes: number;
+}
+
+export interface SearchIndexSnapshotPage {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  /** Every project, on the first page only. */
+  projects: SearchIndexProject[];
+  next_after_number: number;
+  done: boolean;
+}
+
+export interface SearchIndexChanges {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  projects: SearchIndexProject[];
+  deleted: {
+    issues: string[];
+    comments: string[];
+    projects: string[];
+  };
+  cursor: string;
+  has_more: boolean;
+}
+
 export interface UpdateMeRequest {
   name?: string;
   avatar_url?: string;

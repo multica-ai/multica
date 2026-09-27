@@ -1263,10 +1263,7 @@ export function IssuesHeader({
   );
   // The save dialog's default variant: while a saved view is open the view's
   // own variant wins (the rows on screen ARE that variant — a copy must not
-  // silently widen to the page tab); otherwise the page tab applies. Memoized
-  // on primitives: the dialog resets its draft when this prop's identity
-  // changes, so a fresh object per header render would wipe a half-typed
-  // name on any background refetch.
+  // silently widen to the page tab); otherwise the page tab applies.
   const dialogActorKind = activeView
     ? actorKindForViewVariant(activeView.scope_variant)
     : scope;

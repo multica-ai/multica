@@ -11,7 +11,7 @@
  * rather than looked at (Markdown, text) render on a centered sheet that
  * keeps the app's own theme.
  *
- * Single viewer for every previewable kind. Handles 7 PreviewKinds:
+ * Single viewer for every previewable kind. Handles 9 PreviewKinds:
  *
  *   - image : <img> on the shared ZoomCanvas — fit on open, then wheel /
  *             drag / pinch / double-click / keyboard zoom, same controls as
@@ -31,8 +31,16 @@
  *                JS work), but cookie / localStorage / parent access /
  *                top-navigation / popups / forms stay blocked because
  *                `allow-same-origin` is intentionally NOT included.
+ *                Laid out at a device width on demand, or shown as source.
+ *   - table    : fetch text, parse CSV / TSV, sortable virtualized table.
+ *   - structured : fetch text, parse JSON / JSON Lines / YAML into a
+ *                collapsible tree, with the source one toggle away.
  *   - text     : fetch text, highlight with lowlight if the extension
- *                maps to a known hljs language; otherwise plain <pre>.
+ *                maps to a known hljs language, with numbered lines and a
+ *                wrap toggle.
+ *
+ * The same top bar and stage also stand alone as the "open in new tab" page
+ * (`AttachmentPreviewStandalone`), so a file looks the same in both.
  *
  * Media types load directly from the CloudFront signed `download_url`.
  * Text types go through `/api/attachments/{id}/content` to sidestep
@@ -50,6 +58,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { toast } from "sonner";
 import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
@@ -57,21 +66,35 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  Code,
+  Copy,
   Download,
   ExternalLink,
   File,
   FileAudio,
   FileCode,
+  FileSpreadsheet,
   FileText,
   FileVideo,
   ImageIcon,
+  LayoutGrid,
+  ListTree,
   Loader2,
+  Maximize2,
+  MessageSquareText,
+  Monitor,
+  PanelRight,
+  RotateCw,
+  Smartphone,
+  Tablet,
+  WrapText,
   X,
   type LucideIcon,
 } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
+import { copyImage } from "@multica/ui/lib/clipboard";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   UI_EASE_OUT,
@@ -80,6 +103,7 @@ import {
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
+import { isDesktopShell } from "../platform/local-directory";
 import { useImmersiveMode } from "../platform/use-immersive-mode";
 import { ReadonlyContent } from "./readonly-content";
 import {
@@ -87,8 +111,12 @@ import {
   extensionToLanguage,
   fileTypeLabel,
   getPreviewKind,
+  structuredFormat,
+  tableDelimiter,
+  wrapsByDefault,
   type PreviewKind,
 } from "./utils/preview";
+import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
@@ -97,7 +125,19 @@ import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
 import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
 import type { Size } from "./utils/zoom-transform";
 import { HtmlPreviewBody } from "./html-preview-body";
+import { HtmlPreviewAddress } from "./html-preview-address";
+import {
+  useHtmlPreviewLocation,
+  type HtmlPreviewLocation,
+} from "./hooks/use-html-preview-location";
 import { CodeBlockStatic } from "./code-block-static";
+import { TablePreview } from "./table-preview";
+import { StructuredTree } from "./structured-tree";
+import {
+  HTML_VIEWPORTS,
+  HtmlViewportFrame,
+  type HtmlViewport,
+} from "./html-viewport-frame";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -209,6 +249,19 @@ export interface PreviewSequence {
   onNext?: () => void;
 }
 
+/** "Show where this was posted" — labelled by the host, which knows where. */
+export interface PreviewLocateAction {
+  label: string;
+  onSelect: () => void;
+}
+
+/** The info panel beside the stage (MUL-7649). Its open state outlives the file. */
+export interface PreviewInfoPanel {
+  content: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+}
+
 interface AttachmentPreviewModalProps {
   source: PreviewSource;
   open: boolean;
@@ -216,6 +269,14 @@ interface AttachmentPreviewModalProps {
   sequence?: PreviewSequence;
   /** Fired when the image kind fails to load — lets a gallery skip the frame. */
   onImageError?: () => void;
+  /** Rendered after the file name, e.g. a version switcher. */
+  titleAccessory?: ReactNode;
+  /** Adds the info button and `I`. */
+  info?: PreviewInfoPanel;
+  /** Adds "show where this was posted": the caller closes the viewer and scrolls. */
+  locate?: PreviewLocateAction;
+  /** Adds the overview button and `G`. */
+  onOpenOverview?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +440,13 @@ function ownsArrowKeys(target: EventTarget | null): boolean {
   return target.closest("input, textarea, select, video, audio") !== null;
 }
 
+// Letter shortcuts stand down only where the reader could be typing.
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target.closest("input, textarea, select") !== null;
+}
+
 export function AttachmentPreviewModal({
   source,
   open,
@@ -386,6 +454,10 @@ export function AttachmentPreviewModal({
   onExitComplete,
   sequence,
   onImageError,
+  titleAccessory,
+  info,
+  locate,
+  onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
   const shouldReduceMotion = useReducedMotion() ?? false;
@@ -394,9 +466,21 @@ export function AttachmentPreviewModal({
   // workspace route instead of throwing, so the new-tab button just hides.
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
+  // The html kind's current address, for "Open in new tab". Tagged with its
+  // file so one document's address never follows the reader to the next.
+  const htmlAddressRef = useRef<{ attachmentId: string; address: string } | null>(
+    null,
+  );
+  const handleHtmlAddressChange = useCallback(
+    (attachmentId: string, address: string) => {
+      htmlAddressRef.current = { attachmentId, address };
+    },
+    [],
+  );
 
   const onPrev = sequence?.onPrev;
   const onNext = sequence?.onNext;
+  const onToggleInfo = info?.onToggle;
 
   // macOS desktop: hide the traffic lights while the viewer is up — its top
   // bar starts at the window's top-left corner, where they would sit on the
@@ -406,6 +490,9 @@ export function AttachmentPreviewModal({
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      // A menu opened from the chrome (the version switcher) owns its keys:
+      // Escape closes the menu, not the viewer, and arrows move its focus.
+      if (e.target instanceof Element && e.target.closest('[role="menu"]')) return;
       if (e.key === "Escape") {
         onClose();
         return;
@@ -415,6 +502,21 @@ export function AttachmentPreviewModal({
       // `horizontalArrowPan` below), so exactly one of the two responds.
       // Modified presses stay with the browser / OS.
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (!e.repeat && !isTypingTarget(e.target)) {
+        // Claimed with preventDefault so the app's own single-key shortcuts
+        // (which skip handled events) don't also fire behind the viewer.
+        const letter = e.key.toLowerCase();
+        if (letter === "g" && onOpenOverview) {
+          e.preventDefault();
+          onOpenOverview();
+          return;
+        }
+        if (letter === "i" && onToggleInfo) {
+          e.preventDefault();
+          onToggleInfo();
+          return;
+        }
+      }
       if (ownsArrowKeys(e.target)) return;
       if (e.key === "ArrowLeft" && onPrev) {
         e.preventDefault();
@@ -426,7 +528,7 @@ export function AttachmentPreviewModal({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose, onPrev, onNext]);
+  }, [open, onClose, onPrev, onNext, onOpenOverview, onToggleInfo]);
 
   const kind = state.kind;
 
@@ -441,17 +543,22 @@ export function AttachmentPreviewModal({
     }
   };
 
-  // Open-in-new-tab mirrors HtmlAttachmentPreview's inline toolbar: only the
-  // `html` kind has a dedicated full-page route (/attachments/{id}/preview).
-  // Gated on slug + attachmentId for the same reason — URL-only sources
-  // can't address the /content proxy the page relies on.
-  const canOpenInNewTab = kind === "html" && !!slug && !!state.attachmentId;
+  // Open-in-new-tab: the full-page route (/attachments/{id}/preview) shows
+  // every previewable kind, but loads the file by id — a URL-only source has
+  // none, and a file the viewer cannot show gains nothing from a tab.
+  const canOpenInNewTab = kind !== null && !!slug && !!state.attachmentId;
   const handleOpenInNewTab = () => {
     if (!slug || !state.attachmentId) return;
-    const nameQuery = state.filename
-      ? `?name=${encodeURIComponent(state.filename)}`
-      : "";
-    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
+    const address =
+      htmlAddressRef.current?.attachmentId === state.attachmentId
+        ? htmlAddressRef.current.address
+        : "";
+    const params = [
+      state.filename ? `name=${encodeURIComponent(state.filename)}` : "",
+      address ? `loc=${encodeURIComponent(address)}` : "",
+    ].filter(Boolean);
+    const query = params.length > 0 ? `?${params.join("&")}` : "";
+    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${query}`;
     if (navigation.openInNewTab) {
       navigation.openInNewTab(path, state.filename, { activate: true });
     } else {
@@ -509,6 +616,7 @@ export function AttachmentPreviewModal({
               every swap, so the canvas re-fits even across a run of
               same-resolution screenshots. */}
           <PreviewPanel
+            surface="viewer"
             kind={kind}
             source={source}
             state={state}
@@ -518,6 +626,11 @@ export function AttachmentPreviewModal({
             sequence={sequence}
             onImageError={onImageError}
             reduceMotion={shouldReduceMotion}
+            titleAccessory={titleAccessory}
+            info={info}
+            locate={locate}
+            onOpenOverview={onOpenOverview}
+            onHtmlAddressChange={handleHtmlAddressChange}
           />
         </motion.div>
       )}
@@ -537,13 +650,64 @@ const KIND_ICONS: Record<PreviewKind, LucideIcon> = {
   audio: FileAudio,
   markdown: FileText,
   html: FileCode,
+  table: FileSpreadsheet,
+  structured: FileCode,
   text: FileCode,
 };
 
-// Top bar and stage live together because the image kind's zoom controls sit
-// in the bar while the canvas they drive is on the stage: one owner for that
-// shared state, mounted and destroyed with the open viewer.
+type StructuredView = "tree" | "raw";
+
+const VIEWPORT_ICONS: Record<HtmlViewport, LucideIcon> = {
+  fill: Maximize2,
+  desktop: Monitor,
+  tablet: Tablet,
+  phone: Smartphone,
+};
+
+/**
+ * Renders an HTML attachment's iframe, loaded at the address bar's address
+ * (`location`, see useHtmlPreviewLocation). The viewer's is plain; the
+ * full-page preview's also reports its scroll position to the desktop tab
+ * restorer.
+ */
+export type HtmlFrameRenderer = (props: {
+  html: string;
+  title: string;
+  location: HtmlPreviewLocation;
+}) => ReactNode;
+
+const renderViewerHtmlFrame: HtmlFrameRenderer = ({ html, title, location }) => (
+  <HtmlPreviewBody
+    html={html}
+    title={title}
+    location={location}
+    className="h-full w-full"
+    iframeClassName="rounded-none border-0"
+  />
+);
+
+// The parsed body of a `structured` file. Parsed here, above the stage,
+// because the top bar needs the outcome too: a file that does not parse has
+// no tree to switch to. Shares the stage's query, so nothing is fetched twice.
+function useStructuredParse(state: PreviewState, enabled: boolean) {
+  const format = enabled ? structuredFormat(state.contentType, state.filename) : null;
+  const query = useAttachmentHtmlText(format ? state.attachmentId : null);
+  const text = query.data?.text;
+  return useMemo(
+    () => (format && text !== undefined ? parseStructured(text, format) : null),
+    [format, text],
+  );
+}
+
+// Top bar and stage live together because some kinds' controls sit in the
+// bar while what they drive is on the stage — the image's zoom, a document's
+// line wrapping, an HTML file's viewport: one owner for that shared state,
+// mounted and destroyed with the open viewer.
+//
+// `surface` is where it is mounted: the viewer overlay, or the "open in new
+// tab" page, which has no close, no sequence and no window drag region.
 function PreviewPanel({
+  surface,
   kind,
   source,
   state,
@@ -553,18 +717,70 @@ function PreviewPanel({
   sequence,
   onImageError,
   reduceMotion,
+  titleAccessory,
+  info,
+  locate,
+  onOpenOverview,
+  renderHtmlFrame = renderViewerHtmlFrame,
+  initialHtmlAddress = "",
+  onHtmlAddressChange,
 }: {
+  surface: "viewer" | "page";
   kind: PreviewKind | null;
   source: PreviewSource;
   state: PreviewState;
-  onClose: () => void;
+  onClose?: () => void;
   onDownload: () => void;
   onOpenInNewTab?: () => void;
   sequence?: PreviewSequence;
   onImageError?: () => void;
   reduceMotion: boolean;
+  titleAccessory?: ReactNode;
+  info?: PreviewInfoPanel;
+  locate?: PreviewLocateAction;
+  onOpenOverview?: () => void;
+  renderHtmlFrame?: HtmlFrameRenderer;
+  /** Query and fragment an HTML file opens at. */
+  initialHtmlAddress?: string;
+  /** Reports an HTML file's address as the reader or the document moves it. */
+  onHtmlAddressChange?: (attachmentId: string, address: string) => void;
 }) {
   const { t } = useT("editor");
+
+  // How the file is shown. Held here rather than in the stage so a choice
+  // carries over as the reader pages through the sequence: the next HTML
+  // file opens at the same width, the next log wraps the same way. Wrapping
+  // follows the file until the reader picks.
+  const [wrapChoice, setWrapChoice] = useState<boolean | null>(null);
+  const wrap = wrapChoice ?? wrapsByDefault(state.filename);
+  const toggleWrap = () => setWrapChoice(!wrap);
+  const [htmlViewport, setHtmlViewport] = useState<HtmlViewport>("fill");
+  const [htmlSource, setHtmlSource] = useState(false);
+  // An HTML file's address: shown in the top bar, loaded by the stage. Held
+  // here, per file, so it survives the source view, which unmounts the frame.
+  const htmlLocation = useHtmlPreviewLocation(
+    initialHtmlAddress,
+    state.attachmentId ?? "",
+  );
+  const htmlAddress = htmlLocation.address;
+  useEffect(() => {
+    if (kind === "html" && state.attachmentId) {
+      onHtmlAddressChange?.(state.attachmentId, htmlAddress);
+    }
+  }, [kind, state.attachmentId, htmlAddress, onHtmlAddressChange]);
+  const [structuredChoice, setStructuredChoice] = useState<StructuredView>("tree");
+  const structuredParse = useStructuredParse(state, kind === "structured");
+  const treeAvailable = structuredParse?.ok !== false;
+  const structuredView: StructuredView = treeAvailable ? structuredChoice : "raw";
+  const view: StageView = {
+    wrap,
+    htmlViewport,
+    htmlSource,
+    structuredView,
+    structuredParse,
+    renderHtmlFrame,
+    htmlLocation,
+  };
 
   // Gallery navigation hands this panel an attachment the reader never
   // clicked, so — unlike the click-through path, where <Attachment> had
@@ -589,6 +805,19 @@ function PreviewPanel({
   // reports against the next one.
   const imageLoadError =
     mediaUrl !== "" && mediaUrl === targetUrl ? onImageError : undefined;
+
+  // Copying reads the image's bytes from script. The desktop renderer can
+  // read any origin; web script can't read the storage CDN (it sends no CORS
+  // headers), and there the browser's own context menu has Copy image. Copies
+  // the frame on screen, which during a sequence swap is still the last one.
+  const canCopyImage = kind === "image" && isDesktopShell();
+  const handleCopyImage = async () => {
+    if (await copyImage(mediaUrl)) {
+      toast.success(t(($) => $.image.image_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_image_failed));
+    }
+  };
 
   // Natural size is carried with the URL it was measured from, so a panel
   // reused for a different attachment can never fit the new image against the
@@ -631,7 +860,24 @@ function PreviewPanel({
   // The stage's own padding — the gutters around the content — counts as
   // backdrop: clicking there closes, clicking the content never does.
   const closeOnBackdrop = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target === e.currentTarget) onClose?.();
+  };
+
+  const wrapButton = (enabled: boolean) => (
+    <ChromeButton
+      label={t(($) => $.attachment.wrap_lines)}
+      pressed={enabled && wrap}
+      disabled={!enabled}
+      onClick={toggleWrap}
+    >
+      <WrapText className="size-4" />
+    </ChromeButton>
+  );
+  const viewportLabels: Record<HtmlViewport, string> = {
+    fill: t(($) => $.attachment.viewport_fill),
+    desktop: t(($) => $.attachment.viewport_desktop),
+    tablet: t(($) => $.attachment.viewport_tablet),
+    phone: t(($) => $.attachment.viewport_phone),
   };
 
   return (
@@ -639,15 +885,27 @@ function PreviewPanel({
       {/* Three columns so the counter stays centered on the window while a
           long filename truncates before reaching it. */}
       <header
-        className="dark grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 pl-3 pr-2 text-foreground"
-        style={DRAG}
+        className="dark @container grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 pl-3 pr-2 text-foreground"
+        style={surface === "viewer" ? DRAG : undefined}
       >
         <div className="flex min-w-0 items-center gap-2.5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
             <KindIcon className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-body font-medium">{state.filename}</p>
+            <div className="flex min-w-0 items-center gap-2" style={titleAccessory ? NO_DRAG : undefined}>
+              {kind === "html" && !htmlSource ? (
+                <HtmlPreviewAddress
+                  filename={state.filename}
+                  address={htmlLocation.address}
+                  onNavigate={htmlLocation.navigate}
+                  style={NO_DRAG}
+                />
+              ) : (
+                <p className="truncate text-body font-medium">{state.filename}</p>
+              )}
+              {titleAccessory}
+            </div>
             {meta.length > 0 && (
               <p className="truncate text-caption text-muted-foreground tabular-nums">
                 {meta.join(" · ")}
@@ -682,6 +940,74 @@ function PreviewPanel({
               <ChromeDivider />
             </>
           )}
+          {/* View controls stay mounted, disabled where they do not apply —
+              toggling the source view must not shift the button just pressed. */}
+          {kind === "html" && (
+            <>
+              <ChromeButton
+                label={t(($) => $.attachment.reload)}
+                disabled={htmlSource}
+                onClick={htmlLocation.reload}
+              >
+                <RotateCw className="size-4" />
+              </ChromeButton>
+              <ChromeSegmented
+                label={t(($) => $.attachment.viewport)}
+                value={htmlViewport}
+                disabled={htmlSource}
+                options={HTML_VIEWPORTS.map((viewport) => ({
+                  value: viewport,
+                  label: viewportLabels[viewport],
+                  icon: VIEWPORT_ICONS[viewport],
+                }))}
+                onChange={setHtmlViewport}
+              />
+              <ChromeButton
+                label={t(($) => $.attachment.view_source)}
+                pressed={htmlSource}
+                onClick={() => setHtmlSource((shown) => !shown)}
+              >
+                <Code className="size-4" />
+              </ChromeButton>
+              {wrapButton(htmlSource)}
+              <ChromeDivider />
+            </>
+          )}
+          {kind === "structured" && (
+            <>
+              <ChromeSegmented
+                label={t(($) => $.attachment.view_mode)}
+                value={structuredView}
+                disabled={!treeAvailable}
+                options={[
+                  {
+                    value: "tree",
+                    label: t(($) => $.attachment.view_tree),
+                    icon: ListTree,
+                  },
+                  {
+                    value: "raw",
+                    label: t(($) => $.attachment.view_raw),
+                    icon: Code,
+                  },
+                ]}
+                onChange={setStructuredChoice}
+              />
+              {wrapButton(structuredView === "raw")}
+              <ChromeDivider />
+            </>
+          )}
+          {kind === "text" && (
+            <>
+              {wrapButton(true)}
+              <ChromeDivider />
+            </>
+          )}
+          {locate && (
+            <ChromeButton label={locate.label} onClick={locate.onSelect}>
+              <MessageSquareText className="size-4" />
+            </ChromeButton>
+          )}
           {onOpenInNewTab && (
             <ChromeButton
               label={t(($) => $.attachment.open_in_new_tab)}
@@ -690,66 +1016,112 @@ function PreviewPanel({
               <ExternalLink className="size-4" />
             </ChromeButton>
           )}
+          {canCopyImage && (
+            <ChromeButton
+              label={t(($) => $.image.copy_image)}
+              disabled={!mediaUrl}
+              onClick={() => void handleCopyImage()}
+            >
+              <Copy className="size-4" />
+            </ChromeButton>
+          )}
           <ChromeButton label={t(($) => $.image.download)} onClick={onDownload}>
             <Download className="size-4" />
           </ChromeButton>
-          <ChromeDivider />
-          <ChromeButton label={t(($) => $.attachment.close)} onClick={onClose}>
-            <X className="size-4" />
-          </ChromeButton>
+          {(onOpenOverview || info) && <ChromeDivider />}
+          {onOpenOverview && (
+            <ChromeButton
+              label={t(($) => $.attachment.overview)}
+              shortcut="G"
+              onClick={onOpenOverview}
+            >
+              <LayoutGrid className="size-4" />
+            </ChromeButton>
+          )}
+          {info && (
+            <ChromeButton
+              label={t(($) => $.attachment.info)}
+              shortcut="I"
+              pressed={info.open}
+              onClick={info.onToggle}
+            >
+              <PanelRight className="size-4" />
+            </ChromeButton>
+          )}
+          {onClose && (
+            <>
+              <ChromeDivider />
+              <ChromeButton label={t(($) => $.attachment.close)} onClick={onClose}>
+                <X className="size-4" />
+              </ChromeButton>
+            </>
+          )}
         </div>
       </header>
-      {/* The stage. In a sequence its sides are 64px gutters holding the
-          prev / next buttons, so a fitted image or a page never runs under
-          them. */}
-      <motion.div
-        className={cn(
-          "relative min-h-0 flex-1",
-          sequence ? "px-16" : "px-4",
-        )}
-        onClick={closeOnBackdrop}
-        initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
-        animate={{
-          transform: "scale(1)",
-          transition: {
-            duration: UI_MOTION_DURATION.standard,
-            ease: UI_EASE_OUT,
-          },
-        }}
-      >
-        {kind === "image" ? (
-          <ImagePreview
-            state={state}
-            mediaUrl={mediaUrl}
-            canvas={canvas}
-            natural={natural}
-            onNaturalSize={handleNaturalSize}
-            onError={imageLoadError}
-          />
-        ) : (
-          <PreviewContent
-            kind={kind}
-            source={source}
-            state={state}
-            onDownload={onDownload}
-            onBackdropClick={closeOnBackdrop}
-          />
-        )}
-        {sequence && (
-          <>
-            <SequenceButton
-              side="prev"
-              label={t(($) => $.attachment.previous)}
-              onClick={sequence.onPrev}
+      <div className="flex min-h-0 flex-1">
+        {/* The stage. In a sequence its sides are 64px gutters holding the
+            prev / next buttons, so a fitted image or a page never runs under
+            them. */}
+        <motion.div
+          className={cn(
+            "relative min-h-0 min-w-0 flex-1",
+            sequence ? "px-16" : "px-4",
+          )}
+          onClick={closeOnBackdrop}
+          initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
+          animate={{
+            transform: "scale(1)",
+            transition: {
+              duration: UI_MOTION_DURATION.standard,
+              ease: UI_EASE_OUT,
+            },
+          }}
+        >
+          {kind === "image" ? (
+            <ImagePreview
+              state={state}
+              mediaUrl={mediaUrl}
+              canvas={canvas}
+              natural={natural}
+              onNaturalSize={handleNaturalSize}
+              onError={imageLoadError}
             />
-            <SequenceButton
-              side="next"
-              label={t(($) => $.attachment.next)}
-              onClick={sequence.onNext}
+          ) : (
+            <PreviewContent
+              kind={kind}
+              source={source}
+              state={state}
+              view={view}
+              onDownload={onDownload}
+              onBackdropClick={closeOnBackdrop}
             />
-          </>
+          )}
+          {sequence && (
+            <>
+              <SequenceButton
+                side="prev"
+                label={t(($) => $.attachment.previous)}
+                onClick={sequence.onPrev}
+              />
+              <SequenceButton
+                side="next"
+                label={t(($) => $.attachment.next)}
+                onClick={sequence.onNext}
+              />
+            </>
+          )}
+        </motion.div>
+        {info?.open && (
+          // A column beside the stage rather than a layer over it: the file
+          // re-fits into what is left instead of hiding under the panel.
+          <aside
+            className="dark w-80 max-w-[45vw] shrink-0 overflow-y-auto border-l border-border bg-background/40 text-foreground"
+            aria-label={t(($) => $.attachment.info)}
+          >
+            {info.content}
+          </aside>
         )}
-      </motion.div>
+      </div>
     </>
   );
 }
@@ -762,23 +1134,83 @@ function PreviewPanel({
 // resolve to the dark set whatever the app theme is.
 function ChromeButton({
   label,
+  shortcut,
+  pressed,
+  disabled,
   onClick,
   children,
 }: {
   label: string;
+  /** Single-key shortcut, shown in the tooltip and announced to AT. */
+  shortcut?: string;
+  /** Toggle buttons pass their state; plain actions leave it unset. */
+  pressed?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-      title={label}
+      className={cn(
+        "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+        pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+      )}
+      title={shortcut ? `${label} (${shortcut})` : label}
       aria-label={label}
+      aria-keyshortcuts={shortcut}
+      aria-pressed={pressed}
+      disabled={disabled}
       onClick={onClick}
     >
       {children}
     </button>
+  );
+}
+
+// A one-of-several choice in the top bar (viewport width, tree / raw). Same
+// pressed look as the toggle buttons beside it. Labels show once the bar has
+// room for them; below that the icons carry the choice, named by tooltip.
+function ChromeSegmented<T extends string>({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string; icon: LucideIcon }>;
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex items-center gap-0.5">
+      {options.map((option) => {
+        const pressed = option.value === value;
+        const Icon = option.icon;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            className={cn(
+              "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+              pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+            )}
+            title={option.label}
+            aria-label={option.label}
+            aria-pressed={pressed}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+          >
+            <Icon className="size-4 shrink-0" />
+            <span className="hidden @7xl:inline" aria-hidden>
+              {option.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -902,24 +1334,46 @@ function ImagePreview({
 // Dispatch
 // ---------------------------------------------------------------------------
 
+// What the top bar decided about how the file shows — see PreviewPanel.
+interface StageView {
+  wrap: boolean;
+  htmlViewport: HtmlViewport;
+  htmlSource: boolean;
+  structuredView: StructuredView;
+  /** The `structured` kind's parse, once its body has loaded. */
+  structuredParse: ReturnType<typeof parseStructured> | null;
+  renderHtmlFrame: HtmlFrameRenderer;
+  htmlLocation: HtmlPreviewLocation;
+}
+
+const TEXT_BACKED_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
+  "markdown",
+  "html",
+  "table",
+  "structured",
+  "text",
+]);
+
 // Dispatch on PreviewKind. New cases go here; remember that the viewer frame
 // (top bar, close, Download CTA, ESC handling) is shared — sub-renderers only
 // own the stage. `image` is handled by PreviewPanel itself because its
 // toolbar and canvas share zoom state.
 //
-// Layout per kind: pages (PDF, HTML) fill the stage; video letterboxes on it;
-// Markdown and text scroll on a centered sheet in the app's own theme; anything
-// else that sits directly on the stage wears `dark`.
+// Layout per kind: pages (PDF, HTML, tables) fill the stage; video letterboxes
+// on it; Markdown, code and data scroll on a centered sheet in the app's own
+// theme; anything else that sits directly on the stage wears `dark`.
 function PreviewContent({
   kind,
   source,
   state,
+  view,
   onDownload,
   onBackdropClick,
 }: {
   kind: Exclude<PreviewKind, "image"> | null;
   source: PreviewSource;
   state: PreviewState;
+  view: StageView;
   onDownload: () => void;
   onBackdropClick: (e: React.MouseEvent) => void;
 }) {
@@ -939,10 +1393,7 @@ function PreviewContent({
   // be defensive — a direct mount of <AttachmentPreviewModal> with a URL
   // source whose filename later resolves to a text kind would otherwise
   // crash on a null id.
-  if (
-    (kind === "markdown" || kind === "html" || kind === "text") &&
-    !state.attachmentId
-  ) {
+  if (TEXT_BACKED_KINDS.has(kind) && !state.attachmentId) {
     return (
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
@@ -950,6 +1401,18 @@ function PreviewContent({
       />
     );
   }
+
+  const code = (text: string, language: string | undefined) => (
+    <DocumentSheet width="code" onBackdropClick={onBackdropClick}>
+      <CodeBlockStatic
+        language={language}
+        body={text}
+        lineNumbers
+        wrap={view.wrap}
+        className="min-h-full"
+      />
+    </DocumentSheet>
+  );
 
   switch (kind) {
     case "pdf":
@@ -999,16 +1462,69 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          render={(text) =>
+            view.htmlSource ? (
+              code(text, "xml")
+            ) : (
+              <HtmlViewportFrame viewport={view.htmlViewport}>
+                {view.renderHtmlFrame({
+                  html: text,
+                  title: state.filename,
+                  location: view.htmlLocation,
+                })}
+              </HtmlViewportFrame>
+            )
+          }
+        />
+      );
+    case "table":
+      return (
+        <TextBackedPreview
+          attachmentId={state.attachmentId!}
+          onDownload={onDownload}
           render={(text) => (
-            <div className="h-full pb-4">
-              <HtmlPreviewBody
-                source={{ kind: "inline", html: text }}
-                title={state.filename}
-                className="h-full w-full"
-                iframeClassName="rounded-lg border-0"
-              />
-            </div>
+            // Keyed on the file: sort order and column widths belong to it.
+            <TablePreview
+              key={state.attachmentId}
+              text={text}
+              delimiter={tableDelimiter(state.contentType, state.filename)}
+            />
           )}
+        />
+      );
+    case "structured":
+      return (
+        <TextBackedPreview
+          attachmentId={state.attachmentId!}
+          onDownload={onDownload}
+          render={(text) => {
+            const parse = view.structuredParse;
+            if (parse?.ok && view.structuredView === "tree") {
+              return (
+                <DocumentSheet width="code" onBackdropClick={onBackdropClick}>
+                  <div className="px-4 py-4">
+                    <StructuredTree key={state.attachmentId} value={parse.value} />
+                  </div>
+                </DocumentSheet>
+              );
+            }
+            return (
+              <div className="flex h-full flex-col">
+                {parse && !parse.ok && (
+                  <p
+                    className="dark mx-auto mb-2 w-full max-w-5xl shrink-0 text-body text-muted-foreground"
+                    role="status"
+                  >
+                    {t(($) => $.attachment.structured_parse_failed)}{" "}
+                    <span className="font-mono text-caption">{parse.message}</span>
+                  </p>
+                )}
+                <div className="min-h-0 flex-1">
+                  {code(text, extensionToLanguage(state.filename))}
+                </div>
+              </div>
+            );
+          }}
         />
       );
     case "text":
@@ -1016,15 +1532,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
-          render={(text) => (
-            <DocumentSheet width="code" onBackdropClick={onBackdropClick}>
-              <CodeBlockStatic
-                language={extensionToLanguage(state.filename)}
-                body={text}
-                className="px-6 py-5"
-              />
-            </DocumentSheet>
-          )}
+          render={(text) => code(text, extensionToLanguage(state.filename))}
         />
       );
   }
@@ -1137,6 +1645,55 @@ function UnsupportedFallback({
         <Download className="size-4" />
         {t(($) => $.image.download)}
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Standalone — the viewer's top bar and stage as a page of their own
+// ---------------------------------------------------------------------------
+
+/**
+ * The "Open in new tab" destination: the same bar and stage as the viewer,
+ * on the same dark ground, filling its host instead of overlaying the app.
+ * No close, sequence or window drag region — the tab is the frame.
+ */
+export function AttachmentPreviewStandalone({
+  attachment,
+  renderHtmlFrame,
+  initialHtmlAddress,
+  onHtmlAddressChange,
+}: {
+  attachment: Attachment;
+  renderHtmlFrame?: HtmlFrameRenderer;
+  /** Query and fragment an HTML file opens at. */
+  initialHtmlAddress?: string;
+  onHtmlAddressChange?: (address: string) => void;
+}) {
+  const download = useDownloadAttachment();
+  const source = useMemo<PreviewSource>(
+    () => ({ kind: "full", attachment }),
+    [attachment],
+  );
+  const state = normalize(source);
+  const handleHtmlAddressChange = useCallback(
+    (_attachmentId: string, address: string) => onHtmlAddressChange?.(address),
+    [onHtmlAddressChange],
+  );
+
+  return (
+    <div className="flex h-full w-full flex-col bg-black/95">
+      <PreviewPanel
+        surface="page"
+        kind={state.kind}
+        source={source}
+        state={state}
+        onDownload={() => download(attachment.id)}
+        reduceMotion
+        renderHtmlFrame={renderHtmlFrame}
+        initialHtmlAddress={initialHtmlAddress}
+        onHtmlAddressChange={handleHtmlAddressChange}
+      />
     </div>
   );
 }

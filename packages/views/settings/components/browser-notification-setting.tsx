@@ -50,6 +50,7 @@ export function BrowserNotificationSetting() {
   return (
     <SettingsCard>
       <SettingsRow
+        anchor="browser"
         label={t(($) => $.notifications.browser.label)}
         description={statusHint}
       >

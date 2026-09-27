@@ -132,6 +132,12 @@ type copyPack struct {
 	ChatStarted  string
 	IssueUsage   string
 
+	// InvokeDenied answers a member who may not run this agent (a private
+	// agent belongs to its owner alone). It always goes to that member alone —
+	// in place in a 1:1, in their own 1:1 for a group trigger (replier.go) — so
+	// their profile picks the language even when the trigger was a room.
+	InvokeDenied string
+
 	// BindingPromptPrefix / BindingPromptSuffix wrap the bind URL.
 	// BindingPending replaces the whole thing when the mint was throttled and
 	// there is no URL to print. Both go to the sender alone, never to a room
@@ -270,6 +276,7 @@ var copyPacks = map[Locale]copyPack{
 		FreshPending:         "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。",
 		ChatStarted:          "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。",
 		IssueUsage:           "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）",
+		InvokeDenied:         "⚠️ 你没有权限运行该智能体。如需使用，请联系它的所有者。",
 		BindingPromptPrefix:  "👋 请先绑定你的 Multica 账号，才能与我对话：\n",
 		BindingPromptSuffix:  "\n（链接 15 分钟内有效）",
 		BindingPending:       "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。",
@@ -311,6 +318,7 @@ var copyPacks = map[Locale]copyPack{
 		FreshPending:         "✅ Fresh start ready. Your next message stays in this chat but runs without the earlier context.",
 		ChatStarted:          "✅ Started a new Multica chat. Your next message will enter it.",
 		IssueUsage:           "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)",
+		InvokeDenied:         "⚠️ You don't have permission to run this agent. Ask its owner if you need to use it.",
 		BindingPromptPrefix:  "👋 Link your Multica account before we can talk:\n",
 		BindingPromptSuffix:  "\n(the link is good for 15 minutes)",
 		BindingPending:       "👋 I already sent you a link — it is just above, tap it to finish linking.",

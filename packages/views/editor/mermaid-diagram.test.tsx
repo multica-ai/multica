@@ -67,6 +67,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   document.documentElement.className = "";
+  document.documentElement.removeAttribute("style");
+  document.body.removeAttribute("style");
 });
 
 function currentScale(): number {
@@ -194,6 +196,51 @@ describe("MermaidDiagram theme changes", () => {
       releaseRender({ svg: '<svg viewBox="0 0 1000 500"><text>themed</text></svg>' });
     });
     expect(document.querySelector(".mermaid-diagram-frame")).not.toBeNull();
+  });
+
+  it("does not re-render when a dialog's scroll lock rewrites the page style", async () => {
+    render(<MermaidDiagram chart={CHART} />);
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(1);
+    });
+
+    // What the Dialog's scroll lock writes on every open and close. Taken for a
+    // theme switch, it re-rendered every diagram on the page as the viewer
+    // closed, and that stall made the page flash (MUL-7760).
+    await act(async () => {
+      document.body.style.overflow = "hidden";
+      await Promise.resolve();
+    });
+    await act(async () => {
+      document.body.style.removeProperty("overflow");
+      await Promise.resolve();
+    });
+
+    // A real theme switch still re-renders, and it is the only extra render:
+    // any from the scroll lock would already have pushed the count past two.
+    await act(async () => {
+      document.documentElement.classList.add("dark");
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("re-renders when a theme token is written straight into the root style", async () => {
+    render(<MermaidDiagram chart={CHART} />);
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      document.documentElement.style.setProperty("--muted", "rgb(1, 2, 3)");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mermaidRenderMock).toHaveBeenCalledTimes(2);
+    });
   });
 });
 

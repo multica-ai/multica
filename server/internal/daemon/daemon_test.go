@@ -6543,7 +6543,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 // TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
 // Hermes regression. A custom runtime profile's fixed_args are no longer folded
 // into custom_args — they become the launch prefix and reach hermes ahead of
-// custom_args, with the backend's own `acp` token between the two.
+// custom_args, which in turn precede the backend's own `acp` token.
 //
 // Both halves of the profile chain therefore have to run against the argv the
 // backend really assembles. Resolving or stripping against a hand-built
@@ -6552,10 +6552,10 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 	t.Parallel()
 
-	// A prefix ending in a value-taking flag: the `acp` token decides which
-	// selection hermes sees, so it must be present when the daemon resolves.
-	launchPrefix := []string{"--model"}
-	customArgs := []string{"-p", "research", "--yolo"}
+	// A prefix ending in a bare `-p`: the selection straddles the two regions,
+	// so only the assembled argv shows which profile hermes sees.
+	launchPrefix := []string{"-p"}
+	customArgs := []string{"research", "--yolo"}
 
 	sel := agent.ParseHermesProfileArgs(
 		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
@@ -6571,10 +6571,10 @@ func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
 		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
 	}
-	if strings.Join(strippedPrefix, "\x00") != "--model" {
-		t.Errorf("prefix = %v, want the non-selector token kept", strippedPrefix)
+	if len(strippedPrefix) != 0 {
+		t.Errorf("prefix = %v, want the straddling `-p` removed", strippedPrefix)
 	}
 	if strings.Join(strippedCustom, "\x00") != "--yolo" {
-		t.Errorf("custom = %v, want only the selector removed", strippedCustom)
+		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }

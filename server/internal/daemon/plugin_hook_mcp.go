@@ -77,6 +77,7 @@ func startTaskPluginHookMCP(lifetimeCtx context.Context, taskID string, tools []
 	}
 
 	byName := make(map[string]PluginHookTool, len(tools))
+	acceptedTools := make([]PluginHookTool, 0, len(tools))
 	for _, tool := range tools {
 		// The server namespaces these, but a duplicate arriving anyway must
 		// resolve to exactly one hook rather than whichever came last.
@@ -87,6 +88,7 @@ func startTaskPluginHookMCP(lifetimeCtx context.Context, taskID string, tools []
 			continue
 		}
 		byName[tool.Name] = tool
+		acceptedTools = append(acceptedTools, tool)
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -100,7 +102,7 @@ func startTaskPluginHookMCP(lifetimeCtx context.Context, taskID string, tools []
 	}
 
 	handler := &pluginHookMCPServer{
-		taskID: taskID, tools: tools, byName: byName,
+		taskID: taskID, tools: acceptedTools, byName: byName,
 		invoke: invoke, path: "/" + pathToken, logger: logger,
 	}
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}

@@ -39,7 +39,12 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { mcpHooks, PluginHookActivity, PluginMCPApproval, PluginScheduleActivity } from "../../plugins";
 import { useLocale, useT } from "../../i18n";
-import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
+import {
+  SettingsCard,
+  SettingsReadOnlyNotice,
+  SettingsSection,
+  SettingsTab,
+} from "./settings-layout";
 
 /**
  * The scope list is the entire trust model: there is no signature, no
@@ -679,14 +684,8 @@ export function PluginsTab() {
   const installations = useMemo(() => data?.plugins ?? [], [data]);
 
   return (
-    <SettingsTab title={t(($) => $.plugins.title)} >
-      {!canManage ? (
-        <Alert>
-          <AlertCircle />
-          <AlertTitle>{t(($) => $.plugins.read_only)}</AlertTitle>
-          <AlertDescription>{t(($) => $.plugins.read_only_description)}</AlertDescription>
-        </Alert>
-      ) : null}
+    <SettingsTab title={t(($) => $.plugins.title)} scope="workspace">
+      {role && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
 
       {canManage ? <PublishAndInstall wsId={wsId} canManage={canManage} /> : null}
 

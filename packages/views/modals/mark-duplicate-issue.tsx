@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, errorCode } from "@multica/core/api";
+import { errorCode } from "@multica/core/api";
+import { searchIssues } from "@multica/core/search-index";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   issueDetailOptions,
@@ -60,7 +61,7 @@ export function MarkDuplicateIssueModal({
   const title = issue?.title.trim() ?? "";
   const { data: sameTitle } = useQuery({
     queryKey: [...issueKeys.all(wsId), "duplicate-candidates", issueId, title],
-    queryFn: () => api.searchIssues({ q: title, limit: SUGGESTION_LIMIT, include_closed: true }),
+    queryFn: () => searchIssues({ q: title, limit: SUGGESTION_LIMIT, include_closed: true }),
     enabled: title !== "",
     staleTime: 60_000,
   });

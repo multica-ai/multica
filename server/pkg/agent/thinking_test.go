@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -58,73 +59,84 @@ Options:
 	}
 }
 
-func TestClaudeEffortLevelsFromHelp_DriftedFormatFallsBackToFullSuperset(t *testing.T) {
+func TestClaudeEffortHelpFromText(t *testing.T) {
 	t.Parallel()
-	// The flag is advertised but the parenthesised value list is gone —
-	// genuine help drift, so keep offering the last known good superset.
-	help := `Usage: claude [options]
-
-Options:
-  --effort <level>    Choose how hard the model thinks
-`
-	got := claudeEffortLevelsFromHelp(help)
-	if !reflect.DeepEqual(got, claudeStaticEffortFullSuperset) {
-		t.Fatalf("claudeEffortLevelsFromHelp: got %v, want full superset %v", got, claudeStaticEffortFullSuperset)
+	full := []string{"low", "medium", "high", "xhigh", "max"}
+	for _, tc := range []struct {
+		name       string
+		help       string
+		wantFlag   []string
+		wantPicker []string
+	}{
+		{
+			name:       "parsed value list is both the vocabulary and the picker",
+			help:       "Options:\n  --effort <level>    Effort level for the current session (low, medium, high, xhigh, max)\n",
+			wantFlag:   full,
+			wantPicker: full,
+		},
+		{
+			// The flag is advertised but the parenthesised value list is gone —
+			// genuine help drift. The vocabulary is unknown, so nothing may be
+			// vetoed, and the picker keeps offering the last known good superset.
+			name:       "drifted format",
+			help:       "Options:\n  --effort <level>    Choose how hard the model thinks\n",
+			wantFlag:   nil,
+			wantPicker: claudeStaticEffortFullSuperset,
+		},
+		{
+			// A CLI released before --effort existed (e.g. claude 2.1.2). Its
+			// vocabulary is empty, not unknown: injecting --effort makes the
+			// binary reject the launch with "unknown option", failing the task.
+			name:       "pre-effort CLI",
+			help:       "Options:\n  --model <model>     Model to use\n  --verbose\n",
+			wantFlag:   []string{},
+			wantPicker: nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := claudeEffortHelpFromText(tc.help)
+			if !reflect.DeepEqual(got.flag, tc.wantFlag) {
+				t.Errorf("flag = %#v, want %#v", got.flag, tc.wantFlag)
+			}
+			if !reflect.DeepEqual(got.picker, tc.wantPicker) {
+				t.Errorf("picker = %#v, want %#v", got.picker, tc.wantPicker)
+			}
+		})
 	}
 }
 
-func TestClaudeEffortLevelsFromHelp_PreEffortCLIReturnsNoLevels(t *testing.T) {
-	t.Parallel()
-	// A CLI released before --effort existed (e.g. claude 2.1.2) has no
-	// mention of the flag anywhere in --help. This must yield NO levels —
-	// the old fallback-to-full-superset here made the daemon inject
-	// --effort, which the binary rejects with "unknown option", failing
-	// the task outright.
-	help := `Usage: claude [options]
+// Without discovery, every static model offers what `claude --help` lists —
+// there is no per-model table narrowing it (MUL-7691) — and the catalog
+// carries the binary's own vocabulary for the daemon to enforce.
+func TestClaudeStaticCatalogOffersHelpSupersetOnEveryModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	// This test resets the package-global thinking cache, so it must remain serial.
+	fakeClaude := writeFakeClaudeHelpBinary(t)
+	resetThinkingCacheForTests()
+	defer resetThinkingCacheForTests()
 
-Options:
-  --model <model>     Model to use
-  --verbose
-`
-	if got := claudeEffortLevelsFromHelp(help); got != nil {
-		t.Fatalf("claudeEffortLevelsFromHelp: expected nil for pre-effort CLI, got %v", got)
+	catalog := claudeStaticCatalog(context.Background(), Command{Path: fakeClaude})
+	want := []string{"low", "medium", "high", "xhigh", "max"}
+	if !catalog.Fallback {
+		t.Fatal("static catalog must be flagged Fallback")
 	}
-}
-
-func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
-	t.Parallel()
-	superset := []string{"low", "medium", "high", "xhigh", "max"}
-	// Sonnet should drop xhigh per claudeModelEffortAllow.
-	got := projectClaudeLevels(superset, claudeModelEffortAllow["claude-sonnet-4-6"])
-	values := make([]string, 0, len(got))
-	for _, lvl := range got {
-		values = append(values, lvl.Value)
+	if !reflect.DeepEqual(catalog.CLIThinkingLevels, want) {
+		t.Errorf("CLIThinkingLevels = %v, want %v", catalog.CLIThinkingLevels, want)
 	}
-	want := []string{"low", "medium", "high", "max"}
-	if !reflect.DeepEqual(values, want) {
-		t.Fatalf("projectClaudeLevels: got %v, want %v", values, want)
-	}
-	// Opus keeps xhigh.
-	got = projectClaudeLevels(superset, claudeModelEffortAllow["claude-opus-4-7"])
-	values = values[:0]
-	for _, lvl := range got {
-		values = append(values, lvl.Value)
-	}
-	if !reflect.DeepEqual(values, superset) {
-		t.Fatalf("projectClaudeLevels for Opus: got %v, want %v", values, superset)
-	}
-	// Opus 5 declares `xhigh_effort` + `max_effort` upstream, so it keeps the
-	// full superset like the rest of the Opus family. Without an entry here it
-	// would fall through to "no allow-list" and coincidentally get the same
-	// levels — this pins the mapping so a later Sonnet-style restriction on the
-	// fallback path can't silently widen it.
-	got = projectClaudeLevels(superset, claudeModelEffortAllow["claude-opus-5"])
-	values = values[:0]
-	for _, lvl := range got {
-		values = append(values, lvl.Value)
-	}
-	if !reflect.DeepEqual(values, superset) {
-		t.Fatalf("projectClaudeLevels for Opus 5: got %v, want %v", values, superset)
+	for _, m := range catalog.Models {
+		if m.Thinking == nil {
+			t.Errorf("%s: no effort picker", m.ID)
+			continue
+		}
+		got := make([]string, 0, len(m.Thinking.SupportedLevels))
+		for _, lvl := range m.Thinking.SupportedLevels {
+			got = append(got, lvl.Value)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: levels = %v, want %v", m.ID, got, want)
+		}
 	}
 }
 
@@ -330,6 +342,30 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	}
 }
 
+// Codex reports the GPT-6 family as "GPT-6-Sol" and so on (codex-cli 0.155.1
+// `debug models`). The picker shows each one the way the static catalog
+// spells it, so a model reads the same whether discovery succeeded or not.
+func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
+	t.Parallel()
+	static := map[string]string{}
+	for _, m := range codexStaticModels() {
+		static[m.ID] = m.Label
+	}
+	for id, reported := range map[string]string{
+		"gpt-6-astra": "GPT-6-Astra",
+		"gpt-6-sol":   "GPT-6-Sol",
+		"gpt-6-luna":  "GPT-6-Luna",
+	} {
+		if static[id] == "" {
+			t.Errorf("%s missing from the static Codex catalog", id)
+			continue
+		}
+		if got := normalizeCodexModelLabel(id, reported); got != static[id] {
+			t.Errorf("normalizeCodexModelLabel(%q, %q) = %q, want %q", id, reported, got, static[id])
+		}
+	}
+}
+
 func TestParseCodexModelCatalogMalformed(t *testing.T) {
 	t.Parallel()
 	if _, err := parseCodexModelCatalog([]byte("not json")); err == nil {
@@ -446,68 +482,108 @@ exit 1
 	})
 }
 
-func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
+// A fallback catalog is a picker affordance, not an answer: whatever the static
+// list says about a model, a saved level passes through to the CLI (MUL-7691).
+func TestValidateThinkingLevelCodexFallbackCatalogPassesThrough(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		model string
-		level string
-		want  bool
-	}{
-		{model: "gpt-6-astra", level: "low", want: true},
-		{model: "gpt-6-astra", level: "max", want: true},
-		{model: "gpt-6-astra", level: "ultra", want: true},
-		{model: "gpt-5.6-sol", level: "ultra", want: true},
-		{model: "gpt-5.6-terra", level: "ultra", want: true},
-		{model: "gpt-5.6-luna", level: "max", want: true},
-		{model: "gpt-5.6-luna", level: "ultra", want: false},
-		{model: "gpt-5.3-codex", level: "xhigh", want: true},
-		{model: "gpt-5.3-codex", level: "max", want: false},
+	for _, tc := range []struct{ model, level string }{
+		{model: "gpt-6-astra", level: "ultra"},
+		{model: "gpt-5.6-luna", level: "ultra"}, // the static list gives Luna no ultra
+		{model: "gpt-5.3-codex", level: "max"},  // ...nor gpt-5.3-codex max
+		{model: "gpt-7", level: "high"},         // absent from the static list
 	} {
 		got, err := ValidateThinkingLevel(context.Background(), "codex", Command{Path: "/nonexistent/codex"}, tc.model, tc.level)
-		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
-		}
-		if got != tc.want {
-			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
+		if got || !errors.Is(err, errUnverifiedCatalog) {
+			t.Errorf("ValidateThinkingLevel(%q, %q) = (%v, %v), want errUnverifiedCatalog", tc.model, tc.level, got, err)
 		}
 	}
 }
 
-// A fallback is not an allow-list for live-only models. Unknown models on an
-// authoritative catalog still fail closed, and known fallback models still
-// have their capabilities checked instead of being passed through.
-func TestValidateCodexCapabilitiesMissingFromFallback(t *testing.T) {
-	fallback := Catalog{Models: []Model{{ID: "gpt-5.5"}}, Fallback: true}
-	for _, tc := range []struct {
-		name     string
-		validate func(func() (Catalog, error), string, string, string) (bool, error)
-		value    string
-	}{
-		{"thinking", ValidateThinkingLevelWith, "high"},
-		{"service tier", ValidateServiceTierWith, "priority"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			load := func() (Catalog, error) { return fallback, nil }
-			if valid, err := tc.validate(load, "codex", "gpt-6-sol", tc.value); valid || err == nil {
-				t.Fatalf("missing live-only model: got (%v, %v), want validation error", valid, err)
+// Only a verified catalog may reject a saved capability. A fallback stand-in and
+// an empty catalog both mean "unknown", for every provider alike: the value
+// passes through with errUnverifiedCatalog whether or not the stand-in happens
+// to list the model, and an empty model no longer borrows the stand-in's
+// Default entry (MUL-7691).
+func TestValidateCapabilitiesPassThroughUnverifiedCatalog(t *testing.T) {
+	t.Parallel()
+	listed := Model{ID: "listed", Default: true, Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "low"}}}}
+	unverified := map[string]Catalog{
+		"fallback": {Models: []Model{listed}, Fallback: true},
+		"empty":    {Models: []Model{}},
+	}
+	for _, provider := range []string{"claude", "codex", "grok", "codebuddy", "dim", "opencode", "reasonix"} {
+		for name, catalog := range unverified {
+			load := func() (Catalog, error) { return catalog, nil }
+			models := []string{"listed", "unlisted"}
+			if !ThinkingRequiresExplicitModel(provider) {
+				models = append(models, "")
 			}
-			if valid, err := tc.validate(load, "codex", "gpt-5.5", tc.value); valid || err != nil {
-				t.Fatalf("known fallback model with unsupported value: got (%v, %v), want (false, nil)", valid, err)
+			for _, model := range models {
+				if ok, err := ValidateThinkingLevelWith(load, provider, model, "high"); ok || !errors.Is(err, errUnverifiedCatalog) {
+					t.Errorf("%s, %s catalog, model %q: got (%v, %v), want errUnverifiedCatalog", provider, name, model, ok, err)
+				}
 			}
-			fallback.Fallback = false
-			if valid, err := tc.validate(load, "codex", "gpt-6-sol", tc.value); valid || err != nil {
-				t.Fatalf("authoritative catalog omits model: got (%v, %v), want (false, nil)", valid, err)
+		}
+	}
+	for name, catalog := range unverified {
+		load := func() (Catalog, error) { return catalog, nil }
+		for _, model := range []string{"listed", "unlisted"} {
+			if ok, err := ValidateServiceTierWith(load, "codex", model, "priority"); ok || !errors.Is(err, errUnverifiedCatalog) {
+				t.Errorf("service tier, %s catalog, model %q: got (%v, %v), want errUnverifiedCatalog", name, model, ok, err)
 			}
-			fallback.Fallback = true
-		})
+		}
 	}
 
-	load := func() (Catalog, error) { t.Fatal("empty model must not read catalog"); return Catalog{}, nil }
-	if valid, err := ValidateThinkingLevelWith(load, "codex", "", "high"); valid || err != nil {
-		t.Fatalf("empty model thinking = (%v, %v), want (false, nil)", valid, err)
+	// A verified catalog still decides: a listed model without the value, or a
+	// model it does not list, drops the value without an error.
+	verified := func() (Catalog, error) { return Catalog{Models: []Model{listed}}, nil }
+	for _, model := range []string{"listed", "unlisted"} {
+		if ok, err := ValidateThinkingLevelWith(verified, "codex", model, "high"); ok || err != nil {
+			t.Errorf("verified catalog, model %q thinking: got (%v, %v), want (false, nil)", model, ok, err)
+		}
+		if ok, err := ValidateServiceTierWith(verified, "codex", model, "priority"); ok || err != nil {
+			t.Errorf("verified catalog, model %q tier: got (%v, %v), want (false, nil)", model, ok, err)
+		}
 	}
-	if valid, err := ValidateServiceTierWith(load, "codex", "", "priority"); valid || err != nil {
-		t.Fatalf("empty model tier = (%v, %v), want (false, nil)", valid, err)
+
+	// codex's empty model fails closed before any catalog read, so a failed
+	// discovery cannot turn it into a pass-through.
+	noRead := func() (Catalog, error) { t.Error("empty model must not read catalog"); return Catalog{}, nil }
+	if ok, err := ValidateThinkingLevelWith(noRead, "codex", "", "high"); ok || err != nil {
+		t.Errorf("empty model thinking = (%v, %v), want (false, nil)", ok, err)
+	}
+	if ok, err := ValidateServiceTierWith(noRead, "codex", "", "priority"); ok || err != nil {
+		t.Errorf("empty model tier = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// The binary's own effort vocabulary is the one thing an unverified catalog
+// still enforces: a value outside it makes the CLI reject the launch outright,
+// so it is dropped rather than passed through.
+func TestValidateThinkingLevelEnforcesCLIVocabularyOnUnverifiedCatalog(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		cli         []string
+		value       string
+		passThrough bool
+	}{
+		{name: "binary has no effort flag", cli: []string{}, value: "high"},
+		{name: "value outside the vocabulary", cli: []string{"low", "medium", "high"}, value: "max"},
+		{name: "value inside the vocabulary", cli: []string{"low", "medium", "high"}, value: "high", passThrough: true},
+		{name: "vocabulary unknown", cli: nil, value: "max", passThrough: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			load := func() (Catalog, error) {
+				return Catalog{Models: claudeStaticModels(), Fallback: true, CLIThinkingLevels: tc.cli}, nil
+			}
+			for _, model := range []string{"claude-opus-5", "claude-opus-5-5", ""} {
+				ok, err := ValidateThinkingLevelWith(load, "claude", model, tc.value)
+				if ok || errors.Is(err, errUnverifiedCatalog) != tc.passThrough {
+					t.Errorf("model %q: got (%v, %v), want pass-through=%v", model, ok, err, tc.passThrough)
+				}
+			}
+		})
 	}
 }
 
@@ -775,28 +851,32 @@ func TestValidateThinkingLevel_PiRPCPerModelCatalog(t *testing.T) {
 	check("openai-multi/gpt-5.6-luna", "", true)
 }
 
-func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
+// claudeVerifiedCatalog has the shape live Claude discovery produces: each
+// model states its own effort levels and the CLI's default row is flagged
+// Default.
+func claudeVerifiedCatalog() (Catalog, error) {
+	levels := func(values ...string) *ModelThinking {
+		out := &ModelThinking{}
+		for _, v := range values {
+			out.SupportedLevels = append(out.SupportedLevels, ThinkingLevel{Value: v})
+		}
+		return out
 	}
-	// This test resets the package-global thinking cache, so it must remain serial.
+	return Catalog{Models: []Model{
+		{ID: "claude-sonnet-4-6", Default: true, Thinking: levels("low", "medium", "high", "max")},
+		{ID: "claude-opus-4-7", Thinking: levels("low", "medium", "high", "xhigh", "max")},
+		{ID: "claude-opus-5", Thinking: levels("low", "medium", "high", "xhigh", "max")},
+	}}, nil
+}
 
-	// We need a `claude` whose --help advertises the full superset
-	// (low/medium/high/xhigh/max) so per-model projection actually has
-	// something to filter. A non-existent path falls back to a conservative
-	// [low,medium,high] which would hide the per-model behaviour we're
-	// trying to verify.
-	fakeClaude := writeFakeClaudeHelpBinary(t)
-	resetThinkingCacheForTests()
-	defer resetThinkingCacheForTests()
-
-	ctx := context.Background()
+func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
+	t.Parallel()
 
 	t.Run("valid level on default model passes", func(t *testing.T) {
-		// Claude's catalog flags Sonnet 4.6 as Default. Sonnet supports
-		// low/medium/high/max (no xhigh) per claudeModelEffortAllow, so
-		// "high" must round-trip when model is left empty.
-		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "", "high")
+		// The catalog flags Sonnet 4.6 as Default. Sonnet advertises
+		// low/medium/high/max (no xhigh), so "high" must round-trip when model
+		// is left empty.
+		ok, err := ValidateThinkingLevelWith(claudeVerifiedCatalog, "claude", "", "high")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -806,9 +886,9 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	})
 
 	t.Run("invalid level on default model fails", func(t *testing.T) {
-		// "xhigh" is opus-only; resolving "" to default (sonnet 4.6)
+		// Sonnet does not advertise xhigh; resolving "" to the default model
 		// should reject it, not silently accept.
-		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "", "xhigh")
+		ok, err := ValidateThinkingLevelWith(claudeVerifiedCatalog, "claude", "", "xhigh")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -820,7 +900,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	t.Run("empty value always valid", func(t *testing.T) {
 		// Empty value means "use runtime default" — should pass
 		// regardless of model resolution.
-		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "", "")
+		ok, err := ValidateThinkingLevelWith(claudeVerifiedCatalog, "claude", "", "")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -831,84 +911,38 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 }
 
 func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fake binary requires a POSIX shell")
-	}
-	// This test resets the package-global thinking cache, so it must remain serial.
-	fakeClaude := writeFakeClaudeHelpBinary(t)
-	resetThinkingCacheForTests()
-	defer resetThinkingCacheForTests()
-
-	ctx := context.Background()
-
-	// xhigh IS valid on Opus 4.7.
-	ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-4-7", "xhigh")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if !ok {
-		t.Errorf("xhigh should be valid on opus-4-7; got false")
-	}
-
-	// The whole Opus effort range round-trips on Opus 5, which is the point of
-	// adding it to the catalog: an agent pinned to it can still carry a
-	// persisted thinking_level without the daemon dropping the flag.
-	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
-		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5", level)
+	t.Parallel()
+	check := func(model, value string, want bool) {
+		t.Helper()
+		ok, err := ValidateThinkingLevelWith(claudeVerifiedCatalog, "claude", model, value)
 		if err != nil {
-			t.Fatalf("unexpected err for opus-5 %q: %v", level, err)
+			t.Fatalf("ValidateThinkingLevelWith(claude, %q, %q): unexpected err: %v", model, value, err)
 		}
-		if !ok {
-			t.Errorf("%q should be valid on opus-5; got false", level)
+		if ok != want {
+			t.Errorf("ValidateThinkingLevelWith(claude, %q, %q) = %v, want %v", model, value, ok, want)
 		}
+	}
+
+	check("claude-opus-4-7", "xhigh", true)
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		check("claude-opus-5", level, true)
 	}
 
 	// Claude Code appends a bracketed context-window tag to the model ID for
 	// long-context sessions. Capability validation must inherit the base
 	// model's effort catalog without rewriting the model passed to the CLI.
-	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5[1m]", "xhigh")
-	if err != nil {
-		t.Fatalf("unexpected err for context-tagged opus-5: %v", err)
-	}
-	if !ok {
-		t.Error("xhigh should be valid on the opus-5[1m] context variant")
-	}
-
-	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5[500k]", "high")
-	if err != nil {
-		t.Fatalf("unexpected err for future context-tag shape: %v", err)
-	}
-	if !ok {
-		t.Error("high should be valid on a syntactically valid opus-5 context variant")
-	}
+	check("claude-opus-5[1m]", "xhigh", true)
+	check("claude-opus-5[500k]", "high", true)
 
 	// Arbitrary bracket suffixes are not context-window tags. Keep malformed
 	// variants fail-closed even when their apparent base model is known.
-	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5[weird]", "high")
-	if err != nil {
-		t.Fatalf("unexpected err for malformed context tag: %v", err)
-	}
-	if ok {
-		t.Error("malformed context tag must fail closed")
-	}
+	check("claude-opus-5[weird]", "high", false)
 
-	// xhigh is NOT valid on Sonnet — should fail.
-	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-sonnet-4-6[1m]", "xhigh")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if ok {
-		t.Errorf("xhigh must not be valid on sonnet-4-6; got true")
-	}
+	// Sonnet does not advertise xhigh.
+	check("claude-sonnet-4-6[1m]", "xhigh", false)
 
-	// An unknown model with a valid token still fails closed (no guess).
-	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-nonexistent", "high")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if ok {
-		t.Errorf("unknown model must fail closed; got true")
-	}
+	// A model a verified catalog does not list still fails closed (no guess).
+	check("claude-nonexistent", "high", false)
 }
 
 // TestValidateThinkingLevel_CodexEmptyModelFailsClosed pins the MUL-4347
@@ -1049,8 +1083,8 @@ echo "opencode 9.9.9"
 }
 
 // writeFakeClaudeHelpBinary writes a small shell script that mimics
-// `claude --help`, emitting the full effort superset line so per-model
-// projection has something to filter. Returns the path to the executable.
+// `claude --help`, emitting the full effort superset line. Returns the path
+// to the executable.
 func writeFakeClaudeHelpBinary(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -1194,22 +1228,18 @@ func TestThinkingCacheKeyDistinct(t *testing.T) {
 	b := thinkingCacheKey{provider: "claude", command: "/bin/claude", cliVersion: "2.1.122"}
 	c := thinkingCacheKey{provider: "claude", command: "/opt/claude", cliVersion: "2.1.121"}
 
-	thinkingCachePut(a, map[string]*ModelThinking{"x": {DefaultLevel: "a"}})
-	thinkingCachePut(b, map[string]*ModelThinking{"x": {DefaultLevel: "b"}})
-	thinkingCachePut(c, map[string]*ModelThinking{"x": {DefaultLevel: "c"}})
+	thinkingCachePut(a, claudeEffortHelp{picker: []string{"a"}})
+	thinkingCachePut(b, claudeEffortHelp{picker: []string{"b"}})
+	thinkingCachePut(c, claudeEffortHelp{picker: []string{"c"}})
 
 	assertLevel := func(name string, key thinkingCacheKey, want string) {
 		t.Helper()
-		models, ok := thinkingCacheGet(key)
+		help, ok := thinkingCacheGet(key)
 		if !ok {
 			t.Fatalf("cache key %s: entry missing", name)
 		}
-		model, ok := models["x"]
-		if !ok || model == nil {
-			t.Fatalf("cache key %s: model x missing", name)
-		}
-		if model.DefaultLevel != want {
-			t.Errorf("cache key %s: got %q, want %q", name, model.DefaultLevel, want)
+		if len(help.picker) != 1 || help.picker[0] != want {
+			t.Errorf("cache key %s: got %v, want [%s]", name, help.picker, want)
 		}
 	}
 
@@ -1503,29 +1533,31 @@ func argIndexOf(slice []string, target string) int {
 	return -1
 }
 
-func TestValidateThinkingLevel_ClaudeFable51AcceptsFullEffortRange(t *testing.T) {
+// End to end through a Claude CLI whose discovery fails: a model the static
+// list does not name (a release newer than this daemon) and an empty model both
+// carry their saved level through to the CLI — the list needs no update for
+// either. Only a level outside the binary's own `--effort` vocabulary is
+// dropped (MUL-7691).
+func TestValidateThinkingLevel_ClaudeFallbackPassesSavedLevelThrough(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
 	// This test resets the package-global thinking cache, so it must remain serial.
-
-	// A model missing from the Claude catalog never gets a Thinking entry, so
-	// the daemon's pre-execution guard silently drops any persisted effort for
-	// it. Fable 5.1 supports the full low..max range, so once it is in the
-	// catalog every level must round-trip.
 	fakeClaude := writeFakeClaudeHelpBinary(t)
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
 
 	ctx := context.Background()
-
-	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
-		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-fable-5-1", level)
-		if err != nil {
-			t.Fatalf("unexpected err for %q: %v", level, err)
+	for _, model := range []string{"claude-fable-5-1", "claude-opus-5-5", ""} {
+		for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+			ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, model, level)
+			if ok || !errors.Is(err, errUnverifiedCatalog) {
+				t.Errorf("model %q, level %q: got (%v, %v), want errUnverifiedCatalog", model, level, ok, err)
+			}
 		}
-		if !ok {
-			t.Errorf("level %q must be valid on claude-fable-5-1; got false", level)
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, model, "ultra")
+		if ok || err != nil {
+			t.Errorf("model %q, level outside --help: got (%v, %v), want (false, nil)", model, ok, err)
 		}
 	}
 }

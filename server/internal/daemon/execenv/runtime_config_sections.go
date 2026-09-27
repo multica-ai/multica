@@ -99,7 +99,7 @@ func writeHeader(b *strings.Builder) {
 // a fresh review decision.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup, whatever a tool response promises. Never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
+	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup, whatever a tool response promises; an issue wakeup (`multica issue wakeup create`) is different — the platform stores it and starts a new run later. Never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
 	b.WriteString("External systems triggered by your completed actions — CI, GitHub Actions after a successful push — are not run-owned: do not wait for them, and do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls. A repo's merge gate (\"CI must be green before merge\") is NOT your delivery acceptance criteria. Deliver what you have — \"Local tests pass; CI running: <PR link>\" is a complete hand-off. The one exception: when the trigger comment or the issue's acceptance criteria explicitly ask for the CI result, collect it as ONE foreground blocking call (`gh pr checks <pr> --watch`) inside this same turn.\n\n")
 	b.WriteString("A user explicitly asking for a local service to stay available after the turn is a persistent service handoff, not background-and-yield — allowed only when the running service itself is the requested deliverable. Detach its lifecycle from this run first (durable logs, a recorded cleanup handle such as PID/profile), verify readiness, and reply with the URL, logs, and stop instructions. Without a supervisor, describe survival as best-effort, not guaranteed.\n\n")
 	b.WriteString("Never terminate `multica` or `multica.exe` by executable name: a long-lived matching process may be the workspace daemon. Cancel only the exact child PID you started, and before terminating it compare that PID with `multica daemon status --output json`; never kill it if it is the reported daemon PID.\n\n")
@@ -264,7 +264,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <YYYY-MM-DD>]` — update fields; pass `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica issue assign <id> (--to X | --to-id <uuid> | --unassign)` — change ownership; assigning to an agent can start a run.\n")
 	writeIssueStatusCommand(b, ctx)
-	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|events>` — persist an event or time wakeup on this issue, then finish the current run. Use `--event comment.created --filter-actor-type member --filter-actor-id USER_ID` to wait for a specific member to comment. See `multica issue wakeup --help` and the multica-platform issues reference.\n")
+	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|trigger|delete|runs|events>` — persist an event, condition or time wakeup on this issue, then finish the current run. When the platform can check the fact itself, use a condition (`--until-status`, `--until-pr checks`, `--until-children-done`, `--until-issue`) so no run starts before it holds. Use `--event comment.created --filter-actor-type member --filter-actor-id USER_ID` to wait for a specific member to comment. See `multica issue wakeup --help` and the multica-platform issues reference.\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`; see `## Comment Formatting` for why. `multica issue comment add --help` for full flags.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch. Re-running it keeps an existing checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches. `--fresh` discards uncommitted and untracked files and starts a new branch; commits stay on the old branch, but push any you still need first.\n\n")
@@ -750,7 +750,7 @@ func writeWorkflowAutopilot(b *strings.Builder) {
 // the re-trigger (member update / stage barrier) that confirms the overall
 // goal is met. Flipping the parent on the dispatch turn would mark unfinished
 // multi-stage work as ready for review; see the Squad Operating Protocol and
-// child-done system comments.
+// the sub-issue wakeup (service/issue_wakeup_system.go).
 //
 // ctx.IsSquadLeader is a PER-TASK role, not agent configuration: branching on
 // it here does move brief bytes when the same agent runs leader one turn and
@@ -953,6 +953,21 @@ func writeDeliveryInvariant(b *strings.Builder) {
 	b.WriteString("**Runtime-local paths are never deliverables.** Your working directory exists only on the machine running you — NEVER write an absolute path or a `file://` URL as a clickable link or an embedded image. Reference code locations as inline code, never a link: `path/to/file.ts:42`. Deliver files through this surface's mechanism (above); if it has none, say so in words — never link the path and imply the file was delivered.\n\n")
 }
 
+// writeInlineBlocksPolicy tells a surface that renders the reply as rich text
+// where a chart or diagram goes (MUL-7649). A fenced `html` / `mermaid` block
+// renders in place as a dynamic block; an attachment, HTML included, is a file
+// and shows as a card. Agents that uploaded report.html expecting an inline
+// chart now get a card, and the platform skill's reference is only opened on
+// demand, so the one-line rule sits here, beside the file-delivery line, where
+// it is in front of the agent when it writes the reply. The detail (theme
+// variables, sizing) stays in the reference.
+//
+// Only surfaces the web renders get it: channel chats, autopilot run results
+// and quick-create stdout do not render these blocks.
+func writeInlineBlocksPolicy(b *strings.Builder) {
+	b.WriteString("\n**Charts and diagrams:** put them in the text as a fenced `html` or `mermaid` code block — it renders in place (name it with `title=\"...\"` after the language). An attached file, HTML included, shows as a card instead. Theming and sizing: the multica-platform issues reference.\n")
+}
+
 // writeOutput emits the kind-specific Output section: the always-on delivery
 // invariant plus one per-surface file-delivery policy line per kind.
 func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
@@ -990,6 +1005,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 			fmt.Fprintf(b, "**Delivering files here:** whether Multica can push a file you produce into this %s conversation depends on how this deployment is configured, so it is stated per turn rather than here: the per-turn user message tells you, every turn. Follow what it says about files, and never report a file as delivered unless it told you how to deliver one.\n", ChannelDisplayName(ctx.ChatChannelType))
 		} else {
 			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
+			writeInlineBlocksPolicy(b)
 		}
 	default:
 		if ctx.IsSquadLeader {
@@ -997,9 +1013,10 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		} else {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output or run logs — only comments on the issue.\n\n")
 		}
-		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates or plans along the way.\n\n")
+		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates or plans along the way. Only a scheduled wakeup check whose `[WAKEUP]` block offers `multica issue wakeup checkin` may check in instead of commenting, when it found nothing that needs a reply.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n\n")
 		b.WriteString("**Delivering files here:** pass `--attachment <path>` to `multica issue comment add` (repeatable) — the only way a screenshot or artifact reaches the reader.\n")
+		writeInlineBlocksPolicy(b)
 	}
 	b.WriteString("\n")
 	writeDeliveryInvariant(b)

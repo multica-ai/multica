@@ -223,9 +223,9 @@ func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	}
 }
 
-// Auto-complete must span providers: an issue with an OPEN GitHub PR and a
-// MERGED close-intent VCS merge request waits for the GitHub PR, and completes
-// once it merges too.
+// The merge automation must span providers: an issue with an OPEN GitHub PR
+// and a MERGED VCS merge request waits for the GitHub PR, and moves once it
+// merges too.
 func TestAutoCompleteSpansProviders(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
@@ -274,11 +274,6 @@ func TestAutoCompleteSpansProviders(t *testing.T) {
 		IssueID: parseUUID(issue.ID), PullRequestID: vcsPR.ID,
 	}); err != nil {
 		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
-	}
-	if err := testHandler.Queries.SyncVCSPullRequestCloseIntent(ctx, db.SyncVCSPullRequestCloseIntentParams{
-		PullRequestID: vcsPR.ID, ClosingIssueIds: []pgtype.UUID{parseUUID(issue.ID)},
-	}); err != nil {
-		t.Fatalf("SyncVCSPullRequestCloseIntent: %v", err)
 	}
 
 	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue.ID), nil)
@@ -352,10 +347,9 @@ func TestDeleteIssue_VCSLinkCleanupIsWorkspaceScoped(t *testing.T) {
 	}
 }
 
-// A merge whose text no longer closes the issue clears the close intent an
-// earlier event recorded, even though the link itself is kept after merge
-// (PR #8794 review; mirrors TestWebhook_RemovedKeywordStopsCounting).
-func TestVCSWebhook_MergeWithoutKeywordDoesNotComplete(t *testing.T) {
+// A PR linked while open stays linked when its merge event no longer names the
+// issue, and that merge moves the issue: the keyword only links (MUL-7726).
+func TestVCSWebhook_MergeMovesIssueLinkedEarlier(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
 	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
@@ -388,8 +382,8 @@ func TestVCSWebhook_MergeWithoutKeywordDoesNotComplete(t *testing.T) {
 	fire("closed", "closed", true, "Related to "+issue.Identifier, "2026-05-02T00:00:00Z")
 
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status == "done" {
-		t.Errorf("merged without a closing keyword, but the issue moved to done")
+	if updated.Status != "done" {
+		t.Errorf("status = %q, want done", updated.Status)
 	}
 	var links int
 	testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&links)
@@ -429,20 +423,17 @@ func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
 		}
 	}
 
-	// Newer terminal event: merged with a real claim (Closes) → close_intent.
+	// Newer terminal event: merged with a real claim (Closes).
 	fire("closed", "closed", true, "Fix "+issue.Identifier, "Closes "+issue.Identifier, "2026-05-02T00:00:00Z")
 	// Older redelivered "opened" event: bare body mention, generic title/branch.
-	// Without the guard this clears close_intent and drops the link entirely.
+	// Without the guard this would drop the link: an open PR that no longer
+	// claims the issue is unlinked.
 	fire("opened", "open", false, "WIP", "touches "+issue.Identifier, "2026-05-01T00:00:00Z")
 
-	var closeIntent bool
-	if err := testPool.QueryRow(ctx,
-		`SELECT close_intent FROM issue_vcs_pull_request WHERE issue_id = $1`,
-		issue.ID).Scan(&closeIntent); err != nil {
-		t.Fatalf("select link: %v", err)
-	}
-	if !closeIntent {
-		t.Errorf("stale event rewrote link: close_intent=%v, want true", closeIntent)
+	var links int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&links)
+	if links != 1 {
+		t.Errorf("stale event rewrote the link: %d links, want 1", links)
 	}
 	// The PR row also stayed at the newer merged state.
 	rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))

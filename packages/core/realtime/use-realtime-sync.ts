@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -1278,6 +1279,9 @@ export function useRealtimeSync(
       // CancelledError + reload combo this guard exists to prevent. This
       // handler only serves deletes initiated elsewhere (other user/device).
       if (isWorkspaceDeletePending(workspace_id)) return;
+      // Any deleted workspace, not only the current one: its local search
+      // copy must not outlive it.
+      void forgetLocalSearchIndex(workspace_id);
       // Event payload has UUID; look up slug from cached workspace list
       // since clearWorkspaceStorage keys are namespaced by slug.
       const wsList = qc.getQueryData<{ id: string; slug: string }[]>(workspaceKeys.list()) ?? [];
@@ -1291,9 +1295,11 @@ export function useRealtimeSync(
     });
 
     const unsubMemberRemoved = ws.on("member:removed", (p) => {
-      const { user_id } = p as MemberRemovedPayload;
+      const { user_id, workspace_id } = p as MemberRemovedPayload;
       const myUserId = authStore.getState().user?.id;
       if (user_id === myUserId) {
+        const lostWsId = workspace_id || getCurrentWsId();
+        if (lostWsId) void forgetLocalSearchIndex(lostWsId);
         const slug = getCurrentSlug();
         const wsId = getCurrentWsId();
         if (slug && wsId) {

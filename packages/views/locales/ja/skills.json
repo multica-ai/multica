@@ -112,7 +112,9 @@
     "sort_by": "並び替え",
     "direction_asc": "昇順",
     "direction_desc": "降順",
-    "section_columns": "表示する列"
+    "section_columns": "表示する列",
+    "manage_labels": "ラベルを管理...",
+    "manage_labels_title": "スキルのラベル"
   },
   "detail": {
     "all_skills": "すべてのスキル",

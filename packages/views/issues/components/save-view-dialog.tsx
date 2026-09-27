@@ -488,6 +488,10 @@ export function SaveViewDialog({
 
   // Fresh draft per open: seed a private store instance from the live
   // panel's data fields, then let the embedded controls mutate it freely.
+  // Keyed on `open` alone: hosts rebuild `scope` on every render, and
+  // re-seeding on prop identity would wipe a half-typed name (and draft
+  // filters) on any background refetch. Hosts set `editView` and `open` in
+  // the same event, so the values read here are the ones this open is for.
   useEffect(() => {
     if (!open) {
       setDraftStore(null);
@@ -526,7 +530,8 @@ export function SaveViewDialog({
           : scope.variant,
       );
     }
-  }, [open, liveStore, editView, seedFromDefinition, scope]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per open, see above
+  }, [open]);
 
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),

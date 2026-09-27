@@ -9,4 +9,4 @@ export {
   shouldUpgradeFence,
   type RichFenceLanguage,
 } from "./rich-code-block";
-export { computeClosedFenceOffsets } from "./streaming-fence";
+export { computeClosedFences } from "./streaming-fence";

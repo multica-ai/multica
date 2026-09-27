@@ -1,6 +1,7 @@
 "use client";
 
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { cn } from "@multica/ui/lib/utils";
 
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -45,6 +46,7 @@ import type {
   IssueGroupPageState,
 } from "../surface/use-issue-group-branches";
 import { useDragSettle } from "./use-drag-settle";
+import { useIssuePeekActions } from "../surface/peek-context";
 import { useBoardDragPan } from "./use-board-drag-pan";
 import { useT } from "../../i18n";
 import {
@@ -512,6 +514,13 @@ function BoardViewImpl({
     })
   );
 
+  // Side peek steps through a column with J / K, in the order shown here.
+  const peek = useIssuePeekActions();
+  useEffect(() => {
+    peek?.publishColumns(groups.map((group) => columns[group.id] ?? EMPTY_IDS));
+  }, [peek, groups, columns]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
+
   // #6700: drag empty board background with the left button to pan horizontally
   // (Trello/Linear). Card drags start on `[data-board-card]` and are ignored.
   const pan = useBoardDragPan<HTMLDivElement>();
@@ -708,7 +717,13 @@ function BoardViewImpl({
         onPointerUp={pan.onPointerUp}
         onPointerCancel={pan.onPointerCancel}
         onLostPointerCapture={pan.onLostPointerCapture}
-        className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-2"
+        data-board-scroller=""
+        className={cn(
+          "flex flex-1 min-h-0 gap-4 overflow-x-auto p-2",
+          // While a side peek is open, a trailing spacer as wide as the panel
+          // lets every column scroll clear of it (IssuePeekHost).
+          "group-data-[peek-open]/peek:after:w-(--issue-peek-width) group-data-[peek-open]/peek:after:shrink-0 group-data-[peek-open]/peek:after:content-['']",
+        )}
       >
         {groups.length === 0 ? (
           groupBranches?.isError ? (

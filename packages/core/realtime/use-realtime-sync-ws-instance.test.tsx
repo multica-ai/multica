@@ -17,7 +17,14 @@ import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
 } from "../workspace/pending-delete";
+import { setApiInstance } from "../api";
+import type { ApiClient } from "../api/client";
+import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
+
+vi.mock("../search-index/instance", () => ({
+  forgetLocalSearchIndex: vi.fn(async () => undefined),
+}));
 
 vi.mock("../platform/workspace-storage", () => ({
   getCurrentWsId: () => "ws-1",
@@ -432,6 +439,7 @@ describe("useRealtimeSync — workspace:deleted self-initiated suppression", () 
   afterEach(() => {
     unmarkWorkspaceDeletePending("ws-2");
     localStorage.clear();
+    vi.mocked(forgetLocalSearchIndex).mockClear();
   });
 
   // getCurrentWsId is mocked to "ws-1" at module level, so deleting "ws-2"
@@ -460,6 +468,7 @@ describe("useRealtimeSync — workspace:deleted self-initiated suppression", () 
     // useDeleteWorkspace.onSuccess owns cleanup for self-initiated deletes;
     // the handler must not have touched storage.
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBe("draft");
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
   });
 
   it("still cleans up for a delete initiated elsewhere", () => {
@@ -473,5 +482,34 @@ describe("useRealtimeSync — workspace:deleted self-initiated suppression", () 
     dispatchWorkspaceDeleted(ws, "ws-2");
 
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBeNull();
+    // Not the current workspace, but its local search copy must still go.
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-2");
+  });
+});
+
+describe("useRealtimeSync — member:removed", () => {
+  afterEach(() => {
+    vi.mocked(forgetLocalSearchIndex).mockClear();
+  });
+
+  const dispatchMemberRemoved = (ws: WSClient, payload: Record<string, string>) => {
+    const call = vi.mocked(ws.on).mock.calls.find(([event]) => event === "member:removed");
+    expect(call).toBeDefined();
+    (call![1] as (p: unknown) => void)(payload);
+  };
+
+  it("destroys the local search copy when this user is removed", async () => {
+    setApiInstance({ listWorkspaces: vi.fn().mockResolvedValue([]) } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+
+    dispatchMemberRemoved(ws, { member_id: "m2", user_id: "someone-else", workspace_id: "ws-1" });
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
+
+    dispatchMemberRemoved(ws, { member_id: "m1", user_id: "u1", workspace_id: "ws-1" });
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-1");
+    // Let the relocate lookup settle before the test tears down.
+    await waitFor(() => expect(qc.getQueryData(workspaceKeys.list())).toEqual([]));
   });
 });

@@ -115,6 +115,7 @@ export function KeyboardShortcutsTab() {
     <SettingsTab
       title={t(($) => $.shortcuts.title)}
       description={t(($) => $.shortcuts.description)}
+      scope="device"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1 sm:max-w-sm">

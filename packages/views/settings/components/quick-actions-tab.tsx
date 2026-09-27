@@ -248,6 +248,7 @@ export function QuickActionsTab() {
     <SettingsTab
       title={t(($) => $.quick_actions.title)}
       description={t(($) => $.quick_actions.description)}
+      scope="workspace"
     >
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

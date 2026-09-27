@@ -41,6 +41,7 @@ import {
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useIssuePeekActions } from "../surface/peek-context";
 import type { IssueCreateDefaults } from "../surface/types";
 import type {
   IssueStatusPageState,
@@ -119,6 +120,9 @@ function ListViewImpl({
 
   const dragEnabled = !!onMoveIssue;
 
+  // Side peek steps through the list top to bottom, skipping collapsed groups.
+  const peek = useIssuePeekActions();
+
   const groups = useMemo(
     () => buildListGroups(visibleStatuses),
     [visibleStatuses],
@@ -163,6 +167,13 @@ function ListViewImpl({
   if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
+
+  useEffect(() => {
+    peek?.publishColumns([
+      expandedStatuses.flatMap((status) => columns[statusGroupId(status)] ?? EMPTY_IDS),
+    ]);
+  }, [peek, expandedStatuses, columns]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
 
   const collisionDetection = useMemo(
     () => makeKanbanCollision(groupIds),

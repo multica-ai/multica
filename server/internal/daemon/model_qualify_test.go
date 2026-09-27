@@ -219,6 +219,86 @@ func TestResolveTaskModelSelectionFailsOpenOnDiscoveryError(t *testing.T) {
 	}
 }
 
+// A catalog discovery did not verify — a static fallback or an empty list —
+// cannot say what the runtime supports, so every provider launches with the
+// saved selection untouched, even where the stand-in disagrees with it. The
+// installed binary's own effort vocabulary is the only thing still enforced
+// (MUL-7691).
+func TestResolveTaskModelSelectionPassesThroughUnverifiedCatalogs(t *testing.T) {
+	levels := func(values ...string) *agent.ModelThinking {
+		out := &agent.ModelThinking{}
+		for _, v := range values {
+			out.SupportedLevels = append(out.SupportedLevels, agent.ThinkingLevel{Value: v})
+		}
+		return out
+	}
+	claudeFallback := func(cli []string) agent.Catalog {
+		return agent.Catalog{
+			Models: []agent.Model{
+				{ID: "claude-sonnet-4-6", Default: true, Thinking: levels("low", "medium", "high")},
+			},
+			Fallback:          true,
+			CLIThinkingLevels: cli,
+		}
+	}
+	full := []string{"low", "medium", "high", "xhigh", "max"}
+	for _, tc := range []struct {
+		name     string
+		provider string
+		catalog  agent.Catalog
+		in, want taskModelSelection
+	}{
+		{
+			name: "claude model newer than the static list", provider: "claude", catalog: claudeFallback(full),
+			in:   taskModelSelection{Model: "claude-opus-5-5", ThinkingLevel: "xhigh"},
+			want: taskModelSelection{Model: "claude-opus-5-5", ThinkingLevel: "xhigh"},
+		},
+		{
+			name: "claude listed model the stand-in narrows", provider: "claude", catalog: claudeFallback(full),
+			in:   taskModelSelection{Model: "claude-sonnet-4-6", ThinkingLevel: "max"},
+			want: taskModelSelection{Model: "claude-sonnet-4-6", ThinkingLevel: "max"},
+		},
+		{
+			name: "claude empty model does not borrow the stand-in default", provider: "claude", catalog: claudeFallback(full),
+			in:   taskModelSelection{ThinkingLevel: "xhigh"},
+			want: taskModelSelection{ThinkingLevel: "xhigh"},
+		},
+		{
+			name: "claude CLI without --effort still drops the level", provider: "claude", catalog: claudeFallback([]string{}),
+			in:   taskModelSelection{Model: "claude-opus-5-5", ThinkingLevel: "high"},
+			want: taskModelSelection{Model: "claude-opus-5-5"},
+		},
+		{
+			name: "grok", provider: "grok",
+			catalog: agent.Catalog{Models: []agent.Model{{ID: "grok-4.5", Thinking: levels("low", "medium", "high")}}, Fallback: true},
+			in:      taskModelSelection{Model: "grok-4.5", ThinkingLevel: "xhigh"},
+			want:    taskModelSelection{Model: "grok-4.5", ThinkingLevel: "xhigh"},
+		},
+		{
+			name: "codex service tier", provider: "codex",
+			catalog: agent.Catalog{Models: []agent.Model{{ID: "gpt-5.5", Thinking: levels("low")}}, Fallback: true},
+			in:      taskModelSelection{Model: "gpt-5.5", ThinkingLevel: "xhigh", ServiceTier: "priority"},
+			want:    taskModelSelection{Model: "gpt-5.5", ThinkingLevel: "xhigh", ServiceTier: "priority"},
+		},
+		{
+			name: "empty opencode catalog", provider: "opencode", catalog: agent.Catalog{Models: []agent.Model{}},
+			in:   taskModelSelection{Model: "deepseek/deepseek-v4", ThinkingLevel: "max"},
+			want: taskModelSelection{Model: "deepseek/deepseek-v4", ThinkingLevel: "max"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reads := stubModelDiscovery(t, map[string]agent.Catalog{tc.provider: tc.catalog})
+			got := resolveTaskModelSelection(context.Background(), tc.provider, agent.Command{}, tc.in, quietTaskLog())
+			if got != tc.want {
+				t.Errorf("launch selection = %+v, want %+v", got, tc.want)
+			}
+			if reads() != 1 {
+				t.Errorf("catalog reads = %d, want 1", reads())
+			}
+		})
+	}
+}
+
 // Exercise real discovery through the daemon's task-launch guard rather than
 // injecting a prebuilt fallback: live discovery fails, bundled succeeds but
 // lacks the saved model. Model-scoped overrides pass through; the CLI-version

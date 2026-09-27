@@ -47,14 +47,15 @@ func TestInboundPhotoWithCaptionCarriesMediaAndPlaceholder(t *testing.T) {
 		t.Fatalf("text=%q command=%q", msg.Text, msg.CommandText)
 	}
 	raw, err := decodeTelegramRaw(msg)
-	if err != nil || raw.Media == nil {
+	if err != nil || len(raw.Media) != 1 {
 		t.Fatalf("raw media missing: %+v err=%v", raw, err)
 	}
-	if raw.Media.FileID != "large" || raw.Media.Kind != channel.MsgTypeImage || raw.Media.Placeholder != "[Image]" || raw.Media.FileSize != 120000 {
-		t.Fatalf("media = %+v, want the largest rendition", *raw.Media)
+	media := raw.Media[0]
+	if media.FileID != "large" || media.Kind != channel.MsgTypeImage || media.Placeholder != "[Image]" || media.FileSize != 120000 {
+		t.Fatalf("media = %+v, want the largest rendition", media)
 	}
-	if raw.Media.PlaceholderIndex != 0 {
-		t.Fatalf("a p2p photo has nothing ahead of its placeholder, index = %d", raw.Media.PlaceholderIndex)
+	if media.PlaceholderIndex != 0 {
+		t.Fatalf("a p2p photo has nothing ahead of its placeholder, index = %d", media.PlaceholderIndex)
 	}
 }
 
@@ -103,17 +104,18 @@ func TestInboundPlaceholderIndexSkipsLiteralsInRecentContext(t *testing.T) {
 	}
 	msg := handled[1]
 	raw, _ := decodeTelegramRaw(msg)
-	if raw.Media == nil || raw.Media.PlaceholderIndex != 1 {
+	if len(raw.Media) != 1 || raw.Media[0].PlaceholderIndex != 1 {
 		t.Fatalf("media = %+v, want placeholder index 1 (Ada's literal is occurrence 0)", raw.Media)
 	}
+	media := raw.Media[0]
 	contextEnd := strings.Index(msg.Text, "</recent_context>")
 	if contextEnd < 0 {
 		t.Fatalf("no recent context in\n%s", msg.Text)
 	}
-	if pos := nthOccurrence(msg.Text, raw.Media.Placeholder, raw.Media.PlaceholderIndex); pos < contextEnd {
-		t.Fatalf("occurrence %d is inside the context block (at %d, block ends %d):\n%s", raw.Media.PlaceholderIndex, pos, contextEnd, msg.Text)
+	if pos := nthOccurrence(msg.Text, media.Placeholder, media.PlaceholderIndex); pos < contextEnd {
+		t.Fatalf("occurrence %d is inside the context block (at %d, block ends %d):\n%s", media.PlaceholderIndex, pos, contextEnd, msg.Text)
 	}
-	if pos := nthOccurrence(msg.Text, raw.Media.Placeholder, 0); pos > contextEnd {
+	if pos := nthOccurrence(msg.Text, media.Placeholder, 0); pos > contextEnd {
 		t.Fatalf("Ada's literal should be occurrence 0, found at %d:\n%s", pos, msg.Text)
 	}
 }
@@ -131,12 +133,13 @@ func TestInboundPlaceholderIndexSkipsLiteralsInQuotedMessage(t *testing.T) {
 		t.Fatalf("ok=%v selected=%v", ok, msg.HasSelectedContext)
 	}
 	raw, _ := decodeTelegramRaw(msg)
-	if raw.Media == nil || raw.Media.PlaceholderIndex != 1 {
+	if len(raw.Media) != 1 || raw.Media[0].PlaceholderIndex != 1 {
 		t.Fatalf("media = %+v, want placeholder index 1", raw.Media)
 	}
+	media := raw.Media[0]
 	quoteEnd := strings.Index(msg.Text, "</quoted_message>")
-	if pos := nthOccurrence(msg.Text, raw.Media.Placeholder, raw.Media.PlaceholderIndex); quoteEnd < 0 || pos < quoteEnd {
-		t.Fatalf("occurrence %d is not on Bob's line (at %d, quote ends %d):\n%s", raw.Media.PlaceholderIndex, pos, quoteEnd, msg.Text)
+	if pos := nthOccurrence(msg.Text, media.Placeholder, media.PlaceholderIndex); quoteEnd < 0 || pos < quoteEnd {
+		t.Fatalf("occurrence %d is not on Bob's line (at %d, quote ends %d):\n%s", media.PlaceholderIndex, pos, quoteEnd, msg.Text)
 	}
 }
 
@@ -175,12 +178,12 @@ func TestInboundMediaKindsAndPlaceholders(t *testing.T) {
 			}
 			raw, _ := decodeTelegramRaw(msg)
 			if tc.wantNoMedia {
-				if raw.Media != nil {
-					t.Fatalf("unexpected media %+v", *raw.Media)
+				if len(raw.Media) != 0 {
+					t.Fatalf("unexpected media %+v", raw.Media)
 				}
 				return
 			}
-			if raw.Media == nil || raw.Media.FileName != tc.wantName || raw.Media.Placeholder != tc.wantText {
+			if len(raw.Media) != 1 || raw.Media[0].FileName != tc.wantName || raw.Media[0].Placeholder != tc.wantText {
 				t.Fatalf("media = %+v", raw.Media)
 			}
 		})
@@ -195,6 +198,109 @@ func TestInboundControlCommandWithPhotoKeepsMediaTurn(t *testing.T) {
 	msg, ok := inboundFromUpdate(u, 999, "my_bot")
 	if !ok || msg.CommandText != "/new" || msg.Text != "[Image]" {
 		t.Fatalf("ok=%v command=%q text=%q", ok, msg.CommandText, msg.Text)
+	}
+}
+
+// A reply to a message that carries a file selects that file, in a private
+// chat and whoever sent it — here the bot's own photo, one of several the
+// agent sent — so the quote is rendered and the file fetched the way a group
+// member's quoted photo is. A quoted text in a private chat is already part
+// of the one continuous session and stays unrendered, as before; and a reply
+// that addresses nobody in a group is neither rendered nor fetched, since the
+// Router drops it.
+func TestInboundReplyToFileQuotesAndFetchesIt(t *testing.T) {
+	ada := &User{ID: 111, FirstName: "Ada"}
+	botPhoto := &Message{
+		MessageID: 3, From: &User{ID: 999, IsBot: true, FirstName: "Team Bot"},
+		Caption: "sprites", Photo: []PhotoSize{{FileID: "bot-photo", FileUniqueID: "u-bot"}},
+	}
+	msg, ok := inboundFromUpdate(Update{UpdateID: 1, Message: &Message{
+		MessageID: 7, From: ada, Chat: Chat{ID: 555, Type: "private"},
+		Text: "which one is this?", ReplyToMessage: botPhoto,
+	}}, 999, "my_bot")
+	if !ok || !msg.HasSelectedContext || msg.CommandText != "which one is this?" {
+		t.Fatalf("message = %+v", msg)
+	}
+	want := "<quoted_message message_id=\"555:3\" sender=\"Team Bot\" type=\"image\">\n[Image]\nsprites\n</quoted_message>\n\nwhich one is this?"
+	if msg.Text != want {
+		t.Fatalf("Text =\n%s\nwant\n%s", msg.Text, want)
+	}
+	raw, _ := decodeTelegramRaw(msg)
+	if len(raw.Media) != 1 || raw.Media[0].FileID != "bot-photo" || raw.Media[0].Placeholder != "[Image]" || raw.Media[0].PlaceholderIndex != 0 {
+		t.Fatalf("media = %+v, want the quoted photo at occurrence 0", raw.Media)
+	}
+
+	msg, ok = inboundFromUpdate(Update{UpdateID: 2, Message: &Message{
+		MessageID: 8, From: ada, Chat: Chat{ID: 555, Type: "private"},
+		Text: "expand on that", ReplyToMessage: &Message{MessageID: 4, From: &User{ID: 999, IsBot: true}, Text: "earlier answer"},
+	}}, 999, "my_bot")
+	if !ok || msg.HasSelectedContext || msg.Text != "expand on that" {
+		t.Fatalf("message = %+v", msg)
+	}
+	if raw, _ := decodeTelegramRaw(msg); len(raw.Media) != 0 {
+		t.Fatalf("media = %+v, want none", raw.Media)
+	}
+
+	msg, ok = inboundFromUpdate(groupUpdate(9, ada, "which one is this?", &Message{
+		MessageID: 5, From: &User{ID: 222, FirstName: "Carol"}, Photo: []PhotoSize{{FileID: "carol-photo"}},
+	}, 0), 999, "my_bot")
+	if !ok || msg.AddressedToBot || msg.HasSelectedContext || msg.Text != "which one is this?" {
+		t.Fatalf("message = %+v", msg)
+	}
+	if raw, _ := decodeTelegramRaw(msg); len(raw.Media) != 0 {
+		t.Fatalf("media = %+v, want none for unaddressed chatter", raw.Media)
+	}
+}
+
+// A group member replies to another member's video with a photo of their
+// own: both files are carried, the quoted one first, and each marker's
+// occurrence skips the literals ahead of it — a member who typed "[Video]"
+// in the window must not receive the quoted video. The quoted video is
+// buffered like any group message but stays out of the window, since the
+// quote already renders it.
+func TestInboundReplyWithFileToFileCarriesBoth(t *testing.T) {
+	var handled []channel.InboundMessage
+	c := &telegramChannel{
+		botID: 999, botUsername: "my_bot", acceptsMedia: true,
+		handler: func(_ context.Context, msg channel.InboundMessage) error { handled = append(handled, msg); return nil },
+		logger:  testLogger(),
+		recent:  newRecentContextBuffer(DefaultRecentContextSize),
+	}
+	ctx := context.Background()
+	if err := c.dispatch(ctx, groupUpdate(1, &User{ID: 111, FirstName: "Ada"}, "the [Video] tag broke the page", nil, 0)); err != nil {
+		t.Fatal(err)
+	}
+	video := groupUpdate(2, &User{ID: 222, FirstName: "Carol"}, "", nil, 0)
+	video.Message.Video = &FileRef{FileID: "v1", FileUniqueID: "u-v1", MimeType: "video/mp4"}
+	if err := c.dispatch(ctx, video); err != nil {
+		t.Fatal(err)
+	}
+	reply := groupUpdate(3, &User{ID: 333, FirstName: "Bob"}, "", video.Message, 0)
+	reply.Message.Caption = "@my_bot is my witch as cute as hers?"
+	reply.Message.CaptionEntities = []MessageEntity{{Type: "mention", Offset: 0, Length: 7}}
+	reply.Message.Photo = []PhotoSize{{FileID: "p1", FileUniqueID: "u-p1"}}
+	if err := c.dispatch(ctx, reply); err != nil {
+		t.Fatal(err)
+	}
+	if len(handled) != 2 || !handled[1].AddressedToBot || !handled[1].HasSelectedContext {
+		t.Fatalf("handler calls = %+v", handled)
+	}
+	msg := handled[1]
+	want := "<recent_context count=\"1\">\n[Ada]: the [Video] tag broke the page\n</recent_context>\n\n" +
+		"<quoted_message message_id=\"-100200:2\" sender=\"Carol\" type=\"video\">\n[Video]\n</quoted_message>\n\n" +
+		"[Image]\nis my witch as cute as hers?"
+	if msg.Text != want {
+		t.Fatalf("Text =\n%s\nwant\n%s", msg.Text, want)
+	}
+	raw, _ := decodeTelegramRaw(msg)
+	if len(raw.Media) != 2 {
+		t.Fatalf("media = %+v, want the quoted video then the sender's photo", raw.Media)
+	}
+	if quoted := raw.Media[0]; quoted.FileID != "v1" || quoted.Placeholder != "[Video]" || quoted.PlaceholderIndex != 1 {
+		t.Fatalf("quoted media = %+v, want v1 at occurrence 1 (Ada's literal is occurrence 0)", quoted)
+	}
+	if own := raw.Media[1]; own.FileID != "p1" || own.Placeholder != "[Image]" || own.PlaceholderIndex != 0 {
+		t.Fatalf("own media = %+v, want p1 at occurrence 0", own)
 	}
 }
 
@@ -326,7 +432,7 @@ func (f *fakeBotFiles) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func mediaResolverFixture(t *testing.T, media *inboundMedia) (engine.ResolvedInstallation, pgtype.UUID, channel.InboundMessage) {
+func mediaResolverFixture(t *testing.T, media ...inboundMedia) (engine.ResolvedInstallation, pgtype.UUID, channel.InboundMessage) {
 	t.Helper()
 	cfg, _ := json.Marshal(installConfig{AppID: "999", BotTokenEncrypted: base64.StdEncoding.EncodeToString([]byte("123:secret"))})
 	var ws, instID, chatMessageID pgtype.UUID
@@ -335,16 +441,19 @@ func mediaResolverFixture(t *testing.T, media *inboundMedia) (engine.ResolvedIns
 	raw, _ := json.Marshal(telegramRawEvent{BotID: "999", EventType: "message", Media: media})
 	inst := engine.ResolvedInstallation{ID: instID, WorkspaceID: ws, Platform: db.ChannelInstallation{Config: cfg}}
 	text := "hello"
-	if media != nil {
-		text = media.Placeholder
+	if len(media) > 0 {
+		text = ""
+		for _, m := range media {
+			text += m.Placeholder + "\n"
+		}
 	}
 	return inst, chatMessageID, channel.InboundMessage{MessageID: "42:7", Source: channel.Source{ChatID: "42"}, Type: channel.MsgTypeText, Text: text, Raw: raw}
 }
 
 func TestMediaResolverHasMedia(t *testing.T) {
 	r := NewMediaResolver(nil, newFakeObjectStore(nil), &fakeMediaLedger{}, "", nil, testLogger())
-	_, _, with := mediaResolverFixture(t, &inboundMedia{Kind: channel.MsgTypeImage, FileID: "p", Placeholder: "[Image]"})
-	_, _, without := mediaResolverFixture(t, nil)
+	_, _, with := mediaResolverFixture(t, inboundMedia{Kind: channel.MsgTypeImage, FileID: "p", Placeholder: "[Image]"})
+	_, _, without := mediaResolverFixture(t)
 	if !r.HasMedia(with) || r.HasMedia(without) {
 		t.Fatalf("HasMedia with=%v without=%v", r.HasMedia(with), r.HasMedia(without))
 	}
@@ -357,7 +466,7 @@ func TestMediaResolverIngestsPhoto(t *testing.T) {
 	defer srv.Close()
 	store, ledger := newFakeObjectStore(nil), &fakeMediaLedger{}
 	r := NewMediaResolver(nil, store, ledger, srv.URL, srv.Client(), testLogger())
-	inst, chatMessageID, msg := mediaResolverFixture(t, &inboundMedia{Kind: channel.MsgTypeImage, FileID: "p1", FileUniqueID: "u1", MimeType: "image/jpeg", Placeholder: "[Image]", PlaceholderIndex: 1})
+	inst, chatMessageID, msg := mediaResolverFixture(t, inboundMedia{Kind: channel.MsgTypeImage, FileID: "p1", FileUniqueID: "u1", MimeType: "image/jpeg", Placeholder: "[Image]", PlaceholderIndex: 1})
 
 	got := r.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
 	if len(got.MediaRefs) != 1 {
@@ -391,7 +500,7 @@ func TestMediaResolverKeepsSenderFilenameWithoutDeclaredType(t *testing.T) {
 	defer srv.Close()
 	store := newFakeObjectStore(nil)
 	r := NewMediaResolver(nil, store, &fakeMediaLedger{}, srv.URL, srv.Client(), testLogger())
-	inst, chatMessageID, msg := mediaResolverFixture(t, &inboundMedia{Kind: channel.MsgTypeFile, FileID: "d1", FileName: "../report", Placeholder: "[File: report]"})
+	inst, chatMessageID, msg := mediaResolverFixture(t, inboundMedia{Kind: channel.MsgTypeFile, FileID: "d1", FileName: "../report", Placeholder: "[File: report]"})
 
 	got := r.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
 	if len(got.MediaRefs) != 1 {
@@ -422,13 +531,13 @@ func TestMediaResolverRefusesFailuresWithoutTouchingStorage(t *testing.T) {
 	defer srv.Close()
 	for _, tc := range []struct {
 		name         string
-		media        *inboundMedia
+		media        inboundMedia
 		refuseLedger bool
 		wantLedger   int
 	}{
-		{name: "oversize declared up front", media: &inboundMedia{Kind: channel.MsgTypeFile, FileID: "big", FileSize: maxBotDownloadBytes + 1, Placeholder: "[File: big]"}},
-		{name: "getFile fails", media: &inboundMedia{Kind: channel.MsgTypeImage, FileID: "missing", Placeholder: "[Image]"}},
-		{name: "reconciler owns the key", media: &inboundMedia{Kind: channel.MsgTypeImage, FileID: "p1", Placeholder: "[Image]"}, refuseLedger: true, wantLedger: 1},
+		{name: "oversize declared up front", media: inboundMedia{Kind: channel.MsgTypeFile, FileID: "big", FileSize: maxBotDownloadBytes + 1, Placeholder: "[File: big]"}},
+		{name: "getFile fails", media: inboundMedia{Kind: channel.MsgTypeImage, FileID: "missing", Placeholder: "[Image]"}},
+		{name: "reconciler owns the key", media: inboundMedia{Kind: channel.MsgTypeImage, FileID: "p1", Placeholder: "[Image]"}, refuseLedger: true, wantLedger: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bot.files["p1"] = fakeBotFile{path: "photos/p1.jpg", data: []byte("x")}
@@ -450,6 +559,56 @@ func TestMediaResolverRefusesFailuresWithoutTouchingStorage(t *testing.T) {
 				t.Fatalf("notice = %+v", got)
 			}
 		})
+	}
+}
+
+// Both files a reply names are carried across, under distinct keys even when
+// the reply quotes the very file it sends (the same file_unique_id twice).
+func TestMediaResolverIngestsQuotedAndOwnFiles(t *testing.T) {
+	jpeg := []byte("\xff\xd8\xff\xe0fake-jpeg")
+	bot := &fakeBotFiles{files: map[string]fakeBotFile{
+		"quoted": {path: "photos/quoted.jpg", data: jpeg},
+		"own":    {path: "photos/own.jpg", data: jpeg},
+	}}
+	srv := httptest.NewServer(http.HandlerFunc(bot.serve))
+	defer srv.Close()
+	store, ledger := newFakeObjectStore(nil), &fakeMediaLedger{}
+	r := NewMediaResolver(nil, store, ledger, srv.URL, srv.Client(), testLogger())
+	inst, chatMessageID, msg := mediaResolverFixture(t,
+		inboundMedia{Kind: channel.MsgTypeImage, FileID: "quoted", FileUniqueID: "same", MimeType: "image/jpeg", Placeholder: "[Image]", PlaceholderIndex: 0},
+		inboundMedia{Kind: channel.MsgTypeImage, FileID: "own", FileUniqueID: "same", MimeType: "image/jpeg", Placeholder: "[Image]", PlaceholderIndex: 1},
+	)
+
+	got := r.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
+	if len(got.MediaRefs) != 2 || got.MediaRefs[0].InlineIndex != 0 || got.MediaRefs[1].InlineIndex != 1 {
+		t.Fatalf("media refs = %+v", got.MediaRefs)
+	}
+	if got.MediaRefs[0].StorageKey == got.MediaRefs[1].StorageKey {
+		t.Fatalf("both files share key %q", got.MediaRefs[0].StorageKey)
+	}
+	if len(store.objects) != 2 || len(ledger.records) != 2 || bot.getFileCalls != 2 || len(bot.notices) != 0 {
+		t.Fatalf("uploads=%d ledger=%d getFile=%d notices=%+v", len(store.objects), len(ledger.records), bot.getFileCalls, bot.notices)
+	}
+}
+
+// One file failing does not cost the other: the refs that fetched are kept
+// with their own occurrence indexes, and the sender is told once.
+func TestMediaResolverKeepsTheFilesThatFetchedAndNotifiesOnce(t *testing.T) {
+	bot := &fakeBotFiles{files: map[string]fakeBotFile{"own": {path: "photos/own.jpg", data: []byte("x")}}}
+	srv := httptest.NewServer(http.HandlerFunc(bot.serve))
+	defer srv.Close()
+	r := NewMediaResolver(nil, newFakeObjectStore(nil), &fakeMediaLedger{}, srv.URL, srv.Client(), testLogger())
+	inst, chatMessageID, msg := mediaResolverFixture(t,
+		inboundMedia{Kind: channel.MsgTypeVideo, FileID: "missing", Placeholder: "[Video]", PlaceholderIndex: 0},
+		inboundMedia{Kind: channel.MsgTypeImage, FileID: "own", Placeholder: "[Image]", PlaceholderIndex: 0},
+	)
+
+	got := r.ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{}, pgtype.UUID{}, chatMessageID, msg)
+	if len(got.MediaRefs) != 1 || got.MediaRefs[0].InlinePlaceholder != "[Image]" || got.MediaRefs[0].InlineIndex != 0 {
+		t.Fatalf("media refs = %+v, want only the photo", got.MediaRefs)
+	}
+	if len(bot.notices) != 1 || bot.notices[0].Text != msgMediaUnavailable {
+		t.Fatalf("notices = %+v, want exactly one", bot.notices)
 	}
 }
 

@@ -19,7 +19,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isAgentRuntimeBound } from "@multica/core/agents";
-import { api } from "@multica/core/api";
+import { searchIssues, searchProjects } from "@multica/core/search-index";
 import {
   isIssueDirectHit,
   isProjectDirectHit,
@@ -306,13 +306,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           try {
             if (includeProjectSearch) {
               const [issues, projects] = await Promise.all([
-                api.searchIssues({
+                searchIssues({
                   q,
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
                   signal: controller.signal,
                 }),
-                api.searchProjects({
+                searchProjects({
                   q,
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
@@ -326,7 +326,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                 ]);
               }
             } else {
-              const res = await api.searchIssues({
+              const res = await searchIssues({
                 q,
                 limit: SERVER_ISSUE_SEARCH_LIMIT,
                 include_closed: true,

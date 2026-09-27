@@ -192,7 +192,7 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
 
-Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et déclenchent normalement le passage à `done` lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
+Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
 
 Pour les étapes de configuration, consultez [Intégration GitHub](/github-integration#configuration-en-auto-hébergement), [Bot Lark](/lark-bot-integration#configuration-en-auto-hébergement), [Bot Slack](/slack-bot-integration#configuration-en-auto-hébergement) et [Bot Telegram](/telegram-bot-integration#configuration-en-auto-hébergement).
 

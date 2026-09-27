@@ -168,7 +168,7 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if fresh.Reason != dispatch.ReasonRuntimeOffline {
 		t.Errorf("install in flight: reason = %q, want %q", fresh.Reason, dispatch.ReasonRuntimeOffline)
 	}
-	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow - time.Minute)), db.Agent{OwnerID: ownerA})
+	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow-time.Minute)), db.Agent{OwnerID: ownerA})
 	if !stale.Blocked() || stale.Reason != dispatch.ReasonRuntimeProfileMissing {
 		t.Fatalf("stale install claim: got %+v, want blocked/runtime_profile_missing", stale)
 	}

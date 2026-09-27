@@ -399,6 +399,12 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 <ResourceRow
                   key={resource.id}
                   resource={resource}
+                  githubRepoDescription={
+                    isGithubRef(resource)
+                      ? workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
+                          ?.description
+                      : undefined
+                  }
                   localDaemonId={localDaemonId}
                   onRemove={() => handleRemove(resource)}
                   onEditGithubRef={(target) => {
@@ -484,14 +490,23 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
                         >
                           <FolderGit className="size-3.5" />
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span className="truncate flex-1">{githubShortLabel(repo.url)}</span>
-                              }
-                            />
-                            <TooltipContent side="top">{repo.url}</TooltipContent>
-                          </Tooltip>
+                          <span className="min-w-0 flex-1">
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="block truncate">
+                                    {githubShortLabel(repo.url)}
+                                  </span>
+                                }
+                              />
+                              <TooltipContent side="top">{repo.url}</TooltipContent>
+                            </Tooltip>
+                            {repo.description?.trim() && (
+                              <span className="block truncate text-micro text-muted-foreground">
+                                {repo.description.trim()}
+                              </span>
+                            )}
+                          </span>
                           {isAttached && (
                             <span className="text-micro text-muted-foreground">
                               {t(($) => $.resources.attached_badge)}
@@ -614,6 +629,7 @@ function worktreeUnavailableReason(
 
 interface ResourceRowProps {
   resource: ProjectResource;
+  githubRepoDescription?: string;
   localDaemonId: string | null;
   onRemove: () => void;
   onEditGithubRef: (
@@ -626,6 +642,7 @@ interface ResourceRowProps {
 
 function ResourceRow({
   resource,
+  githubRepoDescription,
   localDaemonId,
   onRemove,
   onEditGithubRef,
@@ -635,26 +652,37 @@ function ResourceRow({
   if (isGithubRef(resource)) {
     const ref = resource.resource_ref;
     const display = resource.label || githubShortLabel(ref.url);
+    // Workspace repository descriptions are source-of-truth metadata. They stay
+    // live here rather than being copied into the resource label, while an
+    // explicit resource label remains the user's preferred primary text.
+    const description = resource.label ? undefined : githubRepoDescription?.trim();
     const tooltip = ref.ref ? `${ref.url}\nref: ${ref.ref}` : ref.url;
     return (
       <div className="text-caption group">
         <div className="flex items-center gap-2">
           <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <a
-                  href={ref.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate min-w-0 flex-1 hover:underline"
-                >
-                  {display}
-                </a>
-              }
-            />
-            <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>
-          </Tooltip>
+          <div className="min-w-0 flex-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <a
+                    href={ref.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block truncate hover:underline"
+                  >
+                    {display}
+                  </a>
+                }
+              />
+              <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>
+            </Tooltip>
+            {description && (
+              <span className="block truncate text-micro text-muted-foreground">
+                {description}
+              </span>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => onEditGithubRef(resource)}

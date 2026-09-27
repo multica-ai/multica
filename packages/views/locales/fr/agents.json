@@ -850,6 +850,7 @@
     "status_cancelled": "Annulée",
     "status_waiting": "En attente",
     "trigger_initial": "Exécution initiale",
+    "trigger_text": "Déclencheur",
     "trigger_comment": "Depuis un commentaire",
     "trigger_autopilot": "Automatisation",
     "trigger_retry": "Relance",
@@ -910,7 +911,8 @@
     "tool_kind_command": "Commandes",
     "tool_kind_write": "Modifications",
     "tool_kind_read": "Lectures",
-    "tool_kind_misc": "Autres"
+    "tool_kind_misc": "Autres",
+    "trigger_wakeup": "Réveil"
   },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",

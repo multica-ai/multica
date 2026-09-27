@@ -401,6 +401,17 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
 	if req.Settings != nil {
+		if incoming, ok := req.Settings.(map[string]any); ok {
+			// Only an old client's flip of the retired PR switch needs the
+			// stored value; see reconcilePRMergeSettings.
+			var stored map[string]any
+			if _, sent := incoming[prAutoCompleteLegacyKey]; sent {
+				if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+					_ = json.Unmarshal(existing.Settings, &stored)
+				}
+			}
+			reconcilePRMergeSettings(stored, incoming)
+		}
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
 	}
@@ -1239,6 +1250,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete comments",
 			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Teardown mode keeps the triggers from logging the deletes above
+			// and below; this clears what normal writes logged before.
+			name: "delete search index changes",
+			run:  func() error { return qtx.DeleteWorkspaceSearchIndexChanges(ctx, requester.WorkspaceID) },
 		},
 		// Keep source-context object intents after the workspace row is gone.
 		// They are the durable retry ledger for an upload that began before the

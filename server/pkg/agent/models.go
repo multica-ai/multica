@@ -125,11 +125,37 @@ type Catalog struct {
 	// enter the server's day-scale model-catalog cache, which would pin one
 	// transient failure as the answer for 24h (MUL-5549).
 	Fallback bool
+	// CLIThinkingLevels is the effort vocabulary the installed binary itself
+	// accepts, read from the binary (claude's `--help`) rather than from any
+	// model list. nil means it is unknown; a non-nil empty slice means the
+	// binary has no effort flag at all.
+	//
+	// It is the one capability an unverified catalog still enforces: it
+	// describes the executable, not a guess about models, so it holds whether
+	// or not discovery succeeded (MUL-7691).
+	CLIThinkingLevels []string
+}
+
+// Verified reports whether the catalog is the runtime's own answer, and so may
+// be used to reject, rewrite, or drop a saved model, thinking level, or
+// service tier.
+//
+// A fallback is a static stand-in for a discovery that failed, and an empty
+// catalog is what the providers without one return in the same situation.
+// Both mean "unknown", not "unsupported": the saved value goes to the CLI
+// as-is and the CLI is the judge (MUL-7691).
+func (c Catalog) Verified() bool {
+	return !c.Fallback && len(c.Models) > 0
 }
 
 // discovered adapts a plain `([]Model, error)` discovery function to Catalog
 // for providers that have no static fallback — for them a failure is already
 // reported as an empty list or an error, which downstream guards handle.
+//
+// An empty list deliberately stays unflagged. The server treats a completed
+// empty report as fresh truth and drops its cached catalog, while a fallback
+// report leaves the cache alone; flagging it here would change that. The
+// capability checks read emptiness themselves (Catalog.Verified).
 func discovered(models []Model, err error) (Catalog, error) {
 	return Catalog{Models: models}, err
 }
@@ -364,9 +390,9 @@ func ModelSelectorMustBeProviderQualified(providerType string) bool {
 func QualifyModelID(catalog Catalog, model string) (string, bool) {
 	model = strings.TrimSpace(model)
 	// A fallback catalog is a static stand-in, not what the runtime actually
-	// supports (see Catalog.Fallback) — qualifying against it would rewrite a
+	// supports (see Catalog.Verified) — qualifying against it would rewrite a
 	// working id into one the CLI never advertised.
-	if model == "" || catalog.Fallback {
+	if model == "" || !catalog.Verified() {
 		return model, false
 	}
 	for _, m := range catalog.Models {
@@ -426,25 +452,18 @@ func ModelSelectionSupported(providerType string) bool {
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known
-// mismatch for a target runtime provider. Static catalogs are sufficient to
-// recognize known-good IDs, but they are not allow-lists: Claude and Codex can
-// gain same-family model IDs through live discovery without a Multica release.
-// Unknown/custom model strings still return false because the UI and CLI allow
-// manual entries and the server should not erase values it cannot confidently
-// classify.
+// mismatch for a target runtime provider. Only Claude and Codex are judged, and
+// only by model-family prefix: they gain same-family model IDs through live
+// discovery without a Multica release, so no static list could be an
+// allow-list here. Unknown/custom model strings still return false because the
+// UI and CLI allow manual entries and the server should not erase values it
+// cannot confidently classify.
 func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return false
 	}
 
-	accepted, ok := acceptedModelIDsForProvider(providerType)
-	if !ok {
-		return false
-	}
-	if accepted[modelIDForCapabilityLookup(providerType, model)] {
-		return false
-	}
 	lookupID := modelIDForCapabilityLookup(providerType, model)
 	switch providerType {
 	case "claude":
@@ -455,6 +474,8 @@ func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 		if strings.HasPrefix(lookupID, "gpt-") || isOpenAIReasoningSeriesID(lookupID) {
 			return false
 		}
+	default:
+		return false
 	}
 	return isRuntimeSpecificModelID(model)
 }
@@ -477,32 +498,11 @@ func modelIDForCapabilityLookup(providerType, model string) string {
 	return claudeContextWindowTagRe.ReplaceAllString(model, "")
 }
 
-func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
-	switch {
-	case providerType == "claude":
-		return modelIDSet(claudeStaticModels()), true
-	case providerType == "codex":
-		return modelIDSet(codexStaticModels()), true
-	default:
-		return nil, false
-	}
-}
-
-func modelIDSet(models []Model) map[string]bool {
-	out := make(map[string]bool, len(models))
-	for _, m := range models {
-		out[m.ID] = true
-	}
-	return out
-}
-
 func isRuntimeSpecificModelID(model string) bool {
 	if strings.Contains(model, "/") {
 		return true
 	}
-	return modelHasKnownPrefix(model) ||
-		modelIDSet(claudeStaticModels())[model] ||
-		modelIDSet(codexStaticModels())[model]
+	return modelHasKnownPrefix(model)
 }
 
 func modelHasKnownPrefix(model string) bool {
@@ -577,11 +577,15 @@ func discoveryCacheKey(providerType string, runtimeCmd Command) string {
 // ── Static catalogs ──
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
-// values. Keep this list short and current; stale entries here
-// mislead users more than they help. Default = Sonnet because it's
-// the everyday workhorse (Opus is reserved for advisor-style flows).
+// values. It only fills the picker when live discovery fails and is never
+// validated against (Catalog.Verified), so listing a current model is cheap:
+// a CLI too old to know it reports that itself at launch. Add new models
+// here; drop entries only once the CLI stops accepting them. Default = Sonnet
+// because it's the everyday workhorse (Opus is reserved for advisor-style
+// flows).
 func claudeStaticModels() []Model {
 	return []Model{
+		{ID: "claude-opus-5-5", Label: "Claude Opus 5.5", Provider: "anthropic"},
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
 		{ID: "claude-fable-5-1", Label: "Claude Fable 5.1", Provider: "anthropic"},
@@ -596,25 +600,25 @@ func claudeStaticModels() []Model {
 }
 
 // codexStaticModels is the fallback for Codex versions older than 0.122.0
-// and for failed/malformed live and bundled discovery calls. Keep it in
-// sync with the visible entries in the newest locally verified bundled
-// catalog, plus still-common models from older Codex releases. Each entry
-// carries its own reasoning catalog so old/offline CLIs retain the same model
-// + thinking picker contract as dynamic discovery. Service tiers are
+// and for failed/malformed live and bundled discovery calls. It lists the
+// visible entries of the newest locally verified live catalog — which can run
+// ahead of the bundled one (gpt-6-sol and gpt-6-luna were live-only on
+// codex-cli 0.155.1) — plus still-common models from older Codex releases.
+// Each entry carries its own reasoning catalog so old/offline CLIs retain the
+// same model + thinking picker contract as dynamic discovery. Service tiers are
 // intentionally NOT guessed here: they are runtime/version/account-sensitive,
-// so a discovery failure hides the speed picker and fails the override closed.
+// so a discovery failure hides the speed picker. None of this is validated
+// against — a saved model, effort, or tier reaches the CLI as-is while this
+// list stands in (Catalog.Verified, MUL-7691).
 func codexStaticModels() []Model {
 	// `Default` here is NOT a user-facing "default model" badge — the picker
 	// stopped rendering that (Multica follows the CLI config when the model is
-	// unset). It only marks the current flagship for the "default must track
-	// the latest release" catalog guard
-	// (TestCodexStaticModelsMatchVerifiedFallbackCatalog,
-	// multica#2009). It is deliberately NOT used to validate effort for an
-	// empty (follow-CLI-config) model: that config can resolve to any model,
-	// so ValidateThinkingLevel fails an empty codex model closed rather than
-	// borrowing this entry's catalog (Astra/Sol/Terra advertise `ultra`; Luna
-	// does not) — see ValidateThinkingLevel and MUL-4347. Keep exactly one
-	// entry flagged.
+	// unset). It only marks the current flagship (multica#2009). It is
+	// deliberately NOT used to validate effort for an empty (follow-CLI-config)
+	// model: that config can resolve to any model, so ValidateThinkingLevel
+	// fails an empty codex model closed rather than borrowing this entry's
+	// catalog (Astra/Sol/Terra advertise `ultra`; Luna does not) — see
+	// ValidateThinkingLevel and MUL-4347. Keep exactly one entry flagged.
 	standardThinking := func(defaultLevel string, includeMax, includeUltra bool) *ModelThinking {
 		levels := []ThinkingLevel{
 			{Value: "low", Label: "Low", Description: "Fast responses with lighter reasoning"},
@@ -643,6 +647,8 @@ func codexStaticModels() []Model {
 	}
 	return []Model{
 		{ID: "gpt-6-astra", Label: "GPT-6 Astra", Provider: "openai", Default: true, Thinking: standardThinking("low", true, true)},
+		{ID: "gpt-6-sol", Label: "GPT-6 Sol", Provider: "openai", Thinking: standardThinking("medium", true, true)},
+		{ID: "gpt-6-luna", Label: "GPT-6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
 		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Thinking: standardThinking("low", true, true)},
 		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai", Thinking: standardThinking("medium", true, true)},
 		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai", Thinking: standardThinking("medium", true, false)},
@@ -2504,9 +2510,9 @@ func grokStaticModels() []Model {
 // these fallback catalogs with the installed CLI's advertised values.
 //
 // grok-4.6 documents and accepts `xhigh` (docs.x.ai/developers/grok-4-6,
-// grok 1.0.5 `--effort`). grok-4.5 does not; the server's dynamic literal
-// gate lets the token through and ValidateThinkingLevel still fails it closed
-// for 4.5 using the per-model catalog.
+// grok 1.0.5 `--effort`). grok-4.5 does not, so the fallback picker does not
+// offer it there. The daemon does not validate against this list: while it
+// stands in, a saved level reaches the CLI as-is (Catalog.Verified).
 func annotateGrokThinking(models []Model) {
 	for i := range models {
 		switch models[i].ID {

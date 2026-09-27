@@ -159,6 +159,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "wecom replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeInvokeDenied:
+		if err := r.sendInvokeDenied(ctx, inst, msg); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: invoke-denied notice failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeIngested:
 		// Only a /issue-created message warrants a confirmation; a plain
 		// chat message stays silent (the agent's own reply lands via
@@ -238,6 +243,26 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 		return r.post(ctx, inst, msg, c.BindingSentPrivately)
 	}
 	return nil
+}
+
+// sendInvokeDenied tells a member the agent is not theirs to run.
+//
+// A 1:1 is answered in place. A GROUP trigger is answered in the sender's own
+// 1:1 and the room hears nothing: a line there would tell everyone present both
+// which member was refused and that the agent is someone's private one. The
+// sender is bound by definition at this point — the identity check is what
+// produced the user id this verdict was read for — so a 1:1 route to them
+// exists.
+//
+// Either way the only reader is the sender, so the sender's own profile picks
+// the language — not the room's, which is what Reply resolved for everything
+// else it says.
+func (r *OutboundReplier) sendInvokeDenied(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) error {
+	text := copyFor(localeFor(ctx, r.languages, inst.ID, chatTypeSingleInt, msg.Source.SenderID)).InvokeDenied
+	if aibotChatTypeFromChannel(msg.Source.ChatType) != chatTypeGroupInt {
+		return r.post(ctx, inst, msg, text)
+	}
+	return r.postPrivate(ctx, inst, msg.Source.SenderID, text)
 }
 
 // postPrivate delivers text to a single user's 1:1 chat (chat_type=1),

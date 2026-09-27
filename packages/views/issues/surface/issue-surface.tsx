@@ -40,6 +40,7 @@ import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
+import { IssuePeekHost } from "../components/issue-peek";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
@@ -282,6 +283,10 @@ function IssueSurfaceContent({
             }
           />
         )}
+        {/* Every view opens the side peek on Shift+Click. The host wraps the
+            loading and empty states too, so a view switch that briefly shows
+            a skeleton keeps the peek open. */}
+        <IssuePeekHost>
         {/* A failed status catalog precedes loading/empty/content on purpose.
             Row fetching is suspended while it is down (a custom status filter
             cannot be routed without it), so every branch below would render an
@@ -382,6 +387,7 @@ function IssueSurfaceContent({
             )}
           </div>
         )}
+        </IssuePeekHost>
         {shouldShowBatchToolbar && (
           <BatchActionToolbar
             issues={

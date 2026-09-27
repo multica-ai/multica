@@ -19,6 +19,12 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { AppLink } from "../../navigation";
+import {
+  PEEK_TARGET_ATTR,
+  useIsIssuePeeked,
+  useIssuePeekActions,
+  useIssuePeekLinkProps,
+} from "../surface/peek-context";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { StatusIcon } from "./status-icon";
@@ -328,6 +334,8 @@ function ScheduledRow({
     enabled: !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const peeked = useIsIssuePeeked(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue.id);
 
   const start = parseDay(issue.start_date);
   const due = parseDay(issue.due_date);
@@ -365,15 +373,22 @@ function ScheduledRow({
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
+        {...{ [PEEK_TARGET_ATTR]: issue.id }}
         className="flex border-b border-foreground/5 hover:bg-accent/30 transition-colors"
         style={{ height: ROW_HEIGHT }}
       >
-        {/* Sticky label cell */}
+        {/* Sticky label cell — it also carries the peeked mark, since its
+            opaque background covers the row's own. */}
         <AppLink
           href={p.issueDetail(issue.id)}
           newTabTitle={issue.identifier}
-          className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0"
+          className={cn(
+            "sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0",
+            peeked &&
+              "bg-[color-mix(in_oklab,var(--brand)_6%,var(--background))] shadow-[inset_2px_0_0_var(--brand)]",
+          )}
           style={{ width: LEFT_COL_WIDTH }}
+          {...peekLinkProps}
         >
           <StatusIcon
             status={issue.status}
@@ -409,6 +424,7 @@ function ScheduledRow({
                   <AppLink
                     href={p.issueDetail(issue.id)}
                     newTabTitle={issue.identifier}
+                    {...peekLinkProps}
                     className={cn(
                       "absolute top-1/2 -translate-y-1/2 transition-opacity hover:opacity-90",
                       bar.isMarker
@@ -479,6 +495,13 @@ export function GanttView({ issues }: { issues: Issue[] }) {
     const sortField = sortBy === "position" ? "start_date" : sortBy;
     return sortIssues(issues, sortField, sortDirection, statusOrder);
   }, [issues, sortBy, sortDirection, statusOrder]);
+
+  // Side peek steps through the rows top to bottom.
+  const peek = useIssuePeekActions();
+  useEffect(() => {
+    peek?.publishColumns([scheduled.map((issue) => issue.id)]);
+  }, [peek, scheduled]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
 
   const range = useMemo(
     () => computeRange(scheduled, today, zoom),

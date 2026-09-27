@@ -27,7 +27,7 @@ import type {
   SearchIssueResult,
   SearchProjectResult,
 } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
   openCreateIssueWithPreference,
@@ -430,7 +430,7 @@ export function SearchCommand() {
     ];
 
     if (currentIssueId && currentIssue) {
-      const identifier = currentIssue.identifier;
+      const { id: issueId, identifier } = currentIssue;
       items.push(
         {
           key: "copy-issue-link",
@@ -467,12 +467,12 @@ export function SearchCommand() {
             // still can't load, no comments are on screen — dropping the
             // action matches the visible state.
             void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .ensureQueryData(issueTimelineOptions(issueId))
               .then((entries) => {
                 useCommentCollapseStore
                   .getState()
-                  .collapseAll(currentIssueId, rootCommentIds(entries));
-                useResolvedExpandStore.getState().collapseAll(currentIssueId);
+                  .collapseAll(issueId, rootCommentIds(entries));
+                useResolvedExpandStore.getState().collapseAll(issueId);
               })
               .catch(() => {});
             setOpen(false);
@@ -485,12 +485,12 @@ export function SearchCommand() {
           keywords: ["unfold", "expand", "comments", "展开", "评论"],
           onSelect: () => {
             void queryClient
-              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .ensureQueryData(issueTimelineOptions(issueId))
               .then((entries) => {
-                useCommentCollapseStore.getState().expandAll(currentIssueId);
+                useCommentCollapseStore.getState().expandAll(issueId);
                 useResolvedExpandStore
                   .getState()
-                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
+                  .expandAll(issueId, resolvedThreadRootIds(entries));
               })
               .catch(() => {});
             setOpen(false);
@@ -630,18 +630,21 @@ export function SearchCommand() {
     }
 
     setIsLoading(true);
+    // The debounce spares the server a request per keystroke; the local index
+    // answers in milliseconds, so it searches on every keystroke.
+    const delay = isLocalSearchReady() ? 0 : 300;
     debounceRef.current = setTimeout(async () => {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
         const [issueRes, projectRes] = await Promise.all([
-          api.searchIssues({
+          searchIssues({
             q: q.trim(),
             limit: 20,
             include_closed: true,
             signal: controller.signal,
           }),
-          api.searchProjects({
+          searchProjects({
             q: q.trim(),
             limit: 10,
             include_closed: true,
@@ -665,7 +668,7 @@ export function SearchCommand() {
           setIsLoading(false);
         }
       }
-    }, 300);
+    }, delay);
   }, []);
 
   const handleValueChange = useCallback(

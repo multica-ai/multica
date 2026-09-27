@@ -1,6 +1,6 @@
 ---
 title: Fournisseurs Git auto-hébergés
-description: Connectez une instance Forgejo, Gitea ou GitLab auto-hébergée par espace de travail, afin que les pull/merge requests portant un identifiant de tâche dans leur nom de branche ou leur titre, ou après un mot-clé de clôture dans leur description, soient automatiquement associées à cette tâche, la fassent passer à Terminé à la fusion et affichent le statut CI.
+description: Connectez une instance Forgejo, Gitea ou GitLab auto-hébergée par espace de travail, afin que les pull/merge requests portant un identifiant de tâche dans leur nom de branche ou leur titre, ou après un mot-clé de clôture dans leur description, soient automatiquement associées à cette tâche, la fassent passer au statut choisi par l'espace de travail à la fusion et affichent le statut CI.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -11,10 +11,10 @@ exécutez Multica vous-même ; elle n'est pas proposée sur Multica Cloud. « Au
 signifie ici que c'est **Multica** qui est auto-hébergé — généralement pour pouvoir joindre
 une instance Git sur votre propre réseau. Un opérateur du serveur doit l'activer
 (`MULTICA_VCS_INTEGRATION_ENABLED=true`) et définir `MULTICA_VCS_SECRET_KEY` ; d'ici là,
-la section n'apparaît pas dans Paramètres → Intégrations.
+la ligne n'apparaît pas dans Paramètres → Code.
 </Callout>
 
-Multica se connecte à un fournisseur Git auto-hébergé par espace de travail : **Forgejo**, **Gitea** ou **GitLab**. Une fois la connexion établie, toute pull request (GitLab : merge request) dont le nom de branche ou le titre contient un identifiant de tâche (par exemple `MUL-123`), ou dont la description en cite un après un mot-clé de clôture (`Closes MUL-123`), est **associée automatiquement** à cette [tâche](/issues), apparaît sous **Pull requests** dans la barre latérale de la tâche et — lorsqu'elle est fusionnée avec un mot-clé de clôture — fait passer la tâche à **Terminé**. La CI du commit de tête s'affiche sous forme de barre de vérifications sur la carte.
+Multica se connecte à un fournisseur Git auto-hébergé par espace de travail : **Forgejo**, **Gitea** ou **GitLab**. Une fois la connexion établie, toute pull request (GitLab : merge request) dont le nom de branche ou le titre contient un identifiant de tâche (par exemple `MUL-123`), ou dont la description en cite un après un mot-clé de clôture (`Closes MUL-123`), est **associée automatiquement** à cette [tâche](/issues), apparaît sous **Pull requests** dans la barre latérale de la tâche et — une fois toutes les PR associées fusionnées — fait passer la tâche au statut choisi par l'espace de travail (**Terminé** par défaut). La CI du commit de tête s'affiche sous forme de barre de vérifications sur la carte.
 
 Ces fournisseurs fonctionnent en parallèle de GitHub : un espace de travail peut les combiner librement.
 
@@ -51,7 +51,7 @@ Définissez `MULTICA_PUBLIC_URL` sur l'URL de base publique du serveur pour que 
 1. Chez votre fournisseur, créez un jeton d'accès disposant d'un accès en lecture aux dépôts que vous voulez refléter :
    - **Forgejo / Gitea** : Settings → Applications.
    - **GitLab** : un jeton d'accès personnel (ou de groupe/projet) avec la portée `read_api`.
-2. Dans Multica, ouvrez **Paramètres → Intégrations → Fournisseurs git (auto-hébergés)**.
+2. Dans Multica, ouvrez **Paramètres → Code**, puis cliquez sur **Connecter** sur la ligne **Git auto-hébergé**.
 3. Choisissez le **Fournisseur**, saisissez l'URL de l'instance (par exemple `https://forgejo.example.com`) et le jeton d'accès, puis cliquez sur **Connecter**. Multica valide le jeton auprès de l'instance avant d'enregistrer.
 4. Copiez l'**URL du webhook** et le **Secret du webhook** affichés après la connexion.
 
@@ -87,7 +87,7 @@ Multica authentifie chaque livraison à l'aide du secret stocké : un webhook qu
 ## Ce qui est reflété
 
 - **Pull requests / merge requests** — état ouvert, fermé, fusionné et brouillon, auteur, branche et (lorsque le fournisseur les fournit) statistiques de diff.
-- **Liens vers les tâches** — un identifiant dans le titre ou la branche associe la PR à la tâche, tout comme un identifiant placé après un mot-clé de clôture dans la description ; une simple mention dans la description n'associe rien. Un mot-clé de clôture (`Closes`/`Fixes`/`Resolves MUL-123`) sur une PR fusionnée fait passer la tâche à **Terminé** dès qu'aucune PR associée n'est encore ouverte.
+- **Liens vers les tâches** — un identifiant dans le titre ou la branche associe la PR à la tâche, tout comme un identifiant placé après un mot-clé de clôture dans la description ; une simple mention dans la description n'associe rien. Une fois toutes les PR associées fusionnées, la tâche passe au statut choisi par l'espace de travail, selon le même paramètre que [GitHub](/github-integration).
 - **CI** — les statuts de commit Forgejo/Gitea et les pipelines GitLab sont agrégés dans une barre de vérifications réussie/en échec/en attente pour le commit de tête.
 
 ## Agents qui ouvrent des pull requests

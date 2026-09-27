@@ -16,9 +16,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { Button } from "@multica/ui/components/ui/button";
 import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
 import type { Agent, AgentTask, Issue } from "@multica/core/types";
 import {
   type AgentActivity,
@@ -39,11 +40,7 @@ import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from ".
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-// Recent work pagination: small initial cohort to keep the section
-// scannable, then "Show more" reveals 20 at a time. Tasks are already
-// fully cached client-side (one listAgentTasks for the whole agent), so
-// "more" is a pure state flip — zero extra fetches.
+// Reveal cached rows in small batches and fetch another page only on demand.
 const RECENT_INITIAL = 10;
 const RECENT_PAGE = 20;
 // Placeholder rows shown while the lazily-loaded per-agent task list is
@@ -61,13 +58,11 @@ interface ActivityTabProps {
  * around the user's three diagnostic questions, in scan order:
  *
  *   Now           — what's it doing right this second?
- *   Last 7 days   — how has it been doing in aggregate?
+ *   Last 30 days  — how has it been doing in aggregate?
  *   Recent work   — what did it just finish?
  *
- * All three read from caches the rest of the page already fills (the
- * workspace task snapshot for "Now", per-agent task list for "Recent",
- * the workspace 7d activity buckets for the trend), so opening this tab
- * adds no extra fetches once the page is hydrated.
+ * "Now" and performance reuse workspace projections. Recent work loads
+ * bounded history pages on demand; opening the tab never fetches all runs.
  */
 export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps) {
   const wsId = useWorkspaceId();
@@ -76,9 +71,21 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
   // `isLoading` (pending + fetching, no cached data) is true only on the
   // very first fetch. Once the page has hydrated this cache elsewhere the
   // tab opens straight into data with no skeleton flash.
-  const { data: agentTasks = [], isLoading: isLoadingRecent } = useQuery(
-    agentTasksOptions(wsId, agent.id),
-  );
+  const {
+    data,
+    isLoading: isLoadingRecent,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useInfiniteQuery(agentTasksOptions(wsId, agent.id));
+  const agentTasks = useMemo(() => {
+    const tasks = new Map<string, AgentTask>();
+    for (const page of data?.pages ?? []) {
+      for (const task of page.tasks) tasks.set(task.id, task);
+    }
+    return [...tasks.values()];
+  }, [data]);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const activity = activityMap.get(agent.id);
 
@@ -138,12 +145,9 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
     () => recentTasksAll.slice(0, recentDisplayLimit),
     [recentTasksAll, recentDisplayLimit],
   );
-  const hasMoreRecent = recentTasksAll.length > recentTasks.length;
+  const hasMoreRecent = recentTasksAll.length > recentTasks.length || hasNextPage;
 
-  const avgDurationMs = useMemo(
-    () => deriveAvgDurationLast30d(agentTasks, Date.now()),
-    [agentTasks],
-  );
+  const avgDurationMs = activity?.avgDurationMs ?? 0;
 
   // Resolve issue identifiers + titles for any task we'll render. Going
   // through `issueDetailOptions` is the same lookup the rest of the app
@@ -179,12 +183,22 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
       )}
       <RecentWorkSection
         tasks={recentTasks}
-        totalCount={recentTasksAll.length}
+        totalCount={hasNextPage ? undefined : recentTasksAll.length}
         hasMore={hasMoreRecent}
         loading={isLoadingRecent}
-        onShowMore={() =>
-          setRecentDisplayLimit((n) => n + RECENT_PAGE)
-        }
+        fetchingMore={isFetchingNextPage}
+        fetchMoreFailed={isFetchNextPageError}
+        onShowMore={() => {
+          if (recentDisplayLimit < recentTasksAll.length) {
+            setRecentDisplayLimit((n) => n + RECENT_PAGE);
+          } else if (hasNextPage && !isFetchingNextPage) {
+            void fetchNextPage({ cancelRefetch: false }).then((result) => {
+              if (!result.isFetchNextPageError) {
+                setRecentDisplayLimit((n) => n + RECENT_PAGE);
+              }
+            });
+          }
+        }}
         issueMap={issueMap}
         agent={agent}
       />
@@ -197,16 +211,10 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
 export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
-  const { data: agentTasks = [] } = useQuery(
-    agentTasksOptions(wsId, agent.id),
-  );
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
   const activity = activityMap.get(agent.id);
   const summary = summarizeActivityWindow(activity, 30);
-  const avgDurationMs = useMemo(
-    () => deriveAvgDurationLast30d(agentTasks, Date.now()),
-    [agentTasks],
-  );
+  const avgDurationMs = activity?.avgDurationMs ?? 0;
 
   return (
     <section className="mt-5 border-t pt-5">
@@ -422,14 +430,19 @@ function RecentWorkSection({
   hasMore,
   loading,
   onShowMore,
+  fetchingMore,
+  fetchMoreFailed,
   issueMap,
   agent,
 }: {
   tasks: AgentTask[];
-  totalCount: number;
+  // Only known after the server has returned the final history page.
+  totalCount?: number;
   hasMore: boolean;
   loading: boolean;
   onShowMore: () => void;
+  fetchingMore: boolean;
+  fetchMoreFailed: boolean;
   issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
@@ -439,8 +452,10 @@ function RecentWorkSection({
   const subtitle = loading
     ? ""
     : tasks.length === 0
-      ? t(($) => $.tab_body.activity.subtitle_no_recent)
-      : totalCount > tasks.length
+      ? hasMore
+        ? ""
+        : t(($) => $.tab_body.activity.subtitle_no_recent)
+      : totalCount !== undefined && totalCount > tasks.length
         ? t(($) => $.tab_body.activity.subtitle_recent_progress, { shown: tasks.length, total: totalCount })
         : t(($) => $.tab_body.activity.subtitle_recent_latest, { count: tasks.length });
   return (
@@ -448,25 +463,27 @@ function RecentWorkSection({
       {loading ? (
         <RecentWorkSkeleton />
       ) : tasks.length === 0 ? (
-        <EmptyText>{t(($) => $.tab_body.activity.empty_recent)}</EmptyText>
+        hasMore ? null : <EmptyText>{t(($) => $.tab_body.activity.empty_recent)}</EmptyText>
       ) : (
-        <>
-          <TaskList
-            tasks={tasks}
-            issueMap={issueMap}
-            timeMode="completed"
-            agent={agent}
-          />
-          {hasMore && (
-            <button
-              type="button"
-              onClick={onShowMore}
-              className="mt-2 self-start rounded-xs text-caption text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {t(($) => $.tab_body.activity.show_more)}
-            </button>
-          )}
-        </>
+        <TaskList
+          tasks={tasks}
+          issueMap={issueMap}
+          timeMode="completed"
+          agent={agent}
+        />
+      )}
+      {!loading && hasMore && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onShowMore}
+          disabled={fetchingMore}
+          aria-busy={fetchingMore}
+          className="self-start"
+        >
+          {fetchMoreFailed ? t(($) => $.detail.try_again) : t(($) => $.tab_body.activity.show_more)}
+        </Button>
       )}
     </Section>
   );
@@ -856,32 +873,6 @@ function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): st
     return t(($) => $.tab_body.activity.dispatched_prefix, { when: timeAgo(task.dispatched_at) });
   }
   return t(($) => $.tab_body.activity.queued_prefix, { when: timeAgo(task.created_at) });
-}
-
-/**
- * Average wall-clock duration of completed/failed tasks whose completion
- * lands in the last 30 days. Pure function so callers can pass a
- * deterministic `now` in tests.
- */
-export function deriveAvgDurationLast30d(
-  tasks: readonly AgentTask[],
-  now: number,
-): number {
-  let sum = 0;
-  let count = 0;
-  for (const t of tasks) {
-    if (!t.completed_at || !t.started_at) continue;
-    const completedAt = new Date(t.completed_at).getTime();
-    if (Number.isNaN(completedAt)) continue;
-    if (now - completedAt > THIRTY_DAYS_MS) continue;
-    const startedAt = new Date(t.started_at).getTime();
-    const dur = completedAt - startedAt;
-    if (Number.isFinite(dur) && dur > 0) {
-      sum += dur;
-      count += 1;
-    }
-  }
-  return count > 0 ? Math.round(sum / count) : 0;
 }
 
 /**
