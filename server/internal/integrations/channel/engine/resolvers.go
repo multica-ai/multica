@@ -428,10 +428,14 @@ type TaskEnqueuer interface {
 	FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
-	// MemberMayInvokeAgent is service.CanMemberInvokeAgent keyed by agent id:
-	// the Router has the installation's agent id, not the loaded row. An agent
-	// that no longer exists admits nobody; a lookup that failed is an error, so
-	// an unreachable database is never read as a denial.
+	// MemberMayInvokeAgent applies the invocation policy by agent id: the
+	// Router has the installation's agent id, not the loaded row.
+	//
+	// An agent that no longer exists admits nobody, and so does a member who is
+	// not a target — both are (false, nil). A query that FAILED is an error,
+	// never false, because the Router reads false as "tell this person no" and
+	// marks the message processed. The scheduled triggers use the fail-closed
+	// wrapper instead; they can wait for the next tick, a person cannot.
 	MemberMayInvokeAgent(ctx context.Context, agentID, userID pgtype.UUID) (bool, error)
 }
 

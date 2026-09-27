@@ -1851,9 +1851,11 @@ type PreparedChatTaskEnqueue struct {
 // before storing a sender's message, so a member the web chat would refuse
 // cannot reach the agent through a bot either.
 //
-// An agent that no longer exists admits nobody. A lookup that failed is
-// returned as an error rather than as false, so an unreachable database is
-// never read as a denial.
+// An agent that no longer exists admits nobody — that is a verdict, not a
+// failure. Every other query failure comes back as an error, so an unreachable
+// database is never read as a denial: the caller releases its dedup claim and
+// the platform's redelivery is still the message's chance. CanMemberInvokeAgent
+// is the fail-closed wrapper the scheduled triggers use instead.
 func (s *TaskService) MemberMayInvokeAgent(ctx context.Context, agentID, userID pgtype.UUID) (bool, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1862,7 +1864,7 @@ func (s *TaskService) MemberMayInvokeAgent(ctx context.Context, agentID, userID 
 	if err != nil {
 		return false, fmt.Errorf("load agent: %w", err)
 	}
-	return CanMemberInvokeAgent(ctx, s.Queries, agent, userID, agent.WorkspaceID), nil
+	return memberMayInvokeAgent(ctx, s.Queries, agent, userID, agent.WorkspaceID)
 }
 
 // PrepareChatTaskEnqueue performs reads and optional external integration work

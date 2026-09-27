@@ -218,9 +218,6 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	return nil
 }
 
-// postPrivate delivers text to a single user's 1:1 chat (chat_type=1),
-// regardless of which room triggered the message. Used for bearer-credential
-// content (the binding link) that must never land in a group.
 // sendInvokeDenied tells a member the agent is not theirs to run.
 //
 // A 1:1 is answered in place. A GROUP trigger is answered in the sender's own
@@ -236,6 +233,9 @@ func (r *OutboundReplier) sendInvokeDenied(ctx context.Context, inst engine.Reso
 	return r.postPrivate(ctx, inst, msg.Source.SenderID, invokeDeniedText)
 }
 
+// postPrivate delivers text to a single user's 1:1 chat (chat_type=1),
+// regardless of which room triggered the message. Used for bearer-credential
+// content (the binding link) that must never land in a group.
 func (r *OutboundReplier) postPrivate(ctx context.Context, inst engine.ResolvedInstallation, userID, text string) error {
 	if r.senders == nil {
 		return errors.New("wecom: sender registry not configured")
