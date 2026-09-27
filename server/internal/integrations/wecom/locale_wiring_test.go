@@ -13,6 +13,7 @@ package wecom
 
 import (
 	"context"
+	"github.com/multica-ai/multica/server/internal/util"
 	"strings"
 	"testing"
 
@@ -263,6 +264,57 @@ func TestInboxCardUnknownTypeUsesTheSamePacksFallback(t *testing.T) {
 // by the caller and handed down in attachmentTarget — the delivery itself runs
 // detached, with no context left to read a profile with. Constructing the
 // target by hand here would test the pack and skip the wiring.
+// The relayed path builds its own attachmentTarget, so "the notice reads the
+// destination's language" has to be true twice. On a multi-replica deployment
+// the relayed one is the common case: chat:done lands wherever the run
+// finished, and only the lease holder can write to the socket.
+//
+// Nothing else differs when this is wrong — the file still fails, the notice
+// still goes out, it is just in the wrong language — so no other test would
+// have caught it.
+func TestRelayedAttachmentFailureNoticeAlsoReadsTheDestinationsLanguage(t *testing.T) {
+	t.Parallel()
+	for _, tc := range localeCases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := oneAttachmentQueries(t, db.Attachment{
+				ID: mustTestUUID(t), Filename: "big.bin", Url: "https://cdn.example/obj/bin",
+			})
+			// A 1:1, where the bound chatid IS the reader's userid.
+			q.sessionBinding.ChannelChatID = "T-asker"
+			q.sessionBinding.ChatType = string(channel.ChatTypeP2P)
+			q.userLanguage = tc.language
+			q.userBindingID = localeTestUserID
+
+			o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/bin", data: []byte("DATA")})
+			q.sessionBinding.InstallationID = instID
+			q.installation.ID = instID
+			conn.refuse[cmdUploadMediaInit] = 40058 // the server will not take the file
+
+			if res := o.deliverRelayed(context.Background(), relayFrame{
+				Kind:           relayKindReply,
+				InstallationID: util.UUIDToString(instID),
+				ChatID:         "T-asker",
+				ChatType:       chatTypeSingleInt,
+				Content:        "See the attached dump.",
+				MessageID:      testMessageID,
+				WorkspaceID:    testWorkspaceID,
+				SessionID:      testSessionID,
+				TaskID:         testTaskID,
+				CarriesFiles:   true,
+			}); res.outcome != outcomeDone {
+				t.Fatalf("outcome = %v, want outcomeDone", res.outcome)
+			}
+
+			got := markdownSends(t, conn)
+			want := copyPacks[tc.locale].MediaSendFailed
+			if len(got) == 0 || got[len(got)-1] != want {
+				t.Fatalf("sends = %q, want the %s failure notice %q last — a relayed reply reaches the "+
+					"same reader as a direct one", got, tc.locale, want)
+			}
+		})
+	}
+}
+
 func TestAttachmentSendFailureNoticeReadsTheDestinationsLanguage(t *testing.T) {
 	t.Parallel()
 	for _, tc := range localeCases {

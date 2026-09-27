@@ -1435,6 +1435,13 @@ func (o *Outbound) deliverRelayed(ctx context.Context, f relayFrame) relayResult
 			ChatID:         f.ChatID,
 			ChatType:       f.ChatType,
 			SessionID:      f.SessionID,
+			// Same reason as the direct path in outbound.go: the failure runs
+			// on a detached goroutine with no context left to read a profile
+			// with, so the reader's language is resolved here. A relayed reply
+			// is the one a multi-replica deployment takes most of the time —
+			// without this, an English reader's file-failure notice arrives in
+			// the deployment's language and nothing else differs.
+			Locale: localeFor(ctx, o.q, instID, f.ChatType, f.ChatID),
 		}, !hasVisibleChar(f.Content))
 	}
 	return relayResult{outcome: outcomeDone, record: record}
