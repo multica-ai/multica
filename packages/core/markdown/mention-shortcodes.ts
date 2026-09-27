@@ -7,10 +7,10 @@
  * (Tiptap @tiptap/markdown on web/desktop, the mobile renderer in
  * apps/mobile/lib/markdown/) only need to handle one syntax.
  *
- * Single source of truth for all clients. Mobile imports this directly
- * because mobile is allowed to import pure functions from @multica/core/.
- * Web/desktop continue to access it via @multica/ui/markdown which now
- * re-exports from here, so existing import paths keep working.
+ * SYNCED COPY — KEEP IDENTICAL TO packages/ui/markdown/mentions.ts.
+ * Mobile imports this copy because mobile is allowed to import pure functions
+ * from @multica/core/. Web/desktop use the @multica/ui/markdown copy because
+ * packages/ui/ cannot import from packages/core/.
  *
  * Pure regex transform — no IO, no global state. Idempotent: running it
  * twice on the same input produces the same output.
