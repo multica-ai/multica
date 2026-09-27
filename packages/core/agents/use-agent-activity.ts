@@ -163,6 +163,11 @@ export function deriveAgentActivity(
   let durationMs = 0;
   let durationCount = 0;
   for (const b of buckets) {
+    // The server already bounds duration to its rolling 30-day window, which
+    // can span 31 calendar days. Sum before the chart's local-day slotting so
+    // the oldest partial day still counts toward the average.
+    durationMs += b.duration_ms ?? 0;
+    durationCount += b.duration_count ?? 0;
     const ts = new Date(b.bucket_at).getTime();
     if (Number.isNaN(ts)) continue;
     const daysAgo = Math.floor((today - startOfDay(ts)) / DAY_MS);
@@ -173,8 +178,6 @@ export function deriveAgentActivity(
     target.failed += b.failed_count;
     target.completed += b.completed_count;
     target.cancelled += b.cancelled_count;
-    durationMs += b.duration_ms ?? 0;
-    durationCount += b.duration_count ?? 0;
   }
 
   const createdAt = new Date(agentCreatedAt).getTime();
