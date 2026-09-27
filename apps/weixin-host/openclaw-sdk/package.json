@@ -1,0 +1,10 @@
+{
+  "name": "openclaw",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Minimal OpenClaw plugin-SDK surface implemented by Multica so the official @tencent-weixin/openclaw-weixin plugin can run inside the Multica Weixin host. Not OpenClaw.",
+  "type": "module",
+  "exports": {
+    "./plugin-sdk/*": "./plugin-sdk/*.js"
+  }
+}
