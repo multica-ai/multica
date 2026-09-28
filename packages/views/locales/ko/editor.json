@@ -164,5 +164,11 @@
     "commands": {
       "note": "메모 추가 — 에이전트를 트리거하지 않음"
     }
+  },
+  "details_block": {
+    "summary_default": "세부 정보",
+    "summary_aria_label": "요약",
+    "body_placeholder": "본문 (Markdown)",
+    "body_aria_label": "세부 정보 본문 (Markdown)"
   }
 }

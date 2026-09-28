@@ -3,9 +3,9 @@ import {
   cleanup,
   createEvent,
   fireEvent,
-  render,
   screen,
 } from "@testing-library/react";
+import { renderWithI18n } from "../../test/i18n";
 
 // Tiptap's NodeView primitives need a full editor to instantiate. Stub the
 // wrapper so <DetailsBlockView /> can render as a plain React component and we
@@ -50,7 +50,7 @@ afterEach(() => {
 describe("DetailsBlockView — editable mode", () => {
   it("renders collapsed by default, keeping the editable fields", () => {
     const { props } = makeProps({ summary: "Click to expand", body: "Body." });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     // The regression: editable mode used to render always-expanded form
     // controls, so the block never collapsed on issues. It must stay a
@@ -63,7 +63,7 @@ describe("DetailsBlockView — editable mode", () => {
 
   it("respects the open attribute in editable mode", () => {
     const { props } = makeProps({ summary: "s", body: "b", open: true });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     const details = document.querySelector("details");
     expect(details).toBeTruthy();
@@ -75,7 +75,7 @@ describe("DetailsBlockView — editable mode", () => {
       summary: "s",
       body: "b",
     });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     const details = document.querySelector("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
@@ -96,7 +96,7 @@ describe("DetailsBlockView — editable mode", () => {
 
   it("does not toggle the block when clicking into the summary field", () => {
     const { props } = makeProps({ summary: "s", body: "b" });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     // Clicking a <summary> toggles the parent <details> by default; the click
     // on the input must be prevented so the user can focus/edit the field.
@@ -108,7 +108,7 @@ describe("DetailsBlockView — editable mode", () => {
 
   it("renders the summary in an editable text field", () => {
     const { props } = makeProps({ summary: "Click to expand", body: "Body." });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     const input = screen.getByLabelText("Summary") as HTMLInputElement;
     expect(input.value).toBe("Click to expand");
@@ -121,7 +121,7 @@ describe("DetailsBlockView — editable mode", () => {
       summary: "s",
       body: "Hidden **markdown** body.\n\n- one\n- two",
     });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     const body = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
     expect(body.value).toBe("Hidden **markdown** body.\n\n- one\n- two");
@@ -132,7 +132,7 @@ describe("DetailsBlockView — editable mode", () => {
 
   it("writes summary edits back through updateAttributes", () => {
     const { props, updateAttributes } = makeProps({ summary: "Old" });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     fireEvent.change(screen.getByLabelText("Summary"), {
       target: { value: "New summary" },
@@ -142,12 +142,25 @@ describe("DetailsBlockView — editable mode", () => {
 
   it("writes body edits back through updateAttributes", () => {
     const { props, updateAttributes } = makeProps({ body: "old body" });
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     fireEvent.change(screen.getByLabelText(/body/i), {
       target: { value: "new body" },
     });
     expect(updateAttributes).toHaveBeenCalledWith({ body: "new body" });
+  });
+
+  // The summary/body labels are the only copy this node view owns, and they are
+  // read aloud by a screen reader — so they must come from the editor bundle
+  // rather than English literals baked into the JSX.
+  it("labels the editable fields through the editor i18n namespace", () => {
+    const { props } = makeProps({ summary: "", body: "" });
+    renderWithI18n(<DetailsBlockView {...props} />, { locale: "zh-Hans" });
+
+    const input = screen.getByLabelText("摘要") as HTMLInputElement;
+    expect(input.placeholder).toBe("详情");
+    const body = screen.getByLabelText("详情正文 (Markdown)") as HTMLTextAreaElement;
+    expect(body.placeholder).toBe("正文 (Markdown)");
   });
 });
 
@@ -157,12 +170,19 @@ describe("DetailsBlockView — readonly mode", () => {
       { summary: "Click to expand", body: "Body." },
       { editable: false },
     );
-    render(<DetailsBlockView {...props} />);
+    renderWithI18n(<DetailsBlockView {...props} />);
 
     expect(document.querySelector("details")).toBeTruthy();
     expect(screen.getByTestId("readonly").textContent).toBe("Body.");
     // No editable fields when the editor is not editable.
     expect(screen.queryByLabelText("Summary")).toBeNull();
     expect(screen.queryByLabelText(/body/i)).toBeNull();
+  });
+
+  it("falls back to the translated label when the summary is empty", () => {
+    const { props } = makeProps({ summary: "", body: "b" }, { editable: false });
+    renderWithI18n(<DetailsBlockView {...props} />, { locale: "zh-Hans" });
+
+    expect(document.querySelector("summary")!.textContent).toBe("详情");
   });
 });

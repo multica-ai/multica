@@ -51,6 +51,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { ReadonlyContent } from "../readonly-content";
+import { useT } from "../../i18n";
 
 // Matches a complete <details><summary>…</summary>…</details> block at the
 // start of the remaining source. Group 1 = the raw `<details>` attributes (used
@@ -69,6 +70,7 @@ const DETAILS_BLOCK_RE =
 // ---------------------------------------------------------------------------
 
 export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewProps) {
+  const { t } = useT("editor");
   const summary = String(node.attrs.summary ?? "");
   const body = String(node.attrs.body ?? "");
   const open = Boolean(node.attrs.open);
@@ -88,7 +90,9 @@ export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewPro
         data-type="detailsBlock"
       >
         <details className="details-block" open={open} contentEditable={false}>
-          <summary className="details-block-summary">{summary || "Details"}</summary>
+          <summary className="details-block-summary">
+            {summary || t(($) => $.details_block.summary_default)}
+          </summary>
           <div className="details-block-body">
             <ReadonlyContent content={body} />
           </div>
@@ -120,8 +124,8 @@ export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewPro
             className="details-block-summary-input"
             type="text"
             value={summary}
-            placeholder="Details"
-            aria-label="Summary"
+            placeholder={t(($) => $.details_block.summary_default)}
+            aria-label={t(($) => $.details_block.summary_aria_label)}
             onChange={(e) => updateAttributes({ summary: e.target.value })}
             onKeyDown={stop}
             onMouseDown={stop}
@@ -134,8 +138,8 @@ export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewPro
         <textarea
           className="details-block-body-input"
           value={body}
-          placeholder="Body (Markdown)"
-          aria-label="Details body (Markdown)"
+          placeholder={t(($) => $.details_block.body_placeholder)}
+          aria-label={t(($) => $.details_block.body_aria_label)}
           rows={Math.max(3, body.split("\n").length)}
           onChange={(e) => updateAttributes({ body: e.target.value })}
           onKeyDown={stop}
