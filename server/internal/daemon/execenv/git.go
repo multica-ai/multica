@@ -1,14 +1,16 @@
 package execenv
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/gitexclude"
 )
 
 // detectGitRepo checks if dir is inside a git repository (regular or bare).
@@ -117,44 +119,11 @@ func removeGitWorktree(gitRoot, worktreePath, branchName string, logger *slog.Lo
 	}
 }
 
-// excludeFromGit adds a pattern to the worktree's .git/info/exclude file.
+// excludeFromGit hides pattern from Git in this checkout only. The private
+// info/exclude of a linked worktree is not read, and the common info/exclude
+// would apply the pattern to every other worktree.
 func excludeFromGit(worktreePath, pattern string) error {
-	// Resolve the actual git dir for this worktree.
-	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
-
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("resolve git dir: %w", err)
-	}
-
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
-	}
-
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-
-	// Ensure the info directory exists.
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		return fmt.Errorf("create info dir: %w", err)
-	}
-
-	// Check if pattern is already present.
-	existing, _ := os.ReadFile(excludePath)
-	if strings.Contains(string(existing), pattern) {
-		return nil
-	}
-
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open exclude file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "\n%s\n", pattern); err != nil {
-		return fmt.Errorf("write exclude pattern: %w", err)
-	}
-	return nil
+	return gitexclude.Install(context.Background(), worktreePath, []string{pattern})
 }
 
 // repoNameFromURL extracts a short directory name from a git remote URL.

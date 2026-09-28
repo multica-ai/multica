@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/gitexclude"
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 )
 
@@ -886,8 +887,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, fmt.Errorf("create isolated checkout: %w", err)
 		}
 
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
+		if err := excludeAgentRuntimeFiles(ctx, worktreePath); err != nil {
+			return nil, err
 		}
 		if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
 			return nil, fmt.Errorf("isolate checkout Git identity: %w", err)
@@ -909,8 +910,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
 
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
+		if err := excludeAgentRuntimeFiles(ctx, worktreePath); err != nil {
+			return nil, err
 		}
 
 		if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
@@ -938,9 +939,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
-	// Exclude agent context files from git tracking.
-	for _, pattern := range agentGitExcludePatterns {
-		_ = excludeFromGitContext(ctx, worktreePath, pattern)
+	if err := excludeAgentRuntimeFiles(ctx, worktreePath); err != nil {
+		return nil, err
 	}
 
 	if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
@@ -2180,41 +2180,12 @@ func removeCoAuthoredByHookContext(ctx context.Context, worktreePath string) err
 	return nil
 }
 
-// excludeFromGit adds a pattern to the worktree's .git/info/exclude file.
-func excludeFromGit(worktreePath, pattern string) error {
-	return excludeFromGitContext(context.Background(), worktreePath, pattern)
-}
-
-func excludeFromGitContext(ctx context.Context, worktreePath, pattern string) error {
-	out, err := runGitOutputContext(ctx, "-C", worktreePath, "rev-parse", "--git-dir")
-	if err != nil {
-		return fmt.Errorf("resolve git dir: %w", err)
-	}
-
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
-	}
-
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		return fmt.Errorf("create info dir: %w", err)
-	}
-
-	existing, _ := os.ReadFile(excludePath)
-	if strings.Contains(string(existing), pattern) {
-		return nil
-	}
-
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open exclude file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "\n%s\n", pattern); err != nil {
-		return fmt.Errorf("write exclude pattern: %w", err)
+// excludeAgentRuntimeFiles hides agent runtime files from Git in this checkout
+// only. Linked worktrees cannot use their private info/exclude (Git reads the
+// common dir's copy, which would also hide files in sibling checkouts).
+func excludeAgentRuntimeFiles(ctx context.Context, worktreePath string) error {
+	if err := gitexclude.Install(ctx, worktreePath, agentGitExcludePatterns); err != nil {
+		return fmt.Errorf("exclude agent runtime files: %w", err)
 	}
 	return nil
 }

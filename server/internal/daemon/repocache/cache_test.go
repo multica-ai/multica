@@ -1200,15 +1200,14 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 		t.Fatalf("CreateWorktree failed: %v", err)
 	}
 
-	exclude := gitInfoExclude(t, result.Path)
-	if !strings.Contains(exclude, ".opencode\n") {
-		t.Fatalf("expected .git/info/exclude to contain .opencode, got:\n%s", exclude)
+	for _, path := range []string{".opencode/config.json", ".codeartsdoer/settings.json"} {
+		if !gitIgnoredByAgentExcludes(t, result.Path, path) {
+			t.Errorf("git does not ignore %s", path)
+		}
 	}
-	if !strings.Contains(exclude, ".codeartsdoer\n") {
-		t.Fatalf("expected .git/info/exclude to contain .codeartsdoer, got:\n%s", exclude)
-	}
-	if strings.Contains(exclude, ".config/opencode") {
-		t.Fatalf("expected .git/info/exclude to not contain stale .config/opencode, got:\n%s", exclude)
+	if gitCheckIgnoreExit(t, result.Path, ".config/opencode/settings.json") == 0 &&
+		strings.Contains(gitCheckIgnoreSource(t, result.Path, ".config/opencode/settings.json"), "multica-excludes") {
+		t.Fatal("stale .config/opencode pattern is ignored")
 	}
 }
 
@@ -1216,9 +1215,9 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 // PR #5224's review feedback: once the daemon started writing
 // .codebuddy/skills/ and CODEBUDDY.md into the task workdir (instead of
 // reusing Claude's .claude/CLAUDE.md, which were already excluded), the
-// repo-cache worktree needed the new CodeBuddy sidecar paths added to
-// .git/info/exclude too — otherwise these daemon-injected files show up in
-// `git status` and risk being committed by the agent.
+// repo-cache worktree needed the new CodeBuddy sidecar paths excluded too —
+// otherwise these daemon-injected files show up in `git status` and risk
+// being committed by the agent.
 func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
@@ -1241,16 +1240,9 @@ func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 		t.Fatalf("CreateWorktree failed: %v", err)
 	}
 
-	exclude := gitInfoExclude(t, result.Path)
-	if !strings.Contains(exclude, ".codebuddy\n") {
-		t.Fatalf("expected .git/info/exclude to contain .codebuddy, got:\n%s", exclude)
-	}
-	if !strings.Contains(exclude, "CODEBUDDY.md\n") {
-		t.Fatalf("expected .git/info/exclude to contain CODEBUDDY.md, got:\n%s", exclude)
-	}
-	for _, pattern := range []string{".pi\n", ".omp\n"} {
-		if !strings.Contains(exclude, pattern) {
-			t.Fatalf("expected .git/info/exclude to contain %q, got:\n%s", pattern, exclude)
+	for _, path := range []string{".codebuddy/skills/a.md", "CODEBUDDY.md", ".pi/config.json", ".omp/config.json"} {
+		if !gitIgnoredByAgentExcludes(t, result.Path, path) {
+			t.Errorf("git does not ignore %s", path)
 		}
 	}
 }
@@ -1258,9 +1250,9 @@ func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 // TestCreateWorktreeDoesNotExcludeReasonixProjectConfig guards the layering
 // that makes a `reasonix.toml` exclude wrong. The daemon writes that file at
 // the WorkDir, and a managed checkout is a directory *inside* the WorkDir, so
-// this exclude list — which only reaches the checkout's .git/info/exclude —
-// could never hide the daemon's copy. All it would do is make a project config
-// an agent legitimately creates inside the repository invisible to git status
+// this exclude list — which applies only inside the managed checkout — could
+// never hide the daemon's copy. All it would do is make a project config an
+// agent legitimately creates inside the repository invisible to git status
 // for every provider.
 func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
 	t.Parallel()
@@ -1288,8 +1280,8 @@ func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
 	if filepath.Dir(result.Path) != workDir {
 		t.Fatalf("checkout %q is not a child of the work dir %q", result.Path, workDir)
 	}
-	if strings.Contains(gitInfoExclude(t, result.Path), "reasonix.toml") {
-		t.Fatalf("reasonix.toml is excluded inside the checkout, hiding a project config the agent may create:\n%s", gitInfoExclude(t, result.Path))
+	if gitIgnoredByAgentExcludes(t, result.Path, "reasonix.toml") {
+		t.Fatal("reasonix.toml is excluded inside the checkout, hiding a project config the agent may create")
 	}
 
 	configPath := filepath.Join(result.Path, "reasonix.toml")
@@ -1304,22 +1296,105 @@ func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
 	}
 }
 
-func gitInfoExclude(t *testing.T, worktreePath string) string {
+func gitCombined(t *testing.T, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
-	out, err := cmd.Output()
+	cmd := exec.Command("git", args...)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("git rev-parse --git-dir failed in %s: %v", worktreePath, err)
+		t.Fatalf("git %s: %s: %v", strings.Join(args, " "), out, err)
 	}
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
+	return strings.TrimSpace(string(out))
+}
+
+func gitIgnoredByAgentExcludes(t *testing.T, worktreePath, path string) bool {
+	t.Helper()
+	if gitCheckIgnoreExit(t, worktreePath, path) != 0 {
+		return false
 	}
-	data, err := os.ReadFile(filepath.Join(gitDir, "info", "exclude"))
+	return strings.Contains(gitCheckIgnoreSource(t, worktreePath, path), "multica-excludes")
+}
+
+func gitCheckIgnoreSource(t *testing.T, worktreePath, path string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreePath, "check-ignore", "-v", "--", path)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("read .git/info/exclude failed: %v", err)
+		t.Fatalf("git check-ignore -v %s in %s: %s: %v", path, worktreePath, out, err)
 	}
-	return string(data)
+	return string(out)
+}
+
+func gitCheckIgnoreExit(t *testing.T, worktreePath, path string) int {
+	t.Helper()
+	cmd := exec.Command("git", "-C", worktreePath, "check-ignore", "-q", "--", path)
+	err := cmd.Run()
+	if err == nil {
+		return 0
+	}
+	if exit, ok := err.(*exec.ExitError); ok {
+		return exit.ExitCode()
+	}
+	t.Fatalf("git check-ignore %s in %s: %v", path, worktreePath, err)
+	return -1
+}
+
+func TestCreateWorktreeExcludesDoNotLeakToSibling(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	primary, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1", RepoURL: sourceRepo, WorkDir: t.TempDir(),
+		AgentName: "Claude", TaskID: "exclude-primary",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+	// A worktree created outside CreateWorktree has not opted into agent
+	// excludes. It must keep seeing the files, and it must stay a work tree
+	// (extensions.worktreeConfig on the bare cache would make it look bare).
+	bare := cache.Lookup("ws-1", sourceRepo)
+	siblingPath := filepath.Join(t.TempDir(), "sibling")
+	gitCombined(t, "-C", bare, "worktree", "add", "-b", "manual-sibling", siblingPath, "main")
+
+	for _, path := range []string{"CLAUDE.md", "AGENTS.md", ".claude/settings.local.json"} {
+		if !gitIgnoredByAgentExcludes(t, primary.Path, path) {
+			t.Errorf("primary checkout does not ignore %s", path)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(primary.Path, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		if err := os.WriteFile(filepath.Join(primary.Path, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(primary.Path, ".claude", "settings.local.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status := gitCombined(t, "-C", primary.Path, "status", "--porcelain")
+	if status != "" {
+		t.Fatalf("runtime files visible to git status:\n%s", status)
+	}
+	gitCombined(t, "-C", primary.Path, "add", "-A")
+	if staged := gitCombined(t, "-C", primary.Path, "diff", "--cached", "--name-only"); staged != "" {
+		t.Fatalf("git add -A staged runtime files:\n%s", staged)
+	}
+
+	if gitIgnoredByAgentExcludes(t, siblingPath, "CLAUDE.md") {
+		t.Fatal("agent exclude leaked to sibling worktree")
+	}
+	common := gitCombined(t, "-C", primary.Path, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+	if data, err := os.ReadFile(strings.TrimSpace(common)); err == nil && strings.Contains(string(data), "CLAUDE.md") {
+		t.Fatalf("common info/exclude contains agent patterns:\n%s", data)
+	}
+	if bareRepo := gitCombined(t, "-C", siblingPath, "rev-parse", "--is-bare-repository"); bareRepo != "false" {
+		t.Fatalf("sibling is-bare-repository = %q", bareRepo)
+	}
 }
 
 func TestCreateWorktreeNotCached(t *testing.T) {
