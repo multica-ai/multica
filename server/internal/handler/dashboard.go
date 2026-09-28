@@ -12,7 +12,7 @@ import (
 // ---------------------------------------------------------------------------
 // Workspace / Project dashboard
 //
-// Six read endpoints power the workspace dashboard:
+// Ten read endpoints power the workspace dashboard:
 //
 //   GET /api/dashboard/usage/daily        per-(date, model) token rows
 //   GET /api/dashboard/usage/by-agent     per-(agent, model) token rows
@@ -20,19 +20,33 @@ import (
 //   GET /api/dashboard/runtime/daily      per-date run-time + task counts
 //   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
 //   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
+//   GET /api/dashboard/usage/by-model     per-model token rows   (Model scope)
+//   GET /api/dashboard/model-runtime      per-model run time     (Model scope)
+//   GET /api/dashboard/usage/by-runtime   per-(runtime, model) token rows
+//   GET /api/dashboard/runtime-duration   per-runtime run time   (Runtime scope)
 //
+// The last four back the leaderboard's Model and Runtime scopes. Each scope
+// is a PAIR: a token rollup and a run-time rollup, joined client-side by the
+// scope's key, the same way the Agent scope pairs usage/by-agent with
+// agent-runtime. The pairs are deliberately interchangeable — same cutoff,
+// same terminal-task filter, same cost split — so switching the selector
+// re-ranks the same work rather than changing what counts as work.
+
 // All of them accept ?days=N (defaults to 30, capped at 365) and an optional
 // ?project_id=<uuid> to scope the rollup to a single project. With no
 // project_id the data spans the whole workspace.
 //
 // Cutoff convention: the three date-bucketed series use parseSinceParamInTZ
 // (N+1 calendar days, the surplus day trimmed client-side with `-(days-1)`),
-// and the three per-AGENT rollups use parseExactSinceParamInTZ (exactly N).
+// and every date-less rollup uses parseExactSinceParamInTZ (exactly N).
 // Rows without a date cannot be trimmed client-side, so serving them off the
 // N+1 cutoff makes the leaderboard and the Run time / Tasks KPIs cover one
 // calendar day more than the chart and the Cost / Tokens KPIs beside them —
 // at 1D that let a single agent's row read higher than the workspace total
-// (MUL-5551). Keep the two halves of each pair on matching windows.
+// (MUL-5551). Keep the two halves of each pair on matching windows. The
+// leaderboard's Model and Runtime scopes are date-less like the Agent one, so
+// they take the exact cutoff for the same reason: otherwise moving the scope
+// selector would change the numbers it reports.
 //
 // Cost is computed client-side from a per-model pricing table — the model
 // dimension is intentionally preserved on the wire (same convention as the
@@ -452,6 +466,251 @@ func foldRestrictedAgentRunTime(
 			return dst
 		},
 	)
+}
+
+// DashboardUsageByModelResponse is one model's total token aggregates for
+// the workspace over the selected window.
+type DashboardUsageByModelResponse struct {
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// Cost split, identical to the by-agent rollup: CostUSDTicks is what the
+	// provider charged, the Uncosted* counts are the tokens it did not price.
+	// Without the authoritative half a model the client's rate table does not
+	// know would price at $0.00 and this scope would stop summing to the Cost
+	// KPI above it. See migration 213.
+	CostUSDTicks             int64 `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32 `json:"task_count"`
+}
+
+// GetDashboardUsageByModel returns per-model token aggregates for the
+// workspace, optionally scoped to a project. Powers the Model scope on
+// the leaderboard. Backed by task_usage_hourly.
+//
+// Exact N-day cutoff, like the Agent scope this one sits beside: the rows
+// carry no date, so the client cannot trim the extra calendar day, and
+// serving them on the N+1 cutoff meant the Model scope reported one more
+// day of spend than the Agent scope and the Cost KPI for the same selector.
+func (h *Handler) GetDashboardUsageByModel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseExactSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardUsageByModel(r.Context(), db.ListDashboardUsageByModelParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list usage by model")
+		return
+	}
+
+	resp := make([]DashboardUsageByModelResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardUsageByModelResponse{
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+			TaskCount:                row.TaskCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DashboardRuntimeDurationResponse is one runtime's total terminal-task
+// run time + counts over the window. MeteredTaskCount and CancelledCount are
+// disjoint subsets of TaskCount, matching DashboardAgentRunTimeResponse.
+type DashboardRuntimeDurationResponse struct {
+	RuntimeID        string `json:"runtime_id"`
+	TotalSeconds     int64  `json:"total_seconds"`
+	TaskCount        int32  `json:"task_count"`
+	MeteredTaskCount int32  `json:"metered_task_count"`
+	FailedCount      int32  `json:"failed_count"`
+	CancelledCount   int32  `json:"cancelled_count"`
+}
+
+// GetDashboardRuntimeDuration returns per-runtime total task run time and
+// task counts for the workspace, optionally scoped to a project. Powers
+// the Runtime scope on the leaderboard. Only terminal tasks with both
+// started_at and completed_at contribute — cancelled included, exactly as in
+// the Agent scope, so the two scopes do not disagree about a stopped run.
+//
+// Exact N-day cutoff, like every other date-less rollup here: the client
+// cannot trim the extra calendar day off rows that carry no date.
+func (h *Handler) GetDashboardRuntimeDuration(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseExactSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardRuntimeDuration(r.Context(), db.ListDashboardRuntimeDurationParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runtime run time")
+		return
+	}
+
+	resp := make([]DashboardRuntimeDurationResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardRuntimeDurationResponse{
+			RuntimeID:        uuidToString(row.RuntimeID),
+			TotalSeconds:     row.TotalSeconds,
+			TaskCount:        row.TaskCount,
+			MeteredTaskCount: row.MeteredTaskCount,
+			FailedCount:      row.FailedCount,
+			CancelledCount:   row.CancelledCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DashboardModelRunTimeResponse is one model's total run time and task counts
+// over the window. Powers the Model scope time column on the leaderboard.
+// CancelledCount is a disjoint subset of TaskCount, as on the Agent rollup.
+type DashboardModelRunTimeResponse struct {
+	Model          string `json:"model"`
+	TotalSeconds   int64  `json:"total_seconds"`
+	TaskCount      int32  `json:"task_count"`
+	FailedCount    int32  `json:"failed_count"`
+	CancelledCount int32  `json:"cancelled_count"`
+}
+
+// GetDashboardModelRunTime returns per-model task run time and task counts
+// for the workspace, optionally scoped to a project. Joins task_usage with
+// agent_task_queue on task_id — a task that uses multiple models contributes
+// its full duration to each model.
+//
+// Exact N-day cutoff, like every other date-less rollup here: the client
+// cannot trim the extra calendar day off rows that carry no date.
+func (h *Handler) GetDashboardModelRunTime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseExactSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardModelRunTime(r.Context(), db.ListDashboardModelRunTimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list model run time")
+		return
+	}
+
+	resp := make([]DashboardModelRunTimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardModelRunTimeResponse{
+			Model:          row.Model,
+			TotalSeconds:   row.TotalSeconds,
+			TaskCount:      row.TaskCount,
+			FailedCount:    row.FailedCount,
+			CancelledCount: row.CancelledCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DashboardUsageByRuntimeResponse is one (runtime_id, model) token aggregate.
+// The model dimension is preserved so the client can compute per-model cost.
+// The cost split matches the by-agent and by-model rollups; see migration 213.
+type DashboardUsageByRuntimeResponse struct {
+	RuntimeID                string `json:"runtime_id"`
+	Model                    string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheReadTokens          int64  `json:"cache_read_tokens"`
+	CacheWriteTokens         int64  `json:"cache_write_tokens"`
+	CostUSDTicks             int64  `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64  `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64  `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64  `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64  `json:"uncosted_cache_write_tokens"`
+}
+
+// GetDashboardUsageByRuntime returns per-(runtime_id, model) token aggregates
+// for the workspace, optionally scoped to a project. Powers the Runtime scope
+// token and cost columns on the leaderboard. Backed by task_usage_hourly, the
+// same rollup the Agent and Model scopes read, so all three add up to the same
+// Cost KPI.
+//
+// Exact N-day cutoff, like every other date-less rollup here: the client
+// cannot trim the extra calendar day off rows that carry no date.
+func (h *Handler) GetDashboardUsageByRuntime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	tz := h.resolveViewingTZ(r)
+	since := parseExactSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardUsageByRuntime(r.Context(), db.ListDashboardUsageByRuntimeParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runtime usage")
+		return
+	}
+
+	resp := make([]DashboardUsageByRuntimeResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardUsageByRuntimeResponse{
+			RuntimeID:                uuidToString(row.RuntimeID),
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DashboardRunTimeDailyResponse is one (date) bucket of terminal-task run

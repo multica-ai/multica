@@ -1,33 +1,68 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { EyeOff, Trash2 } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatTokens } from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import {
   DELETED_AGENTS_ROW_ID,
+  aggregateModelRows,
+  aggregateRuntimeRows,
   formatDuration,
   isSyntheticAgentRow,
   RESTRICTED_AGENTS_ROW_ID,
   type AgentDashboardRow,
+  type ModelDashboardRow,
+  type RuntimeDashboardRow,
 } from "../utils";
 import { Segmented } from "./dashboard-shared";
 import "./leaderboard.css";
 
+// What the leaderboard ranks: whole agents, individual models, or runtimes.
+// Agent is the default because it is the scope the page has always shown.
+export type LeaderboardScope = "agent" | "model" | "runtime";
+
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
 // lockstep so the user always sees what the ranking actually measures.
+// All four toggles stay visible in every scope; a metric the current scope
+// does not carry reads "—" in the rows and sorts at zero (natural zeroing,
+// not hidden controls).
 type LeaderboardSort = "tokens" | "cost" | "time" | "tasks";
 
-const SORT_METRIC: Record<LeaderboardSort, (r: AgentDashboardRow) => number> = {
-  tokens: (r) => r.tokens,
-  cost: (r) => r.cost,
-  time: (r) => r.seconds,
-  tasks: (r) => r.taskCount,
+type LeaderboardEntry =
+  | AgentDashboardRow
+  | ModelDashboardRow
+  | RuntimeDashboardRow;
+
+// One extractor per (scope, metric) so row order, the progress bar and the
+// emphasised column can never disagree about what the ranking measures.
+const SCOPE_SORT_METRIC: Record<
+  LeaderboardScope,
+  Record<LeaderboardSort, (r: LeaderboardEntry) => number>
+> = {
+  agent: {
+    tokens: (r) => (r as AgentDashboardRow).tokens,
+    cost: (r) => (r as AgentDashboardRow).cost,
+    time: (r) => (r as AgentDashboardRow).seconds,
+    tasks: (r) => (r as AgentDashboardRow).taskCount,
+  },
+  model: {
+    tokens: (r) => (r as ModelDashboardRow).tokens,
+    cost: (r) => (r as ModelDashboardRow).cost,
+    time: (r) => (r as ModelDashboardRow).seconds,
+    tasks: (r) => (r as ModelDashboardRow).taskCount,
+  },
+  runtime: {
+    tokens: (r) => (r as RuntimeDashboardRow).tokens,
+    cost: (r) => (r as RuntimeDashboardRow).cost,
+    time: (r) => (r as RuntimeDashboardRow).seconds,
+    tasks: (r) => (r as RuntimeDashboardRow).taskCount,
+  },
 };
 
-// How many agents the leaderboard ranks before collapsing the tail behind a
+// How many rows the leaderboard ranks before collapsing the tail behind a
 // toggle, mirroring the offender list's cap. A workspace with dozens of agents
 // rendered every one of them, which pushed everything below it a full screen or
 // more down the page (MUL-5388). Ten answers "who is spending the most" — the
@@ -49,19 +84,58 @@ const LEADERBOARD_GRID_STYLE = {
 const LEADERBOARD_GRID = "grid items-center gap-3";
 
 export function Leaderboard({
-  rows,
+  agentRows,
   agents,
   deletedAgentCount,
+  byModelUsage,
+  modelRunTime,
+  runtimeDuration,
+  usageByRuntime,
+  runtimes,
   lessThanMinuteLabel,
+  noRuntimeLabel,
+  scope,
+  onScopeChange,
 }: {
-  rows: AgentDashboardRow[];
+  agentRows: AgentDashboardRow[];
   agents: { id: string; name: string }[];
   deletedAgentCount: number;
+  byModelUsage: import("@multica/core/types").DashboardUsageByModel[];
+  modelRunTime: import("@multica/core/types").DashboardModelRunTime[];
+  runtimeDuration: import("@multica/core/types").DashboardRuntimeDuration[];
+  usageByRuntime: import("@multica/core/types").DashboardUsageByRuntime[];
+  runtimes: { id: string; name: string }[];
+  // Shown for a run that had no runtime at all (NULL runtime_id), so the row
+  // reads as a label instead of an empty cell.
+  noRuntimeLabel: string;
+  // Controlled by the page, which needs the scope to decide whether the Model
+  // and Runtime rollups are worth fetching at all — see dashboard-page.tsx.
+  scope: LeaderboardScope;
+  onScopeChange: (scope: LeaderboardScope) => void;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
+  const setScope = onScopeChange;
   const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
   const [showAll, setShowAll] = useState(false);
+
+  const modelRows = useMemo(
+    () => aggregateModelRows(byModelUsage, modelRunTime),
+    [byModelUsage, modelRunTime],
+  );
+  const runtimeRows = useMemo(
+    () => aggregateRuntimeRows(runtimeDuration, usageByRuntime),
+    [runtimeDuration, usageByRuntime],
+  );
+
+  const scopeOptions = useMemo(
+    () => [
+      { value: "agent" as const, label: t(($) => $.leaderboard.scope_agent) },
+      { value: "model" as const, label: t(($) => $.leaderboard.scope_model) },
+      { value: "runtime" as const, label: t(($) => $.leaderboard.scope_runtime) },
+    ],
+    [t],
+  );
 
   const sortOptions = useMemo(
     () => [
@@ -73,21 +147,22 @@ export function Leaderboard({
     [t],
   );
 
-  // Re-rank when the metric changes; keep the merged input untouched so
-  // upstream `mergeAgentDashboardRows`'s tiebreaker (run time desc) still
-  // applies inside an equal-bucket.
+  // Re-rank when the scope or the metric changes; keep each scope's input
+  // untouched so upstream `mergeAgentDashboardRows`'s tiebreaker (run time desc)
+  // still applies inside an equal-bucket.
   const sortedRows = useMemo(() => {
-    const metric = SORT_METRIC[sortBy];
-    return rows.toSorted((a, b) => metric(b) - metric(a));
-  }, [rows, sortBy]);
+    const metric = SCOPE_SORT_METRIC[scope][sortBy];
+    const base = scope === "agent" ? agentRows : scope === "model" ? modelRows : runtimeRows;
+    return [...base].sort((a, b) => metric(b) - metric(a));
+  }, [scope, sortBy, agentRows, modelRows, runtimeRows]);
 
   // Measured across every row, not just the visible ones, so a bar's width
   // means the same thing collapsed and expanded — the leader always fills the
   // track and nothing re-scales when the tail comes into view.
   const maxValue = useMemo(() => {
-    const metric = SORT_METRIC[sortBy];
+    const metric = SCOPE_SORT_METRIC[scope][sortBy];
     return sortedRows.reduce((m, r) => Math.max(m, metric(r)), 0);
-  }, [sortedRows, sortBy]);
+  }, [sortedRows, scope, sortBy]);
 
   const visibleRows = showAll
     ? sortedRows
@@ -97,9 +172,28 @@ export function Leaderboard({
   // rows are synthetic buckets (deleted, restricted), and subtracting a fixed 1
   // reported one agent too many whenever both were present.
   const namedAgentCount = useMemo(
-    () => rows.filter((r) => !isSyntheticAgentRow(r.agentId)).length,
-    [rows],
+    () => agentRows.filter((r) => !isSyntheticAgentRow(r.agentId)).length,
+    [agentRows],
   );
+
+  const caption =
+    scope === "agent"
+      ? deletedAgentCount > 0
+        ? t(($) => $.leaderboard.caption_with_deleted, {
+            count: namedAgentCount,
+            deleted: deletedAgentCount,
+          })
+        : t(($) => $.leaderboard.caption, { count: namedAgentCount })
+      : scope === "model"
+        ? t(($) => $.leaderboard.caption_models, { count: modelRows.length })
+        : t(($) => $.leaderboard.caption_runtimes, { count: runtimeRows.length });
+
+  const firstColHeader =
+    scope === "agent"
+      ? t(($) => $.leaderboard.header_agent)
+      : scope === "model"
+        ? t(($) => $.leaderboard.header_model)
+        : t(($) => $.leaderboard.header_runtime);
 
   // Active column gets foreground text; others stay muted. Helps the user
   // see "this is what the bar is measuring" at a glance.
@@ -128,20 +222,19 @@ export function Leaderboard({
         <h4 className="text-body font-semibold">{t(($) => $.leaderboard.title)}</h4>
         <div className="flex flex-wrap items-center justify-end gap-3">
           <Segmented
+            label={t(($) => $.leaderboard.scope_label)}
+            value={scope}
+            onChange={setScope}
+            options={scopeOptions}
+          />
+          <Segmented
             label={t(($) => $.leaderboard.sort_label)}
             value={sortBy}
             onChange={setSortBy}
             options={sortOptions}
           />
-          <span className="text-caption text-muted-foreground">
-            {deletedAgentCount > 0
-              ? t(($) => $.leaderboard.caption_with_deleted, {
-                  count: namedAgentCount,
-                  deleted: deletedAgentCount,
-                })
-              : t(($) => $.leaderboard.caption, { count: namedAgentCount })}
-          </span>
-          {/* The caption right beside this already states how many agents the
+          <span className="text-caption text-muted-foreground">{caption}</span>
+          {/* The caption right beside this already states how many rows the
               window covers, so the toggle carries a count only when
               collapsing — spelling the total out twice reads as two different
               numbers once the deleted-agents bucket splits the caption. */}
@@ -174,7 +267,7 @@ export function Leaderboard({
               className={`${LEADERBOARD_GRID} border-b px-4 py-2 text-caption font-medium text-muted-foreground`}
               style={LEADERBOARD_GRID_STYLE}
             >
-              <span>{t(($) => $.leaderboard.header_agent)}</span>
+              <span>{firstColHeader}</span>
               <span />
               <span className={colClass("tokens")}>
                 {t(($) => $.leaderboard.header_tokens)}
@@ -194,9 +287,70 @@ export function Leaderboard({
                 item boundaries rather than a bag of divs. */}
             <ul aria-label={t(($) => $.leaderboard.title)} className="divide-y">
               {visibleRows.map((row) => {
-                // Two synthetic rows, neither a real agent: both render a neutral
-                // placeholder (no avatar fetch / hover card / UUID) instead of
-                // looking the id up in the agent list.
+                const metric = SCOPE_SORT_METRIC[scope][sortBy];
+                const value = metric(row);
+                const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                if (scope === "model") {
+                  const r = row as ModelDashboardRow;
+                  return (
+                    <li
+                      key={r.model}
+                      className={`${LEADERBOARD_GRID} px-4 py-2`}
+                      style={LEADERBOARD_GRID_STYLE}
+                    >
+                      <span className="truncate text-body font-medium">
+                        {r.model}
+                      </span>
+                      <ProgressBar pct={pct} />
+                      <MetricCell active={sortBy === "tokens"}>
+                        {formatTokens(r.tokens)}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "cost"} size="sm">
+                        ${r.cost.toFixed(2)}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "time"}>
+                        {formatDuration(r.seconds, lessThanMinuteLabel)}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "tasks"}>
+                        {r.taskCount}
+                      </MetricCell>
+                    </li>
+                  );
+                }
+                if (scope === "runtime") {
+                  const r = row as RuntimeDashboardRow;
+                  return (
+                    <li
+                      key={r.runtimeId}
+                      className={`${LEADERBOARD_GRID} px-4 py-2`}
+                      style={LEADERBOARD_GRID_STYLE}
+                    >
+                      <span className="truncate text-body font-medium">
+                        {runtimes.find((rt) => rt.id === r.runtimeId)?.name ??
+                          // A task can run without a runtime, and its
+                          // agent_task_queue row then groups under a NULL
+                          // runtime_id that uuidToString renders as "". Falling
+                          // through to the id would paint a blank cell with
+                          // tokens in it.
+                          (r.runtimeId || noRuntimeLabel)}
+                      </span>
+                      <ProgressBar pct={pct} />
+                      <MetricCell active={sortBy === "tokens"}>
+                        {r.tokens > 0 ? formatTokens(r.tokens) : "—"}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "cost"} size="sm">
+                        {r.cost > 0 ? `$${r.cost.toFixed(2)}` : "—"}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "time"}>
+                        {formatDuration(r.seconds, lessThanMinuteLabel)}
+                      </MetricCell>
+                      <MetricCell active={sortBy === "tasks"}>{r.taskCount}</MetricCell>
+                    </li>
+                  );
+                }
+                // Agent scope. Two synthetic rows, neither a real agent: both
+                // render a neutral placeholder (no avatar fetch / hover card /
+                // UUID) instead of looking the id up in the agent list.
                 //
                 // Only the deleted bucket dashes out Time/Tasks — it genuinely
                 // never carries them (see bucketUnknownAgentRows). The server's
@@ -209,30 +363,27 @@ export function Leaderboard({
                 // this viewer may not see, and the hidden system carriers behind
                 // agent-builder sessions, which nobody can name — including the
                 // admin who owns them.
-                const isDeletedBucket = row.agentId === DELETED_AGENTS_ROW_ID;
-                const isRestrictedBucket =
-                  row.agentId === RESTRICTED_AGENTS_ROW_ID;
+                const r = row as AgentDashboardRow;
+                const isDeletedBucket = r.agentId === DELETED_AGENTS_ROW_ID;
+                const isRestrictedBucket = r.agentId === RESTRICTED_AGENTS_ROW_ID;
                 const isBucket = isDeletedBucket || isRestrictedBucket;
-                const agent = agents.find((a) => a.id === row.agentId);
-                const value = SORT_METRIC[sortBy](row);
-                const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
-                const usageUnavailable = !row.hasUsageTotals;
-                const usageIncomplete = row.unreportedTaskCount > 0;
-                const usageTotalsPending =
-                  row.hasReportedUsage && !row.hasUsageTotals;
+                const agent = agents.find((a) => a.id === r.agentId);
+                const usageUnavailable = !r.hasUsageTotals;
+                const usageIncomplete = r.unreportedTaskCount > 0;
+                const usageTotalsPending = r.hasReportedUsage && !r.hasUsageTotals;
                 const tokenText = usageUnavailable
                   ? "—"
-                  : `${usageIncomplete ? "≥" : ""}${formatTokens(row.tokens)}`;
+                  : `${usageIncomplete ? "≥" : ""}${formatTokens(r.tokens)}`;
                 const costText = usageUnavailable
                   ? "—"
-                  : `${usageIncomplete ? "≥" : ""}$${row.cost.toFixed(2)}`;
+                  : `${usageIncomplete ? "≥" : ""}$${r.cost.toFixed(2)}`;
                 const coverageText = getCoverageText(
-                  row.unreportedTaskCount,
+                  r.unreportedTaskCount,
                   usageTotalsPending,
                 );
                 return (
                   <li
-                    key={row.agentId}
+                    key={r.agentId}
                     className={`${LEADERBOARD_GRID} px-4 py-2`}
                     style={LEADERBOARD_GRID_STYLE}
                   >
@@ -266,13 +417,13 @@ export function Leaderboard({
                         <>
                           <ActorAvatar
                             actorType="agent"
-                            actorId={row.agentId}
+                            actorId={r.agentId}
                             size="md"
                             enableHoverCard
                           />
                           <span className="min-w-0">
                             <span className="block cursor-pointer truncate text-body font-medium">
-                              {agent?.name ?? row.agentId}
+                              {agent?.name ?? r.agentId}
                             </span>
                             {coverageText ? (
                               <span
@@ -286,34 +437,19 @@ export function Leaderboard({
                         </>
                       )}
                     </div>
-                    <div className="relative h-2 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div
-                      className={`text-right text-caption tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                    >
-                      {tokenText}
-                    </div>
-                    <div
-                      className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
-                    >
+                    <ProgressBar pct={pct} />
+                    <MetricCell active={sortBy === "tokens"}>{tokenText}</MetricCell>
+                    <MetricCell active={sortBy === "cost"} size="sm">
                       {costText}
-                    </div>
-                    <div
-                      className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                    >
+                    </MetricCell>
+                    <MetricCell active={sortBy === "time"}>
                       {isDeletedBucket
                         ? "—"
-                        : formatDuration(row.seconds, lessThanMinuteLabel)}
-                    </div>
-                    <div
-                      className={`text-right text-caption tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                    >
-                      {isDeletedBucket ? "—" : row.taskCount}
-                    </div>
+                        : formatDuration(r.seconds, lessThanMinuteLabel)}
+                    </MetricCell>
+                    <MetricCell active={sortBy === "tasks"}>
+                      {isDeletedBucket ? "—" : r.taskCount}
+                    </MetricCell>
                   </li>
                 );
               })}
@@ -321,6 +457,35 @@ export function Leaderboard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProgressBar({ pct }: { pct: number }) {
+  return (
+    <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+function MetricCell({
+  active,
+  size = "xs",
+  children,
+}: {
+  active: boolean;
+  size?: "xs" | "sm";
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`text-right tabular-nums ${size === "sm" ? "text-body" : "text-caption"} ${active ? "font-medium text-foreground" : "text-muted-foreground"}`}
+    >
+      {children}
     </div>
   );
 }

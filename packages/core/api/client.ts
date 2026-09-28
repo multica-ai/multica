@@ -80,10 +80,14 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
+  DashboardUsageByModel,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
+  DashboardRuntimeDuration,
+  DashboardModelRunTime,
+  DashboardUsageByRuntime,
   RuntimeUpdate,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
@@ -282,7 +286,11 @@ import {
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
+  DashboardUsageByModelListSchema,
   DashboardUsageDailyListSchema,
+  DashboardRuntimeDurationListSchema,
+  DashboardModelRunTimeListSchema,
+  DashboardUsageByRuntimeListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_CHAT_MESSAGE_LIST,
@@ -2626,6 +2634,70 @@ export class ApiClient {
       DashboardFailureByAgentListSchema,
       [],
       { endpoint: "GET /api/dashboard/failures/by-agent" },
+    );
+  }
+
+  async getDashboardUsageByModel(
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardUsageByModel[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-model?${search}`);
+    return parseWithFallback<DashboardUsageByModel[]>(
+      raw,
+      DashboardUsageByModelListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/by-model" },
+    );
+  }
+
+  async getDashboardRuntimeDuration(
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardRuntimeDuration[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/runtime-duration?${search}`);
+    return parseWithFallback<DashboardRuntimeDuration[]>(
+      raw,
+      DashboardRuntimeDurationListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/runtime-duration" },
+    );
+  }
+
+  async getDashboardModelRunTime(
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardModelRunTime[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/model-runtime?${search}`);
+    return parseWithFallback<DashboardModelRunTime[]>(
+      raw,
+      DashboardModelRunTimeListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/model-runtime" },
+    );
+  }
+
+  async getDashboardUsageByRuntime(
+    params: { days?: number; project_id?: string | null; tz?: string },
+  ): Promise<DashboardUsageByRuntime[]> {
+    const search = new URLSearchParams();
+    if (params.days) search.set("days", String(params.days));
+    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.tz) search.set("tz", params.tz);
+    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-runtime?${search}`);
+    return parseWithFallback<DashboardUsageByRuntime[]>(
+      raw,
+      DashboardUsageByRuntimeListSchema,
+      [],
+      { endpoint: "GET /api/dashboard/usage/by-runtime" },
     );
   }
 

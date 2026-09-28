@@ -226,6 +226,81 @@ WHERE a.workspace_id = $1
 GROUP BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
+-- name: ListDashboardUsageByModel :many
+-- Per-model token aggregates from `task_usage_hourly`. Groups workspace
+-- usage by model for the dashboard's Model scope. No agent dimension —
+-- the model field is the key.
+--
+-- The cost columns are the same split every other usage rollup in this file
+-- carries (see ListDashboardUsageByAgent): `cost_usd_ticks` is what the
+-- provider itself charged, and the `uncosted_*` sums are the tokens it did
+-- NOT price, which the client estimates from its own rate table. Without
+-- them the client has no authoritative half, so a model the rate table does
+-- not know prices at $0.00 and this scope stops summing to the Cost KPI
+-- sitting directly above it (migration 213).
+--
+-- @since is the viewer's local start-of-day-(N) (same convention as
+-- ListDashboardUsageByAgent); passed straight through without re-truncation.
+SELECT
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
+    SUM(task_count)::int             AS task_count
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+GROUP BY model
+ORDER BY SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) DESC;
+
+-- name: ListDashboardRuntimeDuration :many
+-- Per-runtime total task run time and task count for the workspace.
+-- Mirrors ListDashboardAgentRunTime but groups on runtime_id.
+--
+-- The terminal-task filter is that query's filter verbatim — completed,
+-- failed AND cancelled, with both timestamps populated — and it must stay
+-- that way. A run the user stopped mid-flight burned real agent time, and
+-- dropping it here while ListDashboardAgentRunTime kept it made the same
+-- selector report different totals depending on which scope was open (see
+-- the 'cancelled' note on ListDashboardAgentRunTime). metered_task_count
+-- and cancelled_count ride along for the same reason they do there: the
+-- client needs them to split a runtime's task count into succeeded /
+-- failed / cancelled exactly as it does for an agent.
+--
+-- @since is the viewer's local start-of-day (passed through without
+-- re-truncation). EXACT N days, not N+1: this response carries no date, so
+-- the client cannot trim the surplus day (MUL-5551).
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
+    ))::int AS metered_task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed', 'cancelled')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.runtime_id
+ORDER BY total_seconds DESC;
+
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
 -- scoped to a single project. Counts only terminal runs (completed, failed,
@@ -334,3 +409,143 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2;
+
+-- name: ListDashboardModelRunTime :many
+-- Per-model task run time and task count, derived by joining task_usage
+-- with agent_task_queue on task_id. A task that uses multiple models
+-- contributes its full duration to each model — total_seconds may exceed
+-- the workspace total for workspaces where tasks call multiple models.
+-- Likewise, a task that runs the same model via multiple providers
+-- produces multiple `task_usage` rows (UNIQUE (task_id, provider, model));
+-- we collapse to one row per (task_id, model) before joining so a
+-- multi-provider task's duration is attributed once per model, not
+-- duplicated per provider. COUNT(DISTINCT) avoids inflating the task
+-- count for multi-model tasks.
+--
+-- The terminal-task filter is ListDashboardAgentRunTime's filter verbatim,
+-- cancelled runs included: a run the user stopped mid-flight burned real
+-- agent time, and excluding it here while the agent scope counted it made
+-- the Time column change as the user moved the selector. cancelled_count
+-- rides along so the client splits the count the same way it does for an
+-- agent. metered_task_count is deliberately absent — every row here comes
+-- from a `task_usage` row existing, so it would always equal task_count;
+-- ListDashboardRuntimeDuration is the one that can report a terminal run
+-- that never reported usage.
+--
+-- The workspace / window / project predicates are evaluated INSIDE the
+-- dedup subquery, not only in the outer join. Filtering only outside made
+-- the DISTINCT run over every usage row on the platform before discarding
+-- them, sorting on a wide key (`Sort Key: (model, atq.id)`) and spilling to
+-- a temp file at larger table sizes. Scoping the subquery means the DISTINCT
+-- runs over the windowed terminal-task set instead: the wide sort and its
+-- spill are gone and the query measures 3-5x faster.
+--
+-- What that does NOT buy is an index-driven read of task_usage. Past roughly
+-- 1k rows the planner stops preferring the task_id index and hash-joins the
+-- whole table against the small scoped set instead, so the read stays
+-- O(platform total) however small the window is. Measured during review on
+-- an inflated table (scoped set pinned at 600 rows, ANALYZE at each size,
+-- EXPLAIN (ANALYZE, BUFFERS)):
+--
+--     rows      before                 after
+--     1,000     seq  15.8ms             index  0.9ms
+--     201,000   seq  93ms    spill      seq  33ms   no spill
+--     701,000   seq  518ms   spill      seq  96ms   spill 2r/2w
+--
+-- Read the middle row as the real one: the index path is a small-table win,
+-- not a scaling property. The residual scan is acceptable because this
+-- query is opt-in — the client requests the Model scope only while it is
+-- selected, so it is not on the default dashboard load — and a mounted tab
+-- re-polls it on REFETCH_INTERVAL, not per render.
+--
+-- Removing the scan needs a pre-aggregated per-(model, bucket) duration
+-- rollup, which does not exist: task_usage_hourly carries tokens and cost
+-- but no duration, and duration only exists on the terminal
+-- agent_task_queue row. That is a real project, not a rewrite of this query,
+-- so do not read the scoped subquery as a step towards it.
+--
+-- @since is the viewer's local start-of-day-(N), EXACT N days: this
+-- response carries no date, so the client cannot trim the surplus calendar
+-- day (MUL-5551). Consistent with the companion ListDashboardUsageByModel.
+WITH scoped_task AS (
+    SELECT
+        atq.id,
+        atq.status,
+        atq.started_at,
+        atq.completed_at
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE a.workspace_id = $1
+      AND atq.status IN ('completed', 'failed', 'cancelled')
+      AND atq.started_at IS NOT NULL
+      AND atq.completed_at IS NOT NULL
+      AND atq.completed_at >= @since::timestamptz
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+)
+SELECT
+    tu.model,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (scoped_task.completed_at - scoped_task.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(DISTINCT scoped_task.id)::int AS task_count,
+    COUNT(DISTINCT scoped_task.id) FILTER (WHERE scoped_task.status = 'failed')::int AS failed_count,
+    COUNT(DISTINCT scoped_task.id) FILTER (WHERE scoped_task.status = 'cancelled')::int AS cancelled_count
+FROM (
+    SELECT DISTINCT tu.task_id, tu.model
+    FROM task_usage tu
+    JOIN scoped_task ON scoped_task.id = tu.task_id
+) tu
+JOIN scoped_task ON scoped_task.id = tu.task_id
+GROUP BY tu.model
+ORDER BY total_seconds DESC;
+
+-- name: ListDashboardUsageByRuntime :many
+-- Per-(runtime_id, model) token aggregates for the workspace, read from the
+-- same `task_usage_hourly` rollup as the Agent and Model scopes. The model
+-- dimension is preserved so the client can compute per-model cost and sum
+-- per-runtime, mirroring how ListDashboardUsageByAgent works for the agent
+-- scope.
+--
+-- The rollup keys on runtime_id (migration 101: runtime_id UUID NOT NULL,
+-- indexed (runtime_id, bucket_hour DESC)), so this scope reads the indexed,
+-- workspace-filtered, bucket-windowed table instead of joining the live
+-- `task_usage` rows. That is what makes the Runtime scope's tokens and cost
+-- add up to the same Cost KPI as the Agent and Model scopes beside it; the
+-- earlier live-`task_usage` variant covered a different task population
+-- (terminal tasks only) and so could never reconcile with them.
+--
+-- Because the rollup is not terminal-filtered, a queued or still-running
+-- task's usage counts here — exactly as it already does in the Agent and
+-- Model scopes. Time still comes from ListDashboardRuntimeDuration, which is
+-- terminal-only by necessity (a run in flight has no duration yet); the
+-- agent scope has the same split between its token and run-time rollups.
+--
+-- The cost columns are the split every other usage rollup in this file
+-- carries: `cost_usd_ticks` is what the provider charged, the `uncosted_*`
+-- sums are the tokens it did not price and the client estimates from its own
+-- rate table. Without them a model the rate table does not know prices at
+-- $0.00 here while reading correctly in the Agent scope.
+--
+-- @since is the viewer's local start-of-day (passed through without
+-- re-truncation), EXACT N days: this response carries no date, so the client
+-- cannot trim the surplus day (MUL-5551).
+SELECT
+    runtime_id,
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+GROUP BY runtime_id, model
+ORDER BY runtime_id, model;
