@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // localDirectoryResourceType is the project_resource discriminator the daemon
@@ -418,6 +419,31 @@ func systemRootBlacklist() []string {
 	return []string{"/", "/Users", "/Users/Shared", "/home", "/root", "/var", "/etc", "/tmp", "/usr", "/opt"}
 }
 
+// accessErrorGOOS is a test seam for the darwin branch in describeDirAccessError.
+var accessErrorGOOS = runtime.GOOS
+
+func describeDirAccessError(op, dir string, err error) error {
+	if accessErrorGOOS == "darwin" && errors.Is(err, syscall.EPERM) && macOSPrivacyProtectedPath(dir) {
+		return fmt.Errorf("%s %q: %w — macOS privacy protection may be blocking access. Grant Multica access in System Settings -> Privacy & Security -> Full Disk Access, or move the directory outside a protected folder (Documents, Desktop, Downloads, iCloud Drive)", op, dir, err)
+	}
+	return fmt.Errorf("%s %q: %w", op, dir, err)
+}
+
+func macOSPrivacyProtectedPath(dir string) bool {
+	p := filepath.ToSlash(dir)
+	lower := strings.ToLower(p)
+	if strings.Contains(lower, "/library/mobile documents") || strings.Contains(lower, "/icloud drive") {
+		return true
+	}
+	for _, part := range strings.Split(p, "/") {
+		switch part {
+		case "Documents", "Desktop", "Downloads":
+			return true
+		}
+	}
+	return false
+}
+
 // checkDirReadWrite verifies the daemon process can both read directory
 // contents and create/remove a probe file inside dir. The probe filename is
 // long, hidden, and unlikely to clash with user files; we delete it
@@ -425,11 +451,11 @@ func systemRootBlacklist() []string {
 // the worst case is leaving a 0-byte file the user can ignore).
 func checkDirReadWrite(dir string) error {
 	if _, err := os.ReadDir(dir); err != nil {
-		return fmt.Errorf("read %q: %w", dir, err)
+		return describeDirAccessError("read", dir, err)
 	}
 	probe, err := os.CreateTemp(dir, ".multica-rwcheck-*")
 	if err != nil {
-		return fmt.Errorf("write %q: %w", dir, err)
+		return describeDirAccessError("write", dir, err)
 	}
 	probePath := probe.Name()
 	_ = probe.Close()
