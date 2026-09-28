@@ -8,18 +8,21 @@ CREATE TABLE provider_quota_pool (
     provider_hint text NOT NULL DEFAULT '',
     timezone text NOT NULL DEFAULT 'UTC',
     state text NOT NULL DEFAULT 'open'
-        CHECK (state IN ('open', 'held_exact', 'held_date', 'reset_unknown', 'probe_due', 'probing')),
+        CHECK (state IN ('open', 'held_exact', 'held_date', 'reset_unknown', 'probe_due', 'probing', 'probe_backoff')),
     reset_at timestamptz,
     reset_date date,
     source_task_id uuid,
     observed_at timestamptz,
     probe_started_at timestamptz,
+    probe_task_id uuid,
+    probe_attempts integer NOT NULL DEFAULT 0 CHECK (probe_attempts >= 0),
     revision bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CHECK (revision > 0),
     CHECK (reset_at IS NULL OR reset_date IS NULL),
     CHECK (state <> 'held_exact' OR reset_at IS NOT NULL),
+    CHECK (state <> 'probe_backoff' OR reset_at IS NOT NULL),
     CHECK (state <> 'held_date' OR reset_date IS NOT NULL),
     CHECK (state <> 'reset_unknown' OR (reset_at IS NULL AND reset_date IS NULL))
 );

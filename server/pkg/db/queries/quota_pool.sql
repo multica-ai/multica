@@ -1,6 +1,12 @@
 -- name: GetProviderQuotaPool :one
 SELECT * FROM provider_quota_pool WHERE id = $1;
 
+-- name: GetProviderQuotaPoolForUpdate :one
+SELECT * FROM provider_quota_pool WHERE id = $1 FOR UPDATE;
+
+-- name: ListProviderQuotaPoolsByOwner :many
+SELECT * FROM provider_quota_pool WHERE owner_id = $1 ORDER BY name, id;
+
 -- name: GetProviderQuotaPoolForAgent :one
 SELECT p.* FROM provider_quota_pool p
 JOIN provider_quota_pool_agent m ON m.pool_id = p.id
@@ -37,6 +43,11 @@ DELETE FROM provider_quota_pool_agent WHERE agent_id = $1;
 -- name: ListProviderQuotaPoolAgents :many
 SELECT agent_id FROM provider_quota_pool_agent WHERE pool_id = $1 ORDER BY agent_id;
 
+-- name: ListProviderQuotaPoolRuntimeIDs :many
+SELECT DISTINCT a.runtime_id FROM provider_quota_pool_agent m
+JOIN agent a ON a.id = m.agent_id
+WHERE m.pool_id = $1 AND a.runtime_id IS NOT NULL AND a.archived_at IS NULL;
+
 -- name: SetProviderQuotaPoolState :one
 UPDATE provider_quota_pool
 SET state = @state,
@@ -45,6 +56,8 @@ SET state = @state,
     source_task_id = sqlc.narg(source_task_id),
     observed_at = sqlc.narg(observed_at),
     probe_started_at = sqlc.narg(probe_started_at),
+    probe_task_id = sqlc.narg(probe_task_id),
+    probe_attempts = @probe_attempts,
     revision = revision + 1,
     updated_at = now()
 WHERE id = @id AND revision = @expected_revision
@@ -64,7 +77,15 @@ LIMIT $2;
 
 -- name: ListDueProviderQuotaPools :many
 SELECT * FROM provider_quota_pool
-WHERE (state = 'held_exact' AND reset_at <= now())
+WHERE (state IN ('held_exact', 'probe_backoff') AND reset_at <= now())
    OR (state = 'held_date' AND reset_date <= (now() AT TIME ZONE timezone)::date)
 ORDER BY COALESCE(reset_at, reset_date::timestamptz), id
+LIMIT $1;
+
+-- name: ListOrphanedProviderQuotaProbes :many
+SELECT p.* FROM provider_quota_pool p
+LEFT JOIN agent_task_queue t ON t.id = p.probe_task_id
+WHERE p.state = 'probing'
+  AND (t.id IS NULL OR t.status IN ('completed', 'failed', 'cancelled'))
+ORDER BY p.probe_started_at, p.id
 LIMIT $1;

@@ -678,6 +678,13 @@ DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 -- name: DeleteWorkspaceAgents :exec
 DELETE FROM agent WHERE agent.workspace_id = $1;
 
+-- name: DeleteWorkspaceProviderQuotaPoolMemberships :exec
+-- Account pools may span workspaces; remove only memberships for this
+-- workspace before deleting its agents. The pool and audit history remain
+-- owned by the account user.
+DELETE FROM provider_quota_pool_agent
+WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1);
+
 -- name: DeleteWorkspaceRuntimesAndProjects :exec
 WITH
 deleted_runtimes AS (

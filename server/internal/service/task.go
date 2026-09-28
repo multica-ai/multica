@@ -3562,6 +3562,10 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			outcome = "error_claim"
 			return fmt.Errorf("claim task: %w", err)
 		}
+		if err := reserveQuotaProbeForClaim(ctx, qtx, task); err != nil {
+			outcome = "quota_pool_held"
+			return err
+		}
 
 		// An idle task-owned direct-chat row may already be visible as the
 		// positional queue head. Normal completion reanchors a successor beside
@@ -3589,6 +3593,9 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, errQuotaPoolHeld) {
+			return nil, nil
+		}
 		if outcome == "unknown" {
 			outcome = "error_transaction"
 		}
@@ -4204,7 +4211,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, supplem
 	if poolErr != nil && !errors.Is(poolErr, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("load legacy task quota pool: %w", poolErr)
 	}
-	if poolErr == nil && pool.State != "open" {
+	if poolErr == nil && pool.State != "open" && !(pool.State == "probing" && pool.ProbeTaskID == taskID) {
 		return nil, pgx.ErrNoRows
 	}
 	task, err := qtx.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
@@ -4244,7 +4251,7 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 		if poolErr != nil && !errors.Is(poolErr, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("load task quota pool: %w", poolErr)
 		}
-		if poolErr == nil && pool.State != "open" {
+		if poolErr == nil && pool.State != "open" && !(pool.State == "probing" && pool.ProbeTaskID == task.ID) {
 			return nil, pgx.ErrNoRows
 		}
 		task, err = qtx.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
@@ -4422,6 +4429,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // terminal task is still an idempotent success but must not emit them again.
 func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
 	var task db.AgentTaskQueue
+	var releasedQuotaPoolID pgtype.UUID
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
@@ -4444,6 +4452,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			return err
 		}
 		task = t
+		releasedQuotaPoolID, err = completeQuotaProbe(ctx, qtx, t)
+		if err != nil {
+			return err
+		}
 
 		// Atomic with the status flip: a crash between the two would leave a
 		// finished obligation looking pending forever.
@@ -4529,6 +4541,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			)
 		}
 		return nil, false, fmt.Errorf("complete task: %w", err)
+	}
+	if releasedQuotaPoolID.Valid {
+		s.notifyQuotaPoolReleased(ctx, releasedQuotaPoolID)
 	}
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
@@ -4941,6 +4956,11 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		task = t
 		if err := holdQuotaPoolForFailure(ctx, qtx, t, failureReason, errMsg); err != nil {
 			return err
+		}
+		if failureReason != taskfailure.ReasonAgentProviderQuotaLimit.String() {
+			if err := settleQuotaProbeFailure(ctx, qtx, t, failureReason); err != nil {
+				return err
+			}
 		}
 
 		// Atomic with the status flip, same as the completion path. A failed

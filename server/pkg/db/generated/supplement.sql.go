@@ -733,7 +733,9 @@ WITH candidate AS MATERIALIZED (
       AND NOT EXISTS (
           SELECT 1 FROM provider_quota_pool_agent membership
           JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-          WHERE membership.agent_id = t.agent_id AND pool.state <> 'open'
+          WHERE membership.agent_id = t.agent_id
+            AND pool.state <> 'open'
+            AND NOT (pool.state = 'probing' AND pool.probe_task_id = t.id)
       )
     FOR UPDATE OF t
 ), capability AS (

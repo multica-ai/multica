@@ -1339,6 +1339,8 @@ type ProviderQuotaPool struct {
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
 	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
 	ProbeStartedAt pgtype.Timestamptz `json:"probe_started_at"`
+	ProbeTaskID    pgtype.UUID        `json:"probe_task_id"`
+	ProbeAttempts  int32              `json:"probe_attempts"`
 	Revision       int64              `json:"revision"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`

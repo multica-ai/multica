@@ -151,9 +151,15 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return AgentVerdict{}, err
 	}
+	if err == nil && pool.State == "probe_due" {
+		return AgentVerdict{Availability: AgentWaitable, Reason: dispatch.ReasonProviderQuotaHeld,
+			Detail: "provider account reset is due; the next run will verify access"}, nil
+	}
 	if err == nil && pool.State != "open" {
 		detail := "provider account quota is held"
 		switch {
+		case pool.State == "probing":
+			detail = "provider account reset is being verified by one run"
 		case pool.ResetAt.Valid:
 			detail += " until " + pool.ResetAt.Time.UTC().Format(time.RFC3339)
 		case pool.ResetDate.Valid:

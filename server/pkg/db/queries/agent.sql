@@ -769,7 +769,7 @@ WHERE id = (
       AND NOT EXISTS (
           SELECT 1 FROM provider_quota_pool_agent membership
           JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-          WHERE membership.agent_id = atq.agent_id AND pool.state <> 'open'
+          WHERE membership.agent_id = atq.agent_id AND pool.state NOT IN ('open', 'probe_due')
       )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
       AND EXISTS (
@@ -995,7 +995,9 @@ WHERE agent_task_queue.id = $1 AND agent_task_queue.status IN ('dispatched', 'wa
   AND NOT EXISTS (
       SELECT 1 FROM provider_quota_pool_agent membership
       JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-      WHERE membership.agent_id = agent_task_queue.agent_id AND pool.state <> 'open'
+      WHERE membership.agent_id = agent_task_queue.agent_id
+        AND pool.state <> 'open'
+        AND NOT (pool.state = 'probing' AND pool.probe_task_id = agent_task_queue.id)
   )
 RETURNING *;
 
@@ -2320,7 +2322,7 @@ WHERE atq.runtime_id = $1
   AND NOT EXISTS (
       SELECT 1 FROM provider_quota_pool_agent membership
       JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-      WHERE membership.agent_id = atq.agent_id AND pool.state <> 'open'
+      WHERE membership.agent_id = atq.agent_id AND pool.state NOT IN ('open', 'probe_due')
   )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
   AND EXISTS (
@@ -2446,7 +2448,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
   AND NOT EXISTS (
       SELECT 1 FROM provider_quota_pool_agent membership
       JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-      WHERE membership.agent_id = atq.agent_id AND pool.state <> 'open'
+      WHERE membership.agent_id = atq.agent_id AND pool.state NOT IN ('open', 'probe_due')
   )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
   AND EXISTS (
@@ -2472,7 +2474,10 @@ ORDER BY atq.priority DESC, atq.created_at ASC;
 -- promoted must not advertise an immediate follow-up claim. The response
 -- converts the timestamp to a relative delay, avoiding any dependency on
 -- daemon/server clock synchronization.
-SELECT MIN(fire_at)::timestamptz
+-- Compute the delay from the database clock that wrote fire_at. The API
+-- process clock may differ from the database clock by hundreds of ms.
+SELECT COUNT(fire_at)::bigint AS pending_count,
+       COALESCE(EXTRACT(EPOCH FROM (MIN(fire_at) - clock_timestamp())), 0)::double precision AS delay_seconds
 FROM agent_task_queue t
 WHERE t.runtime_id = ANY(@runtime_ids::uuid[])
   AND t.status = 'deferred'

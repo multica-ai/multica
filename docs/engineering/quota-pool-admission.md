@@ -1,6 +1,6 @@
 # Provider quota pool holds
 
-Design note for [#6255](https://github.com/multica-ai/multica/issues/6255), scoped to account-level admission and recovery. The broader agent/binding selection design is [#6650](https://github.com/multica-ai/multica/issues/6650). This note describes a server feature; it does not claim the feature is implemented.
+Design note for [#6255](https://github.com/multica-ai/multica/issues/6255), scoped to account-level admission and recovery. The broader agent/binding selection design is [#6650](https://github.com/multica-ai/multica/issues/6650). The implementation on this branch uses `provider_quota_pool`, `provider_quota_pool_agent`, and `provider_quota_pool_event`; pool membership is the opt-in rollout boundary. No production pools are created by the migration.
 
 ## Contract
 
@@ -10,9 +10,9 @@ A held pool admits no new execution. Running tasks continue. Existing queued tas
 
 ## State
 
-Use a global `quota_pool` row with `id`, `owner_id`, display name, optional provider hint, and timestamps. A separate `agent_quota_pool` mapping associates an agent with at most one pool in the current single-binding model. The membership points to the agent ID, not the runtime ID; a runtime alone can contain several model/account windows. Scope management to the pool owner or administrator, and validate access to every mapped agent. A future binding model can move the mapping from agent to binding without changing pool identity or hold history.
+Use a global `provider_quota_pool` row with `id`, `owner_id`, display name, optional provider hint, and timestamps. A separate `provider_quota_pool_agent` mapping associates an agent with at most one pool in the current single-binding model. The membership points to the agent ID, not the runtime ID; a runtime alone can contain several model/account windows. Scope management to the pool owner and validate access to every mapped agent. A future binding model can move the mapping from agent to binding without changing pool identity or hold history.
 
-Store a versioned hold row with pool ID, state (`held_exact`, `held_date`, `reset_unknown`, `probe_due`, `probing`, `open`), source task ID, failure reason, observed timestamp, reset timestamp or date plus time zone, last probe timestamp, and revision. Keep an append-only transition/audit record for automatic and manual changes. Exact resets are UTC instants. Date-only resets are calendar dates in the provider account's zone and do not imply an exact hour. A later verified failure may extend the hold; duplicate completion events must be idempotent.
+Store a versioned hold row with pool ID, state (`held_exact`, `held_date`, `reset_unknown`, `probe_due`, `probing`, `probe_backoff`, `open`), source task ID, observed timestamp, reset timestamp or date plus time zone, probe task and attempt count, and revision. Keep an append-only transition/audit record for automatic and manual changes. Exact resets are UTC instants. Date-only resets are calendar dates in the provider account's zone and do not imply an exact hour. A later verified failure may extend the hold; duplicate completion events must be idempotent. Store the normalized failure reason on the audit event, never the raw provider error.
 
 ## Admission and execution
 
@@ -28,11 +28,17 @@ On task finalization, only `agent_error.provider_quota_limit` may create an auto
 
 A server scheduler, independent of agent runtimes, advances exact holds at `reset_at` and date-only holds to `probe_due` on the stated date. Neither transition opens the floodgates: only one bounded probe per pool may run at once. A successful probe opens the pool; a quota failure re-holds it with the new reset; transient provider capacity errors back off without declaring quota success. After release, wake queued tasks once and let the existing task dedup and issue state decide which one is still relevant. An operator may override a hold with an audited reason, but a manual release does not erase failure history.
 
+## Operator API
+
+These authenticated routes require a human actor. A pool owner can create a pool with `POST /api/provider-quota-pools` using `name`, `provider_hint`, and an IANA `timezone`; the migration creates no pools or memberships. `GET /api/provider-quota-pools` lists owned pools. `GET /api/provider-quota-pools/{poolId}` includes mapped agent IDs and recent audit events. `PUT` or `DELETE /api/provider-quota-pools/{poolId}/agents/{agentId}` changes one membership after checking management rights for the mapped agents. An agent can belong to only one pool.
+
+`POST /api/provider-quota-pools/{poolId}/hold` accepts a nonempty `reason` and either an RFC 3339 `reset_at`, a `YYYY-MM-DD` `reset_date`, or neither for an unknown reset. `POST /api/provider-quota-pools/{poolId}/release` requires a nonempty `reason`. Both operations write an audit event. The release endpoint refuses an active probe; cancel its task first so its terminal state cannot reopen the pool later. All reset times are interpreted against the pool timezone where needed. Operators must keep credentials and raw error logs out of the reason field.
+
 ## Rollout and tests
 
-1. Ship the schema, management API, read-only status API, and claim-time gate behind a feature flag. Seed explicit pool membership, leave all pools open, and compare dry-run decisions with the live agent inventory. An unmapped agent keeps existing behavior during this phase.
+1. Ship the schema, owner-scoped management and status API, and claim-time gate with no pool memberships. Seed explicit membership only after comparing the live agent inventory with the account roster. An unmapped agent keeps existing behavior. To roll back one pool, remove its memberships through the API; the audit ledger remains.
 2. Enable manual hold on one test pool. Verify direct assignment, mention, chat, quick-create, and automation produce the intended visible wait/refusal; verify an already running task completes and queued work does not start. Release and confirm exactly one wakeup per task.
 3. Enable automatic failure detection and reset reconciliation for that pool. Test exact reset, date-only reset, unknown reset, repeated failure, late completion, concurrent enqueue, scheduler restart, and a task whose issue was completed while held.
-4. Expand by provider account pool. Alert on an unmapped quota failure, a hold with no reset, a probe loop, or an overdue queued task. Keep a feature-flag rollback that disables new holds without deleting the ledger.
+4. Expand by provider account pool. Alert on an unmapped quota failure, a hold with no reset, a probe loop, or an overdue queued task. Do not map a production agent until the pool owner and provider account are confirmed. An account-wide kill switch and automated alerting are future work; this branch provides per-pool membership removal and audited manual release.
 
 This does not implement cross-provider failover, billing transitions, or mid-run migration. Those need the explicit binding and execution policies in #6650.

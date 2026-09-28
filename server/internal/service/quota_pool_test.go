@@ -62,3 +62,50 @@ func TestQuotaHoldTransitionKeepsDateOnlyDistinct(t *testing.T) {
 		t.Fatalf("date-only hold = %+v %q %v", arg, event, changed)
 	}
 }
+
+func TestQuotaPoolResetDueUsesProviderCalendarDate(t *testing.T) {
+	date, err := time.Parse("2006-01-02", "2026-10-04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := db.ProviderQuotaPool{
+		State: "held_date", Timezone: "Asia/Tokyo",
+		ResetDate: pgtype.Date{Time: date, Valid: true},
+	}
+	if quotaPoolResetDue(pool, time.Date(2026, 10, 3, 14, 59, 0, 0, time.UTC)) {
+		t.Fatal("date-only reset became due before local midnight")
+	}
+	if !quotaPoolResetDue(pool, time.Date(2026, 10, 3, 15, 0, 0, 0, time.UTC)) {
+		t.Fatal("date-only reset did not become probe due at local midnight")
+	}
+}
+
+func TestQuotaProbeFailureBacksOffThenStops(t *testing.T) {
+	now := time.Date(2026, 9, 27, 20, 0, 0, 0, time.UTC)
+	pool := db.ProviderQuotaPool{State: "probing", ProbeAttempts: 1}
+	first := quotaProbeFailureState(pool, now)
+	if first.State != "probe_backoff" || !first.ResetAt.Time.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("first probe failure = %+v", first)
+	}
+	pool.ProbeAttempts = 3
+	last := quotaProbeFailureState(pool, now)
+	if last.State != "reset_unknown" || last.ResetAt.Valid {
+		t.Fatalf("third probe failure = %+v", last)
+	}
+}
+
+func TestQuotaProbeSameDayDateFailureBacksOff(t *testing.T) {
+	now := time.Date(2026, 9, 28, 20, 0, 0, 0, time.UTC)
+	pool := db.ProviderQuotaPool{State: "probing", Timezone: "America/Los_Angeles", ProbeAttempts: 1, Revision: 2}
+	hint := taskfailure.QuotaResetHint{Kind: taskfailure.QuotaResetDateOnly, Date: "2026-09-28", Timezone: pool.Timezone}
+	arg, event, changed := quotaHoldTransition(pool, testUUID(3), hint, now)
+	if !changed || event != "probe_failed" || arg.State != "probe_backoff" ||
+		arg.ResetDate.Valid || arg.ProbeAttempts != 1 || !arg.ResetAt.Time.Equal(now.Add(5*time.Minute)) {
+		t.Fatalf("same-day quota probe = %+v %q %v", arg, event, changed)
+	}
+	pool.ProbeAttempts = 3
+	arg, _, changed = quotaHoldTransition(pool, testUUID(4), hint, now)
+	if !changed || arg.State != "reset_unknown" || arg.ResetAt.Valid || arg.ResetDate.Valid {
+		t.Fatalf("third same-day quota probe = %+v", arg)
+	}
+}

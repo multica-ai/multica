@@ -30,7 +30,7 @@ func (q *Queries) AssignAgentProviderQuotaPool(ctx context.Context, arg AssignAg
 const createProviderQuotaPool = `-- name: CreateProviderQuotaPool :one
 INSERT INTO provider_quota_pool (id, owner_id, name, provider_hint, timezone)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, revision, created_at, updated_at
+RETURNING id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, probe_task_id, probe_attempts, revision, created_at, updated_at
 `
 
 type CreateProviderQuotaPoolParams struct {
@@ -62,6 +62,8 @@ func (q *Queries) CreateProviderQuotaPool(ctx context.Context, arg CreateProvide
 		&i.SourceTaskID,
 		&i.ObservedAt,
 		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -102,7 +104,7 @@ func (q *Queries) CreateProviderQuotaPoolEvent(ctx context.Context, arg CreatePr
 }
 
 const getProviderQuotaPool = `-- name: GetProviderQuotaPool :one
-SELECT id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, revision, created_at, updated_at FROM provider_quota_pool WHERE id = $1
+SELECT id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, probe_task_id, probe_attempts, revision, created_at, updated_at FROM provider_quota_pool WHERE id = $1
 `
 
 func (q *Queries) GetProviderQuotaPool(ctx context.Context, id pgtype.UUID) (ProviderQuotaPool, error) {
@@ -120,6 +122,8 @@ func (q *Queries) GetProviderQuotaPool(ctx context.Context, id pgtype.UUID) (Pro
 		&i.SourceTaskID,
 		&i.ObservedAt,
 		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -128,7 +132,7 @@ func (q *Queries) GetProviderQuotaPool(ctx context.Context, id pgtype.UUID) (Pro
 }
 
 const getProviderQuotaPoolForAgent = `-- name: GetProviderQuotaPoolForAgent :one
-SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
+SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.probe_task_id, p.probe_attempts, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
 JOIN provider_quota_pool_agent m ON m.pool_id = p.id
 WHERE m.agent_id = $1
 `
@@ -148,6 +152,8 @@ func (q *Queries) GetProviderQuotaPoolForAgent(ctx context.Context, agentID pgty
 		&i.SourceTaskID,
 		&i.ObservedAt,
 		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -156,7 +162,7 @@ func (q *Queries) GetProviderQuotaPoolForAgent(ctx context.Context, agentID pgty
 }
 
 const getProviderQuotaPoolForAgentForShare = `-- name: GetProviderQuotaPoolForAgentForShare :one
-SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
+SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.probe_task_id, p.probe_attempts, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
 JOIN provider_quota_pool_agent m ON m.pool_id = p.id
 WHERE m.agent_id = $1
 FOR SHARE OF p
@@ -179,6 +185,8 @@ func (q *Queries) GetProviderQuotaPoolForAgentForShare(ctx context.Context, agen
 		&i.SourceTaskID,
 		&i.ObservedAt,
 		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -187,7 +195,7 @@ func (q *Queries) GetProviderQuotaPoolForAgentForShare(ctx context.Context, agen
 }
 
 const getProviderQuotaPoolForAgentForUpdate = `-- name: GetProviderQuotaPoolForAgentForUpdate :one
-SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
+SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.probe_task_id, p.probe_attempts, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
 JOIN provider_quota_pool_agent m ON m.pool_id = p.id
 WHERE m.agent_id = $1
 FOR UPDATE OF p
@@ -209,6 +217,36 @@ func (q *Queries) GetProviderQuotaPoolForAgentForUpdate(ctx context.Context, age
 		&i.SourceTaskID,
 		&i.ObservedAt,
 		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getProviderQuotaPoolForUpdate = `-- name: GetProviderQuotaPoolForUpdate :one
+SELECT id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, probe_task_id, probe_attempts, revision, created_at, updated_at FROM provider_quota_pool WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) GetProviderQuotaPoolForUpdate(ctx context.Context, id pgtype.UUID) (ProviderQuotaPool, error) {
+	row := q.db.QueryRow(ctx, getProviderQuotaPoolForUpdate, id)
+	var i ProviderQuotaPool
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.ProviderHint,
+		&i.Timezone,
+		&i.State,
+		&i.ResetAt,
+		&i.ResetDate,
+		&i.SourceTaskID,
+		&i.ObservedAt,
+		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -217,8 +255,8 @@ func (q *Queries) GetProviderQuotaPoolForAgentForUpdate(ctx context.Context, age
 }
 
 const listDueProviderQuotaPools = `-- name: ListDueProviderQuotaPools :many
-SELECT id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, revision, created_at, updated_at FROM provider_quota_pool
-WHERE (state = 'held_exact' AND reset_at <= now())
+SELECT id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, probe_task_id, probe_attempts, revision, created_at, updated_at FROM provider_quota_pool
+WHERE (state IN ('held_exact', 'probe_backoff') AND reset_at <= now())
    OR (state = 'held_date' AND reset_date <= (now() AT TIME ZONE timezone)::date)
 ORDER BY COALESCE(reset_at, reset_date::timestamptz), id
 LIMIT $1
@@ -245,6 +283,54 @@ func (q *Queries) ListDueProviderQuotaPools(ctx context.Context, limit int32) ([
 			&i.SourceTaskID,
 			&i.ObservedAt,
 			&i.ProbeStartedAt,
+			&i.ProbeTaskID,
+			&i.ProbeAttempts,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrphanedProviderQuotaProbes = `-- name: ListOrphanedProviderQuotaProbes :many
+SELECT p.id, p.owner_id, p.name, p.provider_hint, p.timezone, p.state, p.reset_at, p.reset_date, p.source_task_id, p.observed_at, p.probe_started_at, p.probe_task_id, p.probe_attempts, p.revision, p.created_at, p.updated_at FROM provider_quota_pool p
+LEFT JOIN agent_task_queue t ON t.id = p.probe_task_id
+WHERE p.state = 'probing'
+  AND (t.id IS NULL OR t.status IN ('completed', 'failed', 'cancelled'))
+ORDER BY p.probe_started_at, p.id
+LIMIT $1
+`
+
+func (q *Queries) ListOrphanedProviderQuotaProbes(ctx context.Context, limit int32) ([]ProviderQuotaPool, error) {
+	rows, err := q.db.Query(ctx, listOrphanedProviderQuotaProbes, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderQuotaPool{}
+	for rows.Next() {
+		var i ProviderQuotaPool
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.Name,
+			&i.ProviderHint,
+			&i.Timezone,
+			&i.State,
+			&i.ResetAt,
+			&i.ResetDate,
+			&i.SourceTaskID,
+			&i.ObservedAt,
+			&i.ProbeStartedAt,
+			&i.ProbeTaskID,
+			&i.ProbeAttempts,
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -325,6 +411,73 @@ func (q *Queries) ListProviderQuotaPoolEvents(ctx context.Context, arg ListProvi
 	return items, nil
 }
 
+const listProviderQuotaPoolRuntimeIDs = `-- name: ListProviderQuotaPoolRuntimeIDs :many
+SELECT DISTINCT a.runtime_id FROM provider_quota_pool_agent m
+JOIN agent a ON a.id = m.agent_id
+WHERE m.pool_id = $1 AND a.runtime_id IS NOT NULL AND a.archived_at IS NULL
+`
+
+func (q *Queries) ListProviderQuotaPoolRuntimeIDs(ctx context.Context, poolID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listProviderQuotaPoolRuntimeIDs, poolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var runtime_id pgtype.UUID
+		if err := rows.Scan(&runtime_id); err != nil {
+			return nil, err
+		}
+		items = append(items, runtime_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProviderQuotaPoolsByOwner = `-- name: ListProviderQuotaPoolsByOwner :many
+SELECT id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, probe_task_id, probe_attempts, revision, created_at, updated_at FROM provider_quota_pool WHERE owner_id = $1 ORDER BY name, id
+`
+
+func (q *Queries) ListProviderQuotaPoolsByOwner(ctx context.Context, ownerID pgtype.UUID) ([]ProviderQuotaPool, error) {
+	rows, err := q.db.Query(ctx, listProviderQuotaPoolsByOwner, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderQuotaPool{}
+	for rows.Next() {
+		var i ProviderQuotaPool
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.Name,
+			&i.ProviderHint,
+			&i.Timezone,
+			&i.State,
+			&i.ResetAt,
+			&i.ResetDate,
+			&i.SourceTaskID,
+			&i.ObservedAt,
+			&i.ProbeStartedAt,
+			&i.ProbeTaskID,
+			&i.ProbeAttempts,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeAgentProviderQuotaPool = `-- name: RemoveAgentProviderQuotaPool :exec
 DELETE FROM provider_quota_pool_agent WHERE agent_id = $1
 `
@@ -342,10 +495,12 @@ SET state = $1,
     source_task_id = $4,
     observed_at = $5,
     probe_started_at = $6,
+    probe_task_id = $7,
+    probe_attempts = $8,
     revision = revision + 1,
     updated_at = now()
-WHERE id = $7 AND revision = $8
-RETURNING id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, revision, created_at, updated_at
+WHERE id = $9 AND revision = $10
+RETURNING id, owner_id, name, provider_hint, timezone, state, reset_at, reset_date, source_task_id, observed_at, probe_started_at, probe_task_id, probe_attempts, revision, created_at, updated_at
 `
 
 type SetProviderQuotaPoolStateParams struct {
@@ -355,6 +510,8 @@ type SetProviderQuotaPoolStateParams struct {
 	SourceTaskID     pgtype.UUID        `json:"source_task_id"`
 	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
 	ProbeStartedAt   pgtype.Timestamptz `json:"probe_started_at"`
+	ProbeTaskID      pgtype.UUID        `json:"probe_task_id"`
+	ProbeAttempts    int32              `json:"probe_attempts"`
 	ID               pgtype.UUID        `json:"id"`
 	ExpectedRevision int64              `json:"expected_revision"`
 }
@@ -367,6 +524,8 @@ func (q *Queries) SetProviderQuotaPoolState(ctx context.Context, arg SetProvider
 		arg.SourceTaskID,
 		arg.ObservedAt,
 		arg.ProbeStartedAt,
+		arg.ProbeTaskID,
+		arg.ProbeAttempts,
 		arg.ID,
 		arg.ExpectedRevision,
 	)
@@ -383,6 +542,8 @@ func (q *Queries) SetProviderQuotaPoolState(ctx context.Context, arg SetProvider
 		&i.SourceTaskID,
 		&i.ObservedAt,
 		&i.ProbeStartedAt,
+		&i.ProbeTaskID,
+		&i.ProbeAttempts,
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,

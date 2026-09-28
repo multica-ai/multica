@@ -585,6 +585,19 @@ func (q *Queries) DeleteWorkspacePluginData(ctx context.Context, workspaceID pgt
 	return err
 }
 
+const deleteWorkspaceProviderQuotaPoolMemberships = `-- name: DeleteWorkspaceProviderQuotaPoolMemberships :exec
+DELETE FROM provider_quota_pool_agent
+WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1)
+`
+
+// Account pools may span workspaces; remove only memberships for this
+// workspace before deleting its agents. The pool and audit history remain
+// owned by the account user.
+func (q *Queries) DeleteWorkspaceProviderQuotaPoolMemberships(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceProviderQuotaPoolMemberships, workspaceID)
+	return err
+}
+
 const deleteWorkspacePullRequests = `-- name: DeleteWorkspacePullRequests :exec
 WITH deleted_github_prs AS (
     DELETE FROM github_pull_request
