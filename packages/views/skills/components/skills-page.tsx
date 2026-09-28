@@ -228,8 +228,13 @@ function SourceCell({
   );
 }
 
-function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
-  const { enabled: gravatarEnabled } = useGravatarSettings();
+function CreatorCell({
+  creator,
+  gravatarEnabled,
+}: {
+  creator: MemberWithUser | null;
+  gravatarEnabled: boolean;
+}) {
   if (!creator) return null;
   return (
     <>
@@ -258,6 +263,9 @@ export default function SkillsPage() {
   const navigation = useNavigation();
   const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  // One read for the whole list: CreatorCell renders per row, and a
+  // per-row hook would re-subscribe every visible row to the same boolean.
+  const { enabled: gravatarEnabled } = useGravatarSettings();
 
   const {
     data: skills = [],
@@ -421,7 +429,9 @@ export default function SkillsPage() {
         header: t(($) => $.table.created_by),
         width: 144,
         hideable: true,
-        cell: (row) => <CreatorCell creator={row.creator} />,
+        cell: (row) => (
+          <CreatorCell creator={row.creator} gravatarEnabled={gravatarEnabled} />
+        ),
       },
       {
         key: "updated",

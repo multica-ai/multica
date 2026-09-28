@@ -88,6 +88,9 @@ vi.mock("@multica/core/workspace/queries", () => ({
   skillListOptions: () => ({ queryKey: ["skills"] }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
+  // The gravatar fallback reads the workspace's `settings` blob, which
+  // useCurrentWorkspace resolves through the workspace list query.
+  workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
   selectSkillAssignments: () => new Map(),
 }));
 
