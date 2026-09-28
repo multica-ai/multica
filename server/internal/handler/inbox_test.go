@@ -88,6 +88,186 @@ func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
 	}
 }
 
+// inboxNotification seeds one notification addressed to the test user and
+// returns its id. priority is the priority of the issue it is linked to, or ""
+// for a notification with no linked issue — the case whose projection is null
+// rather than absent. archived starts the row in the state the archive
+// endpoints read.
+func inboxNotification(t *testing.T, workspaceID, priority string, archived bool) string {
+	t.Helper()
+	cols := testutil.Cols{
+		"workspace_id":   workspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "status_changed",
+		"severity":       "info",
+		"title":          "Priority projection",
+		"archived":       archived,
+	}
+	if priority != "" {
+		cols["issue_id"] = dbfx.Issue(t, "Priority projection", testutil.Cols{
+			"workspace_id": workspaceID,
+			"priority":     priority,
+		})
+	}
+	return dbfx.Insert(t, "inbox_item", cols)
+}
+
+// inboxItemByID picks one notification out of a list response, failing rather
+// than returning a zero value: a row the response dropped is a different
+// defect from a row whose field was projected wrong, and the failure messages
+// should say which.
+func inboxItemByID(t *testing.T, items []InboxItemResponse, id string) InboxItemResponse {
+	t.Helper()
+	for _, item := range items {
+		if item.ID == id {
+			return item
+		}
+	}
+	t.Fatalf("item %s missing from a response of %d items", id, len(items))
+	return InboxItemResponse{}
+}
+
+// wantIssuePriority asserts a projected issue_priority, keeping "reported the
+// wrong value" and "reported null instead of a value" apart — the client sort
+// reads both as no priority, so only the response can tell them.
+func wantIssuePriority(t *testing.T, got, want *string) {
+	t.Helper()
+	switch {
+	case want == nil && got != nil:
+		t.Errorf("issue_priority = %q, want null", *got)
+	case want != nil && got == nil:
+		t.Errorf("issue_priority = null, want %q", *want)
+	case want != nil && *got != *want:
+		t.Errorf("issue_priority = %q, want %q", *got, *want)
+	}
+}
+
+// A notification with no linked issue has no priority to report, so the list
+// carries null for it instead of a value carried over from elsewhere. The
+// issue-backed row in the same response is the control: a projection that
+// dropped the field everywhere would otherwise satisfy a null-only assertion.
+// M-42's client-side sort ranks on this field, so a value invented here ranks a
+// row that has no priority against rows that do.
+func TestListInboxReportsNullPriorityWithoutLinkedIssue(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Inbox null priority", "inbox-null-priority-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	withIssue := inboxNotification(t, workspaceID, "high", false)
+	withoutIssue := inboxNotification(t, workspaceID, "", false)
+
+	var items []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&items)
+
+	cases := []struct {
+		name string
+		id   string
+		want *string
+	}{
+		{"notification without a linked issue reports no priority", withoutIssue, nil},
+		{"notification linked to a high-priority issue reports it", withIssue, ptr("high")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantIssuePriority(t, inboxItemByID(t, items, tc.id).IssuePriority, tc.want)
+		})
+	}
+}
+
+// Marking read answers with the same projection the list carries: the response
+// is enriched from the issue rather than joined, so a path that stopped
+// copying issue_priority would leave the client sorting a row it just mutated
+// on a field only the list ever set.
+func TestMarkInboxReadEnrichesIssuePriority(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Mark read priority", "mark-read-priority-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	withIssue := inboxNotification(t, workspaceID, "high", false)
+	withoutIssue := inboxNotification(t, workspaceID, "", false)
+
+	cases := []struct {
+		name string
+		id   string
+		want *string
+	}{
+		{"item linked to a high-priority issue reports it", withIssue, ptr("high")},
+		{"item without a linked issue reports no priority", withoutIssue, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var resp InboxItemResponse
+			testutil.Call(t, inboxWorkspaceHandler(testHandler.MarkInboxRead),
+				withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+tc.id+"/read", workspaceID), "id", tc.id)).
+				Want(http.StatusOK).
+				JSON(&resp)
+			wantIssuePriority(t, resp.IssuePriority, tc.want)
+		})
+	}
+}
+
+// Archiving mutates the row and answers from the mutated row, so its priority
+// comes off the same enrich path the other single-item responses use rather
+// than off the list query — the field the response is written from is the one
+// the sort leans on after the row moves to the archive.
+func TestArchiveInboxItemEnrichesIssuePriority(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Archive item priority", "archive-item-priority-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	withIssue := inboxNotification(t, workspaceID, "high", false)
+	withoutIssue := inboxNotification(t, workspaceID, "", false)
+
+	cases := []struct {
+		name string
+		id   string
+		want *string
+	}{
+		{"item linked to a high-priority issue reports it", withIssue, ptr("high")},
+		{"item without a linked issue reports no priority", withoutIssue, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var resp InboxItemResponse
+			testutil.Call(t, inboxWorkspaceHandler(testHandler.ArchiveInboxItem),
+				withURLParam(inboxRequest(http.MethodPost, "/api/inbox/"+tc.id+"/archive", workspaceID), "id", tc.id)).
+				Want(http.StatusOK).
+				JSON(&resp)
+			wantIssuePriority(t, resp.IssuePriority, tc.want)
+		})
+	}
+}
+
+// The archived page builds its response from the embedded inbox row and fills
+// the projections separately, so it is a second place the field is set. Its
+// priority filter is computed in SQL from the same joined column: a response
+// that dropped the field would list a row the archive then cannot re-filter by
+// the priority shown next to it.
+func TestListArchivedInboxPageProjectsIssuePriority(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Archived page priority", "archive-page-priority-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	withIssue := inboxNotification(t, workspaceID, "high", true)
+	withoutIssue := inboxNotification(t, workspaceID, "", true)
+
+	var page archivedInboxPageResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage),
+		inboxRequest(http.MethodGet, "/api/inbox/archived/page", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&page)
+
+	cases := []struct {
+		name string
+		id   string
+		want *string
+	}{
+		{"archived notification without a linked issue reports no priority", withoutIssue, nil},
+		{"archived notification linked to a high-priority issue reports it", withIssue, ptr("high")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantIssuePriority(t, inboxItemByID(t, page.Items, tc.id).IssuePriority, tc.want)
+		})
+	}
+}
+
 func TestListArchivedInboxLimitsIssueGroupsNotRows(t *testing.T) {
 	workspaceID := dbfx.Workspace(t, "Archived inbox groups", "archived-groups-"+uuid.NewString())
 	dbfx.Member(t, workspaceID, testUserID, "owner")
