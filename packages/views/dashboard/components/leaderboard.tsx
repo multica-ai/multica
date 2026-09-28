@@ -21,7 +21,7 @@ import "./leaderboard.css";
 
 // What the leaderboard ranks: whole agents, individual models, or runtimes.
 // Agent is the default because it is the scope the page has always shown.
-type LeaderboardScope = "agent" | "model" | "runtime";
+export type LeaderboardScope = "agent" | "model" | "runtime";
 
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
@@ -93,6 +93,9 @@ export function Leaderboard({
   usageByRuntime,
   runtimes,
   lessThanMinuteLabel,
+  noRuntimeLabel,
+  scope,
+  onScopeChange,
 }: {
   agentRows: AgentDashboardRow[];
   agents: { id: string; name: string }[];
@@ -102,10 +105,17 @@ export function Leaderboard({
   runtimeDuration: import("@multica/core/types").DashboardRuntimeDuration[];
   usageByRuntime: import("@multica/core/types").DashboardUsageByRuntime[];
   runtimes: { id: string; name: string }[];
+  // Shown for a run that had no runtime at all (NULL runtime_id), so the row
+  // reads as a label instead of an empty cell.
+  noRuntimeLabel: string;
+  // Controlled by the page, which needs the scope to decide whether the Model
+  // and Runtime rollups are worth fetching at all — see dashboard-page.tsx.
+  scope: LeaderboardScope;
+  onScopeChange: (scope: LeaderboardScope) => void;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
-  const [scope, setScope] = useState<LeaderboardScope>("agent");
+  const setScope = onScopeChange;
   const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
   const [showAll, setShowAll] = useState(false);
 
@@ -317,7 +327,12 @@ export function Leaderboard({
                     >
                       <span className="truncate text-body font-medium">
                         {runtimes.find((rt) => rt.id === r.runtimeId)?.name ??
-                          r.runtimeId}
+                          // A task can run without a runtime, and its
+                          // agent_task_queue row then groups under a NULL
+                          // runtime_id that uuidToString renders as "". Falling
+                          // through to the id would paint a blank cell with
+                          // tokens in it.
+                          (r.runtimeId || noRuntimeLabel)}
                       </span>
                       <ProgressBar pct={pct} />
                       <MetricCell active={sortBy === "tokens"}>

@@ -70,7 +70,7 @@ import {
 } from "./dashboard-shared";
 import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
-import { Leaderboard } from "./leaderboard";
+import { Leaderboard, type LeaderboardScope } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -244,18 +244,33 @@ export function DashboardPage() {
   );
   // Leaderboard Model / Runtime scopes. Same `days` window as the other
   // per-agent rollups, so a scope switch never widens or narrows the ranking.
-  const byModelQuery = useQuery(
-    dashboardUsageByModelOptions(wsId, days, projectId, viewTZ),
-  );
-  const runtimeDurationQuery = useQuery(
-    dashboardRuntimeDurationOptions(wsId, days, projectId, viewTZ),
-  );
-  const modelRunTimeQuery = useQuery(
-    dashboardModelRunTimeOptions(wsId, days, projectId, viewTZ),
-  );
-  const usageByRuntimeQuery = useQuery(
-    dashboardUsageByRuntimeOptions(wsId, days, projectId, viewTZ),
-  );
+  //
+  // Each pair is fetched only while its scope is open. The scope defaults to
+  // agent, and these four requests were previously issued unconditionally and
+  // folded into `usageLoading` — so the default view waited on a full skeleton
+  // for four queries it never read, and one of them 500ing held the whole Usage
+  // tab in that skeleton through TanStack's retry backoff. The scope lives up
+  // here rather than inside Leaderboard precisely so this gate is possible.
+  const [leaderboardScope, setLeaderboardScope] =
+    useState<LeaderboardScope>("agent");
+  const wantModelScope = leaderboardScope === "model";
+  const wantRuntimeScope = leaderboardScope === "runtime";
+  const byModelQuery = useQuery({
+    ...dashboardUsageByModelOptions(wsId, days, projectId, viewTZ),
+    enabled: wantModelScope,
+  });
+  const modelRunTimeQuery = useQuery({
+    ...dashboardModelRunTimeOptions(wsId, days, projectId, viewTZ),
+    enabled: wantModelScope,
+  });
+  const runtimeDurationQuery = useQuery({
+    ...dashboardRuntimeDurationOptions(wsId, days, projectId, viewTZ),
+    enabled: wantRuntimeScope,
+  });
+  const usageByRuntimeQuery = useQuery({
+    ...dashboardUsageByRuntimeOptions(wsId, days, projectId, viewTZ),
+    enabled: wantRuntimeScope,
+  });
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
@@ -330,15 +345,14 @@ export function DashboardPage() {
   // Loading and empty are per tab: the Usage tab has no reason to wait on the
   // two failure rollups, and a workspace with spend but no failures is not an
   // empty dashboard.
+  // The Model/Runtime rollups only gate the leaderboard, never the KPI tiles
+  // above it, so a scope still fetching must not swap the whole Usage tab for
+  // a skeleton — it renders the agent rows and fills the new scope in.
   const usageLoading =
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
     runTimeQuery.isLoading ||
-    runTimeDailyQuery.isLoading ||
-    byModelQuery.isLoading ||
-    runtimeDurationQuery.isLoading ||
-    modelRunTimeQuery.isLoading ||
-    usageByRuntimeQuery.isLoading;
+    runTimeDailyQuery.isLoading;
   const errorsLoading =
     failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
 
@@ -501,6 +515,7 @@ export function DashboardPage() {
 
   const allowedDims = dimsForDays(days);
   const lessThanMinuteLabel = t(($) => $.duration.less_than_minute);
+  const noRuntimeLabel = t(($) => $.leaderboard.no_runtime);
 
   return (
     <Tabs
@@ -662,6 +677,9 @@ export function DashboardPage() {
                   usageByRuntime={usageByRuntime}
                   runtimes={runtimes}
                   lessThanMinuteLabel={lessThanMinuteLabel}
+                  noRuntimeLabel={noRuntimeLabel}
+                  scope={leaderboardScope}
+                  onScopeChange={setLeaderboardScope}
                 />
               </>
             )}

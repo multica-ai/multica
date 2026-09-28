@@ -89,6 +89,7 @@
     "sort_label": "エージェントの並び順",
     "deleted_agents": "削除済みエージェント",
     "other_agents": "その他のエージェント",
+    "no_runtime": "ランタイムなし",
     "caption_models": "{{count}} 件のモデル",
     "caption_runtimes": "{{count}} 件のランタイム",
     "scope_label": "表示切替",

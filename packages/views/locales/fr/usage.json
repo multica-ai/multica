@@ -89,6 +89,7 @@
     "sort_label": "Classer les agents par",
     "deleted_agents": "Agents supprimés",
     "other_agents": "Autres agents",
+    "no_runtime": "Aucun runtime",
     "caption_models": "{{count}} modèles",
     "caption_runtimes": "{{count}} runtimes",
     "scope_label": "Afficher par",

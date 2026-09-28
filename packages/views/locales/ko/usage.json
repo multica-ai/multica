@@ -89,6 +89,7 @@
     "sort_label": "에이전트 순위 기준",
     "deleted_agents": "삭제된 에이전트",
     "other_agents": "기타 에이전트",
+    "no_runtime": "런타임 없음",
     "caption_models": "모델 {{count}}개",
     "caption_runtimes": "런타임 {{count}}개",
     "scope_label": "보기 기준",

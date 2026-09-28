@@ -65,9 +65,14 @@ func TestGetDashboardModelRunTime(t *testing.T) {
 	// mkTask creates a completed task with the given duration and a task_usage
 	// row for the given model. The query joins on task_id, so the usage row
 	// must exist for the run-time aggregation to pick it up.
+	//
+	// Completion is anchored a minute back rather than `now - (duration+5)
+	// minutes`: these rollups take an EXACT N-day cutoff, so a fixture that
+	// lands on the previous calendar day falls out of a days=1 window and the
+	// assertions quietly start measuring the wrong thing.
 	mkTask := func(issueID, model string, durationSeconds int) {
-		started := now.Add(-time.Duration(durationSeconds+5) * time.Minute)
-		completed := started.Add(time.Duration(durationSeconds) * time.Second)
+		completed := now.Add(-1 * time.Minute)
+		started := completed.Add(-time.Duration(durationSeconds) * time.Second)
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
@@ -208,13 +213,21 @@ func TestGetDashboardModelRunTime(t *testing.T) {
 			t.Fatalf("decode: %v", err)
 		}
 		var total int64
+		var count int32
 		for _, r := range rows {
 			if r.Model == dedupModel {
 				total += r.TotalSeconds
+				count += r.TaskCount
 			}
 		}
 		if total != durationSeconds {
 			t.Errorf("dedup: expected total_seconds=%d for %q, got %d (multi-provider rows not deduplicated)", durationSeconds, dedupModel, total)
+		}
+		// The same collapse has to hold for the count. total_seconds alone can
+		// look right while COUNT(DISTINCT) still regresses, and the Tasks
+		// column is what reads this field.
+		if count != 1 {
+			t.Errorf("dedup: expected task_count=1 for %q, got %d (one task, two provider rows)", dedupModel, count)
 		}
 	})
 }
@@ -271,9 +284,14 @@ func TestGetDashboardUsageByRuntime(t *testing.T) {
 	otherIssueID := mkIssue(false)
 
 	now := time.Now().UTC()
+	// This endpoint reads `task_usage_hourly` (migration 101 keys it on
+	// runtime_id), the same rollup the Agent and Model scopes use, so the
+	// fixture seeds the rollup directly — same shortcut as
+	// TestDashboardPerAgentRollupsUseExactWindow. The terminal task still has
+	// to exist because it carries the project_id the scoping assertion needs.
 	mkTask := func(issueID, model string, inputTokens int64) {
-		started := now.Add(-10 * time.Minute)
-		completed := now.Add(-5 * time.Minute)
+		completed := now.Add(-1 * time.Minute)
+		started := completed.Add(-5 * time.Minute)
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
@@ -282,13 +300,34 @@ func TestGetDashboardUsageByRuntime(t *testing.T) {
 		`, agentID, issueID, runtimeID, started, completed).Scan(&taskID); err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
-		if _, err := testPool.Exec(ctx, `
-			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
-			VALUES ($1, 'claude', $2, $3, 0, now())
-		`, taskID, model, inputTokens); err != nil {
-			t.Fatalf("insert task_usage: %v", err)
-		}
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+		var projectID any
+		if err := testPool.QueryRow(ctx, `SELECT project_id FROM issue WHERE id = $1`, issueID).Scan(&projectID); err != nil {
+			t.Fatalf("read issue project: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage_hourly (
+				bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+				provider, model,
+				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+				event_count, task_count
+			)
+			VALUES (
+				date_trunc('hour', $1::timestamptz), $2, $3, $4, $5,
+				'claude', $6,
+				$7, 0, 0, 0,
+				1, 1
+			)
+			ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
+			SET input_tokens = task_usage_hourly.input_tokens + EXCLUDED.input_tokens,
+			    event_count = task_usage_hourly.event_count + EXCLUDED.event_count
+		`, completed, testWorkspaceID, runtimeID, agentID, projectID, model, inputTokens); err != nil {
+			t.Fatalf("insert task_usage_hourly: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE provider = 'claude' AND model = $1`, model)
+		})
 	}
 
 	// project task: 3000 input tokens on model "ru-gpt4"

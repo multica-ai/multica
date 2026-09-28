@@ -1791,16 +1791,22 @@ const DashboardUsageByModelSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
   task_count: z.number().default(0),
 }).loose();
 
 export const DashboardUsageByModelListSchema = z.array(DashboardUsageByModelSchema);
 
+// `metered_task_count` and `cancelled_count` follow DashboardAgentRunTime:
+// optional-with-catch so an older backend still renders, and so a payload that
+// cannot be parsed degrades to "coverage unknown" rather than to a wrong zero.
 const DashboardRuntimeDurationSchema = z.object({
   runtime_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
+  metered_task_count: z.number().optional().catch(undefined),
   failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
 }).loose();
 
 export const DashboardRuntimeDurationListSchema = z.array(DashboardRuntimeDurationSchema);
@@ -1810,6 +1816,7 @@ const DashboardModelRunTimeSchema = z.object({
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
+  cancelled_count: z.number().default(0),
 }).loose();
 
 export const DashboardModelRunTimeListSchema = z.array(DashboardModelRunTimeSchema);
@@ -1821,6 +1828,7 @@ const DashboardUsageByRuntimeSchema = z.object({
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
+  ...CostSplitShape,
 }).loose();
 
 export const DashboardUsageByRuntimeListSchema = z.array(DashboardUsageByRuntimeSchema);

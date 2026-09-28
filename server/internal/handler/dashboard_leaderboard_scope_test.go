@@ -210,9 +210,15 @@ func TestGetDashboardRuntimeDuration(t *testing.T) {
 	otherIssueID := mkIssue(false)
 
 	now := time.Now().UTC()
+	// Anchor completion a minute ago rather than `now - (duration+5) minutes`:
+	// the run-time rollups take an EXACT N-day cutoff, so a fixture that lands
+	// on the previous calendar day drops out of a days=1 window and the test
+	// silently starts asserting against whatever is left. The window boundary
+	// itself is covered by TestDashboardLeaderboardScopesUseExactWindow, which
+	// seeds yesterday on purpose.
 	mkTask := func(issueID string, durationSeconds int) {
-		started := now.Add(-time.Duration(durationSeconds+5) * time.Minute)
-		completed := started.Add(time.Duration(durationSeconds) * time.Second)
+		completed := now.Add(-1 * time.Minute)
+		started := completed.Add(-time.Duration(durationSeconds) * time.Second)
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)

@@ -967,6 +967,7 @@ describe("aggregateModelRows", () => {
           total_seconds: 120,
           task_count: 2,
           failed_count: 1,
+          cancelled_count: 0,
         },
       ],
     );
@@ -978,7 +979,15 @@ describe("aggregateModelRows", () => {
   it("includes runtime-only models (zero tokens) in the result", () => {
     const rows = aggregateModelRows(
       [],
-      [{ model: "model-x", total_seconds: 60, task_count: 1, failed_count: 0 }],
+      [
+        {
+          model: "model-x",
+          total_seconds: 60,
+          task_count: 1,
+          failed_count: 0,
+          cancelled_count: 0,
+        },
+      ],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0]?.tokens).toBe(0);
@@ -1010,8 +1019,20 @@ describe("aggregateRuntimeRows", () => {
   it("reshapes per-runtime rows and sorts by seconds desc", () => {
     const rows = aggregateRuntimeRows(
       [
-        { runtime_id: "runtime-slow", total_seconds: 100, task_count: 2, failed_count: 0 },
-        { runtime_id: "runtime-fast", total_seconds: 5000, task_count: 20, failed_count: 1 },
+        {
+          runtime_id: "runtime-slow",
+          total_seconds: 100,
+          task_count: 2,
+          failed_count: 0,
+          cancelled_count: 0,
+        },
+        {
+          runtime_id: "runtime-fast",
+          total_seconds: 5000,
+          task_count: 20,
+          failed_count: 1,
+          cancelled_count: 0,
+        },
       ],
       [],
     );
@@ -1025,7 +1046,15 @@ describe("aggregateRuntimeRows", () => {
 
   it("merges usage data into runtime rows", () => {
     const rows = aggregateRuntimeRows(
-      [{ runtime_id: "rt-1", total_seconds: 300, task_count: 5, failed_count: 0 }],
+      [
+        {
+          runtime_id: "rt-1",
+          total_seconds: 300,
+          task_count: 5,
+          failed_count: 0,
+          cancelled_count: 0,
+        },
+      ],
       [
         {
           runtime_id: "rt-1",
