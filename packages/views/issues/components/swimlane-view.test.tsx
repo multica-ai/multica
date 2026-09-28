@@ -10,6 +10,7 @@ import type {
 } from "@multica/core/types";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { BUILT_IN_STATUS_ORDER } from "@multica/core/issues/config";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -605,7 +606,10 @@ describe("SwimLaneView", () => {
     // No parent + Parent Issue 1 each have one + per visible status column.
     // The Other parents lane must add zero.
     const realLaneCount = 2;
-    const visibleStatusCount = 7; // Four lifecycle categories (closed included)
+    // Derived, not hard-coded: the component renders one column per entry in
+    // BUILT_IN_STATUS_ORDER, and the fork's M-11 archived status changed that
+    // count from 7 to 8. A literal here silently rots on the next added status.
+    const visibleStatusCount = BUILT_IN_STATUS_ORDER.length;
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
     ).toBe(realLaneCount * visibleStatusCount);

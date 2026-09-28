@@ -72,13 +72,30 @@ export function useStatusOptions(
             color: null,
           }));
         }
-        return entries.map((e) => ({
+        const fromCatalog = entries.map((e) => ({
           key: e.key as IssueStatus,
           category,
           label: labelOf(e.key),
           color: issueStatusColor(e),
           icon: e.icon,
         }));
+        // Built-ins that belong to this category but have no catalog row still
+        // have to be offered. The fork's M-11 `archived` is exactly that case:
+        // it is an accepted issue.status value with no issue_status row, so the
+        // catalog path above never yields it and the picker would silently omit
+        // a status the API accepts. Ordering follows BUILT_IN_STATUS_ORDER, so
+        // these land after the catalog entries of their own category and a
+        // custom status still never creates an extra board column.
+        const present = new Set(fromCatalog.map((o) => o.key));
+        const withoutCatalogRow = BUILT_IN_STATUS_ORDER.filter(
+          (key) => BUILT_IN_STATUS_CATEGORY[key] === category && !present.has(key),
+        ).map((key) => ({
+          key: key as IssueStatus,
+          category,
+          label: labelOf(key),
+          color: null,
+        }));
+        return [...fromCatalog, ...withoutCatalogRow];
       });
     },
     [includeArchivedKeys, labelOf, statuses],
