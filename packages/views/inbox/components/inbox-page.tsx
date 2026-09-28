@@ -31,7 +31,6 @@ import {
 import {
   useInboxSortStore,
   type InboxSortField,
-  type InboxSortDirection,
 } from "@multica/core/inbox/store";
 import {
   useMarkInboxRead,
@@ -75,6 +74,8 @@ import {
   BookCheck,
   ListChecks,
   AlarmClock,
+  ArrowUp,
+  ArrowDown,
   ArrowUpDown,
 } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
@@ -204,11 +205,28 @@ export function InboxPage() {
   const sortField = useInboxSortStore((s) => s.sortField);
   const sortDirection = useInboxSortStore((s) => s.sortDirection);
   const setSortField = useInboxSortStore((s) => s.setSortField);
-  const setSortDirection = useInboxSortStore((s) => s.setSortDirection);
+  const toggleSort = useInboxSortStore((s) => s.toggleSort);
+  // The paginated endpoint guarantees the projection, including on empty pages.
+  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
+  const prioritySortingSupported = priorityFilterSupport === "supported";
+  // A legacy backend omits issue_priority from every row, which would score them
+  // all equal and leave the list date-ordered while the menu claimed Priority.
+  // Reuse the filter's capability probe rather than a second signal: keep the
+  // stored preference but apply date until the projection is proven, the way
+  // inboxFiltersForPrioritySupport holds a stale priority filter dormant.
+  const effectiveSortField: InboxSortField =
+    sortField === "priority" && !prioritySortingSupported ? "date" : sortField;
 
+  // Main-view only, guarded here rather than at the control: the archived list
+  // is cursor-paginated, so ordering it client-side would rank the pages loaded
+  // so far and read as a sorted list while leaving the rest out of order. The
+  // invariant then holds whatever the render path does.
   const items = useMemo(
-    () => sortInboxItems(deduplicateInboxItems(rawItems), sortField, sortDirection),
-    [rawItems, sortField, sortDirection],
+    () =>
+      isArchivedView
+        ? []
+        : sortInboxItems(deduplicateInboxItems(rawItems), effectiveSortField, sortDirection),
+    [isArchivedView, rawItems, effectiveSortField, sortDirection],
   );
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
@@ -226,9 +244,6 @@ export function InboxPage() {
   const archivedError = archiveQuery.isError && !archiveQuery.data;
   const snoozed = useSnoozedInboxRows(wsId, isSnoozedView || isCompact);
   const viewItems = isArchivedView ? archivedItems : items;
-  // The paginated endpoint guarantees the priority projection, including on
-  // empty pages.
-  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
   const issueFieldsSupport = isArchivedView ? archiveIssueFields : inboxIssueFieldsSupport(rawItems);
   const activeFilters = useMemo(
     () => effectiveInboxFilters(filters, { priority: priorityFilterSupport, issueFields: issueFieldsSupport }),
@@ -263,8 +278,7 @@ export function InboxPage() {
   const filteredItems = useMemo(
     () => filterInboxItems(filterRows, effectiveFilters, filterContext),
     [filterRows, effectiveFilters, filterContext],
-  );
-  const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
+  );  const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
   const selectedOnPage = viewItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
   // A deep link can point beyond every loaded page. Resolve its group directly
   // without adding it to the cursor chain or mistaking a page miss for a 404.
@@ -937,6 +951,7 @@ export function InboxPage() {
                 label={t(($) => $.sort.sort_by)}
                 tooltipSide="bottom"
                 className="text-muted-foreground"
+                data-testid="inbox-sort-trigger"
               />
             }
           >
@@ -946,68 +961,81 @@ export function InboxPage() {
             <DropdownMenuGroup>
               <DropdownMenuLabel>{t(($) => $.sort.sort_by)}</DropdownMenuLabel>
               <DropdownMenuRadioGroup
-                value={sortField}
+                value={effectiveSortField}
                 onValueChange={(value) => setSortField(value as InboxSortField)}
               >
                 <DropdownMenuRadioItem value="date">
                   {t(($) => $.sort.date)}
                 </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="priority">
-                  {t(($) => $.sort.priority)}
-                </DropdownMenuRadioItem>
+                {/* Absent on a backend that predates the projection: offering
+                    it would check a sort that cannot order anything. */}
+                {prioritySortingSupported ? (
+                  <DropdownMenuRadioItem value="priority">
+                    {t(($) => $.sort.priority)}
+                  </DropdownMenuRadioItem>
+                ) : null}
                 <DropdownMenuRadioItem value="unread">
                   {t(($) => $.sort.unread)}
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
             </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuRadioGroup
-              value={sortDirection}
-              onValueChange={(value) =>
-                setSortDirection(value as InboxSortDirection)
-              }
-            >
-              <DropdownMenuRadioItem value="desc">
-                {t(($) => $.sort.desc)}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="asc">
-                {t(($) => $.sort.asc)}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <IconButton
-              label={tCommon(($) => $.more_actions)}
-              tooltipSide="bottom"
-              className="text-muted-foreground"
-            />
+        {/* One direction button instead of a second radio group: the toolbar
+            pattern in skill-list-toolbar.tsx. Its title names the direction it
+            switches to, so the control is labelled without a second group
+            label, and it is the live caller for the store's toggleSort. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          data-testid="inbox-sort-direction"
+          onClick={() => toggleSort(sortField)}
+          title={
+            sortDirection === "asc"
+              ? t(($) => $.sort.desc)
+              : t(($) => $.sort.asc)
           }
         >
-          <MoreHorizontal className="h-4 w-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto">
-          <DropdownMenuItem onClick={handleMarkAllRead}>
-            <CheckCheck className="h-4 w-4" />
-            {t(($) => $.menu.mark_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
-            <Archive className="h-4 w-4" />
-            {t(($) => $.menu.archive_all)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveAllRead}>
-            <BookCheck className="h-4 w-4" />
-            {t(($) => $.menu.archive_all_read)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleArchiveCompleted}>
-            <ListChecks className="h-4 w-4" />
-            {t(($) => $.menu.archive_completed)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>      </div>
+          {sortDirection === "asc" ? (
+            <ArrowUp className="h-4 w-4" />
+          ) : (
+            <ArrowDown className="h-4 w-4" />
+          )}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <IconButton
+                label={tCommon(($) => $.more_actions)}
+                tooltipSide="bottom"
+                className="text-muted-foreground"
+              />
+            }
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem onClick={handleMarkAllRead}>
+              <CheckCheck className="h-4 w-4" />
+              {t(($) => $.menu.mark_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setArchiveAllConfirmOpen(true)}>
+              <Archive className="h-4 w-4" />
+              {t(($) => $.menu.archive_all)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveAllRead}>
+              <BookCheck className="h-4 w-4" />
+              {t(($) => $.menu.archive_all_read)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleArchiveCompleted}>
+              <ListChecks className="h-4 w-4" />
+              {t(($) => $.menu.archive_completed)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       )}
     </PanelHeader>
   );

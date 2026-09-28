@@ -33,7 +33,6 @@ export interface InboxSortState {
    *  and reset to that field's default direction. */
   toggleSort: (field: InboxSortField) => void;
   setSortField: (field: InboxSortField) => void;
-  setSortDirection: (direction: InboxSortDirection) => void;
 }
 
 const DEFAULTS = {
@@ -63,7 +62,6 @@ export const useInboxSortStore = create<InboxSortState>()(
                 sortDirection: INBOX_SORT_DEFAULT_DIRECTION[field],
               },
         ),
-      setSortDirection: (direction) => set({ sortDirection: direction }),
     }),
     {
       name: "multica_inbox_sort",

@@ -50,9 +50,9 @@ describe("useInboxSortStore", () => {
     expect(useInboxSortStore.getState().sortDirection).toBe("desc");
   });
 
-  it("setSortDirection updates direction without changing the field", () => {
+  it("toggleSort keeps the field and only flips direction", () => {
     useInboxSortStore.getState().setSortField("priority");
-    useInboxSortStore.getState().setSortDirection("asc");
+    useInboxSortStore.getState().toggleSort("priority");
     expect(useInboxSortStore.getState().sortField).toBe("priority");
     expect(useInboxSortStore.getState().sortDirection).toBe("asc");
   });
@@ -80,7 +80,7 @@ describe("useInboxSortStore", () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();
     useInboxSortStore.getState().setSortField("priority");
-    useInboxSortStore.getState().setSortDirection("asc");
+    useInboxSortStore.getState().toggleSort("priority");
 
     const raw = localStorage.getItem("multica_inbox_sort:acme");
     const parsed = JSON.parse(raw as string);
