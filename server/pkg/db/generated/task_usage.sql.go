@@ -490,11 +490,35 @@ type ListDashboardModelRunTimeRow struct {
 //
 // The workspace / window / project predicates are evaluated INSIDE the
 // dedup subquery, not only in the outer join. Filtering only outside made
-// `SELECT DISTINCT task_id, model FROM task_usage` sort every usage row on
-// the platform before discarding them, so every dashboard load paid a full
-// scan-and-sort of task_usage. Scoping the subquery lets the planner drive
-// from the windowed terminal-task set and reach task_usage through its
-// task_id index instead.
+// the DISTINCT run over every usage row on the platform before discarding
+// them, sorting on a wide key (`Sort Key: (model, atq.id)`) and spilling to
+// a temp file at larger table sizes. Scoping the subquery means the DISTINCT
+// runs over the windowed terminal-task set instead: the wide sort and its
+// spill are gone and the query measures 3-5x faster.
+//
+// What that does NOT buy is an index-driven read of task_usage. Past roughly
+// 1k rows the planner stops preferring the task_id index and hash-joins the
+// whole table against the small scoped set instead, so the read stays
+// O(platform total) however small the window is. Measured during review on
+// an inflated table (scoped set pinned at 600 rows, ANALYZE at each size,
+// EXPLAIN (ANALYZE, BUFFERS)):
+//
+//	rows      before                 after
+//	1,000     seq  15.8ms             index  0.9ms
+//	201,000   seq  93ms    spill      seq  33ms   no spill
+//	701,000   seq  518ms   spill      seq  96ms   spill 2r/2w
+//
+// Read the middle row as the real one: the index path is a small-table win,
+// not a scaling property. The residual scan is acceptable because this
+// query is opt-in — the client requests the Model scope only while it is
+// selected, so it is not on the default dashboard load — and a mounted tab
+// re-polls it on REFETCH_INTERVAL, not per render.
+//
+// Removing the scan needs a pre-aggregated per-(model, bucket) duration
+// rollup, which does not exist: task_usage_hourly carries tokens and cost
+// but no duration, and duration only exists on the terminal
+// agent_task_queue row. That is a real project, not a rewrite of this query,
+// so do not read the scoped subquery as a step towards it.
 //
 // @since is the viewer's local start-of-day-(N), EXACT N days: this
 // response carries no date, so the client cannot trim the surplus calendar
