@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearWorkspaceProviderQuotaPoolProbeAgents = `-- name: ClearWorkspaceProviderQuotaPoolProbeAgents :exec
+UPDATE provider_quota_pool
+SET probe_agent_id = NULL, revision = revision + 1, updated_at = now()
+WHERE probe_agent_id IN (SELECT id FROM agent WHERE workspace_id = $1)
+`
+
+func (q *Queries) ClearWorkspaceProviderQuotaPoolProbeAgents(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearWorkspaceProviderQuotaPoolProbeAgents, workspaceID)
+	return err
+}
+
 const deleteTaskBatch = `-- name: DeleteTaskBatch :exec
 WITH
 batch AS MATERIALIZED (
@@ -1128,6 +1139,32 @@ SELECT pg_advisory_xact_lock(4246)
 func (q *Queries) LockTaskUsageRollupForWorkspaceDelete(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, lockTaskUsageRollupForWorkspaceDelete)
 	return err
+}
+
+const lockWorkspaceProviderQuotaPoolAgents = `-- name: LockWorkspaceProviderQuotaPoolAgents :many
+SELECT id FROM agent WHERE workspace_id = $1 ORDER BY id FOR UPDATE
+`
+
+// Probe selection and membership edits lock the agent before the pool. Lock
+// these agents in the same order before clearing probe selection on delete.
+func (q *Queries) LockWorkspaceProviderQuotaPoolAgents(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockWorkspaceProviderQuotaPoolAgents, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const lockWorkspaceTaskOwnerAgents = `-- name: LockWorkspaceTaskOwnerAgents :exec

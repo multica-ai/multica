@@ -769,7 +769,8 @@ WHERE id = (
       AND NOT EXISTS (
           SELECT 1 FROM provider_quota_pool_agent membership
           JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-          WHERE membership.agent_id = atq.agent_id AND pool.state NOT IN ('open', 'probe_due')
+          WHERE membership.agent_id = atq.agent_id
+            AND (pool.state <> 'open' AND (pool.state <> 'probe_due' OR pool.probe_agent_id IS DISTINCT FROM atq.agent_id))
       )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
       AND EXISTS (
@@ -2322,7 +2323,8 @@ WHERE atq.runtime_id = $1
   AND NOT EXISTS (
       SELECT 1 FROM provider_quota_pool_agent membership
       JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-      WHERE membership.agent_id = atq.agent_id AND pool.state NOT IN ('open', 'probe_due')
+      WHERE membership.agent_id = atq.agent_id
+        AND (pool.state <> 'open' AND (pool.state <> 'probe_due' OR pool.probe_agent_id IS DISTINCT FROM atq.agent_id))
   )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
   AND EXISTS (
@@ -2448,7 +2450,8 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
   AND NOT EXISTS (
       SELECT 1 FROM provider_quota_pool_agent membership
       JOIN provider_quota_pool pool ON pool.id = membership.pool_id
-      WHERE membership.agent_id = atq.agent_id AND pool.state NOT IN ('open', 'probe_due')
+      WHERE membership.agent_id = atq.agent_id
+        AND (pool.state <> 'open' AND (pool.state <> 'probe_due' OR pool.probe_agent_id IS DISTINCT FROM atq.agent_id))
   )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
   AND EXISTS (

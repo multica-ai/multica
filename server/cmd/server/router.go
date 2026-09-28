@@ -1932,6 +1932,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/release", h.ReleaseProviderQuotaPool)
 				r.Put("/agents/{agentId}", h.AssignAgentToProviderQuotaPool)
 				r.Delete("/agents/{agentId}", h.RemoveAgentFromProviderQuotaPool)
+				r.Put("/probe-agent/{agentId}", h.SetProviderQuotaPoolProbeAgent)
+				r.Delete("/probe-agent", h.ClearProviderQuotaPoolProbeAgent)
 			})
 		})
 

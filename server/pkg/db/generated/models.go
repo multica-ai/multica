@@ -1344,6 +1344,7 @@ type ProviderQuotaPool struct {
 	Revision       int64              `json:"revision"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ProbeAgentID   pgtype.UUID        `json:"probe_agent_id"`
 }
 
 type ProviderQuotaPoolAgent struct {

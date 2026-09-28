@@ -30,7 +30,7 @@ func reserveQuotaProbeForClaim(ctx context.Context, qtx *db.Queries, task db.Age
 	if pool.State == "open" {
 		return nil
 	}
-	if pool.State != "probe_due" || pool.ProbeAttempts >= 3 {
+	if pool.State != "probe_due" || pool.ProbeAttempts >= 3 || !pool.ProbeAgentID.Valid || pool.ProbeAgentID != task.AgentID {
 		return errQuotaPoolHeld
 	}
 	_, err = qtx.SetProviderQuotaPoolState(ctx, db.SetProviderQuotaPoolStateParams{

@@ -40,6 +40,14 @@ ON CONFLICT (agent_id) DO UPDATE SET pool_id = EXCLUDED.pool_id;
 -- name: RemoveAgentProviderQuotaPool :exec
 DELETE FROM provider_quota_pool_agent WHERE agent_id = $1;
 
+-- name: SetProviderQuotaPoolProbeAgent :one
+UPDATE provider_quota_pool
+SET probe_agent_id = sqlc.narg(probe_agent_id),
+    revision = revision + 1,
+    updated_at = now()
+WHERE id = @id AND revision = @expected_revision
+RETURNING *;
+
 -- name: ListProviderQuotaPoolAgents :many
 SELECT agent_id FROM provider_quota_pool_agent WHERE pool_id = $1 ORDER BY agent_id;
 

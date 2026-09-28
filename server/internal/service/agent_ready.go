@@ -152,8 +152,12 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 		return AgentVerdict{}, err
 	}
 	if err == nil && pool.State == "probe_due" {
+		if !pool.ProbeAgentID.Valid || pool.ProbeAgentID != agent.ID {
+			return AgentVerdict{Availability: AgentBlocked, Reason: dispatch.ReasonProviderQuotaHeld,
+				Detail: "provider account reset is due; the designated probe agent will verify access"}, nil
+		}
 		return AgentVerdict{Availability: AgentWaitable, Reason: dispatch.ReasonProviderQuotaHeld,
-			Detail: "provider account reset is due; the next run will verify access"}, nil
+			Detail: "provider account reset is due; this agent's next run will verify access"}, nil
 	}
 	if err == nil && pool.State != "open" {
 		detail := "provider account quota is held"

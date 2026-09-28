@@ -74,6 +74,10 @@ func TestProviderQuotaPoolFailureProbeAndRelease(t *testing.T) {
 	if got := state().State; got != "probe_due" {
 		t.Fatalf("due pool state = %q, want probe_due", got)
 	}
+	if claim, err := svc.ClaimTask(ctx, util.MustParseUUID(agentID)); err != nil || claim != nil {
+		t.Fatalf("due pool without a selected probe admitted a claim: %+v, %v", claim, err)
+	}
+	fx.Exec(t, `UPDATE provider_quota_pool SET probe_agent_id = $2, revision = revision + 1 WHERE id = $1`, poolID, agentID)
 	claim, err := svc.ClaimTask(ctx, util.MustParseUUID(agentID))
 	if err != nil || claim == nil || claim.ID != util.MustParseUUID(probeTaskID) {
 		t.Fatalf("reserved probe claim = %+v, %v", claim, err)
@@ -110,6 +114,19 @@ func TestProviderQuotaPoolFailureProbeAndRelease(t *testing.T) {
 		})
 	}
 	fx.Exec(t, `UPDATE provider_quota_pool SET state = 'probe_due', revision = revision + 1 WHERE id = $1`, poolID)
+	for _, row := range []struct {
+		id      string
+		blocked bool
+	}{{agentID, false}, {peerAgentID, true}} {
+		agent, err := q.GetAgent(ctx, util.MustParseUUID(row.id))
+		if err != nil {
+			t.Fatalf("load probe candidate: %v", err)
+		}
+		verdict, err := AgentReadiness(ctx, RuntimeLookup{Queries: q}, agent)
+		if err != nil || verdict.Blocked() != row.blocked {
+			t.Fatalf("probe candidate %s readiness = %+v, %v; blocked=%v", row.id, verdict, err, row.blocked)
+		}
+	}
 	type claimResult struct {
 		task *db.AgentTaskQueue
 		err  error
@@ -138,8 +155,8 @@ func TestProviderQuotaPoolFailureProbeAndRelease(t *testing.T) {
 			winner = result.task
 		}
 	}
-	if winner == nil || state().ProbeTaskID != winner.ID {
-		t.Fatalf("one probe was not reserved: winner=%+v pool=%+v", winner, state())
+	if winner == nil || winner.AgentID != util.MustParseUUID(agentID) || state().ProbeTaskID != winner.ID {
+		t.Fatalf("designated agent did not win the only probe: winner=%+v pool=%+v", winner, state())
 	}
 	fx.Exec(t, `UPDATE agent_task_queue SET status = 'cancelled' WHERE id = $1`, winner.ID)
 	if err := svc.ReconcileDueProviderQuotaPools(ctx, 10); err != nil {

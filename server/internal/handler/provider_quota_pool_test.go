@@ -58,6 +58,22 @@ func TestProviderQuotaPoolManagementScopesOwnerAndAuditsTransitions(t *testing.T
 		t.Fatalf("agent mapped to pool %s, want %s", mappedPoolID, created.ID)
 	}
 	w = httptest.NewRecorder()
+	testHandler.SetProviderQuotaPoolProbeAgent(w, withURLParams(newRequestAs(memberID, http.MethodPut, poolPath+"/probe-agent/"+agentID, nil),
+		"poolId", created.ID, "agentId", agentID))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unrelated member selected another user's probe: %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	testHandler.SetProviderQuotaPoolProbeAgent(w, withURLParams(newRequestAs(testUserID, http.MethodPut, poolPath+"/probe-agent/"+agentID, nil),
+		"poolId", created.ID, "agentId", agentID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("select probe agent: %d %s", w.Code, w.Body.String())
+	}
+	selected, err := testHandler.Queries.GetProviderQuotaPool(context.Background(), util.MustParseUUID(created.ID))
+	if err != nil || selected.ProbeAgentID != util.MustParseUUID(agentID) {
+		t.Fatalf("selected probe agent = %+v, %v", selected.ProbeAgentID, err)
+	}
+	w = httptest.NewRecorder()
 	testHandler.HoldProviderQuotaPool(w, withURLParam(newRequestAs(memberID, http.MethodPost, poolPath+"/hold", map[string]any{
 		"reason": "unauthorized hold attempt",
 	}), "poolId", created.ID))
@@ -86,8 +102,34 @@ func TestProviderQuotaPoolManagementScopesOwnerAndAuditsTransitions(t *testing.T
 	if err != nil || pool.State != "open" {
 		t.Fatalf("released pool = %+v, %v", pool, err)
 	}
+	w = httptest.NewRecorder()
+	testHandler.ClearProviderQuotaPoolProbeAgent(w, withURLParam(newRequestAs(testUserID, http.MethodDelete, poolPath+"/probe-agent", nil),
+		"poolId", created.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear probe agent: %d %s", w.Code, w.Body.String())
+	}
+	pool, err = testHandler.Queries.GetProviderQuotaPool(context.Background(), util.MustParseUUID(created.ID))
+	if err != nil || pool.ProbeAgentID.Valid {
+		t.Fatalf("cleared probe agent = %+v, %v", pool.ProbeAgentID, err)
+	}
+	w = httptest.NewRecorder()
+	testHandler.SetProviderQuotaPoolProbeAgent(w, withURLParams(newRequestAs(testUserID, http.MethodPut, poolPath+"/probe-agent/"+agentID, nil),
+		"poolId", created.ID, "agentId", agentID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("reselect probe agent: %d %s", w.Code, w.Body.String())
+	}
 	var events int
-	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM provider_quota_pool_event WHERE pool_id = $1`, created.ID).Scan(&events); err != nil || events != 3 {
-		t.Fatalf("pool events = %d, %v; want assignment, hold, release", events, err)
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM provider_quota_pool_event WHERE pool_id = $1`, created.ID).Scan(&events); err != nil || events != 6 {
+		t.Fatalf("pool events = %d, %v; want assignment, probe selection, hold, release, clear, reselect", events, err)
+	}
+	w = httptest.NewRecorder()
+	testHandler.RemoveAgentFromProviderQuotaPool(w, withURLParams(newRequestAs(testUserID, http.MethodDelete, poolPath+"/agents/"+agentID, nil),
+		"poolId", created.ID, "agentId", agentID))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("remove probe agent: %d %s", w.Code, w.Body.String())
+	}
+	pool, err = testHandler.Queries.GetProviderQuotaPool(context.Background(), util.MustParseUUID(created.ID))
+	if err != nil || pool.ProbeAgentID.Valid {
+		t.Fatalf("removed agent remained selected as probe: %+v, %v", pool.ProbeAgentID, err)
 	}
 }

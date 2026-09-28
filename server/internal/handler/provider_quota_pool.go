@@ -226,6 +226,26 @@ func (h *Handler) RemoveAgentFromProviderQuotaPool(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusForbidden, "insufficient permissions for a mapped agent")
 		return
 	}
+	if lockedPool.ProbeAgentID == agentID && lockedPool.State == "probing" {
+		writeError(w, http.StatusConflict, "cancel the active probe before removing its agent")
+		return
+	}
+	if lockedPool.ProbeAgentID == agentID {
+		if _, err := qtx.SetProviderQuotaPoolProbeAgent(r.Context(), db.SetProviderQuotaPoolProbeAgentParams{
+			ID: pool.ID, ExpectedRevision: lockedPool.Revision,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clear provider quota probe agent")
+			return
+		}
+		if err := qtx.CreateProviderQuotaPoolEvent(r.Context(), db.CreateProviderQuotaPoolEventParams{
+			ID: dbid.NewV7(), PoolID: pool.ID, ActorID: util.MustParseUUID(userID),
+			EventType: "probe_agent_changed", Reason: "probe agent removed: " + uuidToString(agentID),
+			OldState: lockedPool.State, NewState: lockedPool.State,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to audit provider quota probe agent removal")
+			return
+		}
+	}
 	if err := qtx.RemoveAgentProviderQuotaPool(r.Context(), agentID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove provider quota pool membership")
 		return
@@ -242,6 +262,94 @@ func (h *Handler) RemoveAgentFromProviderQuotaPool(w http.ResponseWriter, r *htt
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) SetProviderQuotaPoolProbeAgent(w http.ResponseWriter, r *http.Request) {
+	h.changeProviderQuotaPoolProbeAgent(w, r, false)
+}
+
+func (h *Handler) ClearProviderQuotaPoolProbeAgent(w http.ResponseWriter, r *http.Request) {
+	h.changeProviderQuotaPoolProbeAgent(w, r, true)
+}
+
+func (h *Handler) changeProviderQuotaPoolProbeAgent(w http.ResponseWriter, r *http.Request, clear bool) {
+	pool, userID, ok := h.loadOwnedProviderQuotaPool(w, r)
+	if !ok {
+		return
+	}
+	var agentID pgtype.UUID
+	if !clear {
+		agentID, ok = parseUUIDOrBadRequest(w, chi.URLParam(r, "agentId"), "agent_id")
+		if !ok {
+			return
+		}
+	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start provider quota pool update")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if !clear {
+		// Keep the same agent-then-pool lock order as claim and membership edits.
+		agent, err := qtx.GetAgentForUpdate(r.Context(), agentID)
+		if err != nil || agent.Kind != "user" || !h.canManageProviderQuotaPoolAgent(r.Context(), userID, agent) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+			writeError(w, http.StatusConflict, "probe agent must be active and bound to a runtime")
+			return
+		}
+	}
+	locked, err := qtx.GetProviderQuotaPoolForUpdate(r.Context(), pool.ID)
+	if err != nil || uuidToString(locked.OwnerID) != userID {
+		writeError(w, http.StatusNotFound, "provider quota pool not found")
+		return
+	}
+	if !h.canManageProviderQuotaPoolAgents(r.Context(), userID, pool.ID) {
+		writeError(w, http.StatusForbidden, "insufficient permissions for a mapped agent")
+		return
+	}
+	if locked.State == "probing" {
+		writeError(w, http.StatusConflict, "cancel the active probe before changing its agent")
+		return
+	}
+	if !clear {
+		mapped, err := qtx.GetProviderQuotaPoolForAgent(r.Context(), agentID)
+		if err != nil || mapped.ID != pool.ID {
+			writeError(w, http.StatusConflict, "probe agent must be mapped to this provider quota pool")
+			return
+		}
+	}
+	if locked.ProbeAgentID == agentID {
+		writeJSON(w, http.StatusOK, locked)
+		return
+	}
+	updated, err := qtx.SetProviderQuotaPoolProbeAgent(r.Context(), db.SetProviderQuotaPoolProbeAgentParams{
+		ID: pool.ID, ExpectedRevision: locked.Revision, ProbeAgentID: agentID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update provider quota probe agent")
+		return
+	}
+	reason := "probe agent cleared"
+	if !clear {
+		reason = "probe agent selected: " + uuidToString(agentID)
+	}
+	if err := qtx.CreateProviderQuotaPoolEvent(r.Context(), db.CreateProviderQuotaPoolEventParams{
+		ID: dbid.NewV7(), PoolID: pool.ID, ActorID: util.MustParseUUID(userID),
+		EventType: "probe_agent_changed", Reason: reason, OldState: locked.State, NewState: locked.State,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to audit provider quota probe agent change")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit provider quota probe agent change")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (h *Handler) HoldProviderQuotaPool(w http.ResponseWriter, r *http.Request) {
