@@ -428,13 +428,20 @@ func syncDaemonAutostartDefault(profile string, announce bool) {
 }
 
 // autostartSpecFor resolves the exact command a login entry should run.
+//
+// The executable goes through cli.StableSelfExecutable — the same resolver
+// behind the daemon's binary-update restart target — before it is recorded:
+// on brew installs os.Executable() reports the versioned keg path that
+// `brew upgrade` cleans up, and an entry holding it would restart a deleted
+// binary after the first upgrade (systemd fails ExecStart with 203/EXEC;
+// a LaunchAgent would point at a missing file at the next login).
 func autostartSpecFor(profile string) (autostartSpec, error) {
 	exe, err := daemonExecutable()
 	if err != nil {
 		return autostartSpec{}, fmt.Errorf("resolve executable path: %w", err)
 	}
 	return autostartSpec{
-		Exe:     exe,
+		Exe:     cli.StableSelfExecutable(exe),
 		Args:    autostartArgs(profile),
 		PathEnv: os.Getenv("PATH"),
 	}, nil

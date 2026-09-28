@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -731,5 +732,33 @@ func TestAutostartCommandsRejectUnsupportedPlatform(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "not supported") {
 			t.Errorf("autostart %s on an unsupported platform = %v, want a clear refusal", name, err)
 		}
+	}
+}
+
+// TestAutostartSpecForUsesStableBrewPath pins the review's Linuxbrew failure
+// mode end to end: os.Executable() reports the versioned keg path on brew
+// installs, `brew upgrade` cleans the old keg, and an autostart entry
+// recorded with that path would restart a deleted binary (systemd 203/EXEC)
+// or point at a missing file at the next login. The spec must carry the
+// stable <prefix>/bin/multica symlink instead — resolved through the same
+// shared helper as the daemon's restart target so the two cannot drift.
+func TestAutostartSpecForUsesStableBrewPath(t *testing.T) {
+	orig := daemonExecutable
+	daemonExecutable = func() (string, error) {
+		return "/opt/homebrew/Cellar/multica/0.4.33/bin/multica", nil
+	}
+	t.Cleanup(func() { daemonExecutable = orig })
+
+	spec, err := autostartSpecFor("")
+	if err != nil {
+		t.Fatalf("autostartSpecFor = %v", err)
+	}
+	want := filepath.Join("/opt/homebrew", "bin", "multica")
+	if spec.Exe != want {
+		t.Fatalf("autostartSpecFor exe = %q, want the stable brew symlink path %q — a recorded keg path is deleted by the next brew upgrade",
+			spec.Exe, want)
+	}
+	if got, want := strings.Join(spec.Args, " "), "daemon start --foreground"; got != want {
+		t.Errorf("autostartSpecFor args = %q, want %q", got, want)
 	}
 }
