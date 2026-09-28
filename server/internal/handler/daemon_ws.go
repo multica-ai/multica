@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,8 +32,7 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 
 // buildDaemonWebSocketIdentity authenticates the connection's entire runtime
 // set with one narrow query and seeds the connection-scoped heartbeat leases.
-// Runtime ownership is immutable, so the heartbeat hot path can safely use
-// this fixed scope without re-reading agent_runtime every 15 seconds.
+// Heartbeats compare the captured generation with the current runtime row.
 func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Request, runtimeIDs []string, userID string) (daemonws.ClientIdentity, bool) {
 	identity := daemonws.ClientIdentity{
 		DaemonID:      middleware.DaemonIDFromContext(r.Context()),
@@ -56,6 +56,13 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
 		return daemonws.ClientIdentity{}, false
 	}
+	var generations map[string]string
+	if raw := r.Header.Get("X-Runtime-Owner-Generations"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &generations); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime owner generations")
+			return daemonws.ClientIdentity{}, false
+		}
+	}
 	byID := make(map[string]int, len(rows))
 	for index, row := range rows {
 		byID[uuidToString(row.ID)] = index
@@ -70,6 +77,10 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 			return daemonws.ClientIdentity{}, false
 		}
 		rt := rows[index]
+		if strings.HasPrefix(rt.OwnerGeneration, "g") && generations[runtimeID] != rt.OwnerGeneration {
+			writeError(w, http.StatusConflict, "runtime ownership has changed")
+			return daemonws.ClientIdentity{}, false
+		}
 		if identity.DaemonID != "" && rt.DaemonID.Valid && rt.DaemonID.String != identity.DaemonID {
 			writeError(w, http.StatusNotFound, "runtime not found")
 			return daemonws.ClientIdentity{}, false
@@ -89,6 +100,8 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 			rt.Status,
 			rt.LastSeenAt.Time,
 			rt.LastSeenAt.Valid,
+			generations[runtimeID],
+			runtimeOwnerGateKey(workspaceID, rt.DaemonID.String, rt.Provider, uuidToString(rt.ProfileID)),
 		)
 	}
 

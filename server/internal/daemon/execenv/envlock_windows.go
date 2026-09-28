@@ -59,6 +59,31 @@ func lockFileExclusiveNonBlocking(f *os.File) (ok bool, err error) {
 	return false, err
 }
 
+// lockFileSharedNonBlocking takes a SHARED lock on f without waiting. ok is
+// false when any exclusive holder exists; other shared holders do not conflict
+// with it.
+//
+// LockFileEx treats a range as shared when LOCKFILE_EXCLUSIVE_LOCK is absent,
+// so the same one-byte range serves the shared/exclusive protocol described in
+// the unix build of this file. LOCKFILE_FAIL_IMMEDIATELY keeps it
+// non-blocking, which is what lets the caller poll with its own deadline
+// instead of pinning a daemon start on another process's GC.
+func lockFileSharedNonBlocking(f *os.File) (ok bool, err error) {
+	overlapped := new(windows.Overlapped)
+	err = windows.LockFileEx(
+		windows.Handle(f.Fd()),
+		windows.LOCKFILE_FAIL_IMMEDIATELY,
+		0, 1, 0, overlapped,
+	)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_IO_PENDING) {
+		return false, nil
+	}
+	return false, err
+}
+
 // unlockFile drops the lock.
 func unlockFile(f *os.File) error {
 	overlapped := new(windows.Overlapped)

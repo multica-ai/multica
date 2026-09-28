@@ -272,9 +272,14 @@ func (s *InMemoryModelListStore) HasPending(_ context.Context, runtimeID string)
 	return false, nil
 }
 
-func (s *InMemoryModelListStore) PopPending(_ context.Context, runtimeID string) (*ModelListRequest, error) {
+func (s *InMemoryModelListStore) PopPending(ctx context.Context, runtimeID string) (*ModelListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockPendingOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var oldest *ModelListRequest
 	now := time.Now()

@@ -49,6 +49,12 @@ type HealthResponse struct {
 	// surfaced here so `daemon status` can say who manages the daemon instead
 	// of leaving the user to guess why a daemon they never started is running.
 	LaunchedBy string `json:"launched_by,omitempty"`
+	// RuntimeCoordinationVersion advertises that this daemon participates in the
+	// runtime-owner claim (GH #8280). Additive and omitted when zero, so a daemon
+	// that does not send it is unambiguously a peer that cannot be coordinated
+	// with - see runtime_coordination.go for why a new daemon stands by rather
+	// than activating a runtime such a peer may already be serving.
+	RuntimeCoordinationVersion int `json:"runtime_coordination_version,omitempty"`
 	// ActiveTaskCount remains the compatibility/safety count of every claimed
 	// handleTask lifecycle. The additive counters split actual provider
 	// execution from local-directory parking for throughput and diagnostics.
@@ -336,21 +342,22 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		}
 
 		resp := HealthResponse{
-			Status:                status,
-			PID:                   os.Getpid(),
-			OS:                    runtime.GOOS,
-			Uptime:                time.Since(startedAt).Truncate(time.Second).String(),
-			Profile:               d.cfg.Profile,
-			LaunchedBy:            d.cfg.LaunchedBy,
-			DaemonID:              d.cfg.DaemonID,
-			DeviceName:            d.cfg.DeviceName,
-			ServerURL:             d.cfg.ServerBaseURL,
-			CLIVersion:            d.cfg.CLIVersion,
-			ActiveTaskCount:       d.activeTasks.Load(),
-			RunningTaskCount:      d.runningTasks.Load(),
-			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),
-			Agents:                agents,
-			SkippedAgents:         d.skippedAgentsSnapshot(),
+			Status:                     status,
+			PID:                        os.Getpid(),
+			OS:                         runtime.GOOS,
+			Uptime:                     time.Since(startedAt).Truncate(time.Second).String(),
+			Profile:                    d.cfg.Profile,
+			LaunchedBy:                 d.cfg.LaunchedBy,
+			RuntimeCoordinationVersion: RuntimeCoordinationVersion,
+			DaemonID:                   d.cfg.DaemonID,
+			DeviceName:                 d.cfg.DeviceName,
+			ServerURL:                  d.cfg.ServerBaseURL,
+			CLIVersion:                 d.cfg.CLIVersion,
+			ActiveTaskCount:            d.activeTasks.Load(),
+			RunningTaskCount:           d.runningTasks.Load(),
+			ResourceWaitTaskCount:      d.resourceWaitTasks.Load(),
+			Agents:                     agents,
+			SkippedAgents:              d.skippedAgentsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,

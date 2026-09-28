@@ -92,6 +92,12 @@ func isRuntimeNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "runtime not found")
 }
 
+func isStaleRuntimeOwnerError(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusConflict &&
+		strings.Contains(strings.ToLower(reqErr.Body), "runtime ownership has changed")
+}
+
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
 	baseURL string
@@ -706,8 +712,8 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 // RecoverOrphans tells the server to fail any dispatched/running tasks the
 // previous daemon process for this runtime left behind. The server will
 // auto-retry eligible tasks.
-func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{}, nil)
+func (c *Client) RecoverOrphans(ctx context.Context, runtimeID, ownerGeneration string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{"owner_generation": ownerGeneration}, nil)
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
@@ -734,10 +740,11 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID, ownerGeneration string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
+		"owner_generation":      ownerGeneration,
 		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
@@ -1064,12 +1071,14 @@ type RuntimeOfflineReason struct {
 // Deregister takes runtimes offline. reasons is optional and keyed by runtime
 // id: a daemon shutting down has nothing to explain, while one that condemned a
 // broken CLI does.
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
-	body := map[string]any{"runtime_ids": runtimeIDs}
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason, ownerGenerations map[string]string) error {
+	body := map[string]any{"runtime_ids": runtimeIDs, "owner_generations": ownerGenerations}
 	if len(reasons) > 0 {
 		body["offline_reasons"] = reasons
 	}
-	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
+	// A distinct route fails closed against a server that predates the fence:
+	// the legacy endpoint would ignore owner_generations and mutate the new owner.
+	return c.postJSON(ctx, "/api/daemon/deregister/fenced", body, nil)
 }
 
 // RegisterResponse holds the server's response to a daemon registration.

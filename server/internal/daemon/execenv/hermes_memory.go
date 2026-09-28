@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // Background
@@ -33,7 +31,7 @@ import (
 //
 // This file makes memory an agent-scoped store Multica owns:
 //
-//	<multica profile dir>/hermes-state/<agent>/<hermes profile>/memories
+//	<daemon work-state root>/hermes-state/<agent>/<hermes profile>/memories
 //
 // linked into the per-task overlay. Memory then survives across tasks and issues
 // for the same agent, never touches the user's home, and is invisible to other
@@ -61,8 +59,8 @@ import (
 // agent's concurrent tasks write the same files and Hermes rewrites them whole,
 // so concurrent memory updates are last-writer-wins.
 
-// hermesMemoryStoreRoot is the directory under the daemon's Multica profile dir
-// that holds every agent's persistent Hermes state. `hermes-state` (not
+// hermesMemoryStoreRoot is the directory under the daemon's work-state root that
+// holds every agent's persistent Hermes state. `hermes-state` (not
 // `hermes-memories`) because state.db joins it when the session half is solved.
 const hermesMemoryStoreRoot = "hermes-state"
 
@@ -70,26 +68,24 @@ const hermesMemoryStoreRoot = "hermes-state"
 // and the overlay home — Hermes resolves it relative to HERMES_HOME.
 const hermesMemoriesEntry = "memories"
 
-// HermesMemoryStorePath returns the persistent memory store for (daemonProfile,
+// HermesMemoryStorePath returns the persistent memory store for (stateRoot,
 // agentID, sourceHome), or "" when memory must stay task-local — there is no
-// agent to key on, or the Multica profile dir cannot be resolved. The daemon
-// marks the returned path in-use for the task's duration so
-// PruneHermesMemoryStores never reclaims it mid-mount.
+// agent to key on, or the daemon has no work-state root. The daemon marks the
+// returned path in-use for the task's duration so PruneHermesMemoryStores never
+// reclaims it mid-mount.
 //
-// daemonProfile namespaces by Multica profile for free: profile dirs are already
-// disjoint, so a staging daemon's GC can never see a production daemon's stores
-// and no hashed namespace segment is needed (unlike the Codex store, which lives
-// in the shared ~/.codex).
-func HermesMemoryStorePath(daemonProfile, agentID, sourceHome string) string {
+// stateRoot is the daemon's resolved work-state root
+// (daemon.WorkStateScope.StateRoot): the machine + backend boundary, NOT the
+// Multica profile. Two profiles on one machine talking to one backend therefore
+// share one memory line for the same agent, so a task prepared by either can be
+// continued by the other (GH #8280), while different backends stay disjoint —
+// the same guarantee the profile directory used to give, one level up.
+func HermesMemoryStorePath(stateRoot, agentID, sourceHome string) string {
 	agent := sanitizePathSegment(agentID)
-	if agent == "" {
+	if agent == "" || strings.TrimSpace(stateRoot) == "" {
 		return ""
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(profileDir, hermesMemoryStoreRoot, agent, hermesMemoryProfileSegment(sourceHome))
+	return filepath.Join(stateRoot, hermesMemoryStoreRoot, agent, hermesMemoryProfileSegment(sourceHome))
 }
 
 // hermesMemoryProfileSegment maps a resolved Hermes source home to the store
@@ -401,15 +397,11 @@ func touchHermesMemoryStore(storeDir string, logger *slog.Logger) {
 // reserve (may be nil) atomically claims a store for deletion, exactly as
 // PruneCodexSessionStores uses it: ok=false means a live task holds the store,
 // so it is left alone. nil disables the guard (tests).
-func PruneHermesMemoryStores(daemonProfile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
-	if retention <= 0 {
+func PruneHermesMemoryStores(stateRoot string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+	if retention <= 0 || strings.TrimSpace(stateRoot) == "" {
 		return 0, 0
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return 0, 0
-	}
-	root := filepath.Join(profileDir, hermesMemoryStoreRoot)
+	root := filepath.Join(stateRoot, hermesMemoryStoreRoot)
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune

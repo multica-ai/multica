@@ -493,23 +493,27 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 }
 
 const getAgentRuntimeHeartbeatLeases = `-- name: GetAgentRuntimeHeartbeatLeases :many
-SELECT id, workspace_id, daemon_id, status, last_seen_at
+SELECT id, workspace_id, daemon_id, provider, profile_id, status, last_seen_at,
+       COALESCE(metadata->>'owner_generation', '')::text AS owner_generation
 FROM agent_runtime
 WHERE id = ANY($1::uuid[])
 `
 
 type GetAgentRuntimeHeartbeatLeasesRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	DaemonID    pgtype.Text        `json:"daemon_id"`
-	Status      string             `json:"status"`
-	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DaemonID        pgtype.Text        `json:"daemon_id"`
+	Provider        string             `json:"provider"`
+	ProfileID       pgtype.UUID        `json:"profile_id"`
+	Status          string             `json:"status"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	OwnerGeneration string             `json:"owner_generation"`
 }
 
 // Narrow connection-time and heartbeat-reconciliation projection. The daemon
 // WebSocket authenticates its whole runtime set in one round trip and then
-// keeps these immutable ownership fields plus liveness state in its connection
-// lease, avoiding a GetAgentRuntime call on every heartbeat.
+// keeps these ownership fields plus liveness state in its connection lease;
+// each heartbeat checks the captured generation against the current row.
 func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgtype.UUID) ([]GetAgentRuntimeHeartbeatLeasesRow, error) {
 	rows, err := q.db.Query(ctx, getAgentRuntimeHeartbeatLeases, ids)
 	if err != nil {
@@ -523,8 +527,11 @@ func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgty
 			&i.ID,
 			&i.WorkspaceID,
 			&i.DaemonID,
+			&i.Provider,
+			&i.ProfileID,
 			&i.Status,
 			&i.LastSeenAt,
+			&i.OwnerGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -534,6 +541,31 @@ func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgty
 		return nil, err
 	}
 	return items, nil
+}
+
+const getAgentRuntimeHeartbeatState = `-- name: GetAgentRuntimeHeartbeatState :one
+SELECT status, last_seen_at, workspace_id,
+       COALESCE(metadata->>'owner_generation', '')::text AS owner_generation
+FROM agent_runtime WHERE id = $1
+`
+
+type GetAgentRuntimeHeartbeatStateRow struct {
+	Status          string             `json:"status"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	OwnerGeneration string             `json:"owner_generation"`
+}
+
+func (q *Queries) GetAgentRuntimeHeartbeatState(ctx context.Context, id pgtype.UUID) (GetAgentRuntimeHeartbeatStateRow, error) {
+	row := q.db.QueryRow(ctx, getAgentRuntimeHeartbeatState, id)
+	var i GetAgentRuntimeHeartbeatStateRow
+	err := row.Scan(
+		&i.Status,
+		&i.LastSeenAt,
+		&i.WorkspaceID,
+		&i.OwnerGeneration,
+	)
+	return i, err
 }
 
 const getAgentRuntimes = `-- name: GetAgentRuntimes :many
@@ -1038,6 +1070,64 @@ func (q *Queries) MarkAgentRuntimeOnlineIfOffline(ctx context.Context, id pgtype
 	return result.RowsAffected(), nil
 }
 
+const markAgentRuntimeOnlineIfOfflineAndOwner = `-- name: MarkAgentRuntimeOnlineIfOfflineAndOwner :execrows
+UPDATE agent_runtime SET status = 'online', last_seen_at = now(), updated_at = now()
+WHERE id = $1 AND status <> 'online'
+  AND (COALESCE(metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR metadata->>'owner_generation' = $2::text)
+`
+
+type MarkAgentRuntimeOnlineIfOfflineAndOwnerParams struct {
+	ID              pgtype.UUID `json:"id"`
+	OwnerGeneration string      `json:"owner_generation"`
+}
+
+func (q *Queries) MarkAgentRuntimeOnlineIfOfflineAndOwner(ctx context.Context, arg MarkAgentRuntimeOnlineIfOfflineAndOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markAgentRuntimeOnlineIfOfflineAndOwner, arg.ID, arg.OwnerGeneration)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markAgentRuntimeOnlineIfOwner = `-- name: MarkAgentRuntimeOnlineIfOwner :one
+UPDATE agent_runtime SET status = 'online', last_seen_at = now(), updated_at = now()
+WHERE id = $1
+  AND (COALESCE(metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR metadata->>'owner_generation' = $2::text)
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+`
+
+type MarkAgentRuntimeOnlineIfOwnerParams struct {
+	ID              pgtype.UUID `json:"id"`
+	OwnerGeneration string      `json:"owner_generation"`
+}
+
+func (q *Queries) MarkAgentRuntimeOnlineIfOwner(ctx context.Context, arg MarkAgentRuntimeOnlineIfOwnerParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, markAgentRuntimeOnlineIfOwner, arg.ID, arg.OwnerGeneration)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+	)
+	return i, err
+}
+
 const markRuntimesOfflineByIDs = `-- name: MarkRuntimesOfflineByIDs :many
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
@@ -1187,17 +1277,19 @@ func (q *Queries) RecordRuntimeLegacyDaemonID(ctx context.Context, arg RecordRun
 }
 
 const selectStaleOnlineRuntimes = `-- name: SelectStaleOnlineRuntimes :many
-SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
+SELECT id, workspace_id, owner_id, daemon_id, provider,
+       COALESCE(metadata->>'owner_generation', '')::text AS owner_generation FROM agent_runtime
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => $1::double precision)
 `
 
 type SelectStaleOnlineRuntimesRow struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Provider    string      `json:"provider"`
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Provider        string      `json:"provider"`
+	OwnerGeneration string      `json:"owner_generation"`
 }
 
 // Lists online runtimes whose last_seen_at exceeds the stale window. The
@@ -1219,6 +1311,7 @@ func (q *Queries) SelectStaleOnlineRuntimes(ctx context.Context, staleSeconds fl
 			&i.OwnerID,
 			&i.DaemonID,
 			&i.Provider,
+			&i.OwnerGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -1239,6 +1332,32 @@ WHERE id = $1
 func (q *Queries) SetAgentRuntimeOffline(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, setAgentRuntimeOffline, id)
 	return err
+}
+
+const setAgentRuntimeOfflineIfOwner = `-- name: SetAgentRuntimeOfflineIfOwner :execrows
+UPDATE agent_runtime
+SET status = 'offline',
+    metadata = COALESCE(metadata, '{}'::jsonb) ||
+        CASE WHEN $1::jsonb IS NULL THEN '{}'::jsonb
+             ELSE jsonb_build_object('offline_reason', $1::jsonb) END,
+    updated_at = now()
+WHERE id = $2 AND metadata->>'owner_generation' = $3::text
+`
+
+type SetAgentRuntimeOfflineIfOwnerParams struct {
+	OfflineReason   []byte      `json:"offline_reason"`
+	ID              pgtype.UUID `json:"id"`
+	OwnerGeneration string      `json:"owner_generation"`
+}
+
+// A delayed deregister from a prior local owner must not take the replacement
+// owner's registration offline. The compare and write are one DB statement.
+func (q *Queries) SetAgentRuntimeOfflineIfOwner(ctx context.Context, arg SetAgentRuntimeOfflineIfOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAgentRuntimeOfflineIfOwner, arg.OfflineReason, arg.ID, arg.OwnerGeneration)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setAgentRuntimeOfflineWithReason = `-- name: SetAgentRuntimeOfflineWithReason :exec
@@ -1294,6 +1413,26 @@ func (q *Queries) TouchAgentRuntimeLastSeen(ctx context.Context, id pgtype.UUID)
 	return result.RowsAffected(), nil
 }
 
+const touchAgentRuntimeLastSeenIfOwner = `-- name: TouchAgentRuntimeLastSeenIfOwner :execrows
+UPDATE agent_runtime SET last_seen_at = now()
+WHERE id = $1 AND status = 'online'
+  AND (COALESCE(metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR metadata->>'owner_generation' = $2::text)
+`
+
+type TouchAgentRuntimeLastSeenIfOwnerParams struct {
+	ID              pgtype.UUID `json:"id"`
+	OwnerGeneration string      `json:"owner_generation"`
+}
+
+func (q *Queries) TouchAgentRuntimeLastSeenIfOwner(ctx context.Context, arg TouchAgentRuntimeLastSeenIfOwnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, touchAgentRuntimeLastSeenIfOwner, arg.ID, arg.OwnerGeneration)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :many
 UPDATE agent_runtime
 SET last_seen_at = now()
@@ -1312,6 +1451,35 @@ RETURNING id
 // sweeper-raced offline rows and invalidating connections for deleted rows.
 func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgtype.UUID) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, touchAgentRuntimesLastSeenBatch, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const touchAgentRuntimesLastSeenBatchIfOwner = `-- name: TouchAgentRuntimesLastSeenBatchIfOwner :many
+UPDATE agent_runtime AS runtime SET last_seen_at = now()
+FROM jsonb_each_text($1::jsonb) AS receipt(id, generation)
+WHERE runtime.id = receipt.id::uuid AND runtime.status = 'online'
+  AND (COALESCE(runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR runtime.metadata->>'owner_generation' = receipt.generation)
+RETURNING runtime.id
+`
+
+func (q *Queries) TouchAgentRuntimesLastSeenBatchIfOwner(ctx context.Context, receipts []byte) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, touchAgentRuntimesLastSeenBatchIfOwner, receipts)
 	if err != nil {
 		return nil, err
 	}
@@ -1590,6 +1758,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
 `
 
@@ -1694,6 +1866,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
 `
 

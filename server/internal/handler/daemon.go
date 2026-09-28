@@ -213,12 +213,14 @@ type DaemonRegisterRequest struct {
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
 		// so task routing (agent.New) is unchanged.
-		ProfileID string `json:"profile_id"`
+		ProfileID       string `json:"profile_id"`
+		OwnerGeneration string `json:"owner_generation"`
 	} `json:"runtimes"`
 	FailedProfiles []struct {
-		ProfileID   string `json:"profile_id"`
-		CommandName string `json:"command_name"`
-		Reason      string `json:"reason"`
+		ProfileID       string `json:"profile_id"`
+		CommandName     string `json:"command_name"`
+		Reason          string `json:"reason"`
+		OwnerGeneration string `json:"owner_generation"`
 	} `json:"failed_profiles"`
 }
 
@@ -333,6 +335,7 @@ func (h *Handler) inheritMachineCustomName(ctx context.Context, rt db.AgentRunti
 }
 
 var errRuntimeProfileDisabled = errors.New("runtime profile is disabled")
+var errStaleRuntimeRegistration = errors.New("runtime ownership has changed")
 
 // upsertRuntimeWithProfile serializes custom-runtime registration with profile
 // deletion. The profile row remains KEY SHARE locked until the runtime upsert
@@ -367,6 +370,9 @@ func (h *Handler) upsertRuntimeWithProfile(
 
 	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, build(profile))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return row, profile, errStaleRuntimeRegistration
+		}
 		return row, profile, fmt.Errorf("upsert profile runtime: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -484,10 +490,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
 		metadata, _ := json.Marshal(map[string]any{
-			"version":      runtime.Version,
-			"cli_version":  req.CLIVersion,
-			"launched_by":  req.LaunchedBy,
-			"capabilities": requestClientCapabilities(r),
+			"version":          runtime.Version,
+			"cli_version":      req.CLIVersion,
+			"launched_by":      req.LaunchedBy,
+			"capabilities":     requestClientCapabilities(r),
+			"owner_generation": runtime.OwnerGeneration,
 		})
 
 		var registered db.AgentRuntime
@@ -497,6 +504,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if isCustom {
 			profileUUID, pok := parseUUIDOrBadRequest(w, strings.TrimSpace(runtime.ProfileID), "profile_id")
 			if !pok {
+				return
+			}
+			if err := h.advanceRuntimeOwner(r.Context(), runtimeOwnerGateKey(req.WorkspaceID, req.DaemonID, "", uuidToString(profileUUID)), runtime.OwnerGeneration); err != nil {
+				writeRuntimeOwnerAdvanceError(w, err)
 				return
 			}
 			// The profile must exist in this workspace and be enabled. Trust
@@ -527,6 +538,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 			if errors.Is(err, errRuntimeProfileDisabled) {
 				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
+				return
+			}
+			if errors.Is(err, errStaleRuntimeRegistration) {
+				writeError(w, http.StatusConflict, err.Error())
 				return
 			}
 			if err != nil {
@@ -564,6 +579,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				ProfileID:      prow.ProfileID,
 			}
 		} else {
+			if err := h.advanceRuntimeOwner(r.Context(), runtimeOwnerGateKey(req.WorkspaceID, req.DaemonID, provider, ""), runtime.OwnerGeneration); err != nil {
+				writeRuntimeOwnerAdvanceError(w, err)
+				return
+			}
 			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 				WorkspaceID: wsUUID,
 				DaemonID:    strToText(req.DaemonID),
@@ -575,6 +594,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				Metadata:    metadata,
 				OwnerID:     ownerID,
 			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusConflict, errStaleRuntimeRegistration.Error())
+				return
+			}
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
 					uuidToString(ownerID),
@@ -654,7 +677,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 		}
 
-		resp = append(resp, runtimeToResponse(registered))
+		registeredResponse := runtimeToResponse(registered)
+		registeredResponse.OwnerGeneration = runtime.OwnerGeneration
+		resp = append(resp, registeredResponse)
 	}
 	for _, failed := range req.FailedProfiles {
 		profileID := strings.TrimSpace(failed.ProfileID)
@@ -663,6 +688,10 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		profileUUID, pok := parseUUIDOrBadRequest(w, profileID, "profile_id")
 		if !pok {
+			return
+		}
+		if err := h.advanceRuntimeOwner(r.Context(), runtimeOwnerGateKey(req.WorkspaceID, req.DaemonID, "", uuidToString(profileUUID)), failed.OwnerGeneration); err != nil {
+			writeRuntimeOwnerAdvanceError(w, err)
 			return
 		}
 		reason := strings.TrimSpace(failed.Reason)
@@ -697,6 +726,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"runtime_profile_registration_error": true,
 					"runtime_profile_failure_reason":     reason,
 					"command_name":                       resolvedCommandName,
+					"owner_generation":                   failed.OwnerGeneration,
 				})
 				return db.UpsertAgentRuntimeWithProfileParams{
 					WorkspaceID: wsUUID,
@@ -925,14 +955,26 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 // it sent one. An absent or unusable reason falls back to the plain offline
 // write: a malformed payload must never cost the caller the state change it
 // actually asked for.
-func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, reason json.RawMessage) error {
+func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, reason json.RawMessage, ownerGeneration string) (bool, error) {
+	if ownerGeneration != "" {
+		var offlineReason []byte
+		if len(reason) > 0 && json.Valid(reason) {
+			offlineReason = reason
+		}
+		rows, err := h.Queries.SetAgentRuntimeOfflineIfOwner(ctx, db.SetAgentRuntimeOfflineIfOwnerParams{
+			ID: runtimeID, OfflineReason: offlineReason, OwnerGeneration: ownerGeneration,
+		})
+		return rows > 0, err
+	}
 	if len(reason) > 0 && json.Valid(reason) {
-		return h.Queries.SetAgentRuntimeOfflineWithReason(ctx, db.SetAgentRuntimeOfflineWithReasonParams{
+		err := h.Queries.SetAgentRuntimeOfflineWithReason(ctx, db.SetAgentRuntimeOfflineWithReasonParams{
 			ID:            runtimeID,
 			OfflineReason: reason,
 		})
+		return err == nil, err
 	}
-	return h.Queries.SetAgentRuntimeOffline(ctx, runtimeID)
+	err := h.Queries.SetAgentRuntimeOffline(ctx, runtimeID)
+	return err == nil, err
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -942,7 +984,8 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 		// OfflineReasons is optional and keyed by runtime id. Present only for
 		// causes the user must repair — a daemon shutting down sends none, so an
 		// older daemon simply keeps today's behaviour (MUL-6164).
-		OfflineReasons map[string]json.RawMessage `json:"offline_reasons"`
+		OfflineReasons   map[string]json.RawMessage `json:"offline_reasons"`
+		OwnerGenerations map[string]string          `json:"owner_generations"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -951,6 +994,10 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.RuntimeIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "runtime_ids is required")
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/deregister/fenced") && req.OwnerGenerations == nil {
+		writeError(w, http.StatusBadRequest, "owner_generations is required")
 		return
 	}
 	runtimeUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.RuntimeIDs, "runtime_ids")
@@ -994,9 +1041,23 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid]); err != nil {
+		generation := req.OwnerGenerations[rid]
+		if generation == "" {
+			var metadata map[string]json.RawMessage
+			if err := json.Unmarshal(rt.Metadata, &metadata); err != nil {
+				continue
+			}
+			if strings.HasSuffix(r.URL.Path, "/deregister/fenced") || len(metadata["owner_generation"]) > 0 && string(metadata["owner_generation"]) != `""` {
+				continue // neither a malformed new request nor a legacy request can retire a fenced owner
+			}
+		}
+		updated, err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid], generation)
+		if err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
+		}
+		if !updated {
+			continue // a newer owner registered before this request landed
 		}
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
@@ -1022,6 +1083,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 
 type DaemonHeartbeatRequest struct {
 	RuntimeID           string `json:"runtime_id"`
+	OwnerGeneration     string `json:"owner_generation,omitempty"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 }
 
@@ -1156,15 +1218,24 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	authMs = time.Since(start).Milliseconds()
 
 	updateStart := time.Now()
-	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
+	ack, m, err := h.heartbeatForOwner(r.Context(), runtimeUUID, runtimeID, runtimeOwnerGateKey(uuidToString(rt.WorkspaceID), rt.DaemonID.String, rt.Provider, uuidToString(rt.ProfileID)), req.OwnerGeneration, req.SupportsBatchImport, nil)
+	if errors.Is(err, service.ErrStaleRuntimeOwner) {
+		outcome = "stale_owner"
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if isNotFound(err) {
+		outcome = "runtime_not_found"
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	if err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
 		return
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
-
-	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
 	probeSkillsMs = m.ProbeSkillsMs
@@ -1174,12 +1245,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	probeModelTimedOut = m.ProbeModelTimedOut
 	probeSkillsTimedOut = m.ProbeSkillsTimedOut
 	probeImportTimedOut = m.ProbeImportTimedOut
-	if err != nil {
-		outcome = "error_update"
-		writeError(w, http.StatusInternalServerError, "heartbeat failed")
-		return
-	}
-
 	outcome = "ok"
 	// Preserve the existing HTTP response shape: the runtime_id field is new
 	// in the WS path and would be redundant noise on the HTTP path where the
@@ -1204,10 +1269,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleDaemonWSHeartbeat is the daemonws.HeartbeatHandler entry point. The
-// WebSocket upgrade already batch-authenticated the fixed runtime set and
-// captured each runtime's liveness state in a connection lease, so the hot
-// path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
-// fallback for a daemon that stops receiving WebSocket acknowledgements.
+// WebSocket upgrade batch-authenticated the fixed runtime set and captured its
+// owner generations. Each heartbeat locks the current row before touching
+// liveness or pending work so an old lease cannot revive a replacement owner.
 func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
@@ -1218,7 +1282,16 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
+	runtimeUUID, err := util.ParseUUID(runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	state := lease.Snapshot()
+	ack, _, err := h.heartbeatForOwner(ctx, runtimeUUID, runtimeID, state.OwnerGateKey, state.OwnerGeneration, supportsBatchImport, lease)
+	if errors.Is(err, service.ErrStaleRuntimeOwner) {
+		return runtimeGoneHeartbeatAck(runtimeID), nil
+	}
+	if err != nil {
 		if isNotFound(err) {
 			if h.DaemonRuntimeGone != nil {
 				h.NotifyRuntimeGone(runtimeID)
@@ -1228,8 +1301,46 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, err
 	}
-	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
-	return ack, err
+	return ack, nil
+}
+
+// Register advances the pending/liveness gate before its DB write. A heartbeat
+// reads the current owner without locking the runtime through shared-store I/O;
+// its DB writes and Redis claims independently compare the same generation.
+func (h *Handler) heartbeatForOwner(ctx context.Context, runtimeUUID pgtype.UUID, runtimeID, ownerKey, generation string, supportsBatchImport bool, lease *daemonws.RuntimeLease) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+	var metrics heartbeatMetrics
+	runtime, err := h.Queries.GetAgentRuntimeHeartbeatState(ctx, runtimeUUID)
+	if err != nil {
+		return nil, metrics, err
+	}
+	if !service.RuntimeOwnerGenerationMatches(runtime.OwnerGeneration, generation) {
+		return nil, metrics, service.ErrStaleRuntimeOwner
+	}
+	if !strings.HasPrefix(runtime.OwnerGeneration, "g") {
+		ownerKey, generation = "", ""
+	}
+	if _, redisStore := h.LivenessStore.(*RedisLivenessStore); !redisStore {
+		if ownerKey != "" && !h.runtimeOwnerGate.current(ownerKey, generation) {
+			return nil, metrics, service.ErrStaleRuntimeOwner
+		}
+	}
+	state := heartbeatLivenessState{Status: runtime.Status, LastSeenAt: runtime.LastSeenAt.Time,
+		LastSeenAtValid: runtime.LastSeenAt.Valid, WorkspaceID: runtime.WorkspaceID}
+	var mark func(time.Time)
+	if lease != nil {
+		mark = lease.MarkDBWriteScheduled
+	}
+	if err := h.recordHeartbeatState(ctx, runtimeUUID, runtimeID, state, mark, ownerKey, generation); err != nil {
+		return nil, metrics, err
+	}
+	if ownerKey != "" {
+		ctx = withPendingOwner(ctx, h.runtimeOwnerGate, ownerKey, generation)
+	}
+	ack, metrics, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
+	if err != nil {
+		return nil, metrics, err
+	}
+	return ack, metrics, nil
 }
 
 func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPayload {
@@ -1238,45 +1349,6 @@ func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPaylo
 		Status:      protocol.HeartbeatStatusRuntimeGone,
 		RuntimeGone: true,
 	}
-}
-
-// recordHeartbeat marks the runtime as alive. When LivenessStore is available
-// (Redis configured and reachable) it writes a TTL'd liveness key and skips
-// the DB row write on most beats — the DB is only updated on the
-// offline→online transition or once per runtimeHeartbeatDBFlushInterval to
-// keep last_seen_at fresh enough for the UI and the DB-fallback sweeper.
-//
-// When LivenessStore is unavailable (no Redis configured) or any Touch call
-// errors, recordHeartbeat falls back to writing the DB on every beat — that
-// is the original behavior and keeps the sweeper's DB-only path correct.
-//
-// The actual DB write is delegated to h.HeartbeatScheduler so production can
-// coalesce many runtimes' bumps into one bulk UPDATE per tick. See
-// heartbeat_scheduler.go for the two implementations.
-func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
-	return h.recordHeartbeatState(ctx, rt.ID, uuidToString(rt.ID), heartbeatLivenessState{
-		Status:          rt.Status,
-		LastSeenAt:      rt.LastSeenAt.Time,
-		LastSeenAtValid: rt.LastSeenAt.Valid,
-		WorkspaceID:     rt.WorkspaceID,
-	}, nil)
-}
-
-func (h *Handler) recordHeartbeatLease(ctx context.Context, runtimeID string, lease *daemonws.RuntimeLease) error {
-	runtimeUUID, err := util.ParseUUID(runtimeID)
-	if err != nil {
-		return fmt.Errorf("invalid runtime_id: %w", err)
-	}
-	state := lease.Snapshot()
-	// Lenient parse: the workspace ID only feeds the recovery refresh payload.
-	// An invalid value suppresses the event instead of failing the heartbeat.
-	wsUUID, _ := util.ParseUUID(state.WorkspaceID)
-	return h.recordHeartbeatState(ctx, runtimeUUID, runtimeID, heartbeatLivenessState{
-		Status:          state.Status,
-		LastSeenAt:      state.LastSeenAt,
-		LastSeenAtValid: state.LastSeenAtValid,
-		WorkspaceID:     wsUUID,
-	}, lease.MarkDBWriteScheduled)
 }
 
 type heartbeatLivenessState struct {
@@ -1294,8 +1366,13 @@ func (h *Handler) recordHeartbeatState(
 	runtimeID string,
 	state heartbeatLivenessState,
 	markDBWriteScheduled func(time.Time),
+	owner ...string,
 ) error {
 	now := time.Now()
+	ownerKey, generation := "", ""
+	if len(owner) == 2 {
+		ownerKey, generation = owner[0], owner[1]
+	}
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
 	// Touch failure can simply force needDBWrite=true without re-evaluating
@@ -1306,7 +1383,21 @@ func (h *Handler) recordHeartbeatState(
 		now.Sub(state.LastSeenAt) >= runtimeHeartbeatDBFlushInterval
 
 	if h.LivenessStore.Available() {
-		if err := h.LivenessStore.Touch(ctx, runtimeID, runtimeLivenessTTL); err != nil {
+		var touchErr error
+		if ownerKey != "" {
+			touchErr = h.touchRuntimeOwner(ctx, runtimeID, ownerKey, generation)
+		} else {
+			touchErr = h.LivenessStore.Touch(ctx, runtimeID, runtimeLivenessTTL)
+		}
+		if errors.Is(touchErr, service.ErrStaleRuntimeOwner) {
+			return touchErr
+		}
+		if touchErr != nil && ownerKey != "" {
+			if _, redisStore := h.LivenessStore.(*RedisLivenessStore); redisStore {
+				return touchErr
+			}
+		}
+		if err := touchErr; err != nil {
 			// Redis hiccup: degrade transparently to the DB-only path for
 			// this beat. The sweeper falls back to its DB threshold the
 			// same way when IsAliveBatch fails, so end-to-end correctness
@@ -1330,7 +1421,7 @@ func (h *Handler) recordHeartbeatState(
 		// refresh; a beat that lost the race (or a never-seen row already
 		// online) stays silent and keeps the unconditional update below so
 		// last_seen_at is bumped and pgx.ErrNoRows is preserved for deletions.
-		flipped, err := h.Queries.MarkAgentRuntimeOnlineIfOffline(ctx, runtimeUUID)
+		flipped, err := h.Queries.MarkAgentRuntimeOnlineIfOfflineAndOwner(ctx, db.MarkAgentRuntimeOnlineIfOfflineAndOwnerParams{ID: runtimeUUID, OwnerGeneration: generation})
 		if err != nil {
 			return err
 		}
@@ -1340,7 +1431,7 @@ func (h *Handler) recordHeartbeatState(
 			if state.WorkspaceID.Valid {
 				h.PublishRuntimeRefresh(uuidToString(state.WorkspaceID), "system", "", "heartbeat_recovery")
 			}
-		} else if _, err := h.Queries.MarkAgentRuntimeOnline(ctx, runtimeUUID); err != nil {
+		} else if _, err := h.Queries.MarkAgentRuntimeOnlineIfOwner(ctx, db.MarkAgentRuntimeOnlineIfOwnerParams{ID: runtimeUUID, OwnerGeneration: generation}); err != nil {
 			return err
 		}
 		if markDBWriteScheduled != nil {
@@ -1348,7 +1439,7 @@ func (h *Handler) recordHeartbeatState(
 		}
 		return nil
 	}
-	if err := h.HeartbeatScheduler.Schedule(ctx, runtimeUUID, state.WorkspaceID); err != nil {
+	if err := h.HeartbeatScheduler.Schedule(ctx, runtimeUUID, state.WorkspaceID, generation); err != nil {
 		return err
 	}
 	if markDBWriteScheduled != nil {
@@ -1385,6 +1476,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	switch {
 	case probeUpdateErr == nil && hasUpdate:
 		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID)
+		if errors.Is(popUpdateErr, service.ErrStaleRuntimeOwner) {
+			return nil, m, popUpdateErr
+		}
 		if popUpdateErr != nil {
 			slog.Warn("update PopPending failed", "error", popUpdateErr, "runtime_id", runtimeID)
 		} else if pending != nil {
@@ -1414,6 +1508,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	case probeModelErr == nil && hasModel:
 		popStart := time.Now()
 		pendingModel, popErr := h.ModelListStore.PopPending(ctx, runtimeID)
+		if errors.Is(popErr, service.ErrStaleRuntimeOwner) {
+			return nil, m, popErr
+		}
 		m.PopModelMs = time.Since(popStart).Milliseconds()
 		if popErr != nil {
 			slog.Warn("model list PopPending failed", "error", popErr, "runtime_id", runtimeID)
@@ -1442,6 +1539,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	case probeErr == nil && hasSkills:
 		popStart := time.Now()
 		pendingSkills, popErr := h.LocalSkillListStore.PopPending(ctx, runtimeID)
+		if errors.Is(popErr, service.ErrStaleRuntimeOwner) {
+			return nil, m, popErr
+		}
 		m.PopSkillsMs = time.Since(popStart).Milliseconds()
 		if popErr != nil {
 			slog.Warn("local skill list PopPending failed", "error", popErr, "runtime_id", runtimeID)
@@ -1467,6 +1567,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		popStart := time.Now()
 		if supportsBatchImport {
 			pendingImports, popErr := h.LocalSkillImportStore.PopPendingBatch(ctx, runtimeID, maxLocalSkillImportBatch)
+			if errors.Is(popErr, service.ErrStaleRuntimeOwner) && len(pendingImports) == 0 {
+				return nil, m, popErr
+			}
 			m.PopImportMs = time.Since(popStart).Milliseconds()
 			if popErr != nil {
 				slog.Warn("local skill import PopPendingBatch failed", "error", popErr, "runtime_id", runtimeID, "claimed", len(pendingImports))
@@ -1493,6 +1596,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			}
 		} else {
 			pendingImport, popErr := h.LocalSkillImportStore.PopPending(ctx, runtimeID)
+			if errors.Is(popErr, service.ErrStaleRuntimeOwner) {
+				return nil, m, popErr
+			}
 			m.PopImportMs = time.Since(popStart).Milliseconds()
 			if popErr != nil {
 				slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", runtimeID)

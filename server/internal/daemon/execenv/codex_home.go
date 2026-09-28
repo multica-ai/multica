@@ -371,36 +371,74 @@ func codexSessionStoreDir(sharedHome, key string) string {
 	return filepath.Join(sharedHome, codexSessionStoreRoot, key)
 }
 
-// codexSessionStoreNamespace maps a daemon's profile to the directory segment
-// that isolates its session stores from another profile-daemon's when several
-// run on the same machine sharing one ~/.codex (profiles get separate daemon
-// state but the same Codex home). Each daemon writes under, and only ever
-// reclaims, its own namespace, so a staging daemon's GC can never delete a
-// production task's live store and vice versa.
+// codexDefaultSessionNamespace is the reserved namespace literal that the old
+// profile-scoped layout used for the default profile. It is still the only
+// accepted bare namespace, so a caller that lost its work-state scope cannot
+// write an un-namespaced store beside the real namespace directories.
+const codexDefaultSessionNamespace = "default"
+
+// CodexSessionNamespaceForProfile returns the pre-#8280, profile-scoped
+// namespace for a Multica profile. It stays exported because the work-state
+// resolver has to recognize the namespace an existing installation already used
+// before it can adopt it.
 //
-// The map MUST be collision-free (distinct profiles are distinct daemons and
-// must never share a namespace) AND fixed-length (a profile can be as long as a
-// filesystem segment allows, ~255 bytes, so any length-expanding encoding would
-// overflow the 255-byte limit and fail to create the store dir). A lossy "drop
-// unsafe characters" scheme collides ("" vs "default", "staging.prod" vs
-// "stagingprod"); a full hex encoding doubles the length and overflows. So the
-// empty (default) profile gets a reserved bare literal, and every named profile
-// is the hex of its SHA-256 — a constant 64 hex chars, filesystem-safe and
-// collision-resistant — under a "p_" prefix the bare literal can never collide
-// with (MUL-4424).
-func codexSessionStoreNamespace(profile string) string {
+// Collision-free AND fixed-length: a profile name can be as long as a filesystem
+// segment allows (~255 bytes), so any length-expanding encoding would overflow
+// the limit and fail to create the store dir, while a lossy "drop unsafe
+// characters" scheme collides ("" vs "default", "staging.prod" vs "stagingprod").
+// So the empty profile gets a reserved bare literal and every named profile is
+// the hex of its SHA-256 — a constant 64 hex chars under a "p_" prefix the bare
+// literal can never collide with (MUL-4424).
+func CodexSessionNamespaceForProfile(profile string) string {
 	if profile == "" {
-		return "default"
+		return codexDefaultSessionNamespace
 	}
 	sum := sha256.Sum256([]byte(profile))
 	return "p_" + hex.EncodeToString(sum[:])
 }
 
-// codexSessionStoreKey builds a profile-and-task key for persistent Codex
+// CodexSessionNamespaceForWorkState returns the backend-scoped namespace for a
+// work-state key (daemon.WorkStateKey). The key is already a fixed-length hex
+// digest, so this only tags it: the "w_" prefix can never collide with the
+// reserved bare literal or with a "p_" profile namespace.
+func CodexSessionNamespaceForWorkState(key string) string {
+	return "w_" + key
+}
+
+// CodexSessionNamespaceHasState reports whether a namespace under the shared
+// Codex home already holds a store. Adoption uses it to tell a namespace an
+// installation actually wrote to from one that only exists as an empty leftover.
+func CodexSessionNamespaceHasState(namespace string) bool {
+	if namespace == "" {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, namespace))
+	return err == nil && len(entries) > 0
+}
+
+// codexSessionStoreNamespace maps a daemon work-state scope to the directory
+// segment that isolates this backend's session stores from another backend's
+// when several daemons on one machine share one ~/.codex. Each daemon writes
+// under, and only ever reclaims, its own namespace, so a staging daemon's GC can
+// never delete a production task's live store and vice versa.
+//
+// The scope is the resolved work-state identity (machine + backend), not the
+// Multica profile: two profiles talking to one backend share one namespace, so a
+// task created under either can be resumed under the other (#8280). An empty
+// scope falls back to the reserved bare literal rather than writing an
+// un-namespaced store beside the real namespace directories.
+func codexSessionStoreNamespace(scope string) string {
+	if scope == "" {
+		return codexDefaultSessionNamespace
+	}
+	return scope
+}
+
+// codexSessionStoreKey builds a work-state-and-task key for persistent Codex
 // sessions. Issue IDs retain their existing path;
 // direct chats use a prefixed chat_session_id so the two namespaces cannot
 // collide. Returns "" when neither stable identifier is available.
-func codexSessionStoreKey(profile string, task TaskContextForEnv) string {
+func codexSessionStoreKey(scope string, task TaskContextForEnv) string {
 	storeID := sanitizePathSegment(task.IssueID)
 	if storeID == "" {
 		chatID := sanitizePathSegment(task.ChatSessionID)
@@ -413,7 +451,7 @@ func codexSessionStoreKey(profile string, task TaskContextForEnv) string {
 	if agent == "" {
 		agent = "_"
 	}
-	return filepath.Join(codexSessionStoreNamespace(profile), agent, storeID)
+	return filepath.Join(codexSessionStoreNamespace(scope), agent, storeID)
 }
 
 // sanitizePathSegment reduces s to the characters a UUID uses (hex plus
@@ -444,10 +482,12 @@ func sanitizePathSegment(s string) string {
 // never reclaimed; a store idle past retention is removed, giving deleted issues
 // an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
 //
-// It scans ONLY the caller profile's namespace, so a daemon never reclaims a
-// store owned by another profile-daemon sharing the same ~/.codex — the
-// in-process reservation guard cannot span processes, and the namespace makes
-// their store trees disjoint so it does not need to (MUL-4424).
+// It scans ONLY the caller's work-state namespace, so a daemon never reclaims a
+// store owned by another backend sharing the same ~/.codex — the in-process
+// reservation guard cannot span processes, and the namespace makes their store
+// trees disjoint so it does not need to (MUL-4424). Two Multica profiles aimed
+// at one backend resolve one namespace, so whichever of them runs the GC
+// reclaims exactly the stores both of them serve (#8280).
 //
 // reserve (may be nil) atomically claims a store for deletion: it returns
 // ok=false when a live task holds the store — leaving it — and otherwise returns
@@ -457,11 +497,11 @@ func sanitizePathSegment(s string) string {
 // the remove are effectively atomic, closing the stat->remove race a plain
 // point-in-time active check leaves open. nil disables the guard (tests): every
 // idle store is removed.
-func PruneCodexSessionStores(profile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+func PruneCodexSessionStores(scope string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
-	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, codexSessionStoreNamespace(profile))
+	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, codexSessionStoreNamespace(scope))
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune
@@ -678,12 +718,14 @@ func touchCodexSessionStore(storeDir string, logger *slog.Logger) {
 }
 
 // CodexSessionStorePath returns the per-conversation Codex session store on the
-// shared home, or "" when there is no stable issue or chat key. The daemon
-// marks this path in-use for the duration of a task so
-// PruneCodexSessionStores never reclaims a store mid-mount, closing the
-// stat→remove race the mtime refresh alone cannot (MUL-4424).
-func CodexSessionStorePath(profile string, task TaskContextForEnv) string {
-	key := codexSessionStoreKey(profile, task)
+// shared home, or "" when there is no stable issue or chat key. scope is the
+// daemon's resolved work-state namespace (daemon.WorkStateScope.CodexNamespace),
+// so every profile serving this backend reaches the same store. The daemon marks
+// this path in-use for the duration of a task so PruneCodexSessionStores never
+// reclaims a store mid-mount, closing the stat→remove race the mtime refresh
+// alone cannot (MUL-4424).
+func CodexSessionStorePath(scope string, task TaskContextForEnv) string {
+	key := codexSessionStoreKey(scope, task)
 	if key == "" {
 		return ""
 	}
