@@ -1640,6 +1640,33 @@ export const ChildIssueProgressResponseSchema = z.object({
     .default([]),
 }).loose();
 
+const RuntimeMetadataSchema = z.object({
+  // Missing detection (older daemons) and malformed flags must not enable MCP.
+  managed_mcp: z.boolean().catch(false),
+}).loose().catch({ managed_mcp: false });
+
+export const AgentRuntimeSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  daemon_id: z.string().nullable().default(null),
+  name: z.string().default(""),
+  custom_name: z.string().nullable().optional(),
+  runtime_mode: z.enum(["local", "cloud"]).catch("local"),
+  provider: z.string().default(""),
+  launch_header: z.string().default(""),
+  status: z.enum(["online", "offline"]).catch("offline"),
+  device_info: z.string().default(""),
+  metadata: RuntimeMetadataSchema,
+  owner_id: z.string().nullable().default(null),
+  visibility: z.enum(["private", "public"]).catch("private"),
+  profile_id: z.string().nullable().optional(),
+  last_seen_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
+
 export const CloudRuntimeNodeSchema = z.object({
   id: z.string(),
   owner_id: z.string(),

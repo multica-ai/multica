@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
@@ -24,6 +26,76 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("listRuntimes", () => {
+    const runtime = {
+      id: "runtime-1",
+      workspace_id: "ws-1",
+      daemon_id: null,
+      name: "Pi",
+      runtime_mode: "local",
+      provider: "pi",
+      launch_header: "pi",
+      status: "online",
+      device_info: "",
+      owner_id: null,
+      visibility: "private",
+      last_seen_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    it.each([
+      [true, true],
+      [false, false],
+      [undefined, false],
+      [null, false],
+      ["true", false],
+      [1, false],
+      [{}, false],
+    ])("parses managed MCP capability without coercion: %j", async (value, expected) => {
+      stubFetchJson([{ ...runtime, metadata: { managed_mcp: value, version: "1.0" } }]);
+      const rows = await new ApiClient("https://api.example.test").listRuntimes();
+      expect(rows[0]?.metadata).toEqual({ managed_mcp: expected, version: "1.0" });
+    });
+
+    it.each([undefined, null, "invalid", []].map((metadata) => ({ metadata })))(
+      "preserves a runtime with malformed metadata: $metadata",
+      async ({ metadata }) => {
+        stubFetchJson([{ ...runtime, metadata }]);
+        const rows = await new ApiClient("https://api.example.test").listRuntimes();
+        expect(rows[0]?.id).toBe("runtime-1");
+        expect(rows[0]?.metadata?.managed_mcp).toBe(false);
+      },
+    );
+
+    it("falls back safely when the runtime list is malformed", async () => {
+      stubFetchJson({ runtimes: "invalid" });
+      await expect(new ApiClient("https://api.example.test").listRuntimes()).resolves.toEqual([]);
+    });
+
+    it("preserves runtime rows across older fields and future enum values", async () => {
+      stubFetchJson([{
+        ...runtime,
+        visibility: undefined,
+        status: "future_status",
+        runtime_mode: "future_mode",
+        metadata: { future_capability: true },
+        custom_name: "My Pi",
+        profile_id: "profile-1",
+      }]);
+      const rows = await new ApiClient("https://api.example.test").listRuntimes();
+      expect(rows[0]).toMatchObject({
+        id: "runtime-1",
+        visibility: "private",
+        status: "offline",
+        runtime_mode: "local",
+        metadata: { managed_mcp: false, future_capability: true },
+        custom_name: "My Pi",
+        profile_id: "profile-1",
+      });
+    });
+  });
+
   describe("GitHub repository import", () => {
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });

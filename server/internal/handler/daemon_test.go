@@ -4905,3 +4905,48 @@ func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
 		t.Fatalf("provider = %q, want stored omp identity", provider)
 	}
 }
+
+func TestDaemonRegister_PiManagedMCPCapability(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		reported string
+		custom   bool
+		want     bool
+	}{
+		{name: "supported", reported: "true", want: true},
+		{name: "missing", reported: "false"},
+		{name: "older daemon"},
+		{name: "invalid", reported: "TRUE"},
+		{name: "custom profile", reported: "true", custom: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			daemonID := uuid.NewString()
+			runtime := map[string]any{"name": "Pi", "type": "pi", "status": "online"}
+			if tc.reported != "" {
+				runtime["managed_mcp"] = tc.reported
+			}
+			if tc.custom {
+				runtime["profile_id"] = insertRuntimeProfileFixture(t, ctx, "Pi wrapper", "pi", "wrapper")
+			}
+			t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID) })
+			req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+				"workspace_id": testWorkspaceID, "daemon_id": daemonID,
+				"runtimes": []map[string]any{runtime},
+			}, testWorkspaceID, daemonID)
+			testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
+			var metadata []byte
+			dbfx.QueryRow(t, `SELECT metadata FROM agent_runtime WHERE daemon_id = $1`, daemonID).Scan(&metadata)
+			var parsed map[string]any
+			if err := json.Unmarshal(metadata, &parsed); err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := parsed["managed_mcp"].(bool); !ok || got != tc.want {
+				t.Fatalf("managed_mcp = %#v, want boolean %v", parsed["managed_mcp"], tc.want)
+			}
+		})
+	}
+}

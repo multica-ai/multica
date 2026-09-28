@@ -371,6 +371,25 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
 	}
 
+	childEnv := buildEnv(b.cfg.Env)
+	var managedMCP *piMCPRun
+	if label == "pi" && hasManagedMcpConfig(opts.McpConfig) {
+		if err := validatePiMCPArgs(append(append([]string{}, b.cfg.LaunchPrefix...), opts.CustomArgs...)); err != nil {
+			return nil, fmt.Errorf("failed to prepare managed MCP config for Pi: %w", err)
+		}
+		managedMCP, err = preparePiMCP(opts.McpConfig, childEnv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare managed MCP config for Pi: %w", err)
+		}
+		childEnv = managedMCP.env
+	}
+	started := false
+	defer func() {
+		if !started {
+			managedMCP.cleanup()
+		}
+	}()
+
 	timeout := opts.Timeout
 
 	// Pi's --session flag expects a file path where events are appended.
@@ -402,6 +421,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	processCtx, cancelProcess := context.WithCancel(runCtx)
 
 	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	if managedMCP != nil {
+		args = append(args, managedMCP.args...)
+	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
@@ -409,7 +431,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd.Env = childEnv
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -459,9 +481,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("start %s: %w", label, err)
 	}
+	started = true
 	stderrDone := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(stderrWatch, stderrRead)
+		if managedMCP == nil {
+			_, _ = io.Copy(stderrWatch, stderrRead)
+		} else {
+			scanner := newAgentStreamScanner(stderrRead)
+			for scanner.Scan() {
+				_, _ = stderrWatch.Write([]byte(managedMCP.redact(scanner.Text()) + "\n"))
+			}
+		}
 		close(stderrDone)
 	}()
 
@@ -506,6 +536,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}()
 
 	go func() {
+		defer managedMCP.cleanup()
 		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancelProcess()
 		defer cancel()
@@ -516,17 +547,40 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var output strings.Builder
 		finalStatus := "completed"
 		var finalError string
+		mcpReady := managedMCP == nil
+		mcpStartupFailed := false
 		usage := make(map[string]TokenUsage)
 
 		// Pi message_update events can be large (they embed the full message
 		// partial on each delta); the shared stream bound covers that.
 		scanner := newAgentStreamScanner(stdout)
 		var textBuffer strings.Builder
+		var mcpTextPending, mcpThinkingPending string
+		emitText := func(text string, final bool) {
+			if managedMCP != nil {
+				text = managedMCP.redactStream(&mcpTextPending, text, final)
+			}
+			if text != "" {
+				output.WriteString(text)
+				trySend(msgCh, Message{Type: MessageText, Content: text})
+			}
+		}
+		emitThinking := func(text string, final bool) {
+			if managedMCP != nil {
+				text = managedMCP.redactStream(&mcpThinkingPending, text, final)
+			}
+			if text != "" {
+				trySend(msgCh, Message{Type: MessageThinking, Content: text})
+			}
+		}
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
+			}
+			if managedMCP != nil {
+				line = managedMCP.redactJSON(line)
 			}
 			var evt piStreamEvent
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
@@ -534,11 +588,25 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			}
 			turnErrors.observeEvent(evt.Type)
 
+			if evt.Type == "multica_managed_mcp_ready" {
+				mcpReady = true
+				continue
+			}
+			if managedMCP != nil && (evt.Type == "multica_managed_mcp_failed" || (!mcpReady && evt.Type == "agent_start")) {
+				mcpStartupFailed = true
+				cancelProcess()
+				closeStdin()
+				closePiReadPipe(stdout)
+				closePiReadPipe(stderrRead)
+				continue
+			}
 			switch evt.Type {
 			case "agent_start":
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
 			case "turn_start":
+				emitText("", true)
+				emitThinking("", true)
 				output.Reset()
 				textBuffer.Reset()
 
@@ -549,12 +617,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				switch evt.AssistantMessageEvent.Type {
 				case "text_delta":
 					if d := drainPiTextBuffer(&textBuffer, evt.AssistantMessageEvent.Delta); d != "" {
-						output.WriteString(d)
-						trySend(msgCh, Message{Type: MessageText, Content: d})
+						emitText(d, false)
 					}
 				case "thinking_delta":
 					if d := evt.AssistantMessageEvent.Delta; d != "" {
-						trySend(msgCh, Message{Type: MessageThinking, Content: d})
+						emitThinking(d, false)
 					}
 				}
 
@@ -635,10 +702,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			}
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
-			output.WriteString(d)
-			trySend(msgCh, Message{Type: MessageText, Content: d})
+			emitText(d, false)
 		}
 
+		emitText("", true)
+		emitThinking("", true)
 		// Finish the user-owned stderr read before Wait closes StderrPipe. Normal
 		// exit gets the same 10s backstop cmd.WaitDelay used to provide when
 		// os/exec owned the copier. Cancellation and error-grace expiry close
@@ -662,7 +730,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		writeErr := <-writeErrCh
 		authoritativeTerminal := false
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		if mcpStartupFailed || (!mcpReady && runCtx.Err() == nil) {
+			finalStatus = "failed"
+			finalError = "failed to prepare managed MCP config for Pi: extension did not initialize"
+			authoritativeTerminal = true
+		} else if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("%s timed out after %s", label, timeout)
 		} else if runCtx.Err() == context.Canceled {
@@ -728,6 +800,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		// still busy after Pi had already exited.
 		releasePiSessionFileLock(sessionLock)
 		sessionLock = nil
+		managedMCP.cleanup()
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     output.String(),

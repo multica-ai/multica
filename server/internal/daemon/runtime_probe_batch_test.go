@@ -181,7 +181,8 @@ type registeredCall struct {
 	types       []string
 	// versions maps runtime type -> the version that call reported, so a test
 	// can assert the server was told about an in-place CLI upgrade.
-	versions map[string]string
+	versions   map[string]string
+	managedMCP map[string]string
 	// names maps runtime type -> the display name that call reported, so a
 	// test can assert the name a user will see for a runtime identity.
 	names map[string]string
@@ -378,6 +379,7 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			call := registeredCall{
 				workspaceID: body.WorkspaceID,
 				versions:    map[string]string{},
+				managedMCP:  map[string]string{},
 				names:       map[string]string{},
 			}
 			var resp RegisterResponse
@@ -385,6 +387,7 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			for _, rt := range body.Runtimes {
 				call.types = append(call.types, rt["type"])
 				call.versions[rt["type"]] = rt["version"]
+				call.managedMCP[rt["type"]] = rt["managed_mcp"]
 				call.names[rt["type"]] = rt["name"]
 				// Mirror UpsertAgentRuntime: a re-register of a row that already
 				// exists returns that row's ID rather than minting a new one.

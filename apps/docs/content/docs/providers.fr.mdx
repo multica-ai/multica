@@ -36,7 +36,7 @@ Les étapes d'installation se trouvent dans [Installer les outils de codage IA](
 | MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
-| Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Pi | `pi` | ✓ | avec adaptateur | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
@@ -72,7 +72,34 @@ Les règles de relance et de reprise de session se trouvent dans [Exécutions](/
 
 ## Configuration MCP
 
-Antigravity, GitHub Copilot CLI, DevEco Code et Pi ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
+Antigravity, GitHub Copilot CLI et DevEco Code ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
+
+### MCP géré pour Pi
+
+Pi prend en charge le MCP géré par Multica lorsque le daemon détecte une installation compatible et activée de `pi-mcp-adapter`. Les versions prises en charge sont **2.37.0** et **3.1.0** ; les autres versions ne sont pas présumées compatibles. Installez une version prise en charge sur l'ordinateur du runtime, puis redémarrez le daemon pour actualiser la détection :
+
+```bash
+pi install npm:pi-mcp-adapter@2.37.0
+```
+
+L'onglet MCP est disponible uniquement pour les runtimes Pi qui déclarent cette capacité. Un ancien daemon, un adaptateur absent ou incompatible le laisse indisponible ; les exécutions Pi ordinaires sans MCP géré restent possibles. Multica n'installe ni n'active automatiquement l'adaptateur.
+
+Pour une exécution gérée, Multica transmet uniquement la configuration MCP résolue de l'agent via `createMcpAdapter({ config })`. Les configurations MCP globales et du projet ne sont pas fusionnées. Un répertoire temporaire privé contient la configuration et l'état de l'adaptateur ; il est supprimé à la fin de l'exécution, en cas d'échec au démarrage ou d'annulation. Les paramètres Pi globaux et les fichiers MCP ne sont pas modifiés.
+
+- Une configuration MCP non définie (`null`) conserve le démarrage habituel de Pi.
+- Une configuration explicitement vide (`{}` ou `{"mcpServers": {}}`) lance une exécution gérée isolée sans serveur MCP.
+- Les exécutions gérées désactivent la découverte automatique des extensions et chargent uniquement le pont MCP de Multica. Les autres extensions, y compris les fournisseurs de modèles qu'elles ajoutent, sont indisponibles. Les skills natifs et du projet, les chemins de skills configurés et les skills des packages npm ou locaux installés sont conservés.
+
+Les packages Pi doivent être des packages npm déjà installés ou des répertoires de packages locaux avec un chemin absolu. Les sources Git et les chemins relatifs font échouer la préparation de l'exécution gérée ; Multica ne télécharge pas de packages pour conserver leurs ressources. La configuration des modèles et l'authentification sont copiées pour chaque exécution, mais les identifiants renouvelés ne sont pas réécrits dans les fichiers d'origine. Une rotation des jetons de renouvellement peut nécessiter une nouvelle authentification. MCP utilise les en-têtes et variables d'environnement explicitement configurés ; les identifiants OAuth globaux de l'adaptateur ne sont pas importés.
+
+#### Vérifier sur l'ordinateur du runtime
+
+Utilisez des serveurs MCP de test et un compte de modèle que vous êtes autorisé à utiliser ; les exécutions réelles peuvent consommer des crédits.
+
+1. Activez une version prise en charge de l'adaptateur, redémarrez le daemon et vérifiez que l'agent Pi affiche l'onglet MCP. Sans adaptateur compatible, vérifiez que les exécutions ordinaires fonctionnent et que l'onglet est indisponible.
+2. Attribuez des serveurs MCP de test différents à deux agents, lancez-les simultanément et demandez à chacun de lister ses outils MCP. Chacun doit voir uniquement son serveur attribué. Avec une configuration explicitement vide, aucun outil MCP ne doit apparaître.
+3. Rattachez un skill, sélectionnez un modèle authentifié et terminez une exécution gérée. Poursuivez la même tâche pour vérifier la reprise de session ; testez aussi une annulation et un échec au démarrage de MCP.
+4. Comparez les sommes de contrôle des paramètres Pi globaux et des fichiers MCP avant et après. Vérifiez la suppression du répertoire temporaire après chaque exécution terminée, échouée ou annulée. N'incluez aucun identifiant dans les journaux ou captures d'écran.
 
 <Callout type="warning">
 Les commandes, arguments et variables d'environnement des serveurs MCP sont enregistrés côté serveur avec la configuration de l'agent. N'écrivez pas dans la configuration des identifiants locaux que vous n'avez pas besoin de partager.

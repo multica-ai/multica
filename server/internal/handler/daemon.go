@@ -209,6 +209,9 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// String-valued to match the daemon's registration payload. Only an
+		// explicit "true" from a built-in Pi runtime enables managed MCP.
+		ManagedMCP string `json:"managed_mcp"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -488,6 +491,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"cli_version":  req.CLIVersion,
 			"launched_by":  req.LaunchedBy,
 			"capabilities": requestClientCapabilities(r),
+			"managed_mcp":  provider == "pi" && strings.TrimSpace(runtime.ProfileID) == "" && runtime.ManagedMCP == "true",
 		})
 
 		var registered db.AgentRuntime

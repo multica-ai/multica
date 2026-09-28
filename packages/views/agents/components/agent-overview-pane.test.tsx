@@ -215,6 +215,18 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows Pi's MCP tab when its runtime reports managed MCP support", () => {
+    renderPane([{ ...makeRuntime("pi"), metadata: { managed_mcp: true } }]);
+    openCapabilities();
+    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+  });
+
+  it("hides Pi's MCP tab for a daemon without capability detection", () => {
+    renderPane([makeRuntime("pi")]);
+    openCapabilities();
+    expect(screen.queryByRole("tab", { name: /^MCP$/i })).not.toBeInTheDocument();
+  });
+
   it("keeps the MCP tab visible when the runtime row hasn't loaded yet", () => {
     // Empty runtimes[] mimics the brief window between the page mounting and
     // the runtimes query resolving. Hiding the tab would flicker it off and

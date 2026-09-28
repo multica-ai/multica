@@ -196,7 +196,7 @@ export function AgentOverviewPane({
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime
-      ? providerSupportsMcpConfig(runtime.provider)
+      ? providerSupportsMcpConfig(runtime.provider, runtime.metadata)
       : true;
     const showComposioMcp =
       composioMCPAppsEnabled &&

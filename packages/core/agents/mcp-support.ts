@@ -1,7 +1,7 @@
-// The set of runtime providers whose backend reads `agent.mcp_config` and
-// forwards MCP servers to the underlying CLI. The MCP config tab is hidden
-// for every other provider so a user can't save a value the runtime will
-// silently ignore. Keep this list in sync with the backends in
+// Providers with unconditional support for forwarding `agent.mcp_config`
+// to the underlying CLI. Pi is checked separately against the runtime
+// capability reported by its daemon, because it requires an enabled adapter.
+// Keep this list in sync with the backends in
 // `server/pkg/agent/` that read `ExecOptions.McpConfig`, plus providers whose
 // per-task preparers in `server/internal/daemon/execenv/` materialise MCP
 // config for CLIs that do not receive it through ExecOptions.
@@ -29,7 +29,12 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "omp",
 ]);
 
-export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {
+export function providerSupportsMcpConfig(
+  provider: string | undefined | null,
+  metadata?: Record<string, unknown> | null,
+): boolean {
   if (!provider) return false;
+  // Pi requires a compatible, enabled MCP extension on this runtime instance.
+  if (provider === "pi") return metadata?.managed_mcp === true;
   return MCP_SUPPORTED_PROVIDERS.has(provider);
 }

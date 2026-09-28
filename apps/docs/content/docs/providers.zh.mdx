@@ -36,7 +36,7 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
-| Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Pi | `pi` | ✓ | 需插件 | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
@@ -72,7 +72,34 @@ Multica 会保存工具返回的会话标识。下一次在同一任务中继续
 
 ## MCP 配置
 
-Antigravity、GitHub Copilot CLI、DevEco Code 和 Pi 暂不读取智能体中的 MCP 配置，因此创建智能体时不会显示这一项。
+Antigravity、GitHub Copilot CLI 和 DevEco Code 暂不读取智能体中的 MCP 配置，因此创建智能体时不会显示这一项。
+
+### Pi 受管 MCP
+
+守护进程检测到已启用且兼容的 `pi-mcp-adapter` 后，Pi 才支持 Multica 管理 MCP。目前支持的插件版本为 **2.37.0** 和 **3.1.0**，其他版本不视为兼容。请在运行时所在电脑安装支持的版本，再重启守护进程以刷新检测结果：
+
+```bash
+pi install npm:pi-mcp-adapter@2.37.0
+```
+
+只有上报了此能力的 Pi 运行时才会显示 MCP 页签。旧版守护进程、插件缺失或版本不兼容时，该页签不可用；未使用受管 MCP 的普通 Pi 运行仍可正常执行。Multica 不会自动安装或启用插件。
+
+受管运行通过插件的 `createMcpAdapter({ config })` 接口，只传入智能体解析后的 MCP 配置，不合并电脑上的全局或项目 MCP 配置。每次运行的配置与插件状态保存在私有临时目录中，运行结束、启动失败或取消后清理。全局 Pi 设置和 MCP 文件不会被修改。
+
+- 未设置 MCP 配置（`null`）时，保留 Pi 原有启动行为。
+- 显式空配置（`{}` 或 `{"mcpServers": {}}`）会启动隔离的受管运行，不加载任何 MCP server。
+- 受管运行关闭扩展自动发现，只加载 Multica 的 MCP 桥接扩展。其他扩展及其提供的模型服务不可用。Pi 原生和项目 skill、配置中的 skill 路径，以及已安装 npm 包或本地包中的 skill 会保留。
+
+Pi 包必须是已安装的 npm 包或使用绝对路径的本地包目录。Git 来源和相对路径会导致受管运行准备失败；Multica 不会为保留包资源而下载包。模型配置和认证按运行复制，刷新的凭据不会写回；如果 refresh token 发生轮换，可能需要重新认证。MCP 认证使用显式配置的 headers 和环境变量，不导入插件的全局 OAuth 凭据。
+
+#### 在运行时电脑上验证
+
+使用测试 MCP server 和已获授权的模型账号；真实运行可能消耗模型额度。
+
+1. 启用支持的插件版本并重启守护进程，确认 Pi 智能体显示 MCP 页签。再检查无兼容插件的情况：页签不可用，普通运行仍可执行。
+2. 为两个智能体分配不同的测试 MCP server，并发运行，让它们分别列出可用的 MCP 工具。每个智能体应只能看到自己分配的 server。再使用显式空配置，确认没有 MCP 工具。
+3. 绑定一个 skill，选择已认证的模型，完成一次受管运行。继续同一任务以检查会话恢复，并验证取消运行和 MCP 启动失败的情况。
+4. 比较执行前后全局 Pi 设置和 MCP 文件的校验和。确认完成、失败或取消的运行均已清理临时目录。日志和截图不要包含凭据。
 
 <Callout type="warning">
 MCP server 的命令、参数和环境变量会随智能体配置保存在服务器端。不要把不需要共享的本地凭据直接写入配置。

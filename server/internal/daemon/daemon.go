@@ -325,7 +325,8 @@ type workspaceState struct {
 	// successful profile fetch (older server / network blip); guarded by
 	// Daemon.mu like every other field on this struct.
 	profileSetSig string
-	// builtinVersions records, per built-in provider, the version carried by
+	// builtinVersions records, per built-in provider, the version (including
+	// Pi's managed MCP capability as a freshness signature) carried by
 	// the last register call the server ACCEPTED for this workspace. This is
 	// the daemon's per-workspace record of what the server knows — which the
 	// shared agentVersions cache deliberately is not: every probing path
@@ -802,9 +803,10 @@ func (d *Daemon) agentVersion(provider string) string {
 	return d.agentVersions[provider]
 }
 
-// builtinVersionsFromPayload extracts provider -> version from a registration
+// builtinVersionsFromPayload extracts provider -> freshness signature from a registration
 // payload's BUILT-IN entries. Custom profile entries (profile_id set) are not
-// version-tracked — the drift path owns their lifecycle.
+// version-tracked — the drift path owns their lifecycle. Pi includes its managed
+// MCP capability so installing or removing the adapter refreshes unchanged CLIs.
 func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string {
 	out := make(map[string]string, len(runtimes))
 	for _, rt := range runtimes {
@@ -812,6 +814,9 @@ func builtinVersionsFromPayload(runtimes []map[string]string) map[string]string 
 			continue
 		}
 		out[rt["type"]] = rt["version"]
+		if rt["type"] == "pi" {
+			out["pi"] += " (managed MCP: " + rt["managed_mcp"] + ")"
+		}
 	}
 	return out
 }
@@ -2838,15 +2843,26 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		runtime := map[string]string{
 			"name":    displayName,
 			"type":    r.name,
 			"version": r.version,
 			"status":  "online",
-		})
+		}
+		if r.name == "pi" {
+			probeErr := probePiManagedMCP()
+			runtime["managed_mcp"] = strconv.FormatBool(probeErr == nil)
+			if probeErr != nil {
+				d.logger.Debug("Pi managed MCP unavailable", "reason", probeErr)
+			}
+		}
+		runtimes = append(runtimes, runtime)
 	}
 	return runtimes, demotable, unavailable
 }
+
+// Read-only inspection: registration must never start Pi or an MCP server.
+var probePiManagedMCP = agent.ProbePiManagedMCP
 
 // cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
 // receive a shared built-in payload (see registerRuntimesForWorkspaceBatch) use

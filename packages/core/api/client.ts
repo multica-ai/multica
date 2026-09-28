@@ -248,6 +248,7 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  AgentRuntimeListSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -2006,8 +2007,11 @@ export class ApiClient {
     // workspace_id alone is not enough: the server resolves the workspace from
     // the slug header first, so a caller listing another workspace's runtimes
     // must override the header too.
-    return this.fetch(`/api/runtimes?${search}`, {
+    const res = await this.fetch<unknown>(`/api/runtimes?${search}`, {
       headers: workspaceHeader(workspaceSlug),
+    });
+    return parseWithFallback<AgentRuntime[]>(res, AgentRuntimeListSchema, [], {
+      endpoint: "listRuntimes",
     });
   }
 

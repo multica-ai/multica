@@ -36,7 +36,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
-| Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Pi | `pi` | ✓ | with adapter | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
@@ -72,7 +72,34 @@ Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
 ## MCP configuration
 
-Antigravity, GitHub Copilot CLI, DevEco Code, and Pi do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+Antigravity, GitHub Copilot CLI, and DevEco Code do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
+
+### Pi managed MCP
+
+Pi supports Multica-managed MCP when the daemon detects an enabled, compatible `pi-mcp-adapter` installation. Supported adapter versions are **2.37.0** and **3.1.0**. Other versions are not assumed compatible. Install a supported version on the runtime computer, then restart the daemon to refresh detection:
+
+```bash
+pi install npm:pi-mcp-adapter@2.37.0
+```
+
+The MCP tab is available only for Pi runtimes that report this capability. An older daemon, a missing adapter, or an incompatible adapter leaves it unavailable; ordinary Pi runs without managed MCP still work. Multica does not install or enable the adapter automatically.
+
+For a managed run, Multica supplies only the agent's resolved MCP configuration through the adapter's `createMcpAdapter({ config })` interface. It does not merge the computer's global or project MCP configuration. A private temporary directory holds the run's configuration and adapter state and is removed when the run ends, fails to start, or is cancelled. Global Pi settings and MCP files are not modified.
+
+- An unset MCP configuration (`null`) preserves Pi's existing startup behavior.
+- An explicit empty configuration (`{}` or `{"mcpServers": {}}`) starts an isolated managed run with no MCP servers.
+- Managed runs disable automatic extension discovery and load only Multica's MCP bridge. Other extensions, including model providers supplied by extensions, are unavailable. Native and project skills, configured skill paths, and skills from installed npm or local packages are retained.
+
+Pi packages must already be installed npm packages or absolute local package directories. Git and relative package sources fail managed-run preparation; Multica does not download packages to preserve their resources. Model configuration and authentication are copied per run, but refreshed credentials are not written back. If refresh tokens rotate, you may need to authenticate again. MCP authentication uses explicitly configured headers and environment variables; the adapter's global OAuth credentials are not imported.
+
+#### Verify on a runtime computer
+
+Use test MCP servers and a model account you are authorized to use; real runs can consume model credits.
+
+1. Restart the daemon with a supported adapter enabled and confirm the Pi agent exposes the MCP tab. Repeat without a compatible adapter and confirm ordinary runs still work while the tab is unavailable.
+2. Give two agents different test MCP servers, run them concurrently, and ask each to list its available MCP tools. Each must see only its own assigned server. Repeat with an explicit empty configuration and confirm no MCP tools appear.
+3. Bind a skill, select an authenticated model, and complete a managed run. Continue the same issue to check session resumption; also test a cancelled run and an MCP startup failure.
+4. Compare global Pi settings and MCP file checksums before and after. Check that each completed, failed, or cancelled run removes its temporary directory. Do not include credentials in logs or screenshots.
 
 <Callout type="warning">
 MCP server commands, arguments, and environment variables are saved server-side with the agent configuration. Do not write local credentials you have no need to share into the configuration.
