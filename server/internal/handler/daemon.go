@@ -4345,7 +4345,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		// 5xx so the daemon retries the terminal callback and the completion —
 		// including the single chat outcome row — lands exactly once (MUL-4351).
 		slog.Warn("complete task failed", "task_id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to complete task")
 		return
 	}
 	if !transitioned {
@@ -5051,7 +5051,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		// isTransientError) — retries and the fail, gap flag, and retry land
 		// exactly once (MUL-5305). An invalid request body still returns 400 above.
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to fail task")
 		return
 	}
 	if !transitioned {

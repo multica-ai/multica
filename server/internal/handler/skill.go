@@ -2239,7 +2239,7 @@ func skillImportOverwriteFailure(err error) (int, string) {
 	case errors.Is(err, errSkillOverwriteNameMismatch):
 		return http.StatusConflict, "target skill name no longer matches the imported skill"
 	default:
-		return http.StatusInternalServerError, "failed to overwrite skill: " + err.Error()
+		return http.StatusInternalServerError, "failed to overwrite skill"
 	}
 }
 
@@ -2273,6 +2273,9 @@ func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Requ
 		})
 		if err != nil {
 			status, reason := skillImportOverwriteFailure(err)
+			if status == http.StatusInternalServerError {
+				slog.Warn("overwrite imported skill failed", append(logger.RequestAttrs(r), "error", err)...)
+			}
 			writeJSON(w, status, SkillImportResult{
 				Status:        "failed",
 				Reason:        reason,
@@ -2286,9 +2289,10 @@ func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Requ
 	case importOnConflictRename:
 		resp, err := h.createRenamedImportedSkill(r.Context(), workspaceUUID, creatorUUID, name, imported, config, files)
 		if err != nil {
+			slog.Warn("create renamed skill failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeJSON(w, http.StatusInternalServerError, SkillImportResult{
 				Status:        "failed",
-				Reason:        "failed to create renamed skill: " + err.Error(),
+				Reason:        "failed to create renamed skill",
 				ExistingSkill: &existingInfo,
 			})
 			return
@@ -2439,9 +2443,10 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 
 	if structuredResult {
 		if existing, found, lerr := h.lookupSkillByName(r.Context(), workspaceUUID, name); lerr != nil {
+			slog.Warn("look up existing skill failed", append(logger.RequestAttrs(r), "error", lerr)...)
 			writeJSON(w, http.StatusInternalServerError, SkillImportResult{
 				Status: "failed",
-				Reason: "failed to check for existing skill: " + lerr.Error(),
+				Reason: "failed to check for existing skill",
 			})
 			return
 		} else if found {
