@@ -453,6 +453,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
+	h.SupportDispatchClaimEnabled = featureflags.SupportDispatchClaimEnabled(context.Background(), opts.FeatureFlags)
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
@@ -1695,6 +1696,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
 			r.Route("/{id}", func(r chi.Router) {
+				// Historical claim read-back must not depend on a live issue.
+				r.With(handler.RequireHumanActor, middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin")).Get(
+					"/support-dispatch/claims/{issueID}", h.GetSupportDispatchClaim)
 				// Member-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
@@ -2022,6 +2026,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateIssue)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
+					// Default-off server-side evidence and once-ever claim; neither invokes an agent.
+					r.Get("/support-dispatch/evidence", h.GetSupportDispatchEvidence)
+					r.Put("/support-dispatch/claim", h.ClaimSupportDispatch)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)

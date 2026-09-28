@@ -1446,6 +1446,17 @@ type SquadMember struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type SupportDispatchClaim struct {
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	IssueRevision        int64              `json:"issue_revision"`
+	StaffCommentID       pgtype.UUID        `json:"staff_comment_id"`
+	StaffCommentRevision int64              `json:"staff_comment_revision"`
+	AttestationDigest    string             `json:"attestation_digest"`
+	ClaimedByUserID      pgtype.UUID        `json:"claimed_by_user_id"`
+	ClaimedAt            pgtype.Timestamptz `json:"claimed_at"`
+}
+
 type SysCronExecution struct {
 	ID           pgtype.UUID        `json:"id"`
 	JobName      string             `json:"job_name"`

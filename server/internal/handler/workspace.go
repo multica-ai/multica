@@ -1136,6 +1136,20 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
 		return
 	}
+	// A support dispatch claim is a permanent issue-wide stop, including after
+	// a host crash. Do not silently discard that history with a workspace
+	// teardown. The claim writer takes KEY SHARE on this workspace first, so
+	// there is no insert between this check and the final delete commit.
+	var supportClaimed bool
+	if err := tx.QueryRow(r.Context(), `SELECT EXISTS (
+		SELECT 1 FROM support_dispatch_claim WHERE workspace_id = $1)`, requester.WorkspaceID).Scan(&supportClaimed); err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "check support claims", err)
+		return
+	}
+	if supportClaimed {
+		writeError(w, http.StatusConflict, "workspace has unreconciled support dispatch claims")
+		return
+	}
 	// Take a best-effort snapshot for post-commit daemon invalidation. Runtime
 	// registration does not participate in the workspace delete lock protocol,
 	// so PR1 retains the heartbeat lookup as the correctness fallback for a

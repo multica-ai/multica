@@ -125,6 +125,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"squad":                              workspaceDelete,
 	"squad_member":                       workspaceDelete,
 	"sys_cron_executions":                workspaceDeleteKeep,
+	"support_dispatch_claim":             workspaceDeleteSettle, // Block teardown while any issue-wide reservation remains.
 	"task_message":                       workspaceDelete,
 	"task_supplement":                    workspaceDelete,
 	"task_supplement_capability":         workspaceDelete,
