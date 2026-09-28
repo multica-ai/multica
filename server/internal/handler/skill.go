@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/logger"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -569,7 +570,8 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a skill with this name already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
+		slog.Warn("create skill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create skill")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
@@ -658,7 +660,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a skill with this name already exists")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to update skill: "+err.Error())
+		slog.Warn("update skill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to update skill")
 		return
 	}
 
@@ -681,7 +684,8 @@ func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 				Content: sanitizeNullBytes(f.Content),
 			})
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
+				slog.Warn("upsert skill file failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 				return
 			}
 			fileResps = append(fileResps, skillFileToResponse(sf))
@@ -2462,7 +2466,8 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 			}
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
+		slog.Warn("create skill failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to create skill")
 		return
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
@@ -2545,7 +2550,8 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		Content: sanitizeNullBytes(req.Content),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
+		slog.Warn("upsert skill file failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to upsert skill file")
 		return
 	}
 
@@ -2649,7 +2655,8 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 			AgentID: agent.ID,
 			SkillID: skillID,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
+			slog.Warn("add agent skill failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to add agent skill")
 			return
 		}
 	}
@@ -2698,7 +2705,8 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 			AgentID: agent.ID,
 			SkillID: skillID,
 		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to add agent skill: "+err.Error())
+			slog.Warn("add agent skill failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to add agent skill")
 			return
 		}
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -539,7 +540,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"db_error",
 					true,
 				))
-				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				slog.Warn("register runtime failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to register runtime")
 				return
 			}
 			provider = agent.ProfileRuntimeType(profile.RuntimeType, profile.ProtocolFamily)
@@ -585,7 +587,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"db_error",
 					true,
 				))
-				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				slog.Warn("register runtime failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to register runtime")
 				return
 			}
 			inserted = row.Inserted
@@ -1825,7 +1828,8 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
+		slog.Warn("claim tasks failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to claim tasks")
 		return
 	}
 
@@ -3751,7 +3755,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	claimMs = time.Since(claimStart).Milliseconds()
 	if err != nil {
 		outcome = "error_claim"
-		writeError(w, http.StatusInternalServerError, "failed to claim task: "+err.Error())
+		slog.Warn("claim task failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to claim task")
 		return
 	}
 

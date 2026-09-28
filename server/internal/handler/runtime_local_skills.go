@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -604,7 +605,8 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 
 	req, err := h.LocalSkillListStore.Create(r.Context(), rt.runtimeID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request: "+err.Error())
+		slog.Warn("enqueue local skills request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request")
 		return
 	}
 	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkills)
@@ -621,7 +623,8 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillListStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != rt.runtimeID {
@@ -689,7 +692,8 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		SupportsConflict: req.SupportsConflict || req.Action == LocalSkillImportActionOverwrite,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
+		slog.Warn("enqueue local skill import failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import")
 		return
 	}
 	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkillImport)
@@ -706,7 +710,8 @@ func (h *Handler) GetLocalSkillImportRequest(w http.ResponseWriter, r *http.Requ
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillImportStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != rt.runtimeID {
@@ -726,7 +731,8 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillListStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != runtimeID {
@@ -792,7 +798,8 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillImportStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != runtimeID {

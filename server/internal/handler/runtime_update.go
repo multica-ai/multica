@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 )
 
@@ -270,7 +271,8 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 
 	update, err := h.UpdateStore.Get(r.Context(), updateID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load update: "+err.Error())
+		slog.Warn("load update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
 		return
 	}
 	if update == nil || update.RuntimeID != uuidToString(rt.ID) {
@@ -301,7 +303,8 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 
 	existing, err := h.UpdateStore.Get(r.Context(), updateID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load update: "+err.Error())
+		slog.Warn("load update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
 		return
 	}
 	if existing == nil || existing.RuntimeID != runtimeID {
