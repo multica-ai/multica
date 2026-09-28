@@ -369,6 +369,24 @@ func Unattributed(evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
 	return finalizeAttribution(Result{Source: SourceUnattributed, EvidenceKind: evidenceKind, EvidenceRefID: evidenceRefID})
 }
 
+// InheritCompletionHandoff builds attribution for a completion-fallback
+// successor run (GH #8719): the authorization/accountable principal is
+// inherited from the completed worker's established delegation, while the
+// lifecycle evidence points at this handoff's fallback comment. It goes
+// through finalizeAttribution like every other constructor, so a hand-built
+// literal is never stamped onto the queue.
+func InheritCompletionHandoff(principal, accountable pgtype.UUID, delegatedFromTaskID, ruleVersionID, fallbackCommentID pgtype.UUID) Result {
+	return finalizeAttribution(Result{
+		UserID:              principal,
+		AccountableUserID:   accountable,
+		Source:              SourceCommentSource,
+		DelegatedFromTaskID: delegatedFromTaskID,
+		RuleVersionID:       ruleVersionID,
+		EvidenceKind:        EvidenceComment,
+		EvidenceRefID:       fallbackCommentID,
+	})
+}
+
 // RuleOwner builds attribution for an autopilot-triggered run whose firing
 // trigger has no created_by principal (MUL-4302 §3.4) — the coarser fallback
 // behind TriggerOwner. publisherUserID, the member who published the active rule
