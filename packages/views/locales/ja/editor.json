@@ -164,5 +164,11 @@
     "commands": {
       "note": "メモを追加 — エージェントをトリガーしません"
     }
+  },
+  "details_block": {
+    "summary_default": "詳細",
+    "summary_aria_label": "概要",
+    "body_placeholder": "本文 (Markdown)",
+    "body_aria_label": "詳細の本文 (Markdown)"
   }
 }

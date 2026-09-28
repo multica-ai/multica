@@ -164,5 +164,11 @@
     "export_png": "下载 PNG",
     "export_svg": "下载 SVG",
     "export_source": "下载 .mmd"
+  },
+  "details_block": {
+    "summary_default": "详情",
+    "summary_aria_label": "摘要",
+    "body_placeholder": "正文 (Markdown)",
+    "body_aria_label": "详情正文 (Markdown)"
   }
 }
