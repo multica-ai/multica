@@ -192,6 +192,10 @@ const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
   done: "text-status-done",
   blocked: "text-status-blocked",
   cancelled: "text-status-cancelled",
+  // Archived is the fork's M-11 terminal status. It presents as the `closed`
+  // category, so it takes Cancelled's muted tone rather than inventing a
+  // second "terminal" colour the palette does not have.
+  archived: "text-status-cancelled",
 };
 
 // Public component
