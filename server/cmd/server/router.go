@@ -1746,6 +1746,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// adds it to their own agent through the agent routes.
 					r.Post("/mcp-servers", h.CreateWorkspaceMcpServer)
 					r.Put("/mcp-servers/{serverId}", h.UpdateWorkspaceMcpServer)
+					r.Get("/mcp-servers/{serverId}/editable-config", h.GetWorkspaceMcpEditableConfig)
+					r.Patch("/mcp-servers/{serverId}/config", h.PatchWorkspaceMcpConfig)
 					r.Delete("/mcp-servers/{serverId}", h.DeleteWorkspaceMcpServer)
 					r.Post("/share-links", h.CreateShareLink)
 					r.Delete("/share-links/{linkId}", h.RevokeShareLink)

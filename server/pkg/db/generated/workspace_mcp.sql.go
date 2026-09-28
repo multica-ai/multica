@@ -67,7 +67,7 @@ func (q *Queries) CountWorkspaceMcpServerAgents(ctx context.Context, workspaceID
 const createWorkspaceMcpServer = `-- name: CreateWorkspaceMcpServer :one
 INSERT INTO workspace_mcp_server (workspace_id, name, config, created_by)
 VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, name, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, config, created_by, created_at, updated_at, revision
 `
 
 type CreateWorkspaceMcpServerParams struct {
@@ -93,6 +93,7 @@ func (q *Queries) CreateWorkspaceMcpServer(ctx context.Context, arg CreateWorksp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -127,7 +128,7 @@ func (q *Queries) DeleteWorkspaceMcpServer(ctx context.Context, arg DeleteWorksp
 }
 
 const getWorkspaceMcpServer = `-- name: GetWorkspaceMcpServer :one
-SELECT id, workspace_id, name, config, created_by, created_at, updated_at FROM workspace_mcp_server
+SELECT id, workspace_id, name, config, created_by, created_at, updated_at, revision FROM workspace_mcp_server
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -147,6 +148,7 @@ func (q *Queries) GetWorkspaceMcpServer(ctx context.Context, arg GetWorkspaceMcp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -236,7 +238,7 @@ func (q *Queries) ListEnabledAgentMcpServers(ctx context.Context, agentID pgtype
 }
 
 const listWorkspaceMcpServers = `-- name: ListWorkspaceMcpServers :many
-SELECT id, workspace_id, name, config, created_by, created_at, updated_at FROM workspace_mcp_server
+SELECT id, workspace_id, name, config, created_by, created_at, updated_at, revision FROM workspace_mcp_server
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -261,6 +263,7 @@ func (q *Queries) ListWorkspaceMcpServers(ctx context.Context, workspaceID pgtyp
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -359,7 +362,7 @@ UPDATE workspace_mcp_server SET
     config = COALESCE($4, config),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, config, created_by, created_at, updated_at, revision
 `
 
 type UpdateWorkspaceMcpServerParams struct {
@@ -388,6 +391,7 @@ func (q *Queries) UpdateWorkspaceMcpServer(ctx context.Context, arg UpdateWorksp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
