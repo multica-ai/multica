@@ -834,6 +834,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     availableAgents,
     agentsSettled,
     sessions,
+    sessionsLoaded,
     projects,
     activeSessionId,
     selectedAgentId,
