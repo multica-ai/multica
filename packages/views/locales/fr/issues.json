@@ -147,7 +147,8 @@
     "in_review": "En relecture",
     "done": "Terminé",
     "blocked": "Bloqué",
-    "cancelled": "Annulé"
+    "cancelled": "Annulé",
+    "archived": "Archivé"
   },
   "status_category": {
     "unstarted": "Non démarré",

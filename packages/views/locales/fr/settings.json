@@ -75,7 +75,8 @@
       "in_review": "Livré, en attente d'une relecture humaine. Clôt l'exécution de l'autopilote.",
       "blocked": "À l'arrêt, en attente d'une dépendance extérieure.",
       "done": "Terminé.",
-      "cancelled": "Abandonné."
+      "cancelled": "Abandonné.",
+      "archived": "Mis de côté sans être supprimé. État terminal — se comporte comme « vu »."
     },
     "pr_auto_complete_badge": "Définie à la fusion des PR",
     "built_in_locked": "Les états intégrés pilotent le comportement du système : ils ne peuvent être ni modifiés ni archivés, mais vous pouvez les réordonner.",
