@@ -4190,12 +4190,32 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 // Issue status is NOT changed here — the agent manages it via the CLI.
 func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, supplementSupport ...bool) (*db.AgentTaskQueue, error) {
 	enableTaskSupplement := len(supplementSupport) > 0 && supplementSupport[0]
-	task, err := s.Queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin legacy task start: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	locked, err := qtx.LockAgentTaskStartLegacy(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("lock legacy task start: %w", err)
+	}
+	pool, poolErr := qtx.GetProviderQuotaPoolForAgentForShare(ctx, locked.AgentID)
+	if poolErr != nil && !errors.Is(poolErr, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("load legacy task quota pool: %w", poolErr)
+	}
+	if poolErr == nil && pool.State != "open" {
+		return nil, pgx.ErrNoRows
+	}
+	task, err := qtx.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
 		TaskID:               taskID,
 		EnableTaskSupplement: enableTaskSupplement,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit legacy task start: %w", err)
 	}
 	s.taskStarted(ctx, task)
 	return &task, nil
@@ -4220,6 +4240,13 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 	}
 	replay := task.Status == "running"
 	if !replay {
+		pool, poolErr := qtx.GetProviderQuotaPoolForAgentForShare(ctx, task.AgentID)
+		if poolErr != nil && !errors.Is(poolErr, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("load task quota pool: %w", poolErr)
+		}
+		if poolErr == nil && pool.State != "open" {
+			return nil, pgx.ErrNoRows
+		}
 		task, err = qtx.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
 			TaskID:               task.ID,
 			EnableTaskSupplement: len(supplementSupport) > 0 && supplementSupport[0],
@@ -4912,6 +4939,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
+		if err := holdQuotaPoolForFailure(ctx, qtx, t, failureReason, errMsg); err != nil {
+			return err
+		}
 
 		// Atomic with the status flip, same as the completion path. A failed
 		// coordinator that already received the recovery comment has consumed

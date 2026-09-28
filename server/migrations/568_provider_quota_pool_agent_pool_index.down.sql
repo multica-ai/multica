@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS provider_quota_pool_agent_pool_idx;

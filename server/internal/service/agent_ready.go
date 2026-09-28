@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -91,9 +93,9 @@ const runtimeOfflineCodeNotExecutable = "not_executable"
 // the profile right now resolves it by itself.
 const runtimeOfflineCodeDshProfile = "dsh_profile"
 
-// RuntimeBlockedNeedsNotice reports whether a blocked verdict's reason is one a
-// human has to repair on the runtime's machine, and therefore one that must
-// leave a durable explanation on the issue (MUL-6164).
+// RuntimeBlockedNeedsNotice reports whether a refused trigger needs a durable
+// explanation on the issue. A quota hold also needs one: assignment and agent
+// mentions can be unattended, so their transient response is not sufficient.
 //
 // A predicate rather than an inline comparison because three admission paths
 // ask it — the refused @mention, the refused assignment, and the refused
@@ -103,7 +105,8 @@ const runtimeOfflineCodeDshProfile = "dsh_profile"
 func RuntimeBlockedNeedsNotice(code dispatch.ReasonCode) bool {
 	return code == dispatch.ReasonRuntimeUnusable ||
 		code == dispatch.ReasonRuntimeProfileMissing ||
-		code == dispatch.ReasonRuntimeAccessDenied
+		code == dispatch.ReasonRuntimeAccessDenied ||
+		code == dispatch.ReasonProviderQuotaHeld
 }
 
 // AgentReadiness reports whether an agent can accept new work right now, and
@@ -143,6 +146,20 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 			Reason:       dispatch.ReasonAgentRuntimeRequired,
 			Detail:       "agent has no runtime bound",
 		}, nil
+	}
+	pool, err := lookup.Queries.GetProviderQuotaPoolForAgent(ctx, agent.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return AgentVerdict{}, err
+	}
+	if err == nil && pool.State != "open" {
+		detail := "provider account quota is held"
+		switch {
+		case pool.ResetAt.Valid:
+			detail += " until " + pool.ResetAt.Time.UTC().Format(time.RFC3339)
+		case pool.ResetDate.Valid:
+			detail += " through " + pool.ResetDate.Time.Format("2006-01-02") + " (" + pool.Timezone + ")"
+		}
+		return AgentVerdict{Availability: AgentBlocked, Reason: dispatch.ReasonProviderQuotaHeld, Detail: detail}, nil
 	}
 	rt, err := lookup.Get(ctx, agent.RuntimeID)
 	if err != nil {
@@ -266,6 +283,9 @@ func RuntimeUnusableNotice(agentName string, verdict AgentVerdict) string {
 	name := agentName
 	if name == "" {
 		name = "The assigned agent"
+	}
+	if verdict.Reason == dispatch.ReasonProviderQuotaHeld {
+		return fmt.Sprintf("%s was not queued because its provider account quota is held. %s. Trigger the agent again after the pool is released.", name, verdict.Detail)
 	}
 	if verdict.Reason == dispatch.ReasonRuntimeAccessDenied {
 		return fmt.Sprintf(

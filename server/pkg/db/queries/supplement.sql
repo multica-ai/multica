@@ -8,6 +8,11 @@ WITH candidate AS MATERIALIZED (
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = @task_id
       AND t.status IN ('dispatched', 'waiting_local_directory')
+      AND NOT EXISTS (
+          SELECT 1 FROM provider_quota_pool_agent membership
+          JOIN provider_quota_pool pool ON pool.id = membership.pool_id
+          WHERE membership.agent_id = t.agent_id AND pool.state <> 'open'
+      )
     FOR UPDATE OF t
 ), capability AS (
     INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability)

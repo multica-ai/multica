@@ -766,6 +766,11 @@ WHERE id = (
     WHERE atq.agent_id = @agent_id
       AND atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM provider_quota_pool_agent membership
+          JOIN provider_quota_pool pool ON pool.id = membership.pool_id
+          WHERE membership.agent_id = atq.agent_id AND pool.state <> 'open'
+      )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
       AND EXISTS (
           SELECT 1
@@ -987,6 +992,11 @@ SET status = 'running',
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
 WHERE agent_task_queue.id = $1 AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
+  AND NOT EXISTS (
+      SELECT 1 FROM provider_quota_pool_agent membership
+      JOIN provider_quota_pool pool ON pool.id = membership.pool_id
+      WHERE membership.agent_id = agent_task_queue.agent_id AND pool.state <> 'open'
+  )
 RETURNING *;
 
 -- name: LockAgentTaskStartClaim :one
@@ -995,6 +1005,13 @@ RETURNING *;
 SELECT * FROM agent_task_queue
 WHERE id = $1 AND runtime_id = $2 AND dispatched_at = $3
   AND status IN ('dispatched', 'waiting_local_directory', 'running')
+FOR UPDATE;
+
+-- name: LockAgentTaskStartLegacy :one
+-- Older daemons do not send a claim generation. Serialize their one-shot start
+-- with quota hold transitions using the same task-then-pool lock order.
+SELECT * FROM agent_task_queue
+WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
 FOR UPDATE;
 
 -- name: MarkAgentTaskWaitingLocalDirectory :one
@@ -2300,6 +2317,11 @@ ORDER BY priority DESC, created_at ASC;
 SELECT atq.* FROM agent_task_queue atq
 WHERE atq.runtime_id = $1
   AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM provider_quota_pool_agent membership
+      JOIN provider_quota_pool pool ON pool.id = membership.pool_id
+      WHERE membership.agent_id = atq.agent_id AND pool.state <> 'open'
+  )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
   AND EXISTS (
       -- Keep this authorization fence in sync with ClaimAgentTask.
@@ -2421,6 +2443,11 @@ RETURNING *;
 SELECT atq.* FROM agent_task_queue atq
 WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
   AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM provider_quota_pool_agent membership
+      JOIN provider_quota_pool pool ON pool.id = membership.pool_id
+      WHERE membership.agent_id = atq.agent_id AND pool.state <> 'open'
+  )
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
   AND EXISTS (
       -- Keep this authorization fence in sync with ClaimAgentTask.

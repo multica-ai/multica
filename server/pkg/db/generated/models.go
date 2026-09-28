@@ -1327,6 +1327,41 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type ProviderQuotaPool struct {
+	ID             pgtype.UUID        `json:"id"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	Name           string             `json:"name"`
+	ProviderHint   string             `json:"provider_hint"`
+	Timezone       string             `json:"timezone"`
+	State          string             `json:"state"`
+	ResetAt        pgtype.Timestamptz `json:"reset_at"`
+	ResetDate      pgtype.Date        `json:"reset_date"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
+	ProbeStartedAt pgtype.Timestamptz `json:"probe_started_at"`
+	Revision       int64              `json:"revision"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ProviderQuotaPoolAgent struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	PoolID    pgtype.UUID        `json:"pool_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProviderQuotaPoolEvent struct {
+	ID           pgtype.UUID        `json:"id"`
+	PoolID       pgtype.UUID        `json:"pool_id"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	SourceTaskID pgtype.UUID        `json:"source_task_id"`
+	EventType    string             `json:"event_type"`
+	Reason       string             `json:"reason"`
+	OldState     string             `json:"old_state"`
+	NewState     string             `json:"new_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
