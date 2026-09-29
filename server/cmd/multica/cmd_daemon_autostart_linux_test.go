@@ -3,6 +3,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -109,4 +111,214 @@ func TestSystemdSupervisorGates(t *testing.T) {
 			t.Error("platformDaemonUnderOwnSystemdUnit = true under a foreign unit")
 		}
 	})
+}
+
+// useAutostartConfigHome points XDG_CONFIG_HOME at a fresh temp dir so every
+// path helper (the systemd user dir, the autostart dir) resolves into a
+// sandbox — never the test host's real ~/.config.
+func useAutostartConfigHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	return dir
+}
+
+func writeAutostartFixture(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create fixture dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write fixture %s: %v", path, err)
+	}
+}
+
+// unmarkedUnitFixture is a plausible hand-written unit at Multica's own name —
+// no marker, and WantedBy a target other than default, exactly the shape the
+// review found deletable.
+const unmarkedUnitFixture = `[Unit]
+Description=user's own service with an EnvironmentFile
+[Service]
+ExecStart=/usr/bin/true
+[Install]
+WantedBy=graphical-session.target
+`
+
+func markedUnitFixture(t *testing.T) string {
+	t.Helper()
+	return systemdUnitContent(autostartSpec{Exe: "/usr/local/bin/multica", Args: autostartArgs("")})
+}
+
+// TestPlatformReadAutostartReportsUnmarkedUnitPresence pins the read side of
+// the review's gap: Enabled tracks only default.target.wants, so a
+// hand-written unit reads disabled whether it is unlinked or linked under
+// another target — while Present stays true and Managed false, which is what
+// the ownership guards now key off.
+func TestPlatformReadAutostartReportsUnmarkedUnitPresence(t *testing.T) {
+	if !systemdAvailable() {
+		t.Skip("systemctl not available")
+	}
+	useAutostartConfigHome(t)
+
+	readUnmarked := func(t *testing.T) autostartState {
+		t.Helper()
+		path, err := systemdUnitPath("")
+		if err != nil {
+			t.Fatalf("systemdUnitPath: %v", err)
+		}
+		writeAutostartFixture(t, path, unmarkedUnitFixture)
+		state, err := platformReadAutostart("")
+		if err != nil {
+			t.Fatalf("platformReadAutostart: %v", err)
+		}
+		return state
+	}
+
+	t.Run("unlinked unmarked unit is present but disabled", func(t *testing.T) {
+		state := readUnmarked(t)
+		if !state.Present || state.Enabled || state.Managed {
+			t.Fatalf("state = %+v, want Present && !Enabled && !Managed", state)
+		}
+	})
+
+	t.Run("unmarked unit linked under another target reads disabled", func(t *testing.T) {
+		state := readUnmarked(t)
+		path, err := systemdUnitPath("")
+		if err != nil {
+			t.Fatalf("systemdUnitPath: %v", err)
+		}
+		linkUnit(t, path, "graphical-session.target.wants")
+		state, err = platformReadAutostart("")
+		if err != nil {
+			t.Fatalf("platformReadAutostart: %v", err)
+		}
+		// Linked — but not under default.target, so Enabled stays false and
+		// the old Enabled-keyed guard would have missed it entirely.
+		if !state.Present || state.Enabled || state.Managed {
+			t.Fatalf("state = %+v, want Present && !Enabled && !Managed despite the other-target link", state)
+		}
+	})
+
+	t.Run("unmarked unit linked under default.target is enabled but still foreign", func(t *testing.T) {
+		state := readUnmarked(t)
+		path, err := systemdUnitPath("")
+		if err != nil {
+			t.Fatalf("systemdUnitPath: %v", err)
+		}
+		linkUnit(t, path, "default.target.wants")
+		state, err = platformReadAutostart("")
+		if err != nil {
+			t.Fatalf("platformReadAutostart: %v", err)
+		}
+		if !state.Present || !state.Enabled || state.Managed {
+			t.Fatalf("state = %+v, want Present && Enabled && !Managed", state)
+		}
+	})
+}
+
+// linkUnit creates the wants symlink systemctl enable would create, under the
+// named wants directory relative to the unit's directory.
+func linkUnit(t *testing.T, unitPath, wantsSubdir string) {
+	t.Helper()
+	wantsDir := filepath.Join(filepath.Dir(unitPath), wantsSubdir)
+	if err := os.MkdirAll(wantsDir, 0o755); err != nil {
+		t.Fatalf("create wants dir: %v", err)
+	}
+	if err := os.Symlink(unitPath, filepath.Join(wantsDir, filepath.Base(unitPath))); err != nil {
+		t.Fatalf("link unit: %v", err)
+	}
+}
+
+// TestPlatformRemoveAutostartRefusesUnmarkedUnit pins the removal backstop:
+// even if a caller skips the shared guard, an unmarked file at our unit path
+// is never deleted — and the refusal fires BEFORE systemctl disable, so the
+// user's unit is not unlinked as a side effect either.
+func TestPlatformRemoveAutostartRefusesUnmarkedUnit(t *testing.T) {
+	if !systemdAvailable() {
+		t.Skip("systemctl not available")
+	}
+	useAutostartConfigHome(t)
+	path, err := systemdUnitPath("")
+	if err != nil {
+		t.Fatalf("systemdUnitPath: %v", err)
+	}
+	writeAutostartFixture(t, path, unmarkedUnitFixture)
+
+	_, changed, err := platformRemoveAutostart("")
+	if !errors.Is(err, errAutostartUnmanaged) {
+		t.Fatalf("platformRemoveAutostart = %v, want errAutostartUnmanaged", err)
+	}
+	if changed {
+		t.Fatalf("changed = true, want false — nothing may be removed")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("unmarked unit was touched: %v", statErr)
+	}
+}
+
+// TestPlatformRemoveAutostartKeepsUnmarkedXdgAlongsideManagedUnit is the
+// review's coexistence scenario: a Multica-created unit plus a hand-written
+// .desktop at our XDG name. Disabling Multica's registration may remove the
+// unit but must leave the user's .desktop alone — the sweep funnels through
+// the marker-checked removeXdgAutostartFile, which enable and the
+// `daemon start` refresh use as well, so this covers all three call sites.
+func TestPlatformRemoveAutostartKeepsUnmarkedXdgAlongsideManagedUnit(t *testing.T) {
+	if !systemdAvailable() {
+		t.Skip("systemctl not available")
+	}
+	useAutostartConfigHome(t)
+	unitPath, err := systemdUnitPath("")
+	if err != nil {
+		t.Fatalf("systemdUnitPath: %v", err)
+	}
+	xdgPath, err := xdgAutostartPath("")
+	if err != nil {
+		t.Fatalf("xdgAutostartPath: %v", err)
+	}
+	writeAutostartFixture(t, unitPath, markedUnitFixture(t))
+	writeAutostartFixture(t, xdgPath, "[Desktop Entry]\nType=Application\nName=hand-written\nExec=/usr/bin/true\n")
+
+	_, changed, err := platformRemoveAutostart("")
+	if err != nil {
+		t.Fatalf("platformRemoveAutostart = %v", err)
+	}
+	if !changed {
+		t.Fatalf("changed = false, want true — the marked unit should be removed")
+	}
+	if _, statErr := os.Stat(unitPath); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("marked unit still present (stat err = %v), want it removed", statErr)
+	}
+	if _, statErr := os.Stat(xdgPath); statErr != nil {
+		t.Fatalf("unmarked .desktop was deleted (%v) — only Multica-created files may be removed", statErr)
+	}
+}
+
+// TestRemoveXdgAutostartFileOnlyRemovesMarkedEntries covers the shared XDG
+// sweeper directly: every removal path (enable's stale sweep, the daemon
+// start refresh, disable) funnels through it, so an unmarked file there must
+// survive all of them.
+func TestRemoveXdgAutostartFileOnlyRemovesMarkedEntries(t *testing.T) {
+	useAutostartConfigHome(t)
+	path, err := xdgAutostartPath("")
+	if err != nil {
+		t.Fatalf("xdgAutostartPath: %v", err)
+	}
+
+	unmarked := "[Desktop Entry]\nType=Application\nName=hand-written\nExec=/usr/bin/true\n"
+	writeAutostartFixture(t, path, unmarked)
+	if removeXdgAutostartFile("") {
+		t.Fatal("removeXdgAutostartFile removed an unmarked file")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("unmarked .desktop no longer exists: %v", statErr)
+	}
+
+	marked := xdgAutostartContent(autostartSpec{Exe: "/usr/local/bin/multica", Args: autostartArgs("")})
+	writeAutostartFixture(t, path, marked)
+	if !removeXdgAutostartFile("") {
+		t.Fatal("removeXdgAutostartFile left a marked file in place")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Fatalf("marked .desktop still present (stat err = %v), want it removed", statErr)
+	}
 }

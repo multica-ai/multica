@@ -435,7 +435,7 @@ func TestSyncDaemonAutostart(t *testing.T) {
 			supported:      true,
 			refreshAllowed: true,
 			read: func(string) (autostartState, error) {
-				return autostartState{Enabled: true, Managed: false}, nil
+				return autostartState{Present: true, Enabled: true, Managed: false}, nil
 			},
 			write: func(string, autostartSpec) (autostartState, bool, error) {
 				writes++
@@ -450,6 +450,57 @@ func TestSyncDaemonAutostart(t *testing.T) {
 		}
 		if out != "" {
 			t.Errorf("stderr = %q, want silence — it IS registered, just not ours", out)
+		}
+	})
+
+	t.Run("present but unlinked foreign entry stays silent too", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		writes := 0
+		stubPlatform(t, stubAutostartPlatform{
+			supported:      true,
+			refreshAllowed: true,
+			read: func(string) (autostartState, error) {
+				// The review's Linux shape: file at our path, not linked, not ours.
+				return autostartState{Present: true, Enabled: false, Managed: false}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				writes++
+				return autostartState{}, false, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("staging", true)
+		out := sc.read()
+		if writes != 0 || out != "" {
+			t.Fatalf("writes=%d stderr=%q, want neither a rewrite nor an enable-hint for a foreign unlinked file", writes, out)
+		}
+	})
+
+	t.Run("owned but unlinked entry gets the hint, never a silent heal", func(t *testing.T) {
+		t.Setenv("MULTICA_LAUNCHED_BY", "")
+		writes := 0
+		stubPlatform(t, stubAutostartPlatform{
+			supported:      true,
+			refreshAllowed: true,
+			read: func(string) (autostartState, error) {
+				// e.g. the user ran `systemctl disable` on OUR unit: the hint
+				// may point at enable, but a plain `daemon start` must not
+				// re-link an entry the user deliberately turned off.
+				return autostartState{Present: true, Enabled: false, Managed: true}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				writes++
+				return autostartState{}, false, nil
+			},
+		})
+		sc := captureStderr(t)
+		syncDaemonAutostart("staging", true)
+		out := sc.read()
+		if writes != 0 {
+			t.Fatalf("writeAutostart calls = %d, want 0 — refresh must not re-enable a disabled entry", writes)
+		}
+		if !strings.Contains(out, "multica daemon autostart enable") {
+			t.Errorf("stderr = %q, want the enable hint for an owned-but-unlinked entry", out)
 		}
 	})
 
@@ -541,6 +592,7 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 			supported: true,
 			read: func(string) (autostartState, error) {
 				return autostartState{
+					Present:   true,
 					Enabled:   true,
 					Managed:   false,
 					Mechanism: autostartMechanismSystemd,
@@ -602,6 +654,7 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 			supported: true,
 			read: func(string) (autostartState, error) {
 				return autostartState{
+					Present:   true,
 					Enabled:   true,
 					Managed:   false,
 					Mechanism: autostartMechanismSystemd,
@@ -616,6 +669,34 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		err := runDaemonAutostartDisable(autostartCmdFor(t, "", ""), nil)
 		if err == nil || !strings.Contains(err.Error(), "not created by Multica") {
 			t.Fatalf("runDaemonAutostartDisable = %v, want a refusal naming the foreign file", err)
+		}
+	})
+
+	// The review's Linux gap: Enabled only means "linked in
+	// default.target.wants", so a hand-written unit that is not enabled (or
+	// enabled under another target) reads disabled — guarding on Enabled let
+	// `disable` delete it. Presence, not enablement, must drive the refusal.
+	t.Run("disable refuses an unlinked file Multica does not own", func(t *testing.T) {
+		mkProfiles(t)
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{
+					Present:   true,
+					Enabled:   false,
+					Managed:   false,
+					Mechanism: autostartMechanismSystemd,
+					Location:  "/home/u/.config/systemd/user/multica-daemon.service",
+				}, nil
+			},
+			remove: func(string) (autostartState, bool, error) {
+				t.Fatal("removeAutostart must not run for an unmanaged, unlinked file")
+				return autostartState{}, false, nil
+			},
+		})
+		err := runDaemonAutostartDisable(autostartCmdFor(t, "", ""), nil)
+		if err == nil || !strings.Contains(err.Error(), "not created by Multica") {
+			t.Fatalf("runDaemonAutostartDisable = %v, want a refusal for the present-but-unlinked foreign file", err)
 		}
 	})
 
@@ -701,6 +782,7 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 			supported: true,
 			read: func(string) (autostartState, error) {
 				return autostartState{
+					Present:   true,
 					Enabled:   true,
 					Managed:   false,
 					Mechanism: autostartMechanismSystemd,
@@ -716,6 +798,36 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		}
 		if !strings.Contains(out, "not created by Multica") {
 			t.Errorf("status = %q, want it to flag the unmanaged entry", out)
+		}
+	})
+
+	// Present-but-unlinked (or linked under another target): status must
+	// still say whose file it is even though the verdict line says disabled.
+	t.Run("status flags an unlinked entry Multica does not own", func(t *testing.T) {
+		mkProfiles(t)
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{
+					Present:   true,
+					Enabled:   false,
+					Managed:   false,
+					Mechanism: autostartMechanismSystemd,
+					Location:  "/home/u/.config/systemd/user/multica-daemon.service",
+				}, nil
+			},
+		})
+		out, err := captureStdout(t, func() error {
+			return runDaemonAutostartStatus(daemonStatusCmdFor(t, "", ""), nil)
+		})
+		if err != nil {
+			t.Fatalf("runDaemonAutostartStatus = %v", err)
+		}
+		if !strings.Contains(out, "disabled") {
+			t.Errorf("status = %q, want the enabled/disabled verdict to stay disabled", out)
+		}
+		if !strings.Contains(out, "not created by Multica") {
+			t.Errorf("status = %q, want it to flag the present-but-unlinked unmanaged entry", out)
 		}
 	})
 }

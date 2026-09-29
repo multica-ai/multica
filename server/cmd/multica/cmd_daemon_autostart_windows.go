@@ -51,6 +51,7 @@ func platformWriteAutostart(profile string, spec autostartSpec) (autostartState,
 		}
 	}
 	return autostartState{
+		Present:   true, // a Run value either exists (and runs at login) or not
 		Enabled:   true,
 		Managed:   true, // the value name is ours alone; see windowsRunValueName
 		Mechanism: autostartMechanismWindowsRun,
@@ -114,6 +115,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 		return autostartState{}, err
 	}
 	return autostartState{
+		Present:   true, // a Run value either exists (and runs at login) or not
 		Enabled:   true,
 		Managed:   true, // the value name is ours alone; see windowsRunValueName
 		Mechanism: autostartMechanismWindowsRun,

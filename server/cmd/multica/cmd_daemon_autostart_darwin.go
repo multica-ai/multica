@@ -76,6 +76,7 @@ func platformWriteAutostart(profile string, spec autostartSpec) (autostartState,
 	_ = exec.Command("launchctl", "enable", "gui/"+strconv.Itoa(os.Getuid())+"/"+label).Run()
 
 	return autostartState{
+		Present:   true, // a plist in LaunchAgents runs at login; presence is enablement
 		Enabled:   true,
 		Managed:   true,
 		Mechanism: autostartMechanismLaunchd,
@@ -129,6 +130,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 		return autostartState{}, err
 	}
 	return autostartState{
+		Present:   true, // the plist's presence is what launchd honors
 		Enabled:   true,
 		Managed:   launchAgentManaged(content),
 		Mechanism: autostartMechanismLaunchd,

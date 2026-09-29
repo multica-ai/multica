@@ -41,12 +41,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// errAutostartUnmanaged is the platform writers' backstop refusal: a file at
-// a path Multica owns that lacks the ownership marker. The shared enable/
-// sync flows check Managed before writing, so hitting this means a race or a
-// caller that skipped the guard — either way the safe answer is to not touch
-// the user's file.
-var errAutostartUnmanaged = errors.New("the existing file was not created by Multica; refusing to overwrite it")
+// errAutostartUnmanaged is the platform writers' and removers' backstop
+// refusal: a file at a path Multica owns that lacks the ownership marker.
+// The shared enable/disable/sync flows check Managed before acting, so
+// hitting this means a race or a caller that skipped the guard — either way
+// the safe answer is to not touch the user's file.
+var errAutostartUnmanaged = errors.New("the existing file was not created by Multica; refusing to modify it")
 
 // Mechanism keys reported by status (`--output json`). Each maps to a human
 // label through mechanismLabel for table output.
@@ -94,6 +94,13 @@ const daemonSystemdHandoffExitStatus = 42
 // value `enable` would write, so `status` answers "where would this go?"
 // before the user commits to anything.
 type autostartState struct {
+	// Present is "a registration file/value exists at our path", deliberately
+	// separate from Enabled: on Linux Enabled only means "linked in
+	// default.target.wants", so a hand-written unit that is not enabled (or
+	// enabled under another target) reads Enabled=false while still being a
+	// file the guards must refuse to touch. Ownership checks key off Present;
+	// the enabled/disabled verdict keys off Enabled.
+	Present   bool   `json:"present,omitempty"`
 	Enabled   bool   `json:"enabled"`
 	Managed   bool   `json:"managed,omitempty"`
 	Mechanism string `json:"mechanism"`
@@ -199,12 +206,17 @@ func requireAutostartSupported() error {
 // unit with an EnvironmentFile=, a hand-written LaunchAgent, ...). Overwriting
 // or deleting it would silently destroy their configuration, so both commands
 // stop and say which file is in the way instead.
+//
+// Keyed off Present, not Enabled: on Linux a hand-written unit that was never
+// enabled — or was enabled under another target, so systemdUnitLinked reads
+// false — is still a file at our path, and guarding only "enabled" entries
+// would let `disable` delete it.
 func refuseUnmanagedAutostart(profile string, action string) error {
 	cur, err := readAutostart(profile)
 	if err != nil {
 		return err
 	}
-	if cur.Enabled && !cur.Managed {
+	if cur.Present && !cur.Managed {
 		return fmt.Errorf(
 			"%s exists at %s but was not created by Multica; refusing to %s it.\n"+
 				"Remove that file yourself if you want Multica to manage autostart, then rerun the command",
@@ -303,10 +315,11 @@ func runDaemonAutostartStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	// An entry at our path without our marker is still "enabled" (the OS
-	// will run it), but it is not ours: say so before the user assumes
+	// A file at our path without our marker is not ours — regardless of
+	// whether it is enabled (on Linux an unlinked unit or one linked under
+	// another target reads disabled): say so before the user assumes
 	// `enable`/`disable`/refresh will act on it.
-	if state.Enabled && !state.Managed && state.Note == "" {
+	if state.Present && !state.Managed && state.Note == "" {
 		state.Note = "not created by Multica; enable, disable and daemon start leave it alone"
 	}
 
@@ -420,6 +433,14 @@ func syncDaemonAutostartDefault(profile string, announce bool) {
 		// next explicit `enable` to fix, and a warning on every start would
 		// be noise the user cannot act on anyway.
 		_, _, _ = writeAutostart(profile, spec)
+		return
+	}
+	// Nothing enabled. A foreign file at our path is not "nothing
+	// registered" — hinting `enable` at it would only lead to enable's
+	// refusal — and an owned-but-unlinked entry (a user's manual `systemctl
+	// disable`) gets the hint but never a silent heal: the refresh must not
+	// re-link an entry the user deliberately turned off.
+	if state.Present && !state.Managed {
 		return
 	}
 	if announce {

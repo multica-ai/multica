@@ -156,6 +156,7 @@ func writeSystemdAutostart(profile string, spec autostartSpec) (autostartState, 
 	}
 
 	return autostartState{
+		Present:   true,
 		Enabled:   true,
 		Managed:   true,
 		Mechanism: autostartMechanismSystemd,
@@ -189,6 +190,7 @@ func writeXdgAutostart(profile string, spec autostartSpec) (autostartState, bool
 		}
 	}
 	return autostartState{
+		Present:   true,
 		Enabled:   true,
 		Managed:   true,
 		Mechanism: autostartMechanismXDG,
@@ -223,6 +225,12 @@ func lingerNote() string {
 // profile registered under the fallback and later re-registered under
 // systemd must not leave either half behind, and each half is a no-op when
 // it was never written.
+//
+// Every removal re-checks the ownership marker on the file itself first —
+// the same backstop the writers carry — so an unmarked file at our path is
+// never deleted even if a caller skipped the shared guard (or raced one):
+// deleting a user's hand-written unit or .desktop is exactly the loss the
+// marker exists to prevent.
 func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 	state := autostartState{Mechanism: autostartMechanismXDG}
 	changed := false
@@ -235,6 +243,15 @@ func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 		state = autostartState{Mechanism: autostartMechanismSystemd, Location: path}
 
 		if _, statErr := os.Stat(path); statErr == nil {
+			// Marker check BEFORE systemctl disable: refusing after the
+			// disable would already have unlinked the user's unit.
+			previous, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return autostartState{}, false, readErr
+			}
+			if !autostartCommentMarked(string(previous)) {
+				return state, false, errAutostartUnmanaged
+			}
 			if _, err := exec.Command("systemctl", "--user", "disable", systemdUnitName(profile)).CombinedOutput(); err != nil {
 				// A missing user bus must not strand the unit file: fall
 				// back to unlinking the wants symlink directly.
@@ -268,11 +285,23 @@ func removeSystemdWantsLink(unitPath string) error {
 }
 
 // removeXdgAutostartFile deletes the fallback entry if present, reporting
-// whether anything was actually removed. A missing file is not an error —
-// removal is expected to be idempotent.
+// whether anything was actually removed. Only a marked (Multica-created)
+// file is removed: an unmarked .desktop at our name — reachable from the
+// systemd sweep on every enable/refresh and from disable — is the user's,
+// and is left in place. A missing file is not an error — removal is
+// expected to be idempotent.
 func removeXdgAutostartFile(profile string) bool {
 	path, err := xdgAutostartPath(profile)
 	if err != nil {
+		return false
+	}
+	previous, err := os.ReadFile(path)
+	if err != nil {
+		// Missing (the common case) and unreadable both mean "nothing we
+		// created is here": never delete what we cannot positively identify.
+		return false
+	}
+	if !autostartCommentMarked(string(previous)) {
 		return false
 	}
 	return os.Remove(path) == nil
@@ -290,7 +319,11 @@ func platformReadAutostart(profile string) (autostartState, error) {
 		content, err := os.ReadFile(path)
 		switch {
 		case err == nil:
+			// Present tracks the FILE, Enabled tracks the wants link: an
+			// unlinked unit — or one linked under another target — is
+			// present-but-disabled, and the ownership guards key off Present.
 			return autostartState{
+				Present:   true,
 				Enabled:   systemdUnitLinked(path),
 				Managed:   autostartCommentMarked(string(content)),
 				Mechanism: autostartMechanismSystemd,
@@ -301,7 +334,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 			return autostartState{}, err
 		}
 		// Unit file absent — an XDG entry may still predate systemd.
-		if state, xdgErr := readXdgAutostart(profile); xdgErr == nil && state.Enabled {
+		if state, xdgErr := readXdgAutostart(profile); xdgErr == nil && state.Present {
 			return state, nil
 		}
 		return autostartState{Mechanism: autostartMechanismSystemd, Location: path}, nil
@@ -319,6 +352,7 @@ func platformReadAutostart(profile string) (autostartState, error) {
 		return autostartState{}, err
 	}
 	return autostartState{
+		Present:   true,
 		Enabled:   true,
 		Managed:   autostartCommentMarked(string(content)),
 		Mechanism: autostartMechanismXDG,
@@ -340,6 +374,7 @@ func readXdgAutostart(profile string) (autostartState, error) {
 		return autostartState{}, err
 	}
 	return autostartState{
+		Present:   true,
 		Enabled:   true,
 		Managed:   autostartCommentMarked(string(content)),
 		Mechanism: autostartMechanismXDG,
