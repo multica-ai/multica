@@ -190,29 +190,57 @@ describe("IssueRunsDialog", () => {
     expect(screen.getAllByText("$7.00").length).toBeGreaterThan(0);
   });
 
-  it("answers a pointer anywhere on the chart with the nearest run", () => {
+  // The plot column sits beside the lane labels; give it a width, which jsdom
+  // does not lay out. Returns the x of a moment on the chart's padded domain.
+  function layOut(plot: HTMLElement, first: string, last: string) {
+    plot.getBoundingClientRect = () => ({ left: 0, width: 1000, top: 0, height: 200, right: 1000, bottom: 200, x: 0, y: 0, toJSON: () => ({}) });
+    const [d0, d1] = [new Date(first).getTime(), new Date(last).getTime()];
+    const pad = (d1 - d0) * 0.02;
+    return (iso: string) => ((new Date(iso).getTime() - (d0 - pad)) / (d1 - d0 + 2 * pad)) * 1000;
+  }
+  const hoverCard = (plot: HTMLElement) => plot.querySelector("[data-hover-card]") as HTMLElement | null;
+
+  it("follows the pointer: the run under it answers, a gap says so", () => {
     open([
       makeTask({ id: "early", trigger_summary: "Early run", started_at: "2026-09-27T09:00:00", completed_at: "2026-09-27T09:30:00", usage: [usage()] }),
       makeTask({ id: "late", trigger_summary: "Late run", started_at: "2026-09-27T15:00:00", completed_at: "2026-09-27T15:10:00", usage: [usage({ output_tokens: 200_000 })] }),
     ]);
-    // The plot column sits beside the lane labels; give it a width, which
-    // jsdom does not lay out.
     const plot = screen.getByRole("img").children[1] as HTMLElement;
-    plot.getBoundingClientRect = () => ({ left: 0, width: 1000, top: 0, height: 200, right: 1000, bottom: 200, x: 0, y: 0, toJSON: () => ({}) });
+    const x = layOut(plot, "2026-09-27T09:00:00", "2026-09-27T15:10:00");
 
-    // Far right, past the last bar: snaps to the last run.
-    fireEvent.pointerMove(plot, { clientX: 995 });
-    expect(within(plot).getByText("Late run")).toBeInTheDocument();
-    expect(within(plot).getByText(/Total so far \$30\.00/)).toBeInTheDocument();
+    fireEvent.pointerMove(plot, { clientX: x("2026-09-27T15:05:00") });
+    expect(within(hoverCard(plot)!).getByText("Late run")).toBeInTheDocument();
+    expect(within(hoverCard(plot)!).getByText(/Total so far \$30\.00/)).toBeInTheDocument();
 
-    // Far left: the first run, with the curve's reading there.
-    fireEvent.pointerMove(plot, { clientX: 5 });
-    expect(within(plot).getByText("Early run")).toBeInTheDocument();
-    expect(within(plot).getByText(/Total so far \$25\.00/)).toBeInTheDocument();
+    // Review repro (MUL-7780): between runs the crosshair used to snap to the
+    // nearest run's end, hundreds of pixels away. Now it stays put and the
+    // card says nothing ran here, for how long, and what was spent by then.
+    fireEvent.pointerMove(plot, { clientX: x("2026-09-27T12:00:00") });
+    const idle = within(hoverCard(plot)!);
+    expect(idle.getByText("No run")).toBeInTheDocument();
+    expect(idle.getByText("09:30 → 15:00 · Idle 5h 30m")).toBeInTheDocument();
+    expect(idle.getByText("Total so far $25.00")).toBeInTheDocument();
+    expect(within(plot).getByText("12:00")).toBeInTheDocument();
 
-    // Leaving hands the plot back to the peak label.
+    fireEvent.pointerMove(plot, { clientX: x("2026-09-27T09:15:00") });
+    expect(within(hoverCard(plot)!).getByText("Early run")).toBeInTheDocument();
+
     fireEvent.pointerLeave(plot);
-    expect(within(plot).queryByText(/Total so far/)).not.toBeInTheDocument();
+    expect(hoverCard(plot)).not.toBeInTheDocument();
+  });
+
+  it("keeps the hover when the pointer drifts off the plot onto the lane labels", () => {
+    open([
+      makeTask({ id: "early", trigger_summary: "Early run", started_at: "2026-09-27T09:00:00", completed_at: "2026-09-27T09:30:00", usage: [usage()] }),
+      makeTask({ id: "late", trigger_summary: "Late run", started_at: "2026-09-27T15:00:00", completed_at: "2026-09-27T15:10:00", usage: [usage()] }),
+    ]);
+    const chart = screen.getByRole("img");
+    const plot = chart.children[1] as HTMLElement;
+    layOut(plot, "2026-09-27T09:00:00", "2026-09-27T15:10:00");
+
+    // Left of the plot: clamped to where the runs begin.
+    fireEvent.pointerMove(chart.children[0] as HTMLElement, { clientX: -40 });
+    expect(within(hoverCard(plot)!).getByText("Early run")).toBeInTheDocument();
   });
 
   it("picks the run on the lane under the pointer when runs overlap", () => {
@@ -222,18 +250,14 @@ describe("IssueRunsDialog", () => {
       makeTask({ id: "short", agent_id: "agent-emacs", trigger_summary: "Short run", started_at: "2026-09-27T10:00:00", completed_at: "2026-09-27T11:00:00", usage: [usage({ output_tokens: 200_000 })] }),
     ]);
     const plot = screen.getByRole("img").children[1] as HTMLElement;
-    plot.getBoundingClientRect = () => ({ left: 0, width: 1000, top: 0, height: 200, right: 1000, bottom: 200, x: 0, y: 0, toJSON: () => ({}) });
+    const x = layOut(plot, "2026-09-27T09:00:00", "2026-09-27T12:00:00");
     const lane = (agentId: string) => plot.querySelector(`[data-lane="${agentId}"]`) as HTMLElement;
-    // The x of 10:30 on the chart's padded domain.
-    const [d0, d1] = [new Date("2026-09-27T09:00:00").getTime(), new Date("2026-09-27T12:00:00").getTime()];
-    const pad = (d1 - d0) * 0.02;
-    const x = ((new Date("2026-09-27T10:30:00").getTime() - (d0 - pad)) / (d1 - d0 + 2 * pad)) * 1000;
 
-    fireEvent.pointerMove(lane("agent-lambda"), { clientX: x });
-    expect(within(plot).getByText("Long run")).toBeInTheDocument();
+    fireEvent.pointerMove(lane("agent-lambda"), { clientX: x("2026-09-27T10:30:00") });
+    expect(within(hoverCard(plot)!).getByText("Long run")).toBeInTheDocument();
 
-    fireEvent.pointerMove(lane("agent-emacs"), { clientX: x });
-    expect(within(plot).getByText("Short run")).toBeInTheDocument();
+    fireEvent.pointerMove(lane("agent-emacs"), { clientX: x("2026-09-27T10:30:00") });
+    expect(within(hoverCard(plot)!).getByText("Short run")).toBeInTheDocument();
   });
 
   it("opens a run's cost split from a real button, not hover alone", () => {

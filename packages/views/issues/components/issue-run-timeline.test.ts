@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { AgentTask, TaskUsage } from "@multica/core/types";
 import {
   buildRunTimeline,
+  cumulativeCostAt,
   groupRunsByDay,
-  nearestRunIndex,
+  idleSpanAround,
   niceTicks,
+  runIndexAt,
+  stepCurvePath,
   timeTicks,
 } from "./issue-run-timeline";
 
@@ -83,6 +86,7 @@ describe("buildRunTimeline", () => {
     expect(timeline.agentMs).toBe(30 * 60 * 1000);
     // Elapsed runs from the first start to now, while a run is still going.
     expect(timeline.elapsedMs).toBe(NOW - new Date("2026-09-24T10:00:00").getTime());
+    expect(timeline.extent).toEqual([new Date("2026-09-24T10:00:00").getTime(), NOW]);
   });
 
   it("ignores deferred runs, which the execution log does not list", () => {
@@ -200,7 +204,8 @@ describe("costSoFar", () => {
   });
 });
 
-describe("nearestRunIndex", () => {
+describe("runIndexAt", () => {
+  const MINUTE = 60_000;
   const { runs } = buildRunTimeline(
     [
       makeTask({ id: "a", started_at: "2026-09-24T10:00:00", completed_at: "2026-09-24T10:30:00" }),
@@ -208,16 +213,39 @@ describe("nearestRunIndex", () => {
     ],
     NOW,
   );
-  const at = (iso: string) => runs[nearestRunIndex(runs, new Date(iso).getTime())]!.task.id;
+  const at = (iso: string, slopMs = MINUTE) => {
+    const i = runIndexAt(runs, new Date(iso).getTime(), slopMs);
+    return i < 0 ? null : runs[i]!.task.id;
+  };
 
   it("picks the run under the pointer", () => {
     expect(at("2026-09-24T10:15:00")).toBe("a");
   });
 
-  it("snaps to the nearest bar, however thin, when between runs", () => {
-    expect(at("2026-09-24T11:00:00")).toBe("a");
-    expect(at("2026-09-24T13:00:00")).toBe("b");
-    expect(at("2026-09-25T00:00:00")).toBe("b");
+  it("reaches a sliver of a run within the slop", () => {
+    // `b` lasts 20s; the pointer lands a few pixels — here 40s — off it.
+    expect(at("2026-09-24T13:59:20")).toBe("b");
+    expect(at("2026-09-24T14:01:00")).toBe("b");
+  });
+
+  it("reports no run between runs instead of snapping across the gap", () => {
+    // Review repro (MUL-7780): the crosshair used to jump to whichever run
+    // was nearest, hundreds of pixels from the pointer.
+    expect(at("2026-09-24T11:00:00")).toBeNull();
+    expect(at("2026-09-24T13:00:00")).toBeNull();
+    expect(at("2026-09-25T00:00:00")).toBeNull();
+  });
+
+  it("prefers the run the pointer is inside over one it is merely near", () => {
+    const { runs: adjacent } = buildRunTimeline(
+      [
+        makeTask({ id: "long", started_at: "2026-09-24T10:00:00", completed_at: "2026-09-24T11:00:00" }),
+        makeTask({ id: "blip", started_at: "2026-09-24T11:00:30", completed_at: "2026-09-24T11:00:40" }),
+      ],
+      NOW,
+    );
+    const i = runIndexAt(adjacent, new Date("2026-09-24T10:59:50").getTime(), MINUTE);
+    expect(adjacent[i]!.task.id).toBe("long");
   });
 
   it("reaches a run nested inside a longer one", () => {
@@ -229,7 +257,7 @@ describe("nearestRunIndex", () => {
       ],
       NOW,
     );
-    const pick = (iso: string) => nested[nearestRunIndex(nested, new Date(iso).getTime())]!.task.id;
+    const pick = (iso: string) => nested[runIndexAt(nested, new Date(iso).getTime(), MINUTE)]!.task.id;
     expect(pick("2026-09-24T10:30:00")).toBe("inner");
     expect(pick("2026-09-24T09:30:00")).toBe("outer");
     expect(pick("2026-09-24T11:30:00")).toBe("outer");
@@ -244,12 +272,78 @@ describe("nearestRunIndex", () => {
       NOW,
     );
     const t = new Date("2026-09-24T10:10:00").getTime();
-    expect(lanes[nearestRunIndex(lanes, t)]!.task.id).toBe("lambda");
-    expect(lanes[nearestRunIndex(lanes, t, "agent-emacs")]!.task.id).toBe("emacs");
+    expect(lanes[runIndexAt(lanes, t, MINUTE)]!.task.id).toBe("lambda");
+    expect(lanes[runIndexAt(lanes, t, MINUTE, "agent-emacs")]!.task.id).toBe("emacs");
   });
 
   it("has nothing to point at without runs", () => {
-    expect(nearestRunIndex([], 0)).toBe(-1);
+    expect(runIndexAt([], 0, MINUTE)).toBe(-1);
+  });
+});
+
+describe("cumulativeCostAt", () => {
+  const timeline = buildRunTimeline(
+    [
+      makeTask({ id: "a", started_at: "2026-09-24T10:00:00", completed_at: "2026-09-24T10:30:00", usage: usage(400_000) }),
+      makeTask({ id: "b", started_at: "2026-09-24T11:00:00", completed_at: "2026-09-24T11:30:00", usage: usage(200_000) }),
+    ],
+    NOW,
+  );
+  const at = (iso: string) => cumulativeCostAt(timeline.cumulative, new Date(iso).getTime());
+
+  it("reads the curve: flat until a run finishes, then up by its cost", () => {
+    expect(at("2026-09-24T09:00:00")).toBe(0);
+    // Mid-run nothing has been billed yet — usage lands at completion.
+    expect(at("2026-09-24T10:15:00")).toBe(0);
+    expect(at("2026-09-24T10:30:00")).toBe(10);
+    expect(at("2026-09-24T10:45:00")).toBe(10);
+    expect(at("2026-09-24T12:00:00")).toBe(15);
+  });
+});
+
+describe("idleSpanAround", () => {
+  const { runs } = buildRunTimeline(
+    [
+      makeTask({ id: "a", agent_id: "agent-lambda", started_at: "2026-09-24T10:00:00", completed_at: "2026-09-24T10:30:00" }),
+      makeTask({ id: "b", agent_id: "agent-emacs", started_at: "2026-09-24T11:00:00", completed_at: "2026-09-24T11:10:00" }),
+      makeTask({ id: "c", agent_id: "agent-lambda", started_at: "2026-09-24T12:00:00", completed_at: "2026-09-24T12:30:00" }),
+    ],
+    NOW,
+  );
+  const ms = (iso: string) => new Date(iso).getTime();
+
+  it("spans from the last run's end to the next run's start", () => {
+    expect(idleSpanAround(runs, ms("2026-09-24T10:45:00"))).toEqual({
+      fromMs: ms("2026-09-24T10:30:00"),
+      toMs: ms("2026-09-24T11:00:00"),
+    });
+  });
+
+  it("reads one lane's quiet stretch", () => {
+    expect(idleSpanAround(runs, ms("2026-09-24T10:45:00"), "agent-lambda")).toEqual({
+      fromMs: ms("2026-09-24T10:30:00"),
+      toMs: ms("2026-09-24T12:00:00"),
+    });
+  });
+
+  it("leaves an open side before the first run and after the last", () => {
+    expect(idleSpanAround(runs, ms("2026-09-24T09:00:00")).fromMs).toBeNull();
+    expect(idleSpanAround(runs, ms("2026-09-24T13:00:00")).toMs).toBeNull();
+  });
+});
+
+describe("stepCurvePath", () => {
+  it("rises at each step and holds flat to the right edge", () => {
+    const { line, area } = stepCurvePath(
+      [
+        { t: 250, cost: 5 },
+        { t: 750, cost: 10 },
+      ],
+      [0, 1000],
+      10,
+    );
+    expect(line).toBe("M0,100 L250.00,100.00 L250.00,50.00 L750.00,50.00 L750.00,0.00 L1000,0.00");
+    expect(area).toBe(`${line} L1000,100 L0,100 Z`);
   });
 });
 

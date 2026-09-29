@@ -729,8 +729,9 @@
     "latest": "最近",
     "open_timeline": "打开时间线",
     "more_runs_other": "还有 {{count}} 次",
-    "strip_aria": "每次运行的费用，从早到晚——打开运行时间线",
-    "strip_no_usage": "没有用量记录"
+    "strip_aria": "累计费用随时间的变化——打开运行时间线",
+    "strip_no_usage": "没有用量记录",
+    "sparkline_now": "现在"
   },
   "runs_timeline": {
     "title": "运行记录",
@@ -755,6 +756,8 @@
     "cost_breakdown_aria": "费用明细：{{cost}}",
     "no_usage": "没有用量记录",
     "tooltip_total": "累计 {{cost}}",
+    "hover_no_run": "没有运行",
+    "hover_idle": "空闲 {{duration}}",
     "note_unmapped": "{{models}} 没有维护价格，token 已计入，费用未计入。",
     "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。"
   },

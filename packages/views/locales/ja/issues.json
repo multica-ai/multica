@@ -729,8 +729,9 @@
     "latest": "最新",
     "open_timeline": "タイムラインを開く",
     "more_runs_other": "他 {{count}} 件",
-    "strip_aria": "各実行の費用（古い順）— 実行タイムラインを開く",
-    "strip_no_usage": "使用量の記録なし"
+    "strip_aria": "累計費用の推移 — 実行タイムラインを開く",
+    "strip_no_usage": "使用量の記録なし",
+    "sparkline_now": "現在"
   },
   "runs_timeline": {
     "title": "実行履歴",
@@ -755,6 +756,8 @@
     "cost_breakdown_aria": "費用の内訳：{{cost}}",
     "no_usage": "使用量の記録なし",
     "tooltip_total": "累計 {{cost}}",
+    "hover_no_run": "実行なし",
+    "hover_idle": "アイドル {{duration}}",
     "note_unmapped": "{{models}} は価格が未登録です。トークンは集計されますが費用は含まれません。",
     "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
   },

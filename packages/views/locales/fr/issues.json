@@ -759,8 +759,9 @@
     "open_timeline": "Ouvrir la chronologie",
     "more_runs_one": "{{count}} de plus",
     "more_runs_other": "{{count}} de plus",
-    "strip_aria": "Coût de chaque exécution, de la plus ancienne à la plus récente — ouvrir la chronologie",
-    "strip_no_usage": "Aucune consommation enregistrée"
+    "strip_aria": "Coût cumulé dans le temps — ouvrir la chronologie",
+    "strip_no_usage": "Aucune consommation enregistrée",
+    "sparkline_now": "Maintenant"
   },
   "runs_timeline": {
     "title": "Exécutions",
@@ -790,6 +791,8 @@
     "cost_breakdown_aria": "Détail du coût : {{cost}}",
     "no_usage": "Aucune consommation enregistrée",
     "tooltip_total": "Cumul : {{cost}}",
+    "hover_no_run": "Aucune exécution",
+    "hover_idle": "Inactif {{duration}}",
     "note_unmapped": "Aucun tarif connu pour {{models}} ; leurs tokens sont comptés, mais pas leur coût.",
     "note_estimate": "Le coût est estimé d'après les tarifs publiés des modèles, sauf lorsque le fournisseur a communiqué son propre chiffre."
   },

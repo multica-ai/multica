@@ -447,23 +447,32 @@ describe("execution log past runs", () => {
     expect(within(row).queryByText("892K")).not.toBeInTheDocument();
   });
 
-  it("draws one strip bar per past run and sums the agent time", () => {
+  it("draws the spend sparkline over a track of every run and sums the agent time", () => {
     renderSection([past(1), past(2), past(3, { status: "failed", usage: [] })]);
 
-    const strip = screen.getByRole("button", {
-      name: "Cost of each run, oldest to newest — open the run timeline",
+    const chart = screen.getByRole("button", {
+      name: "Cumulative cost over time — open the run timeline",
     });
-    expect(strip.children).toHaveLength(3);
+    expect(chart.querySelectorAll("[data-run]")).toHaveLength(3);
     expect(screen.getByText(/30m agent time/)).toBeInTheDocument();
 
-    fireEvent.click(strip);
+    fireEvent.click(chart);
     expect(screen.getByRole("heading", { name: "Runs" })).toBeInTheDocument();
   });
 
-  it("skips the strip for a single run, where it would say nothing", () => {
+  it("draws the sparkline from the first priced run", () => {
+    // Review repro (MUL-7780): the old bar strip waited for two runs and then
+    // drew them as two 12px bars in the corner of an empty strip.
     renderSection([past(1)]);
     expect(
-      screen.queryByRole("button", { name: /Cost of each run/ }),
+      screen.getByRole("button", { name: /Cumulative cost over time/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("skips the sparkline when no run recorded usage — there is no curve to draw", () => {
+    renderSection([past(1, { usage: [] }), past(2, { usage: [] })]);
+    expect(
+      screen.queryByRole("button", { name: /Cumulative cost over time/ }),
     ).not.toBeInTheDocument();
   });
 });

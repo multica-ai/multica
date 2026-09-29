@@ -729,8 +729,9 @@
     "latest": "최근",
     "open_timeline": "타임라인 열기",
     "more_runs_other": "{{count}}개 더",
-    "strip_aria": "실행별 비용(오래된 순) — 실행 타임라인 열기",
-    "strip_no_usage": "사용량 기록 없음"
+    "strip_aria": "시간에 따른 누적 비용 — 실행 타임라인 열기",
+    "strip_no_usage": "사용량 기록 없음",
+    "sparkline_now": "지금"
   },
   "runs_timeline": {
     "title": "실행 기록",
@@ -755,6 +756,8 @@
     "cost_breakdown_aria": "비용 내역: {{cost}}",
     "no_usage": "사용량 기록 없음",
     "tooltip_total": "누적 {{cost}}",
+    "hover_no_run": "실행 없음",
+    "hover_idle": "유휴 {{duration}}",
     "note_unmapped": "{{models}}의 가격 정보가 없어 토큰은 집계되지만 비용은 포함되지 않습니다.",
     "note_estimate": "비용은 공개된 모델 요금 기준 추정치이며, 제공자가 자체 비용을 보고한 경우는 그 값을 사용합니다."
   },

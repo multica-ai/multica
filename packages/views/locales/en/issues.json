@@ -759,8 +759,9 @@
     "open_timeline": "Open timeline",
     "more_runs_one": "{{count}} more",
     "more_runs_other": "{{count}} more",
-    "strip_aria": "Cost of each run, oldest to newest — open the run timeline",
-    "strip_no_usage": "No usage recorded"
+    "strip_aria": "Cumulative cost over time — open the run timeline",
+    "strip_no_usage": "No usage recorded",
+    "sparkline_now": "Now"
   },
   "runs_timeline": {
     "title": "Runs",
@@ -790,6 +791,8 @@
     "cost_breakdown_aria": "Cost breakdown: {{cost}}",
     "no_usage": "No usage recorded",
     "tooltip_total": "Total so far {{cost}}",
+    "hover_no_run": "No run",
+    "hover_idle": "Idle {{duration}}",
     "note_unmapped": "No price on file for {{models}}; their tokens are counted but their cost is not.",
     "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure."
   },

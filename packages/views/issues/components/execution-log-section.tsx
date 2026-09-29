@@ -8,6 +8,7 @@ import { api } from "@multica/core/api";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentTask } from "@multica/core/types";
+import { cn } from "@multica/ui/lib/utils";
 import { useLocale, useTimeAgo } from "../../i18n";
 import {
   Tooltip,
@@ -28,19 +29,27 @@ import {
   summarizeTaskUsageAcross,
 } from "../../runtimes/utils";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
-import { IssueRunsDialog, RunTriggerLabel } from "./issue-runs-dialog";
-import { buildRunTimeline, type TimelineRun } from "./issue-run-timeline";
+import { IssueRunsDialog, RunTriggerLabel, runBarTone } from "./issue-runs-dialog";
+import {
+  buildRunTimeline,
+  cumulativeCostAt,
+  idleSpanAround,
+  runIndexAt,
+  stepCurvePath,
+  type RunTimeline,
+  type TimelineRun,
+} from "./issue-run-timeline";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 import { WakeupRunLabel } from "./wakeup-source-chip";
 
 // Right-panel section that lists every agent run for this issue. Active
-// runs sit at the top (always visible when present); below them a spend strip
-// (one bar per past run, oldest to newest, height = cost) and the latest few
-// past runs. The full history lives in the Runs dialog the header total, the
-// strip and the "Open timeline" row open — 21 rows do not belong in a 320px
-// column, and the dialog can lay them out in time.
+// runs sit at the top (always visible when present); below them a spend
+// sparkline (the issue's cumulative cost over time, above a track of its runs)
+// and the latest few past runs. The full history lives in the Runs dialog the
+// header total, the sparkline and the "Open timeline" row open — 21 rows do not
+// belong in a 320px column, and the dialog can lay them out in time.
 //
 // Replaces:
 //   - the click-to-expand timeline that used to live inside the in-body live
@@ -128,7 +137,7 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
     });
   }, [tasks]);
 
-  // Sidebar-only figures: the strip's bars and the agent-time line. Priced
+  // Sidebar-only figures: the sparkline and the agent-time line. Priced
   // with the same helpers as the dialog, and re-derived on a saved custom rate
   // for the same reason IssueRunsTotal subscribes.
   const timeline = useMemo(
@@ -197,7 +206,7 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
             <div className="my-1.5 border-t border-border/60" />
           )}
 
-          {pastRuns.length >= 2 && <RunSpendStrip runs={pastRuns} onOpen={openRuns} />}
+          {timeline.pricedCount > 0 && <RunSpendSparkline timeline={timeline} onOpen={openRuns} />}
           {timeline.agentMs > 0 && (
             <p className="truncate px-1 pb-1 text-caption text-muted-foreground">
               {t(($) => $.execution_log.agent_time, {
@@ -247,107 +256,200 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
   );
 }
 
-// ─── Spend strip ───────────────────────────────────────────────────────────
+// ─── Spend sparkline ───────────────────────────────────────────────────────
 
-// The most bars the strip draws; older runs stay in the Runs dialog. Past this
-// a 260px column cannot keep a gap between bars.
-const STRIP_MAX_RUNS = 48;
-const STRIP_HEIGHT = 36;
+const SPARK_HEIGHT = 34;
+// The curve tops out a little below the box, so the dot at its end has room.
+const SPARK_HEADROOM = 0.9;
+// Same idea as the Runs dialog's slop: a run a few seconds long is a 3px
+// sliver here, and the pointer only has to come near it.
+const SPARK_SLOP_PX = 6;
 
-// One bar per past run, oldest to newest, height = that run's cost — the
-// issue's rhythm at a glance: how busy it has been, which runs were expensive,
-// and where one failed. The whole strip is one button into the Runs dialog;
-// each bar carries its own hover summary.
-function RunSpendStrip({ runs, onOpen }: { runs: TimelineRun[]; onOpen: () => void }) {
+// The Runs dialog's chart in miniature: the issue's cumulative cost as a step
+// curve over a track of its runs, on one time axis. Whatever the run count it
+// spans the column — the one-bar-per-run strip it replaced drew 12px bars from
+// the left, so an issue with three runs showed three bars in a corner of an
+// empty strip (MUL-7780) — and clicking it opens the same chart full size.
+// Hovering works like the dialog: a crosshair that follows the pointer, and a
+// tooltip naming the run under it or, between runs, the quiet stretch and what
+// the issue had spent by then.
+function RunSpendSparkline({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () => void }) {
   const { t } = useT("issues");
   const locale = useLocale();
-  const shown = runs.slice(-STRIP_MAX_RUNS);
-  const maxCost = shown.reduce((m, run) => Math.max(m, run.usage?.cost ?? 0), 0);
-  const dayOf = (ms: number) => new Date(ms).toDateString();
-  const edgeLabel = (ms: number) =>
-    dayOf(ms) === new Date().toDateString()
-      ? t(($) => $.runs_timeline.day_today)
-      : new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(ms);
-  const first = shown[0];
-  const last = shown[shown.length - 1];
+  const [hover, setHover] = useState<{ t: number; width: number } | null>(null);
+  const [d0, d1] = timeline.domain;
+  const [e0, e1] = timeline.extent;
+  const xPct = (ms: number) => ((ms - d0) / (d1 - d0)) * 100;
+  const yMax = timeline.totalCost / SPARK_HEADROOM;
+  const yPct = (cost: number) => (1 - cost / yMax) * 100;
+  const { line, area } = stepCurvePath(timeline.cumulative, timeline.domain, yMax);
+  const last = timeline.cumulative[timeline.cumulative.length - 1];
+
+  const trackPointer = (event: React.PointerEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const at = d0 + ((event.clientX - rect.left) / rect.width) * (d1 - d0);
+    setHover({ t: Math.min(Math.max(at, e0), e1), width: rect.width });
+  };
+  const hoverIndex = hover
+    ? runIndexAt(timeline.runs, hover.t, (SPARK_SLOP_PX / hover.width) * (d1 - d0))
+    : -1;
+  const hovered = hoverIndex >= 0 ? timeline.runs[hoverIndex] : undefined;
+  // One dot, on whatever the pointer is about: the hovered run's step, the
+  // curve under the crosshair between runs, or at rest, where the curve ends.
+  const dot = hover
+    ? hovered
+      ? hovered.usage
+        ? { t: hovered.endMs, cost: hovered.costSoFar }
+        : null
+      : { t: hover.t, cost: cumulativeCostAt(timeline.cumulative, hover.t) }
+    : last
+      ? { t: last.t, cost: last.cost }
+      : null;
+
+  // The axis ends: clock times while the whole issue is today's, days once it
+  // spans more; "Now" while a run is still going.
+  const [startLabel, endLabel] = useMemo(() => {
+    const today = new Date().toDateString();
+    const hour = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+    const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+    const allToday = new Date(e0).toDateString() === today;
+    const end =
+      timeline.activeCount > 0
+        ? t(($) => $.execution_log.sparkline_now)
+        : allToday
+          ? hour.format(e1)
+          : new Date(e1).toDateString() === today
+            ? t(($) => $.runs_timeline.day_today)
+            : day.format(e1);
+    return [allToday ? hour.format(e0) : day.format(e0), end];
+  }, [e0, e1, timeline.activeCount, locale, t]);
 
   return (
     <div className="px-1 pb-1">
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={t(($) => $.execution_log.strip_aria)}
-        className="flex w-full items-end gap-[3px] rounded-xs"
-        style={{ height: STRIP_HEIGHT }}
-      >
-        {shown.map((run) => (
-          <StripBar key={run.task.id} run={run} maxCost={maxCost} />
-        ))}
-      </button>
-      {/* Day boundaries, on the same flex grid as the bars so each tick sits
-          exactly between the last run of one day and the first of the next. */}
-      <div aria-hidden className="flex h-1.5 gap-[3px] border-t border-border">
-        {shown.map((run, i) => (
-          <span key={run.task.id} className="relative max-w-3 flex-1">
-            {i > 0 && dayOf(run.startMs) !== dayOf(shown[i - 1]!.startMs) && (
-              <span className="absolute top-0 -left-[2px] h-1.5 w-px bg-faint-foreground" />
+      <Tooltip trackCursorAxis="x">
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={onOpen}
+              onPointerMove={trackPointer}
+              onPointerDown={trackPointer}
+              onPointerLeave={() => setHover(null)}
+              aria-label={t(($) => $.execution_log.strip_aria)}
+            />
+          }
+          className="relative block w-full rounded-xs text-left"
+        >
+          <span aria-hidden className="relative block" style={{ height: SPARK_HEIGHT }}>
+            <svg
+              className="absolute inset-0 size-full overflow-visible"
+              viewBox="0 0 1000 100"
+              preserveAspectRatio="none"
+            >
+              <path d={area} fill="var(--chart-1)" fillOpacity={0.1} />
+              <path
+                d={line}
+                fill="none"
+                stroke="var(--chart-1)"
+                strokeWidth={1.5}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+            {dot && (
+              <span
+                className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-chart-1 ring-2 ring-background"
+                style={{ left: `${xPct(dot.t)}%`, top: `${yPct(dot.cost)}%` }}
+              />
             )}
           </span>
-        ))}
-      </div>
-      {first && last && (
-        <div aria-hidden className="flex justify-between text-micro text-muted-foreground">
-          <span>{edgeLabel(first.startMs)}</span>
-          {dayOf(first.startMs) !== dayOf(last.startMs) && <span>{edgeLabel(last.startMs)}</span>}
-        </div>
-      )}
+          <span aria-hidden className="relative mt-1 block h-2 rounded-full bg-muted">
+            {timeline.runs.map((run) => (
+              <span
+                key={run.task.id}
+                data-run={run.task.id}
+                className={cn(
+                  "absolute inset-y-0 min-w-[3px] rounded-full transition-opacity",
+                  runBarTone(run, run === timeline.peak),
+                  hovered && run !== hovered && "opacity-35",
+                )}
+                style={{
+                  left: `${xPct(run.startMs)}%`,
+                  width: `${xPct(run.endMs) - xPct(run.startMs)}%`,
+                }}
+              />
+            ))}
+          </span>
+          {hover && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-0 w-px bg-foreground/30"
+              style={{ left: `${xPct(hover.t)}%`, height: SPARK_HEIGHT + 12 }}
+            />
+          )}
+          <span aria-hidden className="mt-0.5 flex justify-between text-micro tabular-nums text-muted-foreground">
+            <span>{startLabel}</span>
+            <span>{endLabel}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 flex-col items-start gap-0">
+          {hovered ? (
+            <SparklineRunSummary run={hovered} />
+          ) : hover ? (
+            <SparklineIdleSummary timeline={timeline} at={hover.t} />
+          ) : (
+            t(($) => $.execution_log.usage_total_tooltip)
+          )}
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }
 
-function StripBar({ run, maxCost }: { run: TimelineRun; maxCost: number }) {
+function SparklineRunSummary({ run }: { run: TimelineRun }) {
   const { t } = useT("issues");
   const trigger = useTriggerText(run.task);
   const status = useStatusLabel(run.task.status);
   const cost = run.usage?.cost;
-  // A run without usage is not a zero-height bar — that would read as "free".
-  // It gets a dot on the baseline instead, coloured by how it ended.
-  const bar =
-    cost != null ? (
-      <span
-        className="block w-full rounded-t-xs bg-chart-2 transition-colors group-hover/strip-bar:bg-chart-1"
-        style={{ height: Math.max(3, maxCost > 0 ? (cost / maxCost) * STRIP_HEIGHT : 3) }}
-      />
-    ) : (
-      <span
-        className={`mx-auto block size-1 rounded-full ${
-          run.task.status === "failed" ? "bg-destructive" : "bg-faint-foreground"
-        }`}
-      />
-    );
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<span />}
-        className="group/strip-bar flex h-full max-w-3 min-w-0 flex-1 items-end"
-      >
-        {bar}
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64 flex-col items-start gap-0">
-        <RunTriggerLabel task={run.task} fallback={trigger}>
-          {(label) => <span className="max-w-full truncate">{label}</span>}
-        </RunTriggerLabel>
-        <span className="text-micro text-muted-foreground">
-          {[
-            cost != null ? formatUsd(cost) : t(($) => $.execution_log.strip_no_usage),
-            run.durationMs != null ? formatAgentTime(run.durationMs / 1000, "0s") : null,
-            run.task.status === "completed" ? null : status,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-      </TooltipContent>
-    </Tooltip>
+    <>
+      <RunTriggerLabel task={run.task} fallback={trigger}>
+        {(label) => <span className="max-w-full truncate">{label}</span>}
+      </RunTriggerLabel>
+      <span className="text-micro text-muted-foreground">
+        {[
+          // A run still going has not reported usage yet — that is not "none".
+          cost != null ? formatUsd(cost) : run.active ? null : t(($) => $.execution_log.strip_no_usage),
+          run.durationMs != null ? formatAgentTime(run.durationMs / 1000, "0s") : null,
+          run.task.status === "completed" ? null : status,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    </>
+  );
+}
+
+function SparklineIdleSummary({ timeline, at }: { timeline: RunTimeline; at: number }) {
+  const { t } = useT("issues");
+  const { fromMs, toMs } = idleSpanAround(timeline.runs, at);
+  return (
+    <>
+      <span>{t(($) => $.runs_timeline.hover_no_run)}</span>
+      <span className="text-micro text-muted-foreground">
+        {[
+          fromMs != null && toMs != null
+            ? t(($) => $.runs_timeline.hover_idle, { duration: formatAgentTime((toMs - fromMs) / 1000, "0s") })
+            : null,
+          t(($) => $.runs_timeline.tooltip_total, {
+            cost: formatUsd(cumulativeCostAt(timeline.cumulative, at)),
+          }),
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    </>
   );
 }
 
