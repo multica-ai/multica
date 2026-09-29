@@ -178,7 +178,7 @@ multica runtime activity <runtime-id>
 | `config` | 현재 CLI profile의 로컬 설정 확인 또는 변경 |
 | `update`, `version` | CLI 업데이트 또는 버전 확인 |
 
-`multica chat`은 **에이전트가 현재 처리 중인 외부 채팅 대화**를 읽으며 주로 채팅 연동의 에이전트가 사용합니다. 워크스페이스의 임의 대화를 탐색하는 일반 명령이 아닙니다.
+`multica chat history`와 `multica chat thread`는 **에이전트가 현재 처리 중인 외부 채팅 대화**를 읽습니다. 멤버가 소유한 전체 세션을 읽으려면 `multica chat sessions --status active|archived|all --output json`을 실행한 뒤 각 세션에 `multica chat messages <session-id> --limit 1..100 --output json`을 사용하세요. 메시지 응답에는 항상 `messages`, `limit`, `has_more`, `next_cursor`가 포함됩니다. `has_more`가 true이면 `next_cursor.created_at`과 `next_cursor.id`를 각각 `--before-created-at`, `--before-id`에 그대로 전달해 이전 페이지를 읽습니다. 잘못된 입력, 권한, 네트워크 또는 서버 오류는 0이 아닌 코드로 종료되며, 실패한 읽기를 빈 결과로 바꾸지 않습니다.
 
 ## ID와 출력 형식
 
@@ -274,7 +274,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | |
 | | `member list/add/set-role/remove` | 스쿼드 멤버 관리 | |
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
-| `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |
+| `chat` | `history`, `thread [id]`, `sessions`, `messages <session-id>` | 현재 대화 또는 멤버가 접근할 수 있는 전체 세션 읽기 | `sessions`: `--status`, `--output`; `messages`: `--limit`, `--before-created-at`, `--before-id`, `--output` |
 
 ### Runtime
 

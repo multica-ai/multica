@@ -178,7 +178,7 @@ Consultez [Daemon et runtimes](/daemon-runtimes) pour son fonctionnement et les 
 | `config` | Consulter ou modifier la configuration locale du profil CLI actuel |
 | `update`, `version` | Mettre à jour le CLI ou afficher la version |
 
-`multica chat` lit **la session de messagerie externe qu'un agent traite actuellement** ; elle sert surtout aux agents des intégrations de messagerie et n'est pas une commande générale pour parcourir n'importe quelle discussion de l'espace de travail.
+`multica chat history` et `multica chat thread` lisent **la session de messagerie externe qu'un agent traite actuellement**. Pour lire toutes les sessions possédées par le membre, utilisez `multica chat sessions --status active|archived|all --output json`, puis `multica chat messages <session-id> --limit 1..100 --output json` pour chaque session. La réponse des messages contient toujours `messages`, `limit`, `has_more` et `next_cursor` ; lorsque `has_more` vaut true, transmettez `next_cursor.created_at` et `next_cursor.id` tels quels avec `--before-created-at` et `--before-id` pour lire la page précédente. Les erreurs de paramètres, d'autorisation, de réseau ou du serveur entraînent une sortie non nulle ; une lecture échouée ne devient jamais un résultat vide.
 
 ## ID et formats de sortie
 
@@ -282,7 +282,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | `squad` | `list/get/create/update/delete` | Gérer les squads (`delete` archive) | |
 | | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
-| `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
+| `chat` | `history`, `thread [id]`, `sessions`, `messages <session-id>` | Lire la conversation actuelle ou toutes les sessions accessibles du membre | `sessions` : `--status`, `--output` ; `messages` : `--limit`, `--before-created-at`, `--before-id`, `--output` |
 
 ### Runtime
 

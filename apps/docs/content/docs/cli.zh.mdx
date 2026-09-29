@@ -178,7 +178,7 @@ multica runtime activity <runtime-id>
 | `config` | 查看或修改当前 CLI profile 的本地配置 |
 | `update`、`version` | 更新 CLI 或查看版本 |
 
-`multica chat` 读取的是**智能体当前正在处理的外部聊天会话**，主要供聊天集成中的智能体使用；它不是用于浏览任意工作区对话的通用命令。
+`multica chat history` 和 `multica chat thread` 读取的是**智能体当前正在处理的外部聊天会话**。要读取成员拥有的全部会话，使用 `multica chat sessions --status active|archived|all --output json`，再对每个会话调用 `multica chat messages <session-id> --limit 1..100 --output json`。消息响应固定包含 `messages`、`limit`、`has_more` 和 `next_cursor`；当 `has_more` 为 true 时，把 `next_cursor.created_at` 和 `next_cursor.id` 原样作为 `--before-created-at` 与 `--before-id` 读取更早一页。参数、权限、网络或服务端错误都会以非零退出；读取失败不会伪装成空结果。
 
 ## ID 和输出格式
 
@@ -274,7 +274,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
 | | `member list/add/set-role/remove` | 管理小队成员 | |
 | | `activity <issue-id> <outcome>` | 记录队长评价 | |
-| `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的外部聊天会话 | `--limit`、`--before` |
+| `chat` | `history`、`thread [id]`、`sessions`、`messages <session-id>` | 读取当前聊天或成员可访问的全部会话 | `sessions`：`--status`、`--output`；`messages`：`--limit`、`--before-created-at`、`--before-id`、`--output` |
 
 ### Runtime
 

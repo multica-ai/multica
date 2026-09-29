@@ -178,7 +178,7 @@ multica runtime activity <runtime-id>
 | `config` | 現在の CLI プロファイルのローカル設定を表示・編集 |
 | `update`、`version` | CLI の更新とバージョンの表示 |
 
-`multica chat` が読み取るのは、**エージェントが現在処理している外部チャットセッション**です。主にチャット統合の中のエージェントが使うもので、任意のワークスペースの会話を閲覧するための汎用コマンドではありません。
+`multica chat history` と `multica chat thread` は、**エージェントが現在処理している外部チャットセッション**を読み取ります。メンバーが所有するすべてのセッションを読むには、`multica chat sessions --status active|archived|all --output json` を実行し、各セッションに対して `multica chat messages <session-id> --limit 1..100 --output json` を使います。メッセージ応答には常に `messages`、`limit`、`has_more`、`next_cursor` が含まれます。`has_more` が true の場合は、`next_cursor.created_at` と `next_cursor.id` を `--before-created-at` と `--before-id` にそのまま渡して、より古いページを読み取ります。入力、権限、ネットワーク、サーバーのエラーは非ゼロ終了になり、失敗した読み取りが空の結果に置き換えられることはありません。
 
 ## ID と出力形式
 
@@ -274,7 +274,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
-| `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+| `chat` | `history`、`thread [id]`、`sessions`、`messages <session-id>` | 現在のチャット、またはメンバーがアクセスできるセッションを読み取る | `sessions`: `--status`、`--output`；`messages`: `--limit`、`--before-created-at`、`--before-id`、`--output` |
 
 ### Runtime
 

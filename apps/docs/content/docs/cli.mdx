@@ -193,7 +193,7 @@ See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom prof
 | `config` | View or edit the current CLI profile's local configuration |
 | `update`, `version` | Update the CLI or print the version |
 
-`multica chat` reads **the external chat session an agent is currently handling**; it is mainly for agents in chat integrations, not a general command for browsing arbitrary workspace conversations.
+`multica chat history` and `multica chat thread` read **the external chat session an agent is currently handling**. For the complete member-owned chat view, use `multica chat sessions --status active|archived|all --output json`, then read each session with `multica chat messages <session-id> --limit 1..100 --output json`. The messages response always contains `messages`, `limit`, `has_more`, and `next_cursor`; when `has_more` is true, pass both `next_cursor.created_at` and `next_cursor.id` as `--before-created-at` and `--before-id` to read the next older page. Invalid input, denied access, network errors, and server errors exit non-zero; the commands never turn a failed read into an empty result.
 
 ## IDs and output formats
 
@@ -297,7 +297,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
-| `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
+| `chat` | `history`, `thread [id]`, `sessions`, `messages <session-id>` | Read the current chat or all accessible member-owned sessions | `sessions`: `--status`, `--output`; `messages`: `--limit`, `--before-created-at`, `--before-id`, `--output` |
 
 ### Runtime
 
