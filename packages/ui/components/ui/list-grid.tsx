@@ -8,7 +8,8 @@ import { cn } from "../../lib/utils";
 // a literal `grid-cols-[...]` class (plus responsive variants); the header and
 // each row span the full template with `grid-cols-subgrid`, so column widths
 // have a single source of truth and never drift between header, rows, and
-// skeletons.
+// skeletons. `list-grid-subgrid` supplies the inherited-template fallback for
+// Chromium <= 116, which predates CSS subgrid support.
 //
 // Conventions the container class must follow:
 // - First and last tracks are edge-padding columns (e.g. 1.25rem) so row
@@ -53,7 +54,7 @@ function ListGridHeader({
     <div
       role="row"
       className={cn(
-        "group/header sticky top-0 z-10 col-span-full grid h-9 grid-cols-subgrid items-center bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-gradient-to-b after:from-background after:to-transparent",
+        "list-grid-subgrid group/header sticky top-0 z-10 col-span-full grid h-9 grid-cols-subgrid items-center bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-gradient-to-b after:from-background after:to-transparent",
         className,
       )}
       {...props}
@@ -156,7 +157,7 @@ function ListGridBody({
     <div
       role="rowgroup"
       className={cn(
-        "col-span-full grid grid-cols-subgrid content-start",
+        "list-grid-subgrid col-span-full grid grid-cols-subgrid content-start",
         className,
       )}
       {...props}
@@ -185,7 +186,7 @@ function ListGridRow({ className, children, ...props }: ListGridRowProps) {
     <div
       role="row"
       className={cn(
-        "group/row col-span-full grid h-12 grid-cols-subgrid items-center transition-colors hover:bg-accent/40",
+        "list-grid-subgrid group/row col-span-full grid h-12 grid-cols-subgrid items-center transition-colors hover:bg-accent/40",
         className,
       )}
       {...props}
