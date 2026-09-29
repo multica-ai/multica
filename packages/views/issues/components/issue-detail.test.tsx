@@ -20,6 +20,13 @@ import enIssues from "../../locales/en/issues.json";
 const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockLocalDirectoryHint = vi.hoisted(() => vi.fn());
+vi.mock("../../projects/components/local-directory-hint", () => ({
+  LocalDirectoryHint: (props: unknown) => {
+    mockLocalDirectoryHint(props);
+    return null;
+  },
+}));
 
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
@@ -86,7 +93,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
-    queryFn: () => Promise.resolve([]),
+    queryFn: () => mockApiObj.listAgents(),
   }),
   squadListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "squads"],
@@ -736,6 +743,25 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+  });
+
+  it("passes the issue's agent assignment to the local-directory hint", async () => {
+    const agent = { id: "agent-vue", name: "Vue developer", runtime_id: "runtime-vue" };
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      project_id: "proj-1",
+      assignee_type: "agent",
+      assignee_id: agent.id,
+    });
+    mockApiObj.getProject.mockResolvedValue({ id: "proj-1", name: "Demo" });
+    mockApiObj.listAgents.mockResolvedValue([agent]);
+
+    renderIssueDetail();
+
+    await waitFor(() => expect(mockLocalDirectoryHint).toHaveBeenCalledWith({
+      projectId: "proj-1",
+      assignedAgent: agent,
+    }));
   });
 
   it("counts comment files as deliverables, a re-upload once as v2, never the description's (MUL-7649)", async () => {
