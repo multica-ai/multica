@@ -1229,6 +1229,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
 	var finalAnswer, lastAgentMessage string
 	var semanticObserved atomic.Bool
+	// toolActivity records whether any tool call started, which decides how
+	// a Luna Reserve retry resumes the turn (see codexLunaReserveTurnInput).
+	var toolActivity atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 	firstItemWait := &codexFirstItemWaitObservation{}
 
@@ -1269,6 +1272,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		},
 		onMessage: func(msg Message) {
 			observeMessage(msg)
+			if msg.Type == MessageToolUse {
+				toolActivity.Store(true)
+			}
 			trySend(msgCh, msg)
 		},
 		onAgentMessageChunk: func(text string) bool {
@@ -1621,188 +1627,247 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Whether that notice asks the agent to tell the USER is the caller's
 		// call, not ours: it depends on whether this surface's conversation is
 		// still readable, which this package cannot see (MUL-5722).
-		turnParams := map[string]any{
-			"threadId": threadID,
-			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
-		}
-		// Per-turn reasoning override. Mirrors the per-thread injection in
-		// startOrResumeThread; keeping both in sync is enforced by the
-		// shared `codexReasoningInjection` fixture in codex_test.go (see
-		// MUL-2339 — Trump's constraint that the three injection points
-		// must not drift independently).
-		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
-		applyCodexServiceTier(turnParams, opts.ServiceTier)
-		waitingForTurn := true
+		turnInput := codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice)
+		// turnModel overrides the thread's model for a follow-up turn. It is
+		// only ever set to the Luna Reserve model, and only after Codex
+		// reported the ordinary allowance used up and offered the reserve
+		// (codex_luna_reserve.go). The agent's configured model is unchanged,
+		// so the next task starts on it again.
+		turnModel := ""
+		lunaReserveUsed := false
+		var lunaReserveQuotaError string
 		var timeoutDiagnostic codexTimeoutDiagnostic
 		var processExitErr error
-		finishFirstItemWait := func(outcome string) {
-			firstItemWait.finish(
-				time.Now(),
-				outcome,
-				classifyCodexStartupStderr(stderrBuf.Tail(), strings.HasSuffix(outcome, "_timeout")),
-			)
-		}
-		finishTurn := func(aborted bool) {
-			waitingForTurn = false
-			switch {
-			case aborted:
-				finishFirstItemWait("turn_aborted")
-				finalStatus = "aborted"
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finalError = errMsg
-				} else {
-					finalError = "turn was aborted"
-				}
-			default:
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finishFirstItemWait("turn_failed")
-					finalStatus = "failed"
-					finalError = errMsg
-				} else {
-					finishFirstItemWait("turn_completed")
-				}
+		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, opts.FirstTurnNoProgressTimeout)
+		firstTurnProgressObserved := false
+	codexTurns:
+		for {
+			turnParams := map[string]any{
+				"threadId": threadID,
+				"input":    turnInput,
 			}
-		}
-		finishRunContextDone := func() {
-			waitingForTurn = false
-			if runCtx.Err() == context.DeadlineExceeded {
-				finishFirstItemWait("execution_timeout")
-				finalStatus = "timeout"
-				finalError = fmt.Sprintf("codex timed out after %s", timeout)
-			} else {
-				finishFirstItemWait("cancelled")
-				finalStatus = "aborted"
-				finalError = "execution cancelled"
+			if turnModel != "" {
+				turnParams["model"] = turnModel
 			}
-		}
-		turnNotificationGate.arm()
-		_, err = c.request(runCtx, "turn/start", turnParams)
-		if err != nil {
-			if runCtx.Err() != nil {
-				finishRunContextDone()
-				if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
-					stopProcess()
-				}
-			} else {
-				select {
-				case aborted := <-turnDone:
-					finishTurn(aborted)
+			// Per-turn reasoning override. Mirrors the per-thread injection in
+			// startOrResumeThread; keeping both in sync is enforced by the
+			// shared `codexReasoningInjection` fixture in codex_test.go (see
+			// MUL-2339 — Trump's constraint that the three injection points
+			// must not drift independently).
+			applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+			applyCodexServiceTier(turnParams, opts.ServiceTier)
+			waitingForTurn := true
+			finishFirstItemWait := func(outcome string) {
+				firstItemWait.finish(
+					time.Now(),
+					outcome,
+					classifyCodexStartupStderr(stderrBuf.Tail(), strings.HasSuffix(outcome, "_timeout")),
+				)
+			}
+			finishTurn := func(aborted bool) {
+				waitingForTurn = false
+				switch {
+				case aborted:
+					finishFirstItemWait("turn_aborted")
+					finalStatus = "aborted"
+					if errMsg := c.getTurnError(); errMsg != "" {
+						finalError = errMsg
+					} else {
+						finalError = "turn was aborted"
+					}
 				default:
-					drainAndWait() // flush os/exec stderr goroutine before sampling Tail
-					finalStatus = "failed"
-					finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
-					resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+					if errMsg := c.getTurnError(); errMsg != "" {
+						finishFirstItemWait("turn_failed")
+						finalStatus = "failed"
+						finalError = errMsg
+					} else {
+						finishFirstItemWait("turn_completed")
+					}
+				}
+			}
+			finishRunContextDone := func() {
+				waitingForTurn = false
+				if runCtx.Err() == context.DeadlineExceeded {
+					finishFirstItemWait("execution_timeout")
+					finalStatus = "timeout"
+					finalError = fmt.Sprintf("codex timed out after %s", timeout)
+				} else {
+					finishFirstItemWait("cancelled")
+					finalStatus = "aborted"
+					finalError = "execution cancelled"
+				}
+			}
+			turnNotificationGate.arm()
+			_, err = c.request(runCtx, "turn/start", turnParams)
+			if err != nil {
+				if runCtx.Err() != nil {
+					finishRunContextDone()
+					if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
+						stopProcess()
+					}
+				} else {
+					select {
+					case aborted := <-turnDone:
+						finishTurn(aborted)
+					default:
+						drainAndWait() // flush os/exec stderr goroutine before sampling Tail
+						finalStatus = "failed"
+						finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+						resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+						return
+					}
+				}
+			}
+
+			lastSemanticActivity := time.Now()
+			lastSemanticActivityDescription := "turn/start"
+			semanticTimer := time.NewTimer(semanticInactivityTimeout)
+			defer semanticTimer.Stop()
+
+			var firstTurnNoProgressTimer *time.Timer
+			var firstTurnNoProgressTimerC <-chan time.Time
+			firstTurnStarted := false
+			firstTurnProgressObserved = false
+			stopFirstTurnNoProgressTimer := func() {
+				if firstTurnNoProgressTimer == nil {
 					return
 				}
+				stopTimer(firstTurnNoProgressTimer)
+				firstTurnNoProgressTimerC = nil
 			}
-		}
+			defer stopFirstTurnNoProgressTimer()
 
-		lastSemanticActivity := time.Now()
-		lastSemanticActivityDescription := "turn/start"
-		semanticTimer := time.NewTimer(semanticInactivityTimeout)
-		defer semanticTimer.Stop()
-
-		firstTurnNoProgressTimeout := codexFirstTurnNoProgressTimeout(semanticInactivityTimeout, opts.FirstTurnNoProgressTimeout)
-		var firstTurnNoProgressTimer *time.Timer
-		var firstTurnNoProgressTimerC <-chan time.Time
-		firstTurnStarted := false
-		firstTurnProgressObserved := false
-		stopFirstTurnNoProgressTimer := func() {
-			if firstTurnNoProgressTimer == nil {
-				return
-			}
-			stopTimer(firstTurnNoProgressTimer)
-			firstTurnNoProgressTimerC = nil
-		}
-		defer stopFirstTurnNoProgressTimer()
-
-		for waitingForTurn {
-			select {
-			case aborted := <-turnDone:
-				finishTurn(aborted)
-			case activity := <-semanticActivityCh:
-				lastSemanticActivity = time.Now()
-				lastSemanticActivityDescription = activity
-				resetTimer(semanticTimer, semanticInactivityTimeout)
-				if activity == "status:running" && !firstTurnStarted {
-					firstTurnStarted = true
-					firstItemWait.start(time.Now(), c.activeTurnID())
-					firstTurnNoProgressTimer = time.NewTimer(firstTurnNoProgressTimeout)
-					firstTurnNoProgressTimerC = firstTurnNoProgressTimer.C
-				} else if firstTurnStarted && !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
-					firstTurnProgressObserved = true
-					if activity == "error:terminal" {
-						finishFirstItemWait("turn_failed")
-					} else {
-						finishFirstItemWait("progress")
-					}
-					stopFirstTurnNoProgressTimer()
-				}
-			case <-firstTurnNoProgressTimerC:
-				waitingForTurn = false
-				finishFirstItemWait("no_progress_timeout")
-				finalStatus = "timeout"
-				turnID := c.activeTurnID()
-				timeoutDiagnostic = codexTimeoutDiagnostic{
-					Kind:         codexTimeoutFirstTurnNoProgress,
-					Timeout:      firstTurnNoProgressTimeout,
-					LastActivity: lastSemanticActivityDescription,
-					ThreadID:     threadID,
-					TurnID:       turnID,
-					Model:        opts.Model,
-				}
-				b.cfg.Logger.Warn(CodexFirstTurnNoProgressMarker,
-					"pid", cmd.Process.Pid,
-					"thread_id", threadID,
-					"turn_id", turnID,
-					"timeout", firstTurnNoProgressTimeout.String(),
-					"last_activity", lastSemanticActivityDescription,
-				)
-			case <-semanticTimer.C:
-				waitingForTurn = false
-				finishFirstItemWait("semantic_inactivity_timeout")
-				finalStatus = "timeout"
-				turnID := c.activeTurnID()
-				timeoutDiagnostic = codexTimeoutDiagnostic{
-					Kind:         codexTimeoutSemanticInactivity,
-					Timeout:      semanticInactivityTimeout,
-					LastActivity: lastSemanticActivityDescription,
-					ThreadID:     threadID,
-					TurnID:       turnID,
-					Model:        opts.Model,
-				}
-				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
-					"pid", cmd.Process.Pid,
-					"thread_id", threadID,
-					"turn_id", turnID,
-					"timeout", semanticInactivityTimeout.String(),
-					"last_activity", lastSemanticActivityDescription,
-					"idle_for", time.Since(lastSemanticActivity).Round(time.Millisecond).String(),
-				)
-			case <-runCtx.Done():
-				finishRunContextDone()
-				if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
-					stopProcess()
-				}
-			case <-c.processDone:
+			for waitingForTurn {
 				select {
 				case aborted := <-turnDone:
 					finishTurn(aborted)
-				default:
-					if runCtx.Err() != nil {
-						finishRunContextDone()
-					} else {
-						waitingForTurn = false
-						finishFirstItemWait("process_exit")
-						finalStatus = "failed"
-						processExitErr = c.getProcessErr()
-						if processExitErr == nil {
-							processExitErr = errCodexProcessExited
+				case activity := <-semanticActivityCh:
+					lastSemanticActivity = time.Now()
+					lastSemanticActivityDescription = activity
+					resetTimer(semanticTimer, semanticInactivityTimeout)
+					if activity == "status:running" && !firstTurnStarted {
+						firstTurnStarted = true
+						firstItemWait.start(time.Now(), c.activeTurnID())
+						firstTurnNoProgressTimer = time.NewTimer(firstTurnNoProgressTimeout)
+						firstTurnNoProgressTimerC = firstTurnNoProgressTimer.C
+					} else if firstTurnStarted && !firstTurnProgressObserved && isCodexFirstTurnProgressActivity(activity) {
+						firstTurnProgressObserved = true
+						if activity == "error:terminal" {
+							finishFirstItemWait("turn_failed")
+						} else {
+							finishFirstItemWait("progress")
 						}
-						finalError = processExitErr.Error()
+						stopFirstTurnNoProgressTimer()
+					}
+				case <-firstTurnNoProgressTimerC:
+					waitingForTurn = false
+					finishFirstItemWait("no_progress_timeout")
+					finalStatus = "timeout"
+					turnID := c.activeTurnID()
+					timeoutDiagnostic = codexTimeoutDiagnostic{
+						Kind:         codexTimeoutFirstTurnNoProgress,
+						Timeout:      firstTurnNoProgressTimeout,
+						LastActivity: lastSemanticActivityDescription,
+						ThreadID:     threadID,
+						TurnID:       turnID,
+						Model:        opts.Model,
+					}
+					b.cfg.Logger.Warn(CodexFirstTurnNoProgressMarker,
+						"pid", cmd.Process.Pid,
+						"thread_id", threadID,
+						"turn_id", turnID,
+						"timeout", firstTurnNoProgressTimeout.String(),
+						"last_activity", lastSemanticActivityDescription,
+					)
+				case <-semanticTimer.C:
+					waitingForTurn = false
+					finishFirstItemWait("semantic_inactivity_timeout")
+					finalStatus = "timeout"
+					turnID := c.activeTurnID()
+					timeoutDiagnostic = codexTimeoutDiagnostic{
+						Kind:         codexTimeoutSemanticInactivity,
+						Timeout:      semanticInactivityTimeout,
+						LastActivity: lastSemanticActivityDescription,
+						ThreadID:     threadID,
+						TurnID:       turnID,
+						Model:        opts.Model,
+					}
+					b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
+						"pid", cmd.Process.Pid,
+						"thread_id", threadID,
+						"turn_id", turnID,
+						"timeout", semanticInactivityTimeout.String(),
+						"last_activity", lastSemanticActivityDescription,
+						"idle_for", time.Since(lastSemanticActivity).Round(time.Millisecond).String(),
+					)
+				case <-runCtx.Done():
+					finishRunContextDone()
+					if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
+						stopProcess()
+					}
+				case <-c.processDone:
+					select {
+					case aborted := <-turnDone:
+						finishTurn(aborted)
+					default:
+						if runCtx.Err() != nil {
+							finishRunContextDone()
+						} else {
+							waitingForTurn = false
+							finishFirstItemWait("process_exit")
+							finalStatus = "failed"
+							processExitErr = c.getProcessErr()
+							if processExitErr == nil {
+								processExitErr = errCodexProcessExited
+							}
+							finalError = processExitErr.Error()
+						}
 					}
 				}
 			}
+
+			if lunaReserveUsed {
+				// A reserve turn that ran out too is still a quota failure and
+				// already says so. Any other failure keeps the original
+				// usage-limit error in front so the task is still classified as
+				// provider_quota_limit.
+				if finalStatus == "failed" && c.getTurnErrorCode() != codexUsageLimitExceeded {
+					finalError = lunaReserveQuotaError + "; Luna Reserve fallback failed: " + finalError
+				}
+			} else if finalStatus == "failed" && c.getTurnErrorCode() == codexUsageLimitExceeded && runCtx.Err() == nil {
+				currentModel := opts.Model
+				if currentModel == "" {
+					currentModel = c.threadModel
+				}
+				available, reason := c.checkCodexLunaReserve(runCtx, currentModel)
+				b.cfg.Logger.Info("codex luna reserve check",
+					"thread_id", threadID,
+					"model", currentModel,
+					"available", available,
+					"reason", reason,
+				)
+				if available {
+					lunaReserveUsed = true
+					lunaReserveQuotaError = finalError
+					notice := "Codex usage limit reached; continuing with Luna Reserve (" + codexLunaReserveModel + ")."
+					if currentModel != "" {
+						notice = "Codex usage limit reached for " + currentModel + "; continuing with Luna Reserve (" + codexLunaReserveModel + ")."
+					}
+					trySend(msgCh, Message{Type: MessageLog, Level: "warn", Content: notice})
+					turnInput = codexLunaReserveTurnInput(turnInput, toolActivity.Load())
+					turnModel = codexLunaReserveModel
+					finalStatus = "completed"
+					finalError = ""
+					c.resetTurnState()
+					turnNotificationGate.resetForNextTurn()
+					select {
+					case <-turnDone:
+					default:
+					}
+					continue codexTurns
+				}
+			}
+			break
 		}
 
 		duration := time.Since(startTime)
@@ -1917,6 +1982,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
 			model := opts.Model
+			if lunaReserveUsed {
+				// The failed ordinary turn is rejected before inference, so
+				// the tokens belong to the reserve turn.
+				model = codexLunaReserveModel
+			}
 			if model == "" {
 				model = "unknown"
 			}
@@ -2042,6 +2112,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
+				c.threadModel = extractCodexThreadModel(resumeResult)
 				logger.Info("codex lifecycle",
 					"phase", "thread_resume_response",
 					"task_id", c.cfg.TaskID,
@@ -2107,6 +2178,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if threadID == "" {
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
+	c.threadModel = extractCodexThreadModel(startResult)
 	logger.Info("codex lifecycle",
 		"phase", "thread_start_response",
 		"task_id", c.cfg.TaskID,
@@ -2438,6 +2510,14 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+	// turnErrorCode is the codexErrorInfo tag that accompanied turnError
+	// (e.g. "usageLimitExceeded"), when the app-server supplied one.
+	turnErrorCode string
+
+	// threadModel is the model thread/start or thread/resume reported the
+	// thread is running on; it resolves the effective model when the agent
+	// leaves opts.Model empty.
+	threadModel string
 }
 
 type codexAgentMessageStream struct {
@@ -2455,12 +2535,31 @@ type codexAgentMessageStream struct {
 // before the thread/resume response is processed while the gate is still closed.
 // A replay emitted after arm but before a start event cannot be distinguished
 // from a valid legacy current-turn event without breaking those older streams.
-// Its mutable lifecycle fields are only touched by the stdout reader goroutine;
-// armed is atomic because the lifecycle goroutine flips it.
+// Its mutable lifecycle fields are updated by the stdout reader goroutine and
+// reset by the lifecycle goroutine between turns, so mu guards them; armed is
+// atomic because the lifecycle goroutine flips it.
 type codexTurnNotificationGate struct {
-	armed   atomic.Bool
+	armed atomic.Bool
+	// mu guards the fields below: accept runs on the stdout reader, while
+	// resetForNextTurn runs on the lifecycle goroutine between turns.
+	mu      sync.Mutex
 	started bool
 	turnID  string
+	// finishedTurnID is the turn a same-process follow-up turn replaced. Its
+	// late notifications must not end or feed the follow-up turn.
+	finishedTurnID string
+}
+
+// resetForNextTurn reopens the gate for a follow-up turn/start on the same
+// thread (the Luna Reserve retry) while keeping the finished turn out.
+func (g *codexTurnNotificationGate) resetForNextTurn() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.turnID != "" {
+		g.finishedTurnID = g.turnID
+	}
+	g.started = false
+	g.turnID = ""
 }
 
 func (g *codexTurnNotificationGate) arm() {
@@ -2470,6 +2569,17 @@ func (g *codexTurnNotificationGate) arm() {
 func (g *codexTurnNotificationGate) accept(method string, params map[string]any) bool {
 	if !g.armed.Load() {
 		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.finishedTurnID != "" {
+		turnID, _ := params["turnId"].(string)
+		if turnID == "" {
+			turnID = extractNestedString(params, "turn", "id")
+		}
+		if turnID == g.finishedTurnID {
+			return false
+		}
 	}
 
 	if method == "codex/event" || strings.HasPrefix(method, "codex/event/") {
@@ -2512,6 +2622,12 @@ func (g *codexTurnNotificationGate) accept(method string, params map[string]any)
 }
 
 func (c *codexClient) setTurnError(msg string) {
+	c.setTurnErrorWithCode(msg, "")
+}
+
+// setTurnErrorWithCode records the first terminal error of the turn together
+// with its codexErrorInfo tag.
+func (c *codexClient) setTurnErrorWithCode(msg, code string) {
 	if msg == "" {
 		return
 	}
@@ -2519,6 +2635,7 @@ func (c *codexClient) setTurnError(msg string) {
 	defer c.turnErrorMu.Unlock()
 	if c.turnError == "" {
 		c.turnError = msg
+		c.turnErrorCode = code
 	}
 }
 
@@ -2526,6 +2643,35 @@ func (c *codexClient) getTurnError() string {
 	c.turnErrorMu.Lock()
 	defer c.turnErrorMu.Unlock()
 	return c.turnError
+}
+
+func (c *codexClient) getTurnErrorCode() string {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	return c.turnErrorCode
+}
+
+// markTurnCompleted reports whether this is the first turn/completed of the
+// current turn. It shares turnErrorMu with resetTurnState, which the lifecycle
+// goroutine calls between turns.
+func (c *codexClient) markTurnCompleted() bool {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	if c.turnCompleted {
+		return false
+	}
+	c.turnCompleted = true
+	return true
+}
+
+// resetTurnState clears the per-turn terminal state before a follow-up
+// turn/start on the same thread (the Luna Reserve retry).
+func (c *codexClient) resetTurnState() {
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	c.turnCompleted = false
+	c.turnError = ""
+	c.turnErrorCode = ""
 }
 
 // setThreadID publishes the thread ID resolved by thread/start or
@@ -3496,10 +3642,9 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		status := extractNestedString(params, "turn", "status")
 		threadID, _ := params["threadId"].(string)
 		c.cfg.Logger.Info("codex turn/completed received", "thread_id", threadID, "turn_id", turnID, "status", status)
-		if c.turnCompleted {
+		if !c.markTurnCompleted() {
 			return
 		}
-		c.turnCompleted = true
 		c.setActiveTurnID("")
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
@@ -3511,7 +3656,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			if errMsg == "" {
 				errMsg = "codex turn failed"
 			}
-			c.setTurnError(errMsg)
+			var code string
+			if turn, ok := params["turn"].(map[string]any); ok {
+				if turnErr, ok := turn["error"].(map[string]any); ok {
+					code = codexErrorInfoCode(turnErr)
+				}
+			}
+			c.setTurnErrorWithCode(errMsg, code)
 		}
 
 		// Extract usage from turn/completed if present (e.g. params.turn.usage).
@@ -3547,7 +3698,8 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 				}
 			}
 			if !willRetry {
-				c.setTurnError(errMsg)
+				errInfo, _ := params["error"].(map[string]any)
+				c.setTurnErrorWithCode(errMsg, codexErrorInfoCode(errInfo))
 			}
 		}
 
@@ -4294,6 +4446,24 @@ func extractThreadID(result json.RawMessage) string {
 		return ""
 	}
 	return r.Thread.ID
+}
+
+// extractCodexThreadModel returns the model a thread/start or thread/resume
+// response reports, preferring the top-level field over thread.model.
+func extractCodexThreadModel(result json.RawMessage) string {
+	var r struct {
+		Model  string `json:"model"`
+		Thread struct {
+			Model string `json:"model"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	if r.Model != "" {
+		return r.Model
+	}
+	return r.Thread.Model
 }
 
 func extractNestedString(m map[string]any, keys ...string) string {
