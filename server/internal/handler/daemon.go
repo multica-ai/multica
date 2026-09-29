@@ -2215,7 +2215,10 @@ func (h *Handler) rejectClaimOnWorkspaceMismatch(ctx context.Context, task *db.A
 // returned only in the claim response; its hash is committed atomically with
 // the task-scoped agent token by FinalizeTaskClaim.
 func remoteMCPDaemonTokenForClaim(resp AgentTaskResponse, runtime db.AgentRuntime) (string, []db.CreateDaemonTokenParams, error) {
-	if len(resp.RemoteMCPConnections) == 0 {
+	// Agent-triggered plugin hooks ride the same daemon->server call path as
+	// Remote MCP and authenticate with the same token; without it every
+	// http-transport agent hook call 401s at /api/daemon/tasks/{id}/plugin-hooks.
+	if len(resp.RemoteMCPConnections) == 0 && len(resp.PluginHookTools) == 0 {
 		return "", nil, nil
 	}
 	if !runtime.DaemonID.Valid || strings.TrimSpace(runtime.DaemonID.String) == "" {
