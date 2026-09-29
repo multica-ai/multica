@@ -449,11 +449,15 @@ export function McpConfigTab({
           {/* The machine name moves into the heading — it is the only part of
               the old description that told the reader anything. */}
           <h3 className="min-w-0 truncate text-body font-medium">
-            {runtime
-              ? t(($) => $.tab_body.mcp_config.runtime_title_named, {
+            {runtime?.provider === "pi"
+              ? t(($) => $.tab_body.mcp_config.pi_runtime_title, {
                   runtime: runtimeDisplayLabel(runtime),
                 })
-              : t(($) => $.tab_body.mcp_config.runtime_title)}
+              : runtime
+                ? t(($) => $.tab_body.mcp_config.runtime_title_named, {
+                    runtime: runtimeDisplayLabel(runtime),
+                  })
+                : t(($) => $.tab_body.mcp_config.runtime_title)}
           </h3>
           {runtimeId && (
             <Button
@@ -474,6 +478,11 @@ export function McpConfigTab({
             </Button>
           )}
         </div>
+        {runtime?.provider === "pi" && (
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.mcp_config.pi_runtime_notice)}
+          </p>
+        )}
         {!runtime ? (
           <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_missing)} />
         ) : !canReadRuntime ? (
@@ -496,7 +505,11 @@ export function McpConfigTab({
           />
         ) : runtimeQuery.data?.mcpSupported !== true ? (
           <McpNotice
-            text={t(($) => $.tab_body.mcp_config.runtime_unsupported)}
+            text={
+              runtime.provider === "pi"
+                ? t(($) => $.tab_body.mcp_config.pi_runtime_unavailable)
+                : t(($) => $.tab_body.mcp_config.runtime_unsupported)
+            }
           />
         ) : runtimeQuery.data.mcpServers.length === 0 ? (
           <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_empty)} />
@@ -507,7 +520,7 @@ export function McpConfigTab({
               transport: server.transport || "unknown",
               enabled: server.enabled,
               source: server.source,
-              overridden: effectiveNames.has(server.name),
+              overridden: runtime.provider !== "pi" && effectiveNames.has(server.name),
             }))}
             disabledLabel={t(($) => $.tab_body.mcp_config.runtime_disabled_badge)}
             overriddenLabel={t(($) => $.tab_body.mcp_config.runtime_overridden_badge)}

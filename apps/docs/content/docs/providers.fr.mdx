@@ -82,6 +82,8 @@ Pi prend en charge le MCP géré par Multica lorsque le daemon détecte une inst
 pi install npm:pi-mcp-adapter@2.37.0
 ```
 
+La découverte MCP locale utilise les mêmes champs non sensibles que les autres runtimes : nom, transport, source et état activé. Elle lit les fichiers MCP utilisateur partagés et la configuration utilisateur de l’adaptateur compatible, en respectant `PI_CODING_AGENT_DIR` et `PI_MCP_CONFIG_MODE=exclusive`. Cet inventaire exclut les fichiers projet, les imports de compatibilité et les serveurs fournis par des packages. Afficher un serveur local ne l’ajoute pas à une exécution gérée.
+
 L'onglet MCP est disponible uniquement pour les runtimes Pi qui déclarent cette capacité. Un ancien daemon, un adaptateur absent ou incompatible le laisse indisponible ; les exécutions Pi ordinaires sans MCP géré restent possibles. Multica n'installe ni n'active automatiquement l'adaptateur.
 
 Pour une exécution gérée, Multica transmet uniquement la configuration MCP résolue de l'agent via `createMcpAdapter({ config })`. Les configurations MCP globales et du projet ne sont pas fusionnées. Un répertoire temporaire privé contient la configuration et l'état de l'adaptateur ; il est supprimé à la fin de l'exécution, en cas d'échec au démarrage ou d'annulation. Les paramètres Pi globaux et les fichiers MCP ne sont pas modifiés.

@@ -124,7 +124,7 @@ func preparePiMCP(raw json.RawMessage, env []string) (_ *piMCPRun, err error) {
 	if err != nil {
 		return nil, err
 	}
-	entry, err := findPiMCPAdapter(original)
+	adapter, err := findPiMCPAdapter(original)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func preparePiMCP(raw json.RawMessage, env []string) (_ *piMCPRun, err error) {
 	if err = os.WriteFile(filepath.Join(dir, "multica-managed-mcp.json"), config, 0600); err != nil {
 		return nil, errors.New("cannot write private MCP config")
 	}
-	entryJSON, _ := json.Marshal(filepath.ToSlash(entry))
+	entryJSON, _ := json.Marshal(filepath.ToSlash(adapter.entryPath))
 	configJSON, _ := json.Marshal(filepath.ToSlash(filepath.Join(dir, "multica-managed-mcp.json")))
 	bridge := fmt.Sprintf(`import { readFileSync } from "node:fs";
 import { createMcpAdapter } from %s;

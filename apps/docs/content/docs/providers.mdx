@@ -82,6 +82,8 @@ Pi supports Multica-managed MCP when the daemon detects an enabled, compatible `
 pi install npm:pi-mcp-adapter@2.37.0
 ```
 
+Local MCP discovery reports the same non-secret summary fields as other runtimes: name, transport, source, and enabled status. It reads shared user MCP files and the compatible adapter’s user configuration, honoring `PI_CODING_AGENT_DIR` and `PI_MCP_CONFIG_MODE=exclusive`. Project files, compatibility imports, and package-contributed servers are outside this user-level inventory. Displaying a local server does not add it to a managed run.
+
 The MCP tab is available only for Pi runtimes that report this capability. An older daemon, a missing adapter, or an incompatible adapter leaves it unavailable; ordinary Pi runs without managed MCP still work. Multica does not install or enable the adapter automatically.
 
 For a managed run, Multica supplies only the agent's resolved MCP configuration through the adapter's `createMcpAdapter({ config })` interface. It does not merge the computer's global or project MCP configuration. A private temporary directory holds the run's configuration and adapter state and is removed when the run ends, fails to start, or is cancelled. Global Pi settings and MCP files are not modified.

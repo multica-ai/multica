@@ -392,9 +392,17 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
 	}
 
+	out := make([]runtimeLocalMcpServerSummary, 0)
 	var path, key, source string
 	var format string
 	switch provider {
+	case "pi":
+		servers, supported, err := piRuntimeMcpInventory()
+		if err != nil || !supported {
+			return out, supported, err
+		}
+		out = append(out, runtimeMcpSummaries(servers, "User config")...)
+
 	case "claude":
 		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
 	case "codearts":
@@ -450,20 +458,21 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}
 
-	out := make([]runtimeLocalMcpServerSummary, 0)
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
-		if err != nil {
-			return nil, true, err
+	if path != "" {
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			cfg, err := unmarshalRuntimeMcpConfig(raw, format)
+			if err != nil {
+				return nil, true, err
+			}
+			if servers, ok := nestedRuntimeMcpMap(cfg, key); ok {
+				out = append(out, runtimeMcpSummaries(servers, source)...)
+			}
+		} else if !os.IsNotExist(err) {
+			return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 		}
-		if servers, ok := nestedRuntimeMcpMap(cfg, key); ok {
-			out = append(out, runtimeMcpSummaries(servers, source)...)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
-	}
 
+	}
 	if provider == "claude" {
 		out = append(out, listClaudePluginMcpServers(home)...)
 	}

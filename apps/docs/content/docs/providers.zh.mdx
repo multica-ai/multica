@@ -82,6 +82,8 @@ Antigravity、GitHub Copilot CLI 和 DevEco Code 暂不读取智能体中的 MCP
 pi install npm:pi-mcp-adapter@2.37.0
 ```
 
+本地 MCP 清单与其他运行时使用相同的非敏感摘要字段：名称、传输类型、来源和启用状态。发现范围是共享用户 MCP 文件及兼容扩展的用户配置，并遵循 `PI_CODING_AGENT_DIR` 和 `PI_MCP_CONFIG_MODE=exclusive`。此用户级清单不枚举项目文件、兼容导入或包提供的服务器。展示本地服务器不会将其加入受管运行。
+
 只有上报了此能力的 Pi 运行时才会显示 MCP 页签。旧版守护进程、插件缺失或版本不兼容时，该页签不可用；未使用受管 MCP 的普通 Pi 运行仍可正常执行。Multica 不会自动安装或启用插件。
 
 受管运行通过插件的 `createMcpAdapter({ config })` 接口，只传入智能体解析后的 MCP 配置，不合并电脑上的全局或项目 MCP 配置。每次运行的配置与插件状态保存在私有临时目录中，运行结束、启动失败或取消后清理。全局 Pi 设置和 MCP 文件不会被修改。

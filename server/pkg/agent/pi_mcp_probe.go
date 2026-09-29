@@ -71,16 +71,21 @@ func piEnvValue(env []string, key string) string {
 // Package-specific discovery stays here rather than in the daemon or UI.
 // Version pins cover the programmatic config contract and agent-dir-owned
 // caches. New adapter implementations can provide another discovery branch.
-func findPiMCPAdapter(dir string) (string, error) {
+type piMCPAdapter struct {
+	entryPath  string
+	configName string
+}
+
+func findPiMCPAdapter(dir string) (piMCPAdapter, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err != nil {
-		return "", errors.New("Pi MCP extension unavailable: cannot read Pi settings")
+		return piMCPAdapter{}, errors.New("Pi MCP extension unavailable: cannot read Pi settings")
 	}
 	var settings struct {
 		Packages []json.RawMessage `json:"packages"`
 	}
 	if json.Unmarshal(raw, &settings) != nil {
-		return "", errors.New("Pi MCP extension unavailable: invalid Pi settings")
+		return piMCPAdapter{}, errors.New("Pi MCP extension unavailable: invalid Pi settings")
 	}
 	for _, item := range settings.Packages {
 		var source string
@@ -126,7 +131,7 @@ func findPiMCPAdapter(dir string) (string, error) {
 			continue
 		}
 		if pkg.Version != "2.37.0" && pkg.Version != "3.1.0" {
-			return "", errors.New("Pi MCP extension detected but unsupported/incompatible")
+			return piMCPAdapter{}, errors.New("Pi MCP extension detected but unsupported/incompatible")
 		}
 		declared := false
 		for _, p := range pkg.Pi.Extensions {
@@ -137,11 +142,15 @@ func findPiMCPAdapter(dir string) (string, error) {
 		entry := filepath.Join(root, "index.ts")
 		data, err := os.ReadFile(entry)
 		if !declared || err != nil || !bytes.Contains(data, []byte("export function createMcpAdapter(")) {
-			return "", errors.New("Pi MCP extension detected but unsupported/incompatible")
+			return piMCPAdapter{}, errors.New("Pi MCP extension detected but unsupported/incompatible")
 		}
-		return entry, nil
+		configName := "mcp.json"
+		if pkg.Version == "3.1.0" {
+			configName = "mcp-adapter.json"
+		}
+		return piMCPAdapter{entryPath: entry, configName: configName}, nil
 	}
-	return "", errors.New("Pi MCP extension unavailable: no enabled compatible adapter")
+	return piMCPAdapter{}, errors.New("Pi MCP extension unavailable: no enabled compatible adapter")
 }
 
 func piMCPExtensionEnabled(patterns []string, root string) bool {
@@ -187,4 +196,32 @@ func piMCPExtensionEnabled(patterns []string, root string) bool {
 		}
 	}
 	return enabled
+}
+
+// PiMCPUserConfigPaths returns the compatible adapter's user-scope sources in
+// increasing precedence. This is inventory-only: no project discovery, imports,
+// package execution, or changes to the managed per-agent configuration.
+func PiMCPUserConfigPaths() ([]string, bool, error) {
+	dir, err := piAgentDir(os.Environ())
+	if err != nil {
+		return nil, false, err
+	}
+	adapter, err := findPiMCPAdapter(dir)
+	if err != nil {
+		return nil, false, nil
+	}
+	own := filepath.Join(dir, adapter.configName)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("PI_MCP_CONFIG_MODE")), "exclusive") {
+		return []string{own}, true, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, false, err
+	}
+	return []string{
+		filepath.Join(home, ".config", "mcp", "mcp.json"),
+		filepath.Join(home, ".agents", "mcp.json"),
+		filepath.Join(home, ".agents", "mcp", "mcp.json"),
+		own,
+	}, true, nil
 }

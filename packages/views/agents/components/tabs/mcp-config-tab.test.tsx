@@ -709,6 +709,27 @@ describe("McpConfigTab", () => {
     expect(within(row).getByText("Streamable HTTP")).toBeVisible();
   });
 
+  it("lists Pi inventory without claiming it is inherited into managed runs", async () => {
+    mockRuntimeCapabilities.mockResolvedValue({
+      skills: [], supported: true, mcpSupported: true,
+      mcpServers: [{ name: "local", transport: "http", source: "User config", enabled: true }],
+    });
+    renderTab({ mcp_config: { mcpServers: { local: { command: "managed" } } } }, undefined, {
+      ...onlineRuntime, provider: "pi", name: "Pi (Mac)", metadata: { managed_mcp: true },
+    });
+    await waitFor(() => expect(screen.getAllByText("local")).toHaveLength(2));
+    expect(screen.getByRole("heading", { name: "Local MCP in Pi (Mac)" })).toBeVisible();
+    expect(screen.getByText("Managed runs use only the MCP servers assigned in Multica; local servers are not automatically included.")).toBeVisible();
+    expect(screen.queryByText("Overridden by Multica")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /inherited from/i })).not.toBeInTheDocument();
+  });
+
+  it("explains a missing Pi adapter without calling it an old runtime", async () => {
+    mockRuntimeCapabilities.mockResolvedValue({ skills: [], supported: true, mcpSupported: false, mcpServers: [] });
+    renderTab({}, undefined, { ...onlineRuntime, provider: "pi", name: "Pi (Mac)" });
+    expect(await screen.findByText("Could not read Pi's local MCP configuration. Check that the adapter is compatible and enabled, and its configuration is valid.")).toBeVisible();
+  });
+
   it("shows a permission notice when capability discovery is forbidden", async () => {
     mockRuntimeCapabilities.mockRejectedValue(
       new ApiError("insufficient permissions", 403, "Forbidden"),
