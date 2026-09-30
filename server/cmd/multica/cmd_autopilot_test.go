@@ -1100,3 +1100,97 @@ func TestAutopilotTriggerRequestError_SurfacesRefusalToTheUser(t *testing.T) {
 		}
 	})
 }
+
+func TestRunAutopilotRunsTableShowsQueuedAndWorkIssue(t *testing.T) {
+	const autopilotID = "11111111-1111-1111-1111-111111111111"
+	const workIssueID = "33333333-3333-3333-3333-333333333333"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/autopilots/"+autopilotID+"/runs" {
+			t.Fatalf("request = %s %s, want GET runs", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"runs": []map[string]any{
+				{"id": "run-queued", "source": "schedule", "status": "running", "task_status": "queued"},
+				{"id": "run-live", "source": "schedule", "status": "running", "task_status": "running", "work_issue_id": workIssueID},
+			},
+			"total": 2,
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := &cobra.Command{Use: "runs"}
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().String("output", "table", "")
+	out, err := captureStdout(t, func() error {
+		return runAutopilotRuns(cmd, []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotRuns: %v", err)
+	}
+	lines := strings.Split(out, "\n")
+	var queuedLine, liveLine string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "run-queued") {
+			queuedLine = line
+		}
+		if strings.HasPrefix(line, "run-live") {
+			liveLine = line
+		}
+	}
+	if !strings.Contains(out, "WORK_ISSUE") {
+		t.Fatalf("table missing WORK_ISSUE header:\n%s", out)
+	}
+	if !strings.Contains(queuedLine, "queued") {
+		t.Fatalf("run waiting for a slot should read queued:\n%s", out)
+	}
+	if !strings.Contains(liveLine, "running") || !strings.Contains(liveLine, workIssueID) {
+		t.Fatalf("claimed run should read running with its work issue:\n%s", out)
+	}
+}
+
+func newAutopilotLinkIssueTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "link-issue"}
+	cmd.Flags().String("run", "", "")
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunAutopilotLinkIssueDefaultsRunFromEnv(t *testing.T) {
+	const runID = "22222222-2222-2222-2222-222222222222"
+
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/autopilot-runs/"+runID+"/work-issue" {
+			t.Fatalf("request = %s %s, want PUT work-issue", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": runID, "status": "running", "work_issue_id": "issue-uuid"})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_AUTOPILOT_RUN_ID", runID)
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotLinkIssue(newAutopilotLinkIssueTestCmd(), []string{"MUL-42"})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotLinkIssue: %v", err)
+	}
+	if gotBody["issue_id"] != "MUL-42" {
+		t.Fatalf("issue_id sent = %q, want MUL-42", gotBody["issue_id"])
+	}
+	if !strings.Contains(out, "issue-uuid") {
+		t.Fatalf("output missing linked issue:\n%s", out)
+	}
+}
+
+func TestRunAutopilotLinkIssueRequiresRun(t *testing.T) {
+	t.Setenv("MULTICA_AUTOPILOT_RUN_ID", "")
+	err := runAutopilotLinkIssue(newAutopilotLinkIssueTestCmd(), []string{"MUL-42"})
+	if err == nil || !strings.Contains(err.Error(), "--run is required") {
+		t.Fatalf("err = %v, want --run is required", err)
+	}
+}

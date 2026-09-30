@@ -1581,6 +1581,12 @@ export function useRealtimeSync(
     // taskMessages → "Thinking · Ns".
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as TaskDispatchPayload;
+      // An autopilot run reads as Queued until its task is claimed; refetch
+      // the run history so it flips to Running.
+      if (payload.autopilot_run_id) {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),

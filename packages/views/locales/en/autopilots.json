@@ -130,6 +130,7 @@
   },
   "run_status": {
     "issue_created": "Issue Created",
+    "queued": "Queued",
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
@@ -143,6 +144,7 @@
   },
   "run": {
     "issue_linked": "Issue linked",
+    "working_on": "Working on",
     "view_log": "View execution log",
     "skipped_group": {
       "label": "Skipped",

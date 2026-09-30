@@ -130,6 +130,7 @@
   },
   "run_status": {
     "issue_created": "タスク作成済み",
+    "queued": "待機中",
     "running": "実行中",
     "completed": "完了",
     "failed": "失敗",
@@ -143,6 +144,7 @@
   },
   "run": {
     "issue_linked": "タスクをリンク済み",
+    "working_on": "作業中",
     "view_log": "実行ログを表示",
     "skipped_group": {
       "label": "スキップ済み",

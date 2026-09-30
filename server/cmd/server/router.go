@@ -2155,6 +2155,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
+			// Autopilot runs addressed by run id alone: a run's agent knows its
+			// run id (MULTICA_AUTOPILOT_RUN_ID) but not its autopilot id.
+			r.Put("/api/autopilot-runs/{runId}/work-issue", h.SetAutopilotRunWorkIssue)
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

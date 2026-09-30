@@ -960,6 +960,15 @@ multica autopilot runs <id>
 multica autopilot runs <id> --limit 50 --output json
 ```
 
+A `running` run whose task is still waiting for a free agent slot shows as
+`queued`. The `WORK_ISSUE` column is the issue a run declared it is working on:
+
+```bash
+# From inside an autopilot run (run id defaults to $MULTICA_AUTOPILOT_RUN_ID)
+multica autopilot link-issue MUL-123
+multica autopilot link-issue MUL-123 --run <run-id>
+```
+
 ### Schedule Triggers
 
 ```bash

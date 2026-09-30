@@ -420,6 +420,22 @@ WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: ListAgentTaskStatusesByIDs :many
+-- Backs the derived "queued" run state: a run_only run is marked running as
+-- soon as its task is enqueued, so run lists read the task's own status to
+-- tell a run still waiting for a free agent slot from one actually executing.
+SELECT id, status FROM agent_task_queue
+WHERE id = ANY(@task_ids::uuid[]);
+
+-- name: SetAutopilotRunWorkIssue :one
+-- Records the issue a run's agent declared it is working on. Display-only:
+-- unlike issue_id it drives no run lifecycle, so a run_only run can point at
+-- the issue its agent picked without that issue's status finishing the run.
+UPDATE autopilot_run
+SET work_issue_id = $2
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateAutopilotRunIssueCreated :one
 UPDATE autopilot_run
 SET status = 'issue_created', issue_id = $2
