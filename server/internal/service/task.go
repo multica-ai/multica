@@ -4396,6 +4396,19 @@ func lockIssueChatCallbackTarget(ctx context.Context, qtx *db.Queries, taskID pg
 	if session.Status != "active" {
 		return nil, nil
 	}
+	sourceTask, err := qtx.GetAgentTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load issue callback source task: %w", err)
+	}
+	// A private chat remains owned by its creator. A rerun triggered by another
+	// member must finish on the card instead of injecting work into that chat.
+	if util.UUIDToString(sourceTask.OriginatorUserID) == "" ||
+		util.UUIDToString(sourceTask.OriginatorUserID) != util.UUIDToString(session.CreatorID) {
+		return nil, nil
+	}
 
 	agent, err := qtx.GetAgentForClaimUpdate(ctx, session.AgentID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -4405,6 +4418,12 @@ func lockIssueChatCallbackTarget(ctx context.Context, qtx *db.Queries, taskID pg
 		return nil, fmt.Errorf("lock issue callback chat agent: %w", err)
 	}
 	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		return nil, nil
+	}
+	// Re-check the same durable member-to-agent invocation policy as a normal
+	// chat send. Access granted when the session was created may since have been
+	// revoked; an automatic callback must not make that stale session a bypass.
+	if !CanMemberInvokeAgent(ctx, qtx, agent, session.CreatorID, session.WorkspaceID) {
 		return nil, nil
 	}
 	return &issueChatCallbackTarget{session: session, agent: agent}, nil
@@ -4460,9 +4479,9 @@ func createIssueChatCallbackTx(
 		RuntimeID:            target.agent.RuntimeID,
 		Priority:             2,
 		ChatSessionID:        target.session.ID,
-		InitiatorUserID:      sourceTask.InitiatorUserID,
-		OriginatorUserID:     sourceTask.OriginatorUserID,
-		AccountableUserID:    sourceTask.AccountableUserID,
+		InitiatorUserID:      target.session.CreatorID,
+		OriginatorUserID:     target.session.CreatorID,
+		AccountableUserID:    target.session.CreatorID,
 		ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
 		OriginatorSource:     pgtype.Text{String: "delegation", Valid: true},
 		TriggerEvidenceKind:  pgtype.Text{String: issueTaskCallbackEvidenceKind, Valid: true},

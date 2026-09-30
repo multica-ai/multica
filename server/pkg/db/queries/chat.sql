@@ -399,23 +399,55 @@ FOR UPDATE;
 
 -- name: LockChatSessionForIssueCallback :one
 -- Resolves the return path for one Squad card leader run and takes the same
--- first lock as direct chat enqueue. The card must have been created by a chat
--- task; ordinary issues and worker runs deliberately have no callback target.
+-- first lock as direct chat enqueue. A leader may create an implementation
+-- card from a Spec/Ticket card that Mika originally created from chat, so walk
+-- that issue -> origin task -> parent issue chain back to the original chat.
+-- Eight parent cards is a cycle-safe bound well beyond the supported workflow.
+-- Ordinary issues, worker runs, and a different Squad leader deliberately have
+-- no callback target.
+WITH RECURSIVE origin_chain AS (
+  SELECT
+    source_task.agent_id AS source_agent_id,
+    source_issue.workspace_id AS source_workspace_id,
+    source_issue.origin_id AS origin_task_id,
+    0 AS depth
+  FROM agent_task_queue AS source_task
+  JOIN issue AS source_issue
+    ON source_issue.id = source_task.issue_id
+  WHERE source_task.id = $1
+    AND source_task.status IN ('dispatched', 'running', 'waiting_local_directory')
+    AND source_task.chat_session_id IS NULL
+    AND source_task.is_leader_task = TRUE
+    AND source_task.squad_id IS NOT NULL
+    AND source_issue.origin_type = 'agent_create'
+
+  UNION ALL
+
+  SELECT
+    chain.source_agent_id,
+    chain.source_workspace_id,
+    parent_issue.origin_id,
+    chain.depth + 1
+  FROM origin_chain AS chain
+  JOIN agent_task_queue AS current_origin_task
+    ON current_origin_task.id = chain.origin_task_id
+  JOIN issue AS parent_issue
+    ON parent_issue.id = current_origin_task.issue_id
+  WHERE current_origin_task.chat_session_id IS NULL
+    AND parent_issue.origin_type = 'agent_create'
+    AND parent_issue.workspace_id = chain.source_workspace_id
+    AND chain.depth < 8
+)
 SELECT callback_session.*
-FROM agent_task_queue AS source_task
-JOIN issue AS source_issue
-  ON source_issue.id = source_task.issue_id
+FROM origin_chain AS chain
 JOIN agent_task_queue AS origin_task
-  ON origin_task.id = source_issue.origin_id
+  ON origin_task.id = chain.origin_task_id
 JOIN chat_session AS callback_session
   ON callback_session.id = origin_task.chat_session_id
-WHERE source_task.id = $1
-  AND source_task.status IN ('dispatched', 'running', 'waiting_local_directory')
-  AND source_task.chat_session_id IS NULL
-  AND source_task.is_leader_task = TRUE
-  AND source_task.squad_id IS NOT NULL
-  AND source_issue.origin_type = 'agent_create'
-  AND source_issue.workspace_id = callback_session.workspace_id
+WHERE callback_session.workspace_id = chain.source_workspace_id
+  AND callback_session.agent_id = chain.source_agent_id
+ORDER BY chain.depth ASC
+LIMIT 1
 FOR UPDATE OF callback_session;
 
 -- name: LockChatSessionForEnqueue :one

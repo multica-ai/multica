@@ -12,14 +12,17 @@ import (
 )
 
 type issueChatCallbackFixture struct {
-	dbfx          *testutil.Fixture
-	userID        string
-	mikaAgentID   string
-	mikaRuntimeID string
-	squadID       string
-	chatSessionID string
-	issueID       string
-	leaderTaskID  string
+	dbfx            *testutil.Fixture
+	userID          string
+	mikaAgentID     string
+	mikaRuntimeID   string
+	workerAgentID   string
+	workerRuntimeID string
+	squadID         string
+	chatSessionID   string
+	originTaskID    string
+	issueID         string
+	leaderTaskID    string
 }
 
 func seedIssueChatCallbackFixture(t *testing.T) issueChatCallbackFixture {
@@ -66,14 +69,164 @@ func seedIssueChatCallbackFixture(t *testing.T) issueChatCallbackFixture {
 	})
 
 	return issueChatCallbackFixture{
-		dbfx:          dbfx,
-		userID:        userID,
-		mikaAgentID:   mikaAgentID,
-		mikaRuntimeID: mikaRuntimeID,
-		squadID:       squadID,
-		chatSessionID: chatSessionID,
-		issueID:       issueID,
-		leaderTaskID:  leaderTaskID,
+		dbfx:            dbfx,
+		userID:          userID,
+		mikaAgentID:     mikaAgentID,
+		mikaRuntimeID:   mikaRuntimeID,
+		workerAgentID:   workerAgentID,
+		workerRuntimeID: workerRuntimeID,
+		squadID:         squadID,
+		chatSessionID:   chatSessionID,
+		originTaskID:    originTaskID,
+		issueID:         issueID,
+		leaderTaskID:    leaderTaskID,
+	}
+}
+
+func TestCompleteSquadLeaderTaskFindsOriginalMikaChatThroughSpecAndTicketCards(t *testing.T) {
+	fx := seedIssueChatCallbackFixture(t)
+	specIssueID := fx.dbfx.Issue(t, "Spec card created from Mika chat", testutil.Cols{
+		"origin_type": "agent_create",
+		"origin_id":   fx.originTaskID,
+	})
+	specCardTaskID := fx.dbfx.Task(t, fx.mikaAgentID, testutil.Cols{
+		"runtime_id":          fx.mikaRuntimeID,
+		"issue_id":            specIssueID,
+		"status":              "completed",
+		"started_at":          testutil.Raw("now() - interval '1 minute'"),
+		"completed_at":        testutil.Raw("now()"),
+		"initiator_user_id":   fx.userID,
+		"originator_user_id":  fx.userID,
+		"accountable_user_id": fx.userID,
+	})
+	ticketIssueID := fx.dbfx.Issue(t, "Ticket card created from the Spec card", testutil.Cols{
+		"origin_type": "agent_create",
+		"origin_id":   specCardTaskID,
+	})
+	ticketCardTaskID := fx.dbfx.Task(t, fx.mikaAgentID, testutil.Cols{
+		"runtime_id":          fx.mikaRuntimeID,
+		"issue_id":            ticketIssueID,
+		"status":              "completed",
+		"started_at":          testutil.Raw("now() - interval '30 seconds'"),
+		"completed_at":        testutil.Raw("now()"),
+		"initiator_user_id":   fx.userID,
+		"originator_user_id":  fx.userID,
+		"accountable_user_id": fx.userID,
+	})
+	fx.dbfx.Exec(t, `UPDATE issue SET origin_id = $2 WHERE id = $1`, fx.issueID, ticketCardTaskID)
+	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		context.Background(), parseTestUUID(t, fx.leaderTaskID),
+		[]byte(`{"output":"implementation card completed through its parent Spec card"}`),
+		"", "", "", false, "", "",
+	); err != nil {
+		t.Fatalf("complete Spec/Ticket-origin Squad leader task: %v", err)
+	} else if !transitioned {
+		t.Fatal("nested-origin Squad leader completion did not transition")
+	}
+	if got := issueCallbackCount(t, fx); got != 1 {
+		t.Fatalf("callbacks through parent card ancestry = %d, want 1", got)
+	}
+	var callbackSessionID string
+	fx.dbfx.QueryRow(t, `
+		SELECT chat_session_id
+		FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'issue_task_callback'
+		  AND trigger_evidence_ref_id = $1
+	`, fx.leaderTaskID).Scan(&callbackSessionID)
+	if callbackSessionID != fx.chatSessionID {
+		t.Fatalf("callback session = %s, want original Mika chat %s", callbackSessionID, fx.chatSessionID)
+	}
+}
+
+func TestSquadLeaderDoesNotReturnToDifferentOriginChatAgent(t *testing.T) {
+	fx := seedIssueChatCallbackFixture(t)
+	workerLedSquadID := fx.dbfx.Squad(t, "Worker-led callback squad", fx.workerAgentID)
+	fx.dbfx.Exec(t, `
+		UPDATE issue
+		SET assignee_id = $2
+		WHERE id = $1
+	`, fx.issueID, workerLedSquadID)
+	fx.dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET agent_id = $2, runtime_id = $3, squad_id = $4
+		WHERE id = $1
+	`, fx.leaderTaskID, fx.workerAgentID, fx.workerRuntimeID, workerLedSquadID)
+	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		context.Background(), parseTestUUID(t, fx.leaderTaskID),
+		[]byte(`{"output":"a different Squad leader completed the card"}`),
+		"", "", "", false, "", "",
+	); err != nil {
+		t.Fatalf("complete different-agent Squad leader task: %v", err)
+	} else if !transitioned {
+		t.Fatal("different-agent Squad leader completion did not transition")
+	}
+	if got := issueCallbackCount(t, fx); got != 0 {
+		t.Fatalf("callbacks into a different Agent's origin chat = %d, want 0", got)
+	}
+}
+
+func TestSquadLeaderDoesNotReturnAfterChatCreatorLosesInvokePermission(t *testing.T) {
+	fx := seedIssueChatCallbackFixture(t)
+	chatCreatorID := fx.dbfx.User(t, "Revoked callback member", "revoked-callback-"+uuid.NewString()+"@multica.test")
+	fx.dbfx.Member(t, fx.dbfx.WorkspaceID, chatCreatorID, "member")
+	fx.dbfx.Exec(t, `UPDATE agent SET permission_mode = 'public_to' WHERE id = $1`, fx.mikaAgentID)
+	invocationTargetID := fx.dbfx.Insert(t, "agent_invocation_target", testutil.Cols{
+		"agent_id":    fx.mikaAgentID,
+		"target_type": "workspace",
+		"target_id":   fx.dbfx.WorkspaceID,
+		"created_by":  fx.userID,
+	})
+	fx.dbfx.Exec(t, `UPDATE chat_session SET creator_id = $2 WHERE id = $1`, fx.chatSessionID, chatCreatorID)
+	fx.dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET initiator_user_id = $2, originator_user_id = $2, accountable_user_id = $2
+		WHERE id IN ($1, $3)
+	`, fx.originTaskID, chatCreatorID, fx.leaderTaskID)
+
+	// The member could invoke Mika when the session and card were created, but
+	// loses that permission before the leader finishes.
+	fx.dbfx.Exec(t, `DELETE FROM agent_invocation_target WHERE id = $1`, invocationTargetID)
+	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		context.Background(), parseTestUUID(t, fx.leaderTaskID),
+		[]byte(`{"output":"must not re-enter a session after permission revocation"}`),
+		"", "", "", false, "", "",
+	); err != nil {
+		t.Fatalf("complete leader after callback permission revocation: %v", err)
+	} else if !transitioned {
+		t.Fatal("leader completion after permission revocation did not transition")
+	}
+	if got := issueCallbackCount(t, fx); got != 0 {
+		t.Fatalf("callbacks after chat creator permission revocation = %d, want 0", got)
+	}
+}
+
+func TestSquadLeaderDoesNotReturnAnotherMembersRunToChatCreator(t *testing.T) {
+	fx := seedIssueChatCallbackFixture(t)
+	otherUserID := fx.dbfx.User(t, "Different callback originator", "different-callback-"+uuid.NewString()+"@multica.test")
+	fx.dbfx.Member(t, fx.dbfx.WorkspaceID, otherUserID, "member")
+	fx.dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET initiator_user_id = $2, originator_user_id = $2, accountable_user_id = $2
+		WHERE id = $1
+	`, fx.leaderTaskID, otherUserID)
+	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		context.Background(), parseTestUUID(t, fx.leaderTaskID),
+		[]byte(`{"output":"result triggered by a different member"}`),
+		"", "", "", false, "", "",
+	); err != nil {
+		t.Fatalf("complete different-originator Squad leader task: %v", err)
+	} else if !transitioned {
+		t.Fatal("different-originator Squad leader completion did not transition")
+	}
+	if got := issueCallbackCount(t, fx); got != 0 {
+		t.Fatalf("callbacks from another member into chat creator's session = %d, want 0", got)
 	}
 }
 
@@ -104,15 +257,18 @@ func TestCompleteSquadLeaderTaskQueuesOriginalMikaChat(t *testing.T) {
 	}
 
 	var callbackTaskID, agentID, runtimeID, chatSessionID, status, inputOwnerID, delegatedFromID string
+	var initiatorUserID, originatorUserID, accountableUserID string
 	fx.dbfx.QueryRow(t, `
 		SELECT id, agent_id, runtime_id, chat_session_id, status,
-		       chat_input_task_id, delegated_from_task_id
+		       chat_input_task_id, delegated_from_task_id,
+		       initiator_user_id, originator_user_id, accountable_user_id
 		FROM agent_task_queue
 		WHERE trigger_evidence_kind = 'issue_task_callback'
 		  AND trigger_evidence_ref_id = $1
 	`, fx.leaderTaskID).Scan(
 		&callbackTaskID, &agentID, &runtimeID, &chatSessionID, &status,
 		&inputOwnerID, &delegatedFromID,
+		&initiatorUserID, &originatorUserID, &accountableUserID,
 	)
 	if agentID != fx.mikaAgentID || runtimeID != fx.mikaRuntimeID || chatSessionID != fx.chatSessionID {
 		t.Fatalf("callback target = agent %s runtime %s chat %s, want Mika %s/%s/%s",
@@ -121,6 +277,10 @@ func TestCompleteSquadLeaderTaskQueuesOriginalMikaChat(t *testing.T) {
 	if status != "queued" || inputOwnerID != callbackTaskID || delegatedFromID != fx.leaderTaskID {
 		t.Fatalf("callback lineage = status %q owner %s delegated_from %s, want queued/%s/%s",
 			status, inputOwnerID, delegatedFromID, callbackTaskID, fx.leaderTaskID)
+	}
+	if initiatorUserID != fx.userID || originatorUserID != fx.userID || accountableUserID != fx.userID {
+		t.Fatalf("callback principal = initiator %s originator %s accountable %s, want chat creator %s",
+			initiatorUserID, originatorUserID, accountableUserID, fx.userID)
 	}
 
 	var role, kind, content string
