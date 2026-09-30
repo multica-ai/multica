@@ -57,10 +57,19 @@ var modelPrices = map[string]ModelPrice{
 	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
 	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
 	"minimax:m2.7-highspeed":      {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
-	"google:gemini-3-flash":       {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
-	"google:gemini-3.1-pro":       {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
-	"google:gemini-2.5-pro":       {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
-	"google:gemini-2.5-flash":     {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
+	// Standard Gemini Flash prices (ai.google.dev/gemini-api/docs/pricing).
+	// 3.6–3.8 use the published promotional rates through 2026-12-31; update
+	// these rows when the promotion expires. Cache writes bill as input;
+	// hourly cache storage and grounding calls are not represented by tokens.
+	// Mirror packages/views/runtimes/utils.ts.
+	"google:gemini-3.8-flash": {Provider: "google", Model: "gemini-3.8-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.7-flash": {Provider: "google", Model: "gemini-3.7-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.6-flash": {Provider: "google", Model: "gemini-3.6-flash", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 3.75},
+	"google:gemini-3.5-flash": {Provider: "google", Model: "gemini-3.5-flash", InputPerM: 1.50, CacheReadPerM: 0.15, CacheWritePerM: 1.50, OutputPerM: 9.00},
+	"google:gemini-3-flash":   {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
+	"google:gemini-3.1-pro":   {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
+	"google:gemini-2.5-pro":   {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
+	"google:gemini-2.5-flash": {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
 	// xAI Grok (docs.x.ai/developers/pricing). Short-context tier: xAI bills
 	// a request at 2x once its prompt reaches 200K tokens, but a usage record
 	// aggregates every model call in a turn, so it cannot say which tier any
@@ -177,6 +186,10 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
 	{regexp.MustCompile(`minimax-m2[.]7`), "minimax:m2.7"},
 	{regexp.MustCompile(`gemini-3-flash`), "google:gemini-3-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.8-flash$`), "google:gemini-3.8-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.7-flash$`), "google:gemini-3.7-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.6-flash$`), "google:gemini-3.6-flash"},
+	{regexp.MustCompile(`(^|/|:)gemini-3\.5-flash$`), "google:gemini-3.5-flash"},
 	{regexp.MustCompile(`gemini-3[.]1-pro`), "google:gemini-3.1-pro"},
 	{regexp.MustCompile(`gemini-2[.]5-pro`), "google:gemini-2.5-pro"},
 	{regexp.MustCompile(`gemini-2[.]5-flash`), "google:gemini-2.5-flash"},
@@ -220,7 +233,15 @@ var modelAliasRules = []struct {
 // trailing brackets (`model[`) stay unmapped on both sides.
 var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
 
+// Antigravity reports a display label or an effort-suffixed model ID. Effort
+// selects reasoning, not a different SKU. Only strip known effort spellings;
+// unknown variants must remain unpriced instead of borrowing a family's rate.
+var geminiDisplayNameRe = regexp.MustCompile(`(^|/|:)gemini ([0-9]+(?:\.[0-9]+)?) (flash(?:-lite)?|pro)(?: \((?:minimal|low|medium|high)\))?$`)
+var geminiEffortSuffixRe = regexp.MustCompile(`((?:^|/|:)gemini-[0-9]+(?:\.[0-9]+)?-(?:flash(?:-lite)?|pro))-(?:minimal|low|medium|high)$`)
+
 func matchModelAlias(model string) (ModelPrice, bool) {
+	model = geminiDisplayNameRe.ReplaceAllString(model, "${1}gemini-${2}-${3}")
+	model = geminiEffortSuffixRe.ReplaceAllString(model, "${1}")
 	for _, rule := range modelAliasRules {
 		if rule.re.MatchString(model) {
 			price, ok := modelPrices[rule.priceKey]

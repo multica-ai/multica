@@ -261,6 +261,16 @@ const MODEL_PRICING: Record<
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
   "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
 
+  // -- Google Gemini Flash: standard API-equivalent cost, not subscription
+  //    quota. ai.google.dev/gemini-api/docs/pricing. The 3.6–3.8 promotion
+  //    lasts through 2026-12-31; update these rows when it expires. Cache
+  //    writes bill as input; hourly storage/grounding charges cannot be
+  //    inferred from token totals. Mirror server/internal/metrics/pricing.go. --
+  "gemini-3.8-flash":    { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.7-flash":    { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.6-flash":    { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gemini-3.5-flash":    { input: 1.50, output: 9.00, cacheRead: 0.15,  cacheWrite: 1.50 },
+
   // -- OpenAI: GPT-5 family (Codex CLI's default is gpt-5-codex; -codex/-mini/-nano variants priced per OpenAI tiers) --
   "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
   "gpt-5-mini":         { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0.25 },
@@ -399,7 +409,7 @@ const MODEL_PRICING: Record<
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four
-// tolerances applied in order:
+// tolerances applied in order (plus Gemini effort/display-name normalization):
 //
 //  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
 //     opencode) — the `<provider>/` segment is routing metadata, not part
@@ -554,6 +564,15 @@ function canonicalCandidates(model: string): string[] {
   // pricing trade-off.
   const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
+  // Antigravity's display labels and effort-suffixed IDs refer to the same
+  // Gemini SKU. Match only recognized shapes; never strip arbitrary variants.
+  const canonGemini = (s: string) => {
+    const display = /^gemini (\d+(?:\.\d+)?) (flash(?:-lite)?|pro)(?: \((?:minimal|low|medium|high)\))?$/i.exec(s);
+    if (display) return `gemini-${display[1]}-${display[2]}`.toLowerCase();
+    const slug = /^(gemini-\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro))(?:-(?:minimal|low|medium|high))?$/i.exec(s);
+    return slug ? slug[1]!.toLowerCase() : s;
+  };
+
   const raw = model;
   const noProvider = stripProvider(raw);
   const dashed = canonAnthropic(noProvider);
@@ -567,6 +586,8 @@ function canonicalCandidates(model: string): string[] {
   push(stripDate(noProvider));
   push(stripDate(dashed));
   push(stripDate(noTag));
+  push(canonGemini(noTag));
+  push(canonGemini(stripDate(noTag)));
   canonicalCandidatesCache.set(model, out);
   return out;
 }

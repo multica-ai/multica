@@ -355,6 +355,42 @@ describe("estimateCost", () => {
     }
   });
 
+  it("prices Gemini Flash usage from Antigravity display labels and effort IDs", () => {
+    const cases = [
+      { model: "gemini-3.8-flash", input: 0.75, output: 3.75, cacheRead: 0.075 },
+      { model: "gemini-3.7-flash", input: 0.75, output: 3.75, cacheRead: 0.075 },
+      { model: "gemini-3.6-flash", input: 0.75, output: 3.75, cacheRead: 0.075 },
+      { model: "gemini-3.5-flash", input: 1.5, output: 9, cacheRead: 0.15 },
+    ];
+    for (const c of cases) {
+      for (const model of [c.model, `google/${c.model}`, `antigravity:${c.model}-high`, `custom:google/${c.model}-low[1m]`]) {
+        const row = {
+          provider: "antigravity", model,
+          input_tokens: 1_000_000, output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000,
+        };
+        expect(isModelPriced(model, row.provider)).toBe(true);
+        expect(collectUnmappedModels([row])).toEqual([]);
+        const costs = estimateCostBreakdown(row);
+        expect(costs.input).toBeCloseTo(c.input, 5);
+        expect(costs.output).toBeCloseTo(c.output, 5);
+        expect(costs.cacheRead).toBeCloseTo(c.cacheRead, 5);
+        expect(costs.cacheWrite).toBeCloseTo(c.input, 5);
+      }
+    }
+    for (const model of ["Gemini 3.8 Flash", "Gemini 3.8 Flash (High)", "Gemini 3.8 Flash (Low)", "google/Gemini 3.8 Flash (Medium)", "gemini-3.8-flash-minimal"]) {
+      expect(isModelPriced(model, "antigravity")).toBe(true);
+      expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 })).toBeCloseTo(0.75, 5);
+    }
+  });
+
+  it("does not price unknown Gemini models, variants or effort labels", () => {
+    for (const model of ["gemini-3.8-flash-lite", "gemini-3.8-flash-live", "gemini-3.8-flash-preview", "gemini-3.8-flash-ultra", "gemini-3-8-flash", "Gemini 3.8 Flash (Ultra)", "Gemini 3.9 Flash (High)", "gemini-3.8-flash[1m][2m]"]) {
+      expect(isModelPriced(model, "antigravity")).toBe(false);
+      expect(estimateCost({ ...zeroUsage, provider: "antigravity", model, input_tokens: 1_000_000 })).toBe(0);
+    }
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
