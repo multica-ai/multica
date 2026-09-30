@@ -1436,5 +1436,28 @@
     "overview_close": "Fermer",
     "overview_empty": "Aucun livrable de ce type.",
     "group_comment_by": "Commentaire de {{name}}"
+  },
+  "attachments": {
+    "section_title": "Pièces jointes",
+    "view_all_one": "Voir la pièce jointe",
+    "view_all_other": "Voir les {{count}} pièces jointes",
+    "name_with_version": "{{name}}, version {{version}}",
+    "version_short": "v{{version}}",
+    "locate_comment": "Afficher dans les commentaires",
+    "locate_description": "Afficher dans la description",
+    "filter_all": "Tout",
+    "filter_image": "Images",
+    "filter_document": "Documents",
+    "filter_video": "Vidéos",
+    "filter_misc": "Autres",
+    "overview_title": "Pièces jointes de {{identifier}}",
+    "overview_summary_one": "{{count}} pièce jointe",
+    "overview_summary_other": "{{count}} pièces jointes",
+    "overview_summary_with_size_one": "{{count}} pièce jointe · {{size}}",
+    "overview_summary_with_size_other": "{{count}} pièces jointes · {{size}} au total",
+    "overview_close": "Fermer",
+    "overview_empty": "Aucune pièce jointe de ce type.",
+    "group_comment_by": "Commentaire de {{name}}",
+    "group_description": "Description de la tâche"
   }
 }

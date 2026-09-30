@@ -769,11 +769,15 @@ describe("IssueDetail (shared)", () => {
 
     renderIssueDetail();
 
-    const header = await screen.findByRole("button", { name: /^Deliverables/ });
-    expect(header).toHaveTextContent("1");
+    const deliverables = await screen.findByRole("button", { name: /^Deliverables/ });
+    expect(deliverables).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "report.md, version 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View all 1 deliverable" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "brief.pdf" })).toBeNull();
+
+    const attachments = screen.getByRole("button", { name: /^Attachments/ });
+    expect(attachments).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "brief.pdf" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View all 1 attachment" })).toBeInTheDocument();
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {
