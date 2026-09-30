@@ -4236,6 +4236,87 @@ func startsWithAbsolutePath(s string) bool {
 	return false
 }
 
+type responseEnginePersistedCompletion struct {
+	Output                 string `json:"output"`
+	ResponseEngineEnforced bool   `json:"response_engine_enforced"`
+}
+
+func (s *TaskService) ensureResponseEngineTerminalComment(
+	ctx context.Context,
+	task db.AgentTaskQueue,
+	result []byte,
+) error {
+	if effectiveResponseEngineMode(s.ResponseEngineMode) != ResponseEngineEnforce || !task.IssueID.Valid {
+		return nil
+	}
+
+	var persisted responseEnginePersistedCompletion
+	if err := json.Unmarshal(result, &persisted); err != nil {
+		return fmt.Errorf("decode enforced terminal result: %w", err)
+	}
+	if !persisted.ResponseEngineEnforced {
+		return nil
+	}
+	if strings.TrimSpace(persisted.Output) == "" {
+		return errors.New("enforced terminal result is missing rendered output")
+	}
+
+	suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
+	if err != nil {
+		slog.Warn("checking squad leader no_action evaluation failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err,
+		)
+	}
+	if suppressNoActionComment {
+		return nil
+	}
+
+	body := util.UnescapeBackslashEscapes(persisted.Output)
+	content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
+	if content == "" {
+		return errors.New("enforced terminal rendered output became empty after sanitization")
+	}
+
+	err = s.createAgentCommentWithID(
+		ctx,
+		task.ID,
+		task.IssueID,
+		task.AgentID,
+		content,
+		"comment",
+		task.TriggerCommentID,
+		task.ID,
+	)
+	if err == nil {
+		return nil
+	}
+
+	issue, issueErr := s.Queries.GetIssue(ctx, task.IssueID)
+	if issueErr != nil {
+		return fmt.Errorf("create enforced terminal comment: %w", err)
+	}
+	existing, existingErr := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID:          task.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if existingErr != nil {
+		return fmt.Errorf("create enforced terminal comment: %w", err)
+	}
+	if existing.IssueID != task.IssueID ||
+		existing.AuthorType != "agent" ||
+		existing.AuthorID != task.AgentID ||
+		existing.Content != content ||
+		existing.Type != "comment" ||
+		existing.ParentID != task.TriggerCommentID ||
+		existing.SourceTaskID != task.ID {
+		return errors.New("enforced terminal comment id collision")
+	}
+	return nil
+}
+
 // CompleteTask marks a task as completed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
 //
@@ -4359,6 +4440,9 @@ func (s *TaskService) completeTask(ctx context.Context, taskID pgtype.UUID, resu
 					"current_status", existing.Status,
 					"agent_id", util.UUIDToString(existing.AgentID),
 				)
+				if commentErr := s.ensureResponseEngineTerminalComment(ctx, existing, existing.Result); commentErr != nil {
+					return nil, fmt.Errorf("backfill enforced terminal comment: %w", commentErr)
+				}
 				return &existing, nil
 			}
 			slog.Warn("complete task failed",
@@ -4383,13 +4467,14 @@ func (s *TaskService) completeTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
-	// ends. If the agent posted a comment during execution (result, progress
-	// ping, or CLI reply), HasAgentCommentedSince returns true and we skip.
-	// Otherwise, synthesize one from the final output. For comment-triggered
-	// tasks, TriggerCommentID threads the fallback under the original comment;
-	// for assignment-triggered tasks it is NULL and the fallback is top-level.
-	// Chat tasks have no IssueID and are handled separately below.
-	if task.IssueID.Valid {
+	// ends. ENFORCE is stricter: it always persists the standardized terminal
+	// response with a deterministic comment id, even if a progress comment
+	// already exists. If a crash happens after task commit but before this
+	// post-commit write, the daemon retry backfills from the persisted result.
+	var responseTerminalCommentErr error
+	if task.IssueID.Valid && fence != nil {
+		responseTerminalCommentErr = s.ensureResponseEngineTerminalComment(ctx, task, result)
+	} else if task.IssueID.Valid {
 		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
 		if err != nil {
 			slog.Warn("checking squad leader no_action evaluation failed",
@@ -4404,7 +4489,7 @@ func (s *TaskService) completeTask(ctx context.Context, taskID pgtype.UUID, resu
 			AuthorID: task.AgentID,
 			Since:    task.StartedAt,
 		})
-		if !suppressNoActionComment && (!agentCommented || fence != nil) {
+		if !suppressNoActionComment && !agentCommented {
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
@@ -4470,6 +4555,9 @@ func (s *TaskService) completeTask(ctx context.Context, taskID pgtype.UUID, resu
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
+	if responseTerminalCommentErr != nil {
+		return &task, fmt.Errorf("ensure enforced terminal comment: %w", responseTerminalCommentErr)
+	}
 	return &task, nil
 }
 
@@ -7226,13 +7314,26 @@ func commentEventFields(c db.Comment) map[string]any {
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
+	_ = s.createAgentCommentWithID(
+		ctx,
+		dbid.NewV7(),
+		issueID,
+		agentID,
+		content,
+		commentType,
+		parentID,
+		sourceTaskID,
+	)
+}
+
+func (s *TaskService) createAgentCommentWithID(ctx context.Context, commentID, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) error {
 	if content == "" {
-		return
+		return nil
 	}
 	// Look up issue to get workspace ID for mention expansion and broadcasting.
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
-		return
+		return err
 	}
 	// Resolve the thread root for thread-level side effects without overwriting
 	// parentID. The stored parent_id must remain the exact comment being replied
@@ -7247,7 +7348,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		}
 	}
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID:           dbid.NewV7(),
+		ID:           commentID,
 		IssueID:      issueID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   "agent",
@@ -7258,7 +7359,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
-		return
+		return err
 	}
 	comment := created.Comment()
 	commentFields := commentEventFields(comment)
@@ -7276,6 +7377,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+	return nil
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a

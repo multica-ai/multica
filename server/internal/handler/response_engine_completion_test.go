@@ -336,6 +336,75 @@ func TestCompleteTaskWithResponseFence_RejectsStaleIssueRevisionInsideTransactio
 	}
 }
 
+func TestCompleteTask_ResponseEngineEnforceRetryBackfillsMissingTerminalComment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID, _, issueID, taskID := setupResponseEngineIssueTask(t, 91011)
+	fake := &fakeTaskResponseFinalizer{
+		result: service.TaskResponseFinalizationResult{Rendered: "[Goal]\nrendered crash-safe"},
+	}
+	configureResponseEngineForTest(t, service.ResponseEngineEnforce, fake)
+
+	first := completeResponseEngineTask(t, taskID, "raw first")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first CompleteTask status=%d body=%s", first.Code, first.Body.String())
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("first finalizer calls=%d, want 1", len(fake.calls))
+	}
+
+	dbfx.Exec(t, `
+		DELETE FROM comment
+		WHERE issue_id=$1 AND author_type='agent' AND author_id=$2 AND source_task_id=$3
+	`, issueID, agentID, taskID)
+
+	var beforeRetry int
+	dbfx.QueryRow(t, `
+		SELECT count(*) FROM comment
+		WHERE issue_id=$1 AND author_type='agent' AND author_id=$2 AND source_task_id=$3
+	`, issueID, agentID, taskID).Scan(&beforeRetry)
+	if beforeRetry != 0 {
+		t.Fatalf("terminal comments before retry=%d, want 0", beforeRetry)
+	}
+
+	fake.err = errors.New("finalizer must not be called on terminal retry")
+	second := completeResponseEngineTask(t, taskID, "RAW RETRY MUST NOT LEAK")
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry CompleteTask status=%d body=%s", second.Code, second.Body.String())
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("retry called finalizer; calls=%d, want 1", len(fake.calls))
+	}
+
+	var contents []string
+	rows, err := testPool.Query(context.Background(), `
+		SELECT content FROM comment
+		WHERE issue_id=$1 AND author_type='agent' AND author_id=$2 AND source_task_id=$3
+		ORDER BY created_at ASC
+	`, issueID, agentID, taskID)
+	if err != nil {
+		t.Fatalf("query terminal comments: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			t.Fatalf("scan terminal comment: %v", err)
+		}
+		contents = append(contents, content)
+	}
+	if len(contents) != 1 {
+		t.Fatalf("terminal comments=%v, want exactly one backfilled comment", contents)
+	}
+	if contents[0] != fake.result.Rendered {
+		t.Fatalf("backfilled comment=%q, want persisted rendered %q", contents[0], fake.result.Rendered)
+	}
+	if strings.Contains(strings.Join(contents, "\n"), "RAW RETRY MUST NOT LEAK") {
+		t.Fatalf("raw retry leaked into terminal comments: %v", contents)
+	}
+}
+
 func TestCompleteTask_ResponseEngineEnforceTerminalRetrySkipsFinalizer(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

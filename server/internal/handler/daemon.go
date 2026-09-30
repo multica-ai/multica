@@ -3910,6 +3910,15 @@ type TaskCompleteRequest struct {
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
 }
 
+// taskCompleteStoredResult is server-owned persistence metadata layered on top
+// of the daemon request. The daemon cannot set ResponseEngineEnforced because
+// it is not part of TaskCompleteRequest; CompleteTask mints it only after a
+// trusted Response Engine finalization succeeds.
+type taskCompleteStoredResult struct {
+	TaskCompleteRequest
+	ResponseEngineEnforced bool `json:"response_engine_enforced,omitempty"`
+}
+
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
 // caller-supplied string on a terminal task callback. Both request types are
 // flat bags of strings, so this is exhaustive by construction — but that also
@@ -4011,7 +4020,10 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		responseFence = finalized.Fence
 	}
 
-	result, _ := json.Marshal(req)
+	result, _ := json.Marshal(taskCompleteStoredResult{
+		TaskCompleteRequest:    req,
+		ResponseEngineEnforced: responseFence != nil,
+	})
 	// MUL-5305: SessionRolloutMissing is applied inside CompleteTask's terminal
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
