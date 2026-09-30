@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"encoding/json"
@@ -180,6 +181,55 @@ func TestCompleteTask_ResponseEngineEnforcePersistsRenderedOnly(t *testing.T) {
 	}
 	if got == "RAW-MUST-NOT-LEAK" {
 		t.Fatal("raw output leaked in enforce mode")
+	}
+}
+
+func TestCompleteTask_ResponseEngineEnforceAlwaysPostsTerminalRenderedComment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID, _, issueID, taskID := setupResponseEngineIssueTask(t, 91010)
+	dbfx.Exec(t, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'agent', $3, 'progress update before terminal', 'comment')
+	`, issueID, testWorkspaceID, agentID)
+
+	fake := &fakeTaskResponseFinalizer{
+		result: service.TaskResponseFinalizationResult{Rendered: "[Goal]\nstandard terminal response"},
+	}
+	configureResponseEngineForTest(t, service.ResponseEngineEnforce, fake)
+
+	w := completeResponseEngineTask(t, taskID, "RAW TERMINAL")
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	rows, err := testPool.Query(context.Background(), `
+		SELECT content FROM comment
+		WHERE issue_id=$1 AND author_type='agent' AND author_id=$2
+		ORDER BY created_at ASC
+	`, issueID, agentID)
+	if err != nil {
+		t.Fatalf("query comments: %v", err)
+	}
+	defer rows.Close()
+
+	var contents []string
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			t.Fatalf("scan comment: %v", err)
+		}
+		contents = append(contents, content)
+	}
+	if len(contents) != 2 {
+		t.Fatalf("agent comments=%v, want progress + one terminal rendered comment", contents)
+	}
+	if contents[1] != fake.result.Rendered {
+		t.Fatalf("terminal comment=%q, want %q", contents[1], fake.result.Rendered)
+	}
+	if strings.Contains(strings.Join(contents, "\n"), "RAW TERMINAL") {
+		t.Fatalf("raw terminal output leaked into issue comments: %v", contents)
 	}
 }
 
