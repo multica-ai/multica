@@ -238,10 +238,12 @@ type RouterOptions struct {
 
 	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
 	// counter, which is what a deployment with /metrics turned off gets.
-	WecomMetrics *obsmetrics.WecomMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
-	FeatureFlags *featureflag.Service
+	WecomMetrics       *obsmetrics.WecomMetrics
+	DaemonHub          *daemonws.Hub
+	DaemonWakeup       service.TaskWakeupNotifier
+	FeatureFlags       *featureflag.Service
+	ResponseEngineMode service.ResponseEngineMode
+	ResponseFinalizer  service.TaskResponseFinalizer
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -447,6 +449,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
+	h.TaskService.ResponseEngineMode = opts.ResponseEngineMode
+	h.TaskService.ResponseFinalizer = opts.ResponseFinalizer
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{

@@ -53,6 +53,12 @@ type TaskService struct {
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
+	// ResponseEngineMode controls terminal response rollout. Zero value is
+	// LEGACY so direct TaskService construction preserves historical behavior.
+	ResponseEngineMode ResponseEngineMode
+	// ResponseFinalizer bridges to the central Response Engine. Nil is tolerated
+	// in LEGACY/OBSERVE and fails closed in ENFORCE.
+	ResponseFinalizer TaskResponseFinalizer
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -4241,6 +4247,14 @@ func startsWithAbsolutePath(s string) bool {
 // durableWorkDir is terminal delivery metadata, not a resume pointer: it is
 // populated only after the daemon confirms a disposable worktree is gone.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
+	return s.completeTask(ctx, taskID, result, sessionID, workDir, branchName, sessionRolloutMissing, retiredSessionID, durableWorkDir, nil)
+}
+
+func (s *TaskService) CompleteTaskWithResponseFence(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, fence *TaskResponseCompletionFence) (*db.AgentTaskQueue, error) {
+	return s.completeTask(ctx, taskID, result, sessionID, workDir, branchName, sessionRolloutMissing, retiredSessionID, durableWorkDir, fence)
+}
+
+func (s *TaskService) completeTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, fence *TaskResponseCompletionFence) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -4249,6 +4263,19 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
+		}
+		if fence != nil {
+			issue, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+				ID:          fence.IssueID,
+				WorkspaceID: fence.WorkspaceID,
+			})
+			if err != nil {
+				return fmt.Errorf("%w: lock issue: %v", ErrResponseSnapshotStale, err)
+			}
+			if issue.Revision != fence.Revision {
+				return fmt.Errorf("%w: issue revision changed from %d to %d",
+					ErrResponseSnapshotStale, fence.Revision, issue.Revision)
+			}
 		}
 		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
 			ID:                    taskID,

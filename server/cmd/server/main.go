@@ -155,6 +155,40 @@ func envNonNegativeInt(name string, def int) int {
 	return v
 }
 
+type responseEngineStartupConfig struct {
+	Mode      service.ResponseEngineMode
+	Finalizer service.TaskResponseFinalizer
+}
+
+const responseEngineHTTPTimeout = 15 * time.Second
+
+func parseResponseEngineStartupConfig(
+	enabledRaw string,
+	enforceRaw string,
+	baseURL string,
+	token string,
+) (responseEngineStartupConfig, error) {
+	mode, err := service.ParseResponseEngineMode(enabledRaw, enforceRaw)
+	if err != nil {
+		return responseEngineStartupConfig{}, err
+	}
+	if mode == service.ResponseEngineLegacy {
+		return responseEngineStartupConfig{Mode: mode}, nil
+	}
+	finalizer, err := service.NewHTTPTaskResponseFinalizer(service.HTTPTaskResponseFinalizerConfig{
+		BaseURL: baseURL,
+		Token:   token,
+		Timeout: responseEngineHTTPTimeout,
+	})
+	if err != nil {
+		return responseEngineStartupConfig{}, err
+	}
+	return responseEngineStartupConfig{
+		Mode:      mode,
+		Finalizer: finalizer,
+	}, nil
+}
+
 // maxLLMRetriesLimit caps MULTICA_LLM_MAX_RETRIES. The ceiling is a latency
 // budget, not a taste call: SDK backoff is 0.5s doubling to an 8s cap, so 6
 // retries spend ~21s and 10 spend ~48s sleeping before the last attempt. Every
@@ -641,6 +675,16 @@ func main() {
 		slog.Error("invalid MULTICA_LLM_MAX_RETRIES", "error", err)
 		os.Exit(1)
 	}
+	responseEngineConfig, err := parseResponseEngineStartupConfig(
+		os.Getenv("RESPONSE_ENGINE_V1_ENABLED"),
+		os.Getenv("RESPONSE_ENGINE_V1_ENFORCE"),
+		os.Getenv("RESPONSE_ENGINE_V1_URL"),
+		os.Getenv("RESPONSE_ENGINE_V1_TOKEN"),
+	)
+	if err != nil {
+		slog.Error("invalid Response Engine V1 configuration", "error", err)
+		os.Exit(1)
+	}
 	var readRecorder dbreader.Recorder
 	if dbRoutingMetrics != nil {
 		readRecorder = dbRoutingMetrics
@@ -659,6 +703,8 @@ func main() {
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
+		ResponseEngineMode:  responseEngineConfig.Mode,
+		ResponseFinalizer:   responseEngineConfig.Finalizer,
 	})
 	var replicaQueries *db.Queries
 	if replicaPool != nil {
