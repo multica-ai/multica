@@ -276,6 +276,10 @@ const (
 	// the opening self-describes: chat renders the starter cards under this
 	// kind instead of quick-action chips (MUL-5765).
 	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindIssueCallback is a server-authored, task-owned input that
+	// returns a Squad card leader's terminal result to the Mika chat that created
+	// the card. It is consumed by the chat agent but hidden from public transcripts.
+	ChatMessageKindIssueCallback = "issue_callback"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat

@@ -101,7 +101,7 @@ SELECT EXISTS (
     SELECT 1 FROM chat_message
     WHERE chat_session_id = $1
       AND role = 'user'
-      AND message_kind != 'channel_command'
+      AND message_kind NOT IN ('channel_command', 'issue_callback')
 ) AS has_public_user_message
 `
 
@@ -375,7 +375,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, id
+    delegated_from_task_id, fire_at, channel_context_revision, id
 )
 SELECT
     $1, $2, NULL,
@@ -389,9 +389,10 @@ SELECT
     $12,
     $13,
     $14,
+    $15,
     $6::timestamptz,
-    $15::bigint,
-    COALESCE($16::uuid, gen_random_uuid())
+    $16::bigint,
+    COALESCE($17::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
 `
@@ -411,6 +412,7 @@ type CreateChatTaskParams struct {
 	OriginatorSource       pgtype.Text        `json:"originator_source"`
 	TriggerEvidenceKind    pgtype.Text        `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID   pgtype.UUID        `json:"trigger_evidence_ref_id"`
+	DelegatedFromTaskID    pgtype.UUID        `json:"delegated_from_task_id"`
 	ChannelContextRevision pgtype.Int8        `json:"channel_context_revision"`
 	ID                     pgtype.UUID        `json:"id"`
 }
@@ -438,6 +440,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		arg.OriginatorSource,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
+		arg.DelegatedFromTaskID,
 		arg.ChannelContextRevision,
 		arg.ID,
 	)
@@ -1197,7 +1200,7 @@ WHERE cs.id = $1
     EXISTS (
       SELECT 1 FROM chat_message AS public_message
       WHERE public_message.chat_session_id = cs.id
-        AND public_message.message_kind != 'channel_command'
+        AND public_message.message_kind NOT IN ('channel_command', 'issue_callback')
     )
   )
 `
@@ -1416,13 +1419,13 @@ WHERE session.id = $2
     WHERE message.id = $3
       AND message.chat_session_id = session.id
       AND message.role = 'user'
-      AND message.message_kind != 'channel_command'
+      AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   )
   AND NOT EXISTS (
     SELECT 1 FROM chat_message AS other_message
     WHERE other_message.chat_session_id = session.id
       AND other_message.role = 'user'
-      AND other_message.message_kind != 'channel_command'
+      AND other_message.message_kind NOT IN ('channel_command', 'issue_callback')
       AND other_message.id != $3
   )
 RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at
@@ -1468,7 +1471,7 @@ WHERE session.id = $2
     SELECT 1 FROM chat_message AS message
     WHERE message.chat_session_id = session.id
       AND message.role = 'user'
-      AND message.message_kind != 'channel_command'
+      AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   )
 RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at
 `
@@ -1709,7 +1712,7 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
-     AND m.message_kind != 'channel_command'
+     AND m.message_kind NOT IN ('channel_command', 'issue_callback')
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
@@ -1948,7 +1951,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 const listChatMessages = `-- name: ListChatMessages :many
 SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids FROM chat_message AS message
 WHERE message.chat_session_id = $1
-  AND message.message_kind != 'channel_command'
+  AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -2105,7 +2108,7 @@ func (q *Queries) ListChatMessagesForLegacyTask(ctx context.Context, chatSession
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
 SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids FROM chat_message AS message
 WHERE message.chat_session_id = $1
-  AND message.message_kind != 'channel_command'
+  AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -2196,7 +2199,7 @@ SELECT message.id, message.chat_session_id, message.role, message.content, messa
 FROM chat_message AS message
 LEFT JOIN agent_task_queue AS owner ON owner.id = message.task_id
 WHERE message.chat_session_id = $1
-  AND message.message_kind != 'channel_command'
+  AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   AND (
       (
           message.role = 'user'
@@ -2294,7 +2297,7 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
-     AND m.message_kind != 'channel_command'
+     AND m.message_kind NOT IN ('channel_command', 'issue_callback')
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
@@ -2703,6 +2706,53 @@ FOR NO KEY UPDATE
 // deadlock edge is introduced.
 func (q *Queries) LockChatSessionForEnqueue(ctx context.Context, id pgtype.UUID) (ChatSession, error) {
 	row := q.db.QueryRow(ctx, lockChatSessionForEnqueue, id)
+	var i ChatSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.CreatorID,
+		&i.Title,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnreadSince,
+		&i.RuntimeID,
+		&i.LastReadAt,
+		&i.IsAgentIntro,
+		&i.PinnedAt,
+		&i.ProjectID,
+		&i.ExplicitlyCreatedAt,
+	)
+	return i, err
+}
+
+const lockChatSessionForIssueCallback = `-- name: LockChatSessionForIssueCallback :one
+SELECT callback_session.id, callback_session.workspace_id, callback_session.agent_id, callback_session.creator_id, callback_session.title, callback_session.session_id, callback_session.work_dir, callback_session.status, callback_session.created_at, callback_session.updated_at, callback_session.unread_since, callback_session.runtime_id, callback_session.last_read_at, callback_session.is_agent_intro, callback_session.pinned_at, callback_session.project_id, callback_session.explicitly_created_at
+FROM agent_task_queue AS source_task
+JOIN issue AS source_issue
+  ON source_issue.id = source_task.issue_id
+JOIN agent_task_queue AS origin_task
+  ON origin_task.id = source_issue.origin_id
+JOIN chat_session AS callback_session
+  ON callback_session.id = origin_task.chat_session_id
+WHERE source_task.id = $1
+  AND source_task.status = 'running'
+  AND source_task.chat_session_id IS NULL
+  AND source_task.is_leader_task = TRUE
+  AND source_task.squad_id IS NOT NULL
+  AND source_issue.origin_type = 'agent_create'
+  AND source_issue.workspace_id = callback_session.workspace_id
+FOR UPDATE OF callback_session
+`
+
+// Resolves the return path for one Squad card leader run and takes the same
+// first lock as direct chat enqueue. The card must have been created by a chat
+// task; ordinary issues and worker runs deliberately have no callback target.
+func (q *Queries) LockChatSessionForIssueCallback(ctx context.Context, id pgtype.UUID) (ChatSession, error) {
+	row := q.db.QueryRow(ctx, lockChatSessionForIssueCallback, id)
 	var i ChatSession
 	err := row.Scan(
 		&i.ID,
@@ -3278,7 +3328,7 @@ WHERE session.id = $2
     SELECT 1 FROM chat_message AS message
     WHERE message.chat_session_id = session.id
       AND message.role = 'user'
-      AND message.message_kind != 'channel_command'
+      AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   )
 RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at
 `

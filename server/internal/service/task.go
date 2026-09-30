@@ -4374,6 +4374,125 @@ func startsWithAbsolutePath(s string) bool {
 	return false
 }
 
+type issueChatCallbackTarget struct {
+	session db.ChatSession
+	agent   db.Agent
+}
+
+const issueTaskCallbackEvidenceKind = "issue_task_callback"
+
+// lockIssueChatCallbackTarget resolves the one supported card-to-chat route:
+// a Squad leader run on a card that was created by a task in the original chat.
+// Worker runs stay on the card and wake the leader through the existing comment
+// route; only the leader returns the important result to the member's chat.
+func lockIssueChatCallbackTarget(ctx context.Context, qtx *db.Queries, taskID pgtype.UUID) (*issueChatCallbackTarget, error) {
+	session, err := qtx.LockChatSessionForIssueCallback(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock issue callback chat session: %w", err)
+	}
+	if session.Status != "active" {
+		return nil, nil
+	}
+
+	agent, err := qtx.GetAgentForClaimUpdate(ctx, session.AgentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock issue callback chat agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		return nil, nil
+	}
+	return &issueChatCallbackTarget{session: session, agent: agent}, nil
+}
+
+func issueChatCallbackContent(issue db.Issue, sourceTask db.AgentTaskQueue, terminalStatus, failureReason string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "A Squad card leader run has reached %s.\n", terminalStatus)
+	fmt.Fprintf(&b, "Card: %s (issue_id: %s)\n", issue.Title, util.UUIDToString(issue.ID))
+	fmt.Fprintf(&b, "Source task: %s\n", util.UUIDToString(sourceTask.ID))
+	if failureReason != "" {
+		fmt.Fprintf(&b, "Failure reason: %s\n", failureReason)
+	}
+	b.WriteString("Read the card and its comments, continue the workflow from this original chat, and tell the member the important result or next decision. Keep long details on the card and include its address only when the member needs to open it.")
+	return b.String()
+}
+
+// createIssueChatCallbackTx creates the hidden input and its Mika chat task in
+// the same transaction as the source task's terminal transition. A successful
+// transition therefore cannot commit without its return path.
+func createIssueChatCallbackTx(
+	ctx context.Context,
+	qtx *db.Queries,
+	target *issueChatCallbackTarget,
+	sourceTask db.AgentTaskQueue,
+	terminalStatus string,
+	failureReason string,
+) (*db.AgentTaskQueue, error) {
+	if target == nil || !sourceTask.IssueID.Valid {
+		return nil, nil
+	}
+	issue, err := qtx.GetIssue(ctx, sourceTask.IssueID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load issue for chat callback: %w", err)
+	}
+
+	task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+		ID:                   dbid.NewV7(),
+		AgentID:              target.session.AgentID,
+		RuntimeID:            target.agent.RuntimeID,
+		Priority:             2,
+		ChatSessionID:        target.session.ID,
+		InitiatorUserID:      sourceTask.InitiatorUserID,
+		OriginatorUserID:     sourceTask.OriginatorUserID,
+		AccountableUserID:    sourceTask.AccountableUserID,
+		ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
+		OriginatorSource:     pgtype.Text{String: "delegation", Valid: true},
+		TriggerEvidenceKind:  pgtype.Text{String: issueTaskCallbackEvidenceKind, Valid: true},
+		TriggerEvidenceRefID: sourceTask.ID,
+		DelegatedFromTaskID:  sourceTask.ID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create issue callback chat task: %w", err)
+	}
+	task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("stamp issue callback input owner: %w", err)
+	}
+	if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ID:            dbid.NewV7(),
+		ChatSessionID: target.session.ID,
+		Role:          "user",
+		Content:       issueChatCallbackContent(issue, sourceTask, terminalStatus, failureReason),
+		TaskID:        task.ID,
+		MessageKind:   pgtype.Text{String: protocol.ChatMessageKindIssueCallback, Valid: true},
+	}); err != nil {
+		return nil, fmt.Errorf("create issue callback chat input: %w", err)
+	}
+	if err := qtx.TouchChatSession(ctx, target.session.ID); err != nil {
+		return nil, fmt.Errorf("touch issue callback chat session: %w", err)
+	}
+	return &task, nil
+}
+
+func (s *TaskService) finalizeIssueChatCallback(ctx context.Context, task *db.AgentTaskQueue) {
+	if task == nil {
+		return
+	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *task)
+	s.NotifyTaskEnqueued(ctx, *task)
+}
+
 // CompleteTask marks a task as completed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
 //
@@ -4395,11 +4514,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 // terminal task is still an idempotent success but must not emit them again.
 func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
 	var task db.AgentTaskQueue
+	var issueChatCallback *db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
 	var chatAssistantMsg *db.ChatMessage
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		callbackTarget, err := lockIssueChatCallbackTarget(ctx, qtx, taskID)
+		if err != nil {
+			return err
+		}
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
 		}
@@ -4471,6 +4595,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 				return fmt.Errorf("write chat assistant outcome: %w", err)
 			}
 			chatAssistantMsg = msg
+		}
+		issueChatCallback, err = createIssueChatCallbackTx(ctx, qtx, callbackTarget, t, "completed", "")
+		if err != nil {
+			return err
 		}
 		return nil
 	}); err != nil {
@@ -4557,6 +4685,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			}
 		}
 	}
+	s.finalizeIssueChatCallback(ctx, issueChatCallback)
 
 	// Quick-create tasks: locate the issue the agent just created and push
 	// an inbox confirmation to the requester. The agent has no issue / chat
@@ -4889,7 +5018,12 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	var task db.AgentTaskQueue
 	var retried *db.AgentTaskQueue
+	var issueChatCallback *db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		callbackTarget, err := lockIssueChatCallbackTarget(ctx, qtx, taskID)
+		if err != nil {
+			return err
+		}
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
 		}
@@ -5107,6 +5241,12 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 				return fmt.Errorf("write chat failure outcome: %w", err)
 			}
 		}
+		if retried == nil {
+			issueChatCallback, err = createIssueChatCallbackTx(ctx, qtx, callbackTarget, t, "failed", failureReason)
+			if err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
@@ -5186,6 +5326,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
+	s.finalizeIssueChatCallback(ctx, issueChatCallback)
 
 	// Quick-create tasks: push a failure inbox notification to the
 	// requester so they can either retry or fall back to the advanced form
@@ -6258,6 +6399,7 @@ func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 // must leave a durable signal that can be replayed when it becomes executable.
 func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, failed db.AgentTaskQueue) (*delegatedFailureRecoveryTarget, error) {
 	if failed.Status != "failed" || !failed.DelegatedFromTaskID.Valid || failed.AutopilotRunID.Valid ||
+		(failed.TriggerEvidenceKind.Valid && failed.TriggerEvidenceKind.String == issueTaskCallbackEvidenceKind) ||
 		(failed.TriggerEvidenceKind.Valid && failed.TriggerEvidenceKind.String == string(attribution.EvidenceDelegatedFailure)) {
 		return nil, nil
 	}

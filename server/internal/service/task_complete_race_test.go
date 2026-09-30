@@ -70,6 +70,11 @@ func (m *mockDBTX) Query(_ context.Context, _ string, _ ...interface{}) (pgx.Row
 }
 
 func (m *mockDBTX) QueryRow(_ context.Context, sql string, _ ...interface{}) pgx.Row {
+	// These idempotency tests use ordinary terminal rows, so the Squad
+	// issue-to-chat callback lookup has no target.
+	if strings.Contains(sql, "FOR UPDATE OF callback_session") {
+		return &mockRow{err: pgx.ErrNoRows}
+	}
 	// CompleteAgentTask and FailAgentTask SQL contain "SET status ="
 	if strings.Contains(sql, "SET status =") {
 		return &mockRow{err: pgx.ErrNoRows}

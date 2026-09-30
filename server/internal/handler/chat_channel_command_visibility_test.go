@@ -40,6 +40,7 @@ func TestChannelCommandVisibility_MessageListsExcludeCommandsBeforePagination(t 
 	insertChatVisibilityMessage(t, sessionID, "/issue hidden oldest", "channel_command", true, base.Add(time.Second))
 	insertChatVisibilityMessage(t, sessionID, "visible middle", "message", true, base.Add(2*time.Second))
 	insertChatVisibilityMessage(t, sessionID, "/issue hidden newest", "channel_command", true, base.Add(3*time.Second))
+	insertChatVisibilityMessage(t, sessionID, "hidden Squad callback", "issue_callback", false, base.Add(3500*time.Millisecond))
 	insertChatVisibilityMessage(t, sessionID, "visible newest", "message", true, base.Add(4*time.Second))
 
 	legacyReq := httptest.NewRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages", nil)
@@ -94,6 +95,7 @@ func TestChannelCommandVisibility_SessionProjectionUsesPublicMessages(t *testing
 	insertChatVisibilityMessage(t, commandOnlySessionID, "/issue hidden only", "channel_command", true, base.Add(3*time.Second))
 	insertChatVisibilityMessage(t, mixedSessionID, "mixed public", "message", true, base)
 	insertChatVisibilityMessage(t, mixedSessionID, "/issue hidden after public", "channel_command", true, base.Add(4*time.Second))
+	insertChatVisibilityMessage(t, mixedSessionID, "hidden Squad callback", "issue_callback", false, base.Add(5*time.Second))
 	insertChatVisibilityMessage(t, newerPublicSessionID, "newer public", "message", true, base.Add(2*time.Second))
 
 	active, err := testHandler.Queries.ListChatSessionsByCreator(context.Background(), db.ListChatSessionsByCreatorParams{
