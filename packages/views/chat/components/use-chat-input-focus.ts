@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 /**
- * Owns the floating window's composer-focus nonce.
+ * Owns the floating window's composer focus across the open/close transition.
  *
  * `focusRequest` is handed to ChatInput, which pulls keyboard focus into the
  * editor every time the number changes; `0` is inert. Callers bump it for the
@@ -19,8 +19,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * transition focuses. ChatWindow stays mounted while closed and `isOpen` is
  * restored from storage, so treating mount as an open event would let a
  * persisted "open" preference steal focus from whatever page the user loaded.
+ *
+ * Closing hands focus back (#8994). The window is only hidden while closed —
+ * opacity and pointer events, never unmounting — so the composer would otherwise
+ * keep `document.activeElement`, and every global shortcut that defers to an
+ * editable target (`C` for a new issue) would stay dead until the reader clicked
+ * something else. `containerRef` is what lets the close path tell whether the
+ * focus it is about to move is actually ours.
  */
-export function useChatInputFocus(isOpen: boolean): {
+export function useChatInputFocus(
+  isOpen: boolean,
+  containerRef: RefObject<HTMLElement | null>,
+): {
   focusRequest: number;
   requestInputFocus: () => void;
 } {
@@ -28,11 +38,38 @@ export function useChatInputFocus(isOpen: boolean): {
   const requestInputFocus = useCallback(() => setFocusRequest((n) => n + 1), []);
 
   const wasOpenRef = useRef(isOpen);
+  // Where focus sat before the window claimed it, so closing can hand it back.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     const wasOpen = wasOpenRef.current;
     wasOpenRef.current = isOpen;
-    if (isOpen && !wasOpen) requestInputFocus();
-  }, [isOpen, requestInputFocus]);
+    if (isOpen === wasOpen) return;
+
+    const container = containerRef.current;
+
+    if (isOpen) {
+      // Read before requestInputFocus() lands the caret in the composer.
+      const active = document.activeElement;
+      returnFocusRef.current =
+        active instanceof HTMLElement && !container?.contains(active) ? active : null;
+      requestInputFocus();
+      return;
+    }
+
+    // Only release focus the window actually holds: a reader who clicked into
+    // the page behind the overlay before closing it keeps their place.
+    const active = document.activeElement;
+    if (!container || !(active instanceof HTMLElement) || !container.contains(active)) return;
+
+    const returnTo = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (returnTo?.isConnected) {
+      returnTo.focus({ preventScroll: true });
+      if (document.activeElement !== active) return;
+    }
+    active.blur();
+  }, [isOpen, requestInputFocus, containerRef]);
 
   return { focusRequest, requestInputFocus };
 }

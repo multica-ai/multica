@@ -186,9 +186,14 @@ export function ChatWindow() {
     handleClearQueuedTasks,
     handleSendQueuedTaskNow,
   } = useChatTaskActions(activeSessionId, enqueueLocalRestore);
+  // The window's own element. Declared here rather than beside useChatResize
+  // below because the focus hand-back needs it: it is what tells the hook
+  // whether the caret it is about to move is inside the window.
+  const windowRef = useRef<HTMLDivElement>(null);
   // Nonce handed to ChatInput to pull focus into the compose box: when a new
   // chat starts (⊕ or switching agent), and whenever the window itself opens.
-  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
+  // Closing hands focus back, so the composer stops owning it while hidden.
+  const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen, windowRef);
   const [conversationStarterRequest, setConversationStarterRequest] = useState<{
     id: number;
     content: string;
@@ -760,7 +765,6 @@ export function ChatWindow() {
 
   const isExpanded = useChatStore((s) => s.isExpanded);
 
-  const windowRef = useRef<HTMLDivElement>(null);
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
 
   // Show the list (vs empty state) as soon as there's anything to display —
