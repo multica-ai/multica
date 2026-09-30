@@ -4246,7 +4246,7 @@ func (s *TaskService) ensureResponseEngineTerminalComment(
 	task db.AgentTaskQueue,
 	result []byte,
 ) error {
-	if effectiveResponseEngineMode(s.ResponseEngineMode) != ResponseEngineEnforce || !task.IssueID.Valid {
+	if !task.IssueID.Valid {
 		return nil
 	}
 
@@ -4275,7 +4275,7 @@ func (s *TaskService) ensureResponseEngineTerminalComment(
 	}
 
 	body := util.UnescapeBackslashEscapes(persisted.Output)
-	content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
+	content := redact.Text(body)
 	if content == "" {
 		return errors.New("enforced terminal rendered output became empty after sanitization")
 	}

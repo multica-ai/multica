@@ -233,6 +233,37 @@ func TestCompleteTask_ResponseEngineEnforceAlwaysPostsTerminalRenderedComment(t 
 	}
 }
 
+func TestCompleteTask_ResponseEngineEnforcePreservesLongStandardizedResponse(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID, _, issueID, taskID := setupResponseEngineIssueTask(t, 91012)
+	rendered := "[Goal]\nLong standardized response\n\nทำอะไรไป?\n" +
+		strings.Repeat("x", 8250) +
+		"\n\nและต่อไปคืออะไร?\nตรวจสอบผล\n\nReason:\nเพื่อรักษา contract สี่ส่วน"
+	fake := &fakeTaskResponseFinalizer{
+		result: service.TaskResponseFinalizationResult{Rendered: rendered},
+	}
+	configureResponseEngineForTest(t, service.ResponseEngineEnforce, fake)
+
+	w := completeResponseEngineTask(t, taskID, "RAW LONG OUTPUT")
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var content string
+	dbfx.QueryRow(t, `
+		SELECT content FROM comment
+		WHERE issue_id=$1 AND author_type='agent' AND author_id=$2 AND source_task_id=$3
+	`, issueID, agentID, taskID).Scan(&content)
+	if content != rendered {
+		t.Fatalf("terminal comment lost standardized response contract; len=%d want=%d", len([]rune(content)), len([]rune(rendered)))
+	}
+	if strings.Contains(content, "RAW LONG OUTPUT") {
+		t.Fatalf("raw output leaked into terminal comment")
+	}
+}
+
 func TestCompleteTask_ResponseEngineEnforceFailureKeepsTaskRunningAndRawUnpersisted(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -369,6 +400,7 @@ func TestCompleteTask_ResponseEngineEnforceRetryBackfillsMissingTerminalComment(
 	}
 
 	fake.err = errors.New("finalizer must not be called on terminal retry")
+	testHandler.TaskService.ResponseEngineMode = service.ResponseEngineLegacy
 	second := completeResponseEngineTask(t, taskID, "RAW RETRY MUST NOT LEAK")
 	if second.Code != http.StatusOK {
 		t.Fatalf("retry CompleteTask status=%d body=%s", second.Code, second.Body.String())
