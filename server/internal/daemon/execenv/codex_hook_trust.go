@@ -109,13 +109,23 @@ func codexHomePathForms(p string) []string {
 }
 
 // trimCodexHomePrefix reports whether key names a file directly inside one of
-// the home path forms and returns the remainder, including the separator.
+// the home path forms (`<home>/config.toml:...`, `<home>/hooks.json:...`) and
+// returns the remainder, including the separator. A key for a deeper path is
+// not a home-level hook source; rejecting it also keeps a task home nested
+// under the shared home (e.g. `~/.codex/x/codex-home`) from matching and being
+// re-prefixed on every prepare.
 func trimCodexHomePrefix(key string, forms []string) (string, bool) {
 	for _, form := range forms {
 		for _, sep := range []string{"/", string(filepath.Separator)} {
-			if strings.HasPrefix(key, form+sep) {
-				return key[len(form):], true
+			if !strings.HasPrefix(key, form+sep) {
+				continue
 			}
+			rest := key[len(form):]
+			file, _, _ := strings.Cut(rest[1:], ":")
+			if file == "" || strings.ContainsAny(file, `/\`) {
+				continue
+			}
+			return rest, true
 		}
 	}
 	return "", false

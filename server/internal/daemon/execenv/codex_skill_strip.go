@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // stripSkillsConfigEntries removes every `[[skills.config]]` array-of-tables
@@ -78,7 +80,18 @@ func sanitizeCopiedCodexConfig(configPath, sharedHome, taskHome string) error {
 		}
 		return fmt.Errorf("read config.toml: %w", err)
 	}
-	stripped := rehomeCodexHookTrust(stripSkillsConfigEntries(string(data)), sharedHome, taskHome)
+	stripped := stripSkillsConfigEntries(string(data))
+	if rehomed := rehomeCodexHookTrust(stripped, sharedHome, taskHome); rehomed != stripped {
+		// The re-key is a line edit; never trade a config Codex could parse for
+		// one it can't (Codex refuses to start on invalid TOML).
+		var probe map[string]any
+		if toml.Unmarshal([]byte(stripped), &probe) == nil {
+			if err := toml.Unmarshal([]byte(rehomed), &probe); err != nil {
+				return fmt.Errorf("re-keyed hook trust produced invalid config.toml: %w", err)
+			}
+		}
+		stripped = rehomed
+	}
 	if stripped == string(data) {
 		return nil
 	}
