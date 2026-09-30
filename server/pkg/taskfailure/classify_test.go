@@ -233,6 +233,7 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// unrelated 403 stays an auth failure.
 		{"403 usage limit beats auth", "API Error: 403 You've reached your 5-hour usage limit", ReasonAgentProviderQuotaLimit},
 		{"403 usage limit with prefix beats auth", "Failed to authenticate. API Error: 403 {\"error\":{\"message\":\"You've reached your 5-hour usage limit\"}}", ReasonAgentProviderQuotaLimit},
+		{"access token 403 usage limit beats context", "Failed to refresh access token. API Error: 403 You've reached your 5-hour usage limit", ReasonAgentProviderQuotaLimit},
 		{"plain 403 stays auth", "API Error: 403 Forbidden", ReasonAgentProviderAuthOrAccess},
 
 		// Both "429" and "rate limit" present — should still land in
@@ -275,6 +276,30 @@ func TestNormalizeDaemonReasonUpgradesConcurrentRequestLimit(t *testing.T) {
 	}
 	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
 		t.Errorf("ordinary token overflow changed to %q", got)
+	}
+}
+
+func TestNormalizeDaemonReasonUpgradesUsageLimit403(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		"API Error: 403 You've reached your 5-hour usage limit",
+		"Failed to refresh access token. API Error: 403 You've reached your 5-hour usage limit",
+	} {
+		for _, reason := range []string{
+			string(ReasonAgentContextOverflow),
+			string(ReasonAgentProviderAuthOrAccess),
+			string(ReasonAgentUnknown),
+			"agent_error",
+		} {
+			if got := NormalizeDaemonReason(reason, raw); got != ReasonAgentProviderQuotaLimit {
+				t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", reason, raw, got, ReasonAgentProviderQuotaLimit)
+			}
+		}
+	}
+
+	if got := NormalizeDaemonReason(string(ReasonAgentProviderAuthOrAccess), "API Error: 403 Forbidden"); got != ReasonAgentProviderAuthOrAccess {
+		t.Errorf("plain 403 auth rejection changed to %q", got)
 	}
 }
 
