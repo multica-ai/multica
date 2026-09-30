@@ -59,6 +59,44 @@ For DeepSeek Harness, install Node.js 20+ and run `npm install -g @deepseek-ai/d
 
 Those login credentials are stored locally by the tool itself. Multica never receives login tokens from Claude, Codex, Cursor, or any other CLI.
 
+### Use a ChatGPT plan with Codex
+
+As an alternative to Codex's own sign-in, the Multica CLI can request a separate **Sign in with ChatGPT** authorization for local Codex runs. Install a current Codex CLI release first. This optional mode uses OpenAI's public Responses API through Codex app-server; it does not import Codex's saved login or require an API key.
+
+Finish or stop active Codex runs before signing in, switching accounts, signing out, or changing authentication modes. On the machine running the daemon, run:
+
+```bash
+multica chatgpt login
+multica chatgpt status
+multica chatgpt models
+```
+
+The login command opens your browser and receives the callback on `127.0.0.1`. Choose the ChatGPT account and workspace whose plan you want to use, and grant plan usage. An identity-only sign-in is saved but cannot authorize tasks. Adding an identity-only registration does not select it over an existing plan-enabled account. To enable plan usage later, run `multica chatgpt login --account <client-id> --reconsent`. For a machine without a browser, use `--no-browser` and forward the printed loopback callback port to the machine running the CLI before opening the authorization URL on your own computer.
+
+A successful plan-enabled login selects that registration for the current Multica CLI profile. New built-in Codex runs read the selected account without a daemon restart; existing runs do not switch accounts. Refresh the model picker after switching accounts, or configure a model using an identifier returned by `multica chatgpt models`. The list is account-specific, and a listed model does not guarantee that an inference request will succeed or that quota remains. Custom runtime wrappers keep their own authentication.
+
+To keep separate accounts or workspaces, add another registration or select one already saved:
+
+```bash
+multica chatgpt login --label personal
+multica chatgpt accounts
+multica chatgpt use <client-id>
+```
+
+Registrations remain separate even when they use the same email address. Reauthorize a saved registration with `multica chatgpt login --account <client-id>`; omit `--account` only when adding a new one. The selected account applies to the local runtime, not to an individual agent in the web UI. Use separate Multica CLI profiles and daemons when different runtimes need different accounts. Switching accounts starts a fresh Codex conversation rather than resuming a thread owned by another account.
+
+Multica stores its own protected credentials under the local CLI profile directory, in `chatgpt/accounts.json`. Access, refresh, and ID tokens are not uploaded to the Multica server or written into agent configuration. Refreshes are serialized across local CLI and daemon processes. Before each new Codex run, the daemon renews an expiring access token when a refresh token is available and starts app-server with the current token. Authorization errors and exhausted usage do not switch to another account or to API-key billing. A failed turn is not automatically replayed to refresh credentials.
+
+To sign out:
+
+```bash
+multica chatgpt logout
+```
+
+This requests remote revocation and clears local tokens while preserving the registration for later sign-in. Add a client ID to sign out of a particular saved registration. If remote revocation cannot be confirmed, the command says so; you can also disconnect Multica in [ChatGPT Settings](https://chatgpt.com/settings). Signing out of the selected account leaves ChatGPT plan mode selected, so subsequent runs fail with a sign-in error. To deliberately return to Codex's own authentication for new runs, run `multica chatgpt disable`.
+
+Use `multica --profile <name> chatgpt ...` to manage a named CLI profile. For the authorization and supported deployment model, see OpenAI's [Sign in with ChatGPT documentation](https://developers.openai.com/siwc/token-sharing-open-source).
+
 <Callout type="info">
 Antigravity requires 1.1.10 or later, Claude Code requires 2.0.0 or later, Codex 0.100.0 or later, Copilot 1.0.0 or later, Grok 0.2.89 or later, Qwen Code 0.20.0 or later, MiniMax Code 0.1.2 or later, and OpenCode 1.1.54 or later. Below the minimum version, the daemon does not register the corresponding runtime.
 </Callout>

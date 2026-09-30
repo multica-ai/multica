@@ -1059,6 +1059,17 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
+	chatGPTToken, opts, err := b.prepareChatGPTPlan(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	chatGPTProviderID := ""
+	if b.cfg.CodexChatGPTPlan != nil {
+		chatGPTProviderID, err = newCodexChatGPTProviderID()
+		if err != nil {
+			return nil, err
+		}
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "codex"
@@ -1137,6 +1148,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		})
 	}
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
+	if b.cfg.CodexChatGPTPlan != nil {
+		codexArgs = append(codexArgs, codexChatGPTArgs(chatGPTProviderID)...)
+	}
 	// Keep the app-server alive long enough to handle turn/interrupt when the
 	// task context is cancelled. The lifecycle goroutine remains governed by
 	// runCtx and explicitly stops this process context during bounded cleanup.
@@ -1171,6 +1185,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if b.cfg.CodexChatGPTPlan != nil {
+		// Inject after the daemon has built its tool-shell environment policy.
+		cmd.Env = append(cmd.Env, codexChatGPTTokenEnv+"="+chatGPTToken.AccessToken)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1251,6 +1269,8 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	c = &codexClient{
 		cfg:                    b.cfg,
+		chatGPTToken:           chatGPTToken,
+		chatGPTProviderID:      chatGPTProviderID,
 		stdin:                  stdin,
 		pending:                make(map[int]*pendingRPC),
 		processDone:            make(chan struct{}),
@@ -1318,7 +1338,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			if line == "" {
 				continue
 			}
-			c.handleLine(line)
+			c.handleLine(redactCodexChatGPTToken(line, chatGPTToken))
 		}
 		// A cancelled or crashed app-server may close stdout without an
 		// item/completed snapshot. Preserve every complete delta JSON event
@@ -1501,12 +1521,15 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// 1. Initialize handshake
 		initializeStarted := time.Now()
 		b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_sent", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "active_launches", activeLaunches)
+		clientInfo := map[string]any{"name": "multica-agent-sdk", "title": "Multica Agent SDK", "version": "0.2.0"}
+		if b.cfg.CodexChatGPTPlan != nil {
+			clientInfo["name"], clientInfo["title"] = "Multica", "Multica"
+			if b.cfg.DaemonVersion != "" {
+				clientInfo["version"] = b.cfg.DaemonVersion
+			}
+		}
 		_, err := c.request(runCtx, "initialize", map[string]any{
-			"clientInfo": map[string]any{
-				"name":    "multica-agent-sdk",
-				"title":   "Multica Agent SDK",
-				"version": "0.2.0",
-			},
+			"clientInfo": clientInfo,
 			"capabilities": map[string]any{
 				"experimentalApi": true,
 			},
@@ -1537,7 +1560,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// the race against the per-RPC handshake timeout.
 				// Keep it out of persisted/user-visible Results; cleanup lifecycle
 				// still records bounded byte/truncation metadata.
-				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(redactCodexChatGPTToken(stderrBuf.Tail(), chatGPTToken)))
 			}
 			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
 			if timedOut && !cleanupConfirmed {
@@ -1571,7 +1594,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
+			stderrTail := sanitizeCodexDiagnostic(redactCodexChatGPTToken(stderrBuf.Tail(), chatGPTToken))
 			finalError = err.Error()
 			if c.threadSetupMethod != "" {
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
@@ -1602,6 +1625,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				ResumeRejected: isCodexResumeOverflow(opts, err),
 			}
 			return
+		}
+		if b.cfg.CodexChatGPTPlan != nil {
+			if err := bindCodexChatGPTThread(b.cfg.CodexSessionOwnerDir, threadID, chatGPTToken); err != nil {
+				resCh <- Result{Status: "failed", Error: err.Error(), DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 		c.setThreadID(threadID)
 		if resumed {
@@ -1658,6 +1687,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					finishFirstItemWait("turn_failed")
 					finalStatus = "failed"
 					finalError = errMsg
+				} else if b.cfg.CodexChatGPTPlan != nil && !c.chatGPTCompleted.Load() {
+					finishFirstItemWait("turn_failed")
+					finalStatus = "failed"
+					finalError = "ChatGPT plan requires turn/completed with status completed; no verified completion was received"
 				} else {
 					finishFirstItemWait("turn_completed")
 				}
@@ -1690,7 +1723,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				default:
 					drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 					finalStatus = "failed"
-					finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+					finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", sanitizeCodexDiagnostic(redactCodexChatGPTToken(stderrBuf.Tail(), chatGPTToken)))
 					resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 					return
 				}
@@ -1816,11 +1849,15 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		drainAndWait()
 
 		if processExitErr != nil {
-			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(redactCodexChatGPTToken(stderrBuf.Tail(), chatGPTToken)))
 		}
-		stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
+		stderrTail := sanitizeCodexDiagnostic(redactCodexChatGPTToken(stderrBuf.Tail(), chatGPTToken))
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
-			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), b.cfg.commandAt(execPath), cmd.Env, b.cfg.Logger)
+			diagnosticEnv := cmd.Env
+			if b.cfg.CodexChatGPTPlan != nil {
+				diagnosticEnv = withoutCodexChatGPTToken(diagnosticEnv)
+			}
+			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), b.cfg.commandAt(execPath), diagnosticEnv, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrTail)
 		}
 
@@ -1831,7 +1868,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// require (cleanupConfirmed plus platform support) rather than a bare
 		// ProcessState check: on Windows the daemon cannot prove the whole tree
 		// is gone, and a surviving app-server would race the retry.
-		startupRefreshRetrySafe := timeoutDiagnostic.Kind == codexTimeoutFirstTurnNoProgress &&
+		startupRefreshRetrySafe := b.cfg.CodexChatGPTPlan == nil && timeoutDiagnostic.Kind == codexTimeoutFirstTurnNoProgress &&
 			!firstTurnProgressObserved &&
 			strings.Contains(stderrTail, codexModelCatalogRefreshFailureSignal) &&
 			cleanupConfirmed && codexInitializeRetrySupported()
@@ -2026,6 +2063,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		// session was created with, even when the user has flipped the
 		// agent's thinking_level since. See MUL-2339 — Elon flagged that
 		// resume must honour the live config, not the stored one.
+		if c.cfg.CodexChatGPTPlan != nil {
+			resumeParams["modelProvider"] = c.chatGPTProviderID
+		}
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
 		applyCodexServiceTier(resumeParams, opts.ServiceTier)
 		c.threadSetupMethod = "thread/resume"
@@ -2057,7 +2097,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
 		} else {
-			if isCodexTransportError(err) {
+			if c.cfg.CodexChatGPTPlan != nil || isCodexTransportError(err) {
 				logger.Warn("codex thread/resume failed due to transport error; not falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
 				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
 			}
@@ -2085,6 +2125,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
 		"persistExtendedHistory": true,
+	}
+	if c.cfg.CodexChatGPTPlan != nil {
+		startParams["modelProvider"] = c.chatGPTProviderID
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
 	applyCodexServiceTier(startParams, opts.ServiceTier)
@@ -2373,6 +2416,9 @@ func describeCodexSemanticActivity(msg Message) string {
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
+	chatGPTCompleted       atomic.Bool
+	chatGPTProviderID      string
+	chatGPTToken           CodexChatGPTToken
 	cfg                    Config
 	stdin                  interface{ Write([]byte) (int, error) }
 	mu                     sync.Mutex
@@ -2672,6 +2718,11 @@ func interruptCodexTurn(c *codexClient, threadID string, turnDone <-chan bool, c
 }
 
 func (c *codexClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if c.cfg.CodexChatGPTPlan != nil && (method == "turn/start" || method == "turn/steer") {
+		if err := c.cfg.CodexChatGPTPlan.AssertActive(ctx, c.chatGPTToken); err != nil {
+			return nil, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -3500,16 +3551,20 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			return
 		}
 		c.turnCompleted = true
+		c.chatGPTCompleted.Store(status == "completed")
 		c.setActiveTurnID("")
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
 
 		// Capture the error message from failed turns so callers can surface
 		// a real reason instead of falling back to "empty output".
-		if status == "failed" {
+		if status == "failed" || (c.cfg.CodexChatGPTPlan != nil && status != "completed" && !aborted) {
 			errMsg := extractNestedString(params, "turn", "error", "message")
 			if errMsg == "" {
 				errMsg = "codex turn failed"
+				if c.cfg.CodexChatGPTPlan != nil {
+					errMsg = "ChatGPT plan turn did not complete; check account access or sign in again before retrying"
+				}
 			}
 			c.setTurnError(errMsg)
 		}
