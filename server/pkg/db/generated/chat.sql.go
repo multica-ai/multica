@@ -1168,6 +1168,7 @@ WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'wa
   -- they own no assistant turn and must not raise the StatusPill or disable the
   -- composer (MUL-5149 refresh follow-up).
   AND regenerate_quick_actions_for IS NULL
+  AND trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -1360,6 +1361,7 @@ SELECT EXISTS (
     -- Background quick-actions regeneration passes own no visible turn and must
     -- never light the FAB "running" indicator (MUL-5149 refresh follow-up).
     AND atq.regenerate_quick_actions_for IS NULL
+    AND atq.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     AND cs.workspace_id = $1
     AND cs.creator_id = $2
     AND cs.agent_id = ANY($3::uuid[])
@@ -2397,6 +2399,7 @@ WHERE atq.chat_session_id IS NOT NULL
   -- Exclude background quick-actions regeneration passes: they own no assistant
   -- turn and must not surface as "running" chat work (MUL-5149 refresh follow-up).
   AND atq.regenerate_quick_actions_for IS NULL
+  AND atq.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
   AND cs.workspace_id = $1
   AND cs.creator_id = $2
 ORDER BY atq.created_at DESC
@@ -2474,6 +2477,7 @@ LEFT JOIN LATERAL (
 WHERE task.chat_session_id = $1
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
   AND task.regenerate_quick_actions_for IS NULL
+  AND task.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
 ORDER BY
     CASE
       WHEN task.status IN ('dispatched', 'running', 'waiting_local_directory') THEN 0
@@ -2739,7 +2743,7 @@ JOIN agent_task_queue AS origin_task
 JOIN chat_session AS callback_session
   ON callback_session.id = origin_task.chat_session_id
 WHERE source_task.id = $1
-  AND source_task.status = 'running'
+  AND source_task.status IN ('dispatched', 'running', 'waiting_local_directory')
   AND source_task.chat_session_id IS NULL
   AND source_task.is_leader_task = TRUE
   AND source_task.squad_id IS NOT NULL
@@ -2954,6 +2958,7 @@ WITH target AS MATERIALIZED (
   WHERE candidate.id = $2
     AND candidate.chat_session_id = $1
     AND candidate.status = 'queued'
+    AND candidate.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     -- "Send now" is valid only while there is a visible claimed task for the
     -- client to cancel. If the visible head is still queued (or deferred), the
     -- selected row would otherwise replace it without any active_task_id.
@@ -2963,6 +2968,7 @@ WITH target AS MATERIALIZED (
       WHERE active.chat_session_id = $1
         AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
         AND active.regenerate_quick_actions_for IS NULL
+        AND active.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     )
   FOR UPDATE
 ), demoted AS (
@@ -2988,6 +2994,7 @@ SELECT
     WHERE active.chat_session_id = $1
       AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND active.regenerate_quick_actions_for IS NULL
+      AND active.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     ORDER BY active.created_at ASC, active.id ASC
     LIMIT 1
   )::uuid AS active_task_id

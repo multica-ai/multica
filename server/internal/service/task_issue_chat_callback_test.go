@@ -13,8 +13,10 @@ import (
 
 type issueChatCallbackFixture struct {
 	dbfx          *testutil.Fixture
+	userID        string
 	mikaAgentID   string
 	mikaRuntimeID string
+	squadID       string
 	chatSessionID string
 	issueID       string
 	leaderTaskID  string
@@ -65,8 +67,10 @@ func seedIssueChatCallbackFixture(t *testing.T) issueChatCallbackFixture {
 
 	return issueChatCallbackFixture{
 		dbfx:          dbfx,
+		userID:        userID,
 		mikaAgentID:   mikaAgentID,
 		mikaRuntimeID: mikaRuntimeID,
+		squadID:       squadID,
 		chatSessionID: chatSessionID,
 		issueID:       issueID,
 		leaderTaskID:  leaderTaskID,
@@ -181,6 +185,45 @@ func TestCompleteSquadLeaderTaskQueuesOriginalMikaChat(t *testing.T) {
 	}
 }
 
+func TestCompleteSquadLeaderCallbackIncludesFinalOutputAfterProgressComment(t *testing.T) {
+	fx := seedIssueChatCallbackFixture(t)
+	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+
+	fx.dbfx.Comment(t, fx.issueID, "Progress only; the final result is not ready yet.", testutil.Cols{
+		"author_type": "agent",
+		"author_id":   fx.mikaAgentID,
+		"created_at":  testutil.Raw("now() + interval '1 second'"),
+	})
+	const finalOutput = "FINAL-RESULT-7f8c: the implementation and focused acceptance test passed."
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		context.Background(), parseTestUUID(t, fx.leaderTaskID),
+		[]byte(`{"output":"`+finalOutput+`"}`),
+		"", "", "", false, "", "",
+	); err != nil {
+		t.Fatalf("complete Squad leader after progress comment: %v", err)
+	} else if !transitioned {
+		t.Fatal("Squad leader completion did not transition")
+	}
+
+	if got := fx.dbfx.Count(t, `
+		SELECT count(*) FROM comment
+		WHERE issue_id = $1 AND content = $2
+	`, fx.issueID, finalOutput); got != 0 {
+		t.Fatalf("final-output fallback comments = %d, want 0 because progress already existed", got)
+	}
+	var callbackContent string
+	fx.dbfx.QueryRow(t, `
+		SELECT message.content
+		FROM chat_message AS message
+		JOIN agent_task_queue AS task ON task.id = message.task_id
+		WHERE task.trigger_evidence_kind = 'issue_task_callback'
+		  AND task.trigger_evidence_ref_id = $1
+	`, fx.leaderTaskID).Scan(&callbackContent)
+	if !strings.Contains(callbackContent, finalOutput) {
+		t.Fatalf("callback input %q does not contain the leader's final output", callbackContent)
+	}
+}
+
 func TestFailSquadLeaderTaskQueuesOriginalMikaChatAfterRetriesEnd(t *testing.T) {
 	fx := seedIssueChatCallbackFixture(t)
 	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
@@ -230,6 +273,74 @@ func TestRetryingSquadLeaderTaskDoesNotReturnToMikaYet(t *testing.T) {
 	}
 	if got := fx.dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, fx.leaderTaskID); got != 1 {
 		t.Fatalf("retry children = %d, want 1", got)
+	}
+}
+
+func TestManualSquadLeaderSuccessorSuppressesStaleFailureCallback(t *testing.T) {
+	fx := seedIssueChatCallbackFixture(t)
+	svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+	successorID := fx.dbfx.Task(t, fx.mikaAgentID, testutil.Cols{
+		"runtime_id":          fx.mikaRuntimeID,
+		"issue_id":            fx.issueID,
+		"status":              "queued",
+		"is_leader_task":      true,
+		"squad_id":            fx.squadID,
+		"rerun_of_task_id":    fx.leaderTaskID,
+		"initiator_user_id":   fx.userID,
+		"originator_user_id":  fx.userID,
+		"accountable_user_id": fx.userID,
+	})
+
+	if _, transitioned, err := svc.FailTaskWithTransition(
+		context.Background(), parseTestUUID(t, fx.leaderTaskID),
+		"the superseded run failed", "", "", "", "agent_error.unknown", false, "", "",
+	); err != nil {
+		t.Fatalf("fail superseded Squad leader task: %v", err)
+	} else if !transitioned {
+		t.Fatal("superseded failure did not transition")
+	}
+	if got := issueCallbackCount(t, fx); got != 0 {
+		t.Fatalf("callbacks for superseded failure = %d, want 0", got)
+	}
+
+	fx.dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, successorID)
+	if _, transitioned, err := svc.CompleteTaskWithTransition(
+		context.Background(), parseTestUUID(t, successorID),
+		[]byte(`{"output":"the manual successor succeeded"}`),
+		"", "", "", false, "", "",
+	); err != nil {
+		t.Fatalf("complete manual Squad leader successor: %v", err)
+	} else if !transitioned {
+		t.Fatal("manual successor completion did not transition")
+	}
+	if got := fx.dbfx.Count(t, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'issue_task_callback'
+		  AND trigger_evidence_ref_id = $1
+	`, successorID); got != 1 {
+		t.Fatalf("callbacks for successful successor = %d, want 1", got)
+	}
+}
+
+func TestSquadLeaderFailureBeforeRunningStillQueuesOriginalMikaChat(t *testing.T) {
+	for _, status := range []string{"dispatched", "waiting_local_directory"} {
+		t.Run(status, func(t *testing.T) {
+			fx := seedIssueChatCallbackFixture(t)
+			fx.dbfx.Exec(t, `UPDATE agent_task_queue SET status = $2 WHERE id = $1`, fx.leaderTaskID, status)
+			svc := NewTaskService(db.New(fx.dbfx.Pool), fx.dbfx.Pool, nil, events.New())
+
+			if _, transitioned, err := svc.FailTaskWithTransition(
+				context.Background(), parseTestUUID(t, fx.leaderTaskID),
+				"the leader failed before reaching running", "", "", "", "agent_error.unknown", false, "", "",
+			); err != nil {
+				t.Fatalf("fail %s Squad leader task: %v", status, err)
+			} else if !transitioned {
+				t.Fatalf("%s failure did not transition", status)
+			}
+			if got := issueCallbackCount(t, fx); got != 1 {
+				t.Fatalf("callbacks after %s failure = %d, want 1", status, got)
+			}
+		})
 	}
 }
 

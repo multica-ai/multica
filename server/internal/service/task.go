@@ -4418,6 +4418,16 @@ func issueChatCallbackContent(issue db.Issue, sourceTask db.AgentTaskQueue, term
 	if failureReason != "" {
 		fmt.Fprintf(&b, "Failure reason: %s\n", failureReason)
 	}
+	if terminalStatus == "completed" && len(sourceTask.Result) > 0 {
+		var payload protocol.TaskCompletedPayload
+		if json.Unmarshal(sourceTask.Result, &payload) == nil {
+			output := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+			if output != "" {
+				output = truncateFallbackCommentBody(redact.Text(output), maxSynthesizedFallbackCommentRunes)
+				fmt.Fprintf(&b, "Squad leader final output:\n%s\n", output)
+			}
+		}
+	}
 	b.WriteString("Read the card and its comments, continue the workflow from this original chat, and tell the member the important result or next decision. Keep long details on the card and include its address only when the member needs to open it.")
 	return b.String()
 }
@@ -5241,7 +5251,14 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 				return fmt.Errorf("write chat failure outcome: %w", err)
 			}
 		}
+		pendingSuccessor := false
 		if retried == nil {
+			pendingSuccessor, err = hasRunnableSuccessor(ctx, qtx, t)
+			if err != nil {
+				return fmt.Errorf("check final runnable successor: %w", err)
+			}
+		}
+		if retried == nil && !pendingSuccessor {
 			issueChatCallback, err = createIssueChatCallbackTx(ctx, qtx, callbackTarget, t, "failed", failureReason)
 			if err != nil {
 				return err
