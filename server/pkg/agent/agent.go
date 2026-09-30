@@ -220,6 +220,8 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+	StartedAt time.Time      // tool start time reported by the backend
+	EndedAt   time.Time      // tool end time reported by the backend
 }
 
 // TokenUsage tracks token consumption for a single model.
