@@ -228,6 +228,13 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		{"403 concurrent request limit beats auth", "Failed to authenticate. API Error: 403 You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.", ReasonAgentProviderCapacityOrRateLimit},
 		{"access token concurrent request limit beats context", "Failed to refresh access token. API Error: 403 You've reached your concurrent request limit.", ReasonAgentProviderCapacityOrRateLimit},
 
+		// Kimi Code reports an exhausted subscription window as HTTP 403. The
+		// usage-limit witness must beat the bare 403 auth rule, while an
+		// unrelated 403 stays an auth failure.
+		{"403 usage limit beats auth", "API Error: 403 You've reached your 5-hour usage limit", ReasonAgentProviderQuotaLimit},
+		{"403 usage limit with prefix beats auth", "Failed to authenticate. API Error: 403 {\"error\":{\"message\":\"You've reached your 5-hour usage limit\"}}", ReasonAgentProviderQuotaLimit},
+		{"plain 403 stays auth", "API Error: 403 Forbidden", ReasonAgentProviderAuthOrAccess},
+
 		// Both "429" and "rate limit" present — should still land in
 		// the capacity bucket, not the quota bucket.
 		{"429 rate limit", "API Error: 429 rate limit reached", ReasonAgentProviderCapacityOrRateLimit},

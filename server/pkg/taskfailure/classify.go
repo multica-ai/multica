@@ -115,6 +115,13 @@ func Classify(rawError string) Reason {
 		strings.Contains(lower, "no provider configured"):
 		return ReasonAgentMissingConfig
 
+	// Some providers (e.g. Kimi Code) report an exhausted usage window as HTTP
+	// 403. The "usage limit" witness must beat the bare 403 auth rule below,
+	// otherwise the failure is filed as auth and the member is told to fix
+	// credentials that are still valid.
+	case strings.Contains(lower, "usage limit"):
+		return ReasonAgentProviderQuotaLimit
+
 	// 3. Auth / access. 401 / 403 / "Not logged in" / invalid token
 	//    / lacks access to the model. Status codes use a digit boundary
 	//    so "4030" / "1401ms" don't spuriously land here.
