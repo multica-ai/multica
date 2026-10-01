@@ -223,6 +223,10 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 
 				userID := uuidToString(pat.UserID)
+				if !applyPATWorkspaceScope(r, pat.WorkspaceID) {
+					writeError(w, http.StatusForbidden, "token is not valid for this workspace")
+					return
+				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
 					return
 				}
@@ -232,7 +236,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				if !pat.WorkspaceID.Valid {
+					patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				}
 
 				// Cache miss = first request in this TTL window. Refresh
 				// last_used_at; subsequent hits skip the write entirely.

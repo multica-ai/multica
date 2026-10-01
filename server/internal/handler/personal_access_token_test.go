@@ -11,8 +11,43 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestCreatePersonalAccessToken_ValidatesWorkspaceScope(t *testing.T) {
+	t.Run("member may create a scoped token", func(t *testing.T) {
+		var created CreatePATResponse
+		testutil.Call(t, testHandler.CreatePersonalAccessToken,
+			newRequest(http.MethodPost, "/api/personal-access-tokens", map[string]any{
+				"name":         "workspace-scoped",
+				"workspace_id": testWorkspaceID,
+			})).Want(http.StatusCreated).JSON(&created)
+		dbfx.Cleanup(t, `DELETE FROM personal_access_token WHERE id = $1`, parseUUID(created.ID))
+
+		if created.WorkspaceID == nil || *created.WorkspaceID != testWorkspaceID {
+			t.Fatalf("workspace_id = %v, want %s", created.WorkspaceID, testWorkspaceID)
+		}
+	})
+
+	t.Run("invalid workspace id is rejected", func(t *testing.T) {
+		testutil.Call(t, testHandler.CreatePersonalAccessToken,
+			newRequest(http.MethodPost, "/api/personal-access-tokens", map[string]any{
+				"name":         "invalid-workspace",
+				"workspace_id": "not-a-uuid",
+			})).Want(http.StatusBadRequest)
+	})
+
+	t.Run("non-member workspace is hidden", func(t *testing.T) {
+		foreignWorkspaceID := dbfx.Workspace(t, "PAT scope foreign", "pat-scope-foreign")
+
+		testutil.Call(t, testHandler.CreatePersonalAccessToken,
+			newRequest(http.MethodPost, "/api/personal-access-tokens", map[string]any{
+				"name":         "foreign-workspace",
+				"workspace_id": foreignWorkspaceID,
+			})).Want(http.StatusNotFound)
+	})
+}
 
 // insertTestPAT creates a PAT row for the shared test user with the given
 // expiry and returns (rawToken, patID). Each call generates a fresh raw token
