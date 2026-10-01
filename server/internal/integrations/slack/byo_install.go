@@ -33,11 +33,12 @@ var (
 // this bot represents, who is installing, and the two tokens the user pasted
 // from their own Slack app.
 type RegisterBYOParams struct {
-	WorkspaceID pgtype.UUID
-	AgentID     pgtype.UUID
-	InitiatorID pgtype.UUID
-	BotToken    string // xoxb-… — outbound Web API (chat.postMessage)
-	AppToken    string // xapp-… — this app's OWN Socket Mode connection (inbound)
+	WorkspaceID        pgtype.UUID
+	AgentID            pgtype.UUID
+	InitiatorID        pgtype.UUID
+	BotToken           string // xoxb-… — outbound Web API (chat.postMessage)
+	AppToken           string // xapp-… — this app's OWN Socket Mode connection (inbound)
+	DMRepliesInThreads bool
 }
 
 // RegisterBYO installs a user-supplied ("bring your own") Slack app for an agent.
@@ -106,11 +107,12 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		return db.ChannelInstallation{}, fmt.Errorf("encrypt slack app token: %w", err)
 	}
 	cfgJSON, err := json.Marshal(installConfig{
-		AppID:             appID,
-		TeamID:            auth.TeamID,
-		BotUserID:         auth.UserID,
-		BotTokenEncrypted: base64.StdEncoding.EncodeToString(sealedBot),
-		AppTokenEncrypted: base64.StdEncoding.EncodeToString(sealedApp),
+		AppID:              appID,
+		TeamID:             auth.TeamID,
+		BotUserID:          auth.UserID,
+		BotTokenEncrypted:  base64.StdEncoding.EncodeToString(sealedBot),
+		AppTokenEncrypted:  base64.StdEncoding.EncodeToString(sealedApp),
+		DMRepliesInThreads: p.DMRepliesInThreads,
 	})
 	if err != nil {
 		return db.ChannelInstallation{}, fmt.Errorf("encode slack installation config: %w", err)

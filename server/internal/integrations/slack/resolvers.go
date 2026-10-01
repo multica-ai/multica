@@ -80,7 +80,9 @@ type slackBindingConfig struct {
 //   - config: the real channel id, so outbound works even when the key is
 //     composite.
 //   - replyThread: the thread_ts to reply into (the thread root for groups; the
-//     inbound thread for DMs, which may be empty for a top-level send).
+//     inbound thread for DMs, which may be empty for a top-level send). The
+//     Socket Mode adapter sets the DM thread to the message ts when the
+//     installation opts into threaded replies, without changing bindingKey.
 //
 // It is a pure function so the isolation contract is unit-tested without a DB.
 func slackSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte, replyThread string) {

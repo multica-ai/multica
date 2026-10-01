@@ -5,6 +5,8 @@
  * future MUST default to optional so older desktop builds keep parsing the
  * response — see CLAUDE.md → API Compatibility. */
 export interface SlackInstallation {
+  /** Missing on older servers; threaded DM replies default to off. */
+  dm_replies_in_threads?: boolean;
   id: string;
   workspace_id: string;
   agent_id: string;
@@ -39,6 +41,8 @@ export interface ListSlackInstallationsResponse {
 export interface RegisterSlackBYORequest {
   bot_token: string;
   app_token: string;
+  /** Opt into replies under each DM message, keeping one continuous session. */
+  dm_replies_in_threads?: boolean;
 }
 
 /** Post-redemption echo: the Slack user id the token carried is now bound to

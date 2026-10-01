@@ -339,3 +339,32 @@ func TestRegisterBYO_AppTokenNotLive(t *testing.T) {
 		t.Error("an invalid app token must not persist an installation")
 	}
 }
+
+func TestRegisterBYO_DMReplyPolicy(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("threaded=%t", enabled), func(t *testing.T) {
+			srv := authTestServer(t, true)
+			defer srv.Close()
+			id := uid(4)
+			q := &fakeInstallQueries{existing: &db.ChannelInstallation{ID: id}}
+			svc := newTestInstallService(t, q)
+			svc.apiURL = srv.URL + "/"
+			p := byoParams("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222")
+			p.DMRepliesInThreads = enabled
+			row, err := svc.RegisterBYO(context.Background(), p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if row.ID != id {
+				t.Fatal("re-register must retain the installation ID and its session bindings")
+			}
+			var cfg installConfig
+			if err := json.Unmarshal(q.upsertParams.Config, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.DMRepliesInThreads != enabled {
+				t.Fatalf("persisted reply policy = %t, want %t", cfg.DMRepliesInThreads, enabled)
+			}
+		})
+	}
+}

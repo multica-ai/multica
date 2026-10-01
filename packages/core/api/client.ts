@@ -248,6 +248,10 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  SlackInstallationSchema,
+  ListSlackInstallationsResponseSchema,
+  EMPTY_SLACK_INSTALLATION,
+  EMPTY_LIST_SLACK_INSTALLATIONS_RESPONSE,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -4966,7 +4970,10 @@ export class ApiClient {
 
   // Slack integration (MUL-3666)
   async listSlackInstallations(workspaceId: string): Promise<ListSlackInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/slack/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/slack/installations`);
+    return parseWithFallback(raw, ListSlackInstallationsResponseSchema, EMPTY_LIST_SLACK_INSTALLATIONS_RESPONSE, {
+      endpoint: "listSlackInstallations",
+    });
   }
 
   // registerSlackBYO performs a bring-your-own-app install: the admin pastes the
@@ -4978,9 +4985,12 @@ export class ApiClient {
     body: RegisterSlackBYORequest,
   ): Promise<SlackInstallation> {
     const search = new URLSearchParams({ agent_id: agentId });
-    return this.fetch(`/api/workspaces/${workspaceId}/slack/install/byo?${search.toString()}`, {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/slack/install/byo?${search.toString()}`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, SlackInstallationSchema, EMPTY_SLACK_INSTALLATION, {
+      endpoint: "registerSlackBYO",
     });
   }
 

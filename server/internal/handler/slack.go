@@ -19,31 +19,33 @@ import (
 // (only the outbound sender decrypts it). WS lease columns are runtime state,
 // not API surface, so they are omitted too.
 type SlackInstallationResponse struct {
-	ID              string `json:"id"`
-	WorkspaceID     string `json:"workspace_id"`
-	AgentID         string `json:"agent_id"`
-	TeamID          string `json:"team_id"`
-	BotUserID       string `json:"bot_user_id"`
-	InstallerUserID string `json:"installer_user_id"`
-	Status          string `json:"status"`
-	InstalledAt     string `json:"installed_at"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	DMRepliesInThreads bool   `json:"dm_replies_in_threads"`
+	ID                 string `json:"id"`
+	WorkspaceID        string `json:"workspace_id"`
+	AgentID            string `json:"agent_id"`
+	TeamID             string `json:"team_id"`
+	BotUserID          string `json:"bot_user_id"`
+	InstallerUserID    string `json:"installer_user_id"`
+	Status             string `json:"status"`
+	InstalledAt        string `json:"installed_at"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 func slackInstallationToResponse(row db.ChannelInstallation) SlackInstallationResponse {
 	info := slack.DecodePublicConfig(row.Config)
 	return SlackInstallationResponse{
-		ID:              uuidToString(row.ID),
-		WorkspaceID:     uuidToString(row.WorkspaceID),
-		AgentID:         uuidToString(row.AgentID),
-		TeamID:          info.TeamID,
-		BotUserID:       info.BotUserID,
-		InstallerUserID: uuidToString(row.InstallerUserID),
-		Status:          row.Status,
-		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),
-		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+		ID:                 uuidToString(row.ID),
+		WorkspaceID:        uuidToString(row.WorkspaceID),
+		AgentID:            uuidToString(row.AgentID),
+		TeamID:             info.TeamID,
+		BotUserID:          info.BotUserID,
+		DMRepliesInThreads: info.DMRepliesInThreads,
+		InstallerUserID:    uuidToString(row.InstallerUserID),
+		Status:             row.Status,
+		InstalledAt:        row.InstalledAt.Time.UTC().Format(time.RFC3339),
+		CreatedAt:          row.CreatedAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:          row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -85,8 +87,9 @@ func (h *Handler) ListSlackInstallations(w http.ResponseWriter, r *http.Request)
 // RegisterSlackBYORequest is the body for a bring-your-own-app install: the two
 // tokens the user pasted from their own Slack app.
 type RegisterSlackBYORequest struct {
-	BotToken string `json:"bot_token"`
-	AppToken string `json:"app_token"`
+	BotToken           string `json:"bot_token"`
+	AppToken           string `json:"app_token"`
+	DMRepliesInThreads bool   `json:"dm_replies_in_threads"`
 }
 
 // RegisterSlackBYO (POST /api/workspaces/{id}/slack/install/byo?agent_id=…)
@@ -135,11 +138,12 @@ func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row, err := h.SlackInstall.RegisterBYO(r.Context(), slack.RegisterBYOParams{
-		WorkspaceID: wsUUID,
-		AgentID:     agentUUID,
-		InitiatorID: initiatorUUID,
-		BotToken:    body.BotToken,
-		AppToken:    body.AppToken,
+		WorkspaceID:        wsUUID,
+		AgentID:            agentUUID,
+		InitiatorID:        initiatorUUID,
+		BotToken:           body.BotToken,
+		AppToken:           body.AppToken,
+		DMRepliesInThreads: body.DMRepliesInThreads,
 	})
 	if err != nil {
 		switch {
