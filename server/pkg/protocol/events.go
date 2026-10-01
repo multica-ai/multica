@@ -167,6 +167,11 @@ const (
 	EventDaemonRPCRequest  = "daemon:rpc_request"
 	EventDaemonRPCResponse = "daemon:rpc_response"
 
+	// Webhook events
+	EventWebhookCreated = "webhook:created"
+	EventWebhookUpdated = "webhook:updated"
+	EventWebhookDeleted = "webhook:deleted"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"
