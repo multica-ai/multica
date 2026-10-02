@@ -1196,7 +1196,9 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 	}
 	if w.SystemRule.Valid {
 		// A system rule's run targets the assignee resolved when it fired; it
-		// is claimable while the rule is on and that agent can still run.
+		// is claimable while the rule is on and that agent can still run. When
+		// it carries the issue's instruction, whoever set it must still be
+		// allowed to use that agent.
 		if !w.Enabled || w.DisabledAt.Valid || w.Revision != source.Revision || w.IssueID != task.IssueID {
 			return ErrWakeupForbidden
 		}
@@ -1204,7 +1206,25 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (agent.ArchivedAt.Valid || !agent.RuntimeID.Valid)) {
 			return ErrWakeupForbidden
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		var given struct {
+			Evidence struct {
+				InstructionBy string `json:"instruction_by"`
+			} `json:"wakeup_evidence"`
+		}
+		if json.Unmarshal(task.Context, &given) != nil {
+			return ErrWakeupForbidden
+		}
+		if given.Evidence.InstructionBy == "" {
+			return nil
+		}
+		by, err := util.ParseUUID(given.Evidence.InstructionBy)
+		if err != nil {
+			return ErrWakeupForbidden
+		}
+		return s.authorize(ctx, s.Tasks.Queries, w.WorkspaceID, by, agent)
 	}
 	if w.DisabledAt.Valid || w.Revision != source.Revision || w.IssueID != task.IssueID || w.AgentID != task.AgentID || w.CreatedBy != task.OriginatorUserID {
 		return ErrWakeupForbidden

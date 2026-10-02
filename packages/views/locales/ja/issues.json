@@ -1257,6 +1257,8 @@
       "instruction_default": "このタスクでは未設定のため、既定の指示を使います：",
       "instruction_placeholder": "空欄のままなら既定の指示を使います",
       "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
+      "instruction_inactive": "現在は適用されていません。実行には既定の指示が使われます。{{name}} を使えるメンバーが編集して保存すると適用されます。",
+      "instruction_forbidden": "この指示を変更できるのは {{name}} を使えるメンバーだけです。",
       "paused": "一時停止中：{{reason}}"
     },
     "cond": {

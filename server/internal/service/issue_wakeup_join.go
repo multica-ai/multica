@@ -381,11 +381,11 @@ func (s *IssueWakeupService) mayJoin(ctx context.Context, q *db.Queries, issue d
 	if err != nil || runAs.UserID != task.OriginatorUserID {
 		return "", false, err
 	}
-	var settings []byte
-	if ws, err := q.GetWorkspace(ctx, issue.WorkspaceID); err == nil {
-		settings = ws.Settings
+	instruction, _, err := s.childDoneRunInstruction(ctx, q, w, agent)
+	if err != nil {
+		return "", false, err
 	}
-	return ChildDoneInstruction(w.Instruction, settings), true, nil
+	return instruction, true, nil
 }
 
 // takenRun is a run that took some of a rule's inputs along and has started.

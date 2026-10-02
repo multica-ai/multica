@@ -3642,7 +3642,7 @@ export const IssueWakeupSchema = z.object({
 export const SystemWakeupSchema = z.object({
   id: z.string().default(""), revision: z.number().int().nonnegative().default(0),
   rule: z.literal("child_done"), enabled: z.boolean(), instruction: z.string().default(""),
-  default_instruction: z.string().default(""), customized: z.boolean().default(false),
+  default_instruction: z.string().default(""), instruction_inactive: z.boolean().default(false), customized: z.boolean().default(false),
   paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null).transform((v) => v ?? null),
   staged: z.boolean(), stage: z.number().int().nullable(), total: z.number().int().nonnegative(),
   remaining: z.number().int().nonnegative(), waiting: z.array(z.string()).default([]),

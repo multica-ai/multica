@@ -112,6 +112,8 @@ export interface SystemWakeup {
   /** Set on this issue; runs get `default_instruction` when it is empty. */
   instruction: string;
   default_instruction: string;
+  /** Runs get `default_instruction` instead: whoever set `instruction` cannot use the agent it wakes. */
+  instruction_inactive: boolean;
   /** A person changed the rule on this issue; it no longer follows the default. */
   customized: boolean;
   paused_reason: WakeupPausedReason | null;

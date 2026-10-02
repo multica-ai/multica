@@ -74,6 +74,49 @@ func ChildDoneInstruction(issueInstruction string, settings []byte) string {
 	return ChildDoneDefaultInstruction
 }
 
+// childDoneRunInstruction is the instruction a child_done run of this agent
+// gets, and who set it when it is the issue's. The issue's instruction is a
+// person's request to the agent, so it applies only while the person who set
+// it may use that agent, the same gate as their own wakeups; otherwise the run
+// gets the default, as if the issue set none.
+func (s *IssueWakeupService) childDoneRunInstruction(ctx context.Context, q *db.Queries, w db.IssueWakeup, agent db.Agent) (string, pgtype.UUID, error) {
+	var settings []byte
+	if ws, err := q.GetWorkspace(ctx, w.WorkspaceID); err == nil {
+		settings = ws.Settings
+	}
+	instruction := strings.TrimSpace(w.Instruction)
+	if instruction != "" {
+		if err := s.authorize(ctx, q, w.WorkspaceID, w.InstructionBy, agent); err != nil {
+			if !errors.Is(err, ErrWakeupForbidden) {
+				return "", pgtype.UUID{}, err
+			}
+			instruction = ""
+		}
+	}
+	if instruction == "" {
+		return ChildDoneInstruction("", settings), pgtype.UUID{}, nil
+	}
+	return instruction, w.InstructionBy, nil
+}
+
+// ChildDoneInstructionInEffect reports whether the runs the rule would start
+// now get the issue's instruction: whoever set it may use the agent the rule
+// wakes. With no instruction, or no agent to wake, there is nothing to hold
+// back.
+func (s *IssueWakeupService) ChildDoneInstructionInEffect(ctx context.Context, rule db.IssueWakeup, issue db.Issue) (bool, error) {
+	if strings.TrimSpace(rule.Instruction) == "" {
+		return true, nil
+	}
+	target, err := resolveWakeTarget(ctx, s.Tasks.Queries, issue)
+	if err != nil || !target.Agent.ID.Valid {
+		return err == nil, err
+	}
+	if err = s.authorize(ctx, s.Tasks.Queries, rule.WorkspaceID, rule.InstructionBy, target.Agent); errors.Is(err, ErrWakeupForbidden) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func systemRuleText(rule string) pgtype.Text { return pgtype.Text{String: rule, Valid: true} }
 
 // baselineChildDone records what already holds for a rule that was just
@@ -573,7 +616,16 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		return commit()
 	}
 	agent := current.Agent
-	task, err := q.FindPendingWakeupTask(ctx, util.UUIDToString(w.ID))
+	attr, err := s.childDoneRunAs(ctx, issue, agent)
+	if err != nil {
+		return err
+	}
+	// Only a run for this recipient takes the new facts and the instruction
+	// checked against its agent; one left for an earlier assignee keeps what
+	// it was given.
+	task, err := q.FindPendingSystemWakeupTask(ctx, db.FindPendingSystemWakeupTaskParams{
+		WakeupID: util.UUIDToString(w.ID), AgentID: agent.ID, RuntimeID: agent.RuntimeID, SquadID: current.SquadID, OriginatorUserID: attr.UserID,
+	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
@@ -583,10 +635,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		return tx.Commit(ctx)
 	}
 	instruction := w
-	if ws, e := q.GetWorkspace(ctx, issue.WorkspaceID); e == nil {
-		instruction.Instruction = ChildDoneInstruction(w.Instruction, ws.Settings)
-	} else {
-		instruction.Instruction = ChildDoneInstruction(w.Instruction, nil)
+	if instruction.Instruction, instruction.InstructionBy, err = s.childDoneRunInstruction(ctx, q, w, agent); err != nil {
+		return err
 	}
 	noteText, evidence := mergeWakeupEvidence(instruction, task, receipts)
 	if taskExists {
@@ -615,10 +665,6 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 			return err
 		}
 		return commit()
-	}
-	attr, err := s.childDoneRunAs(ctx, issue, agent)
-	if err != nil {
-		return err
 	}
 	waiting, err := hasWaitingRun(ctx, q, issue.ID, agent.ID, attr.UserID)
 	if err != nil {
@@ -705,10 +751,12 @@ type SystemWakeupInput struct {
 	Instruction *string `json:"instruction"`
 }
 
-// UpdateChildDoneRule applies a person's change on one issue. From then on
+// UpdateChildDoneRule applies a member's change on one issue. From then on
 // the rule no longer follows the workspace default. Turning it off withdraws
-// runs that have not started.
-func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID pgtype.UUID, in SystemWakeupInput) (db.IssueWakeup, error) {
+// runs that have not started. A new instruction is the member's request to
+// the agent the rule wakes, so they must be allowed to use that agent; runs
+// check it again (childDoneRunInstruction).
+func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID, member pgtype.UUID, in SystemWakeupInput) (db.IssueWakeup, error) {
 	var out db.IssueWakeup
 	tx, err := s.Tasks.TxStarter.Begin(ctx)
 	if err != nil {
@@ -727,7 +775,7 @@ func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID pg
 	if rule, err = q.LockIssueWakeup(ctx, rule.ID); err != nil {
 		return out, err
 	}
-	enabled, instruction := rule.Enabled, rule.Instruction
+	enabled, instruction, instructionBy := rule.Enabled, rule.Instruction, rule.InstructionBy
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
@@ -737,7 +785,22 @@ func (s *IssueWakeupService) UpdateChildDoneRule(ctx context.Context, issueID pg
 	if len(instruction) > MaxSystemWakeupInstruction {
 		return out, fmt.Errorf("%w: instruction must be at most %d bytes", ErrWakeupInput, MaxSystemWakeupInstruction)
 	}
-	if out, err = q.CustomizeSystemWakeup(ctx, db.CustomizeSystemWakeupParams{ID: rule.ID, Enabled: enabled, Instruction: instruction}); err != nil {
+	if instruction != rule.Instruction {
+		instructionBy = pgtype.UUID{}
+		if instruction != "" {
+			target, err := resolveWakeTarget(ctx, q, issue)
+			if err != nil {
+				return out, err
+			}
+			if target.Agent.ID.Valid {
+				if err = s.authorize(ctx, q, issue.WorkspaceID, member, target.Agent); err != nil {
+					return out, err
+				}
+			}
+			instructionBy = member
+		}
+	}
+	if out, err = q.CustomizeSystemWakeup(ctx, db.CustomizeSystemWakeupParams{ID: rule.ID, Enabled: enabled, Instruction: instruction, InstructionBy: instructionBy}); err != nil {
 		return out, err
 	}
 	if enabled && !rule.Enabled {

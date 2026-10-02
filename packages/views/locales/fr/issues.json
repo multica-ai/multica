@@ -1299,6 +1299,8 @@
       "instruction_default": "Non définie sur cette tâche ; instruction par défaut :",
       "instruction_placeholder": "Laisser vide pour l’instruction par défaut",
       "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
+      "instruction_inactive": "Non appliquée : les exécutions reçoivent l’instruction par défaut. Elle s’applique dès qu’une personne pouvant utiliser {{name}} la modifie et l’enregistre.",
+      "instruction_forbidden": "Seules les personnes pouvant utiliser {{name}} peuvent modifier cette instruction.",
       "paused": "En pause : {{reason}}"
     },
     "cond": {
