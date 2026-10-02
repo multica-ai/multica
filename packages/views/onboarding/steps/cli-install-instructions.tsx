@@ -6,10 +6,10 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { useConfigStore } from "@multica/core/config";
+import { daemonCommands } from "@multica/core/runtimes";
 import { CliInstallCommand } from "../../common/cli-install-command";
 import { useT } from "../../i18n";
-
-const SETUP_CMD = "multica setup";
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useT("onboarding");
@@ -78,13 +78,16 @@ function Step({
 /**
  * CLI install instructions — two copy-and-run commands. Step 1 is the public
  * install script, which differs per OS and so renders through
- * `CliInstallCommand`'s platform switch; step 2 is the cloud
- * `multica setup`, hardcoded because the CLI itself knows the endpoints for
- * it. Local development tests a self-host variant by typing the extended
- * command directly in the terminal; no need to thread env vars through React.
+ * `CliInstallCommand`'s platform switch; step 2 is the setup command, which
+ * derives the self-host flags when server/app URLs are configured in runtime
+ * config or falls back to cloud `multica setup`.
  */
 export function CliInstallInstructions() {
   const { t } = useT("onboarding");
+  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
+  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
+  const { setupCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+
   return (
     <Card className="w-full">
       <CardContent className="space-y-4 pt-4">
@@ -103,7 +106,7 @@ export function CliInstallInstructions() {
           </CliInstallCommand>
         </Step>
         <Step n={2} label={t(($) => $.cli_install.step2_label)}>
-          <CommandRow cmd={SETUP_CMD} />
+          <CommandRow cmd={setupCmd} />
         </Step>
       </CardContent>
     </Card>
