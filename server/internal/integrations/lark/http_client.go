@@ -1270,10 +1270,10 @@ func larkErrorCodeMsg(err error) (int, string, bool) {
 // `code`. This is distinct from the transport-level errors doJSON
 // surfaces (network failure, 5xx, timeout), which are returned as
 // plain wrapped errors. The distinction matters for the threaded-reply
-// fallback: a business code is definitive ("nothing was sent, and here
-// is exactly why"), whereas a transport error is ambiguous ("the
-// message may or may not have been delivered") and must NOT trigger a
-// chat-level retry that could duplicate or leak the reply.
+// fallback for ordinary message replies: a business code is definitive
+// ("nothing was sent, and here is exactly why"), whereas a transport
+// error is ambiguous ("the message may or may not have been delivered").
+// Topic replies never use a chat-level fallback, regardless of error code.
 type APIError struct {
 	Op   string
 	Code int
@@ -1287,10 +1287,10 @@ func (e *APIError) Error() string {
 // threadReplyUnsupportedCodes are the reply-endpoint business codes
 // that definitively mean "this specific trigger message / topic cannot
 // receive a threaded reply" AND nothing was sent, while a plain
-// chat-level send to the same chat is unaffected. Only these justify
-// the chat-level fallback. Rate limits (230020), "message is being
-// sent" (230049, ambiguous), permission/content errors (which would
-// also fail at chat level), and all transport/5xx/timeout failures are
+// chat-level send to the same chat is unaffected. Only these can justify
+// a fallback for an ordinary message reply. Rate limits (230020),
+// "message is being sent" (230049, ambiguous), permission/content errors
+// (which would also fail at chat level), and all transport/5xx/timeout failures are
 // deliberately excluded: those stay failures so we never duplicate a
 // reply or leak a thread-only reply into the main group chat.
 // Codes are from the IM reply-message endpoint error table.
@@ -1305,7 +1305,8 @@ var threadReplyUnsupportedCodes = map[int]struct{}{
 
 // isThreadReplyUnsupported reports whether err carries a Lark business
 // code meaning the threaded reply cannot land on this target. Only such
-// errors are safe to retry at the chat level. Transport errors and other
+// errors can be retried at the chat level for ordinary message replies.
+// Topic replies must stay in their thread. Transport errors and other
 // business codes return false.
 //
 // The code is read through larkErrorCode, so it is found whether Lark

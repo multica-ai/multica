@@ -520,9 +520,8 @@ func outboundChatID(b ChatSessionBinding) ChatID {
 // threadReplyTarget derives the outbound reply target from the trigger
 // snapshot the delivery row froze for THIS task. Three cases:
 //
-//   - Trigger inside a Lark topic (last_lark_thread_id present) → reply
-//     with reply_in_thread so the answer stays in the 话题 rather than
-//     leaking into the main group chat. Unchanged.
+//   - Trigger inside a Lark topic (thread ID or topic-isolated binding)
+//     → reply with reply_in_thread so the answer stays in the topic.
 //
 //   - Trigger in an ordinary group → reply to that message natively
 //     (#8234). A standalone message in a busy group loses which of the
@@ -569,10 +568,7 @@ func isTopicIsolated(b ChatSessionBinding) bool {
 // a new inbound turn, since every turn after deploy records a trigger before
 // its task is enqueued.
 //
-// Deliberately narrower than sendWithReplyFallback's chat-level retry, which
-// fires only when Lark reports the topic itself cannot receive the reply. The
-// topic is unusable there, so delivering beats losing the reply; here the
-// topic is fine and only our own bookkeeping is missing.
+// A topic reply also never retries at chat level when Lark rejects its target.
 func topicSendWithoutTrigger(b ChatSessionBinding) bool {
 	hasTrigger := b.LastMessageID.Valid && b.LastMessageID.String != ""
 	return isTopicIsolated(b) && !hasTrigger
@@ -582,7 +578,7 @@ func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
 	if !binding.LastMessageID.Valid || binding.LastMessageID.String == "" {
 		return ReplyTarget{}
 	}
-	if binding.LastThreadID.Valid && binding.LastThreadID.String != "" {
+	if (binding.LastThreadID.Valid && binding.LastThreadID.String != "") || isTopicIsolated(binding) {
 		return ReplyTarget{MessageID: binding.LastMessageID.String, InThread: true}
 	}
 	if ChatType(binding.ChatType) != ChatTypeGroup {
@@ -591,18 +587,11 @@ func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
 	return ReplyTarget{MessageID: binding.LastMessageID.String}
 }
 
-// sendWithReplyFallback runs send against the reply target and, ONLY
-// when the attempt fails with a Lark error that means this specific
-// trigger message legitimately cannot receive a reply (message
-// recalled, invisible to the operator, self-destructing; plus the
-// topic-only cases: topic gone, topics disabled, aggregated message —
-// see threadReplyUnsupportedCodes), retries once at the chat level so
-// the reply is not silently lost. Any other failure — transport error,
-// 5xx, timeout, rate limit, or an ambiguous "the server may have
-// received it" error — is logged and returned as a failure rather than
-// retried: a blind chat-level retry could duplicate the reply or leak a
-// thread-only reply into the main group chat. When target is already
-// chat-level there is nothing to fall back to and the error is returned.
+// sendWithReplyFallback runs send against the reply target. Only an ordinary
+// message reply may retry at chat level, and only after a classified Lark
+// error confirms the target cannot receive it. A topic reply never leaves
+// its thread: if Lark rejects it, return the error instead of creating a
+// top-level topic. Ambiguous failures are never retried.
 //
 // It is a package-level function (rather than a Patcher method) so the
 // event-driven Patcher and the immediate OutcomeReplier share one
@@ -612,7 +601,7 @@ func sendWithReplyFallback(log *slog.Logger, op string, target ReplyTarget, send
 	if err == nil {
 		return nil
 	}
-	if target.IsSet() && isThreadReplyUnsupported(err) {
+	if target.IsSet() && !target.InThread && isThreadReplyUnsupported(err) {
 		log.Warn("lark: reply target unusable, retrying at chat level",
 			"op", op, "reply_message_id", target.MessageID, "in_thread", target.InThread, "error", err)
 		if fallbackErr := send(ReplyTarget{}); fallbackErr != nil {
@@ -621,7 +610,7 @@ func sendWithReplyFallback(log *slog.Logger, op string, target ReplyTarget, send
 		return nil
 	}
 	if target.IsSet() {
-		log.Warn("lark: reply failed; not falling back (non-classified error)",
+		log.Warn("lark: reply failed; not falling back",
 			"op", op, "reply_message_id", target.MessageID, "in_thread", target.InThread, "error", err)
 	}
 	return fmt.Errorf("%s: %w", op, err)
