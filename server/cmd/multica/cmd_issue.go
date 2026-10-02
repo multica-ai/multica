@@ -38,7 +38,10 @@ import (
 // (PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping
 // to a native command), so Chinese / Cyrillic / any non-ASCII content
 // arrives as `?`. Reading a UTF-8 file directly bypasses the shell's pipe
-// re-encoding entirely. See issues #2198 / #2236 / #2376.
+// re-encoding entirely. See issues #2198 / #2236 / #2376. A single leading
+// UTF-8 BOM is stripped from both file and stdin bodies so a `Set-Content
+// -Encoding utf8` write on Windows PowerShell 5.1 yields the same body as
+// PowerShell 7's BOM-less default (MUL-7352 / #8381).
 func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
 	stdinFlag := flagName + "-stdin"
 	fileFlag := flagName + "-file"
@@ -65,7 +68,7 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		if err != nil {
 			return "", false, fmt.Errorf("read stdin for --%s: %w", stdinFlag, err)
 		}
-		body := strings.TrimSuffix(string(data), "\n")
+		body := strings.TrimSuffix(stripUTF8BOM(string(data)), "\n")
 		if body == "" {
 			return "", false, fmt.Errorf("stdin content for --%s is empty", stdinFlag)
 		}
@@ -79,7 +82,7 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		if err != nil {
 			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
 		}
-		body := strings.TrimSuffix(string(data), "\n")
+		body := strings.TrimSuffix(stripUTF8BOM(string(data)), "\n")
 		if body == "" {
 			return "", false, fmt.Errorf("file content for --%s is empty", fileFlag)
 		}
@@ -89,6 +92,23 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return "", false, nil
 	}
 	return util.UnescapeBackslashEscapes(inline), true, nil
+}
+
+// stripUTF8BOM removes exactly one leading UTF-8 byte-order mark.
+//
+// The ConstrainedLanguage fallback for writing a description/comment body on
+// Windows is `Set-Content -Encoding utf8` (MUL-7352 / #8381), and Windows
+// PowerShell 5.1's `utf8` encoding emits a BOM while PowerShell 7's
+// `utf8NoBOM` default does not. Without this, the same agent instructions
+// would prepend an invisible U+FEFF to the body on 5.1 only — enough to break
+// a leading `##` heading and to make otherwise identical bodies differ by
+// shell version.
+//
+// Exactly one BOM: a second U+FEFF is a zero-width no-break space that the
+// author may have written on purpose, and stripping in a loop would silently
+// edit body content rather than undo an encoding artifact.
+func stripUTF8BOM(s string) string {
+	return strings.TrimPrefix(s, "\ufeff")
 }
 
 // ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
