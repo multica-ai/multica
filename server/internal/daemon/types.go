@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -301,6 +302,9 @@ type TaskResult struct {
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	EnvRoot        string `json:"-"` // env root dir for writing GC metadata (not sent to server)
 	FailureReason  string `json:"-"` // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	// QuotaResetZone is the explicitly configured IANA timezone for provider
+	// reset notices that omit an offset. Nil means no safe conversion is known.
+	QuotaResetZone *time.Location `json:"-"`
 	// SessionRolloutMissing is set when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). Forwarded to
 	// the terminal report so the server clears the resume pointer and flags the

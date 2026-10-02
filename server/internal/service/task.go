@@ -4819,6 +4819,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
 func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+	return s.FailTaskWithTransitionAndQuotaReset(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, nil)
+}
+
+// FailTaskWithTransitionAndQuotaReset accepts a daemon-local reset hint. Quota
+// recovery remains opt-in and is bounded to one same-runtime resume attempt.
+func (s *TaskService) FailTaskWithTransitionAndQuotaReset(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, quotaResetAt *time.Time) (*db.AgentTaskQueue, bool, error) {
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -4859,30 +4865,41 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
 	)
-	if retryableReasons[failureReason] {
+	quotaFireAt, quotaHintValid := validatedQuotaRetryAt(failureReason, quotaResetAt, time.Now())
+	if retryableReasons[failureReason] || quotaHintValid {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
-			wantRetry = true
-			// Persist the reason-aware effective budget into the child so the
-			// retry chain self-describes (e.g. provider_network → max_attempts=3),
-			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
-			// Defer this attempt when the reason's schedule calls for a backoff
-			// (provider_network's final attempt waits ~5s); a zero delay leaves
-			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
-				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+		} else if retryEligible(failureReason, parent) || (quotaHintValid && quotaRetryEligible(parent, sessionID, retiredSessionID, sessionRolloutMissing)) {
+			regularRetry := retryEligible(failureReason, parent)
+			quotaRetry := quotaHintValid && quotaRetryEligible(parent, sessionID, retiredSessionID, sessionRolloutMissing)
+			agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID)
+			if quotaRetry && (aerr != nil || !quotaAutoResumeEnabled(agent.RuntimeConfig)) {
+				quotaRetry = false
 			}
-			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
-				// Best-effort: a missing overlay is not retry-fatal — the child
-				// simply runs without the Composio overlay.
-				slog.Warn("fail task auto-retry: load agent for overlay failed",
-					"task_id", util.UUIDToString(taskID),
-					"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
-			} else {
-				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+			if regularRetry || quotaRetry {
+				wantRetry = true
+				// Persist the reason-aware effective budget into the child so the
+				// retry chain self-describes (e.g. provider_network → max_attempts=3),
+				// rather than leaking a contradictory attempt=N/max_attempts=2 row.
+				retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
+				// Defer this attempt when the reason's schedule calls for a backoff
+				// (provider_network's final attempt waits ~5s); a zero delay leaves
+				// fire_at NULL so the child is created immediately-claimable.
+				if quotaRetry {
+					retryFireAt = pgtype.Timestamptz{Time: quotaFireAt, Valid: true}
+				} else if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
+					retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+				}
+				if aerr != nil {
+					// Best-effort: a missing overlay is not retry-fatal — the child
+					// simply runs without the Composio overlay.
+					slog.Warn("fail task auto-retry: load agent for overlay failed",
+						"task_id", util.UUIDToString(taskID),
+						"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
+				} else {
+					retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+				}
 			}
 		}
 	}
@@ -5245,6 +5262,36 @@ var retryableReasons = map[string]bool{
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
+}
+
+// Quota windows are deliberately absent from retryableReasons: a generic 402
+// can mean a billing problem with no reset. Only a daemon's validated reset
+// hint, an opted-in agent and a resumable same-runtime session permit one
+// deferred retry.
+func validatedQuotaRetryAt(reason string, reset *time.Time, now time.Time) (time.Time, bool) {
+	if reason != string(taskfailure.ReasonAgentProviderQuotaLimit) || reset == nil ||
+		reset.Before(now.Add(time.Minute)) || reset.After(now.Add(8*24*time.Hour)) {
+		return time.Time{}, false
+	}
+	return reset.Add(30 * time.Second), true
+}
+
+func quotaAutoResumeEnabled(raw json.RawMessage) bool {
+	var config struct {
+		QuotaAutoResume bool `json:"quota_auto_resume"`
+	}
+	return json.Unmarshal(raw, &config) == nil && config.QuotaAutoResume
+}
+
+func quotaRetryEligible(parent db.AgentTaskQueue, sessionID, retiredSessionID string, sessionRolloutMissing bool) bool {
+	resumeID := sessionID
+	if resumeID == "" && parent.SessionID.Valid {
+		resumeID = parent.SessionID.String
+	}
+	return parent.Attempt == 1 && parent.MaxAttempts > 1 &&
+		!parent.AutopilotRunID.Valid && !IsTriageTask(parent) &&
+		(parent.IssueID.Valid || parent.ChatSessionID.Valid) &&
+		!sessionRolloutMissing && resumeID != "" && resumeID != retiredSessionID
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
