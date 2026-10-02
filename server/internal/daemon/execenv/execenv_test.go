@@ -5216,7 +5216,7 @@ func TestEnsureSymlinkRepairsBrokenLink(t *testing.T) {
 		t.Fatalf("seed broken symlink: %v", err)
 	}
 
-	if err := ensureSymlink(src, dst); err != nil {
+	if err := ensureSymlink(src, dst, testLogger()); err != nil {
 		t.Fatalf("ensureSymlink failed: %v", err)
 	}
 

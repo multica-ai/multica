@@ -70,12 +70,16 @@ func TestPrepareHermesHomeOverlay(t *testing.T) {
 	}
 
 	for _, name := range []string{"auth.json", "plugins", "oauth_state.json"} {
-		fi, err := os.Lstat(filepath.Join(hermesHome, name))
+		dst := filepath.Join(hermesHome, name)
+		fi, err := os.Lstat(dst)
 		if err != nil {
 			t.Fatalf("%s not mirrored into overlay: %v", name, err)
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s should be a symlink into the shared home", name)
+		// A symlink on symlink-capable hosts; on Windows without Developer
+		// Mode a junction (directories) or hard link (files) — still shared
+		// with the source, unlike the copy fallback (issue #8926).
+		if !linkedTo(t, filepath.Join(sharedHome, name), dst) {
+			t.Errorf("%s should be linked into the shared home, not copied (mode %v)", name, fi.Mode())
 		}
 	}
 
