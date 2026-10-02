@@ -8,7 +8,15 @@
     "upload_image": "画像をアップロード",
     "emoji_label": "絵文字",
     "more_emojis": "他の絵文字…",
-    "emoji_loading": "読み込み中…"
+    "emoji_loading": "読み込み中…",
+    "brand_label": "ブランド",
+    "tier_label": "能力ティア",
+    "tier_gold": "ゴールド",
+    "tier_silver": "シルバー",
+    "tier_copper": "カッパー",
+    "tier_cyan": "シアン",
+    "tier_diamond": "ダイヤモンド",
+    "tier_crown": "クラウン"
   },
   "avatar_crop": {
     "title": "アバターを編集",
