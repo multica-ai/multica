@@ -54,6 +54,23 @@ export interface PluginResource {
   entry: string;
 }
 
+export type PluginComposerCommandContext =
+  | "chat"
+  | "issue_comment"
+  | "issue_reply"
+  | "issue_create"
+  | "agent_create";
+
+/** A declarative slash command contributed by a plugin manifest. */
+export interface PluginComposerCommand {
+  key: string;
+  label: string;
+  description?: string;
+  contexts: PluginComposerCommandContext[];
+  /** Key of a same-manifest modal surface that hosts the command UI. */
+  surface: string;
+}
+
 export interface PluginInstallation {
   id: string;
   plugin_key: string;
@@ -76,6 +93,8 @@ export interface PluginInstallation {
   surfaces: PluginSurface[];
   hooks: PluginHook[];
   resources: PluginResource[];
+  /** Defaults to empty for installations created before composer commands. */
+  composer_commands?: PluginComposerCommand[];
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +116,7 @@ export interface PluginManifestSummary {
       triggers: (PluginHookTrigger | string)[];
       schedule?: PluginHookSchedule;
     }>;
+    composer_commands?: PluginComposerCommand[];
   };
 }
 

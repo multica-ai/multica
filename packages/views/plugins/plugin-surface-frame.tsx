@@ -17,6 +17,7 @@ interface PluginSurfaceFrameProps {
   surface: PluginSurface;
   issueId?: string;
   className?: string;
+  onComposerInsert?: (text: string) => boolean | Promise<boolean>;
 }
 
 /**
@@ -26,7 +27,7 @@ interface PluginSurfaceFrameProps {
  * boundary and is always `sandbox="allow-scripts"` without
  * `allow-same-origin`; see buildSurfaceFrameDocument.
  */
-export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className }: PluginSurfaceFrameProps) {
+export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className, onComposerInsert }: PluginSurfaceFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -66,8 +67,9 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
       bridgeToken: launch?.bridge_token ?? "",
       issueId,
       onResize: setHeight,
+      onComposerInsert,
     }),
-    [installation.id, launch?.bridge_token, issueId],
+    [installation.id, launch?.bridge_token, issueId, onComposerInsert],
   );
 
   // The listener is armed BEFORE srcdoc is assigned. That makes the guest-first

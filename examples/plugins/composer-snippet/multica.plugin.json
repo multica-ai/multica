@@ -1,0 +1,29 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.composer-snippet",
+  "name": "Markdown Snippet",
+  "description": "Insert a static Markdown notes template into the current draft.",
+  "version": "1.0.0",
+  "author": { "name": "multica", "url": "https://multica.ai" },
+  "scopes": [],
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "snippet-picker",
+        "type": "modal",
+        "name": "Markdown Snippet",
+        "entry": "ui/main.js",
+        "platforms": ["web", "desktop"]
+      }
+    ],
+    "composer_commands": [
+      {
+        "key": "snippet",
+        "label": "snippet",
+        "description": "Insert a Markdown notes template",
+        "contexts": ["chat", "issue_comment", "issue_reply", "issue_create", "agent_create"],
+        "surface": "snippet-picker"
+      }
+    ]
+  }
+}

@@ -44,6 +44,12 @@ export type BridgeRequest =
       id: string;
       kind: "ui.resize";
       height: number;
+    }
+  | {
+      id: string;
+      kind: "composer.insert";
+      format: "markdown";
+      text: string;
     };
 
 export type BridgeResponse =
@@ -71,5 +77,6 @@ export function isBridgeRequest(message: unknown): message is BridgeRequest {
   const candidate = message as Record<string, unknown>;
   if (typeof candidate.id !== "string") return false;
   if (candidate.kind === "ui.resize") return typeof candidate.height === "number";
+  if (candidate.kind === "composer.insert") return candidate.format === "markdown" && typeof candidate.text === "string";
   return candidate.kind === "action" && typeof candidate.path === "string" && typeof candidate.method === "string";
 }

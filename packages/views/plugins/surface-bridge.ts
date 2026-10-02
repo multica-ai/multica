@@ -19,7 +19,8 @@ type BridgeMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 type BridgeRequest =
   | { id: string; kind: "action"; method: BridgeMethod; path: string; body?: unknown }
-  | { id: string; kind: "ui.resize"; height: number };
+  | { id: string; kind: "ui.resize"; height: number }
+  | { id: string; kind: "composer.insert"; format: "markdown"; text: string };
 
 /** Paths a surface may name. Anything else is refused before it reaches fetch. */
 const ALLOWED_PATHS: RegExp[] = [
@@ -36,6 +37,7 @@ const ALLOWED_PATHS: RegExp[] = [
 ];
 
 const MAX_RESIZE_PX = 4000;
+const MAX_COMPOSER_INSERT_LENGTH = 64 * 1024;
 
 function isAllowedPath(path: string): boolean {
   return ALLOWED_PATHS.some((pattern) => pattern.test(path));
@@ -48,6 +50,7 @@ function isBridgeRequest(value: unknown): value is BridgeRequest {
   const candidate = value as Record<string, unknown>;
   if (typeof candidate.id !== "string") return false;
   if (candidate.kind === "ui.resize") return typeof candidate.height === "number";
+  if (candidate.kind === "composer.insert") return candidate.format === "markdown" && typeof candidate.text === "string";
   return (
     candidate.kind === "action" &&
     typeof candidate.path === "string" &&
@@ -64,6 +67,8 @@ export interface SurfaceBridgeOptions {
   /** Mounted-on issue, forwarded to /context so the surface knows where it is. */
   issueId?: string;
   onResize?: (height: number) => void;
+  /** Present only for a host-opened composer command surface. */
+  onComposerInsert?: (text: string) => boolean | Promise<boolean>;
 }
 
 export interface SurfaceBridge {
@@ -82,6 +87,7 @@ export function createSurfaceBridge(options: SurfaceBridgeOptions): SurfaceBridg
   let port: MessagePort | null = null;
   let closed = false;
   let connected = false;
+  let composerInsertConsumed = false;
   const connectListeners: Array<(event: MessageEvent) => void> = [];
 
   const handle = async (request: BridgeRequest, port: MessagePort) => {
@@ -89,6 +95,30 @@ export function createSurfaceBridge(options: SurfaceBridgeOptions): SurfaceBridg
       // Clamped: a surface asking for a 10-million-pixel frame is a bug or an
       // attempt to push the rest of the page out of view.
       options.onResize?.(Math.min(Math.max(0, request.height), MAX_RESIZE_PX));
+      return;
+    }
+
+    if (request.kind === "composer.insert") {
+      const refuse = (status: number, error: string) =>
+        port.postMessage({ id: request.id, ok: false, status, error });
+      if (!options.onComposerInsert || composerInsertConsumed) {
+        refuse(403, "this surface has no active composer insertion");
+        return;
+      }
+      composerInsertConsumed = true;
+      if (!request.text || new TextEncoder().encode(request.text).byteLength > MAX_COMPOSER_INSERT_LENGTH) {
+        refuse(413, "composer insertion must contain at most 64 KiB of Markdown");
+        return;
+      }
+      try {
+        if (!await options.onComposerInsert(request.text)) {
+          refuse(409, "composer draft changed since the command was selected");
+          return;
+        }
+        port.postMessage({ id: request.id, ok: true, status: 200, data: null });
+      } catch {
+        refuse(409, "composer is no longer available");
+      }
       return;
     }
 

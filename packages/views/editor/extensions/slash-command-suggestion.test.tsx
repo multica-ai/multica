@@ -1,11 +1,40 @@
 import { act, render } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { configStore } from "@multica/core/config";
+import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { pluginKeys } from "@multica/core/plugins";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import type { Agent, MemberWithUser, PluginInstallation, PluginInstallationListResponse } from "@multica/core/types";
+import type { PluginComposerCommandContext } from "@multica/core/types/plugin";
 import type { QueryClient } from "@tanstack/react-query";
 import enEditor from "../../locales/en/editor.json";
+
+const suggestionRendererState = vi.hoisted(() => ({
+  capturedProps: null as Record<string, unknown> | null,
+}));
+
+vi.mock("@tiptap/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tiptap/react")>();
+  return {
+    ...actual,
+    ReactRenderer: class {
+      element = document.createElement("div");
+      ref = null;
+
+      constructor(_component: unknown, options: { props: Record<string, unknown> }) {
+        suggestionRendererState.capturedProps = options.props;
+      }
+
+      updateProps(props: Record<string, unknown>) {
+        suggestionRendererState.capturedProps = props;
+      }
+
+      destroy() {}
+    },
+  };
+});
 
 const TEST_RESOURCES = {
   en: { editor: enEditor },
@@ -79,17 +108,23 @@ function agent(overrides: Partial<Agent>): Agent {
 function fakeQc(data: {
   members?: Array<Pick<MemberWithUser, "user_id" | "name" | "role">>;
   agents?: Agent[];
+  plugins?: PluginInstallation[];
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  map.set(JSON.stringify(pluginKeys.installed("ws-1")), { plugins: data.plugins ?? [] } satisfies PluginInstallationListResponse);
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
   } as unknown as QueryClient;
 }
 
-function items(qc: QueryClient, query = ""): SlashCommandItem[] {
-  const config = createSlashCommandSuggestion(qc);
+function items(
+  qc: QueryClient,
+  query = "",
+  pluginOptions?: Parameters<typeof createSlashCommandSuggestion>[1],
+): SlashCommandItem[] {
+  const config = createSlashCommandSuggestion(qc, pluginOptions);
   return config.items!({
     query,
     editor: {} as never,
@@ -97,7 +132,123 @@ function items(qc: QueryClient, query = ""): SlashCommandItem[] {
   }) as SlashCommandItem[];
 }
 
+function pluginInstallation(context: PluginComposerCommandContext = "chat"): PluginInstallation {
+  return {
+    id: "plugin-install-1",
+    plugin_key: "example.compose",
+    name: "Example composer",
+    version: "1.0.0",
+    package_version_id: "plugin-version-1",
+    enabled: true,
+    granted_scopes: [],
+    config_schema: [],
+    config: {},
+    configured_secrets: [],
+    surfaces: [{ key: "picker", type: "modal", name: "Picker", entry: "ui/main.js" }],
+    hooks: [],
+    resources: [],
+    composer_commands: [{ key: "summarize", label: "summarize", contexts: [context], surface: "picker" }],
+    created_at: "",
+    updated_at: "",
+  };
+}
+
+afterEach(() => {
+  configStore.getState().setFeatureFlags({});
+});
+
 describe("slash command suggestion items", () => {
+  it("offers generic plugin commands alongside the selected agent's skills", () => {
+    chatState.selectedAgentId = "agent-1";
+    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({
+        skills: [{ id: "skill-1", name: "deploy", description: "Ship changes" }],
+      })],
+      plugins: [pluginInstallation()],
+    });
+
+    const result = items(qc, "", { context: "chat", onSelect: vi.fn() });
+
+    expect(result.map((item) => item.id)).toEqual(["skill-1", "plugin:plugin-install-1:summarize"]);
+    expect(result[0]?.pluginCommand).toBeUndefined();
+    expect(result[1]?.pluginCommand?.command.label).toBe("summarize");
+  });
+
+  it("shows the plugin name beside its command so a matching Skill remains distinguishable", () => {
+    chatState.selectedAgentId = "agent-1";
+    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ skills: [{ id: "skill-1", name: "summarize", description: "Summarize chat" }] })],
+      plugins: [pluginInstallation()],
+    });
+    const { getByText, getAllByText } = render(
+      <I18nWrapper>
+        <SlashCommandList items={items(qc, "", { context: "chat", onSelect: vi.fn() })} query="" command={vi.fn()} />
+      </I18nWrapper>,
+    );
+    expect(getAllByText("/summarize")).toHaveLength(2);
+    expect(getByText("Example composer")).toBeInTheDocument();
+  });
+
+  it("dispatches a selected plugin command to the host callback without inserting it as a Skill", () => {
+    chatState.selectedAgentId = "agent-1";
+    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ skills: [{ id: "skill-1", name: "deploy", description: "Ship changes" }] })],
+      plugins: [pluginInstallation()],
+    });
+    const onSelect = vi.fn();
+    const editor = {} as never;
+    const range = { from: 4, to: 13 };
+    const suggestion = createSlashCommandSuggestion(qc, { context: "chat", onSelect });
+    const command = suggestion.command!;
+    const pluginCommand = items(qc, "", { context: "chat", onSelect })[1]!;
+
+    command({ editor, range, props: pluginCommand } as never);
+
+    expect(onSelect).toHaveBeenCalledWith({
+      editor,
+      range,
+      target: pluginCommand.pluginCommand,
+    });
+  });
+
+  it("shows only installed plugin commands in issue creation and hides the empty popup", () => {
+    chatState.selectedAgentId = "agent-1";
+    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ skills: [{ id: "skill-1", name: "deploy", description: "Ship changes" }] })],
+      plugins: [pluginInstallation("issue_create")],
+    });
+    const pluginOptions = { context: "issue_create" as const, onSelect: vi.fn() };
+    const suggestion = createSlashCommandSuggestion(qc, pluginOptions);
+
+    expect(items(qc, "", pluginOptions).map((item) => item.id)).toEqual([
+      "plugin:plugin-install-1:summarize",
+    ]);
+    expect(items(fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [agent({ skills: [{ id: "skill-1", name: "deploy", description: "Ship changes" }] })],
+    }), "", pluginOptions)).toEqual([]);
+
+    suggestionRendererState.capturedProps = null;
+    const lifecycle = suggestion.render!();
+    lifecycle.onStart?.({
+      editor: { view: { dom: document.createElement("div") } },
+      items: [],
+      query: "",
+      command: vi.fn(),
+      clientRect: null,
+    } as never);
+    expect(suggestionRendererState.capturedProps).toMatchObject({ hideOnEmpty: true });
+    lifecycle.onExit?.({} as never);
+  });
+
   it("returns all active agent skills when query is empty", () => {
     chatState.selectedAgentId = "agent-1";
     const qc = fakeQc({
@@ -558,6 +709,11 @@ describe("buildBuiltinCommandItems", () => {
   it("includes /note while the query is a prefix of the label", () => {
     expect(buildBuiltinCommandItems("no").map((c) => c.id)).toEqual(["note"]);
     expect(buildBuiltinCommandItems("NOTE").map((c) => c.id)).toEqual(["note"]);
+  });
+
+  it("keeps the existing /note command ahead of a plugin using the same label", () => {
+    expect(buildBuiltinCommandItems("note", [], [{ id: "plugin:note", label: "note" }]).map((c) => c.id))
+      .toEqual(["note", "plugin:note"]);
   });
 
   it("matches the label as a prefix only — not the description", () => {

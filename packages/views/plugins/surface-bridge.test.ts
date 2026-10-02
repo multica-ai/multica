@@ -101,6 +101,60 @@ describe("surface bridge", () => {
     expect(heights).toEqual([4000, 0]);
   });
 
+  it("lets only a composer-opened surface insert once into its captured draft", async () => {
+    const insert = vi.fn(() => true);
+    const { port, posted } = connectedBridge({
+      installationId: "installation-1",
+      bridgeToken: TOKEN,
+      onComposerInsert: insert,
+    });
+    port.postMessage({ id: "first", kind: "composer.insert", format: "markdown", text: "**draft**" });
+    await vi.waitFor(() => expect(posted).toContainEqual({ id: "first", ok: true, status: 200, data: null }));
+    port.postMessage({ id: "second", kind: "composer.insert", format: "markdown", text: "again" });
+    await vi.waitFor(() => expect(posted).toContainEqual(expect.objectContaining({ id: "second", ok: false, status: 403 })));
+    expect(insert).toHaveBeenCalledExactlyOnceWith("**draft**");
+  });
+
+  it("keeps the one-shot grant consumed while an asynchronous host check is pending", async () => {
+    let resolveInsert!: (allowed: boolean) => void;
+    const insert = vi.fn(() => new Promise<boolean>((resolve) => { resolveInsert = resolve; }));
+    const { port, posted } = connectedBridge({
+      installationId: "installation-1",
+      bridgeToken: TOKEN,
+      onComposerInsert: insert,
+    });
+    port.postMessage({ id: "first", kind: "composer.insert", format: "markdown", text: "first" });
+    await vi.waitFor(() => expect(insert).toHaveBeenCalledTimes(1));
+    port.postMessage({ id: "second", kind: "composer.insert", format: "markdown", text: "second" });
+    await vi.waitFor(() => expect(posted).toContainEqual(expect.objectContaining({ id: "second", ok: false, status: 403 })));
+    resolveInsert(false);
+    await vi.waitFor(() => expect(posted).toContainEqual(expect.objectContaining({ id: "first", ok: false, status: 409 })));
+    expect(insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses composer insertion without a live host invocation or with invalid input", async () => {
+    const ordinary = connectedBridge();
+    ordinary.port.postMessage({ id: "panel", kind: "composer.insert", format: "markdown", text: "unsafe" });
+    await vi.waitFor(() => expect(ordinary.posted).toContainEqual(expect.objectContaining({ id: "panel", ok: false, status: 403 })));
+
+    const insert = vi.fn(() => false);
+    const stale = connectedBridge({ installationId: "installation-2", bridgeToken: TOKEN, onComposerInsert: insert });
+    stale.port.postMessage({ id: "stale", kind: "composer.insert", format: "markdown", text: "safe" });
+    await vi.waitFor(() => expect(stale.posted).toContainEqual(expect.objectContaining({ id: "stale", ok: false, status: 409 })));
+    expect(insert).toHaveBeenCalledExactlyOnceWith("safe");
+
+    const oversized = vi.fn(() => true);
+    const bounded = connectedBridge({ installationId: "installation-3", bridgeToken: TOKEN, onComposerInsert: oversized });
+    bounded.port.postMessage({ id: "large", kind: "composer.insert", format: "markdown", text: "x".repeat(64 * 1024 + 1) });
+    await vi.waitFor(() => expect(bounded.posted).toContainEqual(expect.objectContaining({ id: "large", ok: false, status: 413 })));
+    expect(oversized).not.toHaveBeenCalled();
+
+    const multibyte = connectedBridge({ installationId: "installation-4", bridgeToken: TOKEN, onComposerInsert: oversized });
+    multibyte.port.postMessage({ id: "multibyte", kind: "composer.insert", format: "markdown", text: "界".repeat(22_000) });
+    await vi.waitFor(() => expect(multibyte.posted).toContainEqual(expect.objectContaining({ id: "multibyte", ok: false, status: 413 })));
+    expect(oversized).not.toHaveBeenCalled();
+  });
+
   it("refuses the wrong frame, protocol, challenge, and a replay", async () => {
     const bridge = createSurfaceBridge({ installationId: "installation-1", bridgeToken: TOKEN });
     const frame = { contentWindow: {} } as unknown as HTMLIFrameElement;
