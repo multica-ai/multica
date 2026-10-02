@@ -132,9 +132,11 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `AWS_ENDPOINT_URL` | 空 | MinIO などの S3 互換 endpoint |
 | `S3_USE_PATH_STYLE` | カスタム endpoint 時は `true` | path-style アドレスを使うか |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign`、`proxy` |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 署名付きダウンロード URL の有効期間 |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | プレビューと認証済みダウンロードのフォールバックに使う署名付きストレージ URL の有効期間 |
 
 内部ネットワークの MinIO など、ブラウザから endpoint に直接到達できない場合は `ATTACHMENT_DOWNLOAD_MODE=proxy` を使ってください。
+
+ダウンロードボタンは、すべてのストレージモードでユーザーに紐づく有効期間 60 秒の独立した bearer URL を使います。各リクエストでそのユーザーのワークスペース所属を再確認し、API 経由でファイルを配信するため、CDN/S3 ダウンロードの API 帯域使用量が増え、API のストレージ資格情報にオブジェクト読み取り権限が必要です。メンバーを削除すると、再開ダウンロードを含む後続のリクエストは拒否されますが、開始済みのレスポンスの中断やダウンロード済みデータの回収はできません。有効な間は URL を持つ人が利用でき、ストレージへ直接アクセスするプレビュー URL の有効期間は設定に従います。`ATTACHMENT_DOWNLOAD_URL_TTL` は capability の 60 秒の有効期間を変更しません。
 
 ### ローカルディスク
 

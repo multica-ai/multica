@@ -1474,9 +1474,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// necessity: a native download (Electron's webContents.downloadURL, a
 	// cross-site webview <img>) carries neither Authorization nor a session
 	// cookie, so there is nothing here for middleware.Auth to read. The
-	// short-lived, single-attachment signature in the query is the credential,
+	// short-lived, user-bound attachment signature in the query is the credential,
 	// and it is only ever minted by the AUTHENTICATED GET
 	// /api/attachments/{id} after that request's membership check passed.
+	// Redemption rechecks the signed user's membership without a cache and
+	// streams the object in every storage mode, never redirecting to a CDN URL.
 	// The authenticated /api/attachments/{id}/download route below is
 	// unchanged — this one is purely additive.
 	r.Get("/api/attachments/{id}/signed-download", h.DownloadAttachmentWithCapability)

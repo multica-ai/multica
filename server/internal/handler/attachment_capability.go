@@ -5,34 +5,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// Attachment download capabilities — MUL-5292.
-//
-// A native download is a browser-level request: Electron's
-// webContents.downloadURL (and an <img> in a cross-site webview) carries
-// neither the desktop client's Authorization header nor a session cookie, so
-// the authenticated /api/attachments/{id}/download endpoint answers 401 and
-// the user never gets a file.
-//
-// CloudFront and presign deployments already sidestep this — the
-// authenticated GetAttachmentByID hands those clients a signed storage URL
-// that needs no credentials of ours. Proxy mode (local disk, private object
-// host) had no equivalent and kept returning the auth-gated API path, which
-// is the entirety of the bug: one unfinished branch of an otherwise correct
-// design, not a missing Electron feature.
-//
-// A capability closes that branch the same way the other two modes do. The
-// ALREADY-AUTHENTICATED GetAttachmentByID mints a short-lived signature
-// granting read on exactly one attachment; a separate public route accepts
-// it. Membership is verified when the capability is minted and never at
-// redemption — the signature is the proof that the check happened.
+// Native downloads cannot attach the client's Authorization header and may
+// carry no session cookie. GetAttachmentByID mints a bearer capability bound
+// to the authenticated user and one attachment, in every storage mode. Each
+// redemption checks that user's current membership in the attachment's workspace.
+// The URL is still transferable: user binding enables revocation, not proof
+// that the person redeeming it is the authenticated user who requested it.
 //
 // Deliberately NOT a general-purpose credential:
 //   - bound to a single attachment id, so it cannot be replayed against another
@@ -45,7 +33,7 @@ const (
 	// attachmentCapabilityVersion is part of the signed message so the
 	// message format can change later without a v1 signature verifying
 	// against a v2 verifier.
-	attachmentCapabilityVersion = "v1"
+	attachmentCapabilityVersion = "v2"
 
 	// attachmentCapabilityTTL is short by design. The client mints a
 	// capability and hands it to the native downloader in the same tick;
@@ -65,8 +53,7 @@ const (
 	// risky disposition), so binding the intent stops nothing an attacker could
 	// exploit now. It is kept so that if a later intent ever grants more than the
 	// load link, the signature is already intent-bound and a lower-privilege link
-	// cannot be replayed as it. It rides the URL as dl=1; the empty (load) intent
-	// signs the historical three-field message, byte-identical.
+	// cannot be replayed as it. It rides the URL as dl=1.
 	attachmentCapabilityDownloadIntent = "attachment"
 )
 
@@ -92,26 +79,20 @@ func attachmentCapabilitySigningKey() []byte {
 // signAttachmentCapability returns the hex HMAC over the capability's fields.
 //
 // The fields are joined with a separator that cannot occur inside a UUID or a
-// decimal timestamp, so no pair of (id, exp) values can be re-split into a
-// different pair that produces the same signed message.
-func signAttachmentCapability(attachmentID string, exp int64) string {
-	return signAttachmentCapabilityIntent(attachmentID, exp, "")
+// decimal timestamp, so fields cannot be re-split into a different capability.
+func signAttachmentCapability(attachmentID, userID string, exp int64) string {
+	return signAttachmentCapabilityIntent(attachmentID, userID, exp, "")
 }
 
-// signAttachmentCapabilityIntent signs the capability over (version, id, exp)
-// and, for a non-empty intent, an extra domain-separation term. The load-intent
-// capability (intent "") signs exactly the historical three-field message, so
-// its signatures stay byte-identical to before; the download-intent capability
-// (attachmentCapabilityDownloadIntent) appends "|attachment". Binding the intent
-// is forward-looking headroom, not a current mitigation — flipping today's two
-// intents is not itself exploitable (see attachmentCapabilityDownloadIntent) —
-// but it keeps the signature honest if a future intent is ever more privileged
-// than the load link.
-func signAttachmentCapabilityIntent(attachmentID string, exp int64, intent string) string {
+// v2 binds the requesting user as well as the attachment, expiry and intent.
+// Unbound v1 links deliberately do not verify; clients must request a fresh URL.
+func signAttachmentCapabilityIntent(attachmentID, userID string, exp int64, intent string) string {
 	mac := hmac.New(sha256.New, attachmentCapabilitySigningKey())
 	mac.Write([]byte(attachmentCapabilityVersion))
 	mac.Write([]byte("|"))
 	mac.Write([]byte(attachmentID))
+	mac.Write([]byte("|"))
+	mac.Write([]byte(userID))
 	mac.Write([]byte("|"))
 	mac.Write([]byte(strconv.FormatInt(exp, 10)))
 	if intent != "" {
@@ -130,11 +111,8 @@ func signAttachmentCapabilityIntent(attachmentID string, exp int64, intent strin
 // only upgrades to ABSOLUTE URLs, so it keeps ignoring proxy-mode responses
 // exactly as it does today instead of pinning a 60-second URL into an <img>
 // it caches for 20 minutes.
-func attachmentCapabilityPath(attachmentID string, now time.Time) string {
-	exp := now.Add(attachmentCapabilityTTL).Unix()
-	return "/api/attachments/" + attachmentID + "/signed-download" +
-		"?exp=" + strconv.FormatInt(exp, 10) +
-		"&sig=" + signAttachmentCapability(attachmentID, exp)
+func attachmentCapabilityPath(attachmentID, userID string, now time.Time) string {
+	return attachmentCapabilityIntentPath(attachmentID, userID, now, "")
 }
 
 // attachmentDownloadCapabilityPath builds the site-relative capability URL for a
@@ -144,12 +122,21 @@ func attachmentCapabilityPath(attachmentID string, now time.Time) string {
 // signed, so the load-intent link the preview path consumes keeps serving media
 // inline. Site-relative for the same reason: the inline-media re-sign hook only
 // upgrades absolute URLs, so it keeps ignoring this one.
-func attachmentDownloadCapabilityPath(attachmentID string, now time.Time) string {
+func attachmentDownloadCapabilityPath(attachmentID, userID string, now time.Time) string {
+	return attachmentCapabilityIntentPath(attachmentID, userID, now, attachmentCapabilityDownloadIntent)
+}
+
+func attachmentCapabilityIntentPath(attachmentID, userID string, now time.Time, intent string) string {
 	exp := now.Add(attachmentCapabilityTTL).Unix()
-	return "/api/attachments/" + attachmentID + "/signed-download" +
-		"?exp=" + strconv.FormatInt(exp, 10) +
-		"&sig=" + signAttachmentCapabilityIntent(attachmentID, exp, attachmentCapabilityDownloadIntent) +
-		"&dl=1"
+	query := url.Values{
+		"uid": {userID},
+		"exp": {strconv.FormatInt(exp, 10)},
+		"sig": {signAttachmentCapabilityIntent(attachmentID, userID, exp, intent)},
+	}
+	if intent == attachmentCapabilityDownloadIntent {
+		query.Set("dl", "1")
+	}
+	return "/api/attachments/" + attachmentID + "/signed-download?" + query.Encode()
 }
 
 // verifyAttachmentCapability fails closed on every path: a missing field, an
@@ -158,8 +145,14 @@ func attachmentDownloadCapabilityPath(attachmentID string, now time.Time) string
 //
 // The signature covers the claimed expiry, so extending `exp` invalidates the
 // signature rather than extending the capability.
-func verifyAttachmentCapability(attachmentID, rawExp, rawSig, intent string, now time.Time) bool {
-	if attachmentID == "" || rawExp == "" || rawSig == "" {
+func verifyAttachmentCapability(attachmentID, userID, rawExp, rawSig, intent string, now time.Time) bool {
+	if _, err := util.ParseUUID(attachmentID); err != nil {
+		return false
+	}
+	if _, err := util.ParseUUID(userID); err != nil {
+		return false
+	}
+	if rawExp == "" || rawSig == "" {
 		return false
 	}
 	exp, err := strconv.ParseInt(rawExp, 10, 64)
@@ -173,7 +166,7 @@ func verifyAttachmentCapability(attachmentID, rawExp, rawSig, intent string, now
 	if err != nil {
 		return false
 	}
-	want, err := hex.DecodeString(signAttachmentCapabilityIntent(attachmentID, exp, intent))
+	want, err := hex.DecodeString(signAttachmentCapabilityIntent(attachmentID, userID, exp, intent))
 	if err != nil {
 		return false
 	}
@@ -192,12 +185,15 @@ func verifyAttachmentCapability(attachmentID, rawExp, rawSig, intent string, now
 // there is no second copy of the header/cookie/PAT/task-token resolution that
 // middleware.Auth owns.
 //
-// Always proxy-streams. Capabilities are only minted in proxy mode, and
-// streaming means this route never emits a cross-origin redirect, so the
-// signed query cannot leak to a CDN in a Referer.
+// Always proxy-streams, even for CDN/presign deployments. Redirecting would
+// exchange the revocable capability for a storage URL that survives member
+// removal. Streaming also prevents the signed query leaking in a Referer.
 func (h *Handler) DownloadAttachmentWithCapability(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	attachmentID := chi.URLParam(r, "id")
 	query := r.URL.Query()
+	userID := query.Get("uid")
 	// dl=1 is the forced-attachment ("download button") intent. It is covered by
 	// a distinct signature, so a load-intent link cannot flip itself to a
 	// download by appending dl=1 — the verification below would fail.
@@ -205,7 +201,7 @@ func (h *Handler) DownloadAttachmentWithCapability(w http.ResponseWriter, r *htt
 	if query.Get("dl") == "1" {
 		intent = attachmentCapabilityDownloadIntent
 	}
-	if !verifyAttachmentCapability(attachmentID, query.Get("exp"), query.Get("sig"), intent, time.Now()) {
+	if !verifyAttachmentCapability(attachmentID, userID, query.Get("exp"), query.Get("sig"), intent, time.Now()) {
 		// One generic rejection for every reason, so a caller cannot
 		// distinguish "expired" from "forged" from "wrong attachment"
 		// and use the difference to probe the signer.
@@ -222,16 +218,16 @@ func (h *Handler) DownloadAttachmentWithCapability(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
+	// Never consult MembershipCache here: a stale positive entry would keep a
+	// removed member's links alive. Scope comes from the row, not the request.
+	if _, err := h.getWorkspaceMember(r.Context(), userID, uuidToString(att.WorkspaceID)); err != nil {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
 	if h.Storage == nil {
 		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
-
-	h.setAttachmentPreviewSecurityHeaders(w)
-	// The signature travels in the query string. If the streamed body is
-	// itself a document that loads subresources, no-referrer keeps that
-	// query out of the outbound Referer.
-	w.Header().Set("Referrer-Policy", "no-referrer")
 
 	h.proxyAttachmentDownload(w, r, att, h.Storage.KeyFromURL(att.Url), intent == attachmentCapabilityDownloadIntent)
 }

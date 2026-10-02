@@ -740,34 +740,24 @@ func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *test
 	if want := "/api/attachments/" + id + "/download"; resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want stable URL %q", resp.MarkdownURL, want)
 	}
-	// The single-attachment endpoint presigns the object twice: once inline for
-	// download_url (asserted above) and once with a forced attachment disposition
-	// for attachment_download_url.
-	if len(store.presignCalls) != 2 || store.presignCalls[0] != key || store.presignCalls[1] != key {
-		t.Fatalf("presign calls = %v, want [%s %s]", store.presignCalls, key, key)
+	// Only the inline preview is presigned; downloads stay revocable at the API.
+	if len(store.presignCalls) != 1 || store.presignCalls[0] != key {
+		t.Fatalf("presign calls = %v, want [%s]", store.presignCalls, key)
 	}
 	dl, err := url.Parse(resp.AttachmentDownloadURL)
 	if err != nil {
 		t.Fatalf("parse attachment_download_url: %v", err)
 	}
-	if got := dl.Query().Get("X-Amz-Signature"); got != "mock" {
-		t.Fatalf("attachment_download_url = %q, want an S3 presigned URL", resp.AttachmentDownloadURL)
+	if dl.IsAbs() || dl.Path != "/api/attachments/"+id+"/signed-download" || dl.Query().Get("uid") != testUserID {
+		t.Fatalf("attachment_download_url = %q, want a user-bound capability", resp.AttachmentDownloadURL)
 	}
-	if got := dl.Query().Get("response-content-disposition"); !strings.HasPrefix(got, "attachment") {
-		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	if dl.Query().Get("dl") != "1" {
+		t.Fatalf("attachment_download_url must force an attachment: %q", resp.AttachmentDownloadURL)
 	}
 }
 
-// TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL pins the
-// CloudFront arm of GetAttachmentByID's download-URL switch — the one storage
-// mode still unexercised at this layer. It asserts attachment_download_url is a
-// CloudFront-signed URL carrying response-content-disposition=attachment, which
-// SignedURLWithContentDisposition sets on the URL BEFORE signing, so the
-// disposition is folded into the signed Resource (a client cannot strip or alter
-// it without invalidating the Signature — that property is unit-tested in
-// cloudfront_test.go). It also asserts the load-intent download_url sibling does
-// NOT force an attachment, so the two intents stay distinct.
-func TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL(t *testing.T) {
+// Downloads use the revocable API capability while previews retain CDN signing.
+func TestGetAttachmentByID_CloudFrontModeKeepsPreviewAndDownloadSeparate(t *testing.T) {
 	origStorage := testHandler.Storage
 	origCfg := testHandler.cfg
 	origSigner := testHandler.CFSigner
@@ -810,26 +800,20 @@ func TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL(t *tes
 	if err != nil {
 		t.Fatalf("parse attachment_download_url: %v", err)
 	}
-	if dl.Host != "static.example.test" {
-		t.Fatalf("attachment_download_url host = %q, want the CloudFront domain", dl.Host)
+	if dl.IsAbs() || dl.Path != "/api/attachments/"+id+"/signed-download" || dl.Query().Get("uid") != testUserID {
+		t.Fatalf("attachment_download_url = %q, want a user-bound capability", resp.AttachmentDownloadURL)
 	}
-	if got := dl.Query().Get("response-content-disposition"); got != `attachment; filename="cf report.md"` {
-		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
-	}
-	// Signed as a whole: Key-Pair-Id + Signature present. Because the disposition
-	// was set before signing, it is inside the signed Resource, so a client cannot
-	// strip or alter it without invalidating this Signature.
-	if got := dl.Query().Get("Key-Pair-Id"); got != "KTEST" {
-		t.Fatalf("attachment_download_url Key-Pair-Id = %q, want KTEST (CloudFront-signed)", got)
-	}
-	if dl.Query().Get("Signature") == "" {
-		t.Fatalf("attachment_download_url missing CloudFront Signature: %q", resp.AttachmentDownloadURL)
+	if dl.Query().Get("dl") != "1" {
+		t.Fatalf("attachment_download_url must force an attachment: %q", resp.AttachmentDownloadURL)
 	}
 
 	// The load-intent sibling must NOT force an attachment, or inline preview breaks.
 	inline, err := url.Parse(resp.DownloadURL)
 	if err != nil {
 		t.Fatalf("parse download_url: %v", err)
+	}
+	if inline.Host != "static.example.test" || inline.Query().Get("Key-Pair-Id") != "KTEST" || inline.Query().Get("Signature") == "" {
+		t.Fatalf("download_url must remain CloudFront-signed: %q", resp.DownloadURL)
 	}
 	if got := inline.Query().Get("response-content-disposition"); strings.HasPrefix(got, "attachment") {
 		t.Fatalf("download_url must stay load-intent, got forced attachment disposition %q", got)
