@@ -1435,35 +1435,108 @@ func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
 	}
 }
 
+// Regression for #8941: ChatGPT.app 26.924+ ships the CLI at
+// Resources/codex-cli/bin/codex. Discovery must use that path when the older
+// flat Resources/codex file is absent.
+func TestLoadConfig_UsesNestedChatGPTCodexCLIPath(t *testing.T) {
+	pathDir := t.TempDir()
+	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(nested, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake CLI: %v", err)
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{nested} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from nested ChatGPT.app path, got %#v", cfg.Agents)
+	}
+	if got.Path != nested {
+		t.Fatalf("codex path = %q, want nested path %q", got.Path, nested)
+	}
+}
+
+// When both the nested CLI and the older flat binary exist, the nested path
+// is the current ChatGPT.app layout and must win.
+func TestLoadConfig_PrefersNestedChatGPTCodexCLIPath(t *testing.T) {
+	pathDir := t.TempDir()
+	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
+	flat := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
+	for _, p := range []string{nested, flat} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake CLI: %v", err)
+		}
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return []string{nested, flat} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent, got %#v", cfg.Agents)
+	}
+	if got.Path != nested {
+		t.Fatalf("codex path = %q, want nested path %q", got.Path, nested)
+	}
+}
+
 func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
 	paths := codexDesktopAppBundlePaths()
-	var hasChatGPT, hasLegacy bool
-	for _, p := range paths {
-		if strings.Contains(p, "ChatGPT.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
-			hasChatGPT = true
-		}
-		if strings.Contains(p, "Codex.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
-			hasLegacy = true
-		}
-	}
-	if !hasChatGPT {
-		t.Fatalf("codexDesktopAppBundlePaths missing ChatGPT.app entry: %#v", paths)
-	}
-	if !hasLegacy {
-		t.Fatalf("codexDesktopAppBundlePaths missing legacy Codex.app entry: %#v", paths)
-	}
-	// New path must be preferred (listed before legacy).
-	chatgptIdx, legacyIdx := -1, -1
+	const (
+		nestedSuffix = "ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+		flatSuffix   = "ChatGPT.app/Contents/Resources/codex"
+		legacySuffix = "Codex.app/Contents/Resources/codex"
+	)
+	nestedIdx, flatIdx, legacyIdx := -1, -1, -1
 	for i, p := range paths {
-		if chatgptIdx < 0 && strings.Contains(p, "ChatGPT.app") {
-			chatgptIdx = i
-		}
-		if legacyIdx < 0 && strings.Contains(p, "Codex.app") {
+		slash := filepath.ToSlash(p)
+		switch {
+		case nestedIdx < 0 && strings.HasSuffix(slash, nestedSuffix):
+			nestedIdx = i
+		case flatIdx < 0 && strings.HasSuffix(slash, flatSuffix):
+			flatIdx = i
+		case legacyIdx < 0 && strings.HasSuffix(slash, legacySuffix):
 			legacyIdx = i
 		}
 	}
-	if chatgptIdx < 0 || legacyIdx < 0 || chatgptIdx > legacyIdx {
-		t.Fatalf("expected ChatGPT.app before Codex.app, got indices chat=%d legacy=%d paths=%#v", chatgptIdx, legacyIdx, paths)
+	if nestedIdx < 0 || flatIdx < 0 || legacyIdx < 0 {
+		t.Fatalf("codexDesktopAppBundlePaths missing nested, flat, or legacy entry: %#v", paths)
+	}
+	if nestedIdx > flatIdx || flatIdx > legacyIdx {
+		t.Fatalf("expected nested ChatGPT path before flat ChatGPT path before Codex.app, got nested=%d flat=%d legacy=%d paths=%#v", nestedIdx, flatIdx, legacyIdx, paths)
 	}
 }
 
