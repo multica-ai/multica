@@ -377,6 +377,27 @@ If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and call
 The daemon launches Qoder and Qoder CN as `qodercli --yolo --acp` and `qoderclicn --yolo --acp`, respectively, matching their ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`. It writes the task brief to `QWEN.md`; when an agent has managed `mcp_config`, the daemon writes a 0600 per-run JSON file and passes it through `--mcp-config <path>`, then removes it after the process exits. A null config preserves Qwen Code native MCP settings.
 
+#### OpenCode completion compatibility
+
+Built-in OpenCode runtimes are version-probed at launch so an in-place upgrade
+uses the installed binary's argv and completion contract immediately. An
+unreadable or unsupported version fails the launch instead of using stale
+registration data. Custom runtime commands keep their existing version policy.
+
+OpenCode 2.0.18 can return complete text without a final `step_finish`. For
+2.0.18 and later 2.x releases, a clean exit with an open step triggers one bounded
+read of the same server's latest two session messages in newest-first order. Recovery requires a
+successful `idle` record followed by the exact completed assistant message seen
+on stdout, a `stop` finish reason, matching text and terminal tools, and no
+stream, process, prompt-write, or cancellation error. Missing usage is not
+invented. This contract was checked against the v2.0.18 source; regression tests
+use isolated fake CLIs, not an authenticated agent installation.
+
+If verification fails, the original incomplete-stream failure is retained.
+Standalone runs cannot query their exited private server, and custom runtimes,
+older v2 releases, and future major versions do not use this recovery. Normal
+`step_finish` handling and the v1 completion policy remain unchanged.
+
 #### `mcp_config` on ACP runtimes
 
 ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.

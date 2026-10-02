@@ -337,6 +337,18 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// OpenCode exited has returned by now. The writer sends exactly once.
 		writeErr := <-writeErrCh
 
+		// A v2 CLI can finish before its consumer emits step_finish. Recover
+		// only after a clean process exit and independent persisted evidence;
+		// stdout EOF or a completed text part alone cannot prove a turn ended.
+		if exitErr == nil && writeErr == nil && runCtx.Err() == nil && scanResult.v2Completion != nil {
+			if opencodeConfirmV2Completion(runCtx, interruptConn, scanResult.v2Completion, b.cfg.Logger) {
+				scanResult.status = "completed"
+				scanResult.errMsg = ""
+				scanResult.noTerminalSignal = false
+				scanResult.sawTerminalSignal = true
+			}
+		}
+
 		if runCtx.Err() == context.DeadlineExceeded {
 			scanResult.status = "timeout"
 			scanResult.errMsg = fmt.Sprintf("opencode timed out after %s", timeout)
@@ -411,12 +423,14 @@ type eventResult struct {
 	noTerminalSignal bool       // guard fired: the stream ended without evidence the run actually finished
 	// sawTerminalSignal is positive evidence that the run actually finished: a
 	// step_finish closed the last step with no continuation pending and with
-	// something to show for it. It is NOT the negation of noTerminalSignal — a
+	// something to show for it, or v2 persisted completion was verified after
+	// process exit. It is NOT the negation of noTerminalSignal — a
 	// stream with no events at all sets neither, because there is nothing to
 	// fail closed on and nothing that proves completion either. Callers that
 	// need "this run really completed" must test this field; status defaults to
 	// "completed" and cannot carry that meaning on its own.
 	sawTerminalSignal bool
+	v2Completion      *opencodeV2Completion
 }
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
@@ -426,6 +440,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var sessionID string
 	var usage TokenUsage
 	separateReasoning := opencodeSeparatesReasoning(b.cfg)
+	verifyV2 := opencodeCanVerifyV2Completion(b.cfg)
+	var v2Completion *opencodeV2Completion
+	validV2Stream := true
 	finalStatus := "completed"
 	var finalError string
 
@@ -477,7 +494,20 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 
 		var event opencodeEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			validV2Stream = false
 			continue
+		}
+
+		if verifyV2 {
+			if sessionID != "" && event.SessionID != sessionID {
+				validV2Stream = false
+			}
+			if event.Type == "step_start" {
+				v2Completion = &opencodeV2Completion{sessionID: event.SessionID, messageID: event.Part.MessageID, tools: make(map[string]string)}
+			}
+			if v2Completion != nil && !v2Completion.observe(event) {
+				validV2Stream = false
+			}
 		}
 
 		if event.SessionID != "" {
@@ -561,6 +591,10 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (last step required a continuation that never started)"
 			noTerminalSignal = true
+		case verifyV2 && !sawStepFinish:
+			finalStatus = "failed"
+			finalError = "opencode stream ended without a terminal signal"
+			noTerminalSignal = true
 		case lastStepVoid:
 			finalStatus = "failed"
 			finalError = "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing"
@@ -568,6 +602,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
+	if !verifyV2 || !validV2Stream || !openStep || !noTerminalSignal {
+		v2Completion = nil
+	}
 	return eventResult{
 		status:            finalStatus,
 		errMsg:            finalError,
@@ -576,6 +613,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		usage:             usage,
 		noTerminalSignal:  noTerminalSignal,
 		sawTerminalSignal: sawStepFinish && !noTerminalSignal,
+		v2Completion:      v2Completion,
 	}
 }
 
@@ -817,18 +855,23 @@ type opencodeToolState struct {
 // opencodeError represents an error event from opencode.
 type opencodeError struct {
 	Name string           `json:"name,omitempty"`
+	Text string           `json:"message,omitempty"`
+	Type string           `json:"type,omitempty"`
 	Data *opencodeErrData `json:"data,omitempty"`
 }
 
 // Message returns the human-readable error message.
 func (e *opencodeError) Message() string {
+	if e.Text != "" {
+		return e.Text
+	}
 	if e.Data != nil && e.Data.Message != "" {
 		return e.Data.Message
 	}
 	if e.Name != "" {
 		return e.Name
 	}
-	return ""
+	return e.Type
 }
 
 type opencodeErrData struct {
