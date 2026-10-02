@@ -28,6 +28,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -73,6 +74,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const showSubIssues = useViewStore((s) => s.showSubIssues);
   const cardGrouping =
     viewMode === "board"
       ? grouping
@@ -198,14 +200,21 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50">
-      {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
+      {/* Row 1: priority + identifier (left), agent activity (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
           <p className="text-caption text-muted-foreground truncate">{issue.identifier}</p>
           <IssueDuplicateOfMarker issue={issue} insideLink />
         </div>
-        <IssueAgentActivityIndicator issueId={issue.id} />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {!showSubIssues && !!childProgress && (
+            <PickerWrapper>
+              <SubIssuesAgentWorkingChip parentIssueId={issue.id} align="end" />
+            </PickerWrapper>
+          )}
+          <IssueAgentActivityIndicator issueId={issue.id} />
+        </div>
       </div>
 
       {/* Row 2: Title */}
