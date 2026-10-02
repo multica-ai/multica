@@ -49,10 +49,20 @@ type fakeOutboundQueries struct {
 	installErr     error
 	memberBinding  db.ChannelUserBinding
 	memberErr      error
-	workspace      db.Workspace
-	workspaceErr   error
-	attachments    []db.Attachment
-	attachmentsErr error
+	// agentMemberBinding / agentMemberErr answer the agent-pinned member
+	// lookup, the one that makes a notification follow the bot↔agent mapping in
+	// a multi-bot org. An unset binding with no error is pgx.ErrNoRows — the bot
+	// this member never bound — which is what every test written before that
+	// lookup expects when it does not mention one. agentBindingAsked records the
+	// agent each lookup was made for, so a test can ask whether the acting
+	// agent's bot was consulted at all.
+	agentMemberBinding db.ChannelUserBinding
+	agentMemberErr     error
+	agentBindingAsked  []pgtype.UUID
+	workspace          db.Workspace
+	workspaceErr       error
+	attachments        []db.Attachment
+	attachmentsErr     error
 	// lookupGate holds every attachment lookup open until it is closed, which
 	// is what a slow database looks like from in here. lookupsEntered counts
 	// the arrivals, so a test can ask how many deliveries got as far as the
@@ -225,6 +235,21 @@ func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChan
 }
 func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
 	return f.memberBinding, f.memberErr
+}
+
+// FindChannelBindingForMemberOnAgentInstallation answers only when the rig
+// filed a binding on the agent's own bot. Production's answer for a bot this
+// member never bound is pgx.ErrNoRows, and handing back a row for every agent
+// would let a test pass that never said which bots the member is on.
+func (f *fakeOutboundQueries) FindChannelBindingForMemberOnAgentInstallation(_ context.Context, arg db.FindChannelBindingForMemberOnAgentInstallationParams) (db.ChannelUserBinding, error) {
+	f.agentBindingAsked = append(f.agentBindingAsked, arg.AgentID)
+	if f.agentMemberErr != nil {
+		return db.ChannelUserBinding{}, f.agentMemberErr
+	}
+	if !f.agentMemberBinding.InstallationID.Valid {
+		return db.ChannelUserBinding{}, pgx.ErrNoRows
+	}
+	return f.agentMemberBinding, nil
 }
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
@@ -519,6 +544,169 @@ func TestTryDeliverInbox_NoBindingIsNoop(t *testing.T) {
 	}
 	if len(conn.frames) != 0 {
 		t.Errorf("no binding should push nothing, got %d frames", len(conn.frames))
+	}
+}
+
+// The multi-bot rule: a notification about one agent's work is
+// pushed through THAT agent's bot, not through whichever bot the recipient
+// happens to have bound most recently. The recipient-wide answer here names a
+// different bot on purpose — delivering through the other one is the whole
+// assertion.
+func TestTryDeliverInbox_FollowsTheActingAgentsBot(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		// What FindChannelBindingForMember answers: some other agent's bot.
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	// The member IS on the acting agent's bot, which is the socket this rig
+	// holds.
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_A_BOT", InstallationID: instID}
+	agentID := "55555555-5555-5555-5555-555555555555"
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", agentID),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the member is bound on the acting agent's bot")
+	}
+	body := conn.sendBody(t, 0)
+	if body["chatid"] != "T_AGENT_A_BOT" {
+		t.Errorf("inbox push chatid = %v, want the acting agent's bot", body["chatid"])
+	}
+	if len(q.agentBindingAsked) != 1 || util.UUIDToString(q.agentBindingAsked[0]) != agentID {
+		t.Errorf("agent-pinned lookup asked for %v, want exactly [%s]", q.agentBindingAsked, agentID)
+	}
+}
+
+// The fallback: the agent that acted has no bot this member linked, so the
+// notification still goes out through the bot the recipient-wide lookup names.
+// Without this, preferring the agent's bot would silently drop notifications
+// for every agent the recipient never bound.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotIsUnbound(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the recipient-wide binding should still deliver")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the recipient's own bot", body["chatid"])
+	}
+	if len(q.agentBindingAsked) != 1 {
+		t.Errorf("agent-pinned lookup asked %d times, want 1 before the fallback", len(q.agentBindingAsked))
+	}
+}
+
+// A notification a member authored names no agent, so there is nothing to
+// attribute: the recipient-wide answer stands and the agent-pinned lookup is
+// never issued (a member is not an agent id, and asking would be meaningless).
+func TestTryDeliverInbox_MemberAuthoredNotificationKeepsTheRecipientWideAnswer(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_BOT", InstallationID: instID}
+
+	item := agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555")
+	item["actor_type"] = util.TextToPtr(pgtype.Text{String: "member", Valid: true})
+	if !o.tryDeliverInbox(context.Background(), item,
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the member has a binding")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the recipient-wide answer", body["chatid"])
+	}
+	if len(q.agentBindingAsked) != 0 {
+		t.Errorf("agent-pinned lookup issued for a member-authored notification: %v", q.agentBindingAsked)
+	}
+}
+
+// A failed agent-pinned read must not silence a notification the fallback can
+// still deliver.
+func TestTryDeliverInbox_AgentBotLookupFailureFallsBack(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding:  db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		agentMemberErr: errors.New("connection reset"),
+		workspace:      db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; a failed agent-bot read must fall back")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the fallback bot", body["chatid"])
+	}
+}
+
+// inboxActorAgent reads the payload the way both publishers spell it, and
+// answers "no agent" for everything else — an actor that is a member, a
+// missing field, a nil pointer, or an id that is not a UUID.
+func TestInboxActorAgent(t *testing.T) {
+	t.Parallel()
+	agentID := "55555555-5555-5555-5555-555555555555"
+	for _, tc := range []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{name: "pointer fields, as published", item: agentInboxItem("new_comment", agentID), want: agentID},
+		{name: "plain fields, as re-encoded", want: agentID, item: map[string]any{
+			"actor_type": "agent", "actor_id": agentID,
+		}},
+		{name: "member actor", want: "", item: map[string]any{
+			"actor_type": util.TextToPtr(pgtype.Text{String: "member", Valid: true}),
+			"actor_id":   util.UUIDToPtr(mustUUID(agentID)),
+		}},
+		{name: "no actor", want: "", item: map[string]any{"actor_type": (*string)(nil)}},
+		{name: "agent actor with no id", want: "", item: map[string]any{
+			"actor_type": util.TextToPtr(pgtype.Text{String: "agent", Valid: true}),
+		}},
+		{name: "agent actor with an unparsable id", want: "", item: map[string]any{
+			"actor_type": "agent", "actor_id": "not-a-uuid",
+		}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := inboxActorAgent(tc.item)
+			if tc.want == "" {
+				if ok {
+					t.Errorf("inboxActorAgent = %q, want no agent", util.UUIDToString(got))
+				}
+				return
+			}
+			if !ok || util.UUIDToString(got) != tc.want {
+				t.Errorf("inboxActorAgent = (%q, %v), want (%s, true)", util.UUIDToString(got), ok, tc.want)
+			}
+		})
+	}
+}
+
+// agentInboxItem is one issue-comment notification as the listeners publish
+// it: a member recipient, and the agent whose comment it is as the actor —
+// behind pointers, which is how inboxItemToResponse builds the map.
+func agentInboxItem(notifType, agentID string) map[string]any {
+	return map[string]any{
+		"recipient_type": "member",
+		"recipient_id":   "33333333-3333-3333-3333-333333333333",
+		"workspace_id":   "44444444-4444-4444-4444-444444444444",
+		"type":           notifType,
+		"title":          "An issue",
+		"actor_type":     util.TextToPtr(pgtype.Text{String: "agent", Valid: true}),
+		"actor_id":       util.UUIDToPtr(mustUUID(agentID)),
 	}
 }
 
