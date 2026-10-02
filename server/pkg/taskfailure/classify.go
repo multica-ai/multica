@@ -23,12 +23,9 @@ var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9])5[0-9][0-9]([^0-9]|$)`)
 // e.g. "402913 tokens", "15290ms", "exit status 4030" — misclassifying process
 // or unknown failures as provider billing / rate-limit errors. That pollutes
 // failure observability: a genuine process crash gets filed under a provider
-// bucket, masking the real cause on failure dashboards. (A misfire here still
-// can't cause a spurious retry: the auth / quota / capacity buckets these
-// regexes guard are all non-retryable. The only agent_error.* reason on
-// internal/service/task.go's retryableReasons allowlist is provider_network
-// — MUL-4910 — and these regexes never route into it.) The 5xx bucket was
-// already anchored for exactly this reason (MUL-1949); these codes were not.
+// bucket, masking the real cause on failure dashboards. Capacity and server
+// errors are also auto-retryable, so a false match could rerun a real process
+// failure. The 5xx bucket uses the same boundary for this reason (MUL-1949).
 var (
 	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)
 	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9])402([^0-9]|$)`)
