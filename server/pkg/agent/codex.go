@@ -188,6 +188,52 @@ const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
 // did not answer within the bounded handshake window.
 const CodexHandshakeTimeoutMarker = "codex app-server handshake timeout"
 
+// CodexGuardianRateLimitMarker identifies an in-turn approval retry loop that
+// the adapter stopped after repeated reviewer failures.
+const CodexGuardianRateLimitMarker = "codex Guardian approval rate-limit circuit open"
+
+const codexGuardianRateLimitThreshold = 2
+const codexGuardianRateLimitError = CodexGuardianRateLimitMarker + ": two consecutive Guardian approval reviews failed with 429 Too Many Requests"
+
+type codexGuardianRateLimitCircuit struct {
+	consecutive  int
+	lastReviewID string
+	tripped      bool
+}
+
+// observeReview consumes the Guardian-specific app-server notification. A
+// synthesized commandExecution item may have no output when approval fails,
+// so inspecting tool output would miss the failure we need to stop.
+func (c *codexGuardianRateLimitCircuit) observeReview(params map[string]any) bool {
+	reviewID, _ := params["reviewId"].(string)
+	review, _ := params["review"].(map[string]any)
+	if reviewID == "" || reviewID == c.lastReviewID || review == nil {
+		return false
+	}
+	status, _ := review["status"].(string)
+	if status == "" || status == "inProgress" {
+		return false
+	}
+	c.lastReviewID = reviewID
+	rationale, _ := review["rationale"].(string)
+	lower := strings.ToLower(rationale)
+	if status != "denied" && status != "timedOut" && status != "aborted" {
+		c.consecutive = 0
+		return false
+	}
+	if !strings.Contains(lower, "automatic approval review failed") ||
+		(!strings.Contains(lower, "429") && !strings.Contains(lower, "too many requests")) {
+		c.consecutive = 0
+		return false
+	}
+	c.consecutive++
+	if c.consecutive < codexGuardianRateLimitThreshold || c.tripped {
+		return false
+	}
+	c.tripped = true
+	return true
+}
+
 // codexResumeMarker and codexLineOverflowMarker are the two halves of the
 // error text a resume-overflow produces: the method that failed (written by
 // startOrResumeThread) and bufio's own ErrTooLong wording, which reaches the
@@ -1219,6 +1265,8 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 	semanticActivityCh := make(chan string, 256)
+	guardianRateLimitTrip := make(chan struct{}, 1)
+	var guardianRateLimitTripped atomic.Bool
 
 	var outputMu sync.Mutex
 	// Result.Output is "final user-facing output selected by the backend"
@@ -1250,17 +1298,25 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	}
 
 	c = &codexClient{
-		cfg:                    b.cfg,
-		stdin:                  stdin,
-		pending:                make(map[int]*pendingRPC),
-		processDone:            make(chan struct{}),
-		handshakeTimeout:       handshakeTimeout,
-		threadHandshakeTimeout: threadHandshakeTimeout,
-		pid:                    cmd.Process.Pid,
-		attempt:                attempt,
-		activeLaunches:         activeLaunches,
-		notificationProtocol:   "unknown",
-		acceptNotification:     turnNotificationGate.accept,
+		cfg:                      b.cfg,
+		stdin:                    stdin,
+		pending:                  make(map[int]*pendingRPC),
+		processDone:              make(chan struct{}),
+		handshakeTimeout:         handshakeTimeout,
+		threadHandshakeTimeout:   threadHandshakeTimeout,
+		pid:                      cmd.Process.Pid,
+		attempt:                  attempt,
+		activeLaunches:           activeLaunches,
+		notificationProtocol:     "unknown",
+		acceptNotification:       turnNotificationGate.accept,
+		guardianRateLimitCircuit: &codexGuardianRateLimitCircuit{},
+		onGuardianRateLimit: func() {
+			guardianRateLimitTripped.Store(true)
+			b.cfg.Logger.Warn("codex Guardian approval rate-limit circuit opened",
+				"task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID,
+				"failure_count", codexGuardianRateLimitThreshold)
+			guardianRateLimitTrip <- struct{}{}
+		},
 		onDiscardedNotification: func(string, map[string]any) {
 			// Any app-server notification proves the process made semantic
 			// progress, even when it is intentionally excluded from the active
@@ -1720,6 +1776,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			select {
 			case aborted := <-turnDone:
 				finishTurn(aborted)
+			case <-guardianRateLimitTrip:
+				waitingForTurn = false
+				finishFirstItemWait("guardian_rate_limit")
+				finalStatus = "failed"
+				finalError = codexGuardianRateLimitError
+				if !interruptCodexTurn(c, threadID, turnDone, opts.TurnInterruptTimeout, b.cfg.Logger) {
+					stopProcess()
+				}
 			case activity := <-semanticActivityCh:
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
@@ -1803,6 +1867,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					}
 				}
 			}
+		}
+		// A turn/completed notification can race the circuit signal in the
+		// select above. The already-observed repeated failures still win.
+		if guardianRateLimitTripped.Load() {
+			finalStatus = "failed"
+			finalError = codexGuardianRateLimitError
 		}
 
 		duration := time.Since(startTime)
@@ -2404,9 +2474,11 @@ type codexClient struct {
 	// onAgentMessage receives the authoritative completed text for one agent
 	// message. onAgentMessageChunk may deliver that text incrementally, so
 	// Result.Output fallbacks must use this callback rather than the last chunk.
-	onAgentMessage     func(text string)
-	onSemanticActivity func(description string)
-	onTurnDone         func(aborted bool)
+	onAgentMessage           func(text string)
+	onSemanticActivity       func(description string)
+	onTurnDone               func(aborted bool)
+	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
+	onGuardianRateLimit      func()
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
@@ -3557,6 +3629,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	case "thread/status/changed":
 		// Status changes are informational. Only turn/completed carries the
 		// authoritative terminal state for a raw-protocol turn.
+
+	case "item/guardianApprovalReviewCompleted":
+		if c.guardianRateLimitCircuit != nil &&
+			c.guardianRateLimitCircuit.observeReview(params) &&
+			c.onGuardianRateLimit != nil {
+			c.onGuardianRateLimit()
+		}
 
 	default:
 		if strings.HasPrefix(method, "item/") {
