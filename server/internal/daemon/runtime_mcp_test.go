@@ -115,7 +115,7 @@ func TestListRuntimeLocalMcpServersUnknownProvider(t *testing.T) {
 
 func TestMergeRuntimeAndAgentMcpConfigOmpUsesAgentConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	merged, err := mergeRuntimeAndAgentMcpConfig("omp", json.RawMessage(`{"mcpServers":{"agent":{"command":"agent-server"}}}`))
+	merged, err := mergeRuntimeAndAgentMcpConfig("omp", json.RawMessage(`{"mcpServers":{"agent":{"command":"agent-server"}}}`), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestMergeRuntimeAndAgentMcpConfigClaudeCombinesAndAgentWins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	merged, err := mergeRuntimeAndAgentMcpConfig("claude", json.RawMessage(`{"mcpServers":{"shared":{"command":"agent-shared"},"agent-only":{"url":"https://agent.example/mcp"}}}`))
+	merged, err := mergeRuntimeAndAgentMcpConfig("claude", json.RawMessage(`{"mcpServers":{"shared":{"command":"agent-shared"},"agent-only":{"url":"https://agent.example/mcp"}}}`), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +169,53 @@ func TestMergeRuntimeAndAgentMcpConfigClaudeCombinesAndAgentWins(t *testing.T) {
 	}
 }
 
+func TestMergeRuntimeAndAgentMcpConfigWithoutInheritanceKeepsAgentSetOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runtimeConfig := `{"mcpServers":{"runtime-only":{"command":"runtime-cmd"},"shared":{"command":"runtime-shared"}}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(runtimeConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	if err := os.WriteFile(filepath.Join(installPath, "mcp.json"), []byte(`{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	agentConfig := json.RawMessage(`{"mcpServers":{"shared":{"command":"agent-shared"},"agent-only":{"url":"https://agent.example/mcp"}}}`)
+	merged, err := mergeRuntimeAndAgentMcpConfig("claude", agentConfig, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Byte-identical, not merely equivalent: the config reaches the agent as
+	// the operator saved it, and --strict-mcp-config then has nothing extra to
+	// enforce away.
+	if string(merged) != string(agentConfig) {
+		t.Fatalf("merged = %s, want the agent config verbatim", merged)
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigWithoutInheritanceStillSkipsUnmanagedAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"runtime-only":{"command":"runtime-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// No managed config means no task-local config file, so the runtime keeps
+	// its own native inheritance. Turning the merge off must not change that:
+	// the opt-out withholds the base layer of a merge, it does not start
+	// writing configs for agents that had none.
+	for _, agentConfig := range []json.RawMessage{nil, json.RawMessage(""), json.RawMessage("null")} {
+		merged, err := mergeRuntimeAndAgentMcpConfig("claude", agentConfig, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(merged) != string(agentConfig) {
+			t.Fatalf("merged = %q, want the agent config %q passed through", merged, agentConfig)
+		}
+	}
+}
+
 func TestMergeRuntimeAndAgentMcpConfigCodexNormalizesHeaders(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -189,7 +236,7 @@ args = ["mcp-server-fetch"]
 		t.Fatal(err)
 	}
 
-	merged, err := mergeRuntimeAndAgentMcpConfig("codex", json.RawMessage(`{"mcpServers":{"agent":{"command":"node","args":["agent.js"]}}}`))
+	merged, err := mergeRuntimeAndAgentMcpConfig("codex", json.RawMessage(`{"mcpServers":{"agent":{"command":"node","args":["agent.js"]}}}`), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +261,7 @@ args = ["mcp-server-fetch"]
 func TestMergeRuntimeAndAgentMcpConfigNullKeepsNativeInheritance(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, raw := range []json.RawMessage{nil, json.RawMessage("null"), json.RawMessage(" null ")} {
-		merged, err := mergeRuntimeAndAgentMcpConfig("claude", raw)
+		merged, err := mergeRuntimeAndAgentMcpConfig("claude", raw, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +290,7 @@ func TestCodeArtsMcpConfigLoadsJSONCAndAgentWins(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	merged, err := mergeRuntimeAndAgentMcpConfig("codearts", json.RawMessage(`{"mcp":{"shared":{"command":"agent-shared"},"agent-only":{"command":"agent-cmd"}}}`))
+	merged, err := mergeRuntimeAndAgentMcpConfig("codearts", json.RawMessage(`{"mcp":{"shared":{"command":"agent-shared"},"agent-only":{"command":"agent-cmd"}}}`), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +441,7 @@ func TestMergeRuntimeAndAgentMcpConfigCodebuddyIsPassthrough(t *testing.T) {
 	}
 
 	agentConfig := json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`)
-	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", agentConfig)
+	merged, err := mergeRuntimeAndAgentMcpConfig("codebuddy", agentConfig, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +613,7 @@ func TestMergeRuntimeAndAgentMcpConfigKimiIsPassthrough(t *testing.T) {
 	}
 
 	agentConfig := json.RawMessage(`{"mcpServers":{"agent-only":{"command":"agent-cmd"}}}`)
-	merged, err := mergeRuntimeAndAgentMcpConfig("kimi", agentConfig)
+	merged, err := mergeRuntimeAndAgentMcpConfig("kimi", agentConfig, true)
 	if err != nil {
 		t.Fatal(err)
 	}
