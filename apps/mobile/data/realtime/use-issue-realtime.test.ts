@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { QueryClient } from "@tanstack/react-query";
 import type {
   CommentDeletedPayload,
@@ -126,4 +127,41 @@ describe("useIssueRealtime owner issue revision on comment deletes", () => {
       expect(state.qc.getQueryState(key)?.isInvalidated).toBe(true);
     }
   });
+});
+
+describe("useIssueRealtime task lifecycle", () => {
+  beforeEach(() => {
+    state.qc = new QueryClient();
+    state.subscriptionSetups.length = 0;
+  });
+
+  it.each(["task:waiting_local_directory", "task:running"])(
+    "%s refreshes both run lists only for the current issue",
+    (event) => {
+      const activeKey = issueKeys.activeTasks(wsId, issueId);
+      const runsKey = issueKeys.tasks(wsId, issueId);
+      const otherKey = issueKeys.tasks(wsId, "other-issue");
+      for (const key of [activeKey, runsKey, otherKey]) {
+        state.qc.setQueryData(key, [{ id: "task-1", status: "dispatched" }]);
+      }
+      useIssueRealtime(issueId);
+      const emit = connect();
+      const payload = {
+        task_id: "task-1",
+        agent_id: "agent-1",
+        issue_id: "other-issue",
+        status: event.slice("task:".length),
+      };
+
+      emit(event, payload);
+      for (const key of [activeKey, runsKey, otherKey]) {
+        expect(state.qc.getQueryState(key)?.isInvalidated).toBe(false);
+      }
+
+      emit(event, { ...payload, issue_id: issueId });
+      expect(state.qc.getQueryState(activeKey)?.isInvalidated).toBe(true);
+      expect(state.qc.getQueryState(runsKey)?.isInvalidated).toBe(true);
+      expect(state.qc.getQueryState(otherKey)?.isInvalidated).toBe(false);
+    },
+  );
 });

@@ -10,8 +10,7 @@
  *   - activity:created → timeline
  *   - reaction:added / reaction:removed → comment reactions on timeline
  *   - issue_reaction:added / issue_reaction:removed → issue-level reactions on detail
- *   - task:queued / task:dispatch / task:progress / task:completed /
- *     task:failed / task:cancelled → invalidate timeline + detail (task
+ *   - task lifecycle / task:progress → invalidate run lists + timeline + detail (task
  *     state can flip an issue's status server-side without firing
  *     issue:updated, so we refetch the authoritative detail too)
  *   - reconnect → invalidate detail + timeline (we might've missed events
@@ -33,6 +32,8 @@ import type {
   TaskFailedPayload,
   TaskMessagePayload,
   TaskQueuedPayload,
+  TaskRunningPayload,
+  TaskWaitingLocalDirectoryPayload,
 } from "@multica/core/types";
 import { issueKeys } from "@/data/queries/issue-keys";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
@@ -59,6 +60,8 @@ import {
 type TaskEventPayload =
   | TaskQueuedPayload
   | TaskDispatchPayload
+  | TaskRunningPayload
+  | TaskWaitingLocalDirectoryPayload
   | TaskCompletedPayload
   | TaskFailedPayload
   | TaskCancelledPayload
@@ -90,7 +93,7 @@ export function useIssueRealtime(
         qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
       };
 
-      // Shared cross-event handler for the 6 task:* subscriptions below.
+      // Shared cross-event handler for the task:* subscriptions below.
       // All task events DO carry `issue_id` server-side, but `task:progress`
       // has no formal payload interface yet (WSEventPayloadMap entry is
       // `unknown`), so we cast through the union of the typed ones. If a new
@@ -231,6 +234,8 @@ export function useIssueRealtime(
         // ----- Agent task progress -----
         ws.on("task:queued", onTaskEvent),
         ws.on("task:dispatch", onTaskEvent),
+        ws.on("task:waiting_local_directory", onTaskEvent),
+        ws.on("task:running", onTaskEvent),
         ws.on("task:progress", onTaskEvent),
         ws.on("task:completed", onTaskEvent),
         ws.on("task:failed", onTaskEvent),

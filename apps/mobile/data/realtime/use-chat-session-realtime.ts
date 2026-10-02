@@ -12,6 +12,7 @@
  *   - chat:quick_actions        → patch the async quick-actions supplement
  *                                  onto the assistant message
  *   - task:queued / dispatch    → seed / promote pendingTask
+ *   - task:waiting_local_directory / running → refresh pendingTask
  *   - task:cancelled            → refresh pendingTask + messages
  *   - task:completed            → no-op for messages (chat:done already
  *                                  wrote the assistant message); just
@@ -81,6 +82,14 @@ export function useChatSessionRealtime(
         ws.on("task:dispatch", (payload) => {
           if (!isMine(payload)) return;
           promotePendingTaskToRunning(qc, payload);
+        }),
+        ws.on("task:waiting_local_directory", (payload) => {
+          if (!isMine(payload)) return;
+          invalidatePendingTask(qc, sessionId);
+        }),
+        ws.on("task:running", (payload) => {
+          if (!isMine(payload)) return;
+          invalidatePendingTask(qc, sessionId);
         }),
         ws.on("task:cancelled", (payload) => {
           if (!isMine(payload)) return;
