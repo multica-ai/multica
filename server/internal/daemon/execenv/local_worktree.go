@@ -1329,6 +1329,8 @@ type replayResult struct {
 // itself, so the whole snapshot applies and cannot conflict. For a continued
 // branch it is the snapshot that branch recorded, which is what makes this a
 // replay of the user's LAST-TURN-TO-NOW edits rather than of their whole tree.
+// If the recorded checkout was clean, replay from the new snapshot's HEAD
+// instead: a committed advance is not an uncommitted edit to the task branch.
 //
 // Replaying the whole tree onto a continued branch is the tempting version and
 // it is wrong: that merge takes the user's HEAD as its base, so it re-proposes
@@ -1347,6 +1349,21 @@ func replayUserState(worktreePath string, plan taskBranchPlan, snapshot string, 
 	carried := plan.base
 	if plan.continues {
 		carried = plan.priorState
+		// A record's first parent is the snapshot; that snapshot's parent is
+		// the local HEAD it captured. If the checkout was clean, there are no
+		// old uncommitted edits to subtract. Use the new snapshot's HEAD so a
+		// pull/commit in the local directory is not replayed as user edits.
+		// Pending-conflict records may instead parent another record (with
+		// two parents); keep their existing incremental replay semantics.
+		parents, err := runGitTrimmed(worktreePath, "rev-list", "--parents", "-n", "1", carried+"^1")
+		if err != nil {
+			return replayResult{}, fmt.Errorf("execenv: could not read the previous local snapshot: %w", err)
+		}
+		if fields := strings.Fields(parents); len(fields) == 2 {
+			if _, err := runGit(worktreePath, "diff", "--quiet", carried, fields[1]); err == nil {
+				carried = snapshot + "^1"
+			}
+		}
 	}
 	if carried == "" {
 		return replayResult{}, fmt.Errorf("execenv: no baseline to replay the local directory against for branch %s", plan.name)
