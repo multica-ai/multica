@@ -57,6 +57,15 @@ type Issue struct {
 	LastActivityAt *string        `json:"last_activity_at"`
 	Metadata       map[string]any `json:"metadata"`
 	Properties     map[string]any `json:"properties"`
+	// ActiveTaskCount is populated by collection queries. It intentionally
+	// remains optional so the single-resource endpoint can avoid counting work
+	// that a caller did not ask for.
+	ActiveTaskCount int32 `json:"active_task_count,omitempty"`
+}
+
+type IssueListResponse struct {
+	Issues     []Issue `json:"issues"`
+	NextCursor string  `json:"next_cursor,omitempty"`
 }
 
 type PatchIssueRequest struct {
@@ -85,6 +94,22 @@ type CommentListResponse struct {
 type CreateCommentRequest struct {
 	Content  string  `json:"content"`
 	ParentID *string `json:"parent_id,omitempty"`
+}
+
+type CreateIssueTaskRequest struct {
+	AgentID     string  `json:"agent_id"`
+	HandoffNote string  `json:"handoff_note,omitempty"`
+	Priority    *string `json:"priority,omitempty"`
+}
+
+type IssueTask struct {
+	ID        string `json:"id"`
+	IssueID   string `json:"issue_id"`
+	AgentID   string `json:"agent_id"`
+	RuntimeID string `json:"runtime_id"`
+	Status    string `json:"status"`
+	Priority  string `json:"priority"`
+	CreatedAt string `json:"created_at"`
 }
 
 type StorageKey struct {
