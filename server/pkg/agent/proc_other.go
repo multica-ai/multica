@@ -42,6 +42,16 @@ func startOwnedProcessTree(cmd *exec.Cmd, _ *slog.Logger) error { return cmd.Sta
 
 // releaseProcessGroup is a no-op on non-Windows platforms: a process group needs
 // no handle and is gone once its members are.
+//
+// It deliberately does NOT reap the group. Reaping here would fire whenever the
+// leader's cmd.Wait returns, which is wrong for the callers that drop ownership
+// while the tree is meant to keep running — the ACP managed terminal keeps a
+// backgrounded child alive between the command's exit and an explicit
+// terminal/release (acp_terminal.go), and the probe helpers already reap before
+// releasing (runOwned in launch.go). The normal-exit descendant leak (#8153)
+// lives only in the backends that neuter cmd.Cancel to drive their own
+// shutdown, and is fixed there with an explicit reapProcessTree before this
+// call — mirroring runOwned — not by overloading this shared no-op.
 func releaseProcessGroup(cmd *exec.Cmd) {}
 
 func codexInitializeRetrySupported() bool { return true }
@@ -52,6 +62,14 @@ func codexInitializeRetrySupported() bool { return true }
 // the descendants the agent spawned, not just the leader.
 func signalProcessGroup(cmd *exec.Cmd, sig syscall.Signal) {
 	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	// Guard the pid before negating it: Kill(-0, sig) hits the caller's (the
+	// daemon's) own process group, and no caller ever wants to signal a
+	// non-positive pgid. A started process always has a positive pid; this only
+	// fires for a zero-value Process, and never lets a group send escape onto
+	// the daemon itself.
+	if cmd.Process.Pid <= 0 {
 		return
 	}
 	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil {

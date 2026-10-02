@@ -242,6 +242,10 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
 		close(procDone)
+		// Reap the group on the normal-exit path: CodeArts neuters cmd.Cancel,
+		// so nothing signals the group when the leader exits on its own, and
+		// releaseProcessGroup is a Unix no-op (#8153).
+		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
