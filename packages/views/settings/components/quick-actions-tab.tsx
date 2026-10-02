@@ -481,7 +481,7 @@ function QuickActionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {action ? t(($) => $.quick_actions.edit_title) : t(($) => $.quick_actions.create_title)}
@@ -492,7 +492,9 @@ function QuickActionDialog({
         {/* space-y-5 against space-y-1.5 inside each group: the gap BETWEEN
             fields has to clearly beat the gap between a label and its own
             control, or the four groups read as one continuous block of text. */}
-        <div className="space-y-5">
+        {/* -mx-1/px-1 keeps the 3px focus ring of an edge-to-edge input from
+            being clipped by the scroll container. */}
+        <div className="-mx-1 min-h-0 flex-1 space-y-5 overflow-y-auto px-1 py-2">
           <div className="space-y-1.5">
             <FieldLabel htmlFor="qa-name">{t(($) => $.quick_actions.field_name)}</FieldLabel>
             <Input
@@ -569,6 +571,7 @@ function QuickActionDialog({
               id="qa-prompt"
               value={form.prompt}
               rows={5}
+              className="max-h-60 overflow-y-auto"
               placeholder={t(($) => $.quick_actions.field_prompt_placeholder)}
               onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
             />
