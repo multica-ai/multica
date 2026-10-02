@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,7 +27,7 @@ func buildMetadataFilterQueryParam(pairs []string) (string, error) {
 	if len(pairs) == 0 {
 		return "", nil
 	}
-	out := make(map[string]any, len(pairs))
+	out := make(map[string]json.RawMessage, len(pairs))
 	for _, pair := range pairs {
 		idx := strings.IndexByte(pair, '=')
 		if idx <= 0 {
@@ -41,11 +42,7 @@ func buildMetadataFilterQueryParam(pairs []string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("--metadata %s: %w", key, err)
 		}
-		var v any
-		if err := json.Unmarshal(encoded, &v); err != nil {
-			return "", fmt.Errorf("--metadata %s: encode value: %w", key, err)
-		}
-		out[key] = v
+		out[key] = encoded
 	}
 	buf, err := json.Marshal(out)
 	if err != nil {
@@ -56,7 +53,7 @@ func buildMetadataFilterQueryParam(pairs []string) (string, error) {
 
 // multica issue metadata {list|get|set|delete} — KV map attached to each issue
 // for agent pipeline state. See server/internal/handler/issue_metadata.go for
-// the constraints (key regex, 50-key cap, primitive-only values, 8KB blob).
+// the constraints (key regex, 50-key cap, non-null JSON values, 8KB blob).
 
 var issueMetadataCmd = &cobra.Command{
 	Use:   "metadata",
@@ -83,9 +80,12 @@ var issueMetadataSetCmd = &cobra.Command{
 	Long: `Set a single metadata key value. The value is JSON-parsed by default:
   --value true / --value false  → bool
   --value 3 / --value 3.14      → number
+  --value '["web","desktop"]' → array
+  --value '{"ready":true}'      → object
   --value waiting               → string
 Use --type to force a specific type. Quote like '"42"' (JSON-escaped) to force
-a string when the bare value would otherwise sniff as a number or bool.`,
+a string when the bare value would otherwise parse as JSON. Null is not allowed;
+use metadata delete to remove a key.`,
 	Args: exactArgs(1),
 	RunE: runIssueMetadataSet,
 }
@@ -117,10 +117,10 @@ func init() {
 }
 
 // parseMetadataValue converts a CLI --value flag (and optional --type) into
-// the JSON-encoded payload sent to the server. Default sniffing: if the
-// raw text parses as a JSON bool / number / string, that type is used; any
-// other JSON shape (null, array, object) is rejected even under default
-// because the server would reject it too.
+// the JSON-encoded payload sent to the server. If the raw text is valid
+// non-null JSON, its type and spelling are preserved; otherwise it is encoded
+// as a literal string. Null is reserved for absence, and callers must use
+// metadata delete to remove a key.
 //
 // forcedType non-empty overrides sniffing: "string" wraps verbatim as a
 // JSON string; "number" parses strictly as a number; "bool" requires the
@@ -149,13 +149,14 @@ func parseMetadataValue(raw, forcedType string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("unknown --type %q (expected string, number, or bool)", forcedType)
 	}
 
-	// Auto-infer: try JSON parse, fall back to string.
-	var v any
-	if err := json.Unmarshal([]byte(raw), &v); err == nil {
-		switch v.(type) {
-		case string, bool, float64:
-			return json.RawMessage(raw), nil
+	// Preserve valid JSON verbatim instead of decoding numbers through
+	// float64, which could lose precision before PostgreSQL receives them.
+	encoded := []byte(raw)
+	if json.Valid(encoded) {
+		if string(bytes.TrimSpace(encoded)) == "null" {
+			return nil, errors.New("value cannot be null (use metadata delete to remove a key)")
 		}
+		return json.RawMessage(encoded), nil
 	}
 	buf, err := json.Marshal(raw)
 	if err != nil {
@@ -377,6 +378,10 @@ func metadataValueType(v any) string {
 		return "bool"
 	case float64:
 		return "number"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
 	default:
 		return "unknown"
 	}
