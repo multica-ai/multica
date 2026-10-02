@@ -34,11 +34,11 @@ export interface BuilderDraftPayload {
   member_ids?: unknown;
 }
 
-export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
-  const match = content.match(/<agent_draft>([\s\S]*?)<\/agent_draft>/);
-  if (!match?.[1]) return null;
+function tryParseBuilderDraftPayload(raw: string): BuilderDraftPayload | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
   try {
-    const value = JSON.parse(match[1]);
+    const value = JSON.parse(trimmed);
     return value && typeof value === "object"
       ? (value as BuilderDraftPayload)
       : null;
@@ -48,7 +48,7 @@ export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
     // control characters that occur inside strings; object structure and all
     // other syntax still have to pass JSON.parse.
     try {
-      const value = JSON.parse(escapeJsonStringControlCharacters(match[1]));
+      const value = JSON.parse(escapeJsonStringControlCharacters(trimmed));
       return value && typeof value === "object"
         ? (value as BuilderDraftPayload)
         : null;
@@ -56,6 +56,32 @@ export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
       return null;
     }
   }
+}
+
+export function parseBuilderDraft(content: string): BuilderDraftPayload | null {
+  const match = content.match(/<agent_draft>([\s\S]*?)<\/agent_draft>/);
+  if (match?.[1]) {
+    const parsed = tryParseBuilderDraftPayload(match[1]);
+    if (parsed) return parsed;
+  }
+
+  // CLI-backed models occasionally emit a complete JSON draft after the opening
+  // tag but omit the closing </agent_draft>. Recover complete drafts from
+  // unclosed blocks while ignoring incomplete/in-flight streaming fragments.
+  const unclosedMatch = content.match(/<agent_draft>([\s\S]*)$/);
+  if (unclosedMatch?.[1]) {
+    const raw = unclosedMatch[1].trim();
+    const directParsed = tryParseBuilderDraftPayload(raw);
+    if (directParsed) return directParsed;
+
+    const firstBrace = raw.indexOf("{");
+    const lastBrace = raw.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      return tryParseBuilderDraftPayload(raw.slice(firstBrace, lastBrace + 1));
+    }
+  }
+
+  return null;
 }
 
 function escapeJsonStringControlCharacters(value: string): string {

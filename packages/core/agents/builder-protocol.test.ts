@@ -81,6 +81,23 @@ Return findings."}</agent_draft>`;
     });
   });
 
+  it("recovers an unclosed draft when the model omits the closing tag (fixes #8513)", () => {
+    const content =
+      'Here is your draft.\n<agent_draft>{"name":"Poet","instructions":"Write poetry.\nUse the requested language.","permission_scope":"private"}';
+
+    expect(parseBuilderDraft(content)).toEqual({
+      name: "Poet",
+      instructions: "Write poetry.\nUse the requested language.",
+      permission_scope: "private",
+    });
+    expect(stripBuilderDraft(content)).toBe("Here is your draft.");
+  });
+
+  it("safely ignores incomplete streaming drafts without throwing or premature parsing", () => {
+    expect(parseBuilderDraft('<agent_draft>{"name":"Incomplete')).toBeNull();
+    expect(parseBuilderDraft('<agent_draft>{"name":')).toBeNull();
+  });
+
   it("round-trips only the user's natural-language request for chat display", () => {
     const currentDraft = draft();
     currentDraft.conversationStarters = [
