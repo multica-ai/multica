@@ -160,6 +160,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const clearDraft = useProjectDraftStore((s) => s.clearDraft);
 
   const [title, setTitle] = useState(draft.title);
+  const [issuePrefix, setIssuePrefix] = useState("");
   const descEditorRef = useRef<ContentEditorRef>(null);
   const [status, setStatus] = useState<ProjectStatus>(draft.status);
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
@@ -395,6 +396,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
+        issue_prefix: issuePrefix.trim().toUpperCase() || null,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -563,6 +565,18 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           />
           <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.create_project.description_hint)}
+          </p>
+          <label className="mt-4 block text-caption font-medium">
+            {t(($) => $.create_project.issue_prefix)}
+            <input
+              value={issuePrefix}
+              onChange={(event) => setIssuePrefix(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
+              placeholder={t(($) => $.create_project.issue_prefix_placeholder)}
+              className="mt-1 block w-full rounded-md border bg-background px-3 py-2 font-mono text-body outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
+          <p className="mt-1 text-caption text-muted-foreground">
+            {t(($) => $.create_project.issue_prefix_hint)}
           </p>
         </div>
 

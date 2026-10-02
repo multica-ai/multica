@@ -1103,13 +1103,9 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
-	// Case-insensitive: a hand-typed `trs-134` should open `TRS-134`.
-	prefix := h.getIssuePrefix(ctx, wsUUID)
-	if prefix == "" || !strings.EqualFold(parts.prefix, prefix) {
-		return db.Issue{}, false
-	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+	issue, err := h.Queries.GetIssueByIdentifier(ctx, db.GetIssueByIdentifierParams{
 		WorkspaceID: wsUUID,
+		IdentifierPrefix: strings.ToUpper(parts.prefix),
 		Number:      parts.number,
 	})
 	if err != nil {

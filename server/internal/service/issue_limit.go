@@ -84,8 +84,11 @@ func CheckIssueCreateCapacity(ctx context.Context, q *db.Queries, provider entit
 // roll the transaction back on IssueLimitReachedError; that also rolls back
 // the counter increment. Deleting an issue frees capacity because
 // issue_counter is deliberately not used as quota usage.
-func AllocateIssueNumber(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, policy IssueCountPolicy) (int32, error) {
-	number, err := q.IncrementIssueCounter(ctx, workspaceID)
+func AllocateIssueNumber(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, prefix string, policy IssueCountPolicy) (int32, error) {
+	if prefix == "" {
+		prefix = "WS"
+	}
+	number, err := q.AllocateIssueIdentifier(ctx, db.AllocateIssueIdentifierParams{WorkspaceID: workspaceID, Prefix: prefix})
 	if err != nil {
 		return 0, err
 	}

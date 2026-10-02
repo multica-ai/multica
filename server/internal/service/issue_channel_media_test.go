@@ -572,11 +572,6 @@ func TestPublishAttachmentsChangedKeepsDuplicateMark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load original: %v", err)
 	}
-	workspace, err := q.GetWorkspace(ctx, workspaceUUID)
-	if err != nil {
-		t.Fatalf("load workspace: %v", err)
-	}
-
 	for _, tc := range []struct {
 		name   string
 		status string
@@ -616,7 +611,7 @@ func TestPublishAttachmentsChangedKeepsDuplicateMark(t *testing.T) {
 			}
 			want := map[string]any{
 				"id":         originalID,
-				"identifier": IssueIdentifier(workspace.IssuePrefix, original.Number),
+				"identifier": IssueIdentifier(original.IdentifierPrefix, original.Number),
 				"title":      "attr original",
 				"status":     "in_progress",
 			}

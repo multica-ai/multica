@@ -446,10 +446,9 @@ export function issueDetailOptions(wsId: string, id: string) {
  * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
  *
  * Backs the Linear-style autolink. This is an EXACT lookup, so it goes to
- * `GET /api/issues/{identifier}` — the server parses `PREFIX-NUMBER`, checks
- * the prefix against the workspace's own `issue_prefix`, and reads the issue
- * through the unique `(workspace_id, number)` index. A non-existent or
- * wrong-prefix identifier 404s, which maps to `null` here and renders as
+ * `GET /api/issues/{identifier}` — the server parses `PREFIX-NUMBER` and reads
+ * the immutable key through `(workspace_id, identifier_prefix, number)`. A
+ * non-existent identifier 404s, which maps to `null` here and renders as
  * plain text — the same contract the previous implementation had.
  *
  * It deliberately does NOT use `/api/issues/search`: that endpoint runs the
@@ -460,7 +459,7 @@ export function issueDetailOptions(wsId: string, id: string) {
  *
  * Server state → TanStack Query; the key includes `wsId` and the identifier,
  * so identical identifiers across the app share one request. Caller gates
- * `enabled` (identifier shape + workspace prefix).
+ * `enabled` (identifier shape + workspace).
  */
 export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
@@ -471,7 +470,7 @@ export function issueIdentifierOptions(wsId: string, identifier: string) {
       try {
         return await api.getIssue(identifier);
       } catch (err) {
-        // Unknown identifier / wrong workspace prefix → render as plain text.
+        // Unknown identifier → render as plain text.
         // Any other failure (401/5xx) must keep propagating so the query
         // can retry instead of being cached as "no such issue".
         if (err instanceof ApiError && err.status === 404) return null;

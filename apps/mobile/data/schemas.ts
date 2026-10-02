@@ -166,6 +166,7 @@ export const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  issue_prefix: z.string().nullable().default(null),
   // .default(null) so a project from an older backend that omits these keys
   // parses to null instead of degrading the batch to the empty fallback.
   start_date: z.string().nullable().default(null),

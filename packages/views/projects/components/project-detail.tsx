@@ -290,6 +290,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="space-y-0.5 pl-2">
+          <PropRow label={t(($) => $.detail.issue_prefix)}>
+            <input
+              key={`prefix-${project.issue_prefix ?? ""}`}
+              defaultValue={project.issue_prefix ?? ""}
+              maxLength={10}
+              placeholder={t(($) => $.detail.issue_prefix_inherited)}
+              className="w-28 rounded border bg-background px-2 py-1 font-mono text-caption uppercase"
+              onBlur={(event) => {
+                const value = event.currentTarget.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+                if (value !== (project.issue_prefix ?? "")) handleUpdateField({ issue_prefix: value || null });
+              }}
+            />
+          </PropRow>
+          <p className="px-2 pb-2 text-caption text-muted-foreground">{t(($) => $.detail.issue_prefix_hint)}</p>
           <PropRow label={t(($) => $.table.status)}>
             <DropdownMenu>
               <DropdownMenuTrigger

@@ -292,6 +292,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to seed issue statuses: "+err.Error())
 		return
 	}
+	if _, err := qtx.ReserveIssueIdentifierSeries(r.Context(), db.ReserveIssueIdentifierSeriesParams{WorkspaceID: ws.ID, Prefix: issuePrefix}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize issue identifier series")
+		return
+	}
 
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
 	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
@@ -448,10 +452,40 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
 	}
 
-	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
+	var currentWorkspace db.Workspace
+	if params.IssuePrefix.Valid {
+		var err error
+		currentWorkspace, err = h.Queries.GetWorkspace(r.Context(), idUUID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if params.IssuePrefix.Valid && !strings.EqualFold(params.IssuePrefix.String, currentWorkspace.IssuePrefix) {
+		if _, err := qtx.ReserveIssueIdentifierSeries(r.Context(), db.ReserveIssueIdentifierSeriesParams{WorkspaceID: idUUID, Prefix: params.IssuePrefix.String}); err != nil {
+			writeError(w, http.StatusConflict, "issue prefix is already in use or permanently reserved")
+			return
+		}
+		if err := qtx.ReleaseUnusedIssueIdentifierSeries(r.Context(), db.ReleaseUnusedIssueIdentifierSeriesParams{WorkspaceID: idUUID, Prefix: strings.ToUpper(currentWorkspace.IssuePrefix)}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to release old issue prefix")
+			return
+		}
+	}
+	ws, err := qtx.UpdateWorkspace(r.Context(), params)
 	if err != nil {
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit workspace update")
 		return
 	}
 
