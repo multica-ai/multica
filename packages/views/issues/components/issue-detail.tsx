@@ -177,6 +177,11 @@ import {
   useAnimatedRightSidebarState,
   useRightSidebarShortcut,
 } from "../../layout/animated-right-sidebar";
+import {
+  isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 
 /**
  * Memento entry recording that the comment-highlight deep link for this
@@ -1381,6 +1386,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // picked it from "+ Add property" and we want them dropped straight into
   // edit state). Consumed by the row that matches this key, cleared after.
   const [autoOpenProp, setAutoOpenProp] = useState<OptionalPropKey | null>(null);
+  // Controlled open state for the "S" / "P" keyboard shortcuts that open the
+  // status and priority pickers directly from the keyboard. See the keydown
+  // listener attached near useRightSidebarShortcut for the guard logic.
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [priorityPickerOpen, setPriorityPickerOpen] = useState(false);
   // Controlled state for the "+ Add property" popover. Base UI's Popover
   // doesn't auto-dismiss on item click (it's not a Menu primitive), so the
   // popover would stay open behind the newly auto-opened picker — two
@@ -2576,6 +2586,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
+  // Issue-detail-scoped keyboard shortcuts: "S" opens the status picker,
+  // "P" opens the priority picker (and reveals the row if it was hidden).
+  // Guarded so the chords never fire while a modal, popover, or editable
+  // input owns the keyboard. Only active when the sidebar is mounted and
+  // not in peek mode (peek lacks the full sidebar).
+  useEffect(() => {
+    if (isPeek) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+      if (isEditableShortcutTarget(e.target)) return;
+      if (isPortalLayerShortcutTarget(e.target)) return;
+      if (e.key === "S" || e.key === "s") {
+        e.preventDefault();
+        setStatusPickerOpen(true);
+      } else if (e.key === "P" || e.key === "p") {
+        e.preventDefault();
+        // Make the priority row visible before opening it.
+        setVisibleOptionalProps((prev) =>
+          prev.has("priority") ? prev : new Set([...prev, "priority" as const]),
+        );
+        setPriorityPickerOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isPeek, setVisibleOptionalProps]);
+
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,
     scrollContainerEl,
@@ -2680,6 +2717,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               status={issue.status}
               onUpdate={handleUpdateField}
               align="start"
+              open={statusPickerOpen}
+              onOpenChange={setStatusPickerOpen}
               onMarkDuplicate={actions.openMarkDuplicate}
               isDuplicate={isDuplicateIssue(issue)}
             />
@@ -2703,6 +2742,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 priority={issue.priority}
                 onUpdate={handleUpdateField}
                 align="start"
+                open={autoOpenProp === "priority" ? undefined : priorityPickerOpen}
+                onOpenChange={autoOpenProp === "priority" ? undefined : setPriorityPickerOpen}
                 defaultOpen={autoOpenProp === "priority"}
               />
             </PropRow>
