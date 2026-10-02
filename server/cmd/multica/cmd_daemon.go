@@ -91,6 +91,16 @@ var daemonDiskUsageCmd = &cobra.Command{
 	RunE: runDaemonDiskUsage,
 }
 
+var daemonReapWorkspacesCmd = &cobra.Command{
+	Use:   "reap-workspaces",
+	Short: "Report or remove terminal, clean task workspaces",
+	Long: "Scans the daemon's task workspace root and considers only issue-backed task roots whose card is done or cancelled.\n" +
+		"A candidate is refused unless every Git worktree below its workdir is clean; uncommitted and untracked files are named in the report.\n\n" +
+		"This is a dry run by default. Pass --apply to remove eligible task roots. Each run reports every removal or refusal, plus task-root counts and task-directory sizes before and after.\n" +
+		"The daemon does not need to be running.",
+	RunE: runDaemonReapWorkspaces,
+}
+
 func init() {
 	f := daemonStartCmd.Flags()
 	f.Bool("foreground", false, "Run in the foreground instead of background")
@@ -140,6 +150,11 @@ func init() {
 	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
 	df.Bool("all-profiles", false, "Scan every workspace root (default root + all ~/.multica/profiles/* roots, incl. the Desktop app's) and report a combined total")
 
+	reapFlags := daemonReapWorkspacesCmd.Flags()
+	reapFlags.Bool("apply", false, "Remove eligible task roots (default is dry-run)")
+	reapFlags.String("output", "table", "Output format: table or json")
+	reapFlags.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
+
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
@@ -147,6 +162,7 @@ func init() {
 	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+	daemonCmd.AddCommand(daemonReapWorkspacesCmd)
 }
 
 type daemonRuntimeProbe struct {
@@ -1840,6 +1856,78 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	printDiskUsageTaskTable(os.Stdout, report)
 	printDiskUsageOtherRootsHint(os.Stdout, report, profile, rootOverride, taskContext)
 	return nil
+}
+
+// --- daemon reap-workspaces ---
+
+func runDaemonReapWorkspaces(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("daemon reap-workspaces"); err != nil {
+		return err
+	}
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	profile := resolveProfile(cmd)
+	rootOverride, _ := cmd.Flags().GetString("workspaces-root")
+	apply, _ := cmd.Flags().GetBool("apply")
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" && output != "json" {
+		return fmt.Errorf("--output must be table or json")
+	}
+
+	workspacesRoot, err := resolveWorkspacesRootForProfile(profile, rootOverride)
+	if err != nil {
+		return fmt.Errorf("resolve workspaces root: %w", err)
+	}
+	diskReport, err := daemon.ScanDiskUsage(workspacesRoot, daemon.ArtifactPatternsFromEnv())
+	if err != nil {
+		return err
+	}
+	// Unlike disk-usage, a reaper may never treat an unavailable status as
+	// permission to remove anything. ResolveParentStatuses leaves those rows
+	// blank, and ReapTerminalCleanWorkspaces reports the resulting refusal.
+	if fetch := newParentStatusFetcher(cmd, profile); fetch != nil {
+		apiCtx, cancel := cli.APIContext(ctx)
+		defer cancel()
+		if err := daemon.ResolveParentStatuses(apiCtx, &diskReport, fetch); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not resolve every issue status; unresolved task roots will be skipped: %v\n", err)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "warning: no usable Multica credentials; all task roots will be skipped because card status cannot be resolved")
+	}
+
+	reapReport, err := daemon.ReapTerminalCleanWorkspaces(ctx, workspacesRoot, diskReport, daemon.ArtifactPatternsFromEnv(), apply)
+	if err != nil {
+		return err
+	}
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, reapReport)
+	}
+	printWorkspaceReapReport(os.Stdout, reapReport)
+	return nil
+}
+
+func printWorkspaceReapReport(w io.Writer, report daemon.WorkspaceReapReport) {
+	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
+	if !report.Applied {
+		fmt.Fprintln(w, "Dry run: no task roots were removed. Re-run with --apply to remove eligible roots.")
+	}
+	if len(report.Results) == 0 {
+		fmt.Fprintln(w, "(no task roots)")
+	} else {
+		for _, result := range report.Results {
+			label := strings.ToUpper(strings.ReplaceAll(result.Action, "_", " "))
+			fmt.Fprintf(w, "%s %s: %s\n", label, result.Path, result.Reason)
+			for _, file := range result.Files {
+				fmt.Fprintf(w, "  %s\n", file)
+			}
+		}
+	}
+	fmt.Fprintf(w, "Before: %d task root(s), %d stable root record(s), %s.\n",
+		report.Before.TaskRootCount, report.Before.TaskRootRecordCount, formatBytes(report.Before.TotalSizeBytes))
+	fmt.Fprintf(w, "After: %d task root(s), %d stable root record(s), %s.\n",
+		report.After.TaskRootCount, report.After.TaskRootRecordCount, formatBytes(report.After.TotalSizeBytes))
 }
 
 // checkTaskDiskUsageScope keeps a managed task's disk-usage view inside the
