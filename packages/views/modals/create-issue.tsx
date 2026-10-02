@@ -240,6 +240,8 @@ export function ManualCreatePanel({
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
+  const setLastProperties = useIssueDraftStore((s) => s.setLastProperties);
+  const lastStage = useIssueDraftStore((s) => s.lastStage);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
@@ -290,11 +292,13 @@ export function ManualCreatePanel({
   const parentIssueLocked = anchorCommentId !== null
     && typeof data?.parent_issue_id === "string"
     && data.parent_issue_id.length > 0;
-  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
-  // since it's a per-creation choice tied to the chosen parent.
-  const [stage, setStage] = useState<number | null>(
-    typeof data?.stage === "number" ? (data.stage as number) : null,
-  );
+  // Stage only applies to a sub-issue; when creating a sub-issue (parent present),
+  // default to the remembered lastStage if not explicitly passed in data.
+  const [stage, setStage] = useState<number | null>(() => {
+    if (typeof data?.stage === "number") return data.stage as number;
+    if (data?.parent_issue_id && lastStage != null) return lastStage;
+    return null;
+  });
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   // Toolbar fields hidden via Settings → Preferences → Issue creation reuse the overflow reveal
   // pattern: the ⋯ menu item flips this open, which mounts the inline pill
@@ -417,9 +421,9 @@ export function ManualCreatePanel({
   const updateIssueMutation = useUpdateIssue();
   const attachLabelMutation = useAttachLabelToIssue();
   const resetForNextIssue = () => {
+    const defaultParentId = (data?.parent_issue_id as string) || undefined;
+    const defaultProjectId = (data?.project_id as string) || undefined;
     setTitle("");
-    setStatus("todo");
-    setPriority("none");
     setStartDate(null);
     setDueDate(null);
     setLabelIds([]);
@@ -427,16 +431,16 @@ export function ManualCreatePanel({
     setCustomPropertyPickerId(null);
     setPropertyErrorId(null);
     setUnavailablePropertyRemoved(false);
-    setProjectId(undefined);
-    setParentIssueId(undefined);
-    setStage(null);
+    setProjectId(defaultProjectId);
+    setParentIssueId(defaultParentId);
+    setStage(defaultParentId ? (stage ?? lastStage ?? null) : null);
     setChildIssues([]);
-    // Keep the just-used assignee for the next issue in the batch; reset
-    // everything else across the manual + shared slots.
+    // Keep the just-used status, priority, and assignee for the next issue in the batch;
+    // preserve parent/project context when subtasks were initiated from a parent.
     setManual({
       title: "",
       description: "",
-      status: "todo",
+      status,
       assigneeType,
       assigneeId,
       startDate: null,
@@ -444,8 +448,8 @@ export function ManualCreatePanel({
       propertyValues: {},
     });
     setShared({
-      priority: "none",
-      projectId: undefined,
+      priority,
+      projectId: defaultProjectId,
       dueDate: null,
       attachments: [],
     });
@@ -760,6 +764,7 @@ export function ManualCreatePanel({
       // These preferences derive from the SUBMITTED values, not the live
       // draft — an issue was created, so record them regardless of the guard.
       setLastAssignee(assigneeType, assigneeId);
+      setLastProperties(status, priority, stage);
       setLastMode("manual");
       // Success may only consume the draft it submitted (MUL-5181 P0): any
       // edit after the submit snapshot — typing while the request is in
@@ -1379,6 +1384,9 @@ export function ManualCreatePanel({
               ]}
               onSelect={(selected) => {
                 setParentIssueId(selected.id);
+                if (stage == null && lastStage != null) {
+                  setStage(lastStage);
+                }
               }}
             />
             <IssuePickerModal

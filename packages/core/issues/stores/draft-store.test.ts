@@ -54,6 +54,9 @@ const RESET_STATE = {
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
+  lastStatus: undefined,
+  lastPriority: undefined,
+  lastStage: undefined,
 };
 
 describe("issue draft store — last assignee", () => {
@@ -175,6 +178,47 @@ describe("issue draft store — last assignee", () => {
     clearDraft();
     expect(useIssueDraftStore.getState().draft.manual.assigneeId).toBeUndefined();
     expect(useIssueDraftStore.getState().draft.manual.assigneeType).toBeUndefined();
+  });
+});
+
+describe("issue draft store — last status and priority (#8762)", () => {
+  beforeEach(() => {
+    useIssueDraftStore.setState(RESET_STATE);
+  });
+
+  it("clearDraft prefills status and priority from the last submission", () => {
+    const { setManual, setLastProperties, clearDraft } = useIssueDraftStore.getState();
+
+    setManual({ title: "first", status: "in_progress" });
+    setLastProperties("in_progress", "high");
+    clearDraft();
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.manual.title).toBe("");
+    expect(draft.manual.status).toBe("in_progress");
+    expect(draft.shared.priority).toBe("high");
+  });
+
+  it("clearDraft falls back to default status/priority when none remembered", () => {
+    const { setManual, clearDraft } = useIssueDraftStore.getState();
+
+    setManual({ title: "first", status: "in_progress" });
+    clearDraft();
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.manual.status).toBe("todo");
+    expect(draft.shared.priority).toBe("none");
+  });
+
+  it("setLastProperties updates lastStatus, lastPriority, and lastStage in state", () => {
+    const { setLastProperties } = useIssueDraftStore.getState();
+
+    setLastProperties("done", "urgent", 2);
+
+    const state = useIssueDraftStore.getState();
+    expect(state.lastStatus).toBe("done");
+    expect(state.lastPriority).toBe("urgent");
+    expect(state.lastStage).toBe(2);
   });
 });
 
@@ -391,6 +435,9 @@ describe("issue draft store — logout cleanup", () => {
     const state = useIssueDraftStore.getState();
     expect(state.lastAssigneeType).toBeUndefined();
     expect(state.lastAssigneeId).toBeUndefined();
+    expect(state.lastStatus).toBeUndefined();
+    expect(state.lastPriority).toBeUndefined();
+    expect(state.lastStage).toBeUndefined();
     // clearDraft() would have re-seeded the manual slot from lastAssignee —
     // the logout reset must not hand the next login a previous user's pick.
     expect(state.draft.manual.assigneeType).toBeUndefined();
