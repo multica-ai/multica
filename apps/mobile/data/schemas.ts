@@ -382,10 +382,14 @@ const SearchIssueResultSchema = IssueSchema.safeExtend({
 
 export const SearchIssuesResponseSchema = z.object({
   issues: z.array(SearchIssueResultSchema).default([]),
+  // Truncation signal from the search endpoint. Defaults to false for older
+  // backends so a missing field degrades to the previous exhaustive-page behavior.
+  has_more: z.boolean().default(false),
 }).loose();
 
 export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
+  has_more: false,
 };
 
 const SearchProjectResultSchema = ProjectSchema.safeExtend({
@@ -395,10 +399,12 @@ const SearchProjectResultSchema = ProjectSchema.safeExtend({
 
 export const SearchProjectsResponseSchema = z.object({
   projects: z.array(SearchProjectResultSchema).default([]),
+  has_more: z.boolean().default(false),
 }).loose();
 
 export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
   projects: [],
+  has_more: false,
 };
 
 // =====================================================
