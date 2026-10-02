@@ -30,7 +30,9 @@ const (
 	runtimeGCSweepInterval = time.Hour
 	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
 	// recovery scan off the latency-sensitive runtime liveness path.
-	delegatedFailureRecoverySweepInterval = 5 * time.Minute
+	delegatedFailureRecoverySweepInterval       = 5 * time.Minute
+	providerQuotaPoolSweepInterval              = time.Minute
+	providerQuotaPoolSweepBatchSize       int32 = 50
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -176,6 +178,14 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
 	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
 		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
+	})
+}
+
+func runProviderQuotaPoolSweeper(ctx context.Context, taskSvc *service.TaskService) {
+	runPeriodicSweep(ctx, providerQuotaPoolSweepInterval, func() {
+		if err := taskSvc.ReconcileDueProviderQuotaPools(ctx, providerQuotaPoolSweepBatchSize); err != nil && ctx.Err() == nil {
+			slog.Warn("provider quota pool sweep failed", "error", err)
+		}
 	})
 }
 

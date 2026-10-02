@@ -1920,6 +1920,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
+		// Account quota pools span workspaces. Each handler checks the pool
+		// owner and current management rights for every mapped agent.
+		r.Route("/api/provider-quota-pools", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+			r.Get("/", h.ListProviderQuotaPools)
+			r.Post("/", h.CreateProviderQuotaPool)
+			r.Route("/{poolId}", func(r chi.Router) {
+				r.Get("/", h.GetProviderQuotaPool)
+				r.Post("/hold", h.HoldProviderQuotaPool)
+				r.Post("/release", h.ReleaseProviderQuotaPool)
+				r.Put("/agents/{agentId}", h.AssignAgentToProviderQuotaPool)
+				r.Delete("/agents/{agentId}", h.RemoveAgentFromProviderQuotaPool)
+				r.Put("/probe-agent/{agentId}", h.SetProviderQuotaPoolProbeAgent)
+				r.Delete("/probe-agent", h.ClearProviderQuotaPoolProbeAgent)
+			})
+		})
+
 		// Cloud Billing proxy. Same upstream service / port as
 		// cloud-runtime — multica-cloud's Fleet and Billing share
 		// :8080 and the same chi router. All routes here forward

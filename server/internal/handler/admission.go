@@ -60,6 +60,7 @@ const (
 	ReasonInvocationNotAllowed  = dispatch.ReasonInvocationNotAllowed
 	ReasonTargetUnavailable     = dispatch.ReasonTargetUnavailable
 	ReasonRuntimeOffline        = dispatch.ReasonRuntimeOffline
+	ReasonProviderQuotaHeld     = dispatch.ReasonProviderQuotaHeld
 	ReasonRuntimeUnusable       = dispatch.ReasonRuntimeUnusable
 	ReasonRuntimeAccessDenied   = dispatch.ReasonRuntimeAccessDenied
 	ReasonRuntimeProfileMissing = dispatch.ReasonRuntimeProfileMissing
@@ -124,6 +125,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the target is unavailable"
 	case ReasonRuntimeOffline:
 		return "the target's runtime is offline"
+	case ReasonProviderQuotaHeld:
+		return "the target's provider account quota is held"
 	case ReasonRuntimeUnusable:
 		return "the target's agent CLI cannot run on its machine"
 	case ReasonRuntimeAccessDenied:

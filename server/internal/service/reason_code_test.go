@@ -131,6 +131,17 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if !RuntimeBlockedNeedsNotice(profile.Reason) {
 		t.Error("missing DSH profile would leave no durable trace on the issue")
 	}
+	quota := AgentVerdict{
+		Availability: AgentBlocked,
+		Reason:       dispatch.ReasonProviderQuotaHeld,
+		Detail:       "provider account quota is held until 2026-09-29T10:00:00Z",
+	}
+	if !RuntimeBlockedNeedsNotice(quota.Reason) {
+		t.Error("quota hold would leave no durable trace on the issue")
+	}
+	if notice := RuntimeUnusableNotice("Kit", quota); !strings.Contains(notice, "2026-09-29T10:00:00Z") || strings.Contains(notice, "CLI") {
+		t.Errorf("quota hold notice = %q", notice)
+	}
 	// The notice must describe the profile, not a broken CLI, and must not hand
 	// the user a command with a placeholder in it to paste.
 	notice := RuntimeUnusableNotice("Kit", profile)

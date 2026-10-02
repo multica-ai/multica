@@ -678,6 +678,23 @@ DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 -- name: DeleteWorkspaceAgents :exec
 DELETE FROM agent WHERE agent.workspace_id = $1;
 
+-- name: LockWorkspaceProviderQuotaPoolAgents :many
+-- Probe selection and membership edits lock the agent before the pool. Lock
+-- these agents in the same order before clearing probe selection on delete.
+SELECT id FROM agent WHERE workspace_id = $1 ORDER BY id FOR UPDATE;
+
+-- name: DeleteWorkspaceProviderQuotaPoolMemberships :exec
+-- Account pools may span workspaces; remove only memberships for this
+-- workspace before deleting its agents. The pool and audit history remain
+-- owned by the account user.
+DELETE FROM provider_quota_pool_agent
+WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1);
+
+-- name: ClearWorkspaceProviderQuotaPoolProbeAgents :exec
+UPDATE provider_quota_pool
+SET probe_agent_id = NULL, revision = revision + 1, updated_at = now()
+WHERE probe_agent_id IN (SELECT id FROM agent WHERE workspace_id = $1);
+
 -- name: DeleteWorkspaceRuntimesAndProjects :exec
 WITH
 deleted_runtimes AS (

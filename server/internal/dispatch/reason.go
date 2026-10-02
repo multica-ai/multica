@@ -33,6 +33,9 @@ const (
 	// that runtime is not online at dispatch time. The task is not lost — the
 	// user's fix is to bring the machine back, and queued work waits for it.
 	ReasonRuntimeOffline ReasonCode = "runtime_offline"
+	// ReasonProviderQuotaHeld: the agent's provider account pool is waiting
+	// for a reset or a bounded probe. New work must not start on this pool.
+	ReasonProviderQuotaHeld ReasonCode = "provider_quota_held"
 	// ReasonRuntimeUnusable: the target is bound to a runtime whose machine is
 	// reachable, but whose agent CLI cannot be executed there — the npm
 	// placeholder stub left behind when a package's postinstall was blocked is

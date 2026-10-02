@@ -155,6 +155,11 @@ func Classify(rawError string) Reason {
 			"insufficient_balance",
 			"balance is too low",
 			"monthly usage limit",
+			"weekly usage limit",
+			"you've hit your weekly limit",
+			"you’ve hit your weekly limit",
+			"you've reached your weekly limit",
+			"you’ve reached your weekly limit",
 			"usage limit",
 			"you've hit your limit",
 			// Curly apostrophe variant: providers and copy-pasted error
