@@ -78,9 +78,18 @@ WHERE id = $1 AND workspace_id = $2;
 -- the profile-delete path must remove the profile's registered runtime
 -- instances itself. Returns the deleted rows so the caller can broadcast /
 -- audit. Runs inside the same transaction as DeleteRuntimeProfile.
-DELETE FROM agent_runtime
-WHERE profile_id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, owner_id, daemon_id, provider;
+-- Plan-limit snapshots have no foreign key, so they are removed in the same
+-- statement before the runtime rows disappear.
+WITH deleted_provider_usage AS (
+    DELETE FROM runtime_provider_usage_snapshot AS snap
+    WHERE snap.runtime_id IN (
+        SELECT rt.id FROM agent_runtime AS rt
+        WHERE rt.profile_id = $1 AND rt.workspace_id = $2
+    )
+)
+DELETE FROM agent_runtime AS rt
+WHERE rt.profile_id = $1 AND rt.workspace_id = $2
+RETURNING rt.id, rt.workspace_id, rt.owner_id, rt.daemon_id, rt.provider;
 
 -- name: ListActiveAgentsByProfile :many
 -- Active (non-archived) agents bound to any runtime instance of this profile.

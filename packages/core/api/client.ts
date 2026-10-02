@@ -74,6 +74,8 @@ import type {
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
   RuntimeUsage,
+  ProviderUsageResponse,
+  RuntimeProviderUsageListResponse,
   IssueUsageSummary,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
@@ -334,6 +336,10 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  ProviderUsageResponseSchema,
+  EMPTY_PROVIDER_USAGE_RESPONSE,
+  RuntimeProviderUsageListSchema,
+  EMPTY_RUNTIME_PROVIDER_USAGE_LIST,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
   SearchIndexManifestSchema,
@@ -2444,6 +2450,34 @@ export class ApiClient {
     await this.fetch(
       `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
       { method: "DELETE" },
+    );
+  }
+
+  async getRuntimeProviderUsage(runtimeId: string): Promise<ProviderUsageResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/provider-usage`,
+    );
+    return parseWithFallback(
+      raw,
+      ProviderUsageResponseSchema,
+      EMPTY_PROVIDER_USAGE_RESPONSE,
+      { endpoint: "GET /api/runtimes/:id/provider-usage" },
+    );
+  }
+
+  async listRuntimeProviderUsage(
+    runtimeIds: readonly string[],
+  ): Promise<RuntimeProviderUsageListResponse> {
+    const search = new URLSearchParams();
+    search.set("runtime_ids", runtimeIds.join(","));
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/provider-usage?${search}`,
+    );
+    return parseWithFallback(
+      raw,
+      RuntimeProviderUsageListSchema,
+      EMPTY_RUNTIME_PROVIDER_USAGE_LIST,
+      { endpoint: "GET /api/runtimes/provider-usage" },
     );
   }
 

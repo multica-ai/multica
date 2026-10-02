@@ -44,6 +44,7 @@ import {
   ActivityHeatmap,
 } from "./charts";
 import { CustomPricingDialog } from "./custom-pricing-dialog";
+import { ProviderUsageBlock } from "./provider-usage-block";
 import { useT } from "../../i18n";
 
 // Single source of truth for the period selector. KPIs, the When-chart, the
@@ -131,6 +132,7 @@ function Segmented<T extends string | number>({
 
 export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { t, i18n } = useT("runtimes");
+  const wsId = useWorkspaceId();
   const runtimeId = runtime.id;
   // Reports render in the viewer's timezone — the backend slices the UTC
   // hourly rollup on the same `tz` we pass here, so every frontend window
@@ -147,8 +149,30 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   // subscribe on their own and pass pricings as a memo dep there.
   useCustomPricingStore((s) => s.pricings);
 
-  if (loading) return <UsageSkeleton />;
-  if (usage.length === 0) return <UsageEmpty />;
+  const planLimits = (
+    <ProviderUsageBlock
+      wsId={wsId}
+      runtimeId={runtimeId}
+      provider={runtime.provider}
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        {planLimits}
+        <UsageSkeleton />
+      </div>
+    );
+  }
+  if (usage.length === 0) {
+    return (
+      <div className="space-y-5">
+        {planLimits}
+        <UsageEmpty />
+      </div>
+    );
+  }
 
   // Slice the cached 180-day window into the user's selected sub-window AND
   // the immediately prior window of equal length. The KPI delta ("+18% vs
@@ -183,6 +207,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
 
   return (
     <div className="space-y-5">
+      {planLimits}
       {/* Page-wide period selector. Lives at the top because it controls
           basically everything below: the KPI numbers and labels, the
           daily / weekly chart window, and the cost-by aggregations. The
