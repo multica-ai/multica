@@ -3059,6 +3059,102 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	return cmd
 }
 
+func TestRunIssueCommentListWarnsOnTruncation(t *testing.T) {
+	const issueID = "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	for _, tc := range []struct {
+		name        string
+		flags       []string
+		header      string
+		cursor      bool
+		taskWorkdir bool
+	}{
+		{name: "default", header: "true"},
+		{name: "since", flags: []string{"--since", "2026-09-01T00:00:00Z"}, header: "true"},
+		{name: "roots", flags: []string{"--roots-only"}, header: "true"},
+		{name: "thread", flags: []string{"--thread", "comment-1"}, header: "true"},
+		{name: "compact", flags: []string{"--compact"}, header: "true"},
+		{name: "table", flags: []string{"--output", "table"}, header: "true"},
+		{name: "cursor", flags: []string{"--recent", "10"}, header: "true", cursor: true},
+		{name: "task workdir", header: "true", taskWorkdir: true},
+		{name: "explicit false", header: "false"},
+		{name: "absent header"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.taskWorkdir {
+				seedDaemonTaskMarker(t)
+			}
+			requests := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/comments":
+					requests++
+					if tc.header != "" {
+						w.Header().Set(handler.HeaderCommentsTruncated, tc.header)
+					}
+					if tc.cursor {
+						w.Header().Set("X-Multica-Next-Before", "2026-09-01T00:00:00Z")
+						w.Header().Set("X-Multica-Next-Before-Id", "comment-1")
+					}
+					_, _ = w.Write([]byte(`[{"id":"comment-1","content":"visible comment","parent_id":null}]`))
+				default:
+					// Table output also fetches actor display names.
+					_, _ = w.Write([]byte(`[]`))
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+			cmd := newIssueCommentListTestCmd()
+			if err := cmd.ParseFlags(tc.flags); err != nil {
+				t.Fatal(err)
+			}
+			capture := captureStderr(t)
+			defer capture.restore()
+			stdout, err := captureStdout(t, func() error { return runIssueCommentList(cmd, []string{issueID}) })
+			stderr := capture.read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if requests != 1 {
+				t.Fatalf("comment requests = %d, want one request without automatic history fetches", requests)
+			}
+			if tc.header == "true" {
+				for _, want := range []string{"comments truncated", "incomplete", "--roots-only --summary --compact", "--thread <id> --tail 30", "--before", "--before-id"} {
+					if !strings.Contains(stderr, want) {
+						t.Errorf("stderr = %q, want %q", stderr, want)
+					}
+				}
+				if strings.Contains(stderr, "--recent") {
+					t.Errorf("truncation warning must not recommend unbounded thread expansion: %q", stderr)
+				}
+			} else if stderr != "" {
+				t.Errorf("complete read should stay quiet, stderr = %q", stderr)
+			}
+			if tc.cursor && !strings.Contains(stderr, "Next thread cursor: --before 2026-09-01T00:00:00Z --before-id comment-1") {
+				t.Errorf("truncation warning hid the page cursor: %q", stderr)
+			}
+			if tc.name == "table" {
+				if !strings.Contains(stdout, "visible comment") || strings.Contains(stdout, "warning:") {
+					t.Errorf("table output = %q", stdout)
+				}
+				return
+			}
+			var comments []map[string]any
+			if err := json.Unmarshal([]byte(stdout), &comments); err != nil {
+				t.Fatalf("stdout is not a JSON array: %v; %q", err, stdout)
+			}
+			if len(comments) != 1 || comments[0]["content"] != "visible comment" {
+				t.Fatalf("comments = %#v", comments)
+			}
+			_, hasParent := comments[0]["parent_id"]
+			if hasParent == (tc.name == "compact") {
+				t.Errorf("parent_id present = %v; compact behavior changed", hasParent)
+			}
+		})
+	}
+}
+
 func newIssueCommentResolutionTestCmd(use string) *cobra.Command {
 	cmd := &cobra.Command{Use: use}
 	cmd.Flags().String("output", "json", "")
