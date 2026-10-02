@@ -2,9 +2,10 @@ import { defineConfig } from "vitest/config";
 import path from "node:path";
 
 // Mobile vitest is intentionally minimal — Node environment only, scoped to
-// pure-function helpers in `lib/` and headless data-layer logic in `data/`
+// pure-function helpers in `lib/`, headless data-layer logic in `data/`
 // (query-key + cache-patch functions that take a QueryClient but touch no
-// DOM / RN native modules). We don't ship jsdom or RN test renderers here
+// DOM / RN native modules), and the headless prebuild config plugins in
+// `plugins/`. We don't ship jsdom or RN test renderers here
 // because the app runs on Hermes / native shims and any DOM-shaped runner
 // would be a lie. Tests that need RN component rendering would need a
 // separate jest+react-native-testing-library track; for now we keep this
@@ -22,7 +23,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    include: ["lib/**/*.test.ts", "data/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "data/**/*.test.ts", "plugins/**/*.test.ts"],
     passWithNoTests: true,
   },
 });
