@@ -1392,5 +1392,25 @@
     "overview_close": "关闭",
     "overview_empty": "没有这类产物。",
     "group_comment_by": "{{name}} 的评论"
+  },
+  "attachments": {
+    "section_title": "附件",
+    "view_all_other": "查看全部 {{count}} 个附件",
+    "name_with_version": "{{name}}，第 {{version}} 版",
+    "version_short": "v{{version}}",
+    "locate_comment": "定位到评论",
+    "locate_description": "定位到描述",
+    "filter_all": "全部",
+    "filter_image": "图片",
+    "filter_document": "文档",
+    "filter_video": "视频",
+    "filter_misc": "其他",
+    "overview_title": "{{identifier}} 的附件",
+    "overview_summary_other": "{{count}} 个附件",
+    "overview_summary_with_size_other": "{{count}} 个附件 · 共 {{size}}",
+    "overview_close": "关闭",
+    "overview_empty": "没有这类附件。",
+    "group_comment_by": "{{name}} 的评论",
+    "group_description": "任务描述"
   }
 }

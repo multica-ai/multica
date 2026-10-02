@@ -6,6 +6,12 @@ export {
   type DeliverableSourceComment,
 } from "./deliverables";
 export {
+  collectIssueAttachmentFiles,
+  MEMBER_UPLOADER_TYPE,
+  type CollectIssueAttachmentFilesInput,
+  type IssueAttachmentFile,
+} from "./issue-attachments";
+export {
   collectAttachmentSequence,
   collectImageSequence,
   indexOfImageKey,
