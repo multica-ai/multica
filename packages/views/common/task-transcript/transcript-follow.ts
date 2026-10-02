@@ -43,6 +43,9 @@ export const FOLLOW_EDGE_THRESHOLD = 120;
 // after the next animation frame.
 const MOTION_SETTLE_WINDOW_MS = 300;
 
+// Tolerance for discrete wheel animation easing overshoot and DPR subpixel rounding.
+export const CARRY_TOLERANCE_PX = 8;
+
 // WheelEvent.deltaMode 1 (lines) / 2 (pages) conversion.
 export const LINE_SCROLL_PX = 40;
 
@@ -111,10 +114,9 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   const motionFresh = () => now() - lastMotionAt < MOTION_SETTLE_WINDOW_MS;
 
   // Carry is spent in fractional steps, so its running total drifts from the
-  // surface's own arithmetic by a few ulps. Scaled to the amount at hand, a
-  // gap this small is rounding — the system moving the viewport is pixels.
+  // surface's own arithmetic by subpixel rounding or easing overshoot.
   const withinCarry = (amount: number) =>
-    amount <= motionCarry + Math.max(1, motionCarry) * 1e-9;
+    amount <= motionCarry + Math.max(CARRY_TOLERANCE_PX, motionCarry * 0.1);
 
   const pinVerdict = (distance: number): boolean =>
     following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
@@ -237,13 +239,15 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         const attributed = Math.min(awayBudget, moved);
         awayBudget -= attributed;
         // Touch displacement need not match finger travel pixel-for-pixel.
-        if (touchHeld || attributed === moved) {
+        // Wheel easing or DPR rounding can slightly overshoot the notch input budget.
+        if (touchHeld || attributed === moved || moved - attributed <= CARRY_TOLERANCE_PX) {
           awayTaken += moved;
           motionDirection = 1;
           motionSource = touchHeld ? "touch" : "input";
           // One notch can animate across several frames; the wiring drops the
           // claim after the first, so carry its remainder into the motion.
           motionCarry = awayBudget;
+          awayBudget = 0;
           lastMotionAt = now();
           if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
           return false;
@@ -251,11 +255,12 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       } else if (moved < 0 && inputFresh() && towardBudget > 0) {
         const attributed = Math.min(towardBudget, -moved);
         towardBudget -= attributed;
-        if (touchHeld || attributed === -moved) {
+        if (touchHeld || attributed === -moved || -moved - attributed <= CARRY_TOLERANCE_PX) {
           awayTaken = Math.max(0, awayTaken + moved);
           motionDirection = -1;
           motionSource = touchHeld ? "touch" : "input";
           motionCarry = towardBudget;
+          towardBudget = 0;
           lastMotionAt = now();
           if (distance === 0) {
             following = true;
