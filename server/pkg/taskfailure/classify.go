@@ -148,6 +148,21 @@ func Classify(rawError string) Reason {
 		):
 		return ReasonAgentProviderAuthOrAccess
 
+	// 3b. Subscription usage-WINDOW limit. Checked before rule 4 because these
+	//     messages carry the word "limit" (and sometimes literally "usage
+	//     limit") yet are transient: the window reopens at the stated reset, so
+	//     they belong in the retryable capacity bucket, not the terminal quota
+	//     one. Claude Code's two current wordings are the ones that mattered for
+	//     MS-121: "5-hour limit reached ∙ resets 3am" fell through to
+	//     agent_error.unknown, and "Claude AI usage limit reached|<epoch>" was
+	//     claimed by rule 4's "usage limit" and filed as a billing problem. The
+	//     generic witness is a limit paired with a stated reset; a real billing
+	//     quota ("insufficient balance", "credits") names no reset time.
+	//     Mirror these substrings into the MUL-1949 offline backfill SQL.
+	case containsAny(lower, usageWindowLimitWitnesses...),
+		strings.Contains(lower, "limit") && containsAny(lower, "resets", "reset at", "try again at"):
+		return ReasonAgentProviderCapacityOrRateLimit
+
 	// 4. Quota / billing. 402 / insufficient balance / monthly usage
 	//    limit / credits exhausted.
 	case httpQuotaCodeRe.MatchString(lower),
@@ -167,7 +182,9 @@ func Classify(rawError string) Reason {
 		):
 		return ReasonAgentProviderQuotaLimit
 
-	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
+	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit. Usage-window
+	//    limits reach this same reason one rule earlier (3b), because they have
+	//    to beat the quota bucket to get here.
 	case httpCapacityCodeRe.MatchString(lower),
 		containsAny(lower,
 			"rate limit",
@@ -376,6 +393,18 @@ var contextWindowExceededWitnesses = []string{
 	"context window limit",
 	"model_context_window_exceeded",
 	TerminalReasonPromptTooLong,
+}
+
+// usageWindowLimitWitnesses are provider messages that announce a temporary
+// usage WINDOW being exhausted, as opposed to a billing quota. Each one names a
+// window that reopens on its own ("5-hour limit", a session window, or Claude
+// Code's pipe-separated reset epoch in "Claude AI usage limit reached|<epoch>"),
+// so the run is retryable after a cooldown. Matched against pre-lowercased text.
+// Mirror these substrings into the MUL-1949 offline backfill SQL.
+var usageWindowLimitWitnesses = []string{
+	"session limit",
+	"5-hour limit",
+	"claude ai usage limit reached",
 }
 
 // legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
