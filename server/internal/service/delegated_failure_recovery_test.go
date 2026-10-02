@@ -1003,6 +1003,73 @@ func TestHandleFailedTasksFinalDelegatedFailureWakesCoordinator(t *testing.T) {
 	}
 }
 
+// insertOrphanedWorkerTask seeds a non-delegated task on the worker's issue
+// that orphan recovery has just failed with runtime_recovery.
+func (f *delegatedFailureFixture) insertOrphanedWorkerTask(t *testing.T, attempt, maxAttempts int32) db.AgentTaskQueue {
+	t.Helper()
+	ctx := context.Background()
+	var taskID pgtype.UUID
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+			originator_user_id, accountable_user_id, originator_source,
+			failure_reason, error, completed_at
+		)
+		VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6, $6, 'direct_human',
+			'runtime_recovery', 'daemon restarted while task was in flight', now())
+		RETURNING id`, f.worker, f.runtimeID, f.workerIssue, attempt, maxAttempts, f.userID).Scan(&taskID); err != nil {
+		t.Fatalf("seed orphaned task: %v", err)
+	}
+	task, err := db.New(f.pool).GetAgentTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("load orphaned task: %v", err)
+	}
+	return task
+}
+
+func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 2, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 0 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 0", retried)
+	}
+
+	var comments int
+	var content string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(content), '')
+		FROM comment
+		WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`, f.workerIssue, failed.ID).
+		Scan(&comments, &content); err != nil {
+		t.Fatalf("read failure comment: %v", err)
+	}
+	if comments != 1 || content != "daemon restarted while task was in flight" {
+		t.Fatalf("terminal failure comments = %d content %q, want one system comment with the task error", comments, content)
+	}
+}
+
+func TestHandleFailedTasksRetryPendingDoesNotCommentOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 1, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 1 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 1", retried)
+	}
+
+	var comments int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`,
+		f.workerIssue, failed.ID).Scan(&comments); err != nil {
+		t.Fatalf("count failure comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("retry-pending failure comments = %d, want 0", comments)
+	}
+}
+
 func TestFailTaskRetryPendingDoesNotWakeCoordinator(t *testing.T) {
 	f, svc := seedDelegatedFailureFixture(t)
 	ctx := context.Background()
