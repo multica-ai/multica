@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
+import { getShortcut, isPortalLayerShortcutTarget, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 
 // ---------------------------------------------------------------------------
@@ -275,6 +275,9 @@ export function useInPageFind(options: {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
       if (!shortcutMatchesEvent(getShortcut("findInIssue"), e)) return;
+      // Yield to an open dialog — it is portaled over the detail, so the bar
+      // would open behind it and yank focus into an invisible input.
+      if (isPortalLayerShortcutTarget(e.target)) return;
       if (!isElementVisible(containerRef.current)) return;
       e.preventDefault();
       setOpen(true);
