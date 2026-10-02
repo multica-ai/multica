@@ -43,11 +43,26 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--message":       blockedWithValue,  // prompt is set by daemon
 	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at registration via `openclaw agents add/update --model`
 	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
+
+	// Claude Code / Cursor protocol flags are invalid for `openclaw agent`.
+	// Keep them out of custom_args so a copied config cannot push OpenClaw back
+	// into help/usage output and the canonical no-parseable-output failure.
+	"-p":                  blockedWithValue,
+	"--output-format":     blockedWithValue,
+	"--input-format":      blockedWithValue,
+	"--json-input":        blockedWithValue,
+	"--workdir":           blockedWithValue,
+	"--add-dir":           blockedWithValue,
+	"--mcp-config":        blockedWithValue,
+	"--strict-mcp-config": blockedStandalone,
+	"--no-tui":            blockedStandalone,
+	"--dangerously-bypass-approvals-and-sandbox": blockedStandalone,
+	"--dangerously-skip-permissions":             blockedStandalone,
+	"--permission-mode":                          blockedWithValue,
 }
 
 // openclawBackend implements Backend by spawning `openclaw agent --message <prompt>
-// --output-format stream-json --yes` and reading streaming NDJSON events from
-// stdout — similar to the opencode backend.
+// --json` and reading JSON output from stdout.
 type openclawBackend struct {
 	cfg Config
 }
