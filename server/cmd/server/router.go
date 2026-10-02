@@ -2273,6 +2273,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
+					// Conversation monitoring: the agent owner or a workspace
+					// owner/admin can review every member's chats with this
+					// agent. Read-only, and it refuses agent actors so an agent
+					// cannot read other members' conversations. See
+					// internal/handler/agent_conversations.go.
+					r.Get("/chat-sessions", h.ListAgentChatSessions)
+					r.Get("/chat-sessions/{sessionId}/messages", h.ListAgentChatSessionMessages)
 				})
 			})
 

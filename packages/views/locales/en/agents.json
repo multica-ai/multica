@@ -263,6 +263,7 @@
   "tabs": {
     "overview": "Overview",
     "work": "Work",
+    "chats": "Chats",
     "capabilities": "Capabilities",
     "settings": "Settings",
     "general": "General",
@@ -283,6 +284,15 @@
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
     "discard_confirm": "Discard changes"
+  },
+  "chats": {
+    "title": "Conversations",
+    "show_archived": "Show archived",
+    "empty_list": "No conversations with this agent yet.",
+    "empty_transcript": "This conversation has no visible messages.",
+    "select_conversation": "Select a conversation to read it.",
+    "untitled": "Untitled",
+    "archived": "Archived"
   },
   "creation_studio": {
     "title": "Create an agent",

@@ -144,6 +144,11 @@ export function invalidateChatMessageQueries(
 ) {
   qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
   qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+  // Owner/admin conversation monitoring keys messages by agent + session, and
+  // the WS payloads carry only chat_session_id, so target the whole monitoring
+  // family. Only the one mounted monitoring query refetches; the rest are just
+  // marked stale.
+  qc.invalidateQueries({ queryKey: chatKeys.agentMessagesAll() });
 }
 
 // refetchPendingChatAggregate marks the current user's cross-session pending
@@ -693,6 +698,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
   qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
   qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
+  // Owner/admin monitoring transcripts are keyed without wsId (agent-messages),
+  // so recover them like the other per-session message caches.
+  qc.invalidateQueries({ queryKey: chatKeys.agentMessagesAll() });
   // A chat:cancel_finalized broadcast missed while disconnected is exactly
   // what the durable draft-restore rows exist for (#5219) — re-pull them so
   // a mounted composer recovers the prompt without a remount.
@@ -1544,7 +1552,15 @@ export function useRealtimeSync(
     };
     const invalidateSessionLists = () => {
       const id = getCurrentWsId();
-      if (id) qc.invalidateQueries({ queryKey: chatKeys.sessions(id) });
+      if (id) {
+        qc.invalidateQueries({ queryKey: chatKeys.sessions(id) });
+        // The owner/admin monitoring list is keyed under the same wsId prefix
+        // but a different suffix (agent-sessions), so the sessions() invalidate
+        // above does not reach it. Keep it fresh on session lifecycle events.
+        qc.invalidateQueries({
+          queryKey: [...chatKeys.all(id), "agent-sessions"],
+        });
+      }
     };
 
     const unsubChatMessage = ws.on("chat:message", (p) => {
@@ -1782,6 +1798,10 @@ export function useRealtimeSync(
       const id = getCurrentWsId();
       if (!id) return;
       applyChatSessionUpdatedToCache(qc, id, payload);
+      // The inline patch above only reaches the creator's own list. The
+      // owner/admin monitoring list is not creator-scoped, so invalidate it
+      // rather than fabricate a cross-member patch.
+      qc.invalidateQueries({ queryKey: [...chatKeys.all(id), "agent-sessions"] });
     });
 
     // chat:session_deleted fires after a hard delete. The originating tab has
@@ -1797,6 +1817,9 @@ export function useRealtimeSync(
         const drop = (old?: { id: string }[]) =>
           old?.filter((s) => s.id !== payload.chat_session_id);
         qc.setQueryData(chatKeys.sessions(id), drop);
+        qc.invalidateQueries({
+          queryKey: [...chatKeys.all(id), "agent-sessions"],
+        });
       }
       qc.removeQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });

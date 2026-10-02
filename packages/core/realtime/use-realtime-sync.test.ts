@@ -303,7 +303,7 @@ describe("applyChatSessionUpdatedToCache", () => {
 });
 
 describe("invalidateChatMessageQueries", () => {
-  it("invalidates both legacy and paged chat message caches", () => {
+  it("invalidates legacy, paged, and agent-monitoring message caches", () => {
     const qc = createQueryClient();
     const invalidate = vi.spyOn(qc, "invalidateQueries");
 
@@ -311,6 +311,7 @@ describe("invalidateChatMessageQueries", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messages(sessionId) });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messagesPage(sessionId) });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.agentMessagesAll() });
   });
 });
 

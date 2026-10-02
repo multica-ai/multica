@@ -1217,6 +1217,15 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.respondChatMessagesPage(w, r, session)
+}
+
+// respondChatMessagesPage writes one cursor page of a session's member-visible
+// transcript. Shared by the creator-facing handler above and the agent-owner
+// monitoring endpoint so both page, filter, and order identically.
+func (h *Handler) respondChatMessagesPage(w http.ResponseWriter, r *http.Request, session db.ChatSession) {
+	workspaceID := ctxWorkspaceID(r.Context())
+
 	limit, beforeCreatedAt, beforeID, err := parseChatMessagesPageParams(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

@@ -2278,6 +2278,123 @@ func (q *Queries) ListChatMessagesPageForChannelContext(ctx context.Context, arg
 	return items, nil
 }
 
+const listChatSessionsByAgent = `-- name: ListChatSessionsByAgent :many
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at,
+       CASE WHEN cs.status = 'archived' THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.role = 'assistant'
+                      AND m.created_at > cs.last_read_at)
+       END::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason,
+       COALESCE(lm.message_kind, '') AS last_message_kind
+FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason, message_kind
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = $1
+  AND cs.agent_id = $2
+  AND ($3::bool OR cs.status = 'active')
+  AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR lm.created_at IS NOT NULL
+  )
+ORDER BY COALESCE(lm.created_at, cs.updated_at) DESC
+`
+
+type ListChatSessionsByAgentParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	IncludeArchived bool        `json:"include_archived"`
+}
+
+type ListChatSessionsByAgentRow struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	CreatorID                pgtype.UUID        `json:"creator_id"`
+	Title                    string             `json:"title"`
+	SessionID                pgtype.Text        `json:"session_id"`
+	WorkDir                  pgtype.Text        `json:"work_dir"`
+	Status                   string             `json:"status"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	UnreadSince              pgtype.Timestamptz `json:"unread_since"`
+	RuntimeID                pgtype.UUID        `json:"runtime_id"`
+	LastReadAt               pgtype.Timestamptz `json:"last_read_at"`
+	IsAgentIntro             bool               `json:"is_agent_intro"`
+	PinnedAt                 pgtype.Timestamptz `json:"pinned_at"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	ExplicitlyCreatedAt      pgtype.Timestamptz `json:"explicitly_created_at"`
+	UnreadCount              int32              `json:"unread_count"`
+	LastMessageContent       string             `json:"last_message_content"`
+	LastMessageRole          string             `json:"last_message_role"`
+	LastMessageAt            pgtype.Timestamptz `json:"last_message_at"`
+	LastMessageFailureReason pgtype.Text        `json:"last_message_failure_reason"`
+	LastMessageKind          string             `json:"last_message_kind"`
+}
+
+// Monitor projection: every member's sessions with ONE agent, for the agent
+// owner or a workspace owner/admin. Unlike ListChatSessionsByCreator this is
+// not scoped to a creator, so it drops the pinned ordering (a pin is the
+// creator's private list preference, not a property of the conversation) and
+// orders purely by recent activity. Archived sessions are included only when
+// @include_archived, and the same "has a real message or was explicitly
+// created" guard as ListAllChatSessionsByCreator keeps command-only channel
+// sessions out. Unread is relative to each session's own creator cursor and is
+// informational here — the viewer is never the creator.
+func (q *Queries) ListChatSessionsByAgent(ctx context.Context, arg ListChatSessionsByAgentParams) ([]ListChatSessionsByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listChatSessionsByAgent, arg.WorkspaceID, arg.AgentID, arg.IncludeArchived)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatSessionsByAgentRow{}
+	for rows.Next() {
+		var i ListChatSessionsByAgentRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.CreatorID,
+			&i.Title,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UnreadSince,
+			&i.RuntimeID,
+			&i.LastReadAt,
+			&i.IsAgentIntro,
+			&i.PinnedAt,
+			&i.ProjectID,
+			&i.ExplicitlyCreatedAt,
+			&i.UnreadCount,
+			&i.LastMessageContent,
+			&i.LastMessageRole,
+			&i.LastMessageAt,
+			&i.LastMessageFailureReason,
+			&i.LastMessageKind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChatSessionsByCreator = `-- name: ListChatSessionsByCreator :many
 SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at,
        (SELECT count(*) FROM chat_message m

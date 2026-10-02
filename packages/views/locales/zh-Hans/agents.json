@@ -253,6 +253,7 @@
   "tabs": {
     "overview": "概览",
     "work": "工作",
+    "chats": "对话",
     "capabilities": "能力",
     "settings": "设置",
     "general": "通用",
@@ -273,6 +274,15 @@
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
     "discard_confirm": "放弃修改"
+  },
+  "chats": {
+    "title": "对话记录",
+    "show_archived": "显示已归档",
+    "empty_list": "该智能体还没有任何对话。",
+    "empty_transcript": "这条对话没有可见的消息。",
+    "select_conversation": "选择一条对话查看内容。",
+    "untitled": "未命名",
+    "archived": "已归档"
   },
   "creation_studio": {
     "title": "创建智能体",

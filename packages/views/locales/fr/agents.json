@@ -263,6 +263,7 @@
   "tabs": {
     "overview": "Vue d'ensemble",
     "work": "Travail",
+    "chats": "Conversations",
     "capabilities": "Capacités",
     "settings": "Paramètres",
     "general": "Général",
@@ -283,6 +284,15 @@
     "discard_dialog_description": "Cet onglet contient des modifications non enregistrées. Les quitter maintenant les abandonnera.",
     "discard_keep": "Continuer à modifier",
     "discard_confirm": "Abandonner les modifications"
+  },
+  "chats": {
+    "title": "Conversations",
+    "show_archived": "Afficher les archivées",
+    "empty_list": "Aucune conversation avec cet agent pour l'instant.",
+    "empty_transcript": "Cette conversation n'a aucun message visible.",
+    "select_conversation": "Sélectionnez une conversation pour la lire.",
+    "untitled": "Sans titre",
+    "archived": "Archivée"
   },
   "creation_studio": {
     "title": "Créer un agent",

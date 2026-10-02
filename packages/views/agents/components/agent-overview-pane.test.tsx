@@ -53,6 +53,9 @@ vi.mock("./tabs/mcp-config-tab", () => ({
 vi.mock("./tabs/integrations-tab", () => ({
   IntegrationsTab: () => <div>integrations-tab</div>,
 }));
+vi.mock("./tabs/chats-tab", () => ({
+  AgentChatsTab: () => <div>agent-chats-tab</div>,
+}));
 vi.mock("../../common/actor-issues-panel", () => ({
   ActorIssuesPanel: () => <div>actor-issues-panel</div>,
 }));
@@ -284,6 +287,31 @@ describe("AgentOverviewPane Environment tab visibility", () => {
     expect(
       screen.queryByRole("tab", { name: /^Environment$/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Chats tab visibility", () => {
+  it("shows the Chats tab to someone who can manage the agent", () => {
+    renderPane([makeRuntime("claude")]);
+    expect(
+      screen.getByRole("tab", { name: /^Chats$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Chats tab from users who cannot manage the agent", () => {
+    // Conversation monitoring is a privileged read of every member's private
+    // chats; the endpoints admit only the agent owner or a workspace
+    // owner/admin, so anyone else must not be offered a dead 403 entry point.
+    renderPane([makeRuntime("claude")], { canEdit: false });
+    expect(
+      screen.queryByRole("tab", { name: /^Chats$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the monitoring surface when the Chats tab is opened", () => {
+    renderPane([makeRuntime("claude")]);
+    fireEvent.click(screen.getByRole("tab", { name: /^Chats$/i }));
+    expect(screen.getByText("agent-chats-tab")).toBeInTheDocument();
   });
 });
 

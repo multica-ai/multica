@@ -3793,6 +3793,45 @@ export class ApiClient {
     }
   }
 
+  // Conversation monitoring (agent owner / workspace admin). Every member's
+  // sessions with one agent; served by GET /api/agents/:id/chat-sessions.
+  async listAgentChatSessions(
+    agentId: string,
+    params?: { status?: "all" },
+  ): Promise<ChatSession[]> {
+    const query = params?.status === "all" ? "?status=all" : "";
+    const raw: unknown = await this.fetch(
+      `/api/agents/${agentId}/chat-sessions${query}`,
+    );
+    return parseWithFallback(raw, ChatSessionListSchema, EMPTY_CHAT_SESSION_LIST, {
+      endpoint: "GET /api/agents/:id/chat-sessions",
+    });
+  }
+
+  async listAgentChatSessionMessages(
+    agentId: string,
+    sessionId: string,
+    params: { before?: { created_at: string; id: string } | null; limit?: number } = {},
+  ): Promise<ChatMessagesPage> {
+    const limit = params.limit ?? 50;
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (params.before) {
+      query.set("before_created_at", params.before.created_at);
+      query.set("before_id", params.before.id);
+    }
+    const raw: unknown = await this.fetch(
+      `/api/agents/${agentId}/chat-sessions/${sessionId}/messages?${query.toString()}`,
+    );
+    return parseWithFallback(
+      raw,
+      ChatMessagesPageSchema,
+      { messages: [], limit, has_more: false, next_cursor: null },
+      {
+        endpoint: "GET /api/agents/:id/chat-sessions/:sessionId/messages",
+      },
+    );
+  }
+
   async sendChatMessage(
     sessionId: string,
     content: string,

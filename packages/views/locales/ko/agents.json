@@ -253,6 +253,7 @@
   "tabs": {
     "overview": "개요",
     "work": "작업",
+    "chats": "대화",
     "capabilities": "기능",
     "settings": "설정",
     "general": "일반",
@@ -863,6 +864,15 @@
     "section_columns": "열",
     "section_owner": "소유자",
     "section_model": "모델"
+  },
+  "chats": {
+    "title": "대화 기록",
+    "show_archived": "보관된 항목 표시",
+    "empty_list": "이 에이전트와의 대화가 아직 없습니다.",
+    "empty_transcript": "이 대화에는 표시할 메시지가 없습니다.",
+    "select_conversation": "내용을 보려면 대화를 선택하세요.",
+    "untitled": "제목 없음",
+    "archived": "보관됨"
   },
   "creation_studio": {
     "title": "에이전트 만들기",
