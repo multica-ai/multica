@@ -3,7 +3,7 @@
     "label": "{{name}} run",
     "stop": "Stop",
     "stopping": "Stopping...",
-    "queued": "Waiting for an available agent.",
+    "queued": "Waiting for a runtime to claim this run.",
     "starting": "Preparing the agent session.",
     "waiting_directory": "Waiting for another run to release the working directory.",
     "thinking": "Thinking",
