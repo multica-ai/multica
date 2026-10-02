@@ -624,29 +624,36 @@ func (b *opencodeBackend) handleToolUseEvent(event opencodeEvent, ch chan<- Mess
 	if event.Part.State != nil && event.Part.State.Input != nil {
 		_ = json.Unmarshal(event.Part.State.Input, &input)
 	}
+	state := event.Part.State
+	var startedAt, endedAt time.Time
+	if state != nil && state.Time != nil && state.Time.Start > 0 && state.Time.End >= state.Time.Start {
+		startedAt = time.UnixMilli(state.Time.Start).UTC()
+		endedAt = time.UnixMilli(state.Time.End).UTC()
+	}
 
 	// Emit the tool-use message.
 	trySend(ch, Message{
-		Type:   MessageToolUse,
-		Tool:   event.Part.Tool,
-		CallID: event.Part.CallID,
-		Input:  input,
+		Type:      MessageToolUse,
+		Tool:      event.Part.Tool,
+		CallID:    event.Part.CallID,
+		Input:     input,
+		StartedAt: startedAt,
 	})
 
 	// Pair every terminal tool-use with a tool-result. The daemon uses this
 	// pair to track in-flight tools, so dropping error results would leave its
 	// counter permanently elevated and suppress the normal idle watchdog.
-	state := event.Part.State
 	if state != nil && (state.Status == "completed" || state.Status == "error") {
 		outputStr := extractToolOutput(state.Output)
 		if state.Status == "error" && state.Error != "" {
 			outputStr = state.Error
 		}
 		trySend(ch, Message{
-			Type:   MessageToolResult,
-			Tool:   event.Part.Tool,
-			CallID: event.Part.CallID,
-			Output: outputStr,
+			Type:    MessageToolResult,
+			Tool:    event.Part.Tool,
+			CallID:  event.Part.CallID,
+			Output:  outputStr,
+			EndedAt: endedAt,
 		})
 	}
 }
@@ -808,10 +815,16 @@ type opencodeCacheTokens struct {
 
 // opencodeToolState represents the state of a tool invocation.
 type opencodeToolState struct {
-	Status string          `json:"status,omitempty"`
-	Input  json.RawMessage `json:"input,omitempty"`
-	Output any             `json:"output,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	Status string            `json:"status,omitempty"`
+	Input  json.RawMessage   `json:"input,omitempty"`
+	Output any               `json:"output,omitempty"`
+	Error  string            `json:"error,omitempty"`
+	Time   *opencodeToolTime `json:"time,omitempty"`
+}
+
+type opencodeToolTime struct {
+	Start int64 `json:"start,omitempty"`
+	End   int64 `json:"end,omitempty"`
 }
 
 // opencodeError represents an error event from opencode.
