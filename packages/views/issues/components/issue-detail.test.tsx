@@ -2511,6 +2511,55 @@ describe("IssueDetail (shared)", () => {
         ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
       });
     });
+
+    it("scrolls to the highlighted comment on mobile layout", async () => {
+      mockViewport.isMobile = true;
+      try {
+        renderIssueDetailWithHighlight("comment-2");
+
+        await waitFor(() => {
+          expect(document.getElementById("comment-comment-2")).not.toBeNull();
+        });
+
+        await waitFor(() => {
+          expect(
+            hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+          ).toBe(true);
+        });
+      } finally {
+        mockViewport.isMobile = false;
+      }
+    });
+
+    it("resets landing guard if unmounted before centering settles so subsequent mount lands", async () => {
+      const queryClient = createTestQueryClient();
+      const { unmount } = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightCommentId="comment-2" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      unmount();
+
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightCommentId="comment-2" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-comment-2")).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+        ).toBe(true);
+      });
+    });
   });
 
   it("marks a reply-resolved thread as resolved on the quick-jump rail", async () => {
