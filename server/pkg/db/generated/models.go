@@ -287,6 +287,7 @@ type AutopilotRun struct {
 	WebhookDeliveryID  pgtype.UUID        `json:"webhook_delivery_id"`
 	QuotaReservationID pgtype.UUID        `json:"quota_reservation_id"`
 	ReasonCode         pgtype.Text        `json:"reason_code"`
+	WorkIssueID        pgtype.UUID        `json:"work_issue_id"`
 }
 
 type AutopilotSubscriber struct {

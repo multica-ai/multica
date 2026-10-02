@@ -6,6 +6,7 @@ import type {
   AgentBuilderSessionSummary,
   Attachment,
   AutopilotRun,
+  ListAutopilotRunsResponse,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -2478,6 +2479,8 @@ export const AutopilotRunSchema = z.object({
   trigger_payload: z.unknown().default(null),
   result: z.unknown().default(null),
   created_at: z.string().default(""),
+  task_status: z.string().nullable().catch(null).default(null),
+  work_issue_id: z.string().nullable().catch(null).default(null),
 }).loose();
 
 export const AutopilotQuotaUsageSchema = z.object({
@@ -2507,6 +2510,21 @@ export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   trigger_payload: null,
   result: null,
   created_at: "",
+  task_status: null,
+  work_issue_id: null,
+};
+
+// Run history (GET /api/autopilots/:id/runs). The run list derives the
+// queued/running distinction and the working-on issue from task_status and
+// work_issue_id, which older servers omit.
+export const ListAutopilotRunsResponseSchema = z.object({
+  runs: z.array(AutopilotRunSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE: ListAutopilotRunsResponse = {
+  runs: [],
+  total: 0,
 };
 
 // Cron preview: the server is the authority on the next occurrences. No

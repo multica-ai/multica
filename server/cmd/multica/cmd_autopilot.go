@@ -68,6 +68,15 @@ var autopilotRunsCmd = &cobra.Command{
 	RunE:  runAutopilotRuns,
 }
 
+var autopilotLinkIssueCmd = &cobra.Command{
+	Use:   "link-issue <issue>",
+	Short: "Record the issue an autopilot run is working on",
+	Long: "Record the issue an autopilot run is working on, so the run history shows it.\n" +
+		"Run from inside an autopilot run, --run defaults to $MULTICA_AUTOPILOT_RUN_ID.",
+	Args: exactArgs(1),
+	RunE: runAutopilotLinkIssue,
+}
+
 var autopilotTriggerAddCmd = &cobra.Command{
 	Use:   "trigger-add <autopilot-id>",
 	Short: "Add a schedule or webhook trigger to an autopilot",
@@ -111,6 +120,7 @@ func init() {
 	autopilotCmd.AddCommand(autopilotDeleteCmd)
 	autopilotCmd.AddCommand(autopilotTriggerCmd)
 	autopilotCmd.AddCommand(autopilotRunsCmd)
+	autopilotCmd.AddCommand(autopilotLinkIssueCmd)
 	autopilotCmd.AddCommand(autopilotTriggerAddCmd)
 	autopilotCmd.AddCommand(autopilotTriggerListCmd)
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
@@ -158,6 +168,10 @@ func init() {
 	autopilotRunsCmd.Flags().Int("limit", 20, "Max number of runs to return")
 	autopilotRunsCmd.Flags().Int("offset", 0, "Pagination offset")
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// link-issue
+	autopilotLinkIssueCmd.Flags().String("run", "", "Autopilot run ID (default: $MULTICA_AUTOPILOT_RUN_ID)")
+	autopilotLinkIssueCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// trigger-add — supports schedule and webhook
 	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule or webhook")
@@ -665,6 +679,47 @@ func autopilotRunStarted(status string) bool {
 	return status == "issue_created" || status == "running"
 }
 
+// autopilotRunDisplayStatus reports a running run whose task has not been
+// claimed yet as "queued": the server marks a run_only run running as soon as
+// its task is enqueued, even while it waits behind the agent's concurrency cap.
+func autopilotRunDisplayStatus(run map[string]any) string {
+	status := strVal(run, "status")
+	if status == "running" && strVal(run, "task_status") == "queued" {
+		return "queued"
+	}
+	return status
+}
+
+func runAutopilotLinkIssue(cmd *cobra.Command, args []string) error {
+	runID, _ := cmd.Flags().GetString("run")
+	if runID == "" {
+		runID = os.Getenv("MULTICA_AUTOPILOT_RUN_ID")
+	}
+	if runID == "" {
+		return fmt.Errorf("--run is required outside an autopilot run (MULTICA_AUTOPILOT_RUN_ID is not set)")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var run map[string]any
+	body := map[string]string{"issue_id": args[0]}
+	if err := client.PutJSON(ctx, "/api/autopilot-runs/"+url.PathEscape(runID)+"/work-issue", body, &run); err != nil {
+		return fmt.Errorf("link issue: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, run)
+	}
+	fmt.Printf("Run %s is working on issue %s\n", strVal(run, "id"), strVal(run, "work_issue_id"))
+	return nil
+}
+
 func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -704,14 +759,15 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, resp)
 	}
 
-	headers := []string{"ID", "SOURCE", "STATUS", "ISSUE", "TRIGGERED_AT", "COMPLETED_AT"}
+	headers := []string{"ID", "SOURCE", "STATUS", "ISSUE", "WORK_ISSUE", "TRIGGERED_AT", "COMPLETED_AT"}
 	rows := make([][]string, 0, len(resp.Runs))
 	for _, r := range resp.Runs {
 		rows = append(rows, []string{
 			strVal(r, "id"),
 			strVal(r, "source"),
-			strVal(r, "status"),
+			autopilotRunDisplayStatus(r),
 			strVal(r, "issue_id"),
+			strVal(r, "work_issue_id"),
 			strVal(r, "triggered_at"),
 			strVal(r, "completed_at"),
 		})
