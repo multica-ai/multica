@@ -461,10 +461,9 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 // TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback
 // pins MUL-4024's direct-mention gap:
 //
-//   - A member explicitly @mentions the issue's assigned squad leader by agent
-//     id, which queues a generic mention task for L (is_leader_task=false,
-//     squad_id=NULL).
-//   - L posts a plain reply while running that mention task.
+//   - The issue's assigned squad leader L runs a generic task on it
+//     (is_leader_task=false, squad_id=NULL).
+//   - L posts a plain reply while running that generic task.
 //   - The assigned-squad fallback must not treat that generic mention task as a
 //     same-squad worker result and queue L again as the leader.
 func TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback(t *testing.T) {
@@ -519,22 +518,24 @@ func TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback(
 		return n
 	}
 
+	// A member @mention of L on its own squad's issue now queues a leader task
+	// (#8875), so the generic task L runs here is seeded directly. The member
+	// comment only mentions a member, which routes to no agent.
 	trigger := postMemberComment(map[string]any{
-		"content": "[@Leader](mention://agent/" + fx.LeaderID + ") can you check this?",
+		"content": "[@Member](mention://member/" + testUserID + ") can you check this?",
 	})
 
+	var leaderRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID); err != nil {
+		t.Fatalf("load leader runtime: %v", err)
+	}
 	var mentionTaskID string
 	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent_task_queue
-		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-		  AND is_leader_task = FALSE AND squad_id IS NULL
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, issueID, fx.LeaderID).Scan(&mentionTaskID); err != nil {
-		t.Fatalf("load leader mention task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, mentionTaskID); err != nil {
-		t.Fatalf("mark mention task running: %v", err)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task)
+		VALUES ($1, $2, $3, 'running', FALSE)
+		RETURNING id
+	`, fx.LeaderID, leaderRuntimeID, issueID).Scan(&mentionTaskID); err != nil {
+		t.Fatalf("seed generic task: %v", err)
 	}
 
 	postAgentComment(mentionTaskID, map[string]any{
