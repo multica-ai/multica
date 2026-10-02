@@ -3,15 +3,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, GitBranch } from "lucide-react";
 import { projectResourcesOptions } from "@multica/core/projects";
-import type { LocalDirectoryResourceRef, ProjectResource } from "@multica/core/types";
+import type { Agent, LocalDirectoryResourceRef, ProjectResource } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isAgentRuntimeBound } from "@multica/core/agents";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { useLocalDaemonStatus } from "../../platform";
 import { useT } from "../../i18n";
 import { localDirectoryLabel } from "./local-directory-label";
 
 /**
  * Banner shown at the top of the issue's Activity section when the
- * project is pinned to a `local_directory` resource on **this** daemon.
+ * project is pinned to a `local_directory` resource on the assigned agent's
+ * daemon (or this daemon when no agent is assigned).
  * Tells the user what starting an agent here will actually do to that
  * directory, which differs by the resource's execution mode:
  *
@@ -27,16 +30,28 @@ import { localDirectoryLabel } from "./local-directory-label";
  * resources read-only in the sidebar but no Activity-section hint.
  *
  * SSR-safe: the underlying hook reads `window.daemonAPI` defensively, so
- * server renders return null.
+ * server renders return null. An unresolved agent runtime does not fall back
+ * to the viewer's directory.
  */
 export function LocalDirectoryHint({
   projectId,
+  assignedAgent,
 }: {
   projectId: string | null | undefined;
+  // undefined means no agent assignee; null means the assigned agent is unresolved.
+  assignedAgent?: Pick<Agent, "runtime_id" | "runtime_bound"> | null;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const daemon = useLocalDaemonStatus();
+  const runtimeId = assignedAgent && isAgentRuntimeBound(assignedAgent) ? assignedAgent.runtime_id : null;
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: Boolean(projectId && daemon.daemonId && runtimeId),
+  });
+  const targetDaemonId = assignedAgent !== undefined
+    ? runtimes.find((runtime) => runtime.id === runtimeId)?.daemon_id
+    : daemon.daemonId;
   const { data: resources = [] } = useQuery({
     ...projectResourcesOptions(wsId, projectId ?? ""),
     enabled: Boolean(projectId),
@@ -44,6 +59,7 @@ export function LocalDirectoryHint({
 
   if (!projectId) return null;
   if (!daemon.daemonId) return null;
+  if (!targetDaemonId) return null;
 
   const matches: Array<ProjectResource & { resource_ref: LocalDirectoryResourceRef }> =
     resources
@@ -51,7 +67,7 @@ export function LocalDirectoryHint({
         (r): r is ProjectResource & { resource_ref: LocalDirectoryResourceRef } =>
           r.resource_type === "local_directory",
       )
-      .filter((r) => r.resource_ref.daemon_id === daemon.daemonId);
+      .filter((r) => r.resource_ref.daemon_id === targetDaemonId);
 
   if (matches.length === 0) return null;
 

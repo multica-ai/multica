@@ -3765,7 +3765,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
             </div>
 
-            <LocalDirectoryHint projectId={issue?.project_id} />
+            <LocalDirectoryHint
+              projectId={issue.project_id}
+              assignedAgent={issue.assignee_type === "agent"
+                ? agents.find((agent) => agent.id === issue.assignee_id) ?? null
+                : undefined}
+            />
 
             {/* The "agent is working" live signal now lives in the header
                 (IssueAgentHeaderChip) so it stays in one fixed place and
