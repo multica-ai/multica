@@ -1131,6 +1131,24 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 	}
 }
 
+// TestSkillsDirPathPrime pins a fix found in a post-implementation audit:
+// skillsDirPath had no "prime" case and fell through to the
+// .agent_context/skills/ default, which prime-agent's own skill discovery
+// (package-manager.ts's projectDirs.skills) never scans. The path is
+// workDir-relative — not the home-relative ~/.prime/agent/skills a first
+// audit pass proposed — to keep skill binding isolated per task, matching
+// every other case in skillsDirPath and Prime's own project-scoped skill
+// directory (CONFIG_DIR_NAME is ".prime/agent").
+func TestSkillsDirPathPrime(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	got := skillsDirPath(workDir, "prime")
+	want := filepath.Join(workDir, ".prime", "agent", "skills")
+	if got != want {
+		t.Fatalf("skillsDirPath(workDir, \"prime\") = %q, want %q", got, want)
+	}
+}
+
 // TestReuseSkillRefreshIsCanonicalAcrossProviders exercises the reuse skill
 // rollback (removeReusedManagedSkillDirs + CleanupSidecars + writeContextFiles
 // — the exact sequence Reuse runs) directly across the file-based providers,
@@ -1140,7 +1158,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", "qwen", ""} {
+	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", "qwen", "prime", ""} {
 		provider := provider
 		name := provider
 		if name == "" {
