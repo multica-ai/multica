@@ -35,3 +35,15 @@
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
 }
+
+/* Auto-layout tables measure a chip's non-wrapping title before its percentage
+   width cap can resolve. Keep references compact here; IssueHoverCard still
+   exposes the full title. Prose and editable content keep the usual chip. */
+[data-rich-content] :is(th, td) span.issue-mention {
+  flex-wrap: wrap;
+  margin-inline: 0;
+}
+
+[data-rich-content] :is(th, td) .issue-mention-title {
+  display: none;
+}
