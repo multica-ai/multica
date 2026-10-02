@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -24,28 +25,50 @@ func isTerminal(f *os.File) bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// colorEnabled resolves whether ANSI color should be emitted to a log sink.
+//
+// LOG_COLOR is an optional boolean override, parsed with strconv.ParseBool like
+// the server's other boolean env vars. When it is unset, color follows term
+// (whether the sink is an interactive terminal). The override exists because a
+// container runtime may allocate a TTY, which would otherwise make a redirected
+// log stream look interactive and leak escape sequences into log collectors;
+// such a deployment sets LOG_COLOR=false for plain text. An unparsable value is
+// ignored with a warning so a typo cannot silently flip the output.
+func colorEnabled(raw string, term bool) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return term
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("invalid env var, using auto", "name", "LOG_COLOR", "value", raw)
+		return term
+	}
+	return v
+}
+
 // Init initializes the global slog logger. Colors are enabled when stderr
-// is a terminal and disabled otherwise. Reads LOG_LEVEL env var (debug,
-// info, warn, error). Default: debug.
+// is a terminal and disabled otherwise, unless LOG_COLOR overrides that.
+// Reads LOG_LEVEL env var (debug, info, warn, error). Default: debug.
 func Init() {
 	level := parseLevel(os.Getenv("LOG_LEVEL"))
 	handler := tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      level,
 		TimeFormat: "15:04:05.000",
-		NoColor:    !isTerminal(os.Stderr),
+		NoColor:    !colorEnabled(os.Getenv("LOG_COLOR"), isTerminal(os.Stderr)),
 	})
 	slog.SetDefault(slog.New(handler))
 }
 
 // NewLogger creates a named slog logger. Colors follow the same
-// TTY-detection rule as Init. Useful for standalone processes (daemon,
-// migrate) that want a component prefix.
+// TTY-detection and LOG_COLOR override as Init. Useful for standalone
+// processes (daemon, migrate) that want a component prefix.
 func NewLogger(component string) *slog.Logger {
 	level := parseLevel(os.Getenv("LOG_LEVEL"))
 	handler := tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      level,
 		TimeFormat: "15:04:05.000",
-		NoColor:    !isTerminal(os.Stderr),
+		NoColor:    !colorEnabled(os.Getenv("LOG_COLOR"), isTerminal(os.Stderr)),
 	})
 	return slog.New(handler).With("component", component)
 }
