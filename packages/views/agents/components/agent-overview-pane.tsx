@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentRuntime,
-  MemberWithUser,
-} from "@multica/core/types";
+import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
@@ -36,6 +32,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
+import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentAccessSettings } from "./agent-access-settings";
@@ -98,9 +95,7 @@ const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
   { id: "settings", labelKey: "settings" },
 ];
 
-const CAPABILITY_IDS = new Set<DetailTab>(
-  CAPABILITY_TABS.map((tab) => tab.id),
-);
+const CAPABILITY_IDS = new Set<DetailTab>(CAPABILITY_TABS.map((tab) => tab.id));
 const SETTINGS_IDS = new Set<DetailTab>(SETTINGS_TABS.map((tab) => tab.id));
 const DETAIL_VIEWS = new Set<DetailTab>([
   "overview",
@@ -227,7 +222,11 @@ export function AgentOverviewPane({
         // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
         // The server stays the boundary; this only removes a dead entry point.
         if (tab.id === "env") return canEdit;
-        if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
+        if (tab.id === "runtime_config")
+          return (
+            runtime?.provider === "openclaw" ||
+            runtime?.provider === "qoder_cloud"
+          );
         return true;
       }),
     [canEdit, runtime?.provider],
@@ -323,7 +322,8 @@ export function AgentOverviewPane({
   const activeSecondaryTab = secondaryTabs.find(
     (tab) => tab.id === effectiveView,
   );
-  const isSecondaryLayout = secondaryTabs.length > 0 && activeSecondaryTab != null;
+  const isSecondaryLayout =
+    secondaryTabs.length > 0 && activeSecondaryTab != null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -510,13 +510,22 @@ export function AgentOverviewPane({
                       onDirtyChange={setActiveDirty}
                     />
                   )}
-                  {effectiveView === "runtime_config" && (
-                    <RuntimeConfigTab
-                      agent={agent}
-                      onSave={(updates) => onUpdate(agent.id, updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  )}
+                  {effectiveView === "runtime_config" &&
+                    (runtime?.provider === "qoder_cloud" ? (
+                      <QoderAgentTab
+                        canEdit={canEdit}
+                        key={agent.id}
+                        agent={agent}
+                        onSave={(updates) => onUpdate(agent.id, updates)}
+                        onDirtyChange={setActiveDirty}
+                      />
+                    ) : (
+                      <RuntimeConfigTab
+                        agent={agent}
+                        onSave={(updates) => onUpdate(agent.id, updates)}
+                        onDirtyChange={setActiveDirty}
+                      />
+                    ))}
                 </div>
               </div>
             </section>

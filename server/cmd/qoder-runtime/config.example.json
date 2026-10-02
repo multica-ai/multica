@@ -1,0 +1,13 @@
+{
+  "multica_url": "http://localhost:8080",
+  "multica_token": "",
+  "workspace_id": "",
+  "qoder_url": "",
+  "qoder_token": "",
+  "environment_id": "",
+  "state_dir": "/var/lib/multica-qoder",
+  "name": "Qoder Cloud Agent",
+  "github_token_files": {
+    "https://github.com/OWNER/REPO": "/path/to/private/github-token"
+  }
+}

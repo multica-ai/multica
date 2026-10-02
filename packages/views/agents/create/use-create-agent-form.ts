@@ -148,6 +148,7 @@ export function useCreateAgentForm(options?: {
     draftReady:
       selectedRuntime != null &&
       isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
+      (selectedRuntime.provider !== "qoder_cloud" || !!draft.qoderAgentId) &&
       isDraftDescriptionWithinLimit(draft.description) &&
       !accessInvalid &&
       !conversationStartersInvalid,

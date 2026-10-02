@@ -7,6 +7,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica 负责记录和协调工作，连接的电脑负责执行。电脑上的**守护进程**（daemon）领取运行，再调用本机安装的 AI 编程工具。
 
+## Qoder Cloud Agent 远端运行时
+
+Qoder Cloud Agent 通过远端会话执行分配的任务。Multica 服务端管理桥接进程，复用现有守护进程任务协议，无需用户启动本地守护进程。
+
+自托管部署需在服务端设置 `MULTICA_VCS_SECRET_KEY` 和持久化的 `MULTICA_QODER_STATE_DIR`。进入**运行时 → 添加远端运行时**，选择 Qoder Cloud Agent 并配置 QCA PAT。页面自动加载可用环境，只有一个时默认选中。保存并启动后，添加关联已有 QCA Agent 的 Multica 智能体。
+
+连接凭证加密保存，在工作区内共享。管理员管理连接，成员可以选择可访问的 QCA 智能体。GitHub 凭证按仓库 URL 绑定，项目选择仓库和起始分支；创建编码会话时，仓库凭证会传给 QCA。保存后的 PAT 不会返回浏览器。
+
+首版支持任务运行、进度同步、取消和基于持久化记录的恢复。模型、工具和 skill 在 Qoder 中配置；暂不支持交互聊天、本地目录、附件，也不支持从 Multica 创建远端 QCA 智能体。运行时页面分别展示远端运行时和电脑。
+
+独立桥接进程的配置与限制见 [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)。
+
+
 ## 概念区分
 
 - **守护进程**是运行在一台电脑上的 Multica 后台程序。它负责连接服务器、发现本机工具、领取运行和回传结果。
