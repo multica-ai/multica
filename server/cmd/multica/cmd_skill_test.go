@@ -58,7 +58,7 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 }
 
 func TestRunSkillImportJsonTreatsDuplicateAsConflictResult(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
@@ -127,7 +127,7 @@ func TestRunSkillImportJsonTreatsDuplicateAsConflictResult(t *testing.T) {
 }
 
 func TestRunSkillImportSendsOnConflictAndPrintsStructuredResult(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
@@ -475,7 +475,7 @@ func TestRunSkillInlineEmptyContentKeepsExistingBehavior(t *testing.T) {
 }
 
 func TestRunSkillRefreshPostsToRefreshEndpointAndPrintsTable(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
@@ -520,7 +520,7 @@ func TestRunSkillRefreshPostsToRefreshEndpointAndPrintsTable(t *testing.T) {
 }
 
 func TestRunSkillRefreshJsonPrintsSkill(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 
@@ -604,7 +604,7 @@ func TestRunSkillGetAsksForMetadataUnlessContentRequested(t *testing.T) {
 		{"--with-content", true, "include=content"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			redirectTestHome(t, t.TempDir())
 			var gotQuery string
 			srv := newSkillQueryCaptureServer(t, "/api/skills/skill-123", &gotQuery, map[string]any{
 				"id":   "skill-123",
@@ -634,7 +634,7 @@ func TestRunSkillFilesListAsksForMetadataUnlessContentRequested(t *testing.T) {
 		{"--with-content", true, "include=content"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			redirectTestHome(t, t.TempDir())
 			var gotQuery string
 			srv := newSkillQueryCaptureServer(t, "/api/skills/skill-123/files", &gotQuery, []any{})
 			setSkillServerEnv(t, srv.URL)
@@ -655,7 +655,7 @@ func TestRunSkillFilesListAsksForMetadataUnlessContentRequested(t *testing.T) {
 // strVal would print a 1.2MB file as "1.234567e+06" — JSON numbers decode as
 // float64 — which is unreadable at exactly the sizes that matter.
 func TestRunSkillFilesListRendersReadableSizes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	var gotQuery string
 	srv := newSkillQueryCaptureServer(t, "/api/skills/skill-123/files", &gotQuery, []any{
 		map[string]any{"id": "f1", "path": "reference.md", "size": 1234567, "content_hash": "abc"},
@@ -691,7 +691,7 @@ func newSkillLabelTestCmd(action string) *cobra.Command {
 }
 
 func TestRunSkillLabelCommands(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "test-token")
 

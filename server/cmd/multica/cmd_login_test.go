@@ -20,7 +20,7 @@ func newLoginTestCmd() *cobra.Command {
 }
 
 func TestResolveLoginTokenServerURLDefaultsToCloud(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 
 	if got := resolveLoginTokenServerURL(newLoginTestCmd()); got != defaultCloudServerURL {
@@ -30,7 +30,7 @@ func TestResolveLoginTokenServerURLDefaultsToCloud(t *testing.T) {
 
 func TestResolveLoginTokenServerURLPrefersConfiguredServer(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
 	// A stale host/container value is not proof that this process is running
 	// inside a daemon task. Login still needs the selected human profile.
@@ -53,7 +53,7 @@ func TestResolveLoginTokenServerURLPrefersConfiguredServer(t *testing.T) {
 
 func TestRunLoginTokenAutoWatchesDiscoveredWorkspaces(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "")
 	t.Setenv("MULTICA_WORKSPACE_ID", "")
 	// Regression for #6779: older container setups may leave this daemon-

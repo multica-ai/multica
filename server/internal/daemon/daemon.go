@@ -597,7 +597,7 @@ type Daemon struct {
 	// the cache that is up to two uncached `brew --prefix` forks per tick.
 	brewTargetOnce sync.Once
 	brewInstall    bool        // resolved once: was this binary installed via brew?
-	brewTarget     string      // "<prefix>/bin/multica" when brewInstall and the prefix resolved
+	brewPrefix     string      // Homebrew prefix when brewInstall and it resolved; the stable path is derived per call by cli.StableExecutablePath
 	updating       atomic.Bool // prevents concurrent update attempts
 	// activeTasks is the ownership-safe count of tasks currently in handleTask.
 	// It deliberately includes preparation and local-directory waiters because
@@ -5297,6 +5297,11 @@ func (d *Daemon) triggerRestart() bool {
 // after an upgrade. For non-brew installs it resolves to the absolute path of
 // the replaced binary.
 //
+// The mapping itself is cli.StableExecutablePath, shared with boot-autostart
+// registration: a restart target and a recorded ExecStart must never disagree
+// about which path survives brew cleanup, or the systemd handoff would
+// restart a binary `brew upgrade` already deleted.
+//
 // Shared with trySelfReload, which must version-probe the same binary the
 // restart would run — probing os.Executable() directly would read the old
 // Cellar path under brew and miss the upgrade entirely.
@@ -5307,30 +5312,26 @@ func (d *Daemon) restartTargetBinary() (string, error) {
 	}
 	// The install method and brew prefix are fixed for the process lifetime;
 	// resolve them once so the per-tick reload probe doesn't fork
-	// `brew --prefix` every 5 minutes.
+	// `brew --prefix` every 5 minutes. Detection order matches
+	// cli.StableSelfExecutable — the path's own Cellar shape first, then
+	// `brew --prefix` — so the restart target and a recorded autostart
+	// ExecStart always agree.
 	d.brewTargetOnce.Do(func() {
 		d.brewInstall = isBrewInstall()
 		if !d.brewInstall {
 			return
 		}
-		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
-			d.brewTarget = filepath.Join(brewPrefix, "bin", "multica")
-		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
-			d.brewTarget = filepath.Join(prefix, "bin", "multica")
+		if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
+			d.brewPrefix = prefix
+		} else {
+			d.brewPrefix = getBrewPrefix()
 		}
 	})
-	if d.brewInstall {
-		if d.brewTarget != "" {
-			return d.brewTarget, nil
-		}
+	if d.brewInstall && d.brewPrefix == "" {
 		d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
 			"executable", newBin)
-		return newBin, nil
 	}
-	if resolved, err := filepath.EvalSymlinks(newBin); err == nil {
-		newBin = resolved
-	}
-	return newBin, nil
+	return cli.StableExecutablePath(newBin, d.brewPrefix, d.brewInstall), nil
 }
 
 // pollLoop runs the machine-level batch claim poller (MUL-4257): a single
