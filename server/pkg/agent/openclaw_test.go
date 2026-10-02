@@ -939,10 +939,9 @@ func TestBuildOpenclawArgsMinimal(t *testing.T) {
 func TestBuildOpenclawArgsMapsModelToAgent(t *testing.T) {
 	t.Parallel()
 
-	// For openclaw, agent.model stores the pre-registered agent name;
-	// the daemon must translate that to `--agent <name>` because the
-	// CLI rejects `--model` entirely. `--system-prompt` is also
-	// rejected and must not be emitted as a flag.
+	// For openclaw, agent.model stores the pre-registered agent name and
+	// the daemon translates that to `--agent <name>`. `--system-prompt`
+	// is not supported and must not be emitted as a flag.
 	args := buildOpenclawArgs("task", "ses-2", ExecOptions{
 		Model:        "deepseek-v4-agent",
 		SystemPrompt: "You are a helpful agent.",
@@ -961,6 +960,27 @@ func TestBuildOpenclawArgsMapsModelToAgent(t *testing.T) {
 	}
 	if got := args[agentIdx+1]; got != "deepseek-v4-agent" {
 		t.Errorf("--agent value = %q, want %q", got, "deepseek-v4-agent")
+	}
+}
+
+func TestBuildOpenclawArgsKeepsAgentAndModelOverrideSeparate(t *testing.T) {
+	t.Parallel()
+
+	args := buildOpenclawArgs("task", "ses-model-override", ExecOptions{
+		Model:                 "main",
+		OpenclawModelOverride: "openrouter/@preset/agent-reasoning",
+	}, slog.Default())
+
+	agentIdx := indexOf(args, "--agent")
+	if agentIdx == -1 || agentIdx+1 >= len(args) || args[agentIdx+1] != "main" {
+		t.Fatalf("expected --agent main, got: %v", args)
+	}
+	modelIdx := indexOf(args, "--model")
+	if modelIdx == -1 || modelIdx+1 >= len(args) || args[modelIdx+1] != "openrouter/@preset/agent-reasoning" {
+		t.Fatalf("expected managed per-run model override, got: %v", args)
+	}
+	if modelIdx <= agentIdx {
+		t.Errorf("expected model override after agent selection, got: %v", args)
 	}
 }
 
@@ -1044,6 +1064,7 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	// Users must not be able to re-introduce the banned flags via custom_args —
 	// they would crash `openclaw agent` just like the direct forward did.
 	args := buildOpenclawArgs("task", "ses-6", ExecOptions{
+		OpenclawModelOverride: "openrouter/@preset/agent-long",
 		CustomArgs: []string{
 			"--agent", "research-bot",
 			"--model", "gpt-4o",
@@ -1053,8 +1074,10 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 		},
 	}, slog.Default())
 
-	if idx := indexOf(args, "--model"); idx != -1 {
-		t.Errorf("--model should be filtered from custom_args: %v", args)
+	if count := countOccurrences(args, "--model"); count != 1 {
+		t.Errorf("expected only the managed --model override, got: %v", args)
+	} else if idx := indexOf(args, "--model"); idx+1 >= len(args) || args[idx+1] != "openrouter/@preset/agent-long" {
+		t.Errorf("custom --model should be filtered in favor of managed override: %v", args)
 	}
 	if idx := indexOf(args, "--system-prompt"); idx != -1 {
 		t.Errorf("--system-prompt should be filtered from custom_args: %v", args)

@@ -41,7 +41,7 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--json":          blockedStandalone, // JSON output for daemon communication
 	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
 	"--message":       blockedWithValue,  // prompt is set by daemon
-	"--model":         blockedWithValue,  // openclaw agent does not accept --model; model is bound at registration via `openclaw agents add/update --model`
+	"--model":         blockedWithValue,  // managed by OpenclawModelOverride; never accept an untracked duplicate from custom_args
 	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
 }
 
@@ -225,12 +225,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 // buildOpenclawArgs assembles the argv for a one-shot `openclaw agent` invocation.
 //
-// The CLI only accepts --local, --json, --session-id, --timeout, --message (and
-// flags like --agent / --channel that users pass through CustomArgs). Notably
-// it does NOT accept --model or --system-prompt — model is bound at agent
-// registration time via `openclaw agents add/update --model`, and instructions
-// must be injected inline into --message because openclaw loads AGENTS.md from
-// its own workspace directory, not from cwd.
+// The CLI accepts separate --agent and --model flags. Multica intentionally
+// keeps those concerns separate: opts.Model selects the registered OpenClaw
+// agent (identity/workspace/session state), while opts.OpenclawModelOverride
+// optionally selects the underlying LLM for only this run. Instructions must
+// still be injected inline into --message because openclaw loads AGENTS.md
+// from its own workspace directory, not from cwd.
 //
 // Routing (issue #3260): `openclaw agent` defaults to Gateway routing; --local
 // is the embedded-mode opt-in. The daemon historically forced --local so every
@@ -249,9 +249,8 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	if opts.Timeout > 0 {
 		args = append(args, "--timeout", fmt.Sprintf("%d", int(opts.Timeout.Seconds())))
 	}
-	// OpenClaw binds models to pre-registered agents at `openclaw agents
-	// add/update --model` time; the daemon selects one at runtime by
-	// passing --agent <id>. The model dropdown populates its list from
+	// The daemon selects a registered OpenClaw agent at runtime by passing
+	// --agent <id>. The model dropdown populates its list from
 	// `openclaw agents list`, so opts.Model here is an agent id (see
 	// openclawEntriesToModels — the agent's display name lives in the
 	// dropdown label, not in opts.Model). Only inject when the user
@@ -260,6 +259,9 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
 	if opts.Model != "" && !customArgsContains(customArgs, "--agent") {
 		args = append(args, "--agent", opts.Model)
+	}
+	if opts.OpenclawModelOverride != "" {
+		args = append(args, "--model", opts.OpenclawModelOverride)
 	}
 	args = append(args, customArgs...)
 
