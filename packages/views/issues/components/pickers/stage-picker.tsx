@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Milestone } from "lucide-react";
+import { Milestone, Plus } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";
@@ -15,13 +15,19 @@ export function maxSiblingStage(children: readonly { stage: number | null }[]): 
   return children.reduce((m, c) => (c.stage != null && c.stage > m ? c.stage : m), 0);
 }
 
+export const DEFAULT_STAGE_OPTIONS_FLOOR = 5;
+
 /**
  * Stage options (Stage 1..top) the picker offers. `top` always covers the
  * current stage, the highest sibling stage (`maxStage`), and one beyond it so a
- * new stage can be added — floored so Stage 1–3 are always selectable.
+ * new stage can be added — floored so Stage 1–5 are always selectable.
  */
-export function stageOptions(stage: number | null, maxStage = 0): number[] {
-  const top = Math.max(stage ?? 0, maxStage, 2) + 1;
+export function stageOptions(
+  stage: number | null,
+  maxStage = 0,
+  floor = DEFAULT_STAGE_OPTIONS_FLOOR,
+): number[] {
+  const top = Math.max(stage ?? 0, maxStage, floor - 1) + 1;
   return Array.from({ length: top }, (_, i) => i + 1);
 }
 
@@ -49,11 +55,20 @@ export function StagePicker({
   defaultOpen?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const [extraStageCount, setExtraStageCount] = useState(0);
   const open = controlledOpen ?? internalOpen;
-  const setOpen = controlledOnOpenChange ?? setInternalOpen;
+  const setOpen = (v: boolean) => {
+    if (!v) setExtraStageCount(0);
+    (controlledOnOpenChange ?? setInternalOpen)(v);
+  };
   const { t } = useT("issues");
 
-  const options = stageOptions(stage, maxStage);
+  const effectiveMax = Math.max(
+    maxStage,
+    (stage ?? 0) + extraStageCount,
+    extraStageCount ? DEFAULT_STAGE_OPTIONS_FLOOR + extraStageCount - 1 : 0,
+  );
+  const options = stageOptions(stage, effectiveMax);
 
   return (
     <PropertyPicker
@@ -73,6 +88,16 @@ export function StagePicker({
             </span>
           </>
         )
+      }
+      footer={
+        <button
+          type="button"
+          onClick={() => setExtraStageCount((c) => c + 1)}
+          className="flex w-full items-center gap-1.5 rounded-xs px-2 py-1 text-caption text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors cursor-pointer"
+        >
+          <Plus className="h-3 w-3 shrink-0" />
+          <span>{t(($) => $.stage.add)}</span>
+        </button>
       }
     >
       {/* "No stage" — always the first row, matching every other picker. Keeps
