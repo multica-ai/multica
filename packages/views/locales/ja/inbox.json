@@ -42,6 +42,7 @@
     "archived_empty": "アーカイブされた通知はありません",
     "unarchive_tooltip": "アーカイブ解除",
     "actions_aria": "通知の操作",
+    "action_required": "要対応",
     "load_more": "さらに読み込む",
     "loading_more": "読み込み中…",
     "retry": "再試行"

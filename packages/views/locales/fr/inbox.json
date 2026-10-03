@@ -44,6 +44,7 @@
     "archived_empty": "Aucune notification archivée",
     "unarchive_tooltip": "Désarchiver",
     "actions_aria": "Actions de notification",
+    "action_required": "Action requise",
     "load_more": "Charger plus",
     "loading_more": "Chargement…",
     "retry": "Réessayer"
