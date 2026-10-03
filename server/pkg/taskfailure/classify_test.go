@@ -1,6 +1,48 @@
 package taskfailure
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// A rolling token-usage quota is an account limit, not a limit on the size of
+// the resumed conversation. The generic token+limit rule must not retire it.
+func TestClassifyTokenWindowQuota(t *testing.T) {
+	t.Parallel()
+	const raw = `429 {"error":{"code":"token_window_quota_exceeded","message":"This API key has reached its 5h usage limit (5031487 / 5000000)","type":"new_api_error"}}`
+	for _, in := range []string{
+		raw,
+		strings.ToUpper(raw),
+		`{"error":{"code":"token_window_quota_exceeded"}}`,
+		"Failed to refresh access token. API Error: " + raw,
+	} {
+		if got := Classify(in); got != ReasonAgentProviderQuotaLimit {
+			t.Errorf("Classify(%q) = %q, want %q", in, got, ReasonAgentProviderQuotaLimit)
+		}
+	}
+}
+
+func TestNormalizeDaemonReasonUpgradesTokenWindowQuota(t *testing.T) {
+	t.Parallel()
+	const raw = `429 {"error":{"code":"token_window_quota_exceeded","message":"This API key has reached its 5h usage limit"}}`
+	for _, reason := range []string{
+		string(ReasonAgentContextOverflow),
+		string(ReasonAgentProviderAuthOrAccess),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(reason, strings.ToUpper(raw)); got != ReasonAgentProviderQuotaLimit {
+			t.Errorf("NormalizeDaemonReason(%q, quota rejection) = %q, want %q", reason, got, ReasonAgentProviderQuotaLimit)
+		}
+	}
+	// Unrelated refined reasons and genuine context overflows remain intact.
+	if got := NormalizeDaemonReason(string(ReasonAgentProcessFailure), raw); got != ReasonAgentProcessFailure {
+		t.Errorf("unrelated process failure changed to %q", got)
+	}
+	if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), "you exceeded the token limit"); got != ReasonAgentContextOverflow {
+		t.Errorf("genuine token overflow changed to %q", got)
+	}
+}
 
 // TestClassifyEmptyAndWhitespace pins the empty/whitespace contract.
 // Daemon callers should never hand us empty error text — but if they

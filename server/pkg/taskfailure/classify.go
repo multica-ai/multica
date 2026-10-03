@@ -45,10 +45,13 @@ const concurrentRequestLimitWitness = "concurrent request limit"
 
 var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9])403([^0-9]|$)`)
 
-// isUsageLimit403 is shared by Classify and NormalizeDaemonReason so new and
-// old daemons land on the same reason.
-func isUsageLimit403(lower string) bool {
-	return httpForbiddenCodeRe.MatchString(lower) && strings.Contains(lower, "usage limit")
+// isUsageQuotaExceeded is shared by Classify and NormalizeDaemonReason so
+// account-usage rejections stay resume-safe even when an older daemon reports
+// context overflow. A token_window_quota_exceeded code names a rolling usage
+// quota, not the conversation's context window.
+func isUsageQuotaExceeded(lower string) bool {
+	return strings.Contains(lower, "token_window_quota_exceeded") ||
+		(httpForbiddenCodeRe.MatchString(lower) && strings.Contains(lower, "usage limit"))
 }
 
 // Classify maps a free-form error string from the agent runtime / CLI
@@ -93,11 +96,10 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, concurrentRequestLimitWitness):
 		return ReasonAgentProviderCapacityOrRateLimit
 
-	// Some providers (e.g. Kimi Code) report an exhausted usage window as HTTP
-	// 403, and Claude Code may prefix it with an access-token failure. It must
-	// beat both the token-window rule (the text has "token" and "limit") and
-	// the bare 403 auth rule, or valid credentials get blamed.
-	case isUsageLimit403(lower):
+	// Specific account-usage rejections must beat token+limit and auth matches.
+	// Otherwise an exhausted quota can be mistaken for an unresumable context
+	// overflow, or an access-token prefix can blame valid credentials.
+	case isUsageQuotaExceeded(lower):
 		return ReasonAgentProviderQuotaLimit
 
 	// 1. Context / token window overflow. Checked early so "token
@@ -510,10 +512,10 @@ var legacyConcurrentRequestLimitReasons = map[string]bool{
 	"agent_error":                           true,
 }
 
-// legacyUsageLimit403Reasons are the stale buckets an older daemon lands a
-// 403 usage-limit rejection in: the bare 403 auth rule, the token-window rule
-// when an access-token prefix is present, or the catchalls.
-var legacyUsageLimit403Reasons = map[string]bool{
+// legacyUsageQuotaReasons are the stale buckets an older daemon can report
+// for account-usage rejections: the generic token+limit or auth rules, or the
+// catchalls. The specific raw witness limits which failures are corrected.
+var legacyUsageQuotaReasons = map[string]bool{
 	string(ReasonAgentContextOverflow):      true,
 	string(ReasonAgentProviderAuthOrAccess): true,
 	string(ReasonAgentUnknown):              true,
@@ -540,7 +542,7 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit
 	}
-	if legacyUsageLimit403Reasons[reason] && isUsageLimit403(strings.ToLower(rawError)) {
+	if legacyUsageQuotaReasons[reason] && isUsageQuotaExceeded(strings.ToLower(rawError)) {
 		return ReasonAgentProviderQuotaLimit
 	}
 	if legacySkillBundleReasons[reason] &&
