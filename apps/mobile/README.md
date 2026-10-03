@@ -54,6 +54,29 @@ Everything below is for app developers — you can ignore the rest if you only w
 
 Bundle id and display name switch on `APP_ENV` (see `app.config.ts`), so Dev / Staging / Production variants can coexist on the same device or simulator.
 
+### Regenerating iOS after the scene lifecycle migration
+
+The app uses Expo SDK 57's scene lifecycle support for builds linked against
+the iOS 27 SDK. `app.config.ts` enables `ios.enableSceneSupport` through
+`expo-build-properties`; Expo owns window creation and forwards scene lifecycle
+and linking events. This requires Expo 57.0.23+ and expo-build-properties
+57.0.20+; adding a scene manifest alone to an SDK 55 app is insufficient.
+See [Expo's migration guidance](https://github.com/expo/fyi/blob/main/ios-scene-lifecycle.md).
+
+After updating dependencies, regenerate an existing native project once (save
+any local native customizations first; `ios/` is generated and ignored):
+
+```bash
+cd apps/mobile
+APP_ENV=production pnpm exec expo prebuild --clean --platform ios
+```
+
+Use `development` or `staging` instead for those variants, then run the usual
+build script. Keep normal development builds on the incremental prebuild path.
+For native validation, test a Release cold launch to sign-in, cold and warm
+`multica://` links, background/foreground transitions, and the Debug dev-client
+in each variant. Unit tests do not replace this device validation.
+
 ## First-time setup
 
 `.env.staging` is committed (public staging URL). `.env.development.local` is gitignored — copy the template once:
