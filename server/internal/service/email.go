@@ -1,13 +1,16 @@
 package service
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"mime"
 	"mime/quotedprintable"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"os"
 	"strings"
@@ -125,6 +128,52 @@ func resolveFromEmail(smtpHost string) string {
 	return resendFrom
 }
 
+// parseFromEmail splits a configured sender into the two forms the SMTP path
+// needs. They are documented as one value, but the envelope (RFC 5321
+// Reverse-path — addr-spec only) and the From: header (RFC 5322 mailbox — may
+// carry a display name) have different grammars. Using the raw value for both
+// turns `"Team" <a@b.com>` into MAIL FROM:<"Team" <a@b.com>>, nested angle
+// brackets that strict relays reject outright.
+//
+// Values that do not parse — a bare local part such as "root", which some local
+// MTAs accept — are passed through unchanged so deployments that work today keep
+// working. ok=false lets the caller warn about it once at startup instead.
+func parseFromEmail(raw string) (address, header string, ok bool) {
+	addr, err := mail.ParseAddress(strings.TrimSpace(raw))
+	if err != nil {
+		return raw, raw, false
+	}
+	// Only switch to the angle-addr form when there is a display name to carry.
+	// A bare address then stays byte-identical to what we sent before, so the
+	// deployments that are not currently broken see no change on the wire.
+	if addr.Name == "" {
+		return addr.Address, addr.Address, true
+	}
+	// Address.String() also RFC 2047-encodes a non-ASCII display name, matching
+	// how Subject: is already handled.
+	return addr.Address, addr.String(), true
+}
+
+// newMessageID builds a unique Message-ID rooted at the sender's own domain.
+// Deriving it from the relay hostname instead produced IDs like
+// <...@smtp.gmail.com> — a domain the sender does not own, which receiving
+// providers are entitled to distrust or dedupe away.
+//
+// fallbackDomain covers senders whose address has no parseable domain; dropping
+// the header is not an option, since RFC 5322 makes Date mandatory and
+// Message-ID a SHOULD, and a plain RFC 5321 relay must not add them for us.
+func newMessageID(fromAddress, fallbackDomain string) string {
+	domain := fallbackDomain
+	if at := strings.LastIndex(fromAddress, "@"); at >= 0 && at+1 < len(fromAddress) {
+		domain = fromAddress[at+1:]
+	}
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), domain)
+	}
+	return fmt.Sprintf("<%s@%s>", hex.EncodeToString(buf[:]), domain)
+}
+
 func (s *EmailService) openSMTPClient() (*smtp.Client, error) {
 	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
 
@@ -231,6 +280,11 @@ func NewEmailService() *EmailService {
 			tlsLabel = "implicit-tls"
 		}
 		fmt.Printf("EmailService: SMTP relay %s:%s (%s) from=%s\n", smtpHost, smtpPort, tlsLabel, from)
+		// Surface a malformed sender at startup rather than on the first send,
+		// where it only shows up as a relay-side syntax error.
+		if _, _, ok := parseFromEmail(from); from != "" && !ok {
+			fmt.Printf("EmailService: SMTP_FROM_EMAIL=%q is not a valid RFC 5322 address; sending it verbatim as both envelope and From: header. Use `Display Name <user@example.com>` or a bare address if the relay rejects it.\n", from)
+		}
 	case client != nil:
 		fmt.Printf("EmailService: Resend API from=%s\n", from)
 	default:
@@ -290,7 +344,8 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	// non-ASCII workspace/inviter names crossing strict or older SMTP hops.
 	has8Bit, _ := c.Extension("8BITMIME")
 	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
-	msgID := fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), s.smtpHost)
+	fromAddress, fromHeader, _ := parseFromEmail(s.fromEmail)
+	msgID := newMessageID(fromAddress, s.smtpHost)
 
 	var bodyBytes []byte
 	var cte string
@@ -306,7 +361,8 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 		cte = "quoted-printable"
 	}
 
-	if err = c.Mail(s.fromEmail); err != nil {
+	// Envelope takes the addr-spec; the From: header below takes the full mailbox.
+	if err = c.Mail(fromAddress); err != nil {
 		return fmt.Errorf("smtp MAIL FROM: %w", err)
 	}
 	if err = c.Rcpt(to); err != nil {
@@ -316,7 +372,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	if err != nil {
 		return fmt.Errorf("smtp DATA: %w", err)
 	}
-	headers := "From: " + s.fromEmail + "\r\n" +
+	headers := "From: " + fromHeader + "\r\n" +
 		"To: " + to + "\r\n" +
 		"Subject: " + encodedSubject + "\r\n" +
 		"Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n" +
