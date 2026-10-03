@@ -258,9 +258,9 @@ export function openLink(
   appOrigin?: string | null,
   intent: LinkClickIntent = "push",
 ): void {
-  const internalPath = href.startsWith("/")
-    ? href
-    : toInternalAppPath(href, appOrigin);
+  const internalPath =
+    toInternalAppPath(href, appOrigin) ??
+    (href.startsWith("/") ? toSameOriginPath(href) : null);
   if (internalPath) {
     let path = internalPath;
     if (currentSlug && !isGlobalPath(path)) {
