@@ -18,6 +18,7 @@ import {
   applyWorktreeDevEnv,
   repoRootFromScriptDir,
 } from "./worktree-dev-env.mjs";
+import { applyDevAuthEnv } from "./dev-auth.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +26,10 @@ applyWorktreeDevEnv(process.env, {
   root: repoRootFromScriptDir(here),
   log: true,
 });
+
+if (applyDevAuthEnv(process.env)) {
+  console.log("[dev:desktop] local profile authentication enabled");
+}
 
 function run(command, args, { shell = false, env = process.env } = {}) {
   const result = spawnSync(command, args, {
