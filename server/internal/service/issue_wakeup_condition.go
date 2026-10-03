@@ -275,6 +275,55 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 		if err = rows.Err(); err != nil {
 			return false, "", nil, err
 		}
+		// Self-hosted VCS pull requests (Forgejo/Gitea/GitLab) live in their own
+		// tables; the GitHub-only query above never sees them (#9034). Aggregate
+		// commit statuses for each PR's current head sha — the same rollup shape
+		// the issue PR list shows: any failed status = FAILURE, all passed (at
+		// least one) = SUCCESS, pending or none = not finished.
+		vcsRows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.provider,pr.state,pr.head_sha,
+				COALESCE(SUM(CASE WHEN cs.state='failed' THEN 1 ELSE 0 END),0),
+				COALESCE(SUM(CASE WHEN cs.state='pending' THEN 1 ELSE 0 END),0),
+				COUNT(cs.state)
+			FROM vcs_pull_request pr
+			JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id=pr.id
+			LEFT JOIN vcs_commit_status cs ON cs.connection_id=pr.connection_id AND cs.sha=pr.head_sha AND pr.head_sha<>''
+			WHERE ipr.issue_id=$1
+			GROUP BY pr.pr_number,pr.provider,pr.state,pr.head_sha`, w.IssueID)
+		if err != nil {
+			return false, "", nil, err
+		}
+		for vcsRows.Next() {
+			var number int32
+			var provider, state, head string
+			var failed, pending, total int64
+			if err = vcsRows.Scan(&number, &provider, &state, &head, &failed, &pending, &total); err != nil {
+				vcsRows.Close()
+				return false, "", nil, err
+			}
+			switch c.Event {
+			case "merged":
+				if state == "merged" {
+					keys = append(keys, fmt.Sprintf("vcs:%s:%d", provider, number))
+					prs = append(prs, map[string]any{"number": number, "provider": provider, "state": state})
+				}
+			case "checks_finished":
+				checks := ""
+				switch {
+				case failed > 0:
+					checks = "FAILURE"
+				case total > 0 && pending == 0:
+					checks = "SUCCESS"
+				}
+				if head != "" && slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks) {
+					keys = append(keys, fmt.Sprintf("vcs:%s:%d@%s:%s", provider, number, head, checks))
+					prs = append(prs, map[string]any{"number": number, "provider": provider, "head_sha": head, "checks": strings.ToLower(checks)})
+				}
+			}
+		}
+		vcsRows.Close()
+		if err = vcsRows.Err(); err != nil {
+			return false, "", nil, err
+		}
 		sort.Strings(keys)
 		return len(keys) > 0, "pr:" + strings.Join(keys, ","), map[string]any{"pull_requests": prs}, nil
 	case "other_issue":
