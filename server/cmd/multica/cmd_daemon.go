@@ -87,7 +87,8 @@ var daemonDiskUsageCmd = &cobra.Command{
 		"The STATUS column shows the current status of the issue each directory belongs to, which requires\n" +
 		"contacting the server. When the machine is offline, logged out, or the request fails, the column is\n" +
 		"left blank and the rest of the report still prints. --by-workspace has no STATUS column and therefore\n" +
-		"makes no network request unless --output json is also set. The daemon does not need to be running.",
+		"makes no server request unless --output json is also set. A local daemon health probe supplies the effective\n" +
+		"GC policy when available; the report remains usable when the daemon is stopped or older.",
 	RunE: runDaemonDiskUsage,
 }
 
@@ -1817,6 +1818,11 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	if !taskContext && diskUsageNeedsParentStatus(byWorkspace, output) {
 		fillDiskUsageParentStatuses(cmd, profile, &report)
 	}
+	if rootOverride == "" {
+		daemon.ApplyDiskUsageRetentionPolicy(&report, diskUsageGCPolicy(cmd, profile, taskContext, workspacesRoot), time.Now())
+	} else {
+		daemon.ApplyDiskUsageRetentionPolicy(&report, nil, time.Now())
+	}
 
 	if top > 0 {
 		if byWorkspace {
@@ -1928,22 +1934,66 @@ func newParentStatusFetcher(cmd *cobra.Command, profile string) daemon.ParentSta
 
 	client := daemon.NewClient(baseURL)
 	client.SetToken(cfg.Token)
-	return func(ctx context.Context, workspaceID string, issueIDs []string) (map[string]string, error) {
-		results, err := client.GetIssueGCChecks(ctx, workspaceID, issueIDs)
+	return func(ctx context.Context, workspaceID string, issueIDs, taskIDs []string) (map[string]daemon.IssueGCCheckResult, map[string]daemon.TaskEnvironmentGCCheckResult, error) {
+		results, environments, err := client.InspectIssueTaskEnvironments(ctx, workspaceID, issueIDs, taskIDs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		statuses := make(map[string]string, len(results))
+		statuses := make(map[string]daemon.IssueGCCheckResult, len(results))
 		for id, result := range results {
-			// Skip per-issue failures and 404s: an unresolved id must stay
-			// blank so it reads as "unknown", not as a status.
-			if result.Err != nil || !result.Found {
+			if result.Err != nil {
 				continue
 			}
-			statuses[id] = result.Status
+			statuses[id] = result
 		}
-		return statuses, nil
+		return statuses, environments, nil
 	}
+}
+
+// diskUsageGCPolicy reads policy only from the daemon that owns the selected
+// root. Re-evaluating MULTICA_GC_* in this short-lived CLI process would be a
+// guess: Desktop and background shells commonly launch the daemon with a
+// different environment. A stopped/older/mismatched daemon therefore yields
+// nil and estimates stay explicitly unavailable.
+func diskUsageGCPolicy(cmd *cobra.Command, profile string, taskContext bool, workspacesRoot string) *daemon.GCPolicySnapshot {
+	port := healthPortForProfile(profile)
+	if taskContext {
+		resolved, err := daemonStatusHealthPort(cmd)
+		if err != nil {
+			return nil
+		}
+		port = resolved
+	}
+	parentCtx := cmd.Context()
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 2*time.Second)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, port)
+	if !daemonAlive(health) {
+		return nil
+	}
+	if !taskContext && daemonIdentityMismatch(health, profile, port) != nil {
+		return nil
+	}
+	daemonRoot, ok := health["workspaces_root"].(string)
+	if !ok || !samePath(daemonRoot, workspacesRoot) {
+		return nil
+	}
+	raw, ok := health["gc_policy"]
+	if !ok {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var policy daemon.GCPolicySnapshot
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return nil
+	}
+	return &policy
 }
 
 // runDaemonDiskUsageAggregate scans every workspace root (the default root plus
@@ -1967,6 +2017,10 @@ func runDaemonDiskUsageAggregate(cmd *cobra.Command, byWorkspace bool, top int, 
 		for i := range agg.Roots {
 			fillDiskUsageParentStatuses(cmd, agg.Roots[i].Profile, &agg.Roots[i].Report)
 		}
+	}
+	for i := range agg.Roots {
+		report := &agg.Roots[i].Report
+		daemon.ApplyDiskUsageRetentionPolicy(report, diskUsageGCPolicy(cmd, agg.Roots[i].Profile, false, report.WorkspacesRoot), time.Now())
 	}
 
 	// --top trims each root's table independently — the grand total in the
@@ -2072,6 +2126,7 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	if report.TotalTaskCount == 0 {
 		fmt.Fprintln(w, "(no run directories)")
 		printRepoCacheLine(w, report)
+		printDiskUsagePolicyHint(w, report)
 		return
 	}
 	rows := make([][]string, 0, len(report.Tasks))
@@ -2083,12 +2138,16 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			task.WorkspaceShort + "/" + task.TaskShort,
 			task.Kind,
 			emptyDash(task.ParentStatus),
+			formatOptionalBool(task.LocalDirectory),
+			formatResumeCandidate(task.ResumeCandidate),
+			emptyDash(task.RetentionReason),
+			formatEstimatedCleanup(task.EstimatedCleanupAt),
 			formatAge(task.AgeSeconds),
 			formatBytes(task.SizeBytes),
 			formatBytes(task.ArtifactSizeBytes),
 		})
 	}
-	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "LOCAL", "RESUME", "RETAINED BY", "EST. CLEANUP", "AGE", "SIZE", "ARTIFACTS"}, rows)
 
 	if len(report.Tasks) < report.TotalTaskCount {
 		// Report-wide totals stay anchored to the full scan; the displayed
@@ -2105,6 +2164,39 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
 	}
 	printRepoCacheLine(w, report)
+	printDiskUsagePolicyHint(w, report)
+}
+
+func formatOptionalBool(value *bool) string {
+	if value == nil {
+		return "-"
+	}
+	if *value {
+		return "yes"
+	}
+	return "no"
+}
+
+func formatResumeCandidate(value *bool) string {
+	return formatOptionalBool(value)
+}
+
+func formatEstimatedCleanup(value *time.Time) string {
+	if value == nil {
+		return "-"
+	}
+	return value.Local().Format("2006-01-02 15:04")
+}
+
+const diskUsagePolicyDocsURL = "https://github.com/multica-ai/multica/blob/main/CLI_AND_DAEMON.md#workspace-garbage-collection"
+
+func printDiskUsagePolicyHint(w io.Writer, report daemon.DiskUsageReport) {
+	if report.GCPolicy == nil {
+		fmt.Fprintln(w, "GC estimates unavailable: the owning daemon is stopped, too old, or could not be identified.")
+	} else if !report.GCPolicy.Enabled {
+		fmt.Fprintln(w, "GC is disabled for this daemon; no automatic cleanup is scheduled.")
+	}
+	fmt.Fprintf(w, "Retention policy: %s\n", diskUsagePolicyDocsURL)
 }
 
 // printRepoCacheLine reports the bare-repo cache on its own line. Every task
@@ -2125,6 +2217,7 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 	if report.TotalWorkspaceCount == 0 {
 		fmt.Fprintln(w, "(no workspaces)")
 		printRepoCacheLine(w, report)
+		printDiskUsagePolicyHint(w, report)
 		return
 	}
 	rows := make([][]string, 0, len(report.Workspaces))
@@ -2155,6 +2248,7 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
 	}
 	printRepoCacheLine(w, report)
+	printDiskUsagePolicyHint(w, report)
 }
 
 // printDiskUsageOtherRootsHint warns that workspace roots OTHER than the one
