@@ -501,7 +501,7 @@ func TestUpdateComment_AutopilotAuthorityReStampedToEditingTask(t *testing.T) {
 // assigned-squad-leader fallback too, so a worker's result comment on the
 // autopilot issue can still wake the private squad leader and close the
 // leader -> worker -> leader loop under the autopilot chain.
-func TestCreateComment_AutopilotWorkerResultWakesSquadLeader(t *testing.T) {
+func TestCreateComment_AutopilotUnverifiedWorkerResultStaysQuiet(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -573,8 +573,8 @@ func TestCreateComment_AutopilotWorkerResultWakesSquadLeader(t *testing.T) {
 	`, issueID, leaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 1 {
-		t.Fatalf("expected the private squad leader to be woken once via autopilot-creator authority, got %d", leaderTasks)
+	if leaderTasks != 0 {
+		t.Fatalf("unverified autopilot worker result queued %d private leader tasks", leaderTasks)
 	}
 }
 
