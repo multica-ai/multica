@@ -82,7 +82,10 @@ function IssueWindowRoute() {
       <IssueWindowNavigationProvider>
         <WorkspacePresencePrefetch />
         <IssueWindowFrame>
-          <IssueDetailPage onDelete={() => window.desktopAPI.closeWindow()} />
+          <IssueDetailPage
+            onDelete={() => window.desktopAPI.closeWindow()}
+            onDone={() => window.desktopAPI.closeWindow()}
+          />
         </IssueWindowFrame>
         <ModalRegistry />
       </IssueWindowNavigationProvider>

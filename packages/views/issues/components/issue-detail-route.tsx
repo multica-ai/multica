@@ -15,6 +15,7 @@ interface IssueDetailRouteProps {
    */
   routeId: string;
   onDelete?: () => void;
+  onDone?: () => void;
 }
 
 /**
@@ -74,7 +75,7 @@ function useCommentHighlightHash(): { hash: string; commentId?: string } {
  *    the route and only the route — the inbox renders `IssueDetail` in a side
  *    panel, where replacing the URL would navigate the user out of the inbox.
  */
-export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
+export function IssueDetailRoute({ routeId, onDelete, onDone }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
   const { canonicalId, issue, isResolving, notFound } = useCanonicalIssue(wsId, routeId);
   const highlight = useCommentHighlightHash();
@@ -93,6 +94,7 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
     <IssueDetail
       issueId={canonicalId}
       onDelete={onDelete}
+      onDone={onDone}
       highlightCommentId={highlight.commentId}
     />
   );

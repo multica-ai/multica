@@ -193,6 +193,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
           leadingAction={<IssuePeekNav />}
           trailingActions={<IssuePeekTrailingActions issueId={issueId} />}
           onDelete={actions.close}
+          onDone={actions.close}
         />
       </ErrorBoundary>
     </motion.aside>

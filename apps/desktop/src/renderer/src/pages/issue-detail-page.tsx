@@ -4,7 +4,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
-export function IssueDetailPage({ onDelete }: { onDelete?: () => void }) {
+export function IssueDetailPage({ onDelete, onDone }: { onDelete?: () => void; onDone?: () => void }) {
   const { id } = useParams<{ id: string }>();
   const wsId = useWorkspaceId();
   // `id` may be an identifier (`MUL-123`); resolving here means the title
@@ -18,5 +18,5 @@ export function IssueDetailPage({ onDelete }: { onDelete?: () => void }) {
   // Render errors bubble to the root route errorElement (DesktopRouteErrorPage),
   // which contains the crash inside the tab content pane. No page-level boundary
   // here — a whole-page wrapper duplicates the route-level error UI.
-  return <IssueDetailRoute routeId={id} onDelete={onDelete} />;
+  return <IssueDetailRoute routeId={id} onDelete={onDelete} onDone={onDone} />;
 }

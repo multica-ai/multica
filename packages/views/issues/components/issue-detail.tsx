@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  LoaderCircle,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -2439,6 +2440,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  const backOrReplace = useBackOrReplace();
+  const [completingIssue, setCompletingIssue] = useState(false);
+  const completeAndClose = () => {
+    if (!issue || completingIssue) return;
+    const close = () => onDone ? onDone() : backOrReplace(paths.issues());
+    if (issueBehavesAs(issue, "done")) {
+      close();
+      return;
+    }
+    setCompletingIssue(true);
+    handleUpdateField({ status: "done" }, {
+      onSuccess: close,
+      onSettled: () => setCompletingIssue(false),
+    });
+  };
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -3164,23 +3180,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
-            {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground"
-                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
-                    >
-                      <CircleCheck />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">{t(($) => $.detail.mark_done_tooltip)}</TooltipContent>
-              </Tooltip>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-success/40 text-success hover:text-success"
+              disabled={completingIssue}
+              aria-busy={completingIssue}
+              onClick={completeAndClose}
+            >
+              {completingIssue ? <LoaderCircle className="animate-spin" /> : <CircleCheck />}
+              {t(($) => $.detail.mark_done_tooltip)}
+            </Button>
             {onDone && issueBehavesAs(issue, "done") && (
               <Tooltip>
                 <TooltipTrigger
