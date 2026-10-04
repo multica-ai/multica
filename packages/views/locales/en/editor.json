@@ -126,6 +126,13 @@
     "show_source": "Show source",
     "fullscreen": "Fullscreen"
   },
+  "alert": {
+    "note": "Note",
+    "tip": "Tip",
+    "important": "Important",
+    "warning": "Warning",
+    "caution": "Caution"
+  },
   "dynamic_block": {
     "preview": "Preview",
     "source": "Source",

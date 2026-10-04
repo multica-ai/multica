@@ -115,6 +115,13 @@
     "show_source": "소스 표시",
     "fullscreen": "전체 화면"
   },
+  "alert": {
+    "note": "참고",
+    "tip": "팁",
+    "important": "중요",
+    "warning": "경고",
+    "caution": "주의"
+  },
   "dynamic_block": {
     "preview": "미리보기",
     "source": "소스",
