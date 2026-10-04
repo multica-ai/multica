@@ -97,7 +97,7 @@ export function IssueChip({
       <span className="font-medium text-muted-foreground shrink-0">
         {issue.identifier}
       </span>
-      <span className="min-w-0 truncate text-foreground">{issue.title}</span>
+      <span className="issue-mention-title min-w-0 truncate text-foreground">{issue.title}</span>
     </span>
   );
 }
