@@ -769,6 +769,110 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 	return items, nil
 }
 
+const listWorkspaceUsageExport = `-- name: ListWorkspaceUsageExport :many
+SELECT
+    atq.agent_id,
+    a.name AS agent_name,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    DATE(tu.created_at AT TIME ZONE $1::text) AS day,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $2::uuid
+  AND tu.created_at >= $3::timestamptz
+  AND tu.created_at < $4::timestamptz
+  AND ($5::uuid IS NULL OR i.project_id = $5)
+  AND ($6::uuid IS NULL OR atq.runtime_id = $6)
+GROUP BY atq.agent_id, a.name, LOWER(tu.provider), tu.model,
+         DATE(tu.created_at AT TIME ZONE $1::text)
+ORDER BY day, atq.agent_id, LOWER(tu.provider), tu.model
+`
+
+type ListWorkspaceUsageExportParams struct {
+	Tz          string             `json:"tz"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	FromTime    pgtype.Timestamptz `json:"from_time"`
+	ToTime      pgtype.Timestamptz `json:"to_time"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+}
+
+type ListWorkspaceUsageExportRow struct {
+	AgentID                  pgtype.UUID `json:"agent_id"`
+	AgentName                string      `json:"agent_name"`
+	Provider                 string      `json:"provider"`
+	Model                    string      `json:"model"`
+	Day                      pgtype.Date `json:"day"`
+	InputTokens              int64       `json:"input_tokens"`
+	OutputTokens             int64       `json:"output_tokens"`
+	CacheReadTokens          int64       `json:"cache_read_tokens"`
+	CacheWriteTokens         int64       `json:"cache_write_tokens"`
+	CostUsdTicks             int64       `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64       `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64       `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64       `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64       `json:"uncosted_cache_write_tokens"`
+}
+
+// Exact, workspace-scoped usage rows for machine-readable exports. Unlike the
+// dashboard's rolling `days` views, exports accept an arbitrary half-open
+// instant interval, so they read the authoritative task_usage timestamps
+// rather than whole-hour rollups that could include data outside the bounds.
+// The handler applies the dashboard's restricted-agent folding before it
+// performs caller-selected grouping and pagination.
+func (q *Queries) ListWorkspaceUsageExport(ctx context.Context, arg ListWorkspaceUsageExportParams) ([]ListWorkspaceUsageExportRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceUsageExport,
+		arg.Tz,
+		arg.WorkspaceID,
+		arg.FromTime,
+		arg.ToTime,
+		arg.ProjectID,
+		arg.RuntimeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceUsageExportRow{}
+	for rows.Next() {
+		var i ListWorkspaceUsageExportRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.AgentName,
+			&i.Provider,
+			&i.Model,
+			&i.Day,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+			&i.UncostedInputTokens,
+			&i.UncostedOutputTokens,
+			&i.UncostedCacheReadTokens,
+			&i.UncostedCacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
