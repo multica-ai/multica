@@ -207,6 +207,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		invalidEventCount := 0
 		assistantEventCount := 0
 		toolUseCount := 0
+		toolResultCount := 0
+		toolResultErrorCount := 0
+		cancelledToolResultCount := 0
 		unreadableAssistantCount := 0
 		controlErrors := make(chan error, 1)
 		var controlWrites sync.WaitGroup
@@ -268,7 +271,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
-				if b.handleUser(msg, msgCh) {
+				turn := b.handleUser(msg, msgCh)
+				toolResultCount += turn.toolResultCount
+				toolResultErrorCount += turn.toolResultErrorCount
+				cancelledToolResultCount += turn.cancelledToolResultCount
+				if turn.sawAsyncLaunch {
 					sawAsyncLaunch = true
 				}
 			case "system":
@@ -303,6 +310,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "control_request":
 				var reply func(io.Writer) error
 				if supplements != nil {
+					var hook struct {
+						Subtype string `json:"subtype"`
+						Input   struct {
+							Event      string `json:"hook_event_name"`
+							CallbackID string `json:"callback_id"`
+						} `json:"input"`
+					}
+					if json.Unmarshal(msg.Request, &hook) == nil && hook.Subtype == "hook_callback" {
+						b.cfg.Logger.Debug("claude hook callback received",
+							"request_id", msg.RequestID,
+							"event", hook.Input.Event,
+							"callback_id", hook.Input.CallbackID,
+						)
+					}
 					reply, _ = supplements.prepareHook(msg)
 				}
 				controlWrites.Add(1)
@@ -313,11 +334,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						return
 					}
 					if err := reply(inputWriter); err != nil {
+						b.cfg.Logger.Warn("claude hook callback response failed", "request_id", msg.RequestID, "error", err)
 						select {
 						case controlErrors <- err:
 						default:
 						}
 						cancel()
+					} else {
+						b.cfg.Logger.Debug("claude hook callback response sent", "request_id", msg.RequestID)
 					}
 				}(msg, reply)
 			case "control_response":
@@ -401,6 +425,17 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "claude", stderrTail)
+		}
+		if finalStatus == "completed" && toolResultCount > 0 && toolResultErrorCount == toolResultCount {
+			classification := "unknown"
+			if cancelledToolResultCount == toolResultCount {
+				classification = "cancelled"
+			}
+			b.cfg.Logger.Warn("claude completed after every tool result failed",
+				"tool_result_count", toolResultCount,
+				"cancelled_tool_result_count", cancelledToolResultCount,
+				"cancellation_classification", classification,
+			)
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
 			provider:                   "claude",
@@ -527,20 +562,34 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	return turn
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
+type claudeUserTurn struct {
+	sawAsyncLaunch           bool
+	toolResultCount          int
+	toolResultErrorCount     int
+	cancelledToolResultCount int
+}
+
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) claudeUserTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return false
+		return claudeUserTurn{}
 	}
 
-	sawAsyncLaunch := false
+	turn := claudeUserTurn{}
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
+			turn.toolResultCount++
+			if block.IsError {
+				turn.toolResultErrorCount++
+			}
+			if block.ToolDenialKind == "cancelled" {
+				turn.cancelledToolResultCount++
+			}
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
 				if claudeToolResultHasAsyncLaunch(block.Content) {
-					sawAsyncLaunch = true
+					turn.sawAsyncLaunch = true
 				}
 			}
 			trySend(ch, Message{
@@ -550,7 +599,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 			})
 		}
 	}
-	return sawAsyncLaunch
+	return turn
 }
 
 func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -1029,13 +1078,15 @@ func claudeUsageHasTokens(input, output, cacheRead, cacheWrite int64) bool {
 }
 
 type claudeContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
+	Type           string          `json:"type"`
+	Text           string          `json:"text,omitempty"`
+	ID             string          `json:"id,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	Input          json.RawMessage `json:"input,omitempty"`
+	ToolUseID      string          `json:"tool_use_id,omitempty"`
+	Content        json.RawMessage `json:"content,omitempty"`
+	IsError        bool            `json:"is_error,omitempty"`
+	ToolDenialKind string          `json:"toolDenialKind,omitempty"`
 }
 
 type claudeControlRequestPayload struct {
