@@ -447,19 +447,14 @@ describe("estimateCost", () => {
 
   it("prices current Codex models per OpenAI's official cache-aware rates", () => {
     // Official announcement rates. 5.6 is the first OpenAI generation to bill
-    // cache writes separately: cacheRead = 0.1x input, cacheWrite = 1.25x
+    // cache writes separately: cacheRead generally = 0.1x input (GPT-6.1
+    // Sol uses 0.05x), cacheWrite = 1.25x
     // input. Cover every model x every token category so a wrong cache rate
     // can't hide behind an input-only assertion. `total` is 1M of each of the
     // four categories priced at its own rate.
-    //
-    // `gpt-6.1-sol` is absent: the pricing table here is the models.dev-generated
-    // snapshot (see pricing.generated.ts), and models.dev carries no cost data for
-    // it yet. Never hand-patch a row into the generated file to satisfy an
-    // assertion — the snapshot refresh on the M-9 branch is where a new SKU gets
-    // its price, and until then the SKU correctly surfaces as unmapped.
     const cases = [
       { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
-
+      { model: "gpt-6.1-sol", input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, total: 14.6 },
       { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
       { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
       { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
@@ -706,13 +701,9 @@ describe("estimateCost", () => {
   });
 
   it("resolves current Codex routing prefixes and context tags", () => {
-    // The behaviour under test is the resolver's prefix/tag normalization, so the
-    // fixture is a priced sibling rather than `gpt-6.1-sol` (unpriced upstream —
-    // see the note in the case table above). `gpt-6-sol` prices cache reads at
-    // 0.2x input in the generated snapshot.
-    for (const model of ["openai:gpt-6-sol", "openai/gpt-6-sol", "gpt-6-sol[1m]"]) {
+    for (const model of ["openai:gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol[1m]"]) {
       expect(isModelPriced(model, "codex")).toBe(true);
-      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.2, 5);
+      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.1, 5);
     }
     for (const model of ["openai:gpt-6.1-terra", "openai/gpt-6.1-terra", "gpt-6.1-terra[1m]"]) {
       expect(isModelPriced(model, "codex")).toBe(true);
