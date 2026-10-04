@@ -178,7 +178,20 @@ multica runtime activity <runtime-id>
 | `config` | 查看或修改当前 CLI profile 的本地配置 |
 | `update`、`version` | 更新 CLI 或查看版本 |
 
-`multica chat` 读取的是**智能体当前正在处理的外部聊天会话**，主要供聊天集成中的智能体使用；它不是用于浏览任意工作区对话的通用命令。
+`multica chat history` 和 `multica chat thread` 读取的是**智能体当前正在处理的会话**，不能浏览其他会话。
+
+### 向已有会话发送消息
+
+```bash
+multica chat list --title "评审" --output json
+multica chat send <session-id> --body "请评审这次改动。"
+```
+
+`chat list` 列出当前工作区内、属于认证用户且有权访问的活跃会话。`--title` 只做精确筛选，名称不一定唯一；发送时使用结果中的完整 UUID，表格输出也保留完整 UUID。在智能体运行中，认证用户是任务令牌绑定的运行时所有者，不一定是本次运行的发起人。这些命令不会授予其他成员会话的访问权，也不会绕过智能体调用权限。
+
+`chat send` 提交普通聊天输入，不是带智能体身份的消息卡片。服务端保存消息并创建一次**运行**，不是看板任务。会话忙时，新消息在已有运行之后排队。JSON 返回 `message_id`、`task_id`（运行 ID）和 `queued`；接收成功不代表回复完成。回复通过正常运行流程显示在目标会话中。
+
+命令只发送一次，不等待回复、不自动重试。超时或响应丢失后，先检查目标会话，再决定是否重发：消息可能已经收到。本次不增加会话创建、附件发送或自动回信。
 
 ## ID 和输出格式
 
@@ -274,7 +287,9 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
 | | `member list/add/set-role/remove` | 管理小队成员 | |
 | | `activity <issue-id> <outcome>` | 记录队长评价 | |
-| `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的外部聊天会话 | `--limit`、`--before` |
+| `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的会话 | `--limit`、`--before` |
+| | `list` | 列出属于认证用户且有权访问的活跃会话 | `--title`（精确匹配）、`--output`（`json` 或 `table`） |
+| | `send <session-id>` | 向已有会话发送消息并创建一次运行 | `--body`（必填）、`--output`（`json` 或 `table`）；使用完整 UUID |
 
 ### Runtime
 
