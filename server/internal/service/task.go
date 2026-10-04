@@ -5838,6 +5838,15 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	if err != nil {
 		return nil, err
 	}
+	if resetErr := s.Queries.ResetProviderFailureCircuitForManualRerun(ctx, db.ResetProviderFailureCircuitForManualRerunParams{
+		IssueID: issueID, FailingAgentID: agentID,
+	}); resetErr != nil {
+		slog.Warn("issue rerun: provider failure circuit reset failed",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"error", resetErr,
+		)
+	}
 	slog.Info("issue rerun enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issueID),
@@ -6125,7 +6134,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 
 const (
 	delegatedFailureErrorSummaryRunes       = 800
-	delegatedFailureRecoveryMaxTaskAttempts = 1
+	delegatedFailureRecoveryMaxTaskAttempts = 3
+	providerFailureRecoveryMaxTaskAttempts  = 1
 	delegatedFailureRecoveryCommentType     = "progress_update"
 )
 
@@ -6346,6 +6356,10 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 			return nil, fmt.Errorf("register provider failure circuit: %w", circuitErr)
 		}
 		if circuit.OpenUntil.Valid {
+			actionRequiredContent := "ACTION_REQUIRED: repeated provider failures opened the recovery circuit for 30 minutes. Automatic events in this causal chain are suppressed. Add a new member comment or start a manual rerun with a new recovery revision after reading back durable state."
+			if !source.TriggerCommentID.Valid {
+				actionRequiredContent = "ACTION_REQUIRED: repeated provider failures opened the recovery circuit for 30 minutes. Automatic events in this causal chain are suppressed. Start a manual rerun with a new recovery revision after reading back durable state."
+			}
 			actionRequiredID := dbid.NewV7()
 			if _, claimErr := q.ClaimProviderFailureActionRequiredComment(ctx, db.ClaimProviderFailureActionRequiredCommentParams{
 				IssueID: issue.ID, ThreadRootID: threadRootID, ProviderErrorSignature: circuit.ProviderErrorSignature,
@@ -6355,7 +6369,7 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 					ID: actionRequiredID, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 					AuthorType: "system", AuthorID: pgtype.UUID{Valid: true}, Type: "system",
 					ParentID: source.TriggerCommentID, SourceTaskID: failed.ID,
-					Content: "ACTION_REQUIRED: repeated provider failures opened the recovery circuit for 30 minutes. Automatic events in this causal chain are suppressed. Add a new member comment or start a manual rerun with a new recovery revision after reading back durable state.",
+					Content: actionRequiredContent,
 				})
 				if createErr != nil {
 					return nil, fmt.Errorf("create provider failure action-required comment: %w", createErr)
@@ -6489,11 +6503,11 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 	return target, created, nil
 }
 
-func delegatedFailureRecoveryExhaustionContent(target *delegatedFailureRecoveryTarget) string {
+func delegatedFailureRecoveryExhaustionContent(target *delegatedFailureRecoveryTarget, maxAttempts int32) string {
 	return fmt.Sprintf(
 		"Automatic recovery for delegated task `%s` stopped after %d coordinator tasks ended before receiving the recovery signal. No more recovery tasks will be created automatically; resume or dismiss the work manually. Source coordinator task: `%s`.",
 		util.UUIDToString(target.failed.ID),
-		delegatedFailureRecoveryMaxTaskAttempts,
+		maxAttempts,
 		util.UUIDToString(target.source.ID),
 	)
 }
@@ -6520,7 +6534,7 @@ func delegatedFailureRecoveryAttribution(target *delegatedFailureRecoveryTarget)
 // that terminal outcome. Updating the newest attempt first serializes
 // concurrent sweepers; the second caller then observes the explanation written
 // by the first and does not report another exhaustion.
-func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget) (bool, error) {
+func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget, maxAttempts int32) (bool, error) {
 	var exhaustedComment db.Comment
 	var exhaustedInbox db.InboxItem
 	created := false
@@ -6529,7 +6543,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		if _, err := qtx.AcknowledgeExhaustedDelegatedFailureRecovery(ctx, db.AcknowledgeExhaustedDelegatedFailureRecoveryParams{
 			CommentID:    target.comment.ID,
 			FailedTaskID: target.failed.ID,
-			MaxAttempts:  delegatedFailureRecoveryMaxTaskAttempts,
+			MaxAttempts:  maxAttempts,
 		}); err != nil {
 			return fmt.Errorf("acknowledge exhausted delegated failure recovery: %w", err)
 		}
@@ -6562,7 +6576,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
 			AuthorID:     pgtype.UUID{Valid: true},
-			Content:      delegatedFailureRecoveryExhaustionContent(target),
+			Content:      delegatedFailureRecoveryExhaustionContent(target, maxAttempts),
 			Type:         "system",
 			ParentID:     target.source.TriggerCommentID,
 			SourceTaskID: target.failed.ID,
@@ -6594,7 +6608,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				"failed_task_id":       util.UUIDToString(target.failed.ID),
 				"source_task_id":       util.UUIDToString(target.source.ID),
 				"coordinator_agent_id": util.UUIDToString(target.agent.ID),
-				"max_attempts":         delegatedFailureRecoveryMaxTaskAttempts,
+				"max_attempts":         maxAttempts,
 			})
 			if err != nil {
 				return fmt.Errorf("encode delegated failure exhaustion details: %w", err)
@@ -6714,8 +6728,12 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if err != nil {
 			return delegatedFailureRecoveryCovered, fmt.Errorf("count delegated failure recovery tasks: %w", err)
 		}
-		if recoveryTasks >= delegatedFailureRecoveryMaxTaskAttempts {
-			exhausted, err := s.exhaustDelegatedFailureRecovery(ctx, target)
+		maxRecoveryTasks := int32(delegatedFailureRecoveryMaxTaskAttempts)
+		if target.failed.FailureReason.Valid && target.failed.FailureReason.String == string(taskfailure.ReasonAgentProviderServerError) {
+			maxRecoveryTasks = providerFailureRecoveryMaxTaskAttempts
+		}
+		if recoveryTasks >= int64(maxRecoveryTasks) {
+			exhausted, err := s.exhaustDelegatedFailureRecovery(ctx, target, maxRecoveryTasks)
 			if err != nil {
 				return delegatedFailureRecoveryCovered, err
 			}

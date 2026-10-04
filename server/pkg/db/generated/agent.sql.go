@@ -8549,6 +8549,59 @@ func (q *Queries) RequeueAgentTaskAfterClaimFailure(ctx context.Context, arg Req
 	return i, err
 }
 
+const resetProviderFailureCircuitForManualRerun = `-- name: ResetProviderFailureCircuitForManualRerun :exec
+UPDATE provider_failure_circuit
+SET failure_count = 0,
+    first_failure_at = now(),
+    last_failure_at = now(),
+    causal_depth = 0,
+    recovery_started = false,
+    recovery_revision = recovery_revision + 1,
+    open_until = NULL,
+    action_required_comment_id = NULL
+WHERE issue_id = $1
+  AND failing_agent_id = $2
+`
+
+type ResetProviderFailureCircuitForManualRerunParams struct {
+	IssueID        pgtype.UUID `json:"issue_id"`
+	FailingAgentID pgtype.UUID `json:"failing_agent_id"`
+}
+
+// A manual rerun is also an explicit recovery boundary. Scope it to the target
+// agent because one issue may contain independent failing-agent circuits.
+func (q *Queries) ResetProviderFailureCircuitForManualRerun(ctx context.Context, arg ResetProviderFailureCircuitForManualRerunParams) error {
+	_, err := q.db.Exec(ctx, resetProviderFailureCircuitForManualRerun, arg.IssueID, arg.FailingAgentID)
+	return err
+}
+
+const resetProviderFailureCircuitForMemberComment = `-- name: ResetProviderFailureCircuitForMemberComment :exec
+UPDATE provider_failure_circuit
+SET failure_count = 0,
+    first_failure_at = now(),
+    last_failure_at = now(),
+    causal_depth = 0,
+    recovery_started = false,
+    recovery_revision = recovery_revision + 1,
+    open_until = NULL,
+    action_required_comment_id = NULL
+WHERE issue_id = $1
+  AND thread_root_id = $2
+`
+
+type ResetProviderFailureCircuitForMemberCommentParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	ThreadRootID pgtype.UUID `json:"thread_root_id"`
+}
+
+// A new member-authored comment is an explicit recovery boundary. Preserve the
+// row for audit/idempotency while allowing the next provider failure in the
+// thread to start a fresh bounded recovery revision.
+func (q *Queries) ResetProviderFailureCircuitForMemberComment(ctx context.Context, arg ResetProviderFailureCircuitForMemberCommentParams) error {
+	_, err := q.db.Exec(ctx, resetProviderFailureCircuitForMemberComment, arg.IssueID, arg.ThreadRootID)
+	return err
+}
+
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1

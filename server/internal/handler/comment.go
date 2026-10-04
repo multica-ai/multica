@@ -1963,6 +1963,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := created.Comment()
+	if authorType == "member" {
+		threadRootID := comment.ID
+		if rootComment != nil {
+			threadRootID = rootComment.ID
+		}
+		if err := h.Queries.ResetProviderFailureCircuitForMemberComment(r.Context(), db.ResetProviderFailureCircuitForMemberCommentParams{
+			IssueID: issue.ID, ThreadRootID: threadRootID,
+		}); err != nil {
+			slog.Warn("reset provider failure circuit after member comment", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "thread_root_id", uuidToString(threadRootID))...)
+		}
+	}
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})

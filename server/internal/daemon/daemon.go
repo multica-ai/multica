@@ -8916,7 +8916,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	switch result.Status {
 	case "completed":
 		if isProviderEmptyContentOutput(result.Output) {
-			comment := "Provider failed to return content after one safe in-run retry. Raw diagnostics are retained in run metadata; no automatic run retry will be started."
+			comment := "Provider failed to return content after one safe in-run retry. No automatic run retry will be started."
 			failureReason := string(taskfailure.ReasonAgentProviderServerError)
 			if tools > 0 {
 				comment = "PARTIAL_EXECUTION_ACTION_REQUIRED: the provider failed after durable side effects may have occurred. Automatic rerun is disabled; read back external state before manual recovery."
@@ -9049,9 +9049,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// conversation permanently blocks the issue: every follow-up
 		// task resumes the same poisoned session and hits the same 400.
 		failureReason, _ := classifyPoisonedError(errMsg)
-		if isProviderEmptyContent(errMsg) && tools > 0 {
-			failureReason = "partial_execution_action_required"
-			errMsg = "PARTIAL_EXECUTION_ACTION_REQUIRED: the provider failed after durable side effects may have occurred. Automatic rerun is disabled; read back external state before manual recovery."
+		if isProviderEmptyContent(errMsg) {
+			if tools > 0 {
+				failureReason = "partial_execution_action_required"
+				errMsg = "PARTIAL_EXECUTION_ACTION_REQUIRED: the provider failed after durable side effects may have occurred. Automatic rerun is disabled; read back external state before manual recovery."
+			} else {
+				failureReason = string(taskfailure.ReasonAgentProviderServerError)
+			}
 		}
 		if failureReason == "" {
 			// A resume we could not read back leaves the same oversized thread

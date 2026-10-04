@@ -2159,6 +2159,37 @@ WHERE issue_id = @issue_id
   AND action_required_comment_id IS NULL
 RETURNING *;
 
+-- name: ResetProviderFailureCircuitForMemberComment :exec
+-- A new member-authored comment is an explicit recovery boundary. Preserve the
+-- row for audit/idempotency while allowing the next provider failure in the
+-- thread to start a fresh bounded recovery revision.
+UPDATE provider_failure_circuit
+SET failure_count = 0,
+    first_failure_at = now(),
+    last_failure_at = now(),
+    causal_depth = 0,
+    recovery_started = false,
+    recovery_revision = recovery_revision + 1,
+    open_until = NULL,
+    action_required_comment_id = NULL
+WHERE issue_id = @issue_id
+  AND thread_root_id = @thread_root_id;
+
+-- name: ResetProviderFailureCircuitForManualRerun :exec
+-- A manual rerun is also an explicit recovery boundary. Scope it to the target
+-- agent because one issue may contain independent failing-agent circuits.
+UPDATE provider_failure_circuit
+SET failure_count = 0,
+    first_failure_at = now(),
+    last_failure_at = now(),
+    causal_depth = 0,
+    recovery_started = false,
+    recovery_revision = recovery_revision + 1,
+    open_until = NULL,
+    action_required_comment_id = NULL
+WHERE issue_id = @issue_id
+  AND failing_agent_id = @failing_agent_id;
+
 -- name: AcknowledgeExhaustedDelegatedFailureRecovery :one
 -- Once the bounded automatic attempts are exhausted, record a terminal
 -- acknowledgement on the newest recovery task. The outbox treats this receipt
