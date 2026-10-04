@@ -1,0 +1,38 @@
+---
+title: HarmonyOS 앱
+description: DevEco 에뮬레이터에서 Multica HarmonyOS 클라이언트를 실행합니다. 현재는 수직 슬라이스이며 로그인, 워크스페이스, 읽기 전용 수신함을 제공합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica HarmonyOS 클라이언트는 현재 개발 중이며 아직 AppGallery에 출시되지 않았습니다. 현재 제공되는 것은**수직 슬라이스**입니다. 이메일 확인 코드 로그인, 워크스페이스 선택, 실시간 업데이트가 지원되는 읽기 전용 수신함을 사용할 수 있습니다. 태스크 상세, 편집기, 채팅은 아직 이식되지 않았습니다.
+
+<Callout type="info">
+  데이터는 서버에 저장됩니다. 슬라이스는 Web, Desktop, iOS 앱과 동일한 백엔드에 연결되므로 기존 계정으로 그대로 로그인하면 됩니다.
+</Callout>
+
+## 준비 사항
+
+- DevEco Studio가 설치된 Mac(기본 경로 `/Applications/DevEco-Studio.app`)과 Device Manager에서 다운로드한 스마트폰 에뮬레이터 이미지;
+- Node.js 22+, pnpm, Git.
+
+## 에뮬레이터에서 실행
+
+저장소를 클론하고 의존성을 설치합니다:
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+
+DevEco Studio에서 스마트폰 에뮬레이터를 시작한 뒤 저장소 루트에서 다음을 실행합니다:
+
+```bash
+pnpm harmony:mobile-harmony:staging
+pnpm dev:mobile-harmony:staging
+```
+
+첫 번째 명령은 앱 패키지를 빌드해 에뮬레이터에 설치하고, 두 번째 명령은 JS 번들러를 시작합니다. 앱은 기본적으로 staging 백엔드에 연결됩니다. 연결 대상을 바꾸려면 `apps/mobile-harmony/.env.*`의 `MULTICA_API_URL`을 수정하세요(변경 후 번들러를 재시작해야 합니다).
+
+개발 로드맵은 [`apps/mobile-harmony/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile-harmony/README.md)를 참고하세요.

@@ -141,12 +141,12 @@ jobs:
             turbo-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
 
       - name: Build, type check, and lint
-        # Mobile lives in a parallel mobile-verify workflow (path-filtered
-        # to apps/mobile/** + packages/core/**) so it doesn't add
-        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
-        # filter in sync with the root package.json scripts, which also
-        # exclude @multica/mobile.
-        run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
+        # Mobile lives in parallel mobile-verify / harmony-verify workflows
+        # (path-filtered to the app + packages/core/**) so they don't add
+        # their toolchain time to every web/desktop PR. Keep this filter in
+        # sync with the root package.json scripts, which also exclude
+        # @multica/mobile and @multica/mobile-harmony.
+        run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile' --filter='!@multica/mobile-harmony'
 
       - name: Check frontend quality
         uses: ./.github/actions/frontend-quality
@@ -194,7 +194,7 @@ jobs:
         # job's responsibility -- frontend-build owns the `typecheck` task.
         # `test` reaches dependency sources through the hash-only
         # `^cache-inputs` edge (see turbo.json), so no `tsc` runs here.
-        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile' --filter='!@multica/views'
+        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile' --filter='!@multica/mobile-harmony' --filter='!@multica/views'
 
   # Split views across two runners. GitHub reports the matrix job's combined
   # result, so the aggregate gate can continue depending on this one job ID.

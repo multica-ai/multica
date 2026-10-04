@@ -1,0 +1,38 @@
+---
+title: HarmonyOS アプリ
+description: DevEco エミュレーターで Multica の HarmonyOS クライアントを実行します。現在は縦方向スライス：サインイン、ワークスペース、読み取り専用受信トレイ。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica の HarmonyOS クライアントは現在開発中で、まだ AppGallery では配布されていません。現時点で提供されるのは**縦方向スライス**です。メールの確認コードによるサインイン、ワークスペース選択、リアルタイム更新付きの読み取り専用受信トレイが利用できます。タスクの詳細、エディター、チャットは未移植です。
+
+<Callout type="info">
+  データはサーバー側に保存されます。スライスは Web・Desktop・iOS アプリと同じバックエンドに接続するため、既存のアカウントでそのままサインインできます。
+</Callout>
+
+## 事前準備
+
+- DevEco Studio がインストールされた Mac（デフォルトパス `/Applications/DevEco-Studio.app`）と、Device Manager からダウンロードしたスマートフォンのエミュレーターイメージ；
+- Node.js 22+、pnpm、Git。
+
+## エミュレーターでの実行
+
+リポジトリをクローンして依存関係をインストールします：
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+
+DevEco Studio でスマートフォンエミュレーターを起動し、リポジトリのルートから次を実行します：
+
+```bash
+pnpm harmony:mobile-harmony:staging
+pnpm dev:mobile-harmony:staging
+```
+
+最初のコマンドはアプリパッケージをビルドしてエミュレーターにインストールし、2 番目のコマンドは JS バンドラーを起動します。アプリはデフォルトで staging バックエンドに接続します。接続先を変えるには `apps/mobile-harmony/.env.*` の `MULTICA_API_URL` を編集します（変更後はバンドラーの再起動が必要です）。
+
+開発ロードマップは [`apps/mobile-harmony/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile-harmony/README.md) を参照してください。

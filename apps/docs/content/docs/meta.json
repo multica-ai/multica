@@ -45,6 +45,7 @@
     "---Apps---",
     "desktop-app",
     "mobile-app",
+    "mobile-harmony-app",
     "---Self-hosting---",
     "security-model",
     "environment-variables",

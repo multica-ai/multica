@@ -45,6 +45,7 @@
     "---客户端---",
     "desktop-app",
     "mobile-app",
+    "mobile-harmony-app",
     "---自托管---",
     "security-model",
     "environment-variables",

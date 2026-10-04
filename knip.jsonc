@@ -13,9 +13,10 @@
   // reads as "unused" from inside its own workspace.
   "include": ["files", "dependencies", "unlisted"],
 
-  // Go, and a workspace with its own Expo toolchain, lint pipeline, and React
-  // version (see apps/mobile/CLAUDE.md). Neither is covered by this config.
-  "ignoreWorkspaces": ["apps/mobile"],
+  // Go, and workspaces with their own mobile toolchains, lint pipelines, and
+  // React versions (see apps/mobile/CLAUDE.md and
+  // apps/mobile-harmony/AGENTS.md). Not covered by this config.
+  "ignoreWorkspaces": ["apps/mobile", "apps/mobile-harmony"],
 
   "workspaces": {
     ".": {

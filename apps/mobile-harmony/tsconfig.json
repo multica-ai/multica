@@ -1,0 +1,34 @@
+{
+  "extends": "@tsconfig/react-native/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "nativewind",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "types": [
+      "react-native",
+      "node"
+    ],
+    "lib": [
+      "es2023",
+      "dom"
+    ]
+  },
+  "include": [
+    "App.tsx",
+    "index.js",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "editor/**/*.ts",
+    "editor/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "data/**/*.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "nativewind-env.d.ts"
+  ]
+}

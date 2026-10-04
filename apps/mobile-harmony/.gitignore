@@ -1,0 +1,26 @@
+# HarmonyOS toolchain (generated)
+harmony/entry/build/
+harmony/entry/.cxx/
+harmony/build/
+harmony/.cxx/
+harmony/oh_modules/
+harmony/entry/oh_modules/
+harmony/.hvigor/
+harmony/**/.preview/
+harmony/.appanalyzer/
+*.har.trace
+oh_modules/
+.hvigor/
+build/
+.cxx/
+
+# Metro / RN
+.metro-health-check*
+
+# Env
+.env*.local
+
+# Keep source data dir visible against the root `data/` ignore rule.
+!data/
+!data/**
+data/**/.DS_Store
