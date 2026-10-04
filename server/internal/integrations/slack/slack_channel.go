@@ -31,13 +31,14 @@ import (
 // EventChatDone subscriber (NewOutbound); Send satisfies the Channel contract
 // and posts with this installation's bot token.
 type slackChannel struct {
-	appID     string
-	botUserID string
-	appToken  string        // decrypted xapp- — authorizes the Socket Mode connection
-	botAPI    *slack.Client // bot-token client for outbound Send
-	handler   channel.InboundHandler
-	slash     *SlashCommandProcessor // nil disables /issue and /new slash-command handling
-	logger    *slog.Logger
+	appID              string
+	botUserID          string
+	appToken           string        // decrypted xapp- — authorizes the Socket Mode connection
+	botAPI             *slack.Client // bot-token client for outbound Send
+	dmRepliesInThreads bool
+	handler            channel.InboundHandler
+	slash              *SlashCommandProcessor // nil disables /issue and /new slash-command handling
+	logger             *slog.Logger
 }
 
 // slashCommandTimeout bounds detached `/issue`, `/new`, and `/clear` processing
@@ -194,6 +195,13 @@ func (c *slackChannel) dispatchEventsAPI(ctx context.Context, e slackevents.Even
 	if !ok {
 		return nil
 	}
+	// Apply the installation's placement policy before ingestion so notices,
+	// session appends, and immutable task delivery snapshots share the same
+	// originating thread. Do not change ChatType or ChatID: DMs retain their
+	// continuous session even when each top-level message starts a new thread.
+	if c.dmRepliesInThreads && msg.Source.ChatType == channel.ChatTypeP2P && msg.Source.ThreadID == "" {
+		msg.Source.ThreadID = msg.MessageID
+	}
 	return c.handler(ctx, msg)
 }
 
@@ -256,13 +264,14 @@ func newSlackFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("slack: decrypt bot token: %w", err)
 		}
 		return &slackChannel{
-			appID:     ic.AppID,
-			botUserID: ic.BotUserID,
-			appToken:  appToken,
-			botAPI:    slack.New(botToken),
-			handler:   cfg.Handler,
-			slash:     deps.Slash,
-			logger:    logger,
+			appID:              ic.AppID,
+			botUserID:          ic.BotUserID,
+			appToken:           appToken,
+			botAPI:             slack.New(botToken),
+			dmRepliesInThreads: ic.DMRepliesInThreads,
+			handler:            cfg.Handler,
+			slash:              deps.Slash,
+			logger:             logger,
 		}, nil
 	}
 }

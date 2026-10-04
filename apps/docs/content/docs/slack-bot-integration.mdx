@@ -125,6 +125,26 @@ Only members of the current Multica workspace can use the Bot.
 
 Open the Bot from **Apps** in the Slack sidebar and message it directly — no @-mention needed.
 
+#### Threaded DM replies
+
+By default, replies to top-level DMs appear in the main conversation. Workspace
+owners and admins can opt a single Bot into threaded replies through the BYO
+installation API: include `"dm_replies_in_threads": true` alongside the Bot and
+App-level tokens in `POST /api/workspaces/{workspace_id}/slack/install/byo?agent_id={agent_id}`.
+For an existing Bot, submit its current tokens and agent ID again; its
+installation ID and existing Chat bindings are retained. The connection reloads
+the new configuration on the supervisor's next reconciliation. Read back
+`dm_replies_in_threads` on that installation from
+`GET /api/workspaces/{workspace_id}/slack/installations` to confirm the saved setting.
+
+When enabled, a reply to a top-level DM lands under that message, and a reply to
+an existing thread stays under that thread's root. All DM threads still share
+one continuous Multica Chat and agent context. Use `/new` or `/clear` to change
+that context explicitly. Set the option to `false` to restore top-level replies;
+omitting it when reconnecting also restores the default. This API option has no
+UI toggle yet. It changes replies to incoming messages; scheduled deliveries
+keep their recorded destinations.
+
 ### Channels and group chats
 
 Run `/invite @your-bot` to add the Bot to the channel first, then send `@your-bot your request`. Each thread forms its own session; for follow-ups, keep @-mentioning the Bot in the original thread.

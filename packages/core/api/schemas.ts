@@ -34,6 +34,8 @@ import type {
   PurchaseWorkspaceSeatsResponse,
   CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
+  SlackInstallation,
+  ListSlackInstallationsResponse,
   DingTalkInstallation,
   ListDingTalkInstallationsResponse,
   ListDingTalkGroupsResponse,
@@ -3215,6 +3217,45 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
+};
+
+export const SlackInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  team_id: z.string().default(""),
+  bot_user_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  dm_replies_in_threads: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_SLACK_INSTALLATION: SlackInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  team_id: "",
+  bot_user_id: "",
+  installer_user_id: "",
+  status: "revoked",
+  installed_at: "",
+  created_at: "",
+  updated_at: "",
+  dm_replies_in_threads: false,
+};
+
+export const ListSlackInstallationsResponseSchema = z.object({
+  installations: z.array(SlackInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_SLACK_INSTALLATIONS_RESPONSE: ListSlackInstallationsResponse = {
+  installations: [],
+  configured: false,
 };
 
 export const DingTalkInstallationSchema = z.object({

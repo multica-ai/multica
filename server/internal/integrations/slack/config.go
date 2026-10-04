@@ -42,6 +42,9 @@ type installConfig struct {
 	BotUserID         string `json:"bot_user_id,omitempty"`
 	BotTokenEncrypted string `json:"bot_token_encrypted"`
 	AppTokenEncrypted string `json:"app_token_encrypted,omitempty"`
+	// DMRepliesInThreads changes reply placement only; DM session identity
+	// remains the channel ID. Existing installations default to false.
+	DMRepliesInThreads bool `json:"dm_replies_in_threads,omitempty"`
 }
 
 // credentials is the decoded, decrypted form the outbound sender runs on. The
@@ -87,9 +90,10 @@ func decodeCredentials(raw json.RawMessage, decrypt Decrypter) (credentials, err
 // PublicConfig is the non-secret subset of an installation config, safe to
 // surface on the management API (the encrypted bot token is never included).
 type PublicConfig struct {
-	AppID     string
-	TeamID    string
-	BotUserID string
+	DMRepliesInThreads bool
+	AppID              string
+	TeamID             string
+	BotUserID          string
 }
 
 // DecodePublicConfig extracts the display-safe fields from a stored config blob.
@@ -102,7 +106,7 @@ func DecodePublicConfig(raw json.RawMessage) PublicConfig {
 	if teamID == "" {
 		teamID = cfg.AppID
 	}
-	return PublicConfig{AppID: cfg.AppID, TeamID: teamID, BotUserID: cfg.BotUserID}
+	return PublicConfig{AppID: cfg.AppID, TeamID: teamID, BotUserID: cfg.BotUserID, DMRepliesInThreads: cfg.DMRepliesInThreads}
 }
 
 // decryptToken base64-decodes the stored ciphertext (tolerating the MIME

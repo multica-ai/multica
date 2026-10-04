@@ -1639,3 +1639,32 @@ describe("workspace subscription contract", () => {
     );
   });
 });
+
+
+describe("Slack reply preference API compatibility", () => {
+  it("defaults older installations to top-level replies and accepts future statuses", async () => {
+    stubFetchJson({ installations: [{ id: "bot-1", status: "future-status" }], configured: true });
+    const result = await new ApiClient("https://api.example.test").listSlackInstallations("ws-1");
+    expect(result.installations[0]).toMatchObject({ id: "bot-1", status: "future-status", dm_replies_in_threads: false });
+  });
+
+  it("preserves an enabled preference and sends the opt-in on registration", async () => {
+    stubFetchJson({ id: "bot-1", dm_replies_in_threads: true });
+    const body = { bot_token: "test-bot", app_token: "test-app", dm_replies_in_threads: true };
+    const result = await new ApiClient("https://api.example.test").registerSlackBYO("ws-1", "agent-1", body);
+    expect(result.dm_replies_in_threads).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.example.test/api/workspaces/ws-1/slack/install/byo?agent_id=agent-1",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(body) }),
+    );
+  });
+
+  it("falls back safely for malformed installation lists and boolean preferences", async () => {
+    const client = new ApiClient("https://api.example.test");
+    stubFetchJson({ installations: "invalid", configured: true });
+    await expect(client.listSlackInstallations("ws-1")).resolves.toEqual({ installations: [], configured: false });
+    stubFetchJson({ id: "bot-1", dm_replies_in_threads: "true" });
+    await expect(client.registerSlackBYO("ws-1", "agent-1", { bot_token: "test", app_token: "test" }))
+      .resolves.toMatchObject({ id: "", status: "revoked", dm_replies_in_threads: false });
+  });
+});
