@@ -547,6 +547,13 @@ jobs:
         # real skills instead of the test directories.
         run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
 
+      - name: Test Windows Claude Git Bash temp lifecycle
+        working-directory: server
+        run: |
+          $env:MULTICA_TEST_GIT_BASH = "$env:ProgramFiles\Git\usr\bin\bash.exe"
+          if (-not (Test-Path -LiteralPath $env:MULTICA_TEST_GIT_BASH)) { throw "Git for Windows is required" }
+          go test -tags=gitbashintegration ./internal/daemon -v -run '^(TestWindowsClaudeGitBashTaskTempLifecycle|TestTaskMulticaEnvironment.*|TestTaskTempBaseDir)$' -count=1 -timeout=5m
+
       - name: Test Windows agent launcher argv/stdin handling
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the

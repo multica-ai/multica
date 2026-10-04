@@ -103,7 +103,7 @@ Le tableau liste les variables que les runtimes personnalisés peuvent utiliser 
 | `MULTICA_AGENT_NAME` | Nom affiché de l'agent assigné | Indicatif |
 | `MULTICA_DAEMON_PORT` | Port local de santé/API du daemon utilisé par les commandes réservées aux exécutions, comme `multica repo checkout` | Indicatif |
 | `MULTICA_TASK_SLOT` | Emplacement dans le pool de parallélisme global du daemon ; utile pour les ressources indexées par emplacement, comme les GPU | Indicatif |
-| `TMPDIR` | Répertoire temporaire privé de l'exécution en cours ; également fourni sous `TMP` et `TEMP` pour les outils multiplateformes | Indicatif |
+| `TMPDIR` | Répertoire temporaire privé de l'exécution ; également fourni sous `TMP` et `TEMP`, sauf pour Claude Code sous Windows, qui hérite des chemins temporaires utilisateur pour le `/tmp` partagé de Git Bash et utilise par défaut le répertoire temporaire de la tâche pour `CLAUDE_CODE_TMPDIR` | Indicatif |
 
 Le serveur détermine l'auteur des requêtes effectuées avec `MULTICA_TOKEN` ; les écritures telles que les commentaires de tâche sont attribuées à l'agent assigné et à l'exécution en cours. Pour tout savoir sur le rattachement du jeton, ses permissions, l'attribution, sa durée de vie maximale de 24 heures et son nettoyage, consultez [Jetons temporaires pour les exécutions d'agents](/auth-tokens#jetons-temporaires-pour-les-exécutions-dagents).
 

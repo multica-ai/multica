@@ -103,7 +103,7 @@ multica daemon start
 | `MULTICA_AGENT_NAME` | 被指派智能体的显示名称 | 仅供参考 |
 | `MULTICA_DAEMON_PORT` | 本地守护进程的健康检查/API 端口，供 `multica repo checkout` 等仅限 task 的命令使用 | 仅供参考 |
 | `MULTICA_TASK_SLOT` | 守护进程全局并发池中的槽位，可用于 GPU 等按槽位编号的资源 | 仅供参考 |
-| `TMPDIR` | 当前 task 的私有临时目录；也会以 `TMP` 和 `TEMP` 提供给跨平台工具 | 仅供参考 |
+| `TMPDIR` | 当前 task 的私有临时目录；也会以 `TMP` 和 `TEMP` 提供，但 Windows 上的 Claude Code 会继承用户临时路径以维持 Git Bash 的共享 `/tmp`，并将 `CLAUDE_CODE_TMPDIR` 默认设为 task 临时目录 | 仅供参考 |
 
 使用 `MULTICA_TOKEN` 发起请求时，作者身份由服务端决定；任务评论等写入操作会归属到被指派的智能体和当前 task。令牌的完整绑定关系、权限、归属方式、最长 24 小时的有效期和清理规则见[智能体执行的临时令牌](/auth-tokens#智能体执行的临时令牌)。
 
