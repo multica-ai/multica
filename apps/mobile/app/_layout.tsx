@@ -2,13 +2,12 @@ import "../global.css";
 
 import { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { Stack, router } from "expo-router";
+import { Stack, ThemeProvider, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { ThemeProvider } from "@react-navigation/native";
 import { PortalHost } from "@rn-primitives/portal";
 import { api } from "@/data/api";
 import { maybeRenewSession } from "@/data/session-renewal";
