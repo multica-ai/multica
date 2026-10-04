@@ -1831,6 +1831,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	printIssueRunDispatchWarning(result)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
@@ -1967,12 +1968,21 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
 	}
+	printIssueRunDispatchWarning(result)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+func printIssueRunDispatchWarning(result map[string]any) {
+	if dispatch, ok := result["run_dispatch"].(map[string]any); ok && dispatch["status"] == "not_started" {
+		if reason, ok := dispatch["reason"].(string); ok && reason != "" {
+			fmt.Fprintf(os.Stderr, "Run not started: %s\n", reason)
+		}
+	}
 }
 
 // duplicateOfFlag returns the --duplicate-of reference, or "" when the flag is
