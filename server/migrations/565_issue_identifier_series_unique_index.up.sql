@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY uq_issue_identifier_series_workspace_prefix ON issue_identifier_series(workspace_id, prefix);

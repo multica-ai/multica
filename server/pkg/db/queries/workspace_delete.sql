@@ -680,6 +680,9 @@ DELETE FROM agent WHERE agent.workspace_id = $1;
 
 -- name: DeleteWorkspaceRuntimesAndProjects :exec
 WITH
+deleted_identifier_series AS (
+    DELETE FROM issue_identifier_series WHERE issue_identifier_series.workspace_id = $1
+),
 deleted_runtimes AS (
     DELETE FROM agent_runtime WHERE agent_runtime.workspace_id = $1
 ),

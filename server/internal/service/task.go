@@ -7650,12 +7650,12 @@ type IssueMapQuerier interface {
 // duplicate_of is resolved too: a client patches its cache with this
 // snapshot, so a null here would erase a mark the issue still carries
 // (MUL-7349). Only a cancelled issue with a pointer costs a read.
-func IssueToMapResolved(ctx context.Context, q IssueMapQuerier, issue db.Issue, issuePrefix string) map[string]any {
-	m := IssueToMap(issue, issuePrefix)
+func IssueToMapResolved(ctx context.Context, q IssueMapQuerier, issue db.Issue, fallbackPrefix string) map[string]any {
+	m := IssueToMap(issue, fallbackPrefix)
 	category, name := issuestatus.CategoryAndName(ctx, q, issue.WorkspaceID, issue.Status)
 	m["status_category"] = issuestatus.WireCategory(issue.Status, category)
 	m["status_name"] = name
-	if ref := resolveDuplicateOf(ctx, q, issue, issuePrefix); ref != nil {
+	if ref := resolveDuplicateOf(ctx, q, issue, issue.IdentifierPrefix); ref != nil {
 		m["duplicate_of"] = ref
 	}
 	return m
@@ -7681,18 +7681,22 @@ func resolveDuplicateOf(ctx context.Context, q IssueMapQuerier, issue db.Issue, 
 	}
 	return map[string]any{
 		"id":         util.UUIDToString(row.ID),
-		"identifier": IssueIdentifier(issuePrefix, row.Number),
+		"identifier": IssueIdentifier(row.IdentifierPrefix, row.Number),
 		"title":      row.Title,
 		"status":     row.Status,
 	}
 }
 
-func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
+func IssueToMap(issue db.Issue, fallbackPrefix string) map[string]any {
+	identifierPrefix := issue.IdentifierPrefix
+	if identifierPrefix == "" {
+		identifierPrefix = fallbackPrefix
+	}
 	return map[string]any{
 		"id":           util.UUIDToString(issue.ID),
 		"workspace_id": util.UUIDToString(issue.WorkspaceID),
 		"number":       issue.Number,
-		"identifier":   IssueIdentifier(issuePrefix, issue.Number),
+		"identifier":   IssueIdentifier(identifierPrefix, issue.Number),
 		"title":        issue.Title,
 		"description":  util.TextToPtr(issue.Description),
 		"status":       issue.Status,
@@ -7905,8 +7909,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	// subscriber template, and — missing entirely until MUL-5483 — ordinary
 	// agent-created sub-issues). Keeping a second write here would leave the
 	// same decision encoded in two places that can drift.
-	prefix := s.getIssuePrefix(workspaceID)
-	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
+	identifier := fmt.Sprintf("%s-%d", issue.IdentifierPrefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),
 		"agent_id":        util.UUIDToString(task.AgentID),

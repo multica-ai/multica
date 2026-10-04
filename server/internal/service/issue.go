@@ -314,13 +314,25 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			projectID = parent.ProjectID
 		}
 	}
+	identifierPrefix := ""
 	if projectID.Valid {
-		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		project, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: p.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
+		if project.IssuePrefix.Valid {
+			identifierPrefix = project.IssuePrefix.String
+		}
+	}
+	if identifierPrefix == "" {
+		workspace, err := qtx.GetWorkspace(ctx, p.WorkspaceID)
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("load workspace issue prefix: %w", err)
+		}
+		identifierPrefix = workspace.IssuePrefix
 	}
 
 	// Validate labels before we increment the issue counter so a stale or
@@ -341,7 +353,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
+	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, identifierPrefix, issueCountPolicy)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("allocate issue number: %w", err)
 	}
@@ -384,6 +396,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			OriginID:      p.OriginID,
 			Stage:         p.Stage,
 			Properties:    properties,
+			IdentifierPrefix: identifierPrefix,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
@@ -405,6 +418,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			ProjectID:     projectID,
 			Stage:         p.Stage,
 			Properties:    properties,
+			IdentifierPrefix: identifierPrefix,
 		})
 	}
 	if err != nil {

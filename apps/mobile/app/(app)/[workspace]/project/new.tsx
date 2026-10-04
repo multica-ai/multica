@@ -63,6 +63,7 @@ export default function NewProject() {
   const [title, setTitle] = useState("");
   const [icon, setIcon] = useState("");
   const [description, setDescription] = useState("");
+  const [issuePrefix, setIssuePrefix] = useState("");
   const status = useNewProjectDraftStore((s) => s.status);
   const priority = useNewProjectDraftStore((s) => s.priority);
   const resetDraft = useNewProjectDraftStore((s) => s.reset);
@@ -71,6 +72,7 @@ export default function NewProject() {
     title.length > 0 ||
     icon.length > 0 ||
     description.length > 0 ||
+    issuePrefix.length > 0 ||
     status !== "planned" ||
     priority !== "none";
 
@@ -119,6 +121,7 @@ export default function NewProject() {
         icon: icon.trim() || undefined,
         status,
         priority,
+        issue_prefix: issuePrefix || null,
       },
       {
         onSuccess: (project) => {
@@ -149,6 +152,7 @@ export default function NewProject() {
     icon,
     status,
     priority,
+    issuePrefix,
     wsSlug,
     resetDraft,
     t,
@@ -211,7 +215,7 @@ export default function NewProject() {
             />
           </Field>
 
-              <Field label={t("form.description")}>
+          <Field label={t("form.description")}>
             <AutosizeTextArea
               value={description}
               onChangeText={setDescription}
@@ -219,6 +223,19 @@ export default function NewProject() {
               className="bg-secondary/50 rounded-md px-3 py-2"
               minHeight={MIN_BODY_INPUT_HEIGHT_PX}
             />
+          </Field>
+
+          <Field label={t("form.issue_prefix")}>
+            <TextInput
+              value={issuePrefix}
+              onChangeText={(value) => setIssuePrefix(value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
+              placeholder={t("form.issue_prefix_placeholder")}
+              placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
+              className="text-base font-mono text-foreground bg-secondary/50 rounded-md px-3 py-2"
+              autoCapitalize="characters"
+              maxLength={10}
+            />
+            <Text className="text-xs text-muted-foreground">{t("form.issue_prefix_hint")}</Text>
           </Field>
 
           <View className="flex-row gap-2">

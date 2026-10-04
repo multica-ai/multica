@@ -39,6 +39,7 @@ export default function EditProject() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
+  const [issuePrefix, setIssuePrefix] = useState("");
   const [seeded, setSeeded] = useState(false);
 
   // Seed local state once detail lands. Effect (not setState-in-render)
@@ -49,6 +50,7 @@ export default function EditProject() {
     setTitle(detail.data.title);
     setDescription(detail.data.description ?? "");
     setIcon(detail.data.icon ?? "");
+    setIssuePrefix(detail.data.issue_prefix ?? "");
     setSeeded(true);
   }, [detail.data, seeded]);
 
@@ -58,8 +60,9 @@ export default function EditProject() {
       title.trim() !== detail.data.title ||
       description.trim() !== (detail.data.description ?? "") ||
       icon.trim() !== (detail.data.icon ?? "")
+      || issuePrefix !== (detail.data.issue_prefix ?? "")
     );
-  }, [detail.data, title, description, icon]);
+  }, [detail.data, title, description, icon, issuePrefix]);
 
   const canSave =
     seeded && title.trim().length > 0 && dirty && !update.isPending;
@@ -89,6 +92,7 @@ export default function EditProject() {
       title: title.trim(),
       description: description.trim() || null,
       icon: icon.trim() || null,
+      issue_prefix: issuePrefix || null,
     };
     update.mutate(patch, {
       onSuccess: () => router.back(),
@@ -99,7 +103,7 @@ export default function EditProject() {
         );
       },
     });
-  }, [canSave, title, description, icon, update, t]);
+  }, [canSave, title, description, icon, issuePrefix, update, t]);
 
   const headerLeft = useCallback(() => {
     return (
@@ -177,6 +181,19 @@ export default function EditProject() {
                   className="bg-secondary/50 rounded-md px-3 py-2"
                   minHeight={MIN_BODY_INPUT_HEIGHT_PX}
                 />
+              </Field>
+
+              <Field label={t("form.issue_prefix")}>
+                <TextInput
+                  value={issuePrefix}
+                  onChangeText={(value) => setIssuePrefix(value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
+                  placeholder={t("form.issue_prefix_inherited")}
+                  placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
+                  className="text-base font-mono text-foreground bg-secondary/50 rounded-md px-3 py-2"
+                  autoCapitalize="characters"
+                  maxLength={10}
+                />
+                <Text className="text-xs text-muted-foreground">{t("form.issue_prefix_hint")}</Text>
               </Field>
             </>
           )}

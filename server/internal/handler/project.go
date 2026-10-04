@@ -31,6 +31,7 @@ type ProjectResponse struct {
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	IssuePrefix *string `json:"issue_prefix"`
 	// StartDate / DueDate are calendar days ("YYYY-MM-DD"), no time-of-day or
 	// timezone — same contract as issue.start_date / issue.due_date.
 	StartDate  *string `json:"start_date"`
@@ -57,6 +58,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
+		IssuePrefix: textToPtr(p.IssuePrefix),
 		StartDate:   dateToPtr(p.StartDate),
 		DueDate:     dateToPtr(p.DueDate),
 		CreatedAt:   timestampToString(p.CreatedAt),
@@ -108,6 +110,7 @@ type CreateProjectRequest struct {
 	LeadID      *string                               `json:"lead_id"`
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
+	IssuePrefix *string                               `json:"issue_prefix"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
@@ -131,6 +134,7 @@ type UpdateProjectRequest struct {
 	LeadID      *string `json:"lead_id"`
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
+	IssuePrefix *string `json:"issue_prefix"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -300,6 +304,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var issuePrefix pgtype.Text
+	if req.IssuePrefix != nil {
+		normalized, valid := normalizeIssuePrefix(*req.IssuePrefix)
+		if !valid {
+			writeError(w, http.StatusBadRequest, issuePrefixFormatError)
+			return
+		}
+		if normalized != "" {
+			issuePrefix = pgtype.Text{String: normalized, Valid: true}
+		}
+	}
 
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
@@ -378,15 +393,27 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
+		IssuePrefix: issuePrefix,
 	}
 
-	// Without resources, keep the simple non-tx path.
+	// Prefix reservation and project creation are atomic even without resources.
 	if len(req.Resources) == 0 {
-		project, err := h.Queries.CreateProject(r.Context(), createParams)
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil { writeError(w, http.StatusInternalServerError, "failed to start transaction"); return }
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		project, err := qtx.CreateProject(r.Context(), createParams)
 		if err != nil {
 			h.writeProjectWriteError(w, r, err, "create")
 			return
 		}
+		if issuePrefix.Valid {
+			if _, err := qtx.ReserveIssueIdentifierSeries(r.Context(), db.ReserveIssueIdentifierSeriesParams{WorkspaceID: wsUUID, Prefix: issuePrefix.String, ProjectID: project.ID}); err != nil {
+				writeError(w, http.StatusConflict, "issue prefix is already in use or permanently reserved")
+				return
+			}
+		}
+		if err := tx.Commit(r.Context()); err != nil { writeError(w, http.StatusInternalServerError, "failed to commit project create"); return }
 		resp := projectToResponse(project)
 		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 		writeJSON(w, http.StatusCreated, resp)
@@ -406,6 +433,12 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
+	}
+	if issuePrefix.Valid {
+		if _, err := qtx.ReserveIssueIdentifierSeries(r.Context(), db.ReserveIssueIdentifierSeriesParams{WorkspaceID: wsUUID, Prefix: issuePrefix.String, ProjectID: project.ID}); err != nil {
+			writeError(w, http.StatusConflict, "issue prefix is already in use or permanently reserved")
+			return
+		}
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
@@ -585,11 +618,36 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
-	project, err := h.Queries.UpdateProject(r.Context(), params)
+	if _, present := rawFields["issue_prefix"]; present {
+		params.SetIssuePrefix = true
+		if req.IssuePrefix != nil {
+			normalized, valid := normalizeIssuePrefix(*req.IssuePrefix)
+			if !valid { writeError(w, http.StatusBadRequest, issuePrefixFormatError); return }
+			if normalized != "" { params.IssuePrefix = pgtype.Text{String: normalized, Valid: true} }
+		}
+	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil { writeError(w, http.StatusInternalServerError, "failed to start transaction"); return }
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if params.SetIssuePrefix && (!prevProject.IssuePrefix.Valid || !params.IssuePrefix.Valid || prevProject.IssuePrefix.String != params.IssuePrefix.String) {
+		if params.IssuePrefix.Valid {
+			if _, err := qtx.ReserveIssueIdentifierSeries(r.Context(), db.ReserveIssueIdentifierSeriesParams{WorkspaceID: wsUUID, Prefix: params.IssuePrefix.String, ProjectID: prevProject.ID}); err != nil {
+				writeError(w, http.StatusConflict, "issue prefix is already in use or permanently reserved"); return
+			}
+		}
+		if prevProject.IssuePrefix.Valid {
+			if err := qtx.ReleaseUnusedIssueIdentifierSeries(r.Context(), db.ReleaseUnusedIssueIdentifierSeriesParams{WorkspaceID: wsUUID, Prefix: prevProject.IssuePrefix.String, ProjectID: prevProject.ID}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to release old issue prefix"); return
+			}
+		}
+	}
+	project, err := qtx.UpdateProject(r.Context(), params)
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")
 		return
 	}
+	if err := tx.Commit(r.Context()); err != nil { writeError(w, http.StatusInternalServerError, "failed to commit project update"); return }
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
@@ -654,6 +712,12 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project views")
 		return
+	}
+	if project.IssuePrefix.Valid {
+		if err := qtx.ReleaseUnusedIssueIdentifierSeries(r.Context(), db.ReleaseUnusedIssueIdentifierSeriesParams{WorkspaceID: project.WorkspaceID, Prefix: project.IssuePrefix.String, ProjectID: project.ID}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to release project issue prefix")
+			return
+		}
 	}
 	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
