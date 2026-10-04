@@ -1746,6 +1746,97 @@ func (q *Queries) ClaimChatFinalizeDeferred(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
+const claimProviderFailureActionRequiredComment = `-- name: ClaimProviderFailureActionRequiredComment :one
+UPDATE provider_failure_circuit
+SET action_required_comment_id = $1
+WHERE issue_id = $2
+  AND thread_root_id = $3
+  AND provider_error_signature = $4
+  AND failing_agent_id = $5
+  AND action_required_comment_id IS NULL
+RETURNING issue_id, thread_root_id, provider_error_signature, failing_agent_id, first_failure_at, last_failure_at, failure_count, causal_depth, last_failure_task_id, recovery_started, recovery_revision, open_until, action_required_comment_id
+`
+
+type ClaimProviderFailureActionRequiredCommentParams struct {
+	CommentID              pgtype.UUID `json:"comment_id"`
+	IssueID                pgtype.UUID `json:"issue_id"`
+	ThreadRootID           pgtype.UUID `json:"thread_root_id"`
+	ProviderErrorSignature string      `json:"provider_error_signature"`
+	FailingAgentID         pgtype.UUID `json:"failing_agent_id"`
+}
+
+func (q *Queries) ClaimProviderFailureActionRequiredComment(ctx context.Context, arg ClaimProviderFailureActionRequiredCommentParams) (ProviderFailureCircuit, error) {
+	row := q.db.QueryRow(ctx, claimProviderFailureActionRequiredComment,
+		arg.CommentID,
+		arg.IssueID,
+		arg.ThreadRootID,
+		arg.ProviderErrorSignature,
+		arg.FailingAgentID,
+	)
+	var i ProviderFailureCircuit
+	err := row.Scan(
+		&i.IssueID,
+		&i.ThreadRootID,
+		&i.ProviderErrorSignature,
+		&i.FailingAgentID,
+		&i.FirstFailureAt,
+		&i.LastFailureAt,
+		&i.FailureCount,
+		&i.CausalDepth,
+		&i.LastFailureTaskID,
+		&i.RecoveryStarted,
+		&i.RecoveryRevision,
+		&i.OpenUntil,
+		&i.ActionRequiredCommentID,
+	)
+	return i, err
+}
+
+const claimProviderFailureRecovery = `-- name: ClaimProviderFailureRecovery :one
+UPDATE provider_failure_circuit
+SET recovery_started = true
+WHERE issue_id = $1
+  AND thread_root_id = $2
+  AND provider_error_signature = $3
+  AND failing_agent_id = $4
+  AND recovery_started = false
+  AND (open_until IS NULL OR open_until <= now())
+RETURNING issue_id, thread_root_id, provider_error_signature, failing_agent_id, first_failure_at, last_failure_at, failure_count, causal_depth, last_failure_task_id, recovery_started, recovery_revision, open_until, action_required_comment_id
+`
+
+type ClaimProviderFailureRecoveryParams struct {
+	IssueID                pgtype.UUID `json:"issue_id"`
+	ThreadRootID           pgtype.UUID `json:"thread_root_id"`
+	ProviderErrorSignature string      `json:"provider_error_signature"`
+	FailingAgentID         pgtype.UUID `json:"failing_agent_id"`
+}
+
+func (q *Queries) ClaimProviderFailureRecovery(ctx context.Context, arg ClaimProviderFailureRecoveryParams) (ProviderFailureCircuit, error) {
+	row := q.db.QueryRow(ctx, claimProviderFailureRecovery,
+		arg.IssueID,
+		arg.ThreadRootID,
+		arg.ProviderErrorSignature,
+		arg.FailingAgentID,
+	)
+	var i ProviderFailureCircuit
+	err := row.Scan(
+		&i.IssueID,
+		&i.ThreadRootID,
+		&i.ProviderErrorSignature,
+		&i.FailingAgentID,
+		&i.FirstFailureAt,
+		&i.LastFailureAt,
+		&i.FailureCount,
+		&i.CausalDepth,
+		&i.LastFailureTaskID,
+		&i.RecoveryStarted,
+		&i.RecoveryRevision,
+		&i.OpenUntil,
+		&i.ActionRequiredCommentID,
+	)
+	return i, err
+}
+
 const clearAgentComposioToolkitAllowlist = `-- name: ClearAgentComposioToolkitAllowlist :one
 UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1
@@ -4666,6 +4757,47 @@ func (q *Queries) GetLatestTaskRolloutMissing(ctx context.Context, arg GetLatest
 	var session_rollout_missing bool
 	err := row.Scan(&session_rollout_missing)
 	return session_rollout_missing, err
+}
+
+const getProviderFailureCircuit = `-- name: GetProviderFailureCircuit :one
+SELECT issue_id, thread_root_id, provider_error_signature, failing_agent_id, first_failure_at, last_failure_at, failure_count, causal_depth, last_failure_task_id, recovery_started, recovery_revision, open_until, action_required_comment_id FROM provider_failure_circuit
+WHERE issue_id = $1
+  AND thread_root_id = $2
+  AND provider_error_signature = $3
+  AND failing_agent_id = $4
+`
+
+type GetProviderFailureCircuitParams struct {
+	IssueID                pgtype.UUID `json:"issue_id"`
+	ThreadRootID           pgtype.UUID `json:"thread_root_id"`
+	ProviderErrorSignature string      `json:"provider_error_signature"`
+	FailingAgentID         pgtype.UUID `json:"failing_agent_id"`
+}
+
+func (q *Queries) GetProviderFailureCircuit(ctx context.Context, arg GetProviderFailureCircuitParams) (ProviderFailureCircuit, error) {
+	row := q.db.QueryRow(ctx, getProviderFailureCircuit,
+		arg.IssueID,
+		arg.ThreadRootID,
+		arg.ProviderErrorSignature,
+		arg.FailingAgentID,
+	)
+	var i ProviderFailureCircuit
+	err := row.Scan(
+		&i.IssueID,
+		&i.ThreadRootID,
+		&i.ProviderErrorSignature,
+		&i.FailingAgentID,
+		&i.FirstFailureAt,
+		&i.LastFailureAt,
+		&i.FailureCount,
+		&i.CausalDepth,
+		&i.LastFailureTaskID,
+		&i.RecoveryStarted,
+		&i.RecoveryRevision,
+		&i.OpenUntil,
+		&i.ActionRequiredCommentID,
+	)
+	return i, err
 }
 
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
@@ -8239,6 +8371,92 @@ func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg R
 	return i, err
 }
 
+const registerProviderFailure = `-- name: RegisterProviderFailure :one
+INSERT INTO provider_failure_circuit (
+    issue_id, thread_root_id, provider_error_signature, failing_agent_id,
+    failure_count, causal_depth, last_failure_task_id, recovery_started, open_until
+)
+VALUES (
+    $1, $2, $3, $4,
+    1, $5, $6, false,
+    CASE WHEN $5::integer > 3 THEN now() + interval '30 minutes' END
+)
+ON CONFLICT (issue_id, thread_root_id, provider_error_signature, failing_agent_id)
+DO UPDATE SET
+    failure_count = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.failure_count + 1
+        ELSE 1
+    END,
+    first_failure_at = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.first_failure_at
+        ELSE now()
+    END,
+    last_failure_at = now(),
+    causal_depth = GREATEST(provider_failure_circuit.causal_depth, EXCLUDED.causal_depth),
+    last_failure_task_id = EXCLUDED.last_failure_task_id,
+    recovery_started = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.recovery_started
+        ELSE false
+    END,
+    action_required_comment_id = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.action_required_comment_id
+        ELSE NULL
+    END,
+    open_until = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+             AND provider_failure_circuit.failure_count + 1 >= 2
+          OR GREATEST(provider_failure_circuit.causal_depth, EXCLUDED.causal_depth) > 3
+            THEN now() + interval '30 minutes'
+        WHEN provider_failure_circuit.last_failure_at < now() - interval '10 minutes' THEN NULL
+        ELSE provider_failure_circuit.open_until
+    END
+WHERE provider_failure_circuit.last_failure_task_id IS DISTINCT FROM EXCLUDED.last_failure_task_id
+RETURNING issue_id, thread_root_id, provider_error_signature, failing_agent_id, first_failure_at, last_failure_at, failure_count, causal_depth, last_failure_task_id, recovery_started, recovery_revision, open_until, action_required_comment_id
+`
+
+type RegisterProviderFailureParams struct {
+	IssueID                pgtype.UUID `json:"issue_id"`
+	ThreadRootID           pgtype.UUID `json:"thread_root_id"`
+	ProviderErrorSignature string      `json:"provider_error_signature"`
+	FailingAgentID         pgtype.UUID `json:"failing_agent_id"`
+	CausalDepth            int32       `json:"causal_depth"`
+	FailedTaskID           pgtype.UUID `json:"failed_task_id"`
+}
+
+// Serialize one causal chain. A member comment/manual recovery deletes or
+// revises this row; automatic failures only advance the same circuit.
+func (q *Queries) RegisterProviderFailure(ctx context.Context, arg RegisterProviderFailureParams) (ProviderFailureCircuit, error) {
+	row := q.db.QueryRow(ctx, registerProviderFailure,
+		arg.IssueID,
+		arg.ThreadRootID,
+		arg.ProviderErrorSignature,
+		arg.FailingAgentID,
+		arg.CausalDepth,
+		arg.FailedTaskID,
+	)
+	var i ProviderFailureCircuit
+	err := row.Scan(
+		&i.IssueID,
+		&i.ThreadRootID,
+		&i.ProviderErrorSignature,
+		&i.FailingAgentID,
+		&i.FirstFailureAt,
+		&i.LastFailureAt,
+		&i.FailureCount,
+		&i.CausalDepth,
+		&i.LastFailureTaskID,
+		&i.RecoveryStarted,
+		&i.RecoveryRevision,
+		&i.OpenUntil,
+		&i.ActionRequiredCommentID,
+	)
+	return i, err
+}
+
 const requeueAgentTaskAfterClaimFailure = `-- name: RequeueAgentTaskAfterClaimFailure :one
 UPDATE agent_task_queue
 SET status = 'queued',
@@ -8329,6 +8547,59 @@ func (q *Queries) RequeueAgentTaskAfterClaimFailure(ctx context.Context, arg Req
 		&i.IssueSnapshot,
 	)
 	return i, err
+}
+
+const resetProviderFailureCircuitForManualRerun = `-- name: ResetProviderFailureCircuitForManualRerun :exec
+UPDATE provider_failure_circuit
+SET failure_count = 0,
+    first_failure_at = now(),
+    last_failure_at = now(),
+    causal_depth = 0,
+    recovery_started = false,
+    recovery_revision = recovery_revision + 1,
+    open_until = NULL,
+    action_required_comment_id = NULL
+WHERE issue_id = $1
+  AND failing_agent_id = $2
+`
+
+type ResetProviderFailureCircuitForManualRerunParams struct {
+	IssueID        pgtype.UUID `json:"issue_id"`
+	FailingAgentID pgtype.UUID `json:"failing_agent_id"`
+}
+
+// A manual rerun is also an explicit recovery boundary. Scope it to the target
+// agent because one issue may contain independent failing-agent circuits.
+func (q *Queries) ResetProviderFailureCircuitForManualRerun(ctx context.Context, arg ResetProviderFailureCircuitForManualRerunParams) error {
+	_, err := q.db.Exec(ctx, resetProviderFailureCircuitForManualRerun, arg.IssueID, arg.FailingAgentID)
+	return err
+}
+
+const resetProviderFailureCircuitForMemberComment = `-- name: ResetProviderFailureCircuitForMemberComment :exec
+UPDATE provider_failure_circuit
+SET failure_count = 0,
+    first_failure_at = now(),
+    last_failure_at = now(),
+    causal_depth = 0,
+    recovery_started = false,
+    recovery_revision = recovery_revision + 1,
+    open_until = NULL,
+    action_required_comment_id = NULL
+WHERE issue_id = $1
+  AND thread_root_id = $2
+`
+
+type ResetProviderFailureCircuitForMemberCommentParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	ThreadRootID pgtype.UUID `json:"thread_root_id"`
+}
+
+// A new member-authored comment is an explicit recovery boundary. Preserve the
+// row for audit/idempotency while allowing the next provider failure in the
+// thread to start a fresh bounded recovery revision.
+func (q *Queries) ResetProviderFailureCircuitForMemberComment(ctx context.Context, arg ResetProviderFailureCircuitForMemberCommentParams) error {
+	_, err := q.db.Exec(ctx, resetProviderFailureCircuitForMemberComment, arg.IssueID, arg.ThreadRootID)
+	return err
 }
 
 const restoreAgent = `-- name: RestoreAgent :one

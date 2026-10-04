@@ -8786,7 +8786,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var retiredSessionID string
 	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
 
+	providerRetryConsumed := false
 	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+		providerRetryConsumed = true
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools
@@ -8827,6 +8829,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		prompt = freshPrompt
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
@@ -8844,6 +8847,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// session keeps firstResult so the bad session stays excluded rather
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
+	}
+	// Empty provider content is safe to retry exactly once only before observed
+	// tool use. This stays inside the same run and creates no recovery comment.
+	if !providerRetryConsumed && shouldRetryProviderEmptyContent(result, tools) {
+		firstResult := result
+		firstUsage := result.Usage
+		firstTools := tools
+		taskLog.Warn("provider returned empty content before side effects; retrying once in the same run")
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		result, tools = reconcileProviderRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
 
@@ -8902,6 +8915,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	switch result.Status {
 	case "completed":
+		if isProviderEmptyContentOutput(result.Output) {
+			comment := "Provider failed to return content after one safe in-run retry. No automatic run retry will be started."
+			failureReason := string(taskfailure.ReasonAgentProviderServerError)
+			if tools > 0 {
+				comment = "PARTIAL_EXECUTION_ACTION_REQUIRED: the provider failed after durable side effects may have occurred. Automatic rerun is disabled; read back external state before manual recovery."
+				failureReason = "partial_execution_action_required"
+			}
+			return TaskResult{
+				Status: "blocked", Comment: comment, SessionID: result.SessionID,
+				WorkDir: env.WorkDir, EnvRoot: env.RootDir, Usage: usageEntries,
+				FailureReason: failureReason,
+			}, nil
+		}
 		if result.Output == "" {
 			// The agent completed successfully but produced no text output.
 			// This is valid — the agent may have done all its work via tool
@@ -9023,6 +9049,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// conversation permanently blocks the issue: every follow-up
 		// task resumes the same poisoned session and hits the same 400.
 		failureReason, _ := classifyPoisonedError(errMsg)
+		if isProviderEmptyContent(errMsg) {
+			if tools > 0 {
+				failureReason = "partial_execution_action_required"
+				errMsg = "PARTIAL_EXECUTION_ACTION_REQUIRED: the provider failed after durable side effects may have occurred. Automatic rerun is disabled; read back external state before manual recovery."
+			} else {
+				failureReason = string(taskfailure.ReasonAgentProviderServerError)
+			}
+		}
 		if failureReason == "" {
 			// A resume we could not read back leaves the same oversized thread
 			// recorded as this issue's resume pointer. Reaching here means the
@@ -9243,6 +9277,34 @@ func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.T
 		first.Usage = mergeUsage(firstUsage, retry.Usage)
 		return first, firstTools
 	}
+}
+
+func isProviderEmptyContent(errorText string) bool {
+	return strings.Contains(strings.ToLower(errorText), "provider returned empty content")
+}
+
+func isProviderEmptyContentOutput(output string) bool {
+	trimmed := strings.TrimSpace(output)
+	if strings.EqualFold(trimmed, "Provider returned empty content") {
+		return true
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	return json.Unmarshal([]byte(trimmed), &payload) == nil && strings.EqualFold(strings.TrimSpace(payload.Message), "Provider returned empty content")
+}
+
+func shouldRetryProviderEmptyContent(result agent.Result, tools int32) bool {
+	return tools == 0 && (isProviderEmptyContent(result.Error) || isProviderEmptyContentOutput(result.Output))
+}
+
+func reconcileProviderRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools int32, retry agent.Result, retryTools int32, retryErr error) (agent.Result, int32) {
+	if retryErr != nil {
+		first.Usage = firstUsage
+		return first, firstTools
+	}
+	retry.Usage = mergeUsage(firstUsage, retry.Usage)
+	return retry, retryTools
 }
 
 // freshSessionMayHelp reports whether restarting the conversation could

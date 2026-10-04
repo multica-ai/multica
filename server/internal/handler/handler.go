@@ -43,8 +43,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/eventrouting"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -746,12 +748,18 @@ func (h *Handler) channelDeliversFiles(channelType string) bool {
 
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
+	routingClass := eventrouting.RecoveryControl
+	if eventType == protocol.EventCommentCreated {
+		routingClass = eventrouting.ClassFromPayload(actorType, payload)
+	}
 	h.Bus.Publish(events.Event{
-		Type:        eventType,
-		WorkspaceID: workspaceID,
-		ActorType:   actorType,
-		ActorID:     actorID,
-		Payload:     payload,
+		Type:              eventType,
+		WorkspaceID:       workspaceID,
+		ActorType:         actorType,
+		ActorID:           actorID,
+		Payload:           payload,
+		RoutingClass:      routingClass,
+		ActionableRouting: routingClass.Actionable(),
 	})
 }
 

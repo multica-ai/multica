@@ -229,6 +229,9 @@ deleted_channel_task_deliveries AS (
 ),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_origin_event_dedupe_backups AS (
+    DELETE FROM agent_task_origin_event_dedupe_backup WHERE task_id IN (SELECT id FROM batch)
 )
 DELETE FROM agent_task_queue WHERE id IN (SELECT id FROM batch);
 
@@ -361,6 +364,10 @@ deleted_activity AS (
 ),
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
+),
+deleted_provider_failure_circuits AS (
+    DELETE FROM provider_failure_circuit
+    WHERE issue_id IN (SELECT id FROM ws_issues)
 ),
 deleted_issue_dependencies AS (
     DELETE FROM issue_dependency

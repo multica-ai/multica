@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/eventrouting"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -5836,6 +5838,15 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	if err != nil {
 		return nil, err
 	}
+	if resetErr := s.Queries.ResetProviderFailureCircuitForManualRerun(ctx, db.ResetProviderFailureCircuitForManualRerunParams{
+		IssueID: issueID, FailingAgentID: agentID,
+	}); resetErr != nil {
+		slog.Warn("issue rerun: provider failure circuit reset failed",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"error", resetErr,
+		)
+	}
 	slog.Info("issue rerun enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issueID),
@@ -6124,6 +6135,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 const (
 	delegatedFailureErrorSummaryRunes       = 800
 	delegatedFailureRecoveryMaxTaskAttempts = 3
+	providerFailureRecoveryMaxTaskAttempts  = 1
 	delegatedFailureRecoveryCommentType     = "progress_update"
 )
 
@@ -6212,11 +6224,12 @@ type DelegatedFailureRecoverySweepResult struct {
 }
 
 type delegatedFailureRecoveryTarget struct {
-	failed  db.AgentTaskQueue
-	source  db.AgentTaskQueue
-	issue   db.Issue
-	agent   db.Agent
-	comment db.Comment
+	failed                db.AgentTaskQueue
+	source                db.AgentTaskQueue
+	issue                 db.Issue
+	agent                 db.Agent
+	comment               db.Comment
+	actionRequiredComment *db.Comment
 }
 
 // IsDelegatedFailureRecoveryComment identifies the durable platform signal
@@ -6234,6 +6247,12 @@ func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 	reason := "agent_error"
 	if failed.FailureReason.Valid && failed.FailureReason.String != "" {
 		reason = truncateForSummary(redact.Text(failed.FailureReason.String), triggerSummaryMaxLen)
+	}
+	if reason == string(taskfailure.ReasonAgentProviderServerError) {
+		return fmt.Sprintf(
+			"Provider failure stopped delegated task `%s`. One controlled recovery may run; repeated failures open the circuit. Raw provider diagnostics remain in run metadata. Source coordinator task: `%s`.",
+			util.UUIDToString(failed.ID), util.UUIDToString(source.ID),
+		)
 	}
 	content := fmt.Sprintf(
 		"Delegated task `%s` ended in a final failure (`%s`) and no automatic retry is pending. Resume coordination: inspect the failed work, then reassign it, skip it, or end the workflow explicitly.",
@@ -6259,6 +6278,9 @@ func delegatedFailureRecoveryContent(failed, source db.AgentTaskQueue) string {
 func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, failed db.AgentTaskQueue) (*delegatedFailureRecoveryTarget, error) {
 	if failed.Status != "failed" || !failed.DelegatedFromTaskID.Valid || failed.AutopilotRunID.Valid ||
 		(failed.TriggerEvidenceKind.Valid && failed.TriggerEvidenceKind.String == string(attribution.EvidenceDelegatedFailure)) {
+		return nil, nil
+	}
+	if failed.FailureReason.Valid && failed.FailureReason.String == "partial_execution_action_required" {
 		return nil, nil
 	}
 	hasRetry, err := q.HasRetryTaskForParent(ctx, failed.ID)
@@ -6294,6 +6316,85 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 	}
 	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
 		return nil, nil
+	}
+	if failed.FailureReason.Valid && failed.FailureReason.String == string(taskfailure.ReasonAgentProviderServerError) {
+		threadRootID := source.TriggerCommentID
+		if threadRootID.Valid {
+			if root, rootErr := q.GetThreadRoot(ctx, db.GetThreadRootParams{CommentID: threadRootID, WorkspaceID: issue.WorkspaceID}); rootErr == nil {
+				threadRootID = root.ID
+			}
+		}
+		if !threadRootID.Valid {
+			// Assignment-triggered coordinator tasks have no comment thread. The
+			// source task is stable across delegated attempts; failed.ID is not.
+			threadRootID = source.ID
+		}
+		// Provider payloads carry volatile request ids and timestamps. The stable
+		// canonical reason is the circuit key; raw diagnostics remain on the run.
+		signature := sha256.Sum256([]byte(failed.FailureReason.String))
+		circuit, circuitErr := q.RegisterProviderFailure(ctx, db.RegisterProviderFailureParams{
+			IssueID:                issue.ID,
+			ThreadRootID:           threadRootID,
+			ProviderErrorSignature: fmt.Sprintf("%x", signature[:]),
+			FailingAgentID:         failed.AgentID,
+			CausalDepth:            failed.Attempt,
+			FailedTaskID:           failed.ID,
+		})
+		if circuitErr != nil {
+			if errors.Is(circuitErr, pgx.ErrNoRows) {
+				circuit, circuitErr = q.GetProviderFailureCircuit(ctx, db.GetProviderFailureCircuitParams{
+					IssueID: issue.ID, ThreadRootID: threadRootID,
+					ProviderErrorSignature: fmt.Sprintf("%x", signature[:]), FailingAgentID: failed.AgentID,
+				})
+				if circuitErr == nil && circuit.LastFailureTaskID == failed.ID {
+					return nil, nil
+				}
+				if circuitErr == nil {
+					return nil, fmt.Errorf("provider failure circuit rejected task %s but records task %s", util.UUIDToString(failed.ID), util.UUIDToString(circuit.LastFailureTaskID))
+				}
+			}
+			return nil, fmt.Errorf("register provider failure circuit: %w", circuitErr)
+		}
+		if circuit.OpenUntil.Valid {
+			actionRequiredContent := "ACTION_REQUIRED: repeated provider failures opened the recovery circuit for 30 minutes. Automatic events in this causal chain are suppressed. Add a new member comment or start a manual rerun with a new recovery revision after reading back durable state."
+			if !source.TriggerCommentID.Valid {
+				actionRequiredContent = "ACTION_REQUIRED: repeated provider failures opened the recovery circuit for 30 minutes. Automatic events in this causal chain are suppressed. Start a manual rerun with a new recovery revision after reading back durable state."
+			}
+			actionRequiredID := dbid.NewV7()
+			if _, claimErr := q.ClaimProviderFailureActionRequiredComment(ctx, db.ClaimProviderFailureActionRequiredCommentParams{
+				IssueID: issue.ID, ThreadRootID: threadRootID, ProviderErrorSignature: circuit.ProviderErrorSignature,
+				FailingAgentID: failed.AgentID, CommentID: actionRequiredID,
+			}); claimErr == nil {
+				created, createErr := q.CreateComment(ctx, db.CreateCommentParams{
+					ID: actionRequiredID, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+					AuthorType: "system", AuthorID: pgtype.UUID{Valid: true}, Type: "system",
+					ParentID: source.TriggerCommentID, SourceTaskID: failed.ID,
+					Content: actionRequiredContent,
+				})
+				if createErr != nil {
+					return nil, fmt.Errorf("create provider failure action-required comment: %w", createErr)
+				}
+				comment := created.Comment()
+				return &delegatedFailureRecoveryTarget{
+					failed: failed, source: source, issue: issue, agent: agent,
+					actionRequiredComment: &comment,
+				}, nil
+			} else if !errors.Is(claimErr, pgx.ErrNoRows) {
+				return nil, fmt.Errorf("claim provider failure action-required comment: %w", claimErr)
+			}
+			return nil, nil
+		}
+		if circuit.RecoveryStarted {
+			return nil, nil
+		}
+		if _, circuitErr = q.ClaimProviderFailureRecovery(ctx, db.ClaimProviderFailureRecoveryParams{
+			IssueID: issue.ID, ThreadRootID: threadRootID, ProviderErrorSignature: circuit.ProviderErrorSignature, FailingAgentID: failed.AgentID,
+		}); circuitErr != nil {
+			if errors.Is(circuitErr, pgx.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("claim provider failure recovery: %w", circuitErr)
+		}
 	}
 	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent}, nil
 }
@@ -6331,6 +6432,9 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		if err != nil || target == nil {
 			return err
 		}
+		if target.actionRequiredComment != nil {
+			return nil
+		}
 		comment, err := qtx.GetDelegatedFailureRecoveryComment(ctx, db.GetDelegatedFailureRecoveryCommentParams{
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
@@ -6366,6 +6470,23 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 	if target == nil {
 		return nil, false, nil
 	}
+	if target.actionRequiredComment != nil {
+		if s.Bus != nil {
+			s.Bus.Publish(events.Event{
+				Type:              protocol.EventCommentCreated,
+				WorkspaceID:       util.UUIDToString(target.issue.WorkspaceID),
+				ActorType:         "system",
+				RoutingClass:      eventrouting.RecoveryControl,
+				ActionableRouting: false,
+				Payload: map[string]any{
+					"comment":      commentEventFields(*target.actionRequiredComment),
+					"issue_title":  target.issue.Title,
+					"issue_status": target.issue.Status,
+				},
+			})
+		}
+		return nil, false, nil
+	}
 	if created && s.Bus != nil {
 		s.Bus.Publish(events.Event{
 			Type:        protocol.EventCommentCreated,
@@ -6382,11 +6503,11 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 	return target, created, nil
 }
 
-func delegatedFailureRecoveryExhaustionContent(target *delegatedFailureRecoveryTarget) string {
+func delegatedFailureRecoveryExhaustionContent(target *delegatedFailureRecoveryTarget, maxAttempts int32) string {
 	return fmt.Sprintf(
 		"Automatic recovery for delegated task `%s` stopped after %d coordinator tasks ended before receiving the recovery signal. No more recovery tasks will be created automatically; resume or dismiss the work manually. Source coordinator task: `%s`.",
 		util.UUIDToString(target.failed.ID),
-		delegatedFailureRecoveryMaxTaskAttempts,
+		maxAttempts,
 		util.UUIDToString(target.source.ID),
 	)
 }
@@ -6413,7 +6534,7 @@ func delegatedFailureRecoveryAttribution(target *delegatedFailureRecoveryTarget)
 // that terminal outcome. Updating the newest attempt first serializes
 // concurrent sweepers; the second caller then observes the explanation written
 // by the first and does not report another exhaustion.
-func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget) (bool, error) {
+func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget, maxAttempts int32) (bool, error) {
 	var exhaustedComment db.Comment
 	var exhaustedInbox db.InboxItem
 	created := false
@@ -6422,7 +6543,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		if _, err := qtx.AcknowledgeExhaustedDelegatedFailureRecovery(ctx, db.AcknowledgeExhaustedDelegatedFailureRecoveryParams{
 			CommentID:    target.comment.ID,
 			FailedTaskID: target.failed.ID,
-			MaxAttempts:  delegatedFailureRecoveryMaxTaskAttempts,
+			MaxAttempts:  maxAttempts,
 		}); err != nil {
 			return fmt.Errorf("acknowledge exhausted delegated failure recovery: %w", err)
 		}
@@ -6455,7 +6576,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
 			AuthorID:     pgtype.UUID{Valid: true},
-			Content:      delegatedFailureRecoveryExhaustionContent(target),
+			Content:      delegatedFailureRecoveryExhaustionContent(target, maxAttempts),
 			Type:         "system",
 			ParentID:     target.source.TriggerCommentID,
 			SourceTaskID: target.failed.ID,
@@ -6487,7 +6608,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 				"failed_task_id":       util.UUIDToString(target.failed.ID),
 				"source_task_id":       util.UUIDToString(target.source.ID),
 				"coordinator_agent_id": util.UUIDToString(target.agent.ID),
-				"max_attempts":         delegatedFailureRecoveryMaxTaskAttempts,
+				"max_attempts":         maxAttempts,
 			})
 			if err != nil {
 				return fmt.Errorf("encode delegated failure exhaustion details: %w", err)
@@ -6607,8 +6728,12 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		if err != nil {
 			return delegatedFailureRecoveryCovered, fmt.Errorf("count delegated failure recovery tasks: %w", err)
 		}
-		if recoveryTasks >= delegatedFailureRecoveryMaxTaskAttempts {
-			exhausted, err := s.exhaustDelegatedFailureRecovery(ctx, target)
+		maxRecoveryTasks := int32(delegatedFailureRecoveryMaxTaskAttempts)
+		if target.failed.FailureReason.Valid && target.failed.FailureReason.String == string(taskfailure.ReasonAgentProviderServerError) {
+			maxRecoveryTasks = providerFailureRecoveryMaxTaskAttempts
+		}
+		if recoveryTasks >= int64(maxRecoveryTasks) {
+			exhausted, err := s.exhaustDelegatedFailureRecovery(ctx, target, maxRecoveryTasks)
 			if err != nil {
 				return delegatedFailureRecoveryCovered, err
 			}
@@ -7484,6 +7609,7 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 // offset away from its real instant and moved it again once a refetch
 // replaced the value — visible as timeline entries jumping position.
 func commentEventFields(c db.Comment) map[string]any {
+	routingClass := eventrouting.CommentClass(c.AuthorType, c.Type, c.Content, c.SourceTaskID.Valid)
 	return map[string]any{
 		"id":             util.UUIDToString(c.ID),
 		"issue_id":       util.UUIDToString(c.IssueID),
@@ -7494,6 +7620,8 @@ func commentEventFields(c db.Comment) map[string]any {
 		"parent_id":      util.UUIDToPtr(c.ParentID),
 		"source_task_id": util.UUIDToPtr(c.SourceTaskID),
 		"created_at":     util.TimestampToString(c.CreatedAt),
+		"routing_class":  routingClass,
+		"actionable":     routingClass.Actionable(),
 	}
 }
 
