@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { SIDEBAR_ITEMS, useSidebarPreferencesStore } from "@multica/core/navigation";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
@@ -208,6 +209,43 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: invitationApi.invalidateQueries }),
 }));
+
+beforeEach(() => {
+  useSidebarPreferencesStore.setState({ hiddenItems: [] });
+});
+
+describe("sidebar visibility", () => {
+  it("shows every navigation item by default", () => {
+    renderWithI18n(<AppSidebar />);
+    for (const label of ["Inbox", "My Issues", "Chat", "Issues", "Projects", "Autopilot", "Agents", "Squads", "Skills", "Runtimes", "Analytics", "Settings"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("hides selected items and restores them immediately", () => {
+    const { setItemVisible } = useSidebarPreferencesStore.getState();
+    for (const item of ["my_issues", "issues", "squads", "runtimes"] as const) {
+      setItemVisible(item, false);
+    }
+    renderWithI18n(<AppSidebar />);
+    for (const label of ["My Issues", "Issues", "Squads", "Runtimes"]) {
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole("button", { name: "Projects" })).toBeInTheDocument();
+    act(() => setItemVisible("squads", true));
+    expect(screen.getByRole("button", { name: "Squads" })).toBeInTheDocument();
+  });
+
+  it("removes empty group headings and always keeps Settings", () => {
+    for (const item of SIDEBAR_ITEMS) {
+      useSidebarPreferencesStore.getState().setItemVisible(item, false);
+    }
+    renderWithI18n(<AppSidebar />);
+    expect(screen.queryByText("Work")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI Team")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+  });
+});
 
 describe("PinRow", () => {
   beforeEach(() => {

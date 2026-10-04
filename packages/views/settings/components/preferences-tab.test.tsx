@@ -15,6 +15,8 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
+import enLayout from "../../locales/en/layout.json";
+import { useSidebarPreferencesStore } from "@multica/core/navigation";
 
 const navigationState = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
 vi.mock("../../navigation", () => ({
@@ -114,7 +116,7 @@ import {
 
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings },
+  en: { common: enCommon, auth: enAuth, settings: enSettings, layout: enLayout },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -422,6 +424,32 @@ describe("PreferencesTab — Create-issue fields", () => {
   });
 });
 
+describe("PreferencesTab — Sidebar", () => {
+  beforeEach(() => {
+    useSidebarPreferencesStore.setState({ hiddenItems: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useSidebarPreferencesStore.setState({ hiddenItems: [] });
+  });
+
+  it("lets users hide and restore items without hiding Settings", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+    const sidebar = within(screen.getByRole("region", { name: "Sidebar items" }));
+    expect(sidebar.queryByRole("switch", { name: "Settings" })).not.toBeInTheDocument();
+    const squads = sidebar.getByRole("switch", { name: "Squads" });
+    expect(squads).toBeChecked();
+    await user.click(squads);
+    expect(squads).not.toBeChecked();
+    expect(useSidebarPreferencesStore.getState().hiddenItems).toEqual(["squads"]);
+    await user.click(squads);
+    expect(squads).toBeChecked();
+    expect(useSidebarPreferencesStore.getState().hiddenItems).toEqual([]);
+  });
+});
+
 describe("PreferencesTab — Scope", () => {
   afterEach(() => {
     cleanup();
@@ -430,8 +458,8 @@ describe("PreferencesTab — Scope", () => {
   it("labels where each group of settings is stored", () => {
     render(<PreferencesTab />, { wrapper: I18nWrapper });
     expect(screen.getByText("Account · synced")).toBeInTheDocument();
-    // Appearance, opening issues, comments & chat.
-    expect(screen.getAllByText("This device only")).toHaveLength(3);
+    // Appearance, sidebar, opening issues, comments & chat.
+    expect(screen.getAllByText("This device only")).toHaveLength(4);
   });
 
   it("switches what clicking a card or row opens, and says what Shift does", async () => {

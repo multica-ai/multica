@@ -187,6 +187,7 @@
     "comments_title": "댓글 및 채팅",
     "region_title": "언어 및 지역",
     "appearance_title": "모양",
+    "sidebar_title": "사이드바 항목",
     "issue_fields_title": "태스크 생성 시 표시할 필드",
     "issue_fields": {
       "field": "필드",

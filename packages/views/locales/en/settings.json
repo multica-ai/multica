@@ -188,6 +188,7 @@
     "comments_title": "Comments & chat",
     "region_title": "Language & region",
     "appearance_title": "Appearance",
+    "sidebar_title": "Sidebar items",
     "issue_fields_title": "Fields shown when creating issues",
     "issue_fields": {
       "field": "Field",
