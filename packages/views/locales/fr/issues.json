@@ -412,6 +412,7 @@
     "quick_action_blocked_body": "« {{name}} » s'exécute sous un agent que vous n'êtes pas autorisé à déclencher. Demandez à un administrateur de l'espace de travail de rendre cet agent accessible à l'équipe, ou de rattacher cette action à un agent partagé.",
     "quick_action_blocked_ok": "Compris",
     "pull_requests_loading": "Chargement…",
+    "pull_request_state_open": "Ouverte",
     "pull_request_state_draft": "Brouillon",
     "pull_request_state_merged": "Fusionnée",
     "pull_request_state_closed": "Fermée",
