@@ -297,9 +297,14 @@ func (s *InMemoryLocalSkillListStore) HasPending(_ context.Context, runtimeID st
 	return false, nil
 }
 
-func (s *InMemoryLocalSkillListStore) PopPending(_ context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
+func (s *InMemoryLocalSkillListStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockPendingOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var oldest *RuntimeLocalSkillListRequest
 	now := time.Now()
@@ -412,9 +417,14 @@ func (s *InMemoryLocalSkillImportStore) HasPending(_ context.Context, runtimeID 
 	return false, nil
 }
 
-func (s *InMemoryLocalSkillImportStore) PopPending(_ context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error) {
+func (s *InMemoryLocalSkillImportStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockPendingOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var oldest *RuntimeLocalSkillImportRequest
 	now := time.Now()
@@ -435,9 +445,14 @@ func (s *InMemoryLocalSkillImportStore) PopPending(_ context.Context, runtimeID 
 	return oldest, nil
 }
 
-func (s *InMemoryLocalSkillImportStore) PopPendingBatch(_ context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error) {
+func (s *InMemoryLocalSkillImportStore) PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockPendingOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	now := time.Now()
 

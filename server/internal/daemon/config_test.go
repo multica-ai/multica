@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,13 +112,13 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 // an operator opts in, and a daemon upgrade never starts deleting on its own.
 func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	stageTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
 	overrides := Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	}
 	cfg, err := LoadConfig(overrides)
 	if err != nil {
@@ -144,10 +145,10 @@ func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *tes
 
 func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	stageTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "")
-	base := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
+	base := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: testWorkspacesRoot(t)}
 
 	cfg, err := LoadConfig(base)
 	if err != nil {
@@ -184,13 +185,13 @@ func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 
 func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	stageTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
 	overrides := Overrides{
 		ServerURL:      "https://" + officialCloudHost,
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	}
 	cfg, err := LoadConfig(overrides)
 	if err != nil {
@@ -461,6 +462,11 @@ func stageFakeAgent(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
+	// These tests drive LoadConfig, which now persists the work-state mapping
+	// under HOME. Sharing the runner home would make the first test's explicit
+	// workspaces root the machine's mapping for that backend and fail every later
+	// test that passes a different one (GH #8280).
+	stageTestHome(t, t.TempDir())
 	binDir := t.TempDir()
 	fake := filepath.Join(binDir, "claude")
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -491,7 +497,7 @@ func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -543,7 +549,7 @@ func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -612,7 +618,7 @@ func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -638,7 +644,7 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	stageFakeAgent(t)
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -654,7 +660,7 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with default: %v", err)
@@ -670,7 +676,7 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with env: %v", err)
@@ -685,7 +691,7 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "1d")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with day-unit env: %v", err)
@@ -700,7 +706,7 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "0")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with zero env: %v", err)
@@ -714,7 +720,7 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:             "http://localhost:8080",
-		WorkspacesRoot:        t.TempDir(),
+		WorkspacesRoot:        testWorkspacesRoot(t),
 		CodexHandshakeTimeout: 12 * time.Second,
 	})
 	if err != nil {
@@ -734,7 +740,7 @@ func TestLoadConfig_CodexTurnInterruptTimeout(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with interrupt timeout: %v", err)
@@ -746,7 +752,7 @@ func TestLoadConfig_CodexTurnInterruptTimeout(t *testing.T) {
 	t.Setenv("MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT", "0")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with zero interrupt timeout: %v", err)
@@ -767,7 +773,7 @@ func TestLoadConfig_CodexFirstTurnNoProgressTimeout(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with unset: %v", err)
@@ -779,7 +785,7 @@ func TestLoadConfig_CodexFirstTurnNoProgressTimeout(t *testing.T) {
 	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "30m")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with env: %v", err)
@@ -791,7 +797,7 @@ func TestLoadConfig_CodexFirstTurnNoProgressTimeout(t *testing.T) {
 	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "0")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with zero env: %v", err)
@@ -823,7 +829,7 @@ func TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns(t *testing.T) {
 		t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", firstTurn)
 		if _, err := LoadConfig(Overrides{
 			ServerURL:      "http://localhost:8080",
-			WorkspacesRoot: t.TempDir(),
+			WorkspacesRoot: testWorkspacesRoot(t),
 		}); err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
@@ -862,7 +868,7 @@ func TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog(t *testing.T) {
 		t.Helper()
 		cfg, err := LoadConfig(Overrides{
 			ServerURL:      "http://localhost:8080",
-			WorkspacesRoot: t.TempDir(),
+			WorkspacesRoot: testWorkspacesRoot(t),
 		})
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
@@ -932,7 +938,7 @@ func TestLoadConfig_CodexSemanticInactivityDerivesFromWatchdog(t *testing.T) {
 		t.Helper()
 		cfg, err := LoadConfig(Overrides{
 			ServerURL:      "http://localhost:8080",
-			WorkspacesRoot: t.TempDir(),
+			WorkspacesRoot: testWorkspacesRoot(t),
 		})
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
@@ -989,7 +995,7 @@ func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with default: %v", err)
@@ -1001,7 +1007,7 @@ func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "7m")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with env: %v", err)
@@ -1015,7 +1021,7 @@ func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "0")
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with zero env: %v", err)
@@ -1034,7 +1040,7 @@ func TestLoadConfig_AutoUpdateDefault_CloudOn(t *testing.T) {
 	stageFakeAgent(t)
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "wss://api.multica.ai/ws",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1051,7 +1057,7 @@ func TestLoadConfig_AutoUpdateEnv_ForcesOnForSelfHost(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "true")
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1068,7 +1074,7 @@ func TestLoadConfig_AutoUpdateEnv_ForcesOffForCloud(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "false")
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "https://api.multica.ai",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1086,7 +1092,7 @@ func TestLoadConfig_AutoUpdate_NoFlagWinsOverCloudDefault(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "true")
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:         "https://api.multica.ai",
-		WorkspacesRoot:    t.TempDir(),
+		WorkspacesRoot:    testWorkspacesRoot(t),
 		DisableAutoUpdate: true,
 	})
 	if err != nil {
@@ -1109,7 +1115,7 @@ func TestLoadConfig_AutoReload_DefaultsOnEvenForSelfHost(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "")
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1131,7 +1137,7 @@ func TestLoadConfig_AutoReload_NotGatedOnAutoUpdateEnv(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "")
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "https://api.multica.ai",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1163,7 +1169,7 @@ func TestLoadConfig_AutoReload_OffSwitches(t *testing.T) {
 			t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", tc.env)
 			overrides := tc.overrides
 			overrides.ServerURL = "https://api.multica.ai"
-			overrides.WorkspacesRoot = t.TempDir()
+			overrides.WorkspacesRoot = testWorkspacesRoot(t)
 			cfg, err := LoadConfig(overrides)
 			if err != nil {
 				t.Fatalf("LoadConfig: %v", err)
@@ -1327,6 +1333,9 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 
 	t.Setenv("PATH", pathDir)
 	t.Setenv("SHELL", shellPath)
+	// LoadConfig persists the work-state mapping under HOME; keep this test out of
+	// the runner home like its siblings.
+	stageTestHome(t, t.TempDir())
 	// Pin a non-existent agent to a bare name so it would normally trip
 	// the fallback — except `claude` already resolves, and the user hasn't
 	// configured anything else, so the probe loop should be satisfied
@@ -1335,7 +1344,7 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 
 	if _, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	}); err != nil {
 		// Some daemon-id / workspace bookkeeping outside our concern may
 		// fail in CI; the marker assertion below is what matters either
@@ -1355,6 +1364,8 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 }
 
 func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
+	// LoadConfig persists a scope mapping under HOME; keep it in this test own home.
+	stageTestHome(t, t.TempDir())
 	pathDir := t.TempDir()
 	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
 	if err := os.MkdirAll(filepath.Dir(fakeCodex), 0o755); err != nil {
@@ -1376,7 +1387,7 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1397,6 +1408,8 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 // Multica must resolve the bundled CLI under ChatGPT.app (and prefer it over
 // the legacy Codex.app path when both exist).
 func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
+	// LoadConfig persists a scope mapping under HOME; keep it in this test own home.
+	stageTestHome(t, t.TempDir())
 	pathDir := t.TempDir()
 	fakeChatGPT := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
 	fakeLegacy := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
@@ -1421,7 +1434,7 @@ func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1468,6 +1481,8 @@ func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
 }
 
 func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T) {
+	// LoadConfig persists a scope mapping under HOME; keep it in this test own home.
+	stageTestHome(t, t.TempDir())
 	pathDir := t.TempDir()
 	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
 	if err := os.MkdirAll(filepath.Dir(fakeCodex), 0o755); err != nil {
@@ -1494,7 +1509,7 @@ func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1696,7 +1711,7 @@ func TestLoadConfig_AppliesBackendOverridesFromConfigFile(t *testing.T) {
 
 	loaded, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1722,7 +1737,7 @@ func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
 	stageFakeAgent(t)
 
 	// Point HOME at an empty dir — no config.json present.
-	t.Setenv("HOME", t.TempDir())
+	stageTestHome(t, t.TempDir())
 	os.Unsetenv("MULTICA_OPENCLAW_PATH")
 	os.Unsetenv("OPENCLAW_STATE_DIR")
 	t.Cleanup(func() {
@@ -1732,7 +1747,7 @@ func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
 
 	_, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig with no config file should not fail: %v", err)
@@ -1764,7 +1779,7 @@ func TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal(t *testing.T) {
 
 	_, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:8080",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig should not fail on malformed config.json: %v", err)
@@ -1821,4 +1836,35 @@ func TestApplyOpenclawOverride_CLITimeout(t *testing.T) {
 			t.Errorf("%s must not be set when the field is empty", execenv.OpenclawCLITimeoutEnv)
 		}
 	})
+}
+
+// stageTestHome points HOME at dir and USERPROFILE with it. os.UserHomeDir
+// reads %USERPROFILE% on Windows, so a test that only sets HOME resolves the
+// developer real home there - and LoadConfig now persists the work-state
+// mapping under it, which would both fail the assertion and write machine state
+// belonging to nobody.
+func stageTestHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
+// testWorkspacesRoots holds one scratch workspaces root per test name.
+var testWorkspacesRoots sync.Map
+
+// testWorkspacesRoot returns that root.
+//
+// LoadConfig persists the work-state mapping for (machine, backend) under HOME,
+// and an explicit workspaces root is the machine-wide choice for that backend —
+// so a second call in one test that asks for a different root is a fail-closed
+// conflict (GH #8280). Stable per test name, so repeated calls agree, and still
+// scratch: these tests care that no real root is used, not which one.
+func testWorkspacesRoot(t *testing.T) string {
+	t.Helper()
+	if v, ok := testWorkspacesRoots.Load(t.Name()); ok {
+		return v.(string)
+	}
+	root := filepath.Join(t.TempDir(), "workspaces")
+	testWorkspacesRoots.Store(t.Name(), root)
+	return root
 }

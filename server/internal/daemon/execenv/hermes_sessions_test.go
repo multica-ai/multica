@@ -10,19 +10,18 @@ import (
 	"time"
 )
 
-// TestHermesSessionStorePathLayout pins the on-disk layout an operator (and
-// the GC below) depends on:
-// <profile dir>/hermes-sessions/<agent>/<hermes profile>/<conversation>.
+// TestHermesSessionStorePathLayout pins the on-disk layout an operator (and the
+// GC below) depends on: <work-state root>/hermes-sessions/<agent>/<hermes
+// profile>/<conversation>. The root is the machine + backend scope, not the
+// Multica profile directory (#8280).
 func TestHermesSessionStorePathLayout(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	stateRoot := t.TempDir()
 
 	agent := "11111111-2222-3333-4444-555555555555"
 	issue := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	got := HermesSessionStorePath("", agent, filepath.Join(platformDefaultHermesHome(), "profiles", "research"),
+	got := HermesSessionStorePath(stateRoot, agent, filepath.Join(platformDefaultHermesHome(), "profiles", "research"),
 		TaskContextForEnv{AgentID: agent, IssueID: issue})
-	want := filepath.Join(home, ".multica", hermesSessionStoreRoot, agent, "research", issue)
+	want := filepath.Join(stateRoot, hermesSessionStoreRoot, agent, "research", issue)
 	if got != want {
 		t.Fatalf("store path = %q, want %q", got, want)
 	}
@@ -31,33 +30,34 @@ func TestHermesSessionStorePathLayout(t *testing.T) {
 // TestHermesSessionStorePathScoping covers which tasks get a shard at all, and
 // that two conversations of one agent never share one.
 func TestHermesSessionStorePathScoping(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
+	stateRoot := t.TempDir()
 	const agent = "agent-1"
-	issueA := HermesSessionStorePath("", agent, "", TaskContextForEnv{IssueID: "issue-a"})
-	issueB := HermesSessionStorePath("", agent, "", TaskContextForEnv{IssueID: "issue-b"})
+	issueA := HermesSessionStorePath(stateRoot, agent, "", TaskContextForEnv{IssueID: "issue-a"})
+	issueB := HermesSessionStorePath(stateRoot, agent, "", TaskContextForEnv{IssueID: "issue-b"})
 	if issueA == "" || issueA == issueB {
 		t.Fatalf("two issues must get distinct stores, got %q and %q", issueA, issueB)
 	}
 
-	chat := HermesSessionStorePath("", agent, "", TaskContextForEnv{ChatSessionID: "sess-1"})
+	chat := HermesSessionStorePath(stateRoot, agent, "", TaskContextForEnv{ChatSessionID: "sess-1"})
 	if filepath.Base(chat) != "chat_sess-1" {
 		t.Fatalf("chat conversation segment = %q, want chat_sess-1", filepath.Base(chat))
 	}
 	// An issue task and a chat task can never collide even on equal ids.
-	if same := HermesSessionStorePath("", agent, "", TaskContextForEnv{IssueID: "sess-1"}); same == chat {
+	if same := HermesSessionStorePath(stateRoot, agent, "", TaskContextForEnv{IssueID: "sess-1"}); same == chat {
 		t.Fatalf("issue and chat conversations collided on %q", chat)
 	}
 
-	// No agent, or no conversation, means no store: the session database stays
-	// task-local rather than landing in a shard nothing will resume.
-	if got := HermesSessionStorePath("", "", "", TaskContextForEnv{IssueID: "issue-a"}); got != "" {
+	// No agent, no conversation, or no work-state root means no store: the
+	// session database stays task-local rather than landing in a shard nothing
+	// will resume.
+	if got := HermesSessionStorePath(stateRoot, "", "", TaskContextForEnv{IssueID: "issue-a"}); got != "" {
 		t.Fatalf("store path without an agent = %q, want empty", got)
 	}
-	if got := HermesSessionStorePath("", agent, "", TaskContextForEnv{}); got != "" {
+	if got := HermesSessionStorePath(stateRoot, agent, "", TaskContextForEnv{}); got != "" {
 		t.Fatalf("store path without a conversation = %q, want empty", got)
+	}
+	if got := HermesSessionStorePath("", agent, "", TaskContextForEnv{IssueID: "issue-a"}); got != "" {
+		t.Fatalf("store path without a work-state root = %q, want empty", got)
 	}
 }
 
@@ -258,11 +258,10 @@ func TestPrepareHermesHomeSessionMountIsIdempotent(t *testing.T) {
 }
 
 func TestPruneHermesSessionStores(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	root := filepath.Join(home, ".multica", hermesSessionStoreRoot)
+	// The store lives under the daemon's work-state root, so the test owns that
+	// root directly instead of going through HOME and the profile directory.
+	stateRoot := t.TempDir()
+	root := filepath.Join(stateRoot, hermesSessionStoreRoot)
 	idle := filepath.Join(root, "agent-1", "default", "issue-idle")
 	fresh := filepath.Join(root, "agent-1", "default", "issue-fresh")
 	held := filepath.Join(root, "agent-2", "default", "issue-held")
@@ -288,7 +287,7 @@ func TestPruneHermesSessionStores(t *testing.T) {
 		return func() {}, true
 	}
 
-	removed, freed := PruneHermesSessionStores("", 14*24*time.Hour, now, reserve, testLogger())
+	removed, freed := PruneHermesSessionStores(stateRoot, 14*24*time.Hour, now, reserve, testLogger())
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
@@ -307,22 +306,37 @@ func TestPruneHermesSessionStores(t *testing.T) {
 }
 
 func TestPruneHermesSessionStoresDisabled(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	store := filepath.Join(home, ".multica", hermesSessionStoreRoot, "agent-1", "default", "issue-1")
+	stateRoot := t.TempDir()
+	store := filepath.Join(stateRoot, hermesSessionStoreRoot, "agent-1", "default", "issue-1")
 	mustWrite(t, filepath.Join(store, "state.db"), "transcript")
-	old := time.Now().Add(-365 * 24 * time.Hour)
-	if err := os.Chtimes(store, old, old); err != nil {
-		t.Fatalf("age store: %v", err)
-	}
+	chtimesTree(t, store, time.Now().Add(-365*24*time.Hour))
 
-	if removed, _ := PruneHermesSessionStores("", 0, time.Now(), nil, testLogger()); removed != 0 {
+	if removed, _ := PruneHermesSessionStores(stateRoot, 0, time.Now(), nil, testLogger()); removed != 0 {
 		t.Fatalf("removed = %d with retention disabled, want 0", removed)
 	}
 	if _, err := os.Stat(store); err != nil {
 		t.Fatalf("store was reclaimed with retention disabled: %v", err)
+	}
+}
+
+// TestPruneHermesSessionStoresIgnoresOtherWorkStateRoots is the transcript half
+// of the GC ownership boundary (GH #8280): a daemon on another backend must
+// never reclaim conversation shards it cannot mount.
+func TestPruneHermesSessionStoresIgnoresOtherWorkStateRoots(t *testing.T) {
+	mine := t.TempDir()
+	otherBackend := t.TempDir()
+	store := filepath.Join(mine, hermesSessionStoreRoot, "agent-1", "default", "issue-1")
+	mustWrite(t, filepath.Join(store, "state.db"), "transcript")
+	chtimesTree(t, store, time.Now().Add(-30*24*time.Hour))
+
+	if removed, _ := PruneHermesSessionStores(otherBackend, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
+		t.Fatalf("removed = %d, want 0 — another backend's work-state root is out of scope", removed)
+	}
+	if _, err := os.Stat(store); err != nil {
+		t.Fatalf("another backend's prune reclaimed this backend's store: %v", err)
+	}
+	if removed, _ := PruneHermesSessionStores(mine, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+		t.Fatalf("removed = %d, want 1 — the owning work-state root reclaims its idle shard", removed)
 	}
 }
 

@@ -158,9 +158,14 @@ func (s *InMemoryUpdateStore) HasPending(_ context.Context, runtimeID string) (b
 }
 
 // PopPending returns and marks as running the pending update for a runtime.
-func (s *InMemoryUpdateStore) PopPending(_ context.Context, runtimeID string) (*UpdateRequest, error) {
+func (s *InMemoryUpdateStore) PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, err := lockPendingOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var oldest *UpdateRequest
 	now := time.Now()

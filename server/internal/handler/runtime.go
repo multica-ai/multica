@@ -23,10 +23,11 @@ import (
 )
 
 type AgentRuntimeResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	DaemonID    *string `json:"daemon_id"`
-	Name        string  `json:"name"`
+	ID              string  `json:"id"`
+	OwnerGeneration string  `json:"owner_generation,omitempty"`
+	WorkspaceID     string  `json:"workspace_id"`
+	DaemonID        *string `json:"daemon_id"`
+	Name            string  `json:"name"`
 	// CustomName is the user-set display override (MUL-4217); null when the
 	// runtime still uses its daemon-proposed Name. Clients show
 	// CustomName ?? Name and seed the rename field from this raw value.

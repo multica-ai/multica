@@ -5966,9 +5966,35 @@ func (s *TaskService) ExpireStaleQueuedTasks(ctx context.Context, arg db.ExpireS
 	})
 }
 
-// RecoverOrphanedTasksForRuntime fails work a restarted daemon reports it lost.
-func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+var ErrStaleRuntimeOwner = errors.New("runtime ownership has changed")
+
+// RuntimeOwnerMatches permits legacy rows without a fenced generation while
+// requiring the exact acquisition token for fenced rows.
+func RuntimeOwnerMatches(metadata []byte, generation string) bool {
+	var owner struct {
+		OwnerGeneration string `json:"owner_generation"`
+	}
+	if err := json.Unmarshal(metadata, &owner); err != nil {
+		return false
+	}
+	return RuntimeOwnerGenerationMatches(owner.OwnerGeneration, generation)
+}
+
+func RuntimeOwnerGenerationMatches(current, generation string) bool {
+	return !strings.HasPrefix(current, "g") || current == generation
+}
+
+// RecoverOrphanedTasksForRuntime holds the runtime row through task failure and
+// settlement, so a replacement Register cannot commit before old recovery.
+func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID, generation string) ([]db.AgentTaskQueue, error) {
 	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		runtime, err := qtx.LockAgentRuntime(ctx, runtimeID)
+		if err != nil {
+			return nil, err
+		}
+		if !RuntimeOwnerMatches(runtime.Metadata, generation) {
+			return nil, ErrStaleRuntimeOwner
+		}
 		return qtx.RecoverOrphanedTasksForRuntime(ctx, runtimeID)
 	})
 }
