@@ -69,7 +69,7 @@ func TestClaimTasksForRuntimes_PartialSuccessOnSecondAgentClaimFailure(t *testin
 	rt1, rt2 := batchClaimFixture(t, ctx, pool)
 	ids := []pgtype.UUID{util.MustParseUUID(rt1), util.MustParseUUID(rt2)}
 
-	claimed, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
+	claimed, _, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
 	if err != nil {
 		t.Fatalf("expected partial success (nil error), got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestClaimTasksForRuntimes_PartialSuccessOnCandidateQueryFailureAfterReclaim
 	})
 
 	ids := []pgtype.UUID{util.MustParseUUID(rt1), util.MustParseUUID(rt2)}
-	claimed, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
+	claimed, _, err := svc.ClaimTasksForRuntimes(ctx, ids, 5)
 	if err != nil {
 		t.Fatalf("expected partial success (nil error) despite candidate query failure, got %v", err)
 	}
