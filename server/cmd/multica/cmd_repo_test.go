@@ -217,9 +217,11 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
 	t.Setenv("MULTICA_REPO_CHECKOUT_MODE", "isolated")
 
-	previousRef, previousFresh := repoCheckoutRef, repoCheckoutFresh
-	repoCheckoutRef, repoCheckoutFresh = "release/v2", true
-	defer func() { repoCheckoutRef, repoCheckoutFresh = previousRef, previousFresh }()
+	previousRef, previousFresh, previousFull := repoCheckoutRef, repoCheckoutFresh, repoCheckoutFull
+	repoCheckoutRef, repoCheckoutFresh, repoCheckoutFull = "release/v2", true, true
+	defer func() {
+		repoCheckoutRef, repoCheckoutFresh, repoCheckoutFull = previousRef, previousFresh, previousFull
+	}()
 
 	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
 		t.Fatalf("runRepoCheckout: %v", err)
@@ -235,6 +237,9 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	}
 	if got := body["fresh"]; got != true {
 		t.Fatalf("fresh = %v, want true", got)
+	}
+	if got := body["full"]; got != true {
+		t.Fatalf("full = %v, want true", got)
 	}
 }
 
@@ -264,6 +269,11 @@ func TestRepoCheckoutSummary(t *testing.T) {
 			name:   "kept on the task branch",
 			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch"},
 			want:   []string{"(branch: agent/test/task, this task's branch; 0 uncommitted files, 0 unpushed commits)"},
+		},
+		{
+			name:   "full widens kept sparse tree",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch", SparseWidened: true},
+			want:   []string{"Kept the existing checkout", "--full disabled sparse checkout and materialized excluded files"},
 		},
 		{
 			name:   "kept on a detached HEAD",
