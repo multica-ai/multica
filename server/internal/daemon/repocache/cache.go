@@ -55,20 +55,6 @@ func gitEnv() []string {
 	)
 }
 
-var agentGitExcludePatterns = []string{
-	".agent_context",
-	"CLAUDE.md",
-	"AGENTS.md",
-	".claude",
-	".opencode",
-	".codeartsdoer",
-	".deveco",
-	"CODEBUDDY.md",
-	".codebuddy",
-	".pi",
-	".omp",
-}
-
 const repoCacheGitTimeout = 10 * time.Minute
 
 func newGitCommand(args ...string) *exec.Cmd {
@@ -886,9 +872,6 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, fmt.Errorf("create isolated checkout: %w", err)
 		}
 
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
-		}
 		if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
 			return nil, fmt.Errorf("isolate checkout Git identity: %w", err)
 		}
@@ -907,10 +890,6 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		result, err := updateExistingCheckoutContext(ctx, worktreePath, branchName, baseRef, params.Fresh)
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
-		}
-
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
 		}
 
 		if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
@@ -936,11 +915,6 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	actualBranch, err := createWorktreeContext(ctx, barePath, worktreePath, branchName, baseRef)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
-	}
-
-	// Exclude agent context files from git tracking.
-	for _, pattern := range agentGitExcludePatterns {
-		_ = excludeFromGitContext(ctx, worktreePath, pattern)
 	}
 
 	if err := isolateWorktreeIdentityContext(ctx, barePath, worktreePath); err != nil {
@@ -2176,45 +2150,6 @@ func removeCoAuthoredByHookContext(ctx context.Context, worktreePath string) err
 	}
 	if err := os.Remove(hookPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove prepare-commit-msg hook: %w", err)
-	}
-	return nil
-}
-
-// excludeFromGit adds a pattern to the worktree's .git/info/exclude file.
-func excludeFromGit(worktreePath, pattern string) error {
-	return excludeFromGitContext(context.Background(), worktreePath, pattern)
-}
-
-func excludeFromGitContext(ctx context.Context, worktreePath, pattern string) error {
-	out, err := runGitOutputContext(ctx, "-C", worktreePath, "rev-parse", "--git-dir")
-	if err != nil {
-		return fmt.Errorf("resolve git dir: %w", err)
-	}
-
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
-	}
-
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		return fmt.Errorf("create info dir: %w", err)
-	}
-
-	existing, _ := os.ReadFile(excludePath)
-	if strings.Contains(string(existing), pattern) {
-		return nil
-	}
-
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open exclude file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "\n%s\n", pattern); err != nil {
-		return fmt.Errorf("write exclude pattern: %w", err)
 	}
 	return nil
 }
