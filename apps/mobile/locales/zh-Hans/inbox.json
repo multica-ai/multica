@@ -59,6 +59,7 @@
     "task_failed": "运行失败",
     "agent_blocked": "智能体受阻",
     "agent_completed": "智能体已完成",
+    "agent_question": "智能体提问",
     "reaction_added": "添加了表情",
     "quick_create_done": "快速创建完成",
     "quick_create_failed": "快速创建失败",

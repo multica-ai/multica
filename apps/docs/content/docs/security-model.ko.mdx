@@ -41,7 +41,7 @@ Multica는 파일 시스템 샌드박스를 제공하지 않습니다. 데몬을
 
 ## 경계가 아닌 것
 
-- **코딩 도구 자체의 샌드박스와 승인 설정.** Multica는 에이전트를 무인으로 실행하므로 승인 요청은 자동 응답됩니다. 기본 경로에서는 파일 시스템 샌드박스도 꺼져 있어 Codex는 `sandbox_mode = "danger-full-access"`, Claude Code는 `--permission-mode bypassPermissions`로 동작합니다. 예외는 Windows입니다. Codex의 네이티브 샌드박스(`windows.sandbox = "unelevated"` 또는 `"elevated"`)를 명시적으로 설정하면 Multica는 그 옵트인을 존중해 해당 실행에 `workspace-write`를 유지합니다. 적용 가능한 환경에서는 권장하지만, 한 플랫폼의 한 도구에 국한된 이야기이며 데몬 사용자의 권한을 얼마나 좁혀야 하는지는 달라지지 않습니다.
+- **코딩 도구 자체의 샌드박스와 승인 설정.** Multica는 에이전트를 무인으로 실행하므로 승인 요청은 자동 응답됩니다. 유일한 예외는 질문입니다. Claude Code 실행이 `AskUserQuestion`을 호출하면 머신에서는 아무것도 답하지 않습니다. 질문은 태스크에 카드로 게시되고 실행은 종료되며, 멤버가 답글을 달면 에이전트가 재개됩니다. 기본 경로에서는 파일 시스템 샌드박스도 꺼져 있어 Codex는 `sandbox_mode = "danger-full-access"`, Claude Code는 `--permission-mode bypassPermissions`로 동작합니다. 예외는 Windows입니다. Codex의 네이티브 샌드박스(`windows.sandbox = "unelevated"` 또는 `"elevated"`)를 명시적으로 설정하면 Multica는 그 옵트인을 존중해 해당 실행에 `workspace-write`를 유지합니다. 적용 가능한 환경에서는 권장하지만, 한 플랫폼의 한 도구에 국한된 이야기이며 데몬 사용자의 권한을 얼마나 좁혀야 하는지는 달라지지 않습니다.
 - **`HOME` 디렉터리 구성.** 실행은 데몬 사용자의 실제 `HOME`과 `XDG_*` 변수를 그대로 상속합니다. 덕분에 `gh`, `aws`, `kubectl`, `gcloud`, `glab` 같은 호스트 CLI가 셸에서와 동일하게 실행 안에서도 동작합니다. 동시에 그 홈 아래의 모든 것에 접근할 수 있다는 뜻이기도 합니다.
 
 <Callout>
