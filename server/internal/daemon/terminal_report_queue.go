@@ -636,42 +636,41 @@ func (s *terminalReportStore) recordPermanentRejection(item pendingTerminalTaskR
 	if !quarantine {
 		return false, nil
 	}
-	return true, s.movePendingToFailedQueue(path, item, report)
+	return s.movePendingToFailedQueue(path, item, report)
 }
 
 // movePendingToFailedQueue publishes the pending record in failed/ and drops
 // the pending file. Callers hold the store mutex and have already validated
-// that the pending file still matches item. The rename/removal has completed by
-// the time it returns: sync failures are reported to operators, but the caller
-// must still treat the report as retired, because there is no pending file left
-// for a later pass to rediscover.
-func (s *terminalReportStore) movePendingToFailedQueue(path string, item pendingTerminalTaskReport, report terminalTaskReport) error {
+// that the pending file still matches item. It returns retired=true only after
+// the rename/removal completes. Subsequent sync failures are still reported,
+// but no pending file remains for a later pass to rediscover.
+func (s *terminalReportStore) movePendingToFailedQueue(path string, item pendingTerminalTaskReport, report terminalTaskReport) (bool, error) {
 	if err := ensureTerminalReportDir(s.failedDir()); err != nil {
-		return fmt.Errorf("create failed terminal report queue: %w", err)
+		return false, fmt.Errorf("create failed terminal report queue: %w", err)
 	}
 	failedPath := filepath.Join(s.failedDir(), item.fileName)
 	if existingBody, readErr := os.ReadFile(failedPath); readErr == nil {
 		existing, decodeErr := decodePersistedTerminalReport(existingBody)
 		if decodeErr != nil {
-			return fmt.Errorf("existing failed terminal report is unreadable: %w", decodeErr)
+			return false, fmt.Errorf("existing failed terminal report is unreadable: %w", decodeErr)
 		}
 		existingReport, decodeErr := existing.terminalReport()
 		if decodeErr != nil || existingReport != report {
-			return errors.New("failed terminal report conflicts with queued payload")
+			return false, errors.New("failed terminal report conflicts with queued payload")
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove duplicate quarantined terminal report: %w", err)
+			return false, fmt.Errorf("remove duplicate quarantined terminal report: %w", err)
 		}
 	} else if errors.Is(readErr, os.ErrNotExist) {
 		if err := os.Rename(path, failedPath); err != nil {
-			return fmt.Errorf("quarantine terminal report: %w", err)
+			return false, fmt.Errorf("quarantine terminal report: %w", err)
 		}
 	} else {
-		return fmt.Errorf("inspect failed terminal report: %w", readErr)
+		return false, fmt.Errorf("inspect failed terminal report: %w", readErr)
 	}
 	failedSyncErr := syncTerminalReportDir(s.failedDir())
 	pendingSyncErr := syncTerminalReportDir(s.dir)
-	return errors.Join(
+	return true, errors.Join(
 		wrapTerminalReportSyncError("sync failed terminal report queue", failedSyncErr),
 		wrapTerminalReportSyncError("sync pending terminal report queue after quarantine", pendingSyncErr),
 	)
@@ -710,7 +709,8 @@ func (s *terminalReportStore) recordSupersededReport(item pendingTerminalTaskRep
 	if err := writeTerminalReportRecord(s.dir, item.fileName, record); err != nil {
 		return fmt.Errorf("persist superseded terminal report: %w", err)
 	}
-	return s.movePendingToFailedQueue(path, item, report)
+	_, err = s.movePendingToFailedQueue(path, item, report)
+	return err
 }
 
 // quarantineSupersededTerminalReport is the daemon-side arm of

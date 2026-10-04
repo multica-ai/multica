@@ -361,6 +361,68 @@ func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *te
 	}
 }
 
+func TestTerminalReportQuarantineMoveFailureKeepsPendingAndSkipsCompensation(t *testing.T) {
+	d := New(Config{
+		ServerBaseURL: "https://api.example.test", WorkspacesRoot: t.TempDir(), DaemonID: "daemon-move-failure",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	base := time.Date(2026, time.October, 4, 0, 0, 0, 0, time.UTC)
+	now := base
+	d.terminalReportNow = func() time.Time { return now }
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "task-move-failure", output: "original successful answer",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
+	}
+	var fallbackCalls atomic.Int32
+	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {
+		if got.kind == terminalTaskReportFail {
+			fallbackCalls.Add(1)
+			return nil
+		}
+		return &requestError{StatusCode: http.StatusForbidden, Body: "forbidden"}
+	}
+	if err := d.reportTerminalTask(context.Background(), report); err == nil {
+		t.Fatal("rejected completion unexpectedly succeeded")
+	}
+	// A file occupying failed/ prevents retirement on every platform.
+	if err := os.WriteFile(d.terminalReports.failedDir(), []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now = base.Add(terminalReportPermanentRejectionAge)
+	for attempt := 0; attempt < terminalReportPermanentRejectionLimit; attempt++ {
+		if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 1 || delivered != 0 {
+			t.Fatalf("blocked move replay = pending:%d delivered:%d, want 1/0", pending, delivered)
+		}
+	}
+	if got := fallbackCalls.Load(); got != 0 {
+		t.Fatalf("compensation before preserving the completion = %d, want 0", got)
+	}
+	items, err := d.terminalReports.list()
+	if err != nil || len(items) != 1 || items[0].report != report {
+		t.Fatalf("original pending payload = %+v, error=%v", items, err)
+	}
+	if err := os.Remove(d.terminalReports.failedDir()); err != nil {
+		t.Fatal(err)
+	}
+	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 0 || delivered != 0 {
+		t.Fatalf("recovered move replay = pending:%d delivered:%d, want 0/0", pending, delivered)
+	}
+	body, err := os.ReadFile(filepath.Join(d.terminalReports.failedDir(), reportFileName(report)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := decodePersistedTerminalReport(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved, err := record.terminalReport(); err != nil || preserved != report {
+		t.Fatalf("preserved completion = %+v, error=%v", preserved, err)
+	}
+	d.replayPendingTerminalReports(context.Background())
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("compensation after successful retirement = %d, want exactly 1", got)
+	}
+}
+
 func TestTerminalReportPermanentRejectionClassification(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
