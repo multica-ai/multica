@@ -612,6 +612,7 @@ type copilotCodeChanges struct {
 // overridden by user-configured custom_args.
 var copilotBlockedArgs = map[string]blockedArgMode{
 	"-p":                blockedWithValue,
+	"--prompt":          blockedWithValue,
 	"--output-format":   blockedWithValue,
 	"--allow-all":       blockedStandalone, // tools + paths + URLs
 	"--allow-all-tools": blockedStandalone,
