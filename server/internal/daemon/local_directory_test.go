@@ -956,7 +956,7 @@ func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 func TestValidateExecutionModeAcceptsKnownModes(t *testing.T) {
 	t.Parallel()
 
-	for _, mode := range []string{"", localDirectoryModeInPlace, localDirectoryModeWorktree, "  worktree  "} {
+	for _, mode := range []string{"", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeWorktreeClean, "  worktree  "} {
 		a := &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: mode}}
 		if err := a.ValidateExecutionMode(); err != nil {
 			t.Errorf("ValidateExecutionMode(%q) = %v, want nil", mode, err)

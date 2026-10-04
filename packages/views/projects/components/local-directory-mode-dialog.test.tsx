@@ -42,6 +42,14 @@ function worktreeOption(): HTMLElement {
 }
 
 describe("LocalDirectoryModeDialog", () => {
+  it("preserves a CLI-configured clean worktree mode", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ value: "worktree_clean", onConfirm });
+    expect(worktreeOption().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(worktreeOption());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onConfirm).toHaveBeenCalledWith("worktree_clean");
+  });
 
   it("marks the current mode as selected", () => {
     renderDialog({ value: "worktree" });

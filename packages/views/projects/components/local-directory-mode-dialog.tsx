@@ -158,8 +158,8 @@ export function LocalDirectoryModeOptions({
         icon={<GitBranch className="size-4" />}
         title={t(($) => $.resources.mode_worktree_title)}
         description={t(($) => $.resources.mode_worktree_description)}
-        identifier="worktree"
-        selected={value === "worktree"}
+        identifier={value === "worktree_clean" ? "worktree_clean" : "worktree"}
+        selected={value === "worktree" || value === "worktree_clean"}
         disabled={worktreeDisabled}
         disabledReason={
           unavailableReason === "not_git"
@@ -168,7 +168,7 @@ export function LocalDirectoryModeOptions({
               ? t(($) => $.resources.mode_worktree_needs_server_upgrade)
               : undefined
         }
-        onSelect={() => onChange("worktree")}
+        onSelect={() => onChange(value === "worktree_clean" ? "worktree_clean" : "worktree")}
       />
     </div>
   );

@@ -1912,3 +1912,86 @@ func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
 		t.Error("a turn that changed nothing left its branch behind")
 	}
 }
+
+// #9041: clean mode must keep local WIP out of the delivered task branch.
+func TestCleanWorktreeBaselineExcludesLocalState(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	head := gitRun(t, repo, "rev-parse", "HEAD")
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "local edit\n")
+	gitRun(t, repo, "add", "tracked.txt")
+	writeFile(t, filepath.Join(repo, "scratch.txt"), "local scratch\n")
+	before := gitRun(t, repo, "status", "--porcelain")
+	wt, err := PrepareLocalWorktree(LocalWorktreeParams{
+		LocalPath: repo, EnvRoot: t.TempDir(), AgentName: "J",
+		TaskID: "11112222-3333-4444-5555-666677778888", CleanBaseline: true,
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(wt.Path, "tracked.txt")); got != "original\n" {
+		t.Fatalf("tracked = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "scratch.txt")); !os.IsNotExist(err) {
+		t.Fatalf("scratch present: %v", err)
+	}
+	if wt.DirtyBaseCaptured {
+		t.Fatal("clean mode captured dirty base")
+	}
+	if got := gitRun(t, wt.Path, "rev-parse", "HEAD^"); got != head {
+		t.Fatalf("baseline parent = %s, want %s", got, head)
+	}
+	writeFile(t, filepath.Join(wt.Path, "agent.txt"), "agent output\n")
+	outcome := finalizeOK(t, wt)
+	if outcome.Branch == "" || !outcome.AutoCommitted {
+		t.Fatalf("delivery = %+v", outcome)
+	}
+	if got := gitRun(t, repo, "show", outcome.Branch+":tracked.txt"); got != "original" {
+		t.Fatalf("delivered local edits: %q", got)
+	}
+	if _, err := gitTry(t, repo, "show", outcome.Branch+":scratch.txt"); err == nil {
+		t.Fatal("delivered local scratch")
+	}
+	if got := gitRun(t, repo, "show", outcome.Branch+":agent.txt"); got != "agent output" {
+		t.Fatalf("agent output = %q", got)
+	}
+	if got := gitRun(t, repo, "status", "--porcelain"); got != before {
+		t.Fatalf("user state changed: %s -> %s", before, got)
+	}
+}
+
+func TestCleanWorktreeContinuationKeepsAgentWork(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	prepare := func(taskID string) *LocalWorktree {
+		wt, err := PrepareLocalWorktree(LocalWorktreeParams{
+			LocalPath: repo, EnvRoot: t.TempDir(), AgentName: "J", TaskID: taskID,
+			ConversationKey: "mul-9041", WorkspaceID: testBranchOwner.WorkspaceID,
+			AgentID: testBranchOwner.AgentID, ConversationID: testBranchOwner.ConversationID,
+			CleanBaseline: true,
+		}, worktreeTestLogger())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wt
+	}
+	first := prepare(turnOneTask)
+	writeFile(t, filepath.Join(first.Path, "agent.txt"), "first turn\n")
+	outcome := finalizeOK(t, first)
+	writeFile(t, filepath.Join(repo, "scratch.txt"), "new local scratch\n")
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "new local edit\n")
+	second := prepare(turnTwoTask)
+	if !second.Continued || second.Branch != outcome.Branch {
+		t.Fatalf("not continued: %+v", second)
+	}
+	if got := readFile(t, filepath.Join(second.Path, "agent.txt")); got != "first turn\n" {
+		t.Fatalf("lost agent work: %q", got)
+	}
+	if got := readFile(t, filepath.Join(second.Path, "tracked.txt")); got != "original\n" {
+		t.Fatalf("copied local edit: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(second.Path, "scratch.txt")); !os.IsNotExist(err) {
+		t.Fatalf("copied scratch: %v", err)
+	}
+	finalizeOK(t, second)
+}

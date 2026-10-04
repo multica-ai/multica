@@ -1137,3 +1137,23 @@ The immutable `runtime_type` selects model discovery, skills paths, and launch b
 the server derives `protocol_family` (`pi` for `omp`). Custom command/path overrides and
 fixed arguments still apply, and the runtime retains its custom-profile provenance.
 Existing profiles and the legacy `--protocol-family` flag retain their original target.
+
+### Local-directory worktree baselines
+
+Local-directory resources support `--execution-mode worktree_clean` when added
+or updated with `multica project resource`. Unlike `worktree`, which copies
+local tracked edits and non-ignored untracked files into the task baseline,
+`worktree_clean` starts from the directory's committed HEAD. It does not select
+a remote/default branch or discard local changes. Follow-up turns keep the
+conversation's agent branch and incorporate new committed changes; task output
+is still recorded and delivered through the normal worktree lifecycle.
+
+For example, update an existing resource with:
+
+```sh
+multica project resource update <project> <resource> --execution-mode worktree_clean
+```
+
+This mode requires a daemon that implements it. Older worktree-capable daemons
+reject it rather than silently including local files. Use `worktree` again to
+restore local-state replay, or `in_place` to work directly in the directory.
