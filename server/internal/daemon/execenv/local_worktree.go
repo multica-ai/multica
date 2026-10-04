@@ -654,7 +654,7 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	// makes that recoverable — the worktree is still there to preserve, exactly
 	// as for a commit that could not be made.
 	if !dropped {
-		if verifyErr := w.verifyDeliveryPoint(tip); verifyErr != nil {
+		if verifyErr := w.verifyDeliveryPoint(tip, logger); verifyErr != nil {
 			outcome.Branch = ""
 			outcome.PreservedPath = w.Path
 			if logger != nil {
@@ -1419,18 +1419,17 @@ func quotedPaths(paths []string) string {
 // verifyDeliveryPoint checks that tip is a commit this conversation can put its
 // name on before it becomes the branch's recorded checkpoint.
 //
-// Two things are asserted, and they are the two ways a delivery can be
-// something other than what this task built. The tip has to BE the task's
-// branch — a run that checked out something else, or a branch someone moved
-// underneath it, delivers a commit this record has no business describing. And
-// it has to still contain the commit this turn started from — this turn's own
-// baseline when it made one, otherwise the branch tip it continued. A run that
-// resets its worktree back to the user's own HEAD passes neither test but the
-// second is the one that matters, twice over: recording a plain user commit as
-// the checkpoint is what makes a branch they later recreate there look like
-// ours, and a tip without this turn's starting point no longer carries the
-// snapshot about to be recorded as delivered (MUL-6881 review).
-func (w *LocalWorktree) verifyDeliveryPoint(tip string) error {
+// The ordinary case ends on the conversation branch itself, so its ref already
+// equals tip. A repository may instead require the agent to check out its own
+// task branch inside the worktree. That is still a valid delivery when tip is a
+// strict descendant of the conversation branch: advancing the conversation ref
+// is then only a fast-forward, and keeps the next turn on the work just
+// delivered.
+//
+// Refuse any divergence. The compare-and-swap form of update-ref also makes the
+// advance atomic: if the conversation branch moves after we inspect it, this
+// finalize fails rather than overwriting somebody else's work.
+func (w *LocalWorktree) verifyDeliveryPoint(tip string, logger *slog.Logger) error {
 	if !w.tracksState {
 		// Nothing will be recorded for this branch, so there is nothing to prove.
 		return nil
@@ -1438,13 +1437,17 @@ func (w *LocalWorktree) verifyDeliveryPoint(tip string) error {
 	if tip == "" {
 		return errors.New("the task worktree has no resolvable HEAD")
 	}
-	branchTip, err := runGitTrimmed(w.GitRoot, "rev-parse", "--verify", "refs/heads/"+w.Branch)
+	branchRef := "refs/heads/" + w.Branch
+	branchTip, err := runGitTrimmed(w.GitRoot, "rev-parse", "--verify", branchRef)
 	if err != nil {
 		return fmt.Errorf("resolve branch %s: %w", w.Branch, err)
 	}
-	if branchTip != tip {
-		return fmt.Errorf("the worktree delivered %s while branch %s points at %s, so the run did not deliver onto its own branch",
-			shortID(tip), w.Branch, shortID(branchTip))
+	advanceBranch := branchTip != tip
+	if advanceBranch {
+		if _, err := runGit(w.GitRoot, "merge-base", "--is-ancestor", branchTip, tip); err != nil {
+			return fmt.Errorf("the worktree delivered %s while branch %s points at %s, so the run did not deliver a fast-forward of its conversation branch",
+				shortID(tip), w.Branch, shortID(branchTip))
+		}
 	}
 	if w.BaseCommit == "" {
 		return fmt.Errorf("branch %s has no commit of this task's own to prove it by", w.Branch)
@@ -1453,7 +1456,48 @@ func (w *LocalWorktree) verifyDeliveryPoint(tip string) error {
 		return fmt.Errorf("the delivered commit %s no longer contains %s, the commit this turn started from",
 			shortID(tip), shortID(w.BaseCommit))
 	}
+	if advanceBranch {
+		// update-ref is atomic but deliberately lower-level than the porcelain
+		// branch commands: it will move a branch even when another worktree has
+		// it checked out. Do not change HEAD underneath a sibling/user checkout.
+		if checkedOutAt, checkedOut, err := branchWorktreePath(w.GitRoot, w.Branch); err != nil {
+			return fmt.Errorf("check whether branch %s is in use before fast-forwarding it: %w", w.Branch, err)
+		} else if checkedOut {
+			return fmt.Errorf("branch %s is checked out at %s, so it cannot be advanced to delivered commit %s without moving another worktree underneath it",
+				w.Branch, checkedOutAt, shortID(tip))
+		}
+		out, err := runGit(w.GitRoot, "update-ref", branchRef, tip, branchTip)
+		if err != nil {
+			return fmt.Errorf("fast-forward branch %s from %s to delivered commit %s: %s: %w",
+				w.Branch, shortID(branchTip), shortID(tip), strings.TrimSpace(out), err)
+		}
+		if logger != nil {
+			logger.Warn("execenv: worktree delivered on another branch; fast-forwarded the conversation branch",
+				"path", w.Path, "branch", w.Branch, "from", branchTip, "to", tip)
+		}
+	}
 	return nil
+}
+
+// branchWorktreePath reports where branch is currently checked out, if
+// anywhere. A low-level update-ref does not enforce git's normal checked-out
+// branch protection, so callers that move a branch ref must check this first.
+func branchWorktreePath(gitRoot, branch string) (string, bool, error) {
+	out, err := runGitStdout(gitRoot, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", false, err
+	}
+	target := "branch refs/heads/" + branch
+	var worktreePath string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			worktreePath = strings.TrimPrefix(line, "worktree ")
+		case line == target:
+			return worktreePath, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // unmergedPaths lists the files git considers unresolved in a worktree.
