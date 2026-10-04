@@ -3,6 +3,8 @@ package events
 import (
 	"log/slog"
 	"sync"
+
+	"github.com/multica-ai/multica/server/pkg/eventrouting"
 )
 
 // Event represents a domain event published by handlers or services.
@@ -12,6 +14,10 @@ type Event struct {
 	ActorType   string // "member", "agent", or "system"
 	ActorID     string
 	Payload     any // JSON-serializable, same shape as current WS payloads
+	// RoutingClass is trusted platform provenance. Consumers that can start
+	// work must require ActionableRouting instead of inferring intent from prose.
+	RoutingClass      eventrouting.Class
+	ActionableRouting bool
 
 	// Optional scope hints used by the realtime fanout layer to route the
 	// event to a more specific scope than `workspace:{WorkspaceID}`. When set

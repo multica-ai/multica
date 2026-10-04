@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
+	"github.com/multica-ai/multica/server/pkg/eventrouting"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -2035,6 +2036,13 @@ func isNoteComment(content string) bool {
 // steerTaskIDs are the running turns the author chose: a recipient whose chosen
 // turn is still running receives this comment there instead of a follow-up run.
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID) []CommentTriggerOutcome {
+	routingClass := eventrouting.CommentClass(comment.AuthorType, comment.Type, comment.Content, comment.SourceTaskID.Valid)
+	if !routingClass.Actionable() {
+		return nil
+	}
+	if routingClass == eventrouting.ResultHandoff && !eventrouting.ResultHandoffTargets(comment.Content, uuidToString(issue.ID)) {
+		return nil
+	}
 	if isNoteComment(comment.Content) {
 		return nil
 	}

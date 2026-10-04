@@ -2083,6 +2083,82 @@ FROM agent_task_queue
 WHERE trigger_evidence_kind = 'delegated_failure'
   AND trigger_evidence_ref_id = @failed_task_id;
 
+-- name: RegisterProviderFailure :one
+-- Serialize one causal chain. A member comment/manual recovery deletes or
+-- revises this row; automatic failures only advance the same circuit.
+INSERT INTO provider_failure_circuit (
+    issue_id, thread_root_id, provider_error_signature, failing_agent_id,
+    failure_count, causal_depth, last_failure_task_id, recovery_started, open_until
+)
+VALUES (
+    @issue_id, @thread_root_id, @provider_error_signature, @failing_agent_id,
+    1, @causal_depth, @failed_task_id, false,
+    CASE WHEN @causal_depth::integer > 3 THEN now() + interval '30 minutes' END
+)
+ON CONFLICT (issue_id, thread_root_id, provider_error_signature, failing_agent_id)
+DO UPDATE SET
+    failure_count = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.failure_count + 1
+        ELSE 1
+    END,
+    first_failure_at = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.first_failure_at
+        ELSE now()
+    END,
+    last_failure_at = now(),
+    causal_depth = GREATEST(provider_failure_circuit.causal_depth, EXCLUDED.causal_depth),
+    last_failure_task_id = EXCLUDED.last_failure_task_id,
+    recovery_started = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.recovery_started
+        ELSE false
+    END,
+    action_required_comment_id = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+            THEN provider_failure_circuit.action_required_comment_id
+        ELSE NULL
+    END,
+    open_until = CASE
+        WHEN provider_failure_circuit.last_failure_at >= now() - interval '10 minutes'
+             AND provider_failure_circuit.failure_count + 1 >= 2
+          OR GREATEST(provider_failure_circuit.causal_depth, EXCLUDED.causal_depth) > 3
+            THEN now() + interval '30 minutes'
+        WHEN provider_failure_circuit.last_failure_at < now() - interval '10 minutes' THEN NULL
+        ELSE provider_failure_circuit.open_until
+    END
+WHERE provider_failure_circuit.last_failure_task_id IS DISTINCT FROM EXCLUDED.last_failure_task_id
+RETURNING *;
+
+-- name: GetProviderFailureCircuit :one
+SELECT * FROM provider_failure_circuit
+WHERE issue_id = @issue_id
+  AND thread_root_id = @thread_root_id
+  AND provider_error_signature = @provider_error_signature
+  AND failing_agent_id = @failing_agent_id;
+
+-- name: ClaimProviderFailureRecovery :one
+UPDATE provider_failure_circuit
+SET recovery_started = true
+WHERE issue_id = @issue_id
+  AND thread_root_id = @thread_root_id
+  AND provider_error_signature = @provider_error_signature
+  AND failing_agent_id = @failing_agent_id
+  AND recovery_started = false
+  AND (open_until IS NULL OR open_until <= now())
+RETURNING *;
+
+-- name: ClaimProviderFailureActionRequiredComment :one
+UPDATE provider_failure_circuit
+SET action_required_comment_id = @comment_id
+WHERE issue_id = @issue_id
+  AND thread_root_id = @thread_root_id
+  AND provider_error_signature = @provider_error_signature
+  AND failing_agent_id = @failing_agent_id
+  AND action_required_comment_id IS NULL
+RETURNING *;
+
 -- name: AcknowledgeExhaustedDelegatedFailureRecovery :one
 -- Once the bounded automatic attempts are exhausted, record a terminal
 -- acknowledgement on the newest recovery task. The outbox treats this receipt

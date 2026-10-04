@@ -1327,6 +1327,22 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type ProviderFailureCircuit struct {
+	IssueID                 pgtype.UUID        `json:"issue_id"`
+	ThreadRootID            pgtype.UUID        `json:"thread_root_id"`
+	ProviderErrorSignature  string             `json:"provider_error_signature"`
+	FailingAgentID          pgtype.UUID        `json:"failing_agent_id"`
+	FirstFailureAt          pgtype.Timestamptz `json:"first_failure_at"`
+	LastFailureAt           pgtype.Timestamptz `json:"last_failure_at"`
+	FailureCount            int32              `json:"failure_count"`
+	CausalDepth             int32              `json:"causal_depth"`
+	LastFailureTaskID       pgtype.UUID        `json:"last_failure_task_id"`
+	RecoveryStarted         bool               `json:"recovery_started"`
+	RecoveryRevision        int32              `json:"recovery_revision"`
+	OpenUntil               pgtype.Timestamptz `json:"open_until"`
+	ActionRequiredCommentID pgtype.UUID        `json:"action_required_comment_id"`
+}
+
 type QuickAction struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
