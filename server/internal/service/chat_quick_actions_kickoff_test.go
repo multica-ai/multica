@@ -151,6 +151,54 @@ func TestWriteChatCompletionOutcomeNeverStampsOnboardingOpening(t *testing.T) {
 	}
 }
 
+func TestWriteChatCompletionOutcomePreservesBackslashes(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var chatSessionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id)
+		VALUES ($1, $2, $3) RETURNING id`, workspaceID, agentID, userID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM chat_message WHERE chat_session_id = $1`, chatSessionID); err != nil {
+			t.Errorf("delete chat messages: %v", err)
+		}
+		if _, err := pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID); err != nil {
+			t.Errorf("delete chat session: %v", err)
+		}
+	})
+
+	var taskID string
+	if err := pool.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&taskID); err != nil {
+		t.Fatalf("new task id: %v", err)
+	}
+	want := `$n \neq -1$; $n \to \infty$; \text{for } i=1,\dots,n; \right. \\`
+	result, err := json.Marshal(protocol.TaskCompletedPayload{Output: want})
+	if err != nil {
+		t.Fatalf("marshal completion payload: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool}
+	row, err := svc.writeChatCompletionOutcome(ctx, q, db.AgentTaskQueue{
+		ID:            util.MustParseUUID(taskID),
+		ChatSessionID: util.MustParseUUID(chatSessionID),
+		AgentID:       util.MustParseUUID(agentID),
+	}, result)
+	if err != nil {
+		t.Fatalf("writeChatCompletionOutcome: %v", err)
+	}
+	if row == nil {
+		t.Fatal("writeChatCompletionOutcome wrote no row")
+	}
+	if row.Content != want {
+		t.Fatalf("stored chat output = %q, want %q", row.Content, want)
+	}
+}
+
 // TestWriteChatCompletionOutcomeStampsAPreDeployKickoffTurn covers the rolling
 // deploy: a kickoff task the PREVIOUS server enqueued, claimed by this one. Its
 // input is a kickoff and nothing else — the old shape — and its reply really is
