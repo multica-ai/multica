@@ -64,6 +64,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       "expo-router",
+      "expo-image",
+      "expo-localization",
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
@@ -85,6 +87,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           ios: {
             buildReactNativeFromSource: true,
+            // SDK 57's supported scene runtime is required for Xcode 27 builds.
+            // Keep this in prebuild config so clean native generations retain it.
+            enableSceneSupport: true,
           },
         },
       ],
