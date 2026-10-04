@@ -96,11 +96,16 @@ Le tableau liste les variables que les runtimes personnalisés peuvent utiliser 
 | `MULTICA_TOKEN` | Jeton d'API `mat_` limité à l'exécution | **Contrat d'intégration** |
 | `MULTICA_TASK_ID` | ID de l'exécution en cours | **Contrat d'intégration** |
 | `MULTICA_AGENT_ID` | ID de l'agent assigné | **Contrat d'intégration** |
+| `MULTICA_SQUAD_ID` | UUID de la squad lorsque c'est une squad qui a pris l'exécution ; absent sinon | **Contrat d'intégration** |
+| `MULTICA_INITIATOR_ID` | ID de la personne au nom de qui l'exécution s'effectue ; absent s'il n'y a pas d'initiateur | **Contrat d'intégration** |
 | `MULTICA_WORKSPACE_ID` | ID de l'espace de travail de l'exécution | **Contrat d'intégration** |
 | `MULTICA_SERVER_URL` | URL du serveur Multica sélectionnée par le daemon | **Contrat d'intégration** |
 | `MULTICA_TASK_CONFIG_ROOT` | Racine privée de configuration du CLI Multica, propre à l'exécution | Indicatif |
 | `MULTICA_TASK_WORKSPACES_ROOT` | Racine des répertoires de travail des exécutions gérés par le daemon | Indicatif |
 | `MULTICA_AGENT_NAME` | Nom affiché de l'agent assigné | Indicatif |
+| `MULTICA_SQUAD_NAME` | Nom affiché de cette squad ; absent s'il n'y a pas de squad | Indicatif |
+| `MULTICA_INITIATOR_NAME` | Nom affiché de l'initiateur ; absent s'il n'y a pas d'initiateur | Indicatif |
+| `MULTICA_INITIATOR_EMAIL` | Adresse e-mail de l'initiateur ; absent s'il n'y a pas d'initiateur | Indicatif |
 | `MULTICA_DAEMON_PORT` | Port local de santé/API du daemon utilisé par les commandes réservées aux exécutions, comme `multica repo checkout` | Indicatif |
 | `MULTICA_TASK_SLOT` | Emplacement dans le pool de parallélisme global du daemon ; utile pour les ressources indexées par emplacement, comme les GPU | Indicatif |
 | `TMPDIR` | Répertoire temporaire privé de l'exécution en cours ; également fourni sous `TMP` et `TEMP` pour les outils multiplateformes | Indicatif |

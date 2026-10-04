@@ -175,8 +175,14 @@ func taskScopedAuthToken(task Task) (string, error) {
 	return token, nil
 }
 
+// taskMulticaEnvironment builds the daemon-owned task environment injected
+// into every agent process. Squad and initiator identity come straight from
+// the claim payload and are set only when known: leaving them unset for tasks
+// without a squad or initiator (autopilot runs, direct member tasks) lets
+// consumers tell "unknown" apart from "empty". isBlockedEnvKey keeps agent
+// custom_env from overriding any MULTICA_ variable, including these.
 func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesRoot, serverURL string, healthPort, slot int, tempDir string) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"MULTICA_TOKEN":        token,
 		cli.TaskConfigRootEnv:  configRoot,
 		TaskWorkspacesRootEnv:  workspacesRoot,
@@ -191,6 +197,22 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if task.SquadID != "" {
+		env["MULTICA_SQUAD_ID"] = task.SquadID
+	}
+	if task.SquadName != "" {
+		env["MULTICA_SQUAD_NAME"] = task.SquadName
+	}
+	if task.InitiatorID != "" {
+		env["MULTICA_INITIATOR_ID"] = task.InitiatorID
+	}
+	if task.InitiatorName != "" {
+		env["MULTICA_INITIATOR_NAME"] = task.InitiatorName
+	}
+	if task.InitiatorEmail != "" {
+		env["MULTICA_INITIATOR_EMAIL"] = task.InitiatorEmail
+	}
+	return env
 }
 
 // taskRunner executes a single agent task and returns the result.

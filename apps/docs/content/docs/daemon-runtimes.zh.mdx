@@ -96,11 +96,16 @@ multica daemon start
 | `MULTICA_TOKEN` | task 级 `mat_` API 凭据 | **集成契约** |
 | `MULTICA_TASK_ID` | 当前 task 的 ID | **集成契约** |
 | `MULTICA_AGENT_ID` | 被指派智能体的 ID | **集成契约** |
+| `MULTICA_SQUAD_ID` | 小队接手任务时的小队 UUID；无小队参与时不设置 | **集成契约** |
+| `MULTICA_INITIATOR_ID` | 本次运行以其权限执行的用户 ID；无发起人时不设置 | **集成契约** |
 | `MULTICA_WORKSPACE_ID` | task 所属工作区的 ID | **集成契约** |
 | `MULTICA_SERVER_URL` | 守护进程选定的 Multica 服务地址 | **集成契约** |
 | `MULTICA_TASK_CONFIG_ROOT` | 私有的 task 本地 Multica CLI 配置根目录 | 仅供参考 |
 | `MULTICA_TASK_WORKSPACES_ROOT` | 守护进程管理的 task 工作区根目录 | 仅供参考 |
 | `MULTICA_AGENT_NAME` | 被指派智能体的显示名称 | 仅供参考 |
+| `MULTICA_SQUAD_NAME` | 该小队的显示名称；无小队参与时不设置 | 仅供参考 |
+| `MULTICA_INITIATOR_NAME` | 发起人的显示名称；无发起人时不设置 | 仅供参考 |
+| `MULTICA_INITIATOR_EMAIL` | 发起人的邮箱；无发起人时不设置 | 仅供参考 |
 | `MULTICA_DAEMON_PORT` | 本地守护进程的健康检查/API 端口，供 `multica repo checkout` 等仅限 task 的命令使用 | 仅供参考 |
 | `MULTICA_TASK_SLOT` | 守护进程全局并发池中的槽位，可用于 GPU 等按槽位编号的资源 | 仅供参考 |
 | `TMPDIR` | 当前 task 的私有临时目录；也会以 `TMP` 和 `TEMP` 提供给跨平台工具 | 仅供参考 |

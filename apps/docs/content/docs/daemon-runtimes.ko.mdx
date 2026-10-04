@@ -96,11 +96,16 @@ multica daemon start
 | `MULTICA_TOKEN` | 작업 범위 `mat_` API 자격 증명 | **연동 계약** |
 | `MULTICA_TASK_ID` | 실행 중인 작업의 ID | **연동 계약** |
 | `MULTICA_AGENT_ID` | 할당된 에이전트의 ID | **연동 계약** |
+| `MULTICA_SQUAD_ID` | 스쿼드가 작업을 선택한 경우 스쿼드의 UUID. 스쿼드가 없으면 설정되지 않음 | **연동 계약** |
+| `MULTICA_INITIATOR_ID` | 이 실행의 권한 원인 사용자의 ID. 발신자가 없으면 설정되지 않음 | **연동 계약** |
 | `MULTICA_WORKSPACE_ID` | 작업이 속한 워크스페이스의 ID | **연동 계약** |
 | `MULTICA_SERVER_URL` | 데몬이 선택한 Multica 서버 URL | **연동 계약** |
 | `MULTICA_TASK_CONFIG_ROOT` | 비공개 작업 로컬 Multica CLI 설정 루트 | 참고 정보 |
 | `MULTICA_TASK_WORKSPACES_ROOT` | 데몬이 관리하는 작업 워크스페이스의 루트 | 참고 정보 |
 | `MULTICA_AGENT_NAME` | 할당된 에이전트의 표시 이름 | 참고 정보 |
+| `MULTICA_SQUAD_NAME` | 해당 스쿼드의 표시 이름. 스쿼드가 없으면 설정되지 않음 | 참고 정보 |
+| `MULTICA_INITIATOR_NAME` | 발신자의 표시 이름. 발신자가 없으면 설정되지 않음 | 참고 정보 |
+| `MULTICA_INITIATOR_EMAIL` | 발신자의 이메일. 발신자가 없으면 설정되지 않음 | 참고 정보 |
 | `MULTICA_DAEMON_PORT` | `multica repo checkout` 같은 작업 전용 명령이 사용하는 로컬 데몬 상태/API 포트 | 참고 정보 |
 | `MULTICA_TASK_SLOT` | 데몬 전체 동시 실행 풀의 슬롯. GPU 같은 슬롯 번호 기반 리소스에 사용 가능 | 참고 정보 |
 | `TMPDIR` | 실행 중인 작업의 비공개 임시 디렉터리. 크로스 플랫폼 도구를 위해 `TMP`와 `TEMP`로도 제공 | 참고 정보 |
