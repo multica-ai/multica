@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -355,6 +356,10 @@ type Handler struct {
 	// production, which gets the real handshake probe; tests inject a fake so
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
+
+	// WeixinHost is the control client for the Weixin host (apps/weixin-host).
+	// Nil unless MULTICA_WEIXIN_HOST_URL and MULTICA_WEIXIN_HOST_SECRET are set.
+	WeixinHost *weixin.HostClient
 
 	// TelegramInstall owns the Telegram bot install lifecycle (register a
 	// pasted BotFather token / list / revoke) and the at-rest encryption of

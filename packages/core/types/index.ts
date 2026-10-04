@@ -257,6 +257,12 @@ export type {
   RedeemTelegramBindingTokenResponse,
 } from "./telegram";
 export type {
+  WeixinInstallation,
+  ListWeixinInstallationsResponse,
+  WeixinLogin,
+  WeixinLoginState,
+} from "./weixin";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

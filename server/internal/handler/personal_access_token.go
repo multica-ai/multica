@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -73,12 +74,6 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	rawToken, err := auth.GeneratePATToken()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
 	var expiresAt pgtype.Timestamptz
 	if req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
 		expiresAt = pgtype.Timestamptz{
@@ -87,18 +82,7 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	prefix := rawToken
-	if len(prefix) > 12 {
-		prefix = prefix[:12]
-	}
-
-	pat, err := h.Queries.CreatePersonalAccessToken(r.Context(), db.CreatePersonalAccessTokenParams{
-		UserID:      parseUUID(userID),
-		Name:        req.Name,
-		TokenHash:   auth.HashToken(rawToken),
-		TokenPrefix: prefix,
-		ExpiresAt:   expiresAt,
-	})
+	pat, rawToken, err := h.mintPersonalAccessToken(r.Context(), userID, req.Name, expiresAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create token")
 		return
@@ -108,6 +92,45 @@ func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 		PersonalAccessTokenResponse: patToResponse(pat),
 		Token:                       rawToken,
 	})
+}
+
+// mintPersonalAccessToken creates a PAT for userID and returns the row and
+// the raw token, which is never stored.
+func (h *Handler) mintPersonalAccessToken(ctx context.Context, userID, name string, expiresAt pgtype.Timestamptz) (db.PersonalAccessToken, string, error) {
+	rawToken, err := auth.GeneratePATToken()
+	if err != nil {
+		return db.PersonalAccessToken{}, "", err
+	}
+	prefix := rawToken
+	if len(prefix) > 12 {
+		prefix = prefix[:12]
+	}
+	pat, err := h.Queries.CreatePersonalAccessToken(ctx, db.CreatePersonalAccessTokenParams{
+		UserID:      parseUUID(userID),
+		Name:        name,
+		TokenHash:   auth.HashToken(rawToken),
+		TokenPrefix: prefix,
+		ExpiresAt:   expiresAt,
+	})
+	return pat, rawToken, err
+}
+
+// revokePersonalAccessToken revokes userID's token and drops it from the
+// auth cache. A token that is already gone is not an error.
+func (h *Handler) revokePersonalAccessToken(ctx context.Context, tokenID, userID pgtype.UUID) error {
+	hash, err := h.Queries.RevokePersonalAccessToken(ctx, db.RevokePersonalAccessTokenParams{
+		ID:     tokenID,
+		UserID: userID,
+	})
+	switch {
+	case err == nil:
+		h.PATCache.Invalidate(ctx, hash)
+		return nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	default:
+		return err
+	}
 }
 
 func (h *Handler) ListPersonalAccessTokens(w http.ResponseWriter, r *http.Request) {
@@ -263,19 +286,9 @@ func (h *Handler) RevokePersonalAccessToken(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	hash, err := h.Queries.RevokePersonalAccessToken(r.Context(), db.RevokePersonalAccessTokenParams{
-		ID:     idUUID,
-		UserID: parseUUID(userID),
-	})
-	switch {
-	case err == nil:
-		// Drop the cache entry immediately so the revocation takes effect
-		// before the TTL would otherwise expire the cached lookup.
-		h.PATCache.Invalidate(r.Context(), hash)
-	case errors.Is(err, pgx.ErrNoRows):
-		// Token doesn't exist or doesn't belong to this user. Preserve the
-		// pre-existing idempotent 204 behavior — no cache entry to clear.
-	default:
+	// A token that doesn't exist or doesn't belong to this user keeps the
+	// pre-existing idempotent 204 behavior.
+	if err := h.revokePersonalAccessToken(r.Context(), idUUID, parseUUID(userID)); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke token")
 		return
 	}

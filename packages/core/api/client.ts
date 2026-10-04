@@ -204,6 +204,9 @@ import type {
   ListTelegramInstallationsResponse,
   RegisterTelegramRequest,
   RedeemTelegramBindingTokenResponse,
+  WeixinInstallation,
+  ListWeixinInstallationsResponse,
+  WeixinLogin,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -380,6 +383,12 @@ import {
   TelegramInstallationSchema,
   ListTelegramInstallationsResponseSchema,
   RedeemTelegramBindingTokenResponseSchema,
+  WeixinInstallationSchema,
+  EMPTY_WEIXIN_INSTALLATION,
+  ListWeixinInstallationsResponseSchema,
+  EMPTY_LIST_WEIXIN_INSTALLATIONS_RESPONSE,
+  WeixinLoginSchema,
+  EMPTY_WEIXIN_LOGIN,
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
@@ -5211,6 +5220,64 @@ export class ApiClient {
 
   async deleteTelegramInstallation(workspaceId: string, installationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/telegram/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listWeixinInstallations(workspaceId: string): Promise<ListWeixinInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/weixin/installations`);
+    return parseWithFallback(
+      raw,
+      ListWeixinInstallationsResponseSchema,
+      EMPTY_LIST_WEIXIN_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/weixin/installations" },
+    );
+  }
+
+  async startWeixinLogin(workspaceId: string, agentId: string): Promise<WeixinLogin> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/weixin/logins?${search.toString()}`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, WeixinLoginSchema, EMPTY_WEIXIN_LOGIN, {
+      endpoint: "POST /api/workspaces/:id/weixin/logins",
+    });
+  }
+
+  async getWeixinLogin(workspaceId: string, loginId: string): Promise<WeixinLogin> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/weixin/logins/${loginId}`);
+    return parseWithFallback(raw, WeixinLoginSchema, EMPTY_WEIXIN_LOGIN, {
+      endpoint: "GET /api/workspaces/:id/weixin/logins/:loginId",
+    });
+  }
+
+  async submitWeixinVerifyCode(
+    workspaceId: string,
+    loginId: string,
+    code: string,
+  ): Promise<WeixinLogin> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/weixin/logins/${loginId}/verify-code`,
+      { method: "POST", body: JSON.stringify({ code }) },
+    );
+    return parseWithFallback(raw, WeixinLoginSchema, EMPTY_WEIXIN_LOGIN, {
+      endpoint: "POST /api/workspaces/:id/weixin/logins/:loginId/verify-code",
+    });
+  }
+
+  async completeWeixinLogin(workspaceId: string, loginId: string): Promise<WeixinInstallation> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/weixin/logins/${loginId}/complete`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, WeixinInstallationSchema, EMPTY_WEIXIN_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/weixin/logins/:loginId/complete",
+    });
+  }
+
+  async deleteWeixinInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/weixin/installations/${installationId}`, {
       method: "DELETE",
     });
   }
