@@ -22,6 +22,7 @@ interface PriorityPickerProps {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  tooltip?: React.ReactNode;
   /** Open the picker on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
@@ -64,6 +65,7 @@ function PriorityPickerImpl({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  tooltip,
   defaultOpen = false,
 }: PriorityPickerProps) {
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
@@ -77,6 +79,7 @@ function PriorityPickerImpl({
       onOpenChange={setOpen}
       width="w-44"
       align={align}
+      tooltip={tooltip}
       triggerRender={triggerRender}
       trigger={
         customTrigger ??
