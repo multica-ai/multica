@@ -6,10 +6,25 @@ import type {
   RuntimeLocalSkillsResult,
 } from "../types";
 
+export interface RuntimeLocalSkillAgentScope {
+  workspaceId: string;
+  agentId: string;
+  agentUpdatedAt: string;
+  customArgs: readonly string[];
+}
+
 export const runtimeLocalSkillsKeys = {
   all: () => ["runtimes", "local-skills"] as const,
   forRuntime: (runtimeId: string) =>
     [...runtimeLocalSkillsKeys.all(), runtimeId] as const,
+  forAgent: (runtimeId: string, scope: RuntimeLocalSkillAgentScope) =>
+    [
+      ...runtimeLocalSkillsKeys.forRuntime(runtimeId),
+      scope.workspaceId,
+      scope.agentId,
+      scope.agentUpdatedAt,
+      scope.customArgs,
+    ] as const,
 };
 
 const POLL_INTERVAL_MS = 500;
@@ -28,8 +43,9 @@ const IMPORT_POLL_TIMEOUT_MS = 4 * 60_000; // 4 minutes
 
 export async function resolveRuntimeLocalSkills(
   runtimeId: string,
+  scope?: RuntimeLocalSkillAgentScope,
 ): Promise<RuntimeLocalSkillsResult> {
-  const initial = await api.initiateListLocalSkills(runtimeId);
+  const initial = await api.initiateListLocalSkills(runtimeId, scope?.agentId);
   const start = Date.now();
   let current = initial;
 
@@ -43,6 +59,10 @@ export async function resolveRuntimeLocalSkills(
 
   if (current.status === "failed" || current.status === "timeout") {
     throw new Error(current.error || "runtime local skill discovery failed");
+  }
+
+  if (scope && current.agent_id !== scope.agentId) {
+    throw new Error("server did not honor the agent skill scope; update the server and refresh");
   }
 
   return {
@@ -92,12 +112,17 @@ export async function resolveRuntimeLocalSkillImport(
   };
 }
 
-export function runtimeLocalSkillsOptions(runtimeId: string | null | undefined) {
+export function runtimeLocalSkillsOptions(
+  runtimeId: string | null | undefined,
+  scope?: RuntimeLocalSkillAgentScope,
+) {
   return queryOptions({
     queryKey: runtimeId
-      ? runtimeLocalSkillsKeys.forRuntime(runtimeId)
+      ? scope
+        ? runtimeLocalSkillsKeys.forAgent(runtimeId, scope)
+        : runtimeLocalSkillsKeys.forRuntime(runtimeId)
       : runtimeLocalSkillsKeys.all(),
-    queryFn: () => resolveRuntimeLocalSkills(runtimeId as string),
+    queryFn: () => resolveRuntimeLocalSkills(runtimeId as string, scope),
     enabled: Boolean(runtimeId),
     staleTime: 30_000,
     retry: false,

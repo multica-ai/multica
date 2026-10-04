@@ -119,7 +119,7 @@ func countSkillFiles(t *testing.T, skillID string) int {
 func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryLocalSkillListStore()
-	req, err := store.Create(ctx, "runtime-xyz")
+	req, err := store.Create(ctx, LocalSkillListRequestInput{RuntimeID: "runtime-xyz"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 func TestInMemoryLocalSkillListStore_TimesOutRunningRequests(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryLocalSkillListStore()
-	req, err := store.Create(ctx, "runtime-xyz")
+	req, err := store.Create(ctx, LocalSkillListRequestInput{RuntimeID: "runtime-xyz"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

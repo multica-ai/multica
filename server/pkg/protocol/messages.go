@@ -445,7 +445,16 @@ type DaemonHeartbeatPendingModelList struct {
 // DaemonHeartbeatPendingLocalSkills describes a request for the runtime's
 // local-skill inventory.
 type DaemonHeartbeatPendingLocalSkills struct {
-	ID string `json:"id"`
+	ID         string                `json:"id"`
+	AgentScope *LocalSkillAgentScope `json:"agent_scope,omitempty"`
+}
+
+// LocalSkillAgentScope travels only to the daemon, never in catalog responses.
+// No scope means the runtime-default import catalog.
+type LocalSkillAgentScope struct {
+	AgentID    string            `json:"agent_id"`
+	CustomArgs []string          `json:"custom_args,omitempty"`
+	CustomEnv  map[string]string `json:"custom_env,omitempty"`
 }
 
 // DaemonHeartbeatPendingLocalSkillImport describes a request to import a

@@ -3141,3 +3141,32 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient runtime skill catalog", () => {
+  it("encodes the agent scope and preserves optional scope fields", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "request", runtime_id: "runtime", agent_id: "agent-a", agent_updated_at: "revision",
+      status: "pending", supported: true, created_at: "", updated_at: "",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.initiateListLocalSkills("runtime", "agent-a")).toMatchObject({ agent_id: "agent-a", agent_updated_at: "revision" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/local-skills?agent_id=agent-a");
+  });
+
+  it("fails malformed catalogs safely on initiation and polling", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ skills: "broken" }), { status: 200 }))));
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.initiateListLocalSkills("runtime")).toMatchObject({ status: "failed", supported: false });
+    expect(await client.getListLocalSkillsResult("runtime", "request")).toMatchObject({ status: "failed", supported: false });
+  });
+
+  it("accepts an older runtime-default response and fails an unknown status", async () => {
+    const data = { id: "request", runtime_id: "runtime", status: "completed", supported: true, created_at: "", updated_at: "" };
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(data), { status: 200 }))));
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.initiateListLocalSkills("runtime")).toMatchObject({ status: "completed" });
+    data.status = "new-unsupported-state";
+    expect(await client.getListLocalSkillsResult("runtime", "request")).toMatchObject({ status: "failed" });
+  });
+});

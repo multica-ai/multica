@@ -297,7 +297,7 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 	if err != nil {
 		t.Fatalf("create model list request: %v", err)
 	}
-	localSkillRequest, err := testHandler.LocalSkillListStore.Create(context.Background(), runtimeID)
+	localSkillRequest, err := testHandler.LocalSkillListStore.Create(context.Background(), LocalSkillListRequestInput{RuntimeID: runtimeID})
 	if err != nil {
 		t.Fatalf("create local skill list request: %v", err)
 	}

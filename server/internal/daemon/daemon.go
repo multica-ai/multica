@@ -4587,7 +4587,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 	if resp.PendingLocalSkills != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
+			go d.handleLocalSkillList(ctx, *rt, *resp.PendingLocalSkills)
 		}
 	}
 	// Prefer the batch field (new backend); fall back to singular (old backend).
@@ -4863,16 +4863,29 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	})
 }
 
-func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {
+func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, pending PendingLocalSkills) {
+	requestID := pending.ID
 	d.logger.Info("runtime local skills requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
-	skills, supported, err := listRuntimeLocalSkills(rt.Provider)
+	var fixedArgs []string
+	if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok && pending.AgentScope != nil {
+		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, spec.fixedArgs, d.logger)
+	}
+	roots, supported, err := localSkillRootsForScope(rt.Provider, pending.AgentScope, fixedArgs)
+	var skills []runtimeLocalSkillSummary
+	if err == nil {
+		skills, err = listRuntimeLocalSkillsFromRoots(rt.Provider, roots)
+	}
 	if err != nil {
 		d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
 		return
+	}
+	agentID := ""
+	if pending.AgentScope != nil {
+		agentID = pending.AgentScope.AgentID
 	}
 	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
 	if err != nil {
@@ -4883,6 +4896,7 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 
 	d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
 		"status":        "completed",
+		"agent_id":      agentID,
 		"skills":        skills,
 		"supported":     supported,
 		"mcp_servers":   mcpServers,
