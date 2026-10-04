@@ -4725,7 +4725,8 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	// enumerate the CLI the profile actually runs, so a subcommand wrapper is
 	// probed as `ccms start q36 models`, not `ccms models` (GH #7046).
 	var fixedArgs []string
-	if customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID); isCustom {
+	customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID)
+	if isCustom {
 		execPath = customSpec.path
 		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, customSpec.fixedArgs, d.logger)
 		d.logger.Info("model list uses custom runtime profile command",
@@ -4744,7 +4745,17 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
+	codexAuth, err := d.codexAuthForProvider(rt.Provider, isCustom)
+	if err != nil {
+		d.reportModelListResult(ctx, rt, requestID, map[string]any{"status": "failed", "error": err.Error()})
+		return
+	}
+	var catalog agent.Catalog
+	if codexAuth.plan != nil {
+		catalog, err = codexAuth.catalog(ctx)
+	} else {
+		catalog, err = listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
+	}
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -8585,17 +8596,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// families go through New. This is the single production boundary — the
 	// daemon never calls agent.New or agent.NewRuntime directly, so the two
 	// factories stay meaning exactly one thing each.
+	codexAuth, err := d.codexAuthForProvider(provider, usesCustomProfileCommand)
+	if err != nil {
+		return TaskResult{}, err
+	}
 	backend, err := agent.ResolveBackend(provider, agent.Config{
-		ExecutablePath: entry.Path,
-		LaunchPrefix:   profileFixedArgs,
-		CLIVersion:     resolvedVersion,
-		Env:            agentEnv,
-		Logger:         d.logger,
-		TaskID:         task.ID,
-		RuntimeID:      task.RuntimeID,
-		DaemonVersion:  d.cfg.CLIVersion,
-		CodexVersion:   codexVersion,
-		BuiltinRuntime: !usesCustomProfileCommand,
+		CodexChatGPTPlan:     codexAuth.plan,
+		CodexSessionOwnerDir: codexAuth.ownerDir,
+		ExecutablePath:       entry.Path,
+		LaunchPrefix:         profileFixedArgs,
+		CLIVersion:           resolvedVersion,
+		Env:                  agentEnv,
+		Logger:               d.logger,
+		TaskID:               task.ID,
+		RuntimeID:            task.RuntimeID,
+		DaemonVersion:        d.cfg.CLIVersion,
+		CodexVersion:         codexVersion,
+		BuiltinRuntime:       !usesCustomProfileCommand,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -8658,8 +8675,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
-	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+	selection := taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}
+	if codexAuth.plan != nil {
+		selection, err = codexAuth.selectModel(ctx, selection)
+		if err != nil {
+			return TaskResult{}, err
+		}
+	} else {
+		selection = resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs), selection, taskLog)
+	}
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration
@@ -8786,7 +8810,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var retiredSessionID string
 	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+	if codexAuth.plan == nil && shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools

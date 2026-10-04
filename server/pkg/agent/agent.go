@@ -315,6 +315,12 @@ type Config struct {
 	RuntimeID      string
 	DaemonVersion  string
 	CodexVersion   string
+	// CodexChatGPTPlan opts into app-owned ChatGPT plan credentials. Nil keeps
+	// the CLI's existing authentication behavior. Tokens never enter Config.Env.
+	CodexChatGPTPlan *CodexChatGPTPlan
+	// CodexSessionOwnerDir stores local, non-secret thread ownership markers.
+	// Set it in both auth modes so vendor auth cannot resume a plan thread.
+	CodexSessionOwnerDir string
 	// BuiltinRuntime reports that ExecutablePath is the provider's own
 	// discovered binary rather than a custom runtime profile's command. A
 	// custom profile keeps its protocol family as the provider, so the
