@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { inboxKeys, mapArchivedInboxCache, type ArchivedInboxCache } from "./queries";
+import { inboxKeys, mapInboxCache, type InboxCache } from "./queries";
 import type { InboxItem, IssuePriority, IssueStatus } from "../types";
 
 // Re-read a query because the server changed — in a way that is never answered
@@ -53,11 +53,13 @@ function patchInboxLists(
   wsId: string,
   patch: (items: InboxItem[]) => InboxItem[],
 ) {
-  for (const queryKey of [inboxKeys.list(wsId), ...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) }).map((query) => query.queryKey)]) {
+  const caches = [inboxKeys.list(wsId), inboxKeys.archived(wsId)]
+    .flatMap((prefix) => qc.getQueryCache().findAll({ queryKey: prefix }));
+  for (const { queryKey } of caches) {
     const invalidated = qc.getQueryState(queryKey)?.isInvalidated === true;
-    qc.setQueryData<ArchivedInboxCache>(queryKey, (old) => {
+    qc.setQueryData<InboxCache>(queryKey, (old) => {
       if (!old) return undefined;
-      const next = mapArchivedInboxCache(old, patch);
+      const next = mapInboxCache(old, patch);
       return next === old ? undefined : next;
     });
     if (invalidated) {
@@ -82,10 +84,7 @@ export function patchInboxIssueProjection(
         ...(patch.status !== undefined
           ? { issue_status: patch.status }
           : {}),
-        // Do not manufacture the projection on data returned by an older
-        // backend. Capability detection relies on `undefined` continuing to
-        // mean "this endpoint version does not provide issue_priority".
-        ...(patch.priority !== undefined && item.issue_priority !== undefined
+        ...(patch.priority !== undefined
           ? { issue_priority: patch.priority }
           : {}),
       };
@@ -136,6 +135,9 @@ export async function onInboxIssueDeleted(
   );
   await Promise.all([
     onInboxSummaryInvalidate(qc),
+    refreshInboxQuery(qc, inboxKeys.listPages(wsId)),
+    refreshInboxQuery(qc, inboxKeys.listLookup(wsId)),
+    refreshInboxQuery(qc, inboxKeys.listFacets(wsId)),
     refreshInboxQuery(qc, inboxKeys.pages(wsId)),
     refreshInboxQuery(qc, inboxKeys.lookup(wsId)),
     refreshInboxQuery(qc, inboxKeys.facets(wsId)),
@@ -177,7 +179,7 @@ export function cancelInboxLists(qc: QueryClient, wsId: string): boolean {
 //
 // Cancels first, like the summary refresh below, and for the same reason: the
 // Inbox page is the only observer that fetches the list, so its first visit
-// downloads a large, unbounded list while notifications keep arriving. After
+// loads it while notifications keep arriving. After
 // that the cache outlives the page — tab titles hold disabled observers on it
 // (`useTabPresentation`) — so a return reuses it and refetches only while it
 // is still marked invalidated.

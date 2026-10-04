@@ -38,3 +38,53 @@ describe("api.deleteComment", () => {
     expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "DELETE" }));
   });
 });
+
+describe("api.listInboxPage", () => {
+  const body = { items: [], next_cursor: null, has_more: false };
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+    new Response(JSON.stringify(body), { status: 200 }),
+  );
+
+  beforeEach(() => {
+    fetchMock.mockClear();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [{}, "https://api.example.test/api/inbox/page?limit=50"],
+    [{ cursor: "abc" }, "https://api.example.test/api/inbox/page?limit=50&cursor=abc"],
+    [{ cursor: null }, "https://api.example.test/api/inbox/page?limit=50"],
+    [{ groupId: "group-1" }, "https://api.example.test/api/inbox/page?limit=50&group_id=group-1"],
+  ])("with %j requests %s", async (opts, url) => {
+    await expect(api.listInboxPage(opts)).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(url, expect.anything());
+  });
+
+  it("forwards the query's abort signal to the request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await api.listInboxPage({ signal: controller.signal });
+    expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("throws on a malformed page instead of reading as an empty inbox", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [], next_cursor: null, has_more: true }), {
+        status: 200,
+      }),
+    );
+
+    await expect(api.listInboxPage()).rejects.toThrow("Invalid inbox page response");
+  });
+});

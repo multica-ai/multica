@@ -102,7 +102,7 @@
     "unarchived": "通知を元に戻しました"
   },
   "errors": {
-    "archived_lookup_failed": "リンク先の通知を読み込めませんでした",
+    "lookup_failed": "リンク先の通知を読み込めませんでした",
     "source_context_retry_failed": "元のコンテキストで再試行できませんでした",
     "source_context_retry_unavailable": "このコンテキストは再試行できません。分岐点からやり直してください。",
     "mark_read_failed": "既読にできませんでした",
@@ -115,6 +115,7 @@
     "archive_completed_failed": "完了した項目をアーカイブできませんでした",
     "unarchive_failed": "アーカイブ解除に失敗しました",
     "archived_load_failed": "アーカイブ済み通知を読み込めませんでした",
+    "load_failed": "通知を読み込めませんでした",
     "filters_load_failed": "フィルターを読み込めませんでした"
   }
 }

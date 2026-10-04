@@ -104,7 +104,7 @@
     "unarchived": "Notification restaurée"
   },
   "errors": {
-    "archived_lookup_failed": "Échec du chargement de la notification liée",
+    "lookup_failed": "Échec du chargement de la notification liée",
     "source_context_retry_failed": "Impossible de réessayer avec le contexte d'origine",
     "source_context_retry_unavailable": "Ce contexte ne peut plus être réutilisé pour une nouvelle tentative. Recommencez depuis le point de branchement.",
     "mark_read_failed": "Échec du marquage comme lu",
@@ -117,6 +117,7 @@
     "archive_completed_failed": "Échec de l'archivage des éléments terminés",
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
+    "load_failed": "Échec du chargement des notifications",
     "filters_load_failed": "Impossible de charger les filtres"
   }
 }

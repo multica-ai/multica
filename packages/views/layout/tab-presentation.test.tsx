@@ -7,7 +7,8 @@ import { issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
-  inboxListOptions,
+  inboxPagesOptions,
+  inboxLookupOptions,
   archivedInboxPagesOptions,
   archivedInboxLookupOptions,
 } from "@multica/core/inbox/queries";
@@ -71,10 +72,16 @@ function seed(qc: QueryClient) {
     { id: "s1", title: "Deploy plan", status: "active" },
     { id: "s2", title: "  ", status: "active" },
   ] as never);
-  qc.setQueryData(inboxListOptions("ws1").queryKey, [
-    { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
-    { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },
-  ] as never);
+  qc.setQueryData(inboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey, {
+    pages: [{ items: [
+      { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
+      { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },
+    ], hasMore: false, nextCursor: null }], pageParams: [null],
+  } as never);
+  qc.setQueryData(inboxLookupOptions("ws1", "n3").queryKey, {
+    items: [{ id: "n3", issue_id: null, title: "Deep quick create note", type: "quick_create_failed" }],
+    hasMore: false, nextCursor: null,
+  } as never);
   const archiveRow = {
     workspace_id: "ws1", recipient_type: "member" as const, recipient_id: "user",
     actor_type: null, actor_id: null, severity: "info" as const, body: null,
@@ -231,7 +238,7 @@ describe("useTabPresentation — live from cache", () => {
     // must still show the issue, not collapse to the container label.
     const qc = makeClient();
     seed(qc);
-    qc.removeQueries({ queryKey: inboxListOptions("ws1").queryKey });
+    qc.removeQueries({ queryKey: inboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey });
     qc.removeQueries({ queryKey: archivedInboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey });
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -267,6 +274,12 @@ describe("useTabPresentation — live from cache", () => {
     // selection is fully resolved — it really is just "Inbox", and a stale
     // persisted title must not override it.
     expect(presentationOf("/acme/inbox", "MUL-9: Crash").title).toBe("Inbox");
+  });
+
+  it("inbox: a deep-link lookup supplies the title outside loaded pages", () => {
+    expect(presentationOf("/acme/inbox?issue=n3")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" }, title: "Deep quick create note",
+    });
   });
 
   it("archived inbox: selected non-issue resolves against the archived list", () => {

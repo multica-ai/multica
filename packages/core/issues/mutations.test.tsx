@@ -3,7 +3,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useInfiniteQuery,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
@@ -24,13 +29,15 @@ import {
   type IssueSortParam,
 } from "./queries";
 import { onIssueUpdated, onIssueAuxiliaryRevision } from "./ws-updaters";
-import { inboxKeys, inboxListOptions } from "../inbox/queries";
+import { EMPTY_INBOX_FILTERS } from "../inbox/filter-store";
+import { inboxPagesOptions } from "../inbox/queries";
 import {
   onInboxInvalidate,
   onInboxIssueStatusChanged,
 } from "../inbox/ws-updaters";
 import type {
   InboxItem,
+  InboxPage,
   Issue,
   ListIssuesCache,
   TimelineEntry,
@@ -98,6 +105,17 @@ function makeInboxItem(
   };
 }
 
+// The unfiltered active Inbox as the client caches it: pages of rows.
+const inboxPagesKey = inboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS).queryKey;
+
+function lastInboxPage(items: InboxItem[]): InboxPage {
+  return { items, nextCursor: null, hasMore: false };
+}
+
+function loadedInboxPages(items: InboxItem[]): InfiniteData<InboxPage> {
+  return { pages: [lastInboxPage(items)], pageParams: [null] };
+}
+
 function createWrapper(qc: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
@@ -149,7 +167,6 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   const projectScope = "project:p1";
   const projectFilter = { project_id: "p1" };
   const wsKey = issueKeys.listSorted(WS_ID, sort);
-  const inboxKey = inboxKeys.list(WS_ID);
   // My-Issues AND the Project board both ride this myList cache; a move that
   // only patched the workspace cache snaps back on those boards.
   const myKey = issueKeys.myListSorted(WS_ID, myScope, myFilter, sort);
@@ -178,8 +195,9 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
   function inboxStatus(issueId: string) {
     return qc
-      .getQueryData<InboxItem[]>(inboxKey)
-      ?.find((item) => item.issue_id === issueId)?.issue_status;
+      .getQueryData(inboxPagesKey)
+      ?.pages.flatMap((page) => page.items)
+      .find((item) => item.issue_id === issueId)?.issue_status;
   }
 
   beforeEach(() => {
@@ -190,10 +208,13 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
-    qc.setQueryData<InboxItem[]>(inboxKey, [
-      makeInboxItem("inbox-1", "issue-1"),
-      makeInboxItem("inbox-2", "issue-2"),
-    ]);
+    qc.setQueryData(
+      inboxPagesKey,
+      loadedInboxPages([
+        makeInboxItem("inbox-1", "issue-1"),
+        makeInboxItem("inbox-2", "issue-2"),
+      ]),
+    );
   });
 
   afterEach(() => {
@@ -839,21 +860,26 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
   type WriteHooks = ReturnType<typeof renderWriteHooks>["current"];
 
   function mountInbox() {
-    const page = renderHook(() => useQuery(inboxListOptions(WS_ID)), {
-      wrapper: createWrapper(qc),
-    });
+    const page = renderHook(
+      () =>
+        useInfiniteQuery({
+          ...inboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS),
+          select: (data) => data.pages.flatMap((p) => p.items),
+        }),
+      { wrapper: createWrapper(qc) },
+    );
     unmounts.push(page.unmount);
     return page.result;
   }
 
   function mockApi(
-    listInbox: () => Promise<InboxItem[]>,
+    inboxRows: () => Promise<InboxItem[]>,
     { fail = false }: { fail?: boolean } = {},
   ) {
     const settle = <T,>(value: T) =>
       fail ? Promise.reject(new Error("boom")) : Promise.resolve(value);
     setApiInstance({
-      listInbox,
+      listInboxPage: () => inboxRows().then(lastInboxPage),
       updateIssue: () => settle(makeIssue(1, { priority: "high" })),
       batchUpdateIssues: () => settle({ updated: 1 }),
     } as unknown as ApiClient);
@@ -877,14 +903,14 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
     "$name re-reads the request it interrupted (issue event meanwhile: $issueEvent)",
     async ({ write, issueEvent }) => {
       let release!: (items: InboxItem[]) => void;
-      const listInbox = vi
+      const inboxRows = vi
         .fn<() => Promise<InboxItem[]>>()
         .mockResolvedValueOnce([readItem])
         .mockImplementationOnce(
           () => new Promise((resolve) => (release = resolve)),
         )
         .mockResolvedValue([notification, readItem]);
-      mockApi(listInbox);
+      mockApi(inboxRows);
       const hooks = renderWriteHooks();
       const inbox = mountInbox();
       await waitFor(() => expect(inbox.current.data).toEqual([readItem]));
@@ -893,8 +919,8 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       act(() => {
         void onInboxInvalidate(qc, WS_ID);
       });
-      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
-      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("fetching");
+      await waitFor(() => expect(inboxRows).toHaveBeenCalledTimes(2));
+      expect(qc.getQueryState(inboxPagesKey)?.fetchStatus).toBe("fetching");
       if (issueEvent) {
         // An `issue:updated` patching a listed row mid-request replaces the
         // snapshot TanStack reverts to on cancel with a non-invalidated state.
@@ -909,17 +935,17 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       await waitFor(() =>
         expect(inbox.current.data?.map((item) => item.id)).toEqual(["n2", "n1"]),
       );
-      expect(listInbox).toHaveBeenCalledTimes(3);
+      expect(inboxRows).toHaveBeenCalledTimes(3);
     },
   );
 
   it.each(writes)(
     "$name adds no Inbox request when it interrupts none",
     async ({ write }) => {
-      const listInbox = vi
+      const inboxRows = vi
         .fn<() => Promise<InboxItem[]>>()
         .mockResolvedValue([readItem]);
-      mockApi(listInbox);
+      mockApi(inboxRows);
       const hooks = renderWriteHooks();
       const inbox = mountInbox();
       await waitFor(() => expect(inbox.current.data).toEqual([readItem]));
@@ -931,18 +957,18 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       await waitFor(() =>
         expect(inbox.current.data?.[0]?.issue_priority).toBe("high"),
       );
-      expect(listInbox).toHaveBeenCalledTimes(1);
+      expect(inboxRows).toHaveBeenCalledTimes(1);
     },
   );
 
   it.each(writes)(
     "$name keeps the pending refresh when a failed write rolls the rows back",
     async ({ write }) => {
-      const listInbox = vi.fn<() => Promise<InboxItem[]>>();
-      mockApi(listInbox, { fail: true });
+      const inboxRows = vi.fn<() => Promise<InboxItem[]>>();
+      mockApi(inboxRows, { fail: true });
       // The user is elsewhere: the list is cached, nothing observes it, and an
       // `inbox:new` has marked it to re-read on the next visit.
-      qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [readItem]);
+      qc.setQueryData(inboxPagesKey, loadedInboxPages([readItem]));
       await onInboxInvalidate(qc, WS_ID);
       const hooks = renderWriteHooks();
 
@@ -951,10 +977,10 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       });
 
       await waitFor(() =>
-        expect(qc.getQueryState(inboxKeys.list(WS_ID))?.isInvalidated).toBe(true),
+        expect(qc.getQueryState(inboxPagesKey)?.isInvalidated).toBe(true),
       );
-      expect(qc.getQueryData(inboxKeys.list(WS_ID))).toEqual([readItem]);
-      expect(listInbox).not.toHaveBeenCalled();
+      expect(qc.getQueryData(inboxPagesKey)).toEqual(loadedInboxPages([readItem]));
+      expect(inboxRows).not.toHaveBeenCalled();
     },
   );
 
@@ -976,7 +1002,7 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       let rows = initial;
       const reads: Array<() => void> = [];
       const saves = new Map<string, () => void>();
-      const listInbox = vi.fn(() => {
+      const inboxRows = vi.fn(() => {
         const snapshot = rows;
         return new Promise<InboxItem[]>((resolve) =>
           reads.push(() => resolve(snapshot)),
@@ -992,14 +1018,14 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
           }),
         );
       setApiInstance({
-        listInbox,
+        listInboxPage: () => inboxRows().then(lastInboxPage),
         updateIssue: (id: string, data: UpdateIssueRequest) =>
           save(id, data.priority).then(() => ({ ...makeIssue(1), ...data, id })),
         batchUpdateIssues: (ids: string[], updates: UpdateIssueRequest) =>
           save(ids[0]!, updates.priority).then(() => ({ updated: ids.length })),
       } as unknown as ApiClient);
       return {
-        listInbox,
+        inboxRows,
         setRows: (next: InboxItem[]) => {
           rows = next;
         },
@@ -1017,7 +1043,7 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
 
     async function loadInbox(server: ReturnType<typeof controlledServer>) {
       const inbox = mountInbox();
-      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(server.inboxRows).toHaveBeenCalledTimes(1));
       server.answerReads();
       await waitFor(() => expect(inbox.current.data).toBeDefined());
       return () => inbox.current.data?.map((row) => [row.id, row.issue_priority]);
@@ -1040,7 +1066,7 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
       act(() => {
         void onInboxInvalidate(qc, WS_ID);
       });
-      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(server.inboxRows).toHaveBeenCalledTimes(2));
 
       let writeA!: Promise<unknown>;
       let writeB!: Promise<unknown>;
@@ -1052,7 +1078,7 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
         writeB = write(hooks.current, second, "issue-2");
       });
       await waitFor(() => expect(server.saving("issue-2")).toBe(true));
-      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("idle");
+      expect(qc.getQueryState(inboxPagesKey)?.fetchStatus).toBe("idle");
       return { server, rendered, writeA, writeB };
     }
 
@@ -1073,13 +1099,13 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
         });
         await act(async () => {});
         // A owes the re-read, but reading while B is unsaved would miss B.
-        expect(server.listInbox).toHaveBeenCalledTimes(2);
+        expect(server.inboxRows).toHaveBeenCalledTimes(2);
 
         await act(async () => {
           server.commit("issue-2");
           await writeB;
         });
-        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        await waitFor(() => expect(server.inboxRows).toHaveBeenCalledTimes(3));
         server.answerReads();
 
         await waitFor(() => expect(rendered()).toEqual(everySaved));
@@ -1098,7 +1124,7 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
           await Promise.all([writeA, writeB]);
         });
         expect(qc.isMutating()).toBe(0);
-        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        await waitFor(() => expect(server.inboxRows).toHaveBeenCalledTimes(3));
         server.answerReads();
 
         await waitFor(() => expect(rendered()).toEqual(everySaved));
@@ -1122,13 +1148,13 @@ describe("status / priority writes re-read an Inbox list they left behind", () =
         act(() => {
           void onInboxInvalidate(qc, WS_ID);
         });
-        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(server.inboxRows).toHaveBeenCalledTimes(2));
 
         await act(async () => {
           server.commit("issue-1");
           await writeA;
         });
-        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        await waitFor(() => expect(server.inboxRows).toHaveBeenCalledTimes(3));
         server.answerReads();
 
         await waitFor(() =>

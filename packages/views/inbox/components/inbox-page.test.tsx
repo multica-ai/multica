@@ -14,9 +14,9 @@ vi.mock("react-resizable-panels", () => ({
   useDefaultLayout: () => ({ defaultLayout: undefined, onLayoutChanged: vi.fn() }),
 }));
 
-// The page runs two queries — the active list and the archived one. They are
-// told apart by the queryKey their options carry, so each test can stock the
-// two lists independently.
+// The page runs a paged query per view — the active list and the archived one
+// — plus a deep-link lookup. They are told apart by the queryKey their options
+// carry, so each test can stock the two lists independently.
 const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem[] } = {
   active: [],
   archived: [],
@@ -24,11 +24,17 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
 const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
+const pageState = {
+  isLoading: false, isError: false, hasNextPage: false,
+  isFetchingNextPage: false, isFetchNextPageError: false,
+  fetchNextPage: vi.fn(), refetch: vi.fn(),
+};
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
+    const rows = options.queryKey.includes("archived") ? listData.archived : listData.active;
     return ({
-    data: options.queryKey.includes("archived") ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null } : listData.active,
+    data: { items: listData.lookup ?? rows, hasMore: false, nextCursor: null },
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -36,11 +42,10 @@ vi.mock("@tanstack/react-query", () => ({
   }); },
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
+    const rows = options.queryKey.includes("archived") ? listData.archived : listData.active;
     return ({
-    data: { pages: [{ items: listData.archived, hasMore: false, nextCursor: null }] },
-    isLoading: false, isError: false, hasNextPage: false,
-    isFetchingNextPage: false, isFetchNextPageError: false,
-    fetchNextPage: vi.fn(), refetch: vi.fn(),
+    data: pageState.isError ? undefined : { pages: [{ items: rows, hasMore: false, nextCursor: null }] },
+    ...pageState,
   }); },
 }));
 
@@ -67,8 +72,10 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: { getState: () => ({ setDraft: vi.fn() }) },
 }));
 
+const inboxPagesOptions = vi.hoisted(() => vi.fn(() => ({ queryKey: ["inbox", "workspace-1", "list", "pages"] })));
 vi.mock("@multica/core/inbox/queries", () => ({
-  inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
+  inboxPagesOptions,
+  inboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "list", "lookup"] }),
   archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
   archivedInboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "lookup"] }),
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
@@ -177,20 +184,25 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
   ),
   ResizableHandle: () => null,
 }));
+const listProps = vi.hoisted(() => ({ onLoadMore: undefined as (() => void) | undefined }));
 vi.mock("./inbox-list", () => ({
   InboxList: ({
     items,
     view,
     onSelect,
+    onLoadMore,
     emptyLabel,
     emptyAction,
   }: {
     items: InboxItem[];
     view: string;
     onSelect: (item: InboxItem) => void;
+    onLoadMore?: () => void;
     emptyLabel?: string;
     emptyAction?: React.ReactNode;
-  }) => (
+  }) => {
+    listProps.onLoadMore = onLoadMore;
+    return (
     <div data-testid="list" data-view={view}>
       {items.map((i) => (
         <button key={i.id} data-testid="row" onClick={() => onSelect(i)}>
@@ -200,7 +212,7 @@ vi.mock("./inbox-list", () => ({
       {items.length === 0 && emptyLabel && <p>{emptyLabel}</p>}
       {items.length === 0 && emptyAction}
     </div>
-  ),
+  ); },
 }));
 vi.mock("./inbox-filter-menu", () => ({
   InboxFilterMenu: () => <button type="button">Filter inbox</button>,
@@ -274,6 +286,14 @@ function reset() {
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
+  Object.assign(pageState, {
+    isLoading: false, isError: false, hasNextPage: false,
+    isFetchingNextPage: false, isFetchNextPageError: false,
+  });
+  pageState.fetchNextPage.mockClear();
+  pageState.refetch.mockClear();
+  inboxPagesOptions.mockClear();
+  listProps.onLoadMore = undefined;
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
@@ -404,53 +424,103 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row")).toHaveTextContent("todo-high");
   });
 
-  it("ignores a priority filter when a legacy response omits the projection", () => {
+  it("sends the filters to the server for the active view", () => {
     reset();
-    const legacyItem = item({
-      id: "legacy-todo",
-      issue_status: "todo",
-    });
-    delete legacyItem.issue_priority;
-    listData.active = [legacyItem];
-    useInboxFilterStore
-      .getState()
-      .togglePriorityFilter("workspace-1", "urgent");
+    useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "done");
 
     render(<InboxPage />);
 
-    expect(screen.getByTestId("row")).toHaveTextContent("legacy-todo");
+    expect(inboxPagesOptions).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.objectContaining({ statuses: ["done"] }),
+    );
+  });
+
+  it("loads the next active page without cancelling a running refetch", () => {
+    reset();
+    listData.active = [item({ id: "active-1" })];
+    pageState.hasNextPage = true;
+
+    render(<InboxPage />);
+    act(() => listProps.onLoadMore?.());
+
+    expect(pageState.fetchNextPage).toHaveBeenCalledWith({ cancelRefetch: false });
+  });
+
+  it("keeps this workspace's rows on screen while a new filter selection loads", () => {
+    reset();
+    render(<InboxPage />);
+    const active = queryCalls.find((q) => q.queryKey.includes("list") && q.queryKey.includes("pages")) as
+      { placeholderData?: (previous: unknown, query?: { queryKey: readonly unknown[] }) => unknown } | undefined;
+    const previous = { pages: [], pageParams: [] };
+
+    expect(active?.placeholderData?.(previous, { queryKey: ["inbox", "workspace-1", "list", "pages", {}] })).toBe(previous);
+    expect(active?.placeholderData?.(previous, { queryKey: ["inbox", "workspace-2", "list", "pages", {}] })).toBeUndefined();
+  });
+
+  it("offers no load-more once the active list is complete", () => {
+    reset();
+    listData.active = [item({ id: "active-1" })];
+
+    render(<InboxPage />);
+
+    expect(listProps.onLoadMore).toBeUndefined();
+  });
+
+  it("shows a retry instead of an empty inbox when the active list fails to load", () => {
+    reset();
+    searchParams = new URLSearchParams("issue=issue-1");
+    pageState.isError = true;
+
+    const { container } = render(<InboxPage />);
+
+    expect(screen.queryByTestId("list")).toBeNull();
+    expect(replace).not.toHaveBeenCalled();
+    fireEvent.click(container.querySelector(".py-16 button")!);
+    expect(pageState.refetch).toHaveBeenCalledTimes(1);
   });
 
   it("only enables the current inbox view's list", () => {
+    const pages = (view: string) => queryCalls.find((q) => q.queryKey.includes(view) && q.queryKey.includes("pages"));
     reset();
     const main = render(<InboxPage />);
-    expect(queryCalls.find((q) => q.queryKey.includes("list"))?.enabled).toBe(true);
-    expect(queryCalls.find((q) => q.queryKey.includes("pages"))?.enabled).toBe(false);
+    expect(pages("list")?.enabled).toBe(true);
+    expect(pages("archived")?.enabled).toBe(false);
     main.unmount();
     reset();
     searchParams = new URLSearchParams("view=archived");
     render(<InboxPage />);
-    expect(queryCalls.find((q) => q.queryKey.includes("list"))?.enabled).toBe(false);
-    expect(queryCalls.find((q) => q.queryKey.includes("pages"))?.enabled).toBe(true);
+    expect(pages("list")?.enabled).toBe(false);
+    expect(pages("archived")?.enabled).toBe(true);
   });
 
-  it("opens a deep-linked archive group outside the loaded pages with its comment anchor", () => {
+  it.each([
+    ["archive", "view=archived&", true],
+    ["inbox", "", false],
+  ])("opens a deep-linked %s group outside the loaded pages with its comment anchor", (_view, query, archived) => {
     reset();
-    searchParams = new URLSearchParams("view=archived&issue=old-issue");
-    listData.archived = [item({ id: "recent", archived: true })];
-    listData.lookup = [item({ id: "older", issue_id: "old-issue", archived: true, details: { comment_id: "old-comment" } })];
+    searchParams = new URLSearchParams(`${query}issue=old-issue`);
+    listData[archived ? "archived" : "active"] = [item({ id: "recent", archived })];
+    listData.lookup = [item({ id: "older", issue_id: "old-issue", archived, details: { comment_id: "old-comment" } })];
     render(<InboxPage />);
     expect(replace).not.toHaveBeenCalled();
     expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "old-issue", highlightCommentId: "old-comment" });
-    expect(queryCalls.find((q) => q.queryKey.includes("lookup"))?.enabled).toBe(true);
+    const lookup = queryCalls.find((q) => q.queryKey.includes("lookup"));
+    expect(lookup?.enabled).toBe(true);
+    expect(lookup?.queryKey.includes(archived ? "archived" : "list")).toBe(true);
   });
 
-  describe.each([PHONE, DESKTOP])("archive deep links at width %s", (width) => {
+  describe.each([
+    [PHONE, "archive", "view=archived&", true],
+    [DESKTOP, "archive", "view=archived&", true],
+    [PHONE, "inbox", "", false],
+    [DESKTOP, "inbox", "", false],
+  ])("deep links at width %s into the %s", (width, _view, query, archived) => {
     function setupLookup() {
       reset();
       layout.width = width;
-      searchParams = new URLSearchParams("view=archived&issue=old-issue");
-      listData.archived = [item({ id: "recent", issue_id: "recent-issue", archived: true })];
+      searchParams = new URLSearchParams(`${query}issue=old-issue`);
+      listData[archived ? "archived" : "active"] = [item({ id: "recent", issue_id: "recent-issue", archived })];
       listData.lookup = [];
     }
 
@@ -463,7 +533,7 @@ describe("InboxPage", () => {
       expect(issueDetailProps).toHaveLength(0);
 
       lookupState.isLoading = false;
-      listData.lookup = [item({ id: "older", issue_id: "old-issue", archived: true })];
+      listData.lookup = [item({ id: "older", issue_id: "old-issue", archived })];
       rerender(<InboxPage />);
       expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "old-issue" });
       expect(replace).not.toHaveBeenCalled();

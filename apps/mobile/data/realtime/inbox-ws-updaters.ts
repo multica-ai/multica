@@ -15,8 +15,8 @@
  * Listing-level only; use-inbox-realtime wires these into the WS layer.
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import type { InboxItem, IssueStatus } from "@multica/core/types";
-import { inboxKeys } from "@/data/queries/inbox";
+import type { IssueStatus } from "@multica/core/types";
+import { inboxKeys, patchInboxCaches } from "@/data/queries/inbox";
 
 export function patchInboxIssueStatus(
   qc: QueryClient,
@@ -24,11 +24,25 @@ export function patchInboxIssueStatus(
   issueId: string,
   status: IssueStatus,
 ) {
-  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-    old?.map((i) =>
+  patchInboxCaches(qc, wsId, (items) =>
+    items.map((i) =>
       i.issue_id === issueId ? { ...i, issue_status: status } : i,
     ),
   );
+  rereadPagesBehindPatch(qc, wsId);
+}
+
+/**
+ * A next-page request appends to the pages it read before a patch, so its
+ * response would put the patched rows back. Re-read the list instead. An idle
+ * list keeps the patch, and a running refetch reads every page anew, so issue
+ * events add a request only in that window.
+ */
+function rereadPagesBehindPatch(qc: QueryClient, wsId: string) {
+  const state = qc.getQueryState(inboxKeys.listPages(wsId));
+  if (state && state.fetchStatus !== "idle" && state.fetchMeta?.fetchMore) {
+    void refreshInboxQuery(qc, inboxKeys.listPages(wsId));
+  }
 }
 
 /**
@@ -57,7 +71,8 @@ async function refreshInboxQuery(qc: QueryClient, queryKey: QueryKey) {
  * THE entry point for refreshing the workspace inbox list. Inbox events,
  * mutations and reconnect all go through here. The list's first load is not
  * a one-off: the inbox tab is mounted lazily, so the first visit loads it
- * while notifications keep arriving.
+ * while notifications keep arriving. `inboxKeys.list` is the prefix of the
+ * paged list and of every group lookup, so this refreshes all of them.
  */
 export async function refreshInboxList(qc: QueryClient, wsId: string) {
   await refreshInboxQuery(qc, inboxKeys.list(wsId));
@@ -83,8 +98,9 @@ export async function dropInboxItemsByIssue(
   wsId: string,
   issueId: string,
 ) {
-  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-    old?.filter((i) => i.issue_id !== issueId),
+  patchInboxCaches(qc, wsId, (items) =>
+    items.filter((i) => i.issue_id !== issueId),
   );
+  rereadPagesBehindPatch(qc, wsId);
   await refreshInboxUnreadSummary(qc);
 }

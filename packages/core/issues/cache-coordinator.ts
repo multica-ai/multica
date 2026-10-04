@@ -11,7 +11,8 @@ import {
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
-import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
+import { inboxCacheItems, inboxKeys, type InboxCache } from "../inbox/queries";
+import type { InboxFilters } from "../inbox/filter-store";
 import { patchInboxIssueProjection } from "../inbox/ws-updaters";
 import { projectKeys } from "../projects/queries";
 import {
@@ -28,7 +29,6 @@ import {
   type IssueChangedDims,
 } from "./surface/membership";
 import type {
-  InboxItem,
   Issue,
   IssueTableRowsResponse,
   ListIssuesCache,
@@ -88,8 +88,8 @@ export interface IssueCacheChangeResult {
   prevFlatLists: [QueryKey, IssueFlatCache][];
   prevTableRows: [QueryKey, IssueTableRowCache][];
   prevDetail: Issue | undefined;
-  prevInboxList: InboxItem[] | undefined;
-  prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
+  /** Every active and archived inbox row cache, when the change touched them. */
+  prevInboxCaches: [QueryKey, InboxCache | undefined][] | undefined;
   /** Loaded list keys whose server result may have drifted (membership
    *  unknown, possible enter/leave beyond the loaded window, bucket-count
    *  drift). Invalidate on settle (mutation) or immediately (WS). */
@@ -533,21 +533,53 @@ export function applyIssueChange(
   // Inbox rows carry issue status/priority snapshots used by presentation and
   // filtering. The issue is the real state, so both projections follow every
   // write immediately.
-  let prevInboxList: InboxItem[] | undefined;
-  let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
+  let prevInboxCaches: [QueryKey, InboxCache | undefined][] | undefined;
   if (patch.status !== undefined || patch.priority !== undefined) {
-    prevInboxList = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-    prevArchivedInboxCaches = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
+    prevInboxCaches = [
+      ...qc.getQueriesData<InboxCache>({ queryKey: inboxKeys.list(wsId) }),
+      ...qc.getQueriesData<InboxCache>({ queryKey: inboxKeys.archived(wsId) }),
+    ];
     // Membership and facets are server-owned; callers refresh after commit.
     // Full issue events also carry unchanged status/priority on title edits.
-    const archiveProjectionChanged =
+    // The archived view stays eager: it is rarely mounted, so treating a
+    // missing copy as "may be stale" costs little there. Do not merge this
+    // rule with the active view's, which must only count known changes.
+    const archivedMayBeStale =
       (patch.status !== undefined && (changed.status || !prevIssue || prevIssue.status !== patch.status)) ||
       (patch.priority !== undefined && (!prevIssue || prevIssue.priority !== patch.priority));
-    if (archiveProjectionChanged) {
+    if (archivedMayBeStale) {
       staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) })
         .filter((query) => query.queryKey.length > inboxKeys.archived(wsId).length)
         .map((query) => query.queryKey));
       staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.facets(wsId) }).map((query) => query.queryKey));
+    }
+    // The active view stays open, and issue events arrive far more often than
+    // notifications, so it re-reads only on a real change. Most issues an
+    // event names are in no issue cache, so a missing copy is not a change:
+    // status follows the write's own flag, and priority a cached copy of the
+    // issue or a loaded inbox row that holds another value.
+    const statusChanged = patch.status !== undefined && changed.status;
+    const priorityChanged = patch.priority !== undefined && (
+      (prevIssue !== undefined && prevIssue.priority !== patch.priority) ||
+      prevInboxCaches.some(([, data]) => !!data && inboxCacheItems(data).some((row) =>
+        row.issue_id === id && row.issue_priority !== undefined && row.issue_priority !== patch.priority))
+    );
+    if (statusChanged || priorityChanged) {
+      // Its pages and lookups end with their filters, and only a selection on
+      // the changed field can gain or lose a group; every other loaded row is
+      // fully corrected by the patch below — unless a next page is out: it
+      // appends to the pages it read before this patch, so it would put the
+      // old projection back. A refetch reads every page anew and is left to
+      // run, so a stream of issue events cannot keep restarting it.
+      staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.list(wsId) })
+        .filter(({ queryKey, state }) => {
+          if (state.fetchStatus !== "idle" && state.fetchMeta?.fetchMore) return true;
+          const filters = queryKey[queryKey.length - 1] as Partial<InboxFilters> | undefined;
+          return (statusChanged && !!filters?.statuses?.length) ||
+            (priorityChanged && !!filters?.priorities?.length);
+        })
+        .map((query) => query.queryKey));
+      staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.listFacets(wsId) }).map((query) => query.queryKey));
     }
     patchInboxIssueProjection(qc, wsId, id, {
       status: patch.status,
@@ -560,8 +592,7 @@ export function applyIssueChange(
     prevFlatLists,
     prevTableRows,
     prevDetail,
-    prevInboxList,
-    prevArchivedInboxCaches,
+    prevInboxCaches,
     staleKeys,
     prevIssue,
   };
@@ -579,8 +610,7 @@ export function rollbackIssueChange(
     | "prevFlatLists"
     | "prevTableRows"
     | "prevDetail"
-    | "prevInboxList"
-    | "prevArchivedInboxCaches"
+    | "prevInboxCaches"
   >,
 ) {
   for (const [key, snapshot] of result.prevLists) {
@@ -595,10 +625,7 @@ export function rollbackIssueChange(
   if (result.prevDetail !== undefined) {
     qc.setQueryData(issueKeys.detail(wsId, id), result.prevDetail);
   }
-  if (result.prevInboxList !== undefined) {
-    qc.setQueryData(inboxKeys.list(wsId), result.prevInboxList);
-  }
-  for (const [key, snapshot] of result.prevArchivedInboxCaches ?? []) {
+  for (const [key, snapshot] of result.prevInboxCaches ?? []) {
     qc.setQueryData(key, snapshot);
   }
 }
@@ -685,7 +712,7 @@ export function invalidateStaleListKeys(qc: QueryClient, staleKeys: QueryKey[]) 
     if (seen.has(hash)) continue;
     seen.add(hash);
     if (key[0] === "inbox") {
-      // A first archive page/facet request may predate this committed issue
+      // A first inbox page/facet request may predate this committed issue
       // change. Cancel before invalidation even when it has no cached data.
       void qc.cancelQueries({ queryKey: key, exact: true }).then(() =>
         qc.invalidateQueries({ queryKey: key, exact: true }));

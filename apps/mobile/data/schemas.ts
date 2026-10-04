@@ -20,6 +20,7 @@ import type {
   ChatSession,
   Comment,
   InboxItem,
+  InboxPage,
   InboxWorkspaceUnread,
   IssueLabelsResponse,
   Label,
@@ -588,8 +589,29 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   details: z.record(z.string(), z.string()).nullable().default(null),
 }).loose();
 
-export const InboxListSchema = z.array(InboxItemSchema).default([]);
-export const EMPTY_INBOX_LIST: InboxItem[] = [];
+// One page of `GET /api/inbox/page`: one row per issue group, newest first.
+// Mirrors InboxPageSchema in packages/core/api/schemas.ts. Unlike the list
+// schemas in this file it has no fallback: `listInboxPage` throws on a
+// malformed page, so the inbox shows its retry state instead of reading as
+// empty. The refinement rejects pages that contradict the paging contract: a
+// cursor without `has_more` or the reverse, and an empty page that claims
+// more follow.
+export const InboxPageSchema: z.ZodType<InboxPage> = z
+  .object({
+    items: z.array(InboxItemSchema),
+    next_cursor: z.string().min(1).nullable(),
+    has_more: z.boolean(),
+  })
+  .refine(
+    (page) =>
+      page.has_more === (page.next_cursor !== null) &&
+      (!page.has_more || page.items.length > 0),
+  )
+  .transform((page) => ({
+    items: page.items,
+    nextCursor: page.next_cursor,
+    hasMore: page.has_more,
+  }));
 
 // Cross-workspace unread summary (`GET /api/inbox/unread-summary`): one entry
 // per workspace the user belongs to that has unread items, already

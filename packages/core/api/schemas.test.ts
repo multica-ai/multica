@@ -38,7 +38,6 @@ import {
   EMPTY_CHAT_SESSION,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
-  EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
@@ -1419,8 +1418,8 @@ describe("InboxUnreadSummarySchema", () => {
 });
 
 describe("InboxItemListSchema", () => {
-  const ENDPOINT = { endpoint: "GET /api/inbox/archived" };
-
+  // The `items` of every inbox page; InboxPageSchema rejects the page when
+  // this rejects, and the page clients turn that into a load error.
   const row = (overrides: Record<string, unknown> = {}) => ({
     id: "inbox-1",
     workspace_id: "ws-1",
@@ -1437,20 +1436,15 @@ describe("InboxItemListSchema", () => {
     ...overrides,
   });
 
-  it("parses a well-formed archived list and tolerates extra fields", () => {
-    const parsed = parseWithFallback(
-      [row({
-        issue_status: "in_progress",
-        issue_priority: "high",
-        details: { comment_id: "c-1" },
-        future_field: 1,
-      })],
-      InboxItemListSchema,
-      EMPTY_INBOX_ITEMS,
-      ENDPOINT,
-    );
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({
+  it("parses well-formed rows and tolerates extra fields", () => {
+    const parsed = InboxItemListSchema.safeParse([row({
+      issue_status: "in_progress",
+      issue_priority: "high",
+      details: { comment_id: "c-1" },
+      future_field: 1,
+    })]);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.[0]).toMatchObject({
       id: "inbox-1",
       archived: true,
       issue_status: "in_progress",
@@ -1460,62 +1454,36 @@ describe("InboxItemListSchema", () => {
 
   it("keeps a notification type this client doesn't know yet", () => {
     // Enums stay lenient on purpose: a backend that ships a new inbox type
-    // must not blank the whole archived list on older clients.
-    const parsed = parseWithFallback(
-      [row({ type: "some_future_type", severity: "future_severity" })],
-      InboxItemListSchema,
-      EMPTY_INBOX_ITEMS,
-      ENDPOINT,
-    );
-    expect(parsed).toHaveLength(1);
+    // must not blank the whole list on older clients.
+    const parsed = InboxItemListSchema.safeParse([row({ type: "some_future_type", severity: "future_severity" })]);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toHaveLength(1);
   });
 
   it("accepts rows that omit the nullable optional fields", () => {
     const { body, issue_id, ...withoutOptionals } = row();
     void body;
     void issue_id;
-    expect(
-      parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
-    ).toHaveLength(1);
+    expect(InboxItemListSchema.safeParse([withoutOptionals]).success).toBe(true);
   });
 
-  it("returns the empty fallback when an issue projection is wrong-typed", () => {
-    expect(
-      parseWithFallback(
-        [row({ issue_priority: 3 })],
-        InboxItemListSchema,
-        EMPTY_INBOX_ITEMS,
-        ENDPOINT,
-      ),
-    ).toBe(EMPTY_INBOX_ITEMS);
+  it("rejects a wrong-typed issue projection", () => {
+    expect(InboxItemListSchema.safeParse([row({ issue_priority: 3 })]).success).toBe(false);
   });
 
-  it("returns the empty fallback for a non-array body", () => {
-    expect(
-      parseWithFallback({ items: [] }, InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
-    ).toBe(EMPTY_INBOX_ITEMS);
-    expect(
-      parseWithFallback(null, InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
-    ).toBe(EMPTY_INBOX_ITEMS);
+  it("rejects a non-array body", () => {
+    expect(InboxItemListSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(InboxItemListSchema.safeParse(null).success).toBe(false);
   });
 
-  it("returns the empty fallback when a row is missing a required field", () => {
+  it("rejects a row missing a required field", () => {
     const { id, ...withoutId } = row();
     void id;
-    expect(
-      parseWithFallback([withoutId], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
-    ).toBe(EMPTY_INBOX_ITEMS);
+    expect(InboxItemListSchema.safeParse([withoutId]).success).toBe(false);
   });
 
-  it("returns the empty fallback when `archived` is wrong-typed", () => {
-    expect(
-      parseWithFallback(
-        [row({ archived: "yes" })],
-        InboxItemListSchema,
-        EMPTY_INBOX_ITEMS,
-        ENDPOINT,
-      ),
-    ).toBe(EMPTY_INBOX_ITEMS);
+  it("rejects a wrong-typed `archived`", () => {
+    expect(InboxItemListSchema.safeParse([row({ archived: "yes" })]).success).toBe(false);
   });
 });
 

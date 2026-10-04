@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { InboxListSchema, InboxUnreadSummarySchema } from "./schemas";
+import { InboxPageSchema, InboxUnreadSummarySchema } from "./schemas";
 
 /**
- * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox.
+ * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox/page.
  *
  * Scope, stated precisely because the name of this file used to overclaim:
- * these are hand-written fixtures run against `InboxListSchema`. They pin how
+ * these are hand-written fixtures run against `InboxPageSchema`. They pin how
  * this client REACTS to a given payload. They cannot fail when the Go server
  * starts sending something new — nothing here executes server code.
  *
@@ -16,12 +16,16 @@ import { InboxListSchema, InboxUnreadSummarySchema } from "./schemas";
  * Why both halves exist: during MUL-5483 a new inbox type was added and the
  * mobile label map was updated so `tsc` passed — but a NUMBER went into
  * `details.child_count`, and `details` is `z.record(z.string(), z.string())`.
- * Because the endpoint parses an ARRAY, one bad row fails the whole parse and
- * `listInbox` falls back to `EMPTY_INBOX_LIST`: the entire mobile inbox
- * renders empty, not just that row. The blast radius is what these tests
- * document; the compile-time type is what prevents it.
+ * Because a page parses its rows as an ARRAY, one bad row fails the whole
+ * page, and `listInboxPage` throws: the inbox shows its retry state, not just
+ * that row missing. The blast radius is what these tests document; the
+ * compile-time type is what prevents it.
  */
-describe("inbox list schema", () => {
+function page(items: unknown[], next_cursor: string | null = null) {
+  return { items, next_cursor, has_more: next_cursor !== null };
+}
+
+describe("inbox page schema", () => {
   it("parses a row shaped like the documented server payload", () => {
     const serverRow = {
       id: "inbox-1",
@@ -42,10 +46,12 @@ describe("inbox list schema", () => {
       details: { from: "in_progress", to: "in_review" },
     };
 
-    const parsed = InboxListSchema.safeParse([serverRow]);
+    const parsed = InboxPageSchema.safeParse(page([serverRow], "cursor-1"));
     expect(parsed.success).toBe(true);
-    expect(parsed.success && parsed.data[0]?.type).toBe("status_changed");
-    expect(parsed.success && parsed.data[0]?.details?.to).toBe("in_review");
+    expect(parsed.success && parsed.data.items[0]?.type).toBe("status_changed");
+    expect(parsed.success && parsed.data.items[0]?.details?.to).toBe("in_review");
+    expect(parsed.success && parsed.data.nextCursor).toBe("cursor-1");
+    expect(parsed.success && parsed.data.hasMore).toBe(true);
   });
 
   it("rejects a numeric details value", () => {
@@ -56,12 +62,12 @@ describe("inbox list schema", () => {
       details: { child_count: 3 },
     };
 
-    expect(InboxListSchema.safeParse([badRow]).success).toBe(false);
+    expect(InboxPageSchema.safeParse(page([badRow])).success).toBe(false);
   });
 
-  it("keeps one malformed row from emptying the entire list observable", () => {
+  it("keeps one malformed row failing the entire page observable", () => {
     // Documents the blast radius that made this a P1 rather than a cosmetic bug:
-    // the schema is an array, so a single bad row invalidates every good one.
+    // a page's rows are an array, so a single bad row invalidates every good one.
     const good = {
       id: "inbox-3",
       recipient_type: "member",
@@ -75,8 +81,8 @@ describe("inbox list schema", () => {
       details: { child_count: 3 },
     };
 
-    expect(InboxListSchema.safeParse([good]).success).toBe(true);
-    expect(InboxListSchema.safeParse([good, bad]).success).toBe(false);
+    expect(InboxPageSchema.safeParse(page([good])).success).toBe(true);
+    expect(InboxPageSchema.safeParse(page([good, bad])).success).toBe(false);
   });
 
   it("renders an unknown server type instead of dropping the row", () => {
@@ -90,15 +96,41 @@ describe("inbox list schema", () => {
       details: { anything: "still a string" },
     };
 
-    const parsed = InboxListSchema.safeParse([future]);
+    const parsed = InboxPageSchema.safeParse(page([future]));
     expect(parsed.success).toBe(true);
+  });
+
+  it("parses the last page", () => {
+    const parsed = InboxPageSchema.safeParse(page([]));
+    expect(parsed.success && parsed.data).toEqual({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
+  });
+
+  // No fallback page exists, so each of these makes the query error and the
+  // inbox offer a retry. Accepting any of them would either read as an empty
+  // inbox or stall paging.
+  it.each([
+    ["an empty object", {}],
+    ["an array", []],
+    ["items without paging fields", { items: [] }],
+    ["items that are not an array", { items: {}, next_cursor: null, has_more: false }],
+    ["more pages without a cursor", { items: [{ id: "inbox-6" }], next_cursor: null, has_more: true }],
+    ["a cursor without more pages", { items: [], next_cursor: "cursor-1", has_more: false }],
+    ["an empty cursor", { items: [], next_cursor: "", has_more: false }],
+    ["more pages after an empty page", { items: [], next_cursor: "cursor-1", has_more: true }],
+    ["a row without an id", page([{ type: "new_comment" }])],
+  ])("rejects %s", (_name, payload) => {
+    expect(InboxPageSchema.safeParse(payload).success).toBe(false);
   });
 });
 
 /**
  * GET /api/inbox/unread-summary — the source of the inbox tab badge.
  *
- * Blast radius differs from the list above: `getInboxUnreadSummary` falls back
+ * Blast radius differs from the page above: `getInboxUnreadSummary` falls back
  * to an empty array, which reads as "nothing unread" and simply hides the
  * badge. A wrong number would be worse than no number, so the schema stays
  * strict about the shape and lenient only about extra fields.

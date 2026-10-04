@@ -1,15 +1,15 @@
 /** @vitest-environment jsdom */
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { WSClient } from "../api/ws-client";
+import { EMPTY_INBOX_FILTERS } from "../inbox/filter-store";
 import {
   deduplicateInboxItems,
-  inboxKeys,
-  inboxListOptions,
+  inboxPagesOptions,
   useInboxUnreadCount,
 } from "../inbox/queries";
 import { createQueryClient } from "../query-client";
@@ -53,9 +53,13 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
     details: null,
   };
   let rows = [oldItem];
-  const listInbox = vi.fn(async () => rows);
+  const listInboxPage = vi.fn(async () => ({
+    items: rows,
+    nextCursor: null,
+    hasMore: false,
+  }));
   setApiInstance({
-    listInbox,
+    listInboxPage,
     getInboxUnreadSummary: async () => [
       {
         workspace_id: "ws-1",
@@ -90,8 +94,16 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
     },
     { wrapper: Wrapper },
   );
+  const pagesOptions = inboxPagesOptions("ws-1", EMPTY_INBOX_FILTERS);
   const mountInbox = () =>
-    renderHook(() => useQuery(inboxListOptions("ws-1")), { wrapper: Wrapper });
+    renderHook(
+      () =>
+        useInfiniteQuery({
+          ...pagesOptions,
+          select: (data) => data.pages.flatMap((p) => p.items),
+        }),
+      { wrapper: Wrapper },
+    );
   let page = mountInbox();
   try {
     await waitFor(() => expect(page.result.current.data).toEqual([oldItem]));
@@ -109,8 +121,8 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
       handlers["inbox:new"]!({ item: newItem });
     });
     await waitFor(() => expect(shell.result.current).toBe(1));
-    expect(qc.getQueryState(inboxKeys.list("ws-1"))?.isInvalidated).toBe(true);
-    expect(listInbox).toHaveBeenCalledTimes(1);
+    expect(qc.getQueryState(pagesOptions.queryKey)?.isInvalidated).toBe(true);
+    expect(listInboxPage).toHaveBeenCalledTimes(1);
 
     // Any later issue update patches status, without re-reading notifications.
     rows = rows.map((item) => ({ ...item, issue_status: "in_progress" }));
@@ -120,7 +132,7 @@ it("refreshes an inactive Inbox after inbox:new then issue:updated (MUL-7286)", 
       });
     });
     page = mountInbox();
-    await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listInboxPage).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(page.result.current.data).toEqual(rows));
     expect(
       deduplicateInboxItems(page.result.current.data!).filter((item) => !item.read),
