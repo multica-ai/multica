@@ -882,6 +882,9 @@ jobs:
       - name: Test self-host env derivation
         run: bash scripts/selfhost-config.test.sh
 
+      - name: Test check script
+        run: bash scripts/check.test.sh
+
       - name: Test worktree database cleanup
         run: bash scripts/worktree-db.test.sh
 
