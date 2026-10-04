@@ -75,6 +75,30 @@ describe("issue draft store — last assignee", () => {
     expect(draft.manual.assigneeId).toBe("alice");
   });
 
+  it("clearDraft resets status for a fresh create", () => {
+    const { setManual, clearDraft } = useIssueDraftStore.getState();
+    setManual({ status: "done" });
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.manual.status).toBe("todo");
+  });
+
+  it("persists todo for a blank batch continuation but retains a started draft", async () => {
+    setCurrentWorkspace("batch", "ws_batch");
+    await flush();
+    await flush();
+
+    const store = useIssueDraftStore.getState();
+    store.setManual({ status: "in_progress" });
+    expect(useIssueDraftStore.getState().draft.manual.status).toBe("in_progress");
+    const storageKey = "multica_issue_draft:batch";
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? "{}").state.draft.manual.status).toBe("todo");
+
+    store.setManual({ title: "Unfinished next issue" });
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? "{}").state.draft.manual.status).toBe("in_progress");
+    setCurrentWorkspace(null, null);
+  });
+
   it("clearDraft yields an empty assignee when none has ever been remembered", () => {
     const { setManual, clearDraft } = useIssueDraftStore.getState();
 
@@ -210,6 +234,35 @@ describe("issue draft store — legacy rehydrate", () => {
 
   afterEach(() => {
     setCurrentWorkspace(null, null);
+  });
+
+  it("drops obsolete status and stage preferences from persisted state", async () => {
+    localStorage.setItem(
+      "multica_issue_draft:legacy-pref",
+      JSON.stringify({
+        state: {
+          draft: { manual: { status: "todo" } },
+          lastStatus: "done",
+          lastStage: 3,
+          lastStageParentIssueId: "parent-a",
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("legacy-pref", "ws_pref");
+    await flush();
+    await flush();
+
+    const state = useIssueDraftStore.getState();
+    expect("lastStatus" in state).toBe(false);
+    expect("lastStage" in state).toBe(false);
+    expect("lastStageParentIssueId" in state).toBe(false);
+    state.setManual({ title: "new draft" });
+    const stored = JSON.parse(localStorage.getItem("multica_issue_draft:legacy-pref") ?? "{}");
+    expect(stored.state).not.toHaveProperty("lastStatus");
+    expect(stored.state).not.toHaveProperty("lastStage");
+    expect(stored.state).not.toHaveProperty("lastStageParentIssueId");
   });
 
   it("migrates a pre-MUL-5181 flat draft into the shared/manual slots", async () => {
