@@ -41,6 +41,7 @@ func init() {
 
 	rootCmd.PersistentFlags().String("server-url", "", "Multica server URL (env: MULTICA_SERVER_URL)")
 	rootCmd.PersistentFlags().String("workspace-id", "", "Workspace ID (env: MULTICA_WORKSPACE_ID)")
+	rootCmd.PersistentFlags().String("workspace", "", "Target a workspace by exact id, slug, or id prefix for this command, ignoring the current-workspace default (deterministic for scripts)")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile name (e.g. dev) — isolates config, daemon state, and workspaces")
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print full error details on failure (env: MULTICA_DEBUG)")
 
