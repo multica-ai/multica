@@ -9345,13 +9345,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	defer drainCancel()
 
 	var toolCount atomic.Int32
-	// lastActivityAt records (as unix nanos) when the drain loop most
-	// recently received a message from the backend. The idle watchdog
-	// reads this to decide whether the agent has gone silent for too long.
-	// Initialise to the start so a backend that never emits a single
-	// message also trips the watchdog.
-	var lastActivityAt atomic.Int64
-	lastActivityAt.Store(time.Now().UnixNano())
+	// Initialise awake-time activity at startup so even a backend that never
+	// emits a message is bounded, without charging host sleep as agent silence.
+	activity := newWatchdogActivity(newWatchdogClock())
 	// inFlightTools counts tool_use messages that haven't yet been paired
 	// with a matching tool_result. A non-zero count means the agent is
 	// legitimately waiting on a tool (e.g. `npm install`, `docker build`)
@@ -9374,16 +9370,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	idleWatchdogThreshold.Store(int64(idleWindow))
 	watchdogToolCount := inFlightTools.Load
 	if session.ToolActivity != nil {
-		watchdogToolCount = func() int32 {
-			count, at := session.ToolActivity()
-			for {
-				previous := lastActivityAt.Load()
-				if at.UnixNano() <= previous || lastActivityAt.CompareAndSwap(previous, at.UnixNano()) {
-					break
-				}
-			}
-			return count
-		}
+		watchdogToolCount = activity.trackTools(session.ToolActivity)
 	}
 	// A backend that can prove its outcome is already decided outranks every
 	// liveness policy below: a run whose terminal result has been read is not a
@@ -9401,7 +9388,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, activity, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 
 	// drainFinished closes after the drain goroutine has flushed the last
@@ -9535,7 +9522,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				observedAt := time.Now().UTC()
-				lastActivityAt.Store(observedAt.UnixNano())
+				activity.record()
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -9895,9 +9882,10 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend.
 //
-// Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
-// somewhere between its budget and budget + tick, never earlier.
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
+// Budgets use awake time since the last observed activity, excluding host
+// sleep. Polling rate comes from idleWatchdogTickInterval, so a silent run is
+// force-stopped between its budget and budget + tick after that observation.
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, activity *watchdogActivity, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
 	tickWindow := window
 	if toolWindow > 0 && toolWindow < tickWindow {
 		tickWindow = toolWindow
@@ -9921,8 +9909,8 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 				}
 				threshold = toolWindow
 			}
-			last := time.Unix(0, lastActivityAt.Load())
-			idleFor := time.Since(last)
+			last := activity.last.Load()
+			idleFor := activity.now() - time.Duration(last)
 			if idleFor < threshold {
 				continue
 			}
@@ -9942,7 +9930,7 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 				return
 			}
 			if toolInFlight && interruptBackground != nil && interruptBackground() {
-				lastActivityAt.Store(time.Now().UnixNano())
+				activity.record()
 				taskLog.Info("tool watchdog stopped background tools; waiting for agent result")
 				continue
 			}
@@ -9953,8 +9941,8 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			// Refresh native tool activity BEFORE reading its timestamp. The
 			// callback may publish newer activity without changing the count.
 			currentToolInFlight := inFlightTools() > 0
-			currentActivity := lastActivityAt.Load()
-			if currentActivity != last.UnixNano() ||
+			currentActivity := activity.last.Load()
+			if currentActivity != last ||
 				currentToolInFlight != toolInFlight || len(messages) > 0 {
 				continue
 			}

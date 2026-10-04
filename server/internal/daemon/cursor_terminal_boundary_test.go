@@ -32,10 +32,10 @@ func TestIdleWatchdogYieldsToTerminalObservedDuringCleanup(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		var last, threshold atomic.Int64
+		var threshold atomic.Int64
+		activity := newTestWatchdogActivity()
 		var fired atomic.Bool
 		var terminal atomic.Bool
-		last.Store(time.Now().UnixNano())
 
 		// A held background tool: in flight, and its activity never moves.
 		tools := func() int32 { return 1 }
@@ -48,7 +48,7 @@ func TestIdleWatchdogYieldsToTerminalObservedDuringCleanup(t *testing.T) {
 			return false
 		}
 
-		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, &last, tools, &fired, &threshold,
+		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, activity, tools, &fired, &threshold,
 			cancel, make(chan agent.Message), interrupt, terminal.Load, slog.Default())
 
 		synctest.Wait()

@@ -547,6 +547,11 @@ jobs:
         # real skills instead of the test directories.
         run: go test ./internal/daemon -v -run '^(TestListRuntimeLocalSkills_HermesFollowsTaskHome|TestLocalSkills_DiscoversACPProviderRoots)$' -count=1 -timeout=5m
 
+      - name: Test Windows awake-time watchdog
+        working-directory: server
+        # Exercise the native unbiased clock API, not just a cross-build.
+        run: go test -race ./internal/daemon -v -run 'TestWatchdog|Test.*IdleWatchdog|Test.*Background.*Watchdog' -count=1 -timeout=5m
+
       - name: Test Windows agent launcher argv/stdin handling
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the
@@ -797,7 +802,7 @@ jobs:
         # disappearing behind a build tag.
         run: |
           go test -race ./pkg/agent -v -run 'TestCursorBackground|TestCaptureCursorBackground' -count=1
-          go test -race ./internal/daemon -v -run 'Test.*Background.*Watchdog|Test.*IdleWatchdog' -count=1
+          go test -race ./internal/daemon -v -run 'TestWatchdog|Test.*Background.*Watchdog|Test.*IdleWatchdog' -count=1
 
       - name: Stress macOS finalization
         shell: bash
