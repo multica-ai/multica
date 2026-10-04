@@ -52,6 +52,9 @@ type ExecOptions struct {
 	// a running turn gone quiet?"), so the two move independently. Currently
 	// honoured by the codex backend (GH #3262).
 	FirstTurnNoProgressTimeout time.Duration
+	// CursorFirstOutputTimeout bounds launch/resume until the first typed JSON event.
+	// Zero disables this timer; subsequent silence is governed by daemon watchdogs.
+	CursorFirstOutputTimeout time.Duration
 	// IdleWatchdogTimeout optionally narrows the daemon's generic no-message
 	// watchdog for this execution. Zero keeps the daemon-wide window, and a
 	// value above that window cannot extend the global safety bound. The

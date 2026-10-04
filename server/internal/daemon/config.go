@@ -44,6 +44,8 @@ const (
 	// missing first model token and a stalled response stream. The generic
 	// AgentIdleWatchdog remains the global enable/disable switch.
 	DefaultOpenCodeIdleWatchdog = 10 * time.Minute
+	// DefaultCursorFirstOutputTimeout bounds silent Cursor launches and resumes.
+	DefaultCursorFirstOutputTimeout = 3 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
@@ -149,6 +151,7 @@ type Config struct {
 	// latency recorded in the Codex lifecycle logs.
 	CodexTurnInterruptTimeout   time.Duration
 	CodexThreadHandshakeTimeout time.Duration
+	CursorFirstOutputTimeout    time.Duration // 0 disables the Cursor startup timer
 	OpenCodeIdleWatchdog        time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog           time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog           time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call, which now also covers a live Cursor background shell); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
@@ -345,6 +348,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
 	if err != nil {
 		return Config{}, err
+	}
+
+	cursorFirstOutputTimeout, err := durationFromEnv("MULTICA_CURSOR_FIRST_OUTPUT_TIMEOUT", DefaultCursorFirstOutputTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if cursorFirstOutputTimeout < 0 {
+		return Config{}, fmt.Errorf("MULTICA_CURSOR_FIRST_OUTPUT_TIMEOUT must not be negative")
 	}
 
 	// The in-flight-tool budget defaults to the idle budget: the tool window
@@ -660,6 +671,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexTurnInterruptTimeout:       codexTurnInterruptTimeout,
 		CodexThreadHandshakeTimeout:     codexThreadHandshakeTimeout,
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
+		CursorFirstOutputTimeout:        cursorFirstOutputTimeout,
 		AgentIdleWatchdog:               agentIdleWatchdog,
 		AgentToolWatchdog:               agentToolWatchdog,
 		ClaudeArgs:                      claudeArgs,

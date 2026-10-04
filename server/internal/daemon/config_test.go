@@ -1822,3 +1822,35 @@ func TestApplyOpenclawOverride_CLITimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfig_CursorFirstOutputTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	for _, tc := range []struct {
+		value   string
+		want    time.Duration
+		invalid bool
+	}{
+		{value: "", want: 3 * time.Minute},
+		{value: "7m", want: 7 * time.Minute},
+		{value: "0"},
+		{value: "invalid", invalid: true},
+		{value: "-1s", invalid: true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			t.Setenv("MULTICA_CURSOR_FIRST_OUTPUT_TIMEOUT", tc.value)
+			cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("expected invalid duration error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.CursorFirstOutputTimeout != tc.want {
+				t.Fatalf("timeout=%s, want %s", cfg.CursorFirstOutputTimeout, tc.want)
+			}
+		})
+	}
+}
