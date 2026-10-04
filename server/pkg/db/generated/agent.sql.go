@@ -5176,16 +5176,18 @@ SELECT count(*) > 0 AS covered
 FROM agent_task_queue
 WHERE issue_id = $1
   AND agent_id = $2
+  AND is_leader_task
+  AND squad_id = $3::uuid
   AND (
-      $3::uuid = ANY(delivered_comment_ids)
+      $4::uuid = ANY(delivered_comment_ids)
       OR (
-          id IS DISTINCT FROM $4::uuid
+          id IS DISTINCT FROM $5::uuid
           AND (
               status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
               OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
           )
-          AND (COALESCE($5::text, '') = '' OR context->>'head_sha' = $5::text)
-          AND (trigger_comment_id = $3::uuid OR $3::uuid = ANY(coalesced_comment_ids))
+          AND (COALESCE($6::text, '') = '' OR context->>'head_sha' = $6::text)
+          AND (trigger_comment_id = $4::uuid OR $4::uuid = ANY(coalesced_comment_ids))
       )
   )
 `
@@ -5193,6 +5195,7 @@ WHERE issue_id = $1
 type HasTaskCoveringCompletionFallbackParams struct {
 	IssueID       pgtype.UUID `json:"issue_id"`
 	AgentID       pgtype.UUID `json:"agent_id"`
+	SquadID       pgtype.UUID `json:"squad_id"`
 	CommentID     pgtype.UUID `json:"comment_id"`
 	ExcludeTaskID pgtype.UUID `json:"exclude_task_id"`
 	HeadSha       pgtype.Text `json:"head_sha"`
@@ -5210,6 +5213,7 @@ func (q *Queries) HasTaskCoveringCompletionFallback(ctx context.Context, arg Has
 	row := q.db.QueryRow(ctx, hasTaskCoveringCompletionFallback,
 		arg.IssueID,
 		arg.AgentID,
+		arg.SquadID,
 		arg.CommentID,
 		arg.ExcludeTaskID,
 		arg.HeadSha,
@@ -6085,6 +6089,14 @@ WHERE fallback.author_type = 'agent'
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue AS covering
       WHERE covering.issue_id = current_issue.id
+        AND covering.is_leader_task
+        AND covering.squad_id = CASE
+            WHEN parent.id IS NOT NULL AND (
+                current_issue.assignee_type = 'squad'
+                AND current_issue.assignee_id = parent_task.squad_id
+            ) IS NOT TRUE THEN parent_squad.id
+            ELSE assigned_squad.id
+            END
         AND fallback.source_task_id = worker.id
         AND fallback.author_id = worker.agent_id
         AND covering.agent_id = CASE
@@ -7565,17 +7577,19 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $3
       AND t.agent_id = $4
+      AND t.is_leader_task AND t.squad_id = $5::uuid
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND (
           t.status = 'queued'
           OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
       )
-      AND (COALESCE($5::text, '') = '' OR t.context->>'head_sha' = $5::text)
+      AND (COALESCE($6::text, '') = '' OR t.context->>'head_sha' = $6::text)
       AND t.trigger_comment_id IS DISTINCT FROM $1::uuid
       AND NOT ($1::uuid = ANY(t.coalesced_comment_ids))
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+AND is_leader_task AND squad_id = $5::uuid
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, completion_fallback_comment_id, completion_fallback_state
 `
 
@@ -7584,6 +7598,7 @@ type MergeCompletionFallbackIntoPendingTaskParams struct {
 	TriggerSummary pgtype.Text `json:"trigger_summary"`
 	IssueID        pgtype.UUID `json:"issue_id"`
 	AgentID        pgtype.UUID `json:"agent_id"`
+	SquadID        pgtype.UUID `json:"squad_id"`
 	HeadSha        pgtype.Text `json:"head_sha"`
 }
 
@@ -7597,6 +7612,7 @@ func (q *Queries) MergeCompletionFallbackIntoPendingTask(ctx context.Context, ar
 		arg.TriggerSummary,
 		arg.IssueID,
 		arg.AgentID,
+		arg.SquadID,
 		arg.HeadSha,
 	)
 	var i AgentTaskQueue
@@ -8708,22 +8724,27 @@ WHERE id = (
       AND t.agent_id = $3
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
+      AND ($4::uuid IS NULL
+           OR (t.is_leader_task AND t.squad_id = $4::uuid))
       AND (
-          COALESCE($4::text, '') = ''
-          OR t.context->>'head_sha' = $4::text
+          COALESCE($5::text, '') = ''
+          OR t.context->>'head_sha' = $5::text
       )
     ORDER BY t.created_at DESC
     LIMIT 1
 )
 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+AND ($4::uuid IS NULL
+     OR (is_leader_task AND squad_id = $4::uuid))
 RETURNING id, coalesced_comment_ids
 `
 
 type RegisterPlannedCommentForActiveTaskParams struct {
-	CommentID pgtype.UUID `json:"comment_id"`
-	IssueID   pgtype.UUID `json:"issue_id"`
-	AgentID   pgtype.UUID `json:"agent_id"`
-	HeadSha   pgtype.Text `json:"head_sha"`
+	CommentID     pgtype.UUID `json:"comment_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+	LeaderSquadID pgtype.UUID `json:"leader_squad_id"`
+	HeadSha       pgtype.Text `json:"head_sha"`
 }
 
 type RegisterPlannedCommentForActiveTaskRow struct {
@@ -8757,11 +8778,13 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 // Recheck status on the UPDATE target after a concurrent row-lock wait. The
 // subquery can see an active snapshot while completion commits; appending to
 // that completed row would be too late for its completion replay to see it.
+// Completion fallbacks also require the resolved leader role and squad.
 func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,
 		arg.IssueID,
 		arg.AgentID,
+		arg.LeaderSquadID,
 		arg.HeadSha,
 	)
 	var i RegisterPlannedCommentForActiveTaskRow

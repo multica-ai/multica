@@ -1659,7 +1659,7 @@ func TestCompletionFallbackDifferentHeadSweeperReplayDoesNotCoalesceOldRun(t *te
 	dbfx.Task(t, fx.workerID, testutil.Cols{
 		"runtime_id": fx.workerRuntimeID, "issue_id": fx.issueID, "status": "queued",
 		"trigger_comment_id": uuidToString(fallbackID),
-		"context": testutil.Raw(`'{"head_sha":"` + head2 + `"}'::jsonb`),
+		"context":            testutil.Raw(`'{"head_sha":"` + head2 + `"}'::jsonb`),
 	})
 	pending, err = testHandler.Queries.ListPendingCompletionFallbacks(ctx, 100)
 	if err != nil {
@@ -1689,6 +1689,117 @@ func TestCompletionFallbackDifferentHeadSweeperReplayDoesNotCoalesceOldRun(t *te
 	}
 	if after := readOld(); after != before {
 		t.Fatalf("completed H1 row changed while dispatching H2: before=%s after=%s", before, after)
+	}
+}
+
+func TestCompletionFallbackWrongRoleCarrierStaysPending(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, tc := range []struct {
+		name, status        string
+		planned, wrongSquad bool
+	}{
+		{"queued-worker", "queued", false, false},
+		{"planned-worker", "queued", true, false},
+		{"other-squad-leader", "queued", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			fx := newFallbackObligationFixture(t, tc.name)
+			workerID := createFallbackWorkerRun(t, fx)
+			fallbackID := completeFallbackWithoutDispatch(t, workerID)
+			cols := testutil.Cols{
+				"runtime_id": fx.leaderRuntimeID, "issue_id": fx.issueID,
+				"status": tc.status, "trigger_comment_id": fx.rootID,
+				"comment_thread_id": fx.rootID, "is_leader_task": false,
+			}
+			if tc.wrongSquad {
+				cols["is_leader_task"] = true
+				cols["squad_id"] = dbfx.Squad(t, "Other fallback squad", fx.leaderID)
+			}
+			if tc.planned {
+				cols["coalesced_comment_ids"] = testutil.Raw("ARRAY['" + uuidToString(fallbackID) + "'::uuid]")
+			}
+			carrierID := dbfx.Task(t, fx.leaderID, cols)
+			readCarrier := func() string {
+				t.Helper()
+				var snapshot string
+				dbfx.QueryRow(t, `SELECT jsonb_build_array(trigger_comment_id, coalesced_comment_ids, is_leader_task, squad_id)::text FROM agent_task_queue WHERE id = $1`, carrierID).Scan(&snapshot)
+				return snapshot
+			}
+			before := readCarrier()
+			for attempt := 0; attempt < 2; attempt++ {
+				_, _ = testHandler.TaskService.RecoverPendingDelegatedFailures(ctx, 100)
+				if after := readCarrier(); after != before {
+					t.Fatalf("fallback mutated a task with another role: before=%s after=%s", before, after)
+				}
+				pending, err := testHandler.Queries.ListPendingCompletionFallbacks(ctx, 100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				for _, row := range pending {
+					found = found || row.FallbackID == fallbackID
+				}
+				if !found {
+					t.Fatal("wrong-role carrier hid the leader's fallback obligation")
+				}
+			}
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, carrierID)
+			if _, err := testHandler.TaskService.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+				t.Fatal(err)
+			}
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task AND squad_id = $3 AND trigger_comment_id = $4`, fx.issueID, fx.leaderID, fx.squadID, fallbackID); got != 1 {
+				t.Fatalf("resolved leader/squad fallback carriers = %d, want exactly 1", got)
+			}
+		})
+	}
+}
+
+func TestCompletionFallbackActiveAndDeliveredCoverageRequiresLeaderRole(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, role := range []string{"worker", "other-squad", "leader"} {
+		t.Run(role, func(t *testing.T) {
+			ctx := context.Background()
+			fx := newFallbackObligationFixture(t, "active-role-"+role)
+			workerID := createFallbackWorkerRun(t, fx)
+			fallbackID := completeFallbackWithoutDispatch(t, workerID)
+			squadID := fx.squadID
+			if role == "other-squad" {
+				squadID = dbfx.Squad(t, "Other active fallback squad", fx.leaderID)
+			}
+			carrierID := dbfx.Task(t, fx.leaderID, testutil.Cols{
+				"runtime_id": fx.leaderRuntimeID, "issue_id": fx.issueID,
+				"status": "running", "trigger_comment_id": fx.rootID,
+				"comment_thread_id": fx.rootID, "is_leader_task": role != "worker", "squad_id": squadID,
+			})
+			_, err := testHandler.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
+				IssueID: parseUUID(fx.issueID), AgentID: parseUUID(fx.leaderID),
+				CommentID: fallbackID, LeaderSquadID: parseUUID(fx.squadID),
+			})
+			if role == "leader" {
+				if err != nil {
+					t.Fatalf("matching leader registration: %v", err)
+				}
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				t.Fatalf("wrong-role registration error = %v, want no rows", err)
+			}
+			planned := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE id = $1 AND $2 = ANY(coalesced_comment_ids)`, carrierID, fallbackID)
+			if (planned == 1) != (role == "leader") {
+				t.Fatalf("planned fallback count = %d for %s", planned, role)
+			}
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now(), delivered_comment_ids = ARRAY[$2::uuid] WHERE id = $1`, carrierID, fallbackID)
+			covered, err := testHandler.Queries.HasTaskCoveringCompletionFallback(ctx, db.HasTaskCoveringCompletionFallbackParams{
+				IssueID: parseUUID(fx.issueID), AgentID: parseUUID(fx.leaderID), SquadID: parseUUID(fx.squadID),
+				CommentID: fallbackID, ExcludeTaskID: parseUUID(workerID),
+			})
+			if err != nil || covered != (role == "leader") {
+				t.Fatalf("delivered fallback coverage = %v, error=%v for %s", covered, err, role)
+			}
+		})
 	}
 }
 
@@ -1765,7 +1876,7 @@ func TestCompletionFallbackMediaPendingDeferredTaskCoversFallback(t *testing.T) 
 		"context": testutil.Raw("'{\"channel_issue_media_pending\":true}'::jsonb"),
 	})
 	covered, err := testHandler.Queries.HasTaskCoveringCompletionFallback(ctx, db.HasTaskCoveringCompletionFallbackParams{
-		IssueID: parseUUID(fx.issueID), AgentID: parseUUID(fx.leaderID), CommentID: fallbackID, ExcludeTaskID: parseUUID(workerTaskID),
+		IssueID: parseUUID(fx.issueID), AgentID: parseUUID(fx.leaderID), SquadID: parseUUID(fx.squadID), CommentID: fallbackID, ExcludeTaskID: parseUUID(workerTaskID),
 	})
 	if err != nil || !covered {
 		t.Fatalf("media-pending deferred carrier coverage = %v, err=%v; want true", covered, err)

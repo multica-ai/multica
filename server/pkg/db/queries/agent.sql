@@ -1998,6 +1998,7 @@ RETURNING id, coalesced_comment_ids;
 -- Recheck status on the UPDATE target after a concurrent row-lock wait. The
 -- subquery can see an active snapshot while completion commits; appending to
 -- that completed row would be too late for its completion replay to see it.
+-- Completion fallbacks also require the resolved leader role and squad.
 UPDATE agent_task_queue
 SET coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
@@ -2010,6 +2011,8 @@ WHERE id = (
       AND t.agent_id = @agent_id
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
+      AND (sqlc.narg('leader_squad_id')::uuid IS NULL
+           OR (t.is_leader_task AND t.squad_id = sqlc.narg('leader_squad_id')::uuid))
       AND (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
           OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
@@ -2018,6 +2021,8 @@ WHERE id = (
     LIMIT 1
 )
 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+AND (sqlc.narg('leader_squad_id')::uuid IS NULL
+     OR (is_leader_task AND squad_id = sqlc.narg('leader_squad_id')::uuid))
 RETURNING id, coalesced_comment_ids;
 
 -- name: MergeDelegatedFailureCommentIntoPendingTask :one
@@ -2064,6 +2069,8 @@ SELECT count(*) > 0 AS covered
 FROM agent_task_queue
 WHERE issue_id = @issue_id
   AND agent_id = @agent_id
+  AND is_leader_task
+  AND squad_id = @squad_id::uuid
   AND (
       @comment_id::uuid = ANY(delivered_comment_ids)
       OR (
@@ -2094,6 +2101,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND t.is_leader_task AND t.squad_id = @squad_id::uuid
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
       AND (
           t.status = 'queued'
@@ -2105,6 +2113,7 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+AND is_leader_task AND squad_id = @squad_id::uuid
 RETURNING *;
 
 -- name: ListPendingCompletionFallbacks :many
@@ -2160,6 +2169,14 @@ WHERE fallback.author_type = 'agent'
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue AS covering
       WHERE covering.issue_id = current_issue.id
+        AND covering.is_leader_task
+        AND covering.squad_id = CASE
+            WHEN parent.id IS NOT NULL AND (
+                current_issue.assignee_type = 'squad'
+                AND current_issue.assignee_id = parent_task.squad_id
+            ) IS NOT TRUE THEN parent_squad.id
+            ELSE assigned_squad.id
+            END
         AND fallback.source_task_id = worker.id
         AND fallback.author_id = worker.agent_id
         AND covering.agent_id = CASE

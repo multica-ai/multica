@@ -1679,6 +1679,7 @@ func (s *TaskService) DispatchCompletionFallbackByLineage(ctx context.Context, i
 	covered, err := s.Queries.HasTaskCoveringCompletionFallback(ctx, db.HasTaskCoveringCompletionFallbackParams{
 		IssueID:       issue.ID,
 		AgentID:       target.Agent.ID,
+		SquadID:       target.SquadID(),
 		CommentID:     fallback.ID,
 		ExcludeTaskID: workerTask.ID,
 		HeadSha:       headSha,
@@ -1695,7 +1696,7 @@ func (s *TaskService) DispatchCompletionFallbackByLineage(ctx context.Context, i
 	}
 	merge := func() (db.AgentTaskQueue, error) {
 		return s.Queries.MergeCompletionFallbackIntoPendingTask(ctx, db.MergeCompletionFallbackIntoPendingTaskParams{
-			CommentID: fallback.ID, TriggerSummary: summary, IssueID: issue.ID, AgentID: target.Agent.ID, HeadSha: headSha,
+			CommentID: fallback.ID, TriggerSummary: summary, IssueID: issue.ID, AgentID: target.Agent.ID, SquadID: target.SquadID(), HeadSha: headSha,
 		})
 	}
 	if merged, err := merge(); err == nil {
@@ -1715,7 +1716,7 @@ func (s *TaskService) DispatchCompletionFallbackByLineage(ctx context.Context, i
 			return false, false, fmt.Errorf("merge fallback into pending task: %w", err)
 		}
 		covered, err := s.Queries.HasTaskCoveringCompletionFallback(ctx, db.HasTaskCoveringCompletionFallbackParams{
-			IssueID: issue.ID, AgentID: target.Agent.ID, CommentID: fallback.ID, ExcludeTaskID: workerTask.ID, HeadSha: headSha,
+			IssueID: issue.ID, AgentID: target.Agent.ID, SquadID: target.SquadID(), CommentID: fallback.ID, ExcludeTaskID: workerTask.ID, HeadSha: headSha,
 		})
 		if err != nil {
 			return false, false, fmt.Errorf("recheck fallback coverage: %w", err)
@@ -1724,7 +1725,7 @@ func (s *TaskService) DispatchCompletionFallbackByLineage(ctx context.Context, i
 			return true, false, nil
 		}
 		if _, err := s.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
-			CommentID: fallback.ID, IssueID: issue.ID, AgentID: target.Agent.ID, HeadSha: headSha,
+			CommentID: fallback.ID, IssueID: issue.ID, AgentID: target.Agent.ID, LeaderSquadID: target.SquadID(), HeadSha: headSha,
 		}); err == nil {
 			return true, false, nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
