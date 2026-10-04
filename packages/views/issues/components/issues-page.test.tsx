@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -808,6 +809,18 @@ describe("IssuesPage (shared)", () => {
     expect(await screen.findAllByText("All")).not.toHaveLength(0);
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
+  });
+
+  it("only offers the mind map when the web route enables it", async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderWithQuery(<IssuesPage />);
+    await user.click(await screen.findByRole("button", { name: "Board" }));
+    expect(screen.queryByRole("menuitemradio", { name: "Mind map" })).not.toBeInTheDocument();
+
+    unmount();
+    renderWithQuery(<IssuesPage enableMindmap />);
+    await user.click(await screen.findByRole("button", { name: "Board" }));
+    expect(screen.getByRole("menuitemradio", { name: "Mind map" })).toBeInTheDocument();
   });
 
   // The Members/Agents tabs filter server-side via assignee_types (the same

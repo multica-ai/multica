@@ -1564,6 +1564,20 @@ const IssueTableRowSchema = z.object({
   direct_child_count: z.number().default(0),
 }).loose();
 
+export const IssueDependenciesResponseSchema = z.object({
+  dependencies: z.array(z.object({
+    issue_id: z.string(),
+    depends_on_issue_id: z.string(),
+    type: z.string(),
+  }).loose()),
+  complete: z.boolean(),
+}).loose();
+
+export const EMPTY_ISSUE_DEPENDENCIES_RESPONSE = {
+  dependencies: [],
+  complete: false,
+};
+
 export const IssueTableRowsResponseSchema = z.object({
   query_fingerprint: z.string(),
   group_key: z.string().nullable().default(null),

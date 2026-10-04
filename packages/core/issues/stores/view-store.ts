@@ -9,7 +9,7 @@ import { PROJECT_STATUS_ORDER } from "../../projects/config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
+export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane" | "mindmap";
 export type GanttZoom = "day" | "week" | "month";
 /**
  * Board grouping. Besides the three built-ins, a select-type custom property
@@ -202,7 +202,7 @@ export function defaultSortDirection(field: SortField): SortDirection {
 
 /** Only expose card controls that the active renderer can honor. */
 export function cardPropertyOptionsForView(viewMode: ViewMode) {
-  if (viewMode === "table" || viewMode === "gantt") return [];
+  if (viewMode === "table" || viewMode === "gantt" || viewMode === "mindmap") return [];
   if (viewMode === "list") {
     return CARD_PROPERTY_OPTIONS.filter((option) => option.key !== "description");
   }

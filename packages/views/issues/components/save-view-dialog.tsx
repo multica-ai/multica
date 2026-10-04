@@ -104,6 +104,7 @@ const LAYOUT_LABEL_KEY = {
   table: "table",
   swimlane: "swimlane",
   gantt: "gantt",
+  mindmap: "mindmap",
 } as const;
 
 const GROUPING_LABEL_KEY = {
@@ -149,9 +150,12 @@ const ROW_LABEL = "w-16 shrink-0 text-caption text-muted-foreground";
 
 /** Filter row + layout row + collapsible display defaults, all bound to the
  *  DRAFT store via the surrounding provider. */
-export function DraftDefinitionFields() {
+export function DraftDefinitionFields({ allowMindmap = false }: { allowMindmap?: boolean }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const layoutModes = allowMindmap
+    ? (["list", "board", "table", "swimlane", "mindmap"] as const)
+    : (["list", "board", "table", "swimlane"] as const);
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
@@ -245,7 +249,7 @@ export function DraftDefinitionFields() {
             <div className="flex items-center gap-3">
               <Label className={ROW_LABEL}>{t(($) => $.save_view.layout_label)}</Label>
               <Select
-                items={(["list", "board", "table", "swimlane"] as const).map((mode) => ({
+                items={layoutModes.map((mode) => ({
                   value: mode as string,
                   label: t(($) => $.view[LAYOUT_LABEL_KEY[mode]]),
                 }))}
@@ -259,7 +263,7 @@ export function DraftDefinitionFields() {
                 </SelectTrigger>
                 <SelectContent align="start">
                   <SelectGroup>
-                    {(["list", "board", "table", "swimlane"] as const).map((mode) => (
+                    {layoutModes.map((mode) => (
                       <SelectItem key={mode} value={mode}>
                         {t(($) => $.view[LAYOUT_LABEL_KEY[mode]])}
                       </SelectItem>
@@ -455,12 +459,14 @@ export function SaveViewDialog({
   open,
   onOpenChange,
   scope,
+  allowMindmap = false,
   editView = null,
   seedFromDefinition = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   scope: SaveViewScope;
+  allowMindmap?: boolean;
   /** Edit mode: same dialog, prefilled from this view; confirm PATCHes it
    *  (with optimistic-concurrency 409 handling) instead of creating. */
   editView?: IssueView | null;
@@ -802,7 +808,7 @@ export function SaveViewDialog({
 
           {draftStore && (
             <ViewStoreProvider store={draftStore}>
-              <DraftDefinitionFields />
+              <DraftDefinitionFields allowMindmap={allowMindmap && scope.kind === "workspace"} />
             </ViewStoreProvider>
           )}
         </div>

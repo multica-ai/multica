@@ -301,6 +301,18 @@ export type IssueTableScope =
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
 
+export interface IssueDependency {
+  issue_id: string;
+  depends_on_issue_id: string;
+  type: "blocks" | "blocked_by" | "related" | (string & {});
+}
+
+export interface IssueDependenciesResponse {
+  dependencies: IssueDependency[];
+  /** False only when an older or malformed server response was rejected. */
+  complete: boolean;
+}
+
 export interface IssueTableFilters {
   statuses?: IssueStatus[];
   priorities?: IssuePriority[];
