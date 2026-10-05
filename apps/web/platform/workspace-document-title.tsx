@@ -38,14 +38,20 @@ export function WorkspaceDocumentTitle() {
   // tab strip needs: a browser tab has no other place to show the product name.
   const documentTitle =
     subject.kind === "unknown" ? SITE_TITLE : formatDocumentTitle(title);
-
-  // `url` is a dependency even though `documentTitle` is what we write: an app
-  // router navigation re-renders the target route's metadata and resets
-  // document.title to the root default, so a move between two routes that
-  // happen to share a title (`/inbox` → `/inbox?view=archived`) has to
-  // re-assert it.
+  // The dashboard owns the title while mounted. Next's App Router can
+  // reconcile streamed route metadata after this component has rendered and
+  // replace it with the root metadata default, so restore the current title
+  // whenever another head mutation changes the title element.
   useEffect(() => {
-    document.title = documentTitle;
+    const applyTitle = () => {
+      if (document.title !== documentTitle) document.title = documentTitle;
+    };
+
+    applyTitle();
+    const observer = new MutationObserver(applyTitle);
+    observer.observe(document.head, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
   }, [documentTitle, url]);
 
   // Leaving the dashboard entirely (logout, workspace switcher, landing) drops
