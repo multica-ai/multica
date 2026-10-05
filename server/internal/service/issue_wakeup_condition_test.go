@@ -159,6 +159,7 @@ func TestWakeupConditionChildrenAndOtherIssue(t *testing.T) {
 
 func TestWakeupConditionPullRequestChecksWaitForNewResult(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
+	s.Tasks.PRSnapshotsEnabled = true
 	ctx := context.Background()
 	var pr string
 	if err := f.Pool.QueryRow(ctx, `INSERT INTO github_pull_request(workspace_id,installation_id,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,snapshot_head_sha,checks_rollup_state)
@@ -213,5 +214,67 @@ func TestWakeupConditionValidation(t *testing.T) {
 		if _, err := s.Create(ctx, issue, member, pgtype.UUID{}, in); !errors.Is(err, ErrWakeupInput) {
 			t.Errorf("%s: err = %v, want ErrWakeupInput", name, err)
 		}
+	}
+}
+
+func TestWakeupConditionPRDiagnosticsRecover(t *testing.T) {
+	for _, event := range []string{"checks_finished", "merged"} {
+		t.Run(event, func(t *testing.T) {
+			f, s, issue, agent := conditionFixture(t)
+			ctx := context.Background()
+			parent := f.Issue(t, "PR owner")
+			f.Exec(t, "UPDATE issue SET parent_issue_id=$2 WHERE id=$1", issue, parent)
+			pr := f.Insert(t, "github_pull_request", testutil.Cols{
+				"workspace_id": f.WorkspaceID, "installation_id": 1,
+				"repo_owner": "fixture", "repo_name": "wakeup", "pr_number": 1,
+				"title": "PR", "state": "open", "html_url": "https://example.test/pr/1",
+				"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+			})
+			f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+			f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", parent, pr)
+			w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Review PR",
+				Condition: condition(t, map[string]any{"type": "pull_request", "event": event})})
+			assertWaiting := func(w db.IssueWakeup, diagnostic error) {
+				t.Helper()
+				if !w.Enabled || !w.LastError.Valid || w.LastError.String != diagnostic.Error() || w.FireCount != 0 || wakeRuns(t, f, w.ID) != 0 {
+					t.Fatalf("expected enabled, unfired rule with %q; got enabled=%t fires=%d error=%+v", diagnostic, w.Enabled, w.FireCount, w.LastError)
+				}
+				if !w.NextFireAt.Valid {
+					t.Fatal("diagnostic stopped condition polling")
+				}
+			}
+			if event == "checks_finished" {
+				// A disabled snapshot client is visible even in the create response.
+				assertWaiting(w, errPRSnapshotsUnavailable)
+				assertWaiting(wakeTick(t, f, s, w.ID), errPRSnapshotsUnavailable)
+				s.Tasks.PRSnapshotsEnabled = true
+			}
+			// Linking to the parent must never satisfy a child issue's rule.
+			assertWaiting(wakeTick(t, f, s, w.ID), errPRNotLinked)
+			f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+			if event == "checks_finished" {
+				assertWaiting(wakeTick(t, f, s, w.ID), errPRSnapshotPending)
+				// Re-enabling also accepts a transiently missing snapshot.
+				disabled, err := s.Disable(ctx, issue, w.ID, parseTestUUID(t, f.UserID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				w, err = s.Enable(ctx, issue, parseTestUUID(t, f.UserID), pgtype.UUID{}, w.ID, WakeupEnableInput{Revision: disabled.Revision})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertWaiting(w, errPRSnapshotPending)
+				f.Exec(t, "UPDATE github_pull_request SET snapshot_head_sha='new',checks_rollup_state='PENDING' WHERE id=$1", pr)
+			}
+			got := wakeTick(t, f, s, w.ID)
+			if got.LastError.Valid || !got.Enabled || wakeRuns(t, f, w.ID) != 0 {
+				t.Fatalf("normal pending condition did not clear diagnostic: %+v", got.LastError)
+			}
+			f.Exec(t, "UPDATE github_pull_request SET state='merged',checks_rollup_state='SUCCESS' WHERE id=$1", pr)
+			got = wakeTick(t, f, s, w.ID)
+			if got.Enabled || got.LastError.Valid || wakeRuns(t, f, w.ID) != 1 {
+				t.Fatalf("recovered condition failed to fire once: enabled=%t error=%+v", got.Enabled, got.LastError)
+			}
+		})
 	}
 }

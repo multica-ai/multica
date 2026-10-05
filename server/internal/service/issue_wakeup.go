@@ -573,7 +573,11 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		return out, err
 	}
 	if len(out.Condition) > 0 && conditionFiresOnChange(out.Condition) {
-		if err = baselineCondition(ctx, tx, q, out, now); err != nil {
+		if err = s.baselineCondition(ctx, tx, q, out, now); err != nil {
+			return out, err
+		}
+		out, err = q.LockIssueWakeup(ctx, out.ID)
+		if err != nil {
 			return out, err
 		}
 	}
@@ -832,7 +836,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	// one condition.met input; a rule that ended only drops the hints.
 	if len(w.Condition) > 0 {
 		if w.Enabled && !timedOut {
-			if next, err = pollCondition(ctx, tx, q, w, now); err != nil {
+			if next, err = s.pollCondition(ctx, tx, q, w, now); err != nil {
 				return err
 			}
 		} else if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {

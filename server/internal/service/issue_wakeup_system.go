@@ -473,7 +473,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
-	met, fingerprint, observed, err := evaluateCondition(ctx, tx, q, w)
+	met, fingerprint, observed, err := s.evaluateCondition(ctx, tx, q, w)
 	if err != nil {
 		return err
 	}
