@@ -14,6 +14,7 @@ describe("iOS scene lifecycle configuration", () => {
   ])("enables scene support for %s without changing app identity", (env, name, bundleIdentifier) => {
     vi.stubEnv("APP_ENV", env);
     vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_DEV", undefined);
+    vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_STAGING", undefined);
     vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_PROD", undefined);
     const config = createConfig({ config: {} } as ConfigContext);
 
@@ -28,11 +29,12 @@ describe("iOS scene lifecycle configuration", () => {
 
   it.each([
     ["development", "com.example.multica.dev"],
-    ["staging", "ai.multica.mobile.staging"],
+    ["staging", "com.example.multica.staging"],
     ["production", "com.example.multica"],
   ])("preserves signing overrides for %s", (env, bundleIdentifier) => {
     vi.stubEnv("APP_ENV", env);
     vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_DEV", "com.example.multica.dev");
+    vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_STAGING", "com.example.multica.staging");
     vi.stubEnv("EXPO_BUNDLE_IDENTIFIER_PROD", "com.example.multica");
     vi.stubEnv("EXPO_APPLE_TEAM_ID", "ABCDE12345");
 

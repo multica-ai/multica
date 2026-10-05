@@ -59,7 +59,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       bundleIdentifier: isProd
         ? (process.env.EXPO_BUNDLE_IDENTIFIER_PROD ?? "ai.multica.mobile")
         : isStaging
-          ? "ai.multica.mobile.staging"
+          ? (process.env.EXPO_BUNDLE_IDENTIFIER_STAGING ?? "ai.multica.mobile.staging")
           : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
     },
     plugins: [
