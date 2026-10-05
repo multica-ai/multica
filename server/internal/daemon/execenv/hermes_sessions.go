@@ -210,12 +210,21 @@ func mountHermesSessionDB(hermesHome, storeDir string, logger *slog.Logger) (her
 const hermesSessionLinkStagingEntry = ".multica-session-link"
 
 // hermesStoreHasSessionDB reports whether storeDir holds a session database
-// with content. A zero-length file is what SQLite leaves after an `open` that
-// never wrote a page, and resuming against it is the same amnesia as an absent
-// one — so it counts as no history, not as history.
+// with readable content. A zero-length file is what SQLite leaves after an
+// `open` that never wrote a page; resuming against it is the same as an absent
+// database, so it counts as no history.
 func hermesStoreHasSessionDB(storeDir string) bool {
-	fi, err := os.Stat(filepath.Join(storeDir, hermesSessionDBEntry))
-	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
+	path := filepath.Join(storeDir, hermesSessionDBEntry)
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {
+		return false
+	}
+	db, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	return true
 }
 
 // migrateHermesTaskSessionDB carries a task-local state.db into an empty store

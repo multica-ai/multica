@@ -843,3 +843,23 @@ func requireSymlinks(t *testing.T) {
 		t.Skipf("symlinks unavailable on this host: %v", err)
 	}
 }
+
+func TestHermesStoreHasSessionDBUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions required")
+	}
+	store := t.TempDir()
+	db := filepath.Join(store, "state.db")
+	mustWrite(t, db, "transcript")
+	if err := os.Chmod(db, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(db, 0o600) })
+	if f, err := os.Open(db); err == nil {
+		f.Close()
+		t.Skip("current user can read files despite permissions")
+	}
+	if hermesStoreHasSessionDB(store) {
+		t.Fatal("unreadable session database reported as reachable")
+	}
+}
