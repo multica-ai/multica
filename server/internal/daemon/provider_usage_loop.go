@@ -35,10 +35,19 @@ func (d *Daemon) collectProviderUsage(ctx context.Context, backoffUntil map[stri
 		return
 	}
 	now := time.Now()
-	// Qianwen, Gemini CLI, Amp, Devin, GLM, MiniMax, Ollama, LM Studio,
-	// DeepSeek, Perplexity, and Command Code are not collected. They are
-	// either not a Multica runtime, or the only CodeNotch path is a browser
-	// cookie or a local token ledger rather than a signed-in plan window.
+	// Left uncollected after CodeNotch 1.22.0 (v1.21.0...v1.22.0):
+	//   Qoder — qoder and qoderclicn are Multica runtimes, but the credit
+	//     ring is a WebKit sign-in on qoder.com or qoder.com.cn
+	//     (GET /api/v2/me/usages/big_model_credits). That is a website
+	//     cookie, not a local CLI session.
+	//   Command Code — not a Multica runtime. Extra ~/.commandcode-<slug>
+	//     homes each hold an apiKey; they do not add a runtime to attach.
+	//   DeepSeek — platform.deepseek.com wallet. Picking the funded wallet
+	//     still reports prepaid spend, not a signed-in plan window. The dsh
+	//     runtime does not expose that wallet locally.
+	// Qianwen, Gemini CLI, Amp, Devin, GLM, MiniMax, Ollama, LM Studio, and
+	// Perplexity stay out for the same reasons: not a Multica runtime, or
+	// only a browser cookie or a local token ledger.
 	collectors := []struct {
 		provider string
 		collect  func(context.Context) providerusage.Result

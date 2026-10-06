@@ -32,6 +32,14 @@ var antigravityWindowOrder = []string{
 // Windows. ~/.gemini/oauth_creds.json remains after the IDE exits, so a
 // closed IDE is already covered here. A vendor 403 uploads an empty
 // unauthorized snapshot.
+//
+// CodeNotch 1.22.0 (#428) parses agy 1.2.16 quota text on Windows. Under
+// ConPTY the CLI prints each reset as local wall-clock time plus a zone
+// abbreviation ("2026-10-10 22:31 AEDT") instead of RFC 3339. This
+// collector does not run agy. Cloud Code JSON resetTime is still an
+// RFC 3339 string or a unix timestamp, which parseResetValue already
+// accepts. The CLI's local form is not a resetTime value here, so it is
+// left unparsed rather than guessed from the host zone.
 type AntigravityCollector struct {
 	AuthPath string
 	Do       HTTPDoer
