@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestWaitReasonForStatus pins the gate that keeps a finished hold from being
@@ -41,4 +42,19 @@ func TestWaitReasonForStatus(t *testing.T) {
 			t.Fatalf("wait reason = %q, want empty", got)
 		}
 	})
+}
+
+func TestTaskResponseIncludesOnlyCurrentWaitReason(t *testing.T) {
+	const reason = "debug: 201 MiB exceeds 200 MiB"
+	for _, status := range []string{"waiting_local_directory", "running", "completed", "cancelled"} {
+		task := db.AgentTaskQueue{Status: status, WaitReason: pgtype.Text{String: reason, Valid: true}}
+		got := taskToResponse(task, "workspace").WaitReason
+		want := ""
+		if status == "waiting_local_directory" {
+			want = reason
+		}
+		if got != want {
+			t.Errorf("status %s: wait reason = %q, want %q", status, got, want)
+		}
+	}
 }

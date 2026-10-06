@@ -633,6 +633,11 @@ describe("TimelineEntriesSchema", () => {
 });
 
 describe("AgentTaskListSchema", () => {
+  it.each([undefined, null, 42, { reason: "bad" }, "debug: 201 MiB exceeds 200 MiB"])("tolerates additive wait reasons: %s", (wait_reason) => {
+    const parsed = AgentTaskListSchema.parse([{ id: "waiting", wait_reason }]);
+    expect(parsed[0]?.wait_reason).toBe(typeof wait_reason === "string" ? wait_reason : undefined);
+  });
+
   it("preserves negotiated supplement capability, ordered coverage and permission", () => {
     const parsed = AgentTaskListSchema.parse([{
       id: "run",

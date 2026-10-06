@@ -5858,3 +5858,27 @@ func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
 		})
 	}
 }
+
+func TestRunIssueRunsShowsFullPreflightReason(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	const reason = "debug: 1 regular file / 209715201 bytes; limits 2000 files / 200 MiB; ignore or remove to resume"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/issues/"+issueID+"/task-runs" {
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "abcd1234-0000-0000-0000-000000000000", "status": "waiting_local_directory", "wait_reason": reason}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	out, err := captureStdout(t, func() error { return runIssueRuns(newIssueRunsTestCmd(t, "table"), []string{issueID}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, reason) {
+		t.Fatalf("diagnostic truncated or missing: %s", out)
+	}
+}

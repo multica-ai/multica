@@ -6117,8 +6117,8 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	// validation above still applies — git needs to write worktree
 	// registrations into the user's repo.
 	if assignment.UsesWorktree() {
-		taskLog.Info("local_directory: worktree mode, skipping path mutex")
-		return nil, false
+		taskLog.Info("local_directory: worktree mode, checking source before preparation")
+		return nil, d.waitForWorktreeReplay(ctx, task, assignment, taskLog)
 	}
 
 	// A conversation is not a second writer. Everything above still applied —

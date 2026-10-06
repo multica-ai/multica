@@ -761,6 +761,15 @@ multica issue runs <issue-id>
 multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
 
+# A local worktree source over 2000 untracked regular files / 200 MiB,
+# or containing untracked symlinks, parks the claimed task before preparation.
+# The run's wait_reason includes measured count/bytes and largest top-level
+# paths (also available in Run details). Ignore/remove the offending files:
+# the same task resumes automatically, without a new retry or coordinator run.
+# The check uses Git's ignore rules and replay's runtime-sidecar exclusions.
+# Waiting tasks retain daemon slots and prepare leases; cancel unwanted waits.
+# The snapshot retains its final replay check for edits racing the preflight.
+
 # Only work in flight (queued / dispatched / running / waiting_local_directory)
 multica issue runs <issue-id> --active --output json
 
