@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -55,8 +56,8 @@ const (
 	// unusual amount of untracked-but-not-ignored content, and snapshotting it
 	// would write every byte of it into the user's own object database. The
 	// task refuses instead, naming the fix.
-	maxUntrackedFiles = 2000
-	maxUntrackedBytes = 200 << 20 // 200 MiB
+	maxUntrackedFiles = protocol.WorktreeReplayMaxFiles
+	maxUntrackedBytes = protocol.WorktreeReplayMaxBytes // 200 MiB
 
 	// snapshotIndexFileName is the private index captureUserSnapshot builds the
 	// user's snapshot in. It lives in the task's env root, never in the user's

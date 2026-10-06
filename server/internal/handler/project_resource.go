@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -21,15 +22,16 @@ import (
 
 // ProjectResourceResponse is the JSON shape returned by the project resource API.
 type ProjectResourceResponse struct {
-	ID           string          `json:"id"`
-	ProjectID    string          `json:"project_id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	ResourceType string          `json:"resource_type"`
-	ResourceRef  json.RawMessage `json:"resource_ref"`
-	Label        *string         `json:"label"`
-	Position     int32           `json:"position"`
-	CreatedAt    string          `json:"created_at"`
-	CreatedBy    *string         `json:"created_by"`
+	WorktreeReadiness *protocol.WorktreeReadiness `json:"worktree_readiness,omitempty"`
+	ID                string                      `json:"id"`
+	ProjectID         string                      `json:"project_id"`
+	WorkspaceID       string                      `json:"workspace_id"`
+	ResourceType      string                      `json:"resource_type"`
+	ResourceRef       json.RawMessage             `json:"resource_ref"`
+	Label             *string                     `json:"label"`
+	Position          int32                       `json:"position"`
+	CreatedAt         string                      `json:"created_at"`
+	CreatedBy         *string                     `json:"created_by"`
 }
 
 func projectResourceToResponse(r db.ProjectResource) ProjectResourceResponse {
@@ -37,7 +39,7 @@ func projectResourceToResponse(r db.ProjectResource) ProjectResourceResponse {
 	if len(ref) == 0 {
 		ref = json.RawMessage("{}")
 	}
-	return ProjectResourceResponse{
+	response := ProjectResourceResponse{
 		ID:           uuidToString(r.ID),
 		ProjectID:    uuidToString(r.ProjectID),
 		WorkspaceID:  uuidToString(r.WorkspaceID),
@@ -48,6 +50,10 @@ func projectResourceToResponse(r db.ProjectResource) ProjectResourceResponse {
 		CreatedAt:    timestampToString(r.CreatedAt),
 		CreatedBy:    uuidToPtr(r.CreatedBy),
 	}
+	if resourceUsesWorktree(r) {
+		response.WorktreeReadiness = readinessResponse(nil, time.Now())
+	}
+	return response
 }
 
 // CreateProjectResourceRequest is the body for POST /api/projects/{id}/resources.
@@ -536,9 +542,35 @@ func (h *Handler) ListProjectResources(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list project resources")
 		return
 	}
+	readiness, err := h.Queries.ListWorktreeReadinessForProject(r.Context(), db.ListWorktreeReadinessForProjectParams{ProjectID: project.ID, WorkspaceID: project.WorkspaceID})
+	if err != nil {
+		writeError(w, 500, "failed to load resource readiness")
+		return
+	}
+	byID := make(map[string]db.LocalWorktreeReadiness, len(readiness))
+	for _, row := range readiness {
+		byID[uuidToString(row.ResourceID)] = row
+	}
+	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), project.WorkspaceID)
+	if err != nil {
+		writeError(w, 500, "failed to load resource runtimes")
+		return
+	}
 	resp := make([]ProjectResourceResponse, len(resources))
 	for i, res := range resources {
 		resp[i] = projectResourceToResponse(res)
+		if row, ok := byID[uuidToString(res.ID)]; ok && resourceUsesWorktree(res) {
+			resp[i].WorktreeReadiness = readinessResponse(&row, time.Now())
+		}
+		if resp[i].WorktreeReadiness != nil {
+			var ref localDirectoryRef
+			_ = json.Unmarshal(res.ResourceRef, &ref)
+			if !daemonReadinessAvailable(runtimes, ref.DaemonID, time.Now()) {
+				resp[i].WorktreeReadiness.Status = "unavailable"
+				resp[i].WorktreeReadiness.ReasonCode = "daemon_unavailable"
+				resp[i].WorktreeReadiness.Message = "Keep this machine's runtime online and update it to support resource readiness. Queued tasks will wait."
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"resources": resp, "total": len(resp)})
 }

@@ -40,6 +40,7 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteProjectResource :exec
+WITH readiness_removed AS (DELETE FROM local_worktree_readiness WHERE resource_id = $1)
 DELETE FROM project_resource WHERE id = $1;
 
 -- name: CountProjectResources :one

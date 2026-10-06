@@ -8093,3 +8093,9 @@ func agentToMap(a db.Agent) map[string]any {
 		"archived_by":          util.UUIDToPtr(a.ArchivedBy),
 	}
 }
+
+// NotifyWorktreeReadinessChanged invalidates cached empty-claim verdicts after
+// a source is remeasured; the SQL gate remains authoritative for every claim.
+func (s *TaskService) NotifyWorktreeReadinessChanged(runtimeID pgtype.UUID) {
+	s.notifyRuntimeMayHaveWork(runtimeID, "")
+}

@@ -19,7 +19,8 @@ const (
 	// is deliberately exempted from the version floor so `make daemon` stays
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
-	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	DaemonCapabilityLocalWorktreeV1     = "local-worktree-v1"
+	DaemonCapabilityWorktreeReadinessV1 = "local-worktree-readiness-v1"
 	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
 	// two-section quick-create prompt that keeps a new instruction separate
 	// from immutable historical source context.
@@ -410,14 +411,15 @@ type DaemonHeartbeatRequestPayload struct {
 // and re-registers; without it the dead UUID would keep heartbeating until the
 // daemon process restarts.
 type DaemonHeartbeatAckPayload struct {
-	RuntimeID               string                                  `json:"runtime_id"`
-	Status                  string                                  `json:"status"`
-	ServerCapabilities      []string                                `json:"server_capabilities,omitempty"`
-	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
-	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
-	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
-	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
-	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	WorktreeReadinessSupported bool                                    `json:"worktree_readiness_supported,omitempty"`
+	RuntimeID                  string                                  `json:"runtime_id"`
+	Status                     string                                  `json:"status"`
+	ServerCapabilities         []string                                `json:"server_capabilities,omitempty"`
+	RuntimeGone                bool                                    `json:"runtime_gone,omitempty"`
+	PendingUpdate              *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
+	PendingModelList           *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
+	PendingLocalSkills         *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
+	PendingLocalSkillImport    *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
 	// heartbeat so the daemon can process them concurrently. Old daemons
 	// that don't know this field silently ignore it (standard JSON behavior)

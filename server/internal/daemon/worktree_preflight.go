@@ -22,6 +22,7 @@ func (d *Daemon) waitForWorktreeReplay(ctx context.Context, task Task, assignmen
 	var stopLease func()
 	var cancelled <-chan struct{}
 	waiting := false
+	lastReason := ""
 	defer func() {
 		if stopLease != nil {
 			stopLease()
@@ -54,15 +55,21 @@ func (d *Daemon) waitForWorktreeReplay(ctx context.Context, task Task, assignmen
 			}
 			return false
 		}
-		if !waiting {
-			reason := fmt.Sprintf("%s: %s", assignment.DisplayName(), check.Err())
+		reason := fmt.Sprintf("%s: %s", assignment.DisplayName(), check.Err())
+		if err != nil {
+			reason = assignment.DisplayName() + ": source inspection unavailable; waiting for a fresh measurement"
+		}
+		if reason != lastReason {
 			if err := d.client.MarkTaskWaitingLocalDirectory(waitCtx, task.ID, reason); err != nil {
 				logger.Warn("worktree preflight: could not publish wait reason", "error", err)
 				// Retry publishing as well as inspecting. Never prepare a source
 				// known to be unreplayable merely because the server is offline.
 			} else {
+				if !waiting {
+					d.resourceWaitTasks.Add(1)
+				}
 				waiting = true
-				d.resourceWaitTasks.Add(1)
+				lastReason = reason
 				logger.Info("worktree preflight: waiting for source cleanup", "reason", reason)
 			}
 		}

@@ -761,14 +761,24 @@ multica issue runs <issue-id>
 multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
 
-# A local worktree source over 2000 untracked regular files / 200 MiB,
-# or containing untracked symlinks, parks the claimed task before preparation.
-# The run's wait_reason includes measured count/bytes and largest top-level
-# paths (also available in Run details). Ignore/remove the offending files:
-# the same task resumes automatically, without a new retry or coordinator run.
-# The check uses Git's ignore rules and replay's runtime-sidecar exclusions.
-# Waiting tasks retain daemon slots and prepare leases; cancel unwanted waits.
-# The snapshot retains its final replay check for edits racing the preflight.
+# Worktree resources are measured by their daemon on heartbeat (normally 15s).
+# The server only claims queued tasks with a ready measurement no older than
+# 90s for the exact current resource configuration. Blocked, missing, expired,
+# offline/older-daemon readiness leaves the same tasks queued without slots.
+# Resource diagnostics are available before any task exists:
+multica project resource list <project-id> --output json
+# worktree_readiness carries status, reason_code, checked_at, expires_at,
+# file_count, total_bytes, max_files/max_bytes, symlink_count, largest_paths.
+# Unknown/failed measurements omit usage; expired measurements are last-known.
+# Reads do not trigger scans. Unsaved/in_place resources are checked after
+# saving worktree mode. Keep the daemon online and upgraded for readiness.
+# Ignore/remove the offending untracked files; the next heartbeat recovers
+# readiness and the same queued task IDs become claimable. Git ignore rules,
+# replay's runtime-sidecar exclusions, and symlink rejection are unchanged.
+# A source that changes after claim can still park before preparation. Its
+# measured wait_reason refreshes when the source changes and is visible in
+# Run details and issue runs. Only these race-path waits retain daemon slots.
+# The snapshot retains a final replay check for concurrent edits.
 
 # Only work in flight (queued / dispatched / running / waiting_local_directory)
 multica issue runs <issue-id> --active --output json

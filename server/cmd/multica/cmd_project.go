@@ -567,7 +567,36 @@ func runProjectResourceList(cmd *cobra.Command, args []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	for _, raw := range resourcesRaw {
+		r, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		ready, ok := r["worktree_readiness"].(map[string]any)
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "\n%s: worktree %s — %s\n", displayID(strVal(r, "id"), fullID), strVal(ready, "status"), strVal(ready, "message"))
+		if ready["file_count"] != nil && ready["total_bytes"] != nil {
+			fmt.Fprintf(os.Stdout, "  Last measured %v files / %v bytes; limits %v files / %v bytes; %v symlinks (%s)\n", resourceMetric(ready["file_count"]), resourceMetric(ready["total_bytes"]), resourceMetric(ready["max_files"]), resourceMetric(ready["max_bytes"]), resourceMetric(ready["symlink_count"]), strVal(ready, "checked_at"))
+			if paths, ok := ready["largest_paths"].([]any); ok {
+				for _, p := range paths {
+					if path, ok := p.(map[string]any); ok {
+						fmt.Fprintf(os.Stdout, "  %q: %v files / %v bytes\n", strVal(path, "path"), resourceMetric(path["file_count"]), resourceMetric(path["total_bytes"]))
+					}
+				}
+			}
+		}
+	}
 	return nil
+}
+
+// resourceMetric keeps JSON numeric byte counts in decimal in table output.
+func resourceMetric(value any) string {
+	if number, ok := value.(float64); ok {
+		return fmt.Sprintf("%.0f", number)
+	}
+	return fmt.Sprint(value)
 }
 
 func runProjectResourceAdd(cmd *cobra.Command, args []string) error {

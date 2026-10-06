@@ -49,7 +49,7 @@ func TestWorktreePreflightParksSiblingsAndResumesSameTasks(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 						t.Error(err)
 					}
-					if !strings.Contains(req.Reason, "debug") || !strings.Contains(req.Reason, "209715201") {
+					if !strings.Contains(req.Reason, "debug") {
 						t.Errorf("missing diagnostic: %s", req.Reason)
 					}
 					mu.Lock()
@@ -104,6 +104,16 @@ func TestWorktreePreflightParksSiblingsAndResumesSameTasks(t *testing.T) {
 			if cancelOnServer {
 				cancelled.Store(true)
 			} else {
+				if err := os.Truncate(filepath.Join(repo, "debug", "big"), (200<<20)+2); err != nil {
+					t.Fatal(err)
+				}
+				for range 2 {
+					select {
+					case <-parked:
+					case <-ctx.Done():
+						t.Fatal("changed measurement was not published")
+					}
+				}
 				if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("debug/\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -124,7 +134,11 @@ func TestWorktreePreflightParksSiblingsAndResumesSameTasks(t *testing.T) {
 				t.Errorf("wrong task identities: %v", counts)
 			}
 			for id, count := range counts {
-				if count != 1 {
+				want := 1
+				if !cancelOnServer {
+					want = 2
+				}
+				if count != want {
 					t.Errorf("duplicate park for %s: %d", id, count)
 				}
 			}

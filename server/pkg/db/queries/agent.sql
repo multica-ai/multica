@@ -767,6 +767,25 @@ WHERE id = (
       AND atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
+
+      -- A source without a fresh daemon measurement never consumes a slot.
+      -- Compare the exact ref so editing path/mode/daemon invalidates readiness.
+      AND (atq.is_leader_task OR NOT EXISTS (
+          SELECT 1 FROM project_resource pr
+          JOIN agent_runtime wr ON wr.id = atq.runtime_id
+          LEFT JOIN local_worktree_readiness ready ON ready.resource_id = pr.id
+            AND ready.resource_ref = pr.resource_ref
+          WHERE pr.workspace_id = wr.workspace_id
+            AND pr.resource_type = 'local_directory'
+            AND pr.resource_ref->>'execution_mode' = 'worktree'
+            AND pr.resource_ref->>'daemon_id' = wr.daemon_id
+            AND pr.project_id::text = COALESCE(
+              (SELECT i.project_id::text FROM issue i WHERE i.id = atq.issue_id AND i.workspace_id = wr.workspace_id),
+              (SELECT c.project_id::text FROM chat_session c WHERE c.id = atq.chat_session_id AND c.workspace_id = wr.workspace_id),
+              (SELECT a.project_id::text FROM autopilot a JOIN autopilot_run ar ON ar.autopilot_id = a.id WHERE ar.id = atq.autopilot_run_id AND a.workspace_id = wr.workspace_id),
+              CASE WHEN atq.context->>'type' = 'quick_create' AND atq.context->>'workspace_id' = wr.workspace_id::text THEN atq.context->>'project_id' END)
+            AND (NOT COALESCE(wr.metadata->'capabilities' ? 'local-worktree-readiness-v1', false) OR ready.resource_id IS NULL OR ready.status <> 'ready' OR ready.expires_at <= now())
+      ))
       AND EXISTS (
           SELECT 1
           FROM agent a
@@ -1004,14 +1023,14 @@ FOR UPDATE;
 -- human-readable hint (typically the contested path) that the UI surfaces
 -- alongside the status.
 --
--- The CHECK only allows the transition from 'dispatched' so a daemon can't
+-- Allow updating diagnostics while waiting, but a daemon cannot
 -- mark an already-running or terminal task as waiting; the StartAgentTask
 -- mutation handles the reverse transition once the lock is acquired.
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
     wait_reason = $2,
     prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
-WHERE id = $1 AND status = 'dispatched'
+WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
 RETURNING *;
 
 -- name: CompleteAgentTask :one

@@ -66,6 +66,7 @@ func (q *Queries) CreateProjectResource(ctx context.Context, arg CreateProjectRe
 }
 
 const deleteProjectResource = `-- name: DeleteProjectResource :exec
+WITH readiness_removed AS (DELETE FROM local_worktree_readiness WHERE resource_id = $1)
 DELETE FROM project_resource WHERE id = $1
 `
 

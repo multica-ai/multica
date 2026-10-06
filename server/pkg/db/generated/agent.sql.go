@@ -1538,6 +1538,25 @@ WHERE id = (
       AND atq.runtime_id = $3
       AND atq.status = 'queued'
       AND (atq.context->>'wakeup_id' IS NULL OR EXISTS (SELECT 1 FROM issue_wakeup w WHERE w.id=(atq.context->>'wakeup_id')::uuid AND w.disabled_at IS NULL AND w.revision=(atq.context->>'wakeup_revision')::bigint))
+
+      -- A source without a fresh daemon measurement never consumes a slot.
+      -- Compare the exact ref so editing path/mode/daemon invalidates readiness.
+      AND (atq.is_leader_task OR NOT EXISTS (
+          SELECT 1 FROM project_resource pr
+          JOIN agent_runtime wr ON wr.id = atq.runtime_id
+          LEFT JOIN local_worktree_readiness ready ON ready.resource_id = pr.id
+            AND ready.resource_ref = pr.resource_ref
+          WHERE pr.workspace_id = wr.workspace_id
+            AND pr.resource_type = 'local_directory'
+            AND pr.resource_ref->>'execution_mode' = 'worktree'
+            AND pr.resource_ref->>'daemon_id' = wr.daemon_id
+            AND pr.project_id::text = COALESCE(
+              (SELECT i.project_id::text FROM issue i WHERE i.id = atq.issue_id AND i.workspace_id = wr.workspace_id),
+              (SELECT c.project_id::text FROM chat_session c WHERE c.id = atq.chat_session_id AND c.workspace_id = wr.workspace_id),
+              (SELECT a.project_id::text FROM autopilot a JOIN autopilot_run ar ON ar.autopilot_id = a.id WHERE ar.id = atq.autopilot_run_id AND a.workspace_id = wr.workspace_id),
+              CASE WHEN atq.context->>'type' = 'quick_create' AND atq.context->>'workspace_id' = wr.workspace_id::text THEN atq.context->>'project_id' END)
+            AND (NOT COALESCE(wr.metadata->'capabilities' ? 'local-worktree-readiness-v1', false) OR ready.resource_id IS NULL OR ready.status <> 'ready' OR ready.expires_at <= now())
+      ))
       AND EXISTS (
           SELECT 1
           FROM agent a
@@ -6874,7 +6893,7 @@ UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
     wait_reason = $2,
     prepare_lease_expires_at = now() + make_interval(secs => $3::double precision)
-WHERE id = $1 AND status = 'dispatched'
+WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
 `
 
@@ -6890,7 +6909,7 @@ type MarkAgentTaskWaitingLocalDirectoryParams struct {
 // human-readable hint (typically the contested path) that the UI surfaces
 // alongside the status.
 //
-// The CHECK only allows the transition from 'dispatched' so a daemon can't
+// Allow updating diagnostics while waiting, but a daemon cannot
 // mark an already-running or terminal task as waiting; the StartAgentTask
 // mutation handles the reverse transition once the lock is acquired.
 func (q *Queries) MarkAgentTaskWaitingLocalDirectory(ctx context.Context, arg MarkAgentTaskWaitingLocalDirectoryParams) (AgentTaskQueue, error) {
