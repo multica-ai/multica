@@ -2725,18 +2725,19 @@ func TestClaimResponseAgentIdentityMatches(t *testing.T) {
 }
 
 type claimRuntimeGuardTask struct {
-	PriorSessionID                string          `json:"prior_session_id"`
-	PriorWorkDir                  string          `json:"prior_work_dir"`
-	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`
-	ChatMessage                   string          `json:"chat_message"`
-	ThreadName                    string          `json:"thread_name"`
-	QuickCreateAttachmentIDs      []string        `json:"quick_create_attachment_ids"`
-	QuickCreatePriority           string          `json:"quick_create_priority"`
-	QuickCreateDueDate            string          `json:"quick_create_due_date"`
-	ProjectID                     string          `json:"project_id"`
-	ProjectDescription            string          `json:"project_description"`
-	ParentIssueID                 string          `json:"parent_issue_id"`
-	QuickCreateSourceContext      json.RawMessage `json:"quick_create_source_context"`
+	PriorSessionID                string               `json:"prior_session_id"`
+	PriorWorkDir                  string               `json:"prior_work_dir"`
+	PriorSessionResumeUnavailable bool                 `json:"prior_session_resume_unavailable"`
+	ChatMessage                   string               `json:"chat_message"`
+	ChatMessageAttachments        []ChatAttachmentMeta `json:"chat_message_attachments"`
+	ThreadName                    string               `json:"thread_name"`
+	QuickCreateAttachmentIDs      []string             `json:"quick_create_attachment_ids"`
+	QuickCreatePriority           string               `json:"quick_create_priority"`
+	QuickCreateDueDate            string               `json:"quick_create_due_date"`
+	ProjectID                     string               `json:"project_id"`
+	ProjectDescription            string               `json:"project_description"`
+	ParentIssueID                 string               `json:"parent_issue_id"`
+	QuickCreateSourceContext      json.RawMessage      `json:"quick_create_source_context"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
