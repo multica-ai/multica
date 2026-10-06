@@ -58,6 +58,7 @@ import {
 import { GithubRefDialog } from "./github-ref-dialog";
 import { GithubRefField, githubRefHasError } from "./github-ref-field";
 import { localDirectoryLabel } from "./local-directory-label";
+import { WorktreeReadinessNotice } from "./worktree-readiness";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
 
@@ -124,9 +125,18 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const [refSaving, setRefSaving] = useState(false);
   const [refError, setRefError] = useState<string | null>(null);
 
-  const { data: resources = [] } = useQuery(
-    projectResourcesOptions(wsId, projectId),
-  );
+  const { data: resources = [], isError: resourcesUnavailable } = useQuery({
+    ...projectResourcesOptions(wsId, projectId),
+    refetchInterval: open || modeDialog !== null ? 5000 : false,
+    refetchIntervalInBackground: false,
+  });
+  // Dialog state captures editable settings, never a snapshot of live readiness.
+  const editedResource = resources.find((resource) => resource.id === modeDialog?.resource?.id);
+  const matchesSavedWorktree = !!(modeDialog && editedResource &&
+    isLocalDirectoryRef(editedResource) &&
+    executionModeOf(editedResource.resource_ref) === "worktree" &&
+    editedResource.resource_ref.local_path === modeDialog.path &&
+    editedResource.resource_ref.daemon_id === modeDialog.daemonId);
   const createResource = useCreateProjectResource(wsId, projectId);
   const updateResource = useUpdateProjectResource(wsId, projectId);
   const deleteResource = useDeleteProjectResource(wsId, projectId);
@@ -399,6 +409,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 <ResourceRow
                   key={resource.id}
                   resource={resource}
+                  readinessUnavailable={resourcesUnavailable}
                   githubRepoDescription={
                     isGithubRef(resource)
                       ? workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
@@ -586,6 +597,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           }}
           path={modeDialog.path}
           value={modeDialog.mode}
+          readiness={{
+            saved: matchesSavedWorktree,
+            readiness: matchesSavedWorktree ? editedResource?.worktree_readiness : undefined,
+            unavailable: resourcesUnavailable,
+          }}
           unavailableReason={worktreeUnavailableReason(
             modeDialog.isGitRepo,
             serverValidatesWorktree,
@@ -629,6 +645,7 @@ function worktreeUnavailableReason(
 
 interface ResourceRowProps {
   resource: ProjectResource;
+  readinessUnavailable?: boolean;
   githubRepoDescription?: string;
   localDaemonId: string | null;
   onRemove: () => void;
@@ -642,6 +659,7 @@ interface ResourceRowProps {
 
 function ResourceRow({
   resource,
+  readinessUnavailable,
   githubRepoDescription,
   localDaemonId,
   onRemove,
@@ -735,6 +753,7 @@ function ResourceRow({
     return (
       <LocalDirectoryRow
         resource={resource}
+        readinessUnavailable={readinessUnavailable}
         localDaemonId={localDaemonId}
         onRemove={onRemove}
         onEditMode={onEditLocalDirectoryMode}
@@ -761,6 +780,7 @@ function ResourceRow({
 
 interface LocalDirectoryRowProps {
   resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
+  readinessUnavailable?: boolean;
   localDaemonId: string | null;
   onRemove: () => void;
   onEditMode: (
@@ -770,6 +790,7 @@ interface LocalDirectoryRowProps {
 
 function LocalDirectoryRow({
   resource,
+  readinessUnavailable,
   localDaemonId,
   onRemove,
   onEditMode,
@@ -787,71 +808,76 @@ function LocalDirectoryRow({
   const mismatch = isForeignDaemon || isLocalUnknown;
 
   return (
-    <div
-      className={`flex items-center gap-2 text-caption group ${
-        mismatch ? "opacity-60" : ""
-      }`}
-    >
-      <FolderOpen className="size-3.5 text-muted-foreground shrink-0" />
-      {/* The name is the folder's own (or whatever a label update stored);
-          there is deliberately no rename here. A folder is identified by its
-          path, and a pencil that only retitled the row read as a broken edit
-          action beside the branch and remove controls (MUL-7525). */}
-      <Tooltip>
-        <TooltipTrigger
-          render={<span className="truncate flex-1">{display}</span>}
-        />
-        <TooltipContent side="top">
-          <div className="space-y-0.5 text-micro">
-            <div className="font-mono">{ref.local_path}</div>
-            {mismatch && (
-              <div className="text-muted-foreground">
-                {isLocalUnknown
-                  ? t(($) => $.resources.local_no_daemon_tooltip)
-                  : t(($) => $.resources.local_other_machine_tooltip)}
-              </div>
-            )}
-          </div>
-        </TooltipContent>
-      </Tooltip>
-      {/* Always visible, unlike the hover-only actions: without it there is no
-          way to tell whether tasks on this folder edit it directly or hand back
-          a branch, which is the first thing someone asks when a task queues (or
-          does not). */}
-      {mode === "worktree" && (
+    <div className="space-y-1.5">
+      <div
+        className={`flex items-center gap-2 text-caption group ${
+          mismatch ? "opacity-60" : ""
+        }`}
+      >
+        <FolderOpen className="size-3.5 text-muted-foreground shrink-0" />
+        {/* The name is the folder's own (or whatever a label update stored);
+            there is deliberately no rename here. A folder is identified by its
+            path, and a pencil that only retitled the row read as a broken edit
+            action beside the branch and remove controls (MUL-7525). */}
         <Tooltip>
           <TooltipTrigger
-            render={
-              <Badge variant="secondary" className="shrink-0 gap-1 font-normal">
-                <GitBranch className="size-3" />
-                {t(($) => $.resources.mode_badge_worktree)}
-              </Badge>
-            }
+            render={<span className="truncate flex-1">{display}</span>}
           />
           <TooltipContent side="top">
-            {t(($) => $.resources.mode_badge_worktree_tooltip)}
+            <div className="space-y-0.5 text-micro">
+              <div className="font-mono">{ref.local_path}</div>
+              {mismatch && (
+                <div className="text-muted-foreground">
+                  {isLocalUnknown
+                    ? t(($) => $.resources.local_no_daemon_tooltip)
+                    : t(($) => $.resources.local_other_machine_tooltip)}
+                </div>
+              )}
+            </div>
           </TooltipContent>
         </Tooltip>
+        {/* Always visible, unlike the hover-only actions: without it there is no
+            way to tell whether tasks on this folder edit it directly or hand back
+            a branch, which is the first thing someone asks when a task queues (or
+            does not). */}
+        {mode === "worktree" && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge variant="secondary" className="shrink-0 gap-1 font-normal">
+                  <GitBranch className="size-3" />
+                  {t(($) => $.resources.mode_badge_worktree)}
+                </Badge>
+              }
+            />
+            <TooltipContent side="top">
+              {t(($) => $.resources.mode_badge_worktree_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
+            it works from the web app or another device, unlike the folder
+            picker. */}
+        <button
+          type="button"
+          onClick={() => onEditMode(resource)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          title={t(($) => $.resources.mode_edit_tooltip)}
+        >
+          <GitBranch className="size-3 text-muted-foreground" />
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          title={t(($) => $.resources.remove_tooltip)}
+        >
+          <Trash2 className="size-3 text-muted-foreground" />
+        </button>
+      </div>
+      {mode === "worktree" && (
+        <WorktreeReadinessNotice readiness={resource.worktree_readiness} unavailable={readinessUnavailable} />
       )}
-      {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
-          it works from the web app or another device, unlike the folder
-          picker. */}
-      <button
-        type="button"
-        onClick={() => onEditMode(resource)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.mode_edit_tooltip)}
-      >
-        <GitBranch className="size-3 text-muted-foreground" />
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.remove_tooltip)}
-      >
-        <Trash2 className="size-3 text-muted-foreground" />
-      </button>
     </div>
   );
 }

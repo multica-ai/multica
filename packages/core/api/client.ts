@@ -247,6 +247,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { ListProjectResourcesResponseSchema } from "./project-resource-schema";
 import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
@@ -4039,7 +4040,11 @@ export class ApiClient {
   async listProjectResources(
     projectId: string,
   ): Promise<ListProjectResourcesResponse> {
-    return this.fetch(`/api/projects/${projectId}/resources`);
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/resources`);
+    return parseWithFallback<ListProjectResourcesResponse>(
+      raw, ListProjectResourcesResponseSchema, { resources: [], total: 0 },
+      { endpoint: "GET /api/projects/{id}/resources" },
+    );
   }
 
   async createProjectResource(

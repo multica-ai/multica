@@ -186,6 +186,7 @@ export type {
   GithubRepoResourceRef,
   LocalDirectoryResourceRef,
   LocalDirectoryExecutionMode,
+  WorktreeReadiness,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
