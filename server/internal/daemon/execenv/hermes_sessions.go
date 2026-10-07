@@ -227,6 +227,14 @@ func hermesStoreHasSessionDB(storeDir string) bool {
 	return true
 }
 
+// hermesStoreContainsSessionDB protects existing history during migration,
+// even when it cannot currently be opened for resume. Read permissions do not
+// prevent unlinking a database from a writable directory.
+func hermesStoreContainsSessionDB(storeDir string) bool {
+	fi, err := os.Stat(filepath.Join(storeDir, hermesSessionDBEntry))
+	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
+}
+
 // migrateHermesTaskSessionDB carries a task-local state.db into an empty store
 // so a daemon upgrade does not restart the conversation that is already in
 // flight. The journal sidecars come with it: a database whose task was killed
@@ -243,7 +251,7 @@ func hermesStoreHasSessionDB(storeDir string) bool {
 // Only an empty store is migrated into — a store that already holds a database
 // is this conversation's real history and must never be overwritten.
 func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger) error {
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return nil // store already holds this conversation — never overwrite it
 	}
 
@@ -315,7 +323,7 @@ func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger
 func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	hermesSessionPublishMu.Lock()
 	defer hermesSessionPublishMu.Unlock()
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return false, nil // a competitor published a real transcript first
 	}
 	if hermesSessionPublishBarrier != nil {
@@ -324,7 +332,7 @@ func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	if err := removeHermesSessionDBFamily(storeDir); err != nil {
 		return false, err
 	}
-	return promoteHermesStoreStaging(staging, storeDir, hermesStoreHasSessionDB)
+	return promoteHermesStoreStaging(staging, storeDir, hermesStoreContainsSessionDB)
 }
 
 // hermesSessionPublishMu serializes every session-store publish in this

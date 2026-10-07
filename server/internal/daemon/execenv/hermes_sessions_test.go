@@ -229,6 +229,53 @@ func TestPrepareHermesHomeMigrationNeverOverwritesStore(t *testing.T) {
 	}
 }
 
+func TestPrepareHermesHomeMigrationPreservesUnreadableStore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions required")
+	}
+	sharedHome := t.TempDir()
+	store := t.TempDir()
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "deploy", Content: "# Deploy"}}
+	db := filepath.Join(store, "state.db")
+	mustWrite(t, db, "the real transcript")
+	mustWrite(t, filepath.Join(store, "state.db-wal"), "the real uncheckpointed history")
+	if err := os.Chmod(db, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(db, 0o600) })
+	if f, err := os.Open(db); err == nil {
+		f.Close()
+		t.Skip("current user can read files despite permissions")
+	}
+	staging := t.TempDir()
+	mustWrite(t, filepath.Join(staging, "state.db"), "competing transcript")
+	mustWrite(t, filepath.Join(staging, "state.db-wal"), "competing WAL")
+	if published, err := publishHermesSessionStaging(staging, store); err != nil || published {
+		t.Fatalf("publish over unreadable history = %v, %v; want false, nil", published, err)
+	}
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", "", testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(hermesHome, "state.db"), "stray task-local database")
+	mustWrite(t, filepath.Join(hermesHome, "state.db-wal"), "stray task-local WAL")
+	if _, err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, "", store, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if hermesStoreHasSessionDB(store) {
+		t.Error("unreadable history must not be resumable")
+	}
+	if err := os.Chmod(db, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"state.db": "the real transcript", "state.db-wal": "the real uncheckpointed history"} {
+		got, err := os.ReadFile(filepath.Join(store, name))
+		if err != nil || string(got) != want {
+			t.Errorf("persistent %s = %q, %v; want %q", name, got, err, want)
+		}
+	}
+}
+
 // TestPrepareHermesHomeSessionMountIsIdempotent covers Reuse: rebuilding the
 // overlay for a follow-up turn in the same task directory must leave the link
 // (and therefore the live database) alone.
