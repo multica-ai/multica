@@ -954,6 +954,15 @@
     "tabs": {
       "updates": "업데이트"
     },
+    "tab_bar": {
+      "pin": "탭 고정",
+      "unpin": "탭 고정 해제",
+      "close": "탭 닫기",
+      "close_others": "다른 탭 닫기",
+      "open_window": "새 창에서 열기",
+      "new": "새 탭",
+      "pinned_name": "{{title}} (고정됨)"
+    },
     "updates": {
       "title": "업데이트",
       "current_version": "현재 버전",

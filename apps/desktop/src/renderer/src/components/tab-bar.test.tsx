@@ -1,11 +1,16 @@
 import { afterAll, describe, expect, it, vi, beforeEach } from "vitest";
+import type { ReactElement } from "react";
 import {
-  render,
+  render as renderRtl,
   renderHook,
   fireEvent,
   waitFor,
   within,
+  type RenderResult,
 } from "@testing-library/react";
+import { I18nProvider } from "@multica/core/i18n/react";
+import type { SupportedLocale } from "@multica/core/i18n";
+import { RESOURCES } from "@multica/views/locales";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 
@@ -93,6 +98,25 @@ vi.mock("@multica/views/layout", () => ({
 }));
 
 import { TabBar } from "./tab-bar";
+
+function render(
+  ui: ReactElement,
+  locale: SupportedLocale = "en",
+): RenderResult {
+  return renderRtl(
+    <I18nProvider locale={locale} resources={RESOURCES}>
+      {ui}
+    </I18nProvider>,
+  );
+}
+
+function englishTabBar() {
+  return (
+    <I18nProvider locale="en" resources={RESOURCES}>
+      <TabBar />
+    </I18nProvider>
+  );
+}
 
 function reset() {
   state.activeWorkspaceSlug = "acme";
@@ -409,7 +433,7 @@ describe("TabBar overflow", () => {
     tabScroller.scrollLeft = 40;
 
     state.byWorkspace.acme.activeTabId = "t5";
-    rerender(<TabBar />);
+    rerender(englishTabBar());
 
     expect(tabScroller.scrollLeft).toBe(222);
   });
@@ -462,7 +486,7 @@ describe("TabBar overflow", () => {
       },
     ];
     state.byWorkspace.acme.activeTabId = "t6";
-    rerender(<TabBar />);
+    rerender(englishTabBar());
 
     expect(getByLabelText("Tab 6")).toHaveAttribute(
       "data-tab-entering",
@@ -517,7 +541,7 @@ describe("TabBar overflow", () => {
         pinned: false,
       },
     ];
-    rerender(<TabBar />);
+    rerender(englishTabBar());
 
     expect(tabScroller.scrollLeft).toBe(40);
     expect(scrollTo).not.toHaveBeenCalled();
@@ -580,4 +604,94 @@ describe("TabBar context menu", () => {
     expect(state.closeOtherTabs).toHaveBeenCalledWith("tB");
   });
 
+});
+
+describe("TabBar locale", () => {
+  const menus = {
+    "zh-Hans": {
+      pin: "固定标签页",
+      unpin: "取消固定标签页",
+      close: "关闭标签页",
+      closeOthers: "关闭其他标签页",
+      openWindow: "在新窗口打开",
+      newTab: "新建标签页",
+      pinned: "Issues（已固定）",
+    },
+    ja: {
+      pin: "タブをピン留め",
+      unpin: "タブのピン留めを解除",
+      close: "タブを閉じる",
+      closeOthers: "他のタブを閉じる",
+      openWindow: "新しいウィンドウで開く",
+      newTab: "新しいタブ",
+      pinned: "Issues（ピン留め）",
+    },
+    ko: {
+      pin: "탭 고정",
+      unpin: "탭 고정 해제",
+      close: "탭 닫기",
+      closeOthers: "다른 탭 닫기",
+      openWindow: "새 창에서 열기",
+      newTab: "새 탭",
+      pinned: "Issues (고정됨)",
+    },
+    fr: {
+      pin: "Épingler l'onglet",
+      unpin: "Désépingler l'onglet",
+      close: "Fermer l'onglet",
+      closeOthers: "Fermer les autres onglets",
+      openWindow: "Ouvrir dans une nouvelle fenêtre",
+      newTab: "Nouvel onglet",
+      pinned: "Issues (épinglé)",
+    },
+  } as const satisfies Record<
+    Exclude<SupportedLocale, "en">,
+    {
+      pin: string;
+      unpin: string;
+      close: string;
+      closeOthers: string;
+      openWindow: string;
+      newTab: string;
+      pinned: string;
+    }
+  >;
+
+  for (const [locale, copy] of Object.entries(menus)) {
+    it(`renders the tab menu in ${locale}, not English`, async () => {
+      state.byWorkspace.acme.tabs = [
+        {
+          id: "tA",
+          url: "/acme/issues/issue-1",
+          title: "Issues",
+          pinned: true,
+        },
+        { id: "tB", url: "/acme/projects", title: "Projects", pinned: false },
+      ];
+
+      const { findByText, getByLabelText, queryByText } = render(
+        <TabBar />,
+        locale as Exclude<SupportedLocale, "en">,
+      );
+
+      expect(getByLabelText(copy.newTab)).toBeInTheDocument();
+      expect(getByLabelText(copy.pinned)).toBeInTheDocument();
+      expect(getByLabelText(copy.unpin)).toBeInTheDocument();
+      expect(getByLabelText(copy.pin)).toBeInTheDocument();
+
+      fireEvent.contextMenu(getByLabelText("Projects"));
+      expect(await findByText(copy.pin)).toBeInTheDocument();
+      expect(await findByText(copy.close)).toBeInTheDocument();
+      expect(await findByText(copy.closeOthers)).toBeInTheDocument();
+      expect(queryByText("Pin tab")).toBeNull();
+      expect(queryByText("Close tab")).toBeNull();
+      expect(queryByText("Close other tabs")).toBeNull();
+
+      fireEvent.contextMenu(getByLabelText(copy.pinned));
+      expect(await findByText(copy.unpin)).toBeInTheDocument();
+      expect(await findByText(copy.openWindow)).toBeInTheDocument();
+      expect(queryByText("Unpin tab")).toBeNull();
+      expect(queryByText("Open as new window")).toBeNull();
+    });
+  }
 });

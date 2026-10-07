@@ -1214,6 +1214,15 @@
     "tabs": {
       "updates": "アップデート"
     },
+    "tab_bar": {
+      "pin": "タブをピン留め",
+      "unpin": "タブのピン留めを解除",
+      "close": "タブを閉じる",
+      "close_others": "他のタブを閉じる",
+      "open_window": "新しいウィンドウで開く",
+      "new": "新しいタブ",
+      "pinned_name": "{{title}}（ピン留め）"
+    },
     "updates": {
       "title": "アップデート",
       "current_version": "現在のバージョン",

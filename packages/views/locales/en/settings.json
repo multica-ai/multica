@@ -1219,6 +1219,15 @@
     "tabs": {
       "updates": "Updates"
     },
+    "tab_bar": {
+      "pin": "Pin tab",
+      "unpin": "Unpin tab",
+      "close": "Close tab",
+      "close_others": "Close other tabs",
+      "open_window": "Open as new window",
+      "new": "New tab",
+      "pinned_name": "{{title}} (pinned)"
+    },
     "updates": {
       "title": "Updates",
       "current_version": "Current version",
