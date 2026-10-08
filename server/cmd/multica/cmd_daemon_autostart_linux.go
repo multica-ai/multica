@@ -243,8 +243,8 @@ func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 		state = autostartState{Mechanism: autostartMechanismSystemd, Location: path}
 
 		if _, statErr := os.Stat(path); statErr == nil {
-			// Marker check BEFORE systemctl disable: refusing after the
-			// disable would already have unlinked the user's unit.
+			// Marker check BEFORE touching the unit: refusing must not have
+			// unlinked the user's file as a side effect.
 			previous, readErr := os.ReadFile(path)
 			if readErr != nil {
 				return autostartState{}, false, readErr
@@ -252,16 +252,25 @@ func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 			if !autostartCommentMarked(string(previous)) {
 				return state, false, errAutostartUnmanaged
 			}
-			if _, err := exec.Command("systemctl", "--user", "disable", systemdUnitName(profile)).CombinedOutput(); err != nil {
-				// A missing user bus must not strand the unit file: fall
-				// back to unlinking the wants symlink directly.
-				_ = removeSystemdWantsLink(path)
+			// Remove the enablement but KEEP the managed unit file. The
+			// running daemon is still supervised by this unit, and its
+			// restart configuration (Restart=, RestartForceExitStatus=) is
+			// what lets the exit-42 binary-update handoff come back in this
+			// session: deleting the file (as disable used to) leaves the
+			// live service at LoadState=not-found / Restart=no, so the next
+			// handoff exits into failure and stays down until someone
+			// starts it manually. Unlinked, the unit never starts at the
+			// next login — boot autostart is off — while the current
+			// session keeps its restart policy.
+			if systemdUnitLinkedAnywhere(path) {
+				if _, err := exec.Command("systemctl", "--user", "disable", systemdUnitName(profile)).CombinedOutput(); err != nil {
+					// A missing user bus must not strand the links: unlink
+					// every wants entry directly.
+					removeSystemdWantsLinks(path)
+				}
+				_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+				changed = true
 			}
-			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return autostartState{}, false, err
-			}
-			_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-			changed = true
 		} else if !errors.Is(statErr, fs.ErrNotExist) {
 			return autostartState{}, false, statErr
 		}
@@ -279,9 +288,26 @@ func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 	return state, changed, nil
 }
 
-func removeSystemdWantsLink(unitPath string) error {
-	wantsDir := filepath.Join(filepath.Dir(unitPath), "default.target.wants")
-	return os.Remove(filepath.Join(wantsDir, filepath.Base(unitPath)))
+// systemdUnitLinkedAnywhere reports whether ANY wants link for the unit
+// exists under the user unit dir — default.target or any other target
+// (graphical-session.target and friends). Disable has to clear all of them,
+// and a link that exists somewhere is what makes a disable call a real
+// change rather than an idempotent no-op.
+func systemdUnitLinkedAnywhere(unitPath string) bool {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(unitPath), "*.wants", filepath.Base(unitPath)))
+	return err == nil && len(matches) > 0
+}
+
+// removeSystemdWantsLinks unlinks every wants entry for the unit — the
+// fallback when `systemctl --user disable` cannot run (no user bus).
+func removeSystemdWantsLinks(unitPath string) {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(unitPath), "*.wants", filepath.Base(unitPath)))
+	if err != nil {
+		return
+	}
+	for _, match := range matches {
+		_ = os.Remove(match)
+	}
 }
 
 // removeXdgAutostartFile deletes the fallback entry if present, reporting

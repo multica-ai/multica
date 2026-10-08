@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -320,5 +321,66 @@ func TestRemoveXdgAutostartFileOnlyRemovesMarkedEntries(t *testing.T) {
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, fs.ErrNotExist) {
 		t.Fatalf("marked .desktop still present (stat err = %v), want it removed", statErr)
+	}
+}
+
+// TestDisableKeepsRunningServiceRecoverable pins the review's P2 regression:
+// running service → `autostart disable` → binary-update handoff. Disable must
+// unlink the unit (so no start happens at the next login) while KEEPING the
+// managed unit file: its RestartForceExitStatus is what lets the exit-42
+// handoff come back in the current session. Deleting the file — as disable
+// used to — left the live service at LoadState=not-found / Restart=no, so the
+// handoff exited into failure and the runtime stayed offline. The follow-up
+// sync (what `daemon start` runs) must also not silently re-enable it.
+func TestDisableKeepsRunningServiceRecoverable(t *testing.T) {
+	if !systemdAvailable() {
+		t.Skip("systemctl not available")
+	}
+	useAutostartConfigHome(t)
+	unitPath, err := systemdUnitPath("")
+	if err != nil {
+		t.Fatalf("systemdUnitPath: %v", err)
+	}
+	writeAutostartFixture(t, unitPath, markedUnitFixture(t))
+	linkUnit(t, unitPath, "default.target.wants")
+
+	if _, changed, err := platformRemoveAutostart(""); err != nil || !changed {
+		t.Fatalf("platformRemoveAutostart: changed=%v err=%v, want the link removed", changed, err)
+	}
+
+	// 1. Restart configuration retained for the running, supervised service.
+	content, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("managed unit file was deleted — the running service loses its restart policy: %v", err)
+	}
+	if !strings.Contains(string(content), "RestartForceExitStatus=") {
+		t.Fatalf("retained unit lost its handoff restart policy:\n%s", content)
+	}
+
+	// 2. Boot autostart disabled: nothing links the unit anymore.
+	if systemdUnitLinkedAnywhere(unitPath) {
+		t.Fatal("unit still wants-linked — it would start at the next login")
+	}
+
+	// 3. The running process would still take the exit-42 handoff branch
+	// (its cgroup still names the unit), so with the policy retained above
+	// systemd restarts it — and the next daemon start must not re-enable.
+	t.Setenv("INVOCATION_ID", "fixture")
+	writeCgroupFixture(t, "0::/app.slice/multica-daemon.service-1.service\n")
+	if !platformDaemonUnderOwnSystemdUnit("") {
+		t.Fatal("handoff detection lost its own unit after disable — the daemon would fall back to spawn+exit 0")
+	}
+	t.Setenv("MULTICA_LAUNCHED_BY", "")
+	syncDaemonAutostartDefault("", false)
+	if systemdUnitLinkedAnywhere(unitPath) {
+		t.Fatal("daemon start re-linked the unit — disable must survive a restart cycle")
+	}
+	if _, statErr := os.Stat(unitPath); statErr != nil {
+		t.Fatalf("sync touched the retained unit: %v", statErr)
+	}
+
+	// A second disable is a no-op, not a second "disabled".
+	if _, changed, err := platformRemoveAutostart(""); err != nil || changed {
+		t.Fatalf("second disable: changed=%v err=%v, want false/nil", changed, err)
 	}
 }

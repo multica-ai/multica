@@ -476,16 +476,16 @@ func TestSyncDaemonAutostart(t *testing.T) {
 		}
 	})
 
-	t.Run("owned but unlinked entry gets the hint, never a silent heal", func(t *testing.T) {
+	t.Run("owned but unlinked entry is left alone entirely", func(t *testing.T) {
 		t.Setenv("MULTICA_LAUNCHED_BY", "")
 		writes := 0
 		stubPlatform(t, stubAutostartPlatform{
 			supported:      true,
 			refreshAllowed: true,
 			read: func(string) (autostartState, error) {
-				// e.g. the user ran `systemctl disable` on OUR unit: the hint
-				// may point at enable, but a plain `daemon start` must not
-				// re-link an entry the user deliberately turned off.
+				// What `autostart disable` leaves behind on Linux: the marked
+				// unit file, unlinked. A plain `daemon start` must neither
+				// re-link it (the user turned it off) nor nag them to.
 				return autostartState{Present: true, Enabled: false, Managed: true}, nil
 			},
 			write: func(string, autostartSpec) (autostartState, bool, error) {
@@ -499,8 +499,8 @@ func TestSyncDaemonAutostart(t *testing.T) {
 		if writes != 0 {
 			t.Fatalf("writeAutostart calls = %d, want 0 — refresh must not re-enable a disabled entry", writes)
 		}
-		if !strings.Contains(out, "multica daemon autostart enable") {
-			t.Errorf("stderr = %q, want the enable hint for an owned-but-unlinked entry", out)
+		if out != "" {
+			t.Errorf("stderr = %q, want silence — the hint is only for a never-registered profile", out)
 		}
 	})
 
@@ -569,7 +569,8 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		stubPlatform(t, stubAutostartPlatform{
 			supported: true,
 			read: func(string) (autostartState, error) {
-				return autostartState{Mechanism: autostartMechanismWindowsRun}, nil
+				// Pre-state: enabled and ours — enable changes nothing.
+				return autostartState{Present: true, Enabled: true, Managed: true, Mechanism: autostartMechanismWindowsRun}, nil
 			},
 			write: func(string, autostartSpec) (autostartState, bool, error) {
 				return autostartState{Enabled: true, Managed: true, Mechanism: autostartMechanismWindowsRun}, false, nil
@@ -583,6 +584,33 @@ func TestRunDaemonAutostartEnableDisableStatus(t *testing.T) {
 		}
 		if !strings.Contains(out, "already enabled") {
 			t.Errorf("enable output = %q, want 'already enabled' when nothing changed", out)
+		}
+	})
+
+	// Linux disable keeps the (unlinked) unit file, so re-enabling after a
+	// disable often rewrites no content — the change is the wants link
+	// coming back. Claiming "already enabled" there would describe the state
+	// the user just moved out of.
+	t.Run("enable says enabled when re-linking a disabled registration", func(t *testing.T) {
+		mkProfiles(t)
+		stubPlatform(t, stubAutostartPlatform{
+			supported: true,
+			read: func(string) (autostartState, error) {
+				return autostartState{Present: true, Enabled: false, Managed: true, Mechanism: autostartMechanismSystemd}, nil
+			},
+			write: func(string, autostartSpec) (autostartState, bool, error) {
+				// Content identical — only the link changes.
+				return autostartState{Present: true, Enabled: true, Managed: true, Mechanism: autostartMechanismSystemd}, false, nil
+			},
+		})
+		sc := captureStderr(t)
+		err := runDaemonAutostartEnable(autostartCmdFor(t, "", ""), nil)
+		out := sc.read()
+		if err != nil {
+			t.Fatalf("runDaemonAutostartEnable = %v", err)
+		}
+		if strings.Contains(out, "already enabled") || !strings.Contains(out, "Boot autostart enabled") {
+			t.Errorf("enable output = %q, want 'enabled' (not 'already enabled') when re-linking", out)
 		}
 	})
 

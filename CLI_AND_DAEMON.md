@@ -211,10 +211,14 @@ was launched by an external supervisor (systemd `INVOCATION_ID` for a unit
 that is not ours).
 
 `daemon stop` stops the daemon but keeps the registration — it says nothing
-about the next boot; `autostart disable` is what turns that off. Daemons
-started by the Multica Desktop app are never registered or refreshed here:
-the app owns that daemon's lifecycle through its own app-start daemon
-preference.
+about the next boot; `autostart disable` is what turns that off. Disabling
+never disturbs a running daemon: on Linux the wants link is removed while
+the managed unit file stays (unlinked), so the current session keeps the
+unit's restart policy across a binary update and only the next-login start
+goes away; on macOS the plist is deleted without a `launchctl bootout`, so
+the process launchd is supervising keeps running. Daemons started by the
+Multica Desktop app are never registered or refreshed here: the app owns
+that daemon's lifecycle through its own app-start daemon preference.
 
 ### Stop
 

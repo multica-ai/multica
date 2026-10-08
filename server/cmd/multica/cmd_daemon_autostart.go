@@ -201,21 +201,19 @@ func requireAutostartSupported() error {
 	return fmt.Errorf("boot autostart is not supported on %s", runtime.GOOS)
 }
 
-// refuseUnmanagedAutostart is the shared guard for enable and disable: an
-// entry at our path that lacks our marker was written by the user (their own
-// unit with an EnvironmentFile=, a hand-written LaunchAgent, ...). Overwriting
-// or deleting it would silently destroy their configuration, so both commands
-// stop and say which file is in the way instead.
+// refuseUnmanagedAutostart is the shared guard for enable and disable, run
+// against the state the caller just read (both commands need that read for
+// their own wording anyway): an entry at our path that lacks our marker was
+// written by the user (their own unit with an EnvironmentFile=, a
+// hand-written LaunchAgent, ...). Overwriting or deleting it would silently
+// destroy their configuration, so both commands stop and say which file is
+// in the way instead.
 //
 // Keyed off Present, not Enabled: on Linux a hand-written unit that was never
 // enabled — or was enabled under another target, so systemdUnitLinked reads
 // false — is still a file at our path, and guarding only "enabled" entries
 // would let `disable` delete it.
-func refuseUnmanagedAutostart(profile string, action string) error {
-	cur, err := readAutostart(profile)
-	if err != nil {
-		return err
-	}
+func refuseUnmanagedAutostart(cur autostartState, action string) error {
 	if cur.Present && !cur.Managed {
 		return fmt.Errorf(
 			"%s exists at %s but was not created by Multica; refusing to %s it.\n"+
@@ -236,21 +234,30 @@ func runDaemonAutostartEnable(cmd *cobra.Command, _ []string) error {
 	if err := requireAutostartSupported(); err != nil {
 		return err
 	}
-	if err := refuseUnmanagedAutostart(profile, "overwrite"); err != nil {
+	cur, err := readAutostart(profile)
+	if err != nil {
+		return err
+	}
+	if err := refuseUnmanagedAutostart(cur, "overwrite"); err != nil {
 		return err
 	}
 	spec, err := autostartSpecFor(profile)
 	if err != nil {
 		return err
 	}
-	state, changed, err := writeAutostart(profile, spec)
+	state, contentChanged, err := writeAutostart(profile, spec)
 	if err != nil {
 		return err
 	}
 
-	verb := "already enabled"
-	if changed {
-		verb = "enabled"
+	// "already enabled" only when it already WAS enabled and nothing about
+	// the registration changed. Linux disable keeps the (unlinked) unit
+	// file, so re-enabling after a disable often rewrites no content — the
+	// change is the wants link coming back, and claiming "already enabled"
+	// there would describe the state the user just moved out of.
+	verb := "enabled"
+	if cur.Enabled && !contentChanged {
+		verb = "already enabled"
 	}
 	fmt.Fprintf(os.Stderr, "Boot autostart %s for profile %s (%s) — the daemon starts at login.\n",
 		verb, profileLabel(profile), mechanismLabel(state.Mechanism))
@@ -280,7 +287,11 @@ func runDaemonAutostartDisable(cmd *cobra.Command, _ []string) error {
 	if err := requireAutostartSupported(); err != nil {
 		return err
 	}
-	if err := refuseUnmanagedAutostart(profile, "remove"); err != nil {
+	cur, err := readAutostart(profile)
+	if err != nil {
+		return err
+	}
+	if err := refuseUnmanagedAutostart(cur, "remove"); err != nil {
 		return err
 	}
 	_, changed, err := removeAutostart(profile)
@@ -404,12 +415,14 @@ func shouldManageAutostart() bool {
 
 // syncDaemonAutostartDefault implements the `daemon start` contract:
 //
-//   - nothing registered → print a one-line hint (only where a human can see
-//     it) pointing at `multica daemon autostart enable`;
-//   - a Multica-owned entry exists → silently rewrite it so a moved
-//     executable (Homebrew upgrade, self-update) or a refreshed PATH heals;
-//   - an entry exists but is not ours, or we are under an external
-//     supervisor → leave it completely alone.
+//   - nothing registered at all → print a one-line hint (only where a human
+//     can see it) pointing at `multica daemon autostart enable`;
+//   - an enabled Multica-owned entry exists → silently rewrite it so a
+//     moved executable (Homebrew upgrade, self-update) or a refreshed PATH
+//     heals;
+//   - an entry exists at our path but is disabled or not ours, or we are
+//     under an external supervisor → leave it completely alone (never
+//     re-link what a disable turned off, never hint at a foreign file).
 //
 // It never creates a registration and never fails the start: the daemon
 // itself is the deliverable of `daemon start`.
@@ -435,12 +448,14 @@ func syncDaemonAutostartDefault(profile string, announce bool) {
 		_, _, _ = writeAutostart(profile, spec)
 		return
 	}
-	// Nothing enabled. A foreign file at our path is not "nothing
-	// registered" — hinting `enable` at it would only lead to enable's
-	// refusal — and an owned-but-unlinked entry (a user's manual `systemctl
-	// disable`) gets the hint but never a silent heal: the refresh must not
-	// re-link an entry the user deliberately turned off.
-	if state.Present && !state.Managed {
+	// Nothing enabled. An entry that exists at our path — ours unlinked
+	// (the user ran `autostart disable` or `systemctl disable`) or a
+	// foreign file — is a state the user chose or owns: no rewrite (the
+	// refresh must never re-link an entry that was deliberately turned off)
+	// and no hint. The hint exists for discovery, i.e. nothing registered
+	// at all; nagging someone who just disabled it would be noise, and
+	// hinting at a foreign file would only lead to enable's refusal.
+	if state.Present {
 		return
 	}
 	if announce {

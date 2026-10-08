@@ -85,11 +85,18 @@ func platformWriteAutostart(profile string, spec autostartSpec) (autostartState,
 	}, changed, nil
 }
 
-// platformRemoveAutostart deletes the LaunchAgent. If launchd still has the
-// label loaded from a prior session it is booted out first so a live entry
-// cannot keep running after the user removed its registration.
+// platformRemoveAutostart deletes the LaunchAgent — on macOS the plist's
+// presence IS the enablement, so removing it is what stops the next login
+// from starting the daemon.
+//
+// Deliberately WITHOUT `launchctl bootout`: bootout would terminate the
+// process launchd is supervising right now, and disable means "don't start
+// at the next login", not "kill the current session". launchd keeps the
+// already-running process going when the plist disappears; only the next
+// login (where the file is gone) starts nothing. Mirrors the Linux disable,
+// which unlinks the unit while keeping it (and its restart policy) for the
+// running service.
 func platformRemoveAutostart(profile string) (autostartState, bool, error) {
-	label := launchAgentLabel(profile)
 	path, err := launchAgentPath(profile)
 	if err != nil {
 		return autostartState{}, false, err
@@ -105,7 +112,6 @@ func platformRemoveAutostart(profile string) (autostartState, bool, error) {
 		return autostartState{}, false, statErr
 	}
 
-	_ = exec.Command("launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/"+label).Run()
 	if err := os.Remove(path); err != nil {
 		return autostartState{}, false, err
 	}
