@@ -4971,6 +4971,16 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-task liveness (#9105): stamp last_heartbeat_at from this existing
+	// poll rather than a new daemon call. The query throttles to one write
+	// per task per minute and only touches running rows. Best-effort: a
+	// heartbeat write failure must never fail the daemon's status check.
+	if task.Status == "running" {
+		if err := h.Queries.TouchAgentTaskHeartbeat(r.Context(), taskUUID); err != nil {
+			slog.Warn("touch agent task heartbeat failed", "task_id", taskID, "error", err)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": task.Status})
 }
 
