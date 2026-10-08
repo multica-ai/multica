@@ -29,7 +29,7 @@ func TestProbeAgentCLIsDiscoversCodeArtsDefaultInstallPath(t *testing.T) {
 	resolveAgentsViaLoginShell = func([]string) map[string]string { return map[string]string{} }
 	resetShellResolveCacheForTest(t)
 
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("MULTICA_CODEARTS_PATH", "")

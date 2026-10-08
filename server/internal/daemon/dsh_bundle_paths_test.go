@@ -241,7 +241,7 @@ func TestDshPluginPathDirs_FindsBothLayouts(t *testing.T) {
 			t.Skip("no app-data location on this platform")
 		}
 		want := mkShim(t, filepath.Join(appData, "runtime-commands", "generations", "gen-1"), time.Now())
-		t.Setenv("HOME", home)
+		redirectTestHome(t, home)
 		t.Setenv("USERPROFILE", home)
 
 		got := dshPluginPathDirs()
@@ -260,7 +260,7 @@ func TestDshPluginPathDirs_FindsBothLayouts(t *testing.T) {
 		if err := os.MkdirAll(flat, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("HOME", home)
+		redirectTestHome(t, home)
 		t.Setenv("USERPROFILE", home)
 
 		got := dshPluginPathDirs()

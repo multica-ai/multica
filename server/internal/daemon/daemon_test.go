@@ -187,7 +187,7 @@ func TestIsBlockedEnvKey(t *testing.T) {
 
 func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 
 	got, err := prepareReasonixTaskStateHome("work", "runtime-1", "agent_2")
@@ -209,7 +209,7 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 
 func TestPrepareDshTaskSessionRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 
 	got, err := prepareDshTaskSessionRoot("work", "runtime-1", "agent_2")
@@ -2067,7 +2067,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 	// Keep profile/store resolution inside synthetic homes, never the user's.
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 	sourceHome, root := t.TempDir(), t.TempDir()
 	taskNumber := 0
