@@ -37,13 +37,14 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { SettingsSection, SettingsTab } from "./settings-layout";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
 export function TokensTab() {
   const { t } = useT("settings");
+  const locale = useLocale();
   const expiryItems = EXPIRY_KEYS.map((value) => ({
     value,
     label: t(($) => $.tokens.expiry[value]),
@@ -129,16 +130,16 @@ export function TokensTab() {
   };
 
   return (
-    <SettingsTab title={t(($) => $.tokens.title)}>
+    <SettingsTab title={t(($) => $.tokens.title)} description={t(($) => $.tokens.purpose)} scope="account">
       <SettingsSection
-        description={
-          <>
-            {t(($) => $.tokens.description)}
-            <br />
-            {t(($) => $.tokens.security_note)}
-          </>
-        }
+        description={t(($) => $.tokens.security_note)}
       >
+        <details className="text-caption text-muted-foreground">
+          <summary className="cursor-pointer rounded-sm py-2 focus-visible:outline-2 focus-visible:outline-ring">
+            {t(($) => $.tokens.usage_help)}
+          </summary>
+          <p className="mt-1">{t(($) => $.tokens.description)}</p>
+        </details>
         <Card>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
@@ -182,7 +183,7 @@ export function TokensTab() {
                     <Skeleton className="h-4 w-32" />
                     <Skeleton className="h-3 w-48" />
                   </div>
-                  <Skeleton className="h-8 w-8 rounded" />
+                  <Skeleton className="h-8 w-8 rounded-xs" />
                 </CardContent>
               </Card>
             ))}
@@ -190,7 +191,7 @@ export function TokensTab() {
         ) : tokens.length === 0 ? (
           <Card>
             <CardContent>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {tokensLoadFailed ? t(($) => $.tokens.load_failed) : t(($) => $.tokens.empty)}
               </p>
             </CardContent>
@@ -201,19 +202,19 @@ export function TokensTab() {
               <Card key={token.id}>
                 <CardContent className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate">{token.name}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-body font-medium truncate">{token.name}</div>
+                    <div className="text-caption text-muted-foreground">
                       {t(($) => $.tokens.metadata_prefix, {
                         prefix: token.token_prefix,
-                        created: new Date(token.created_at).toLocaleDateString(),
+                        created: new Date(token.created_at).toLocaleDateString(locale),
                         lastUsed: token.last_used_at
                           ? t(($) => $.tokens.last_used_with_date, {
-                              date: new Date(token.last_used_at!).toLocaleDateString(),
+                              date: new Date(token.last_used_at!).toLocaleDateString(locale),
                             })
                           : t(($) => $.tokens.last_used_never),
                       })}
                       {token.expires_at && t(($) => $.tokens.expires_with_date, {
-                        date: new Date(token.expires_at!).toLocaleDateString(),
+                        date: new Date(token.expires_at!).toLocaleDateString(locale),
                       })}
                     </div>
                   </div>
@@ -277,7 +278,7 @@ export function TokensTab() {
             </AlertDescription>
           </Alert>
           <div className="flex min-w-0 items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-sm select-all">
+            <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-body select-all">
               {newToken}
             </code>
             <Tooltip>
@@ -297,9 +298,9 @@ export function TokensTab() {
             </Tooltip>
           </div>
           <div className="min-w-0 space-y-1.5">
-            <p className="text-xs text-muted-foreground">{t(($) => $.tokens.created_dialog.cli_hint)}</p>
+            <p className="text-caption text-muted-foreground">{t(($) => $.tokens.created_dialog.cli_hint)}</p>
             <div className="flex min-w-0 items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-sm select-all">
+              <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-body select-all">
                 {`multica login --token ${newToken}`}
               </code>
               <Tooltip>
@@ -320,7 +321,7 @@ export function TokensTab() {
             </div>
           </div>
           <DialogFooter className="items-center sm:justify-between">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-body">
               <Checkbox
                 checked={storedConfirmed}
                 onCheckedChange={(v) => setStoredConfirmed(v === true)}

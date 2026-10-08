@@ -7,10 +7,13 @@ import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import { useWelcomeStore } from "@multica/core/onboarding";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
+import { WebScrollRestorationProvider } from "@/platform/scroll-restoration";
 import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
+import { detectWebOS } from "@/platform/client-os";
+import { useUserLocaleSyncEnabled } from "@/platform/user-locale-sync";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -28,10 +31,9 @@ function hasLegacyToken(): boolean {
 }
 
 // Derive WebSocket URL from the page origin so self-hosted / LAN deployments
-// work without explicit NEXT_PUBLIC_WS_URL.  The Next.js rewrite rule
-// (/ws → backend) handles proxying.
+// work without an explicit runtime wsUrl. The Next.js runtime proxy handles
+// /ws -> backend when the deployment keeps WebSockets same-origin.
 function deriveWsUrl(): string | undefined {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window === "undefined") return undefined;
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}/ws`;
@@ -47,23 +49,28 @@ export function WebProviders({
   children,
   locale,
   resources,
+  apiBaseUrl,
+  wsUrl,
 }: {
   children: React.ReactNode;
   locale: SupportedLocale;
   resources: Record<string, LocaleResources>;
+  apiBaseUrl?: string;
+  wsUrl?: string;
 }) {
   const cookieAuth = !hasLegacyToken();
+  const syncUserLocale = useUserLocaleSyncEnabled();
   // Stable identity reference so downstream effects keyed on it don't see a
   // new object on every parent render.
   const identity = useMemo(
-    () => ({ platform: "web", version: WEB_VERSION }),
+    () => ({ platform: "web", version: WEB_VERSION, os: detectWebOS() }),
     [],
   );
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   return (
     <CoreProvider
-      apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
-      wsUrl={deriveWsUrl()}
+      apiBaseUrl={apiBaseUrl}
+      wsUrl={wsUrl || deriveWsUrl()}
       cookieAuth={cookieAuth}
       onLogin={setLoggedInCookie}
       onLogout={() => {
@@ -80,8 +87,11 @@ export function WebProviders({
       locale={locale}
       resources={resources}
       localeAdapter={localeAdapter}
+      syncUserLocale={syncUserLocale}
     >
-      <WebNavigationProvider>{children}</WebNavigationProvider>
+      <WebNavigationProvider>
+        <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+      </WebNavigationProvider>
     </CoreProvider>
   );
 }

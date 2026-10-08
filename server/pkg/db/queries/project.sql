@@ -5,13 +5,23 @@ WHERE workspace_id = $1
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
 ORDER BY created_at DESC;
 
--- name: GetProject :one
-SELECT * FROM project
-WHERE id = $1;
-
 -- name: GetProjectInWorkspace :one
 SELECT * FROM project
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: LockProjectForChatSessionCreate :one
+-- Conflicts with project deletion so a chat session cannot commit a soft
+-- project reference after the delete transaction has swept existing sessions.
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
+-- name: LockProjectForDelete :one
+-- Serializes project deletion with chat-session creation. The handler locks,
+-- clears every soft chat reference, and deletes the project in one transaction.
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
 
 -- name: CreateProject :one
 INSERT INTO project (
@@ -47,7 +57,8 @@ WHERE project_id = $1;
 -- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done_count
+       count(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done_count
 FROM issue
-WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
+WHERE workspace_id = sqlc.arg('workspace_id')::uuid
+  AND project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;

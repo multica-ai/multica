@@ -1,5 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // The CI workflow pins the toolchain these tasks run under (Node 22 today).
+  // Without it in the global hash, bumping that version would replay cached
+  // typecheck/test results produced by the old runtime and hide an
+  // incompatibility behind a green check.
+  "globalDependencies": [".github/workflows/ci.yml"],
   "globalEnv": [
     "DATABASE_URL",
     "PORT",
@@ -16,9 +21,27 @@
     "DESKTOP_APP_SUFFIX"
   ],
   "tasks": {
+    // `fumadocs-mdx` regenerates `.source/` by removing the directory and
+    // writing it again, so two of them in the same package at once is a race:
+    // one process rm -rf's the tree the other has already mkdir'd, and the
+    // loser dies on `ENOENT .source/index.ts`. `build` and `typecheck` both
+    // needed those types and both used to shell out to it, which turbo is free
+    // to run concurrently — a red CI job on nothing but timing. One task the
+    // two depend on generates it once, and its output is cached like any
+    // other. Packages without an `mdx` script are unaffected: turbo skips a
+    // dependency no package implements.
+    "mdx": {
+      "outputs": [".source/**"]
+    },
     "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "app/**", "**/*.ts", "**/*.tsx", "**/*.css"],
+      "dependsOn": ["^build", "mdx"],
+      // No explicit `inputs`: turbo's default (every git-tracked file in the
+      // package) is the only safe hash source now that the cache is actually
+      // restored in CI. The previous narrow glob list matched neither
+      // `content/**/*.mdx` (compiled by fumadocs-mdx during the build),
+      // `public/**` assets, nor `package.json` / `tsconfig.json`, so the task
+      // hash was unchanged by edits to any of them -- harmless while nothing
+      // was ever cached, a stale-build bug the moment it is.
       "outputs": [".next/**", "!.next/cache/**", "dist/**", "out/**"]
     },
     "dev": {
@@ -30,13 +53,31 @@
       "persistent": true
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["^typecheck", "mdx"]
     },
+    // Hash-only transit task. No package implements a `cache-inputs` script,
+    // so every node resolves to <NONEXISTENT> and nothing is ever executed --
+    // but the edges still pull each dependency's file hashes into whatever
+    // depends on it. `dependsOn: ["^cache-inputs"]` makes that recursive, so
+    // the chain stays complete if a package ever gains a purely transitive
+    // dependency. This exists because a turbo task hash covers a workspace
+    // dependency's sources only when a task edge reaches them.
+    "cache-inputs": {
+      "dependsOn": ["^cache-inputs"]
+    },
+    // Without a dependency edge, editing packages/views or packages/ui left
+    // `@multica/web#test` and `@multica/desktop#test` byte-identical in hash,
+    // so a cached pass would be replayed over changed code. `^cache-inputs`
+    // closes that without side effects: `^typecheck` would also work but drags
+    // three real `tsc --noEmit` runs (~223 CPU-seconds) into the test job, and
+    // `^test` would serialise the suites behind each other.
     "test": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["^cache-inputs"]
     },
-    "lint": {
-      "dependsOn": ["^typecheck"]
-    }
+    // `lint` keeps no dependency edge: eslint here is not type-aware (no
+    // `projectService` / `parserOptions.project` anywhere in
+    // packages/eslint-config), so it only ever reads its own package's files
+    // and a dependency's source cannot change its result.
+    "lint": {}
   }
 }

@@ -379,7 +379,7 @@ func TestSigningSecret_EmptyClearsSecret(t *testing.T) {
 	requireAcceptedWebhookResponse(t, post)
 }
 
-func TestReplay_CreatesNewDeliveryAndDispatchesRun(t *testing.T) {
+func TestReplay_QueuesIdempotentDeliveryForDurableWorker(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "Replay Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
 	trig := createWebhookTriggerViaHandler(t, apID)
@@ -395,9 +395,10 @@ func TestReplay_CreatesNewDeliveryAndDispatchesRun(t *testing.T) {
 	// Replay the original.
 	wr := httptest.NewRecorder()
 	req := newRequest("POST", fmt.Sprintf("/api/autopilots/%s/deliveries/%s/replay", apID, originalID), nil)
+	req.Header.Set("Idempotency-Key", "replay-request")
 	req = withURLParams(req, "id", apID, "deliveryId", originalID)
 	testHandler.ReplayAutopilotDelivery(wr, req)
-	if wr.Code != http.StatusCreated {
+	if wr.Code != http.StatusAccepted {
 		t.Fatalf("replay: %d body=%s", wr.Code, wr.Body.String())
 	}
 	var replay map[string]any
@@ -408,11 +409,32 @@ func TestReplay_CreatesNewDeliveryAndDispatchesRun(t *testing.T) {
 	if replay["replayed_from_delivery_id"] != originalID {
 		t.Fatalf("replayed_from_delivery_id: %v", replay["replayed_from_delivery_id"])
 	}
-	if replay["autopilot_run_id"] == nil {
-		t.Fatal("replay should dispatch a run")
+	if replay["status"] != deliveryStatusQueued || replay["autopilot_run_id"] != nil {
+		t.Fatalf("replay should be durably queued before worker dispatch: %#v", replay)
 	}
-	if replay["autopilot_run_id"] == originalRunID {
+	replayID := replay["id"].(string)
+	replayedDelivery := processQueuedWebhookDelivery(t, replayID)
+	if !replayedDelivery.AutopilotRunID.Valid {
+		t.Fatal("worker should link the replay run")
+	}
+	if uuidToString(replayedDelivery.AutopilotRunID) == originalRunID {
 		t.Fatal("replay should produce a NEW run, not reuse the original")
+	}
+
+	// Retrying the replay request with the same key returns the same delivery
+	// and cannot enqueue or reserve a second run.
+	retryRecorder := httptest.NewRecorder()
+	retryReq := newRequest("POST", fmt.Sprintf("/api/autopilots/%s/deliveries/%s/replay", apID, originalID), nil)
+	retryReq.Header.Set("Idempotency-Key", "replay-request")
+	retryReq = withURLParams(retryReq, "id", apID, "deliveryId", originalID)
+	testHandler.ReplayAutopilotDelivery(retryRecorder, retryReq)
+	if retryRecorder.Code != http.StatusAccepted {
+		t.Fatalf("replay retry: %d body=%s", retryRecorder.Code, retryRecorder.Body.String())
+	}
+	var retried map[string]any
+	json.Unmarshal(retryRecorder.Body.Bytes(), &retried)
+	if retried["id"] != replayID {
+		t.Fatalf("replay retry id = %v, want %s", retried["id"], replayID)
 	}
 
 	deliveries := listDeliveries(t, apID)

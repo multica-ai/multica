@@ -63,8 +63,29 @@ describe("runtimeDisplayLabel", () => {
   });
 
   it("uses the daemon's provider display name for overridden slugs", () => {
-    // Trae's slug is `traecli`; the label must read "Trae", matching the
-    // no-alias daemon name, not the title-cased slug "Traecli".
+    // CodeArts, DSH, Qoder CN, Trae, Qwen Code, and QwenPaw use display names that differ from
+    // title-cased slugs; aliases must match the daemon's no-alias names.
+    expect(
+      runtimeDisplayLabel({
+        name: "CodeArts (host)",
+        custom_name: "box",
+        provider: "codearts",
+      }),
+    ).toBe("box (CodeArts)");
+    expect(
+      runtimeDisplayLabel({
+        name: "DeepSeek Harness (host)",
+        custom_name: "box",
+        provider: "dsh",
+      }),
+    ).toBe("box (DeepSeek Harness)");
+    expect(
+      runtimeDisplayLabel({
+        name: "Qoder CN (host)",
+        custom_name: "box",
+        provider: "qoderclicn",
+      }),
+    ).toBe("box (Qoder CN)");
     expect(
       runtimeDisplayLabel({
         name: "Trae (host)",
@@ -72,12 +93,40 @@ describe("runtimeDisplayLabel", () => {
         provider: "traecli",
       }),
     ).toBe("box (Trae)");
+    expect(
+      runtimeDisplayLabel({
+        name: "Qwen Code (host)",
+        custom_name: "box",
+        provider: "qwen",
+      }),
+    ).toBe("box (Qwen Code)");
+    expect(
+      runtimeDisplayLabel({
+        name: "QwenPaw (host)",
+        custom_name: "box",
+        provider: "qwenpaw",
+      }),
+    ).toBe("box (QwenPaw)");
+    expect(
+      runtimeDisplayLabel({
+        name: "MiniMax Code (host)",
+        custom_name: "box",
+        provider: "mcode",
+      }),
+    ).toBe("box (MiniMax Code)");
+    expect(
+      runtimeDisplayLabel({
+        name: "ZeroClaw (host)",
+        custom_name: "box",
+        provider: "zeroclaw",
+      }),
+    ).toBe("box (ZeroClaw)");
   });
 
   it("first-letter-capitalizes non-overridden slugs, matching the daemon", () => {
-    // The daemon only overrides `traecli`; every other provider is a
-    // first-letter capitalization on both the alias and no-alias paths, so the
-    // label must match to avoid drift (e.g. no-alias name is "Openclaw (host)").
+    // Providers without an explicit daemon override are first-letter
+    // capitalized on both the alias and no-alias paths, so the label must match
+    // the daemon (e.g. no-alias name is "Openclaw (host)").
     expect(
       runtimeDisplayLabel({
         name: "Openclaw (host)",

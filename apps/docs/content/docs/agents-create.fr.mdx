@@ -1,0 +1,169 @@
+---
+title: Créer et configurer un agent
+description: Choisissez un point de départ, puis définissez les responsabilités, les capacités, la configuration d'exécution et l'Accès de l'agent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Pour créer un agent, il faut d'abord un [runtime](/daemon-runtimes) fonctionnel. Le runtime détermine l'ordinateur et l'outil de codage IA utilisés par l'agent ; l'agent porte l'identité durable, les instructions et les capacités.
+
+Sur la page **Agents** de l'espace de travail, cliquez sur **Nouvel agent**.
+
+## Points de départ
+
+La page de création propose deux options :
+
+| Option | Quand l'utiliser |
+|---|---|
+| **Partir de zéro** | Vous connaissez déjà les responsabilités de l'agent et souhaitez remplir vous-même chaque champ. |
+| **Construire avec l'IA** | Décrivez d'abord l'objectif, puis laissez l'Agent Builder poser les questions clés et générer un brouillon. |
+
+**Construire avec l'IA** nécessite un runtime en ligne pour la conversation avec le Builder. Dans les deux cas, vous pouvez relire et modifier la configuration finale avant la création.
+
+![Points de départ de la création d'un agent : Partir de zéro et Construire avec l'IA](/images/docs/quickstart-new-agent.webp)
+
+## Champs obligatoires
+
+La création d'un agent ne requiert que deux éléments :
+
+- **Nom** — doit être unique dans l'espace de travail.
+- **Runtime** — l'environnement qui effectue réellement les exécutions.
+
+Tous les autres champs peuvent garder leur valeur par défaut et être ajustés après la création. Par défaut, seul le créateur peut exécuter un nouvel agent.
+
+## Description et instructions
+
+La **description** est une courte présentation destinée à l'équipe. Elle n'apparaît que dans la liste des agents et sur la page de détail, et n'entre jamais dans le prompt de l'outil de codage IA.
+
+Les **instructions** sont fournies à l'agent à chaque exécution et couvrent généralement :
+
+- ce dont il est responsable, et ce dont il ne l'est pas ;
+- ce qu'il doit vérifier en premier lorsqu'un travail arrive ;
+- ce qu'il est autorisé à modifier ;
+- comment livrer les résultats ;
+- quand consulter un membre avant de poursuivre.
+
+Par exemple :
+
+```text
+Vous relisez les pull requests frontend.
+
+Lisez d'abord le diff et les tests associés, et vérifiez uniquement :
+- la correction du code React et TypeScript
+- l'accessibilité
+- la cohérence avec les patterns de composants existants
+
+Ne modifiez pas le code directement. Publiez vos constats dans un commentaire de la tâche,
+classés par gravité ; si rien n'est bloquant, indiquez clairement que la modification peut être fusionnée.
+```
+
+## Ajouter des skills
+
+Lors de la création, vous pouvez choisir un ou plusieurs [skills](/skills) de l'espace de travail.
+
+Les skills conviennent aux méthodes et aux supports réutilisés par plusieurs agents ; les exigences durables propres à cet agent vont dans les instructions.
+
+## Amorces de conversation
+
+Ajoutez jusqu'à trois **amorces de conversation** pour montrer ce que cet agent sait bien faire avant que l'on envoie un premier message dans une discussion. Elles apparaissent au-dessus du champ de saisie lorsque quelqu'un ouvre une nouvelle discussion avec l'agent. Chaque amorce comporte un libellé court et un prompt complet. En choisir une remplit le champ de saisie pour que l'utilisateur puisse la relire ou la modifier ; elle ne lance jamais d'exécution automatiquement.
+
+L'éditeur affiche un aperçu exact de ce que montrera une nouvelle discussion, et toute personne pouvant modifier l'agent voit, dans cet état vide, un lien **Personnaliser les amorces** qui ramène directement ici.
+
+Si vous laissez la liste vide, la Discussion affiche des amorces génériques par défaut, localisées. Des exemples propres à l'agent sont généralement plus utiles, car ils peuvent refléter le rôle et les limites définis dans les instructions.
+
+Depuis le CLI, définissez-les avec `--conversation-starters` sur `agent create` et `agent update` (un tableau JSON d'objets `{ "label", "prompt" }` ; passez `'[]'` lors d'une mise à jour pour les effacer). `agent copy` copie toujours la valeur de l'agent source et ne propose pas d'option pour la remplacer.
+
+## Runtime, modèle et niveau de réflexion
+
+Chaque runtime correspond déjà à un outil de codage IA. Après avoir choisi un runtime, vous pouvez choisir un modèle et un niveau de réflexion pris en charge par l'outil ; certains outils (comme Codex) proposent aussi un niveau de service (**Vitesse** dans l'interface) :
+
+- Laissé vide, c'est la valeur par défaut du runtime ou du CLI local qui s'applique.
+- Si un modèle est défini, l'agent utilise cette surcharge pour les exécutions qu'il récupère par la suite.
+- Certains runtimes gèrent eux-mêmes les modèles ; aucun sélecteur de modèle n'est alors affiché.
+
+Les outils diffèrent par les modèles pris en charge, la reprise de session, les skills et les capacités MCP — voir [Comparatif des outils de codage IA](/providers).
+
+## Accès
+
+L'Accès détermine quels membres peuvent exécuter cet agent (l'assigner, l'@mentionner ou discuter avec lui) :
+
+| Accès | Signification |
+|---|---|
+| **Moi uniquement** | Vous seul pouvez l'exécuter. Valeur par défaut. |
+| **Tout l'espace de travail** | Tous les membres de l'espace de travail peuvent l'exécuter. |
+| **Personnes précises** | Seuls vous et les membres sélectionnés pouvez l'exécuter. |
+
+![Paramètres d'Accès : Moi uniquement, Tout l'espace de travail, Personnes précises](/images/docs/agent-access-settings.webp)
+
+Seul le propriétaire de l'agent peut modifier l'Accès — les administrateurs de l'espace de travail ne le peuvent pas. Les `owner` et `admin` de l'espace de travail peuvent gérer le reste de la configuration, mais ne peuvent pas se servir de leur rôle d'administrateur pour exécuter des agents auxquels ils n'ont pas accès.
+
+## Configuration après la création
+
+Sur la page de détail de l'agent, vous pouvez continuer à ajuster :
+
+| Paramètre | Rôle |
+|---|---|
+| **Parallélisme** | Nombre d'exécutions que l'agent peut mener en même temps. La valeur par défaut est 6 ; les exécutions au-delà de ce plafond restent en file d'attente. |
+| **Variables d'environnement** | Injectent des variables au démarrage de l'outil de codage IA. |
+| **Arguments personnalisés** | Ajoutés un par un aux arguments CLI de l'outil de codage IA. |
+| **MCP** | Fournit une configuration de serveurs MCP aux outils de codage IA qui la prennent en charge. |
+| **Intégrations** | Connecte les services externes que cet agent peut utiliser. |
+
+Le daemon qui héberge le runtime a aussi un plafond global de parallélisme (20 par défaut) ; le parallélisme effectif est le plus petit des deux.
+
+Modifier la configuration ne change pas les exécutions déjà en cours. Les exécutions suivantes utilisent la configuration de l'agent enregistrée au moment où le runtime les récupère.
+
+## Variables d'environnement et identifiants
+
+Les variables d'environnement conviennent aux identifiants à privilèges limités dont l'agent a besoin pendant l'exécution, comme une clé d'API en lecture seule ou un jeton à portée unique.
+
+<Callout type="warning">
+**Les valeurs de `custom_env` sont stockées en clair dans la base de données du serveur Multica** — il ne s'agit pas de données qui « restent sur cette machine ». Les endpoints de liste et de détail des agents ne renvoient plus aucune valeur de variable, seulement un nombre opaque ; seuls les `owner` et `admin` de l'espace de travail peuvent déverrouiller et modifier les valeurs, et chaque lecture ou modification laisse une trace d'audit. Un agent en cours d'exécution ne peut pas appeler les endpoints d'administration pour lire les variables d'un autre agent.
+</Callout>
+
+N'utilisez pas de mots de passe d'administration de bases de données de production ni d'autres identifiants de grande valeur à longue durée de vie.
+
+Les variables d'exécution critiques comme `PATH`, `HOME` et `MULTICA_*` ne peuvent pas être remplacées ici.
+
+## Arguments personnalisés et MCP
+
+Les arguments personnalisés sont transmis à l'outil de codage IA sous forme de tableau, élément par élément, sans expansion par le shell. La validité d'un argument dépend de l'outil ; inutile de répéter ici une configuration de modèle qui dispose déjà d'un champ dédié.
+
+<Callout type="warning">
+Ne placez pas d'identifiants ni d'autres secrets dans les arguments personnalisés. Ils restent dans l'argv du processus enfant et peuvent être visibles par d'autres processus locaux via `ps` ou `/proc` ; utilisez plutôt les variables d'environnement (`custom_env`). Les journaux du daemon masquent les valeurs des arguments, mais cela ne protège pas la liste des processus du système d'exploitation.
+</Callout>
+
+La configuration MCP peut contenir des jetons ; ses règles de stockage et d'affichage sont les mêmes que pour les variables d'environnement. Seuls les runtimes qui prennent en charge la configuration MCP gérée affichent cette section ; les outils sans prise en charge de MCP ne l'acquièrent pas simplement parce qu'une configuration est enregistrée.
+
+## Dupliquer un agent
+
+La duplication reprend l'essentiel de la configuration de travail, sauf le nom : instructions, amorces de conversation, skills, arguments personnalisés, avatar, limite de parallélisme et paramètres d'Accès. Le modèle, le niveau de réflexion et la vitesse (niveau de service) sont également repris ; si le runtime d'origine est indisponible et que la copie doit passer sur un autre runtime, ces trois valeurs sont effacées et doivent être choisies à nouveau.
+
+Les valeurs des variables d'environnement et la configuration MCP ne sont jamais copiées et doivent être redéfinies sur le nouvel agent. La duplication conserve le rattachement au runtime et les paramètres d'Accès de l'agent d'origine.
+
+## Créer avec le CLI
+
+```bash
+multica agent create \
+  --name "Frontend Reviewer" \
+  --runtime-id <runtime-id> \
+  --description "Relit les pull requests frontend" \
+  --instructions "Lisez d'abord le diff et les tests ; publiez vos conclusions de relecture uniquement dans les commentaires de la tâche." \
+  --conversation-starters '[{"label":"Relire une PR","prompt":"Relisez la pull request ouverte la plus pertinente."}]'
+```
+
+Le texte en clair passé en argument de ligne de commande finit dans l'historique du shell ; ce n'est pas le cas de stdin ni des fichiers à accès restreint.
+
+Lorsqu'un agent configuré de façon similaire existe déjà, copiez-le directement :
+
+```bash
+multica agent copy <agent-id>
+```
+
+Par défaut, la copie reste sur le même runtime ; ajoutez `--runtime-id` pour la déplacer vers un autre runtime, ce qui requiert aussi `--model`. Les variables d'environnement, la configuration MCP et `runtime_config` ne sont jamais copiés ; le rattachement au runtime lui-même est conservé. Toutes les options dans [Utiliser le CLI](/cli).
+
+## Étapes suivantes
+
+- [Assigner des tâches aux agents](/assigning-issues) — validez la configuration avec du vrai travail.
+- [Skills](/skills) — créez, importez et réutilisez les méthodes de l'équipe.
+- [Daemon et runtimes](/daemon-runtimes) — diagnostiquez l'état en ligne et l'endroit où s'effectue l'exécution.

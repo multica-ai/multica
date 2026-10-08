@@ -1,9 +1,12 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "@multica/core/types";
 import {
   buildRuntimeMachines,
   filterRuntimeMachines,
   runtimeMachineCounts,
+  runtimeRowLabel,
   sharedCustomName,
   splitRuntimeName,
 } from "./runtime-machines";
@@ -124,6 +127,29 @@ describe("runtime machine grouping", () => {
       issues: 1,
     });
     expect(filterRuntimeMachines(machines, "", "issues")).toHaveLength(1);
+  });
+
+  it("keeps long_offline as the highest-severity machine health", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          id: "rt-offline",
+          provider: "claude",
+          status: "offline",
+          last_seen_at: new Date(NOW - 10 * 60_000).toISOString(),
+        }),
+        makeRuntime({
+          id: "rt-long-offline",
+          provider: "codex",
+          status: "offline",
+          last_seen_at: new Date(NOW - 6.5 * 24 * 60 * 60_000).toISOString(),
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines).toHaveLength(1);
+    expect(machines[0]?.health).toBe("long_offline");
   });
 
   it("does not surface agent CLI version branding as the machine subtitle", () => {
@@ -402,5 +428,36 @@ describe("sharedCustomName", () => {
       ]),
     ).toBeNull();
     expect(sharedCustomName([])).toBeNull();
+  });
+});
+
+describe("runtimeRowLabel", () => {
+  it("falls back to the provider base when no alias is set", () => {
+    expect(
+      runtimeRowLabel(
+        makeRuntime({ name: "Codex (dev.local)", custom_name: null }),
+        "dev.local",
+      ),
+    ).toBe("Codex");
+  });
+
+  it("collapses a machine-level alias (shared with the title) to the base", () => {
+    // A machine rename stamps the same custom_name on every runtime, so the
+    // title already shows it — repeating it per row would be noise.
+    expect(
+      runtimeRowLabel(
+        makeRuntime({ name: "Codex (dev.local)", custom_name: "Dev Box" }),
+        "Dev Box",
+      ),
+    ).toBe("Codex");
+  });
+
+  it("shows a per-runtime alias that differs from the machine title", () => {
+    expect(
+      runtimeRowLabel(
+        makeRuntime({ name: "Codex (dev.local)", custom_name: "just this one" }),
+        "Dev Box",
+      ),
+    ).toBe("just this one");
   });
 });

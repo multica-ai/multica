@@ -12,8 +12,8 @@ import (
 )
 
 const createTaskToken = `-- name: CreateTaskToken :one
-INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at, id)
+VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid()))
 RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at
 `
 
@@ -24,6 +24,7 @@ type CreateTaskTokenParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	ID          pgtype.UUID        `json:"id"`
 }
 
 func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams) (TaskToken, error) {
@@ -34,6 +35,7 @@ func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams
 		arg.WorkspaceID,
 		arg.UserID,
 		arg.ExpiresAt,
+		arg.ID,
 	)
 	var i TaskToken
 	err := row.Scan(

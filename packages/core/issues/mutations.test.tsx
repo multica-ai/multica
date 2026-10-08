@@ -1,34 +1,40 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
+import { configStore } from "../config";
 import type { ApiClient } from "../api/client";
+import { createQueryClient } from "../query-client";
 import {
   useBatchUpdateIssues,
-  useLoadMoreByAssigneeGroup,
-  useLoadMoreByStatus,
+  useCreateComment,
+  useCreateCommentSubIssue,
+  useDeleteComment,
   useResolveComment,
+  useUpdateComment,
   useUpdateIssue,
 } from "./mutations";
 import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
-import { inboxKeys } from "../inbox/queries";
+import { onIssueUpdated, onIssueAuxiliaryRevision } from "./ws-updaters";
+import { inboxKeys, inboxListOptions } from "../inbox/queries";
+import {
+  onInboxInvalidate,
+  onInboxIssueStatusChanged,
+} from "../inbox/ws-updaters";
 import type {
-  GroupedIssuesResponse,
   InboxItem,
   Issue,
   ListIssuesCache,
-  ListIssuesParams,
-  ListGroupedIssuesParams,
-  ListIssuesResponse,
   TimelineEntry,
+  UpdateIssueRequest,
 } from "../types";
 
 vi.mock("../hooks", () => ({
@@ -98,293 +104,41 @@ function createWrapper(qc: QueryClient) {
   };
 }
 
-describe("useLoadMoreByStatus", () => {
-  let qc: QueryClient;
-  let listIssues: ReturnType<typeof vi.fn<(p?: ListIssuesParams) => Promise<ListIssuesResponse>>>;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    listIssues = vi.fn();
-    setApiInstance({ listIssues } as unknown as ApiClient);
-  });
-
-  afterEach(() => {
-    qc.clear();
-    vi.restoreAllMocks();
-  });
-
-  it("targets the sorted cache key and forwards sort to the API", async () => {
-    const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const activeKey = issueKeys.listSorted(WS_ID, sort);
-    const seed: ListIssuesCache = {
-      byStatus: {
-        todo: { issues: [makeIssue(1)], total: 3 },
-      },
-    };
-    qc.setQueryData<ListIssuesCache>(activeKey, seed);
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2), makeIssue(3)],
-      total: 3,
+describe("useCreateCommentSubIssue", () => {
+  it("applies the normal issue-create cache coordination", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const listKey = issueKeys.list(WS_ID);
+    qc.setQueryData<ListIssuesCache>(listKey, {
+      byStatus: { unstarted: { issues: [], total: 0 } },
     });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.hasMore).toBe(true);
-    expect(result.current.total).toBe(3);
+    const child = makeIssue(2, { parent_issue_id: "issue-1" });
+    const createCommentSubIssue = vi.fn().mockResolvedValue(child);
+    setApiInstance({ createCommentSubIssue } as unknown as ApiClient);
+    const { result } = renderHook(() => useCreateCommentSubIssue(), {
+      wrapper: createWrapper(qc),
+    });
 
     await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "todo",
-      limit: 50,
-      offset: 1,
-      sort_by: "priority",
-      sort_direction: "desc",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(3);
-    expect(updated?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-      "issue-3",
-    ]);
-  });
-
-  it("ignores a stale cache entry under a different sort", async () => {
-    // Stale entry from a previous sort lingers (kept by gcTime / keepPreviousData).
-    const staleSort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    qc.setQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort), {
-      byStatus: { todo: { issues: [makeIssue(99)], total: 99 } },
-    });
-
-    // The active sort cache has its own bucket — load-more must target THIS one.
-    const activeSort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const activeKey = issueKeys.listSorted(WS_ID, activeSort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2)],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, activeSort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    // total derives from the active key, not the stale one.
-    expect(result.current.total).toBe(2);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ offset: 1, sort_by: "position" }),
-    );
-
-    const active = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(active?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-
-    // Stale cache is untouched.
-    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort));
-    expect(stale?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-99"]);
-  });
-
-  it("targets the myList scoped cache when myIssues is provided", async () => {
-    const sort: IssueSortParam = { sort_by: "title", sort_direction: "asc" };
-    const myIssues = { scope: "assigned", filter: { assignee_id: "user-1" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, sort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { in_progress: { issues: [makeIssue(1, { status: "in_progress" })], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2, { status: "in_progress" })],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("in_progress", myIssues, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "in_progress",
-      limit: 50,
-      offset: 1,
-      sort_by: "title",
-      sort_direction: "asc",
-      assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.in_progress?.issues).toHaveLength(2);
-  });
-
-  it("targets the project surface cache when myIssues uses a project scope key", async () => {
-    const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const myIssues = { scope: "project:p1", filter: { project_id: "p1" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, sort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1, { project_id: "p1" })], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2, { project_id: "p1" })],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", myIssues, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "todo",
-      limit: 50,
-      offset: 1,
-      sort_by: "position",
-      sort_direction: undefined,
-      project_id: "p1",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-  });
-
-  it("works with no sort (matches the {} key used by sort-less callers)", async () => {
-    const myIssues = { scope: "actor", filter: { assignee_id: "user-2" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, undefined);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({ issues: [makeIssue(2)], total: 2 });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", myIssues),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.total).toBe(2);
-    expect(result.current.hasMore).toBe(true);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(2);
-  });
-});
-
-describe("useLoadMoreByAssigneeGroup", () => {
-  let qc: QueryClient;
-  let listGroupedIssues: ReturnType<
-    typeof vi.fn<(p: ListGroupedIssuesParams) => Promise<GroupedIssuesResponse>>
-  >;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    listGroupedIssues = vi.fn();
-    setApiInstance({ listGroupedIssues } as unknown as ApiClient);
-  });
-
-  afterEach(() => {
-    qc.clear();
-    vi.restoreAllMocks();
-  });
-
-  it("forwards sort to the grouped API and appends into the right group", async () => {
-    const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const queryKey = ["custom", "assignee-groups", "ws-1"] as const;
-    const seed: GroupedIssuesResponse = {
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(1, { assignee_type: "member", assignee_id: "user-1" })],
-          total: 2,
+      await result.current.mutateAsync({
+        anchorCommentId: "comment-1",
+        data: {
+          mode: "manual",
+          capture_token: "sha256:capture",
+          issue: { title: "Child" },
         },
-      ],
-    };
-    qc.setQueryData<GroupedIssuesResponse>(queryKey, seed);
-
-    listGroupedIssues.mockResolvedValue({
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(2, { assignee_type: "member", assignee_id: "user-1" })],
-          total: 2,
-        },
-      ],
+      });
     });
 
-    const { result } = renderHook(
-      () =>
-        useLoadMoreByAssigneeGroup(
-          {
-            id: "assignee:member:user-1",
-            assignee_type: "member",
-            assignee_id: "user-1",
-          },
-          queryKey,
-          { statuses: ["todo"] },
-          sort,
-        ),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.hasMore).toBe(true);
-    expect(result.current.total).toBe(2);
-
-    await act(async () => {
-      await result.current.loadMore();
+    expect(createCommentSubIssue).toHaveBeenCalledWith("comment-1", {
+      mode: "manual",
+      capture_token: "sha256:capture",
+      issue: { title: "Child" },
     });
-
-    expect(listGroupedIssues).toHaveBeenCalledWith({
-      group_by: "assignee",
-      limit: 50,
-      offset: 1,
-      sort_by: "priority",
-      sort_direction: "desc",
-      statuses: ["todo"],
-      group_assignee_type: "member",
-      group_assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<GroupedIssuesResponse>(queryKey);
-    expect(updated?.groups[0]?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
+    expect(
+      qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.unstarted?.issues,
+    ).toContainEqual(child);
+    expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true);
+    qc.clear();
   });
 });
 
@@ -403,19 +157,20 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
   let qc: QueryClient;
   let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+  let moveIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
 
   function makeBucketed(): ListIssuesCache {
     return {
       byStatus: {
-        todo: { issues: [makeIssue(1)], total: 1 },
-        in_progress: { issues: [], total: 0 },
+        unstarted: { issues: [makeIssue(1)], total: 1 },
+        started: { issues: [], total: 0 },
       },
     };
   }
 
   function bucketIds(
     key: readonly unknown[],
-    status: "todo" | "in_progress",
+    status: "unstarted" | "started",
   ): string[] {
     const c = qc.getQueryData<ListIssuesCache>(key);
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
@@ -430,7 +185,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     updateIssue = vi.fn();
-    setApiInstance({ updateIssue } as unknown as ApiClient);
+    moveIssue = vi.fn();
+    setApiInstance({ updateIssue, moveIssue } as unknown as ApiClient);
     qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
@@ -463,8 +219,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Optimistic state — the regression: myList must move too, not just ws.
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "todo")).toEqual([]);
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "unstarted")).toEqual([]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
 
     await act(async () => {
@@ -473,8 +229,160 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Authoritative settle keeps the card in place in both caches.
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
+  });
+
+  it("does not couple a field update to the cached aggregate revision", async () => {
+    qc.setQueryData(
+      issueKeys.detail(WS_ID, "issue-1"),
+      makeIssue(1, { revision: 6 }),
+    );
+    updateIssue.mockResolvedValue(makeIssue(1, { title: "Renamed", revision: 7 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "issue-1", title: "Renamed" });
+    });
+
+    expect(updateIssue).toHaveBeenCalledWith("issue-1", {
+      title: "Renamed",
+    });
+  });
+
+  it("does not let an older successful response overwrite a newer WS revision", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((done) => {
+        resolve = done;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { revision: 1 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", title: "local" });
+    });
+    await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      makeIssue(1, { title: "newer remote", revision: 3 }),
+    );
+
+    await act(async () => {
+      resolve(makeIssue(1, { title: "older success", revision: 2 }));
+    });
+
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      title: "newer remote",
+      revision: 3,
+    });
+  });
+
+  it("keeps a full response admissible after a newer revision-only response", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((done) => {
+        resolve = done;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { title: "A", revision: 1 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", title: "local" });
+    });
+    await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+    onIssueAuxiliaryRevision(qc, WS_ID, "issue-1", 3);
+
+    await act(async () => {
+      resolve(makeIssue(1, { title: "B", revision: 2 }));
+    });
+
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      title: "B",
+      revision: 2,
+    });
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
+  });
+
+  it("keeps the authoritative description base while a description update is pending", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { description: "base" }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({
+        id: "issue-1",
+        description: "local edit",
+        description_base: "base",
+      });
+    });
+
+    await waitFor(() => {
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", {
+        description: "local edit",
+        description_base: "base",
+      });
+    });
+    const optimistic = qc.getQueryData<Issue & { description_base?: string }>(detailKey);
+    expect(optimistic?.description).toBe("base");
+    expect(optimistic).not.toHaveProperty("description_base");
+
+    await act(async () => {
+      resolve(makeIssue(1, { description: "local edit" }));
+    });
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe("local edit");
+  });
+
+  it("uses server move intent while keeping provisional position optimistic-only", async () => {
+    moveIssue.mockResolvedValue(
+      makeIssue(1, { status: "in_progress", position: 15 }),
+    );
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "issue-1",
+        status: "in_progress",
+        position: 12,
+        move_intent: {
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
+      });
+    });
+
+    expect(moveIssue).toHaveBeenCalledWith("issue-1", {
+      status: "in_progress",
+      before_id: "issue-0",
+      after_id: "issue-2",
+    });
+    expect(updateIssue).not.toHaveBeenCalled();
+    expect(
+      qc
+        .getQueryData<ListIssuesCache>(wsKey)
+        ?.byStatus.started?.issues[0]?.position,
+    ).toBe(15);
   });
 
   it("optimistically patches the linked inbox row status and reconciles with the server response", async () => {
@@ -506,6 +414,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
   it("rolls both caches back when the request fails", async () => {
     updateIssue.mockRejectedValue(new Error("boom"));
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     const { result } = renderHook(() => useUpdateIssue(), {
       wrapper: createWrapper(qc),
@@ -518,9 +427,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     });
 
     for (const key of [wsKey, myKey, projectKey]) {
-      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
-      expect(bucketIds(key, "in_progress")).toEqual([]);
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
     }
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.detail(WS_ID, "issue-1"));
+    expect(invalidatedKeys).toContainEqual(issueKeys.list(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.flatAll(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.tableAll(WS_ID));
   });
 
   it("rolls the linked inbox row status back when the request fails", async () => {
@@ -582,15 +497,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     // Optimistic: gone from the old project's list immediately; the
     // workspace board and the assignee-filtered list keep the card.
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
-    expect(bucketIds(wsKey, "todo")).toEqual(["issue-1"]);
-    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
+    expect(bucketIds(wsKey, "unstarted")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
 
     await act(async () => {
       resolve(makeIssue(1, { project_id: "project-9" }));
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
@@ -608,7 +523,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
         .catch(() => {});
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual(["issue-1"]);
   });
 });
 
@@ -718,13 +633,13 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
   function makeBucketed(): ListIssuesCache {
     return {
       byStatus: {
-        todo: { issues: [makeIssue(1)], total: 1 },
-        in_progress: { issues: [], total: 0 },
+        unstarted: { issues: [makeIssue(1)], total: 1 },
+        started: { issues: [], total: 0 },
       },
     };
   }
 
-  function bucketIds(key: readonly unknown[], status: "todo" | "in_progress"): string[] {
+  function bucketIds(key: readonly unknown[], status: "unstarted" | "started"): string[] {
     const c = qc.getQueryData<ListIssuesCache>(key);
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
   }
@@ -763,8 +678,8 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     // so the optimistic patch lands a microtask later — wait for it.
     await waitFor(() => {
       for (const key of [wsKey, myKey]) {
-        expect(bucketIds(key, "todo")).toEqual([]);
-        expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+        expect(bucketIds(key, "unstarted")).toEqual([]);
+        expect(bucketIds(key, "started")).toEqual(["issue-1"]);
       }
     });
 
@@ -773,8 +688,50 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
 
     for (const key of [wsKey, myKey]) {
-      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual(["issue-1"]);
     }
+  });
+
+  it("does not optimistically replace description merge bases", async () => {
+    let resolve!: (r: { updated: number }) => void;
+    batchUpdateIssues.mockReturnValue(
+      new Promise<{ updated: number }>((r) => {
+        resolve = r;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(
+      detailKey,
+      makeIssue(1, { description: "base with marker" }),
+    );
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({
+        ids: ["issue-1"],
+        updates: {
+          description: "local edit",
+          description_base: "base with marker",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(batchUpdateIssues).toHaveBeenCalledWith(["issue-1"], {
+        description: "local edit",
+        description_base: "base with marker",
+      });
+    });
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe(
+      "base with marker",
+    );
+
+    await act(async () => {
+      resolve({ updated: 1 });
+    });
   });
 
   it("rolls both caches back when the request fails", async () => {
@@ -791,8 +748,8 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
 
     for (const key of [wsKey, myKey]) {
-      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
-      expect(bucketIds(key, "in_progress")).toEqual([]);
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
     }
   });
 
@@ -834,11 +791,519 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
       });
     });
 
-    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(projectKey, "unstarted")).toEqual([]);
     // The assignee-filtered list is untouched by a project move.
-    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "unstarted")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
+  });
+});
+
+// MUL-7286: a status / priority write cancels the Inbox list's in-flight
+// request so it cannot land on top of the optimistic patch. Whatever that
+// request was carrying — here a new notification — must be re-read once the
+// write settles, or the unread badge counts a row the list never shows. The
+// cancel primitive itself is covered in inbox/ws-updaters.test.ts.
+describe("status / priority writes re-read an Inbox list they left behind", () => {
+  const readItem = makeInboxItem("n1", "issue-1", {
+    read: true,
+    issue_priority: "none",
+  });
+  const notification = makeInboxItem("n2", "issue-2", {
+    created_at: "2025-01-02T00:00:00Z",
+  });
+  const writes = [
+    {
+      name: "useUpdateIssue",
+      write: (hooks: WriteHooks) =>
+        hooks.single.mutateAsync({ id: "issue-1", priority: "high" }),
+    },
+    {
+      name: "useBatchUpdateIssues",
+      write: (hooks: WriteHooks) =>
+        hooks.batch.mutateAsync({ ids: ["issue-1"], updates: { priority: "high" } }),
+    },
+  ];
+
+  let qc: QueryClient;
+  const unmounts: Array<() => void> = [];
+
+  function renderWriteHooks() {
+    const hooks = renderHook(
+      () => ({ single: useUpdateIssue(), batch: useBatchUpdateIssues() }),
+      { wrapper: createWrapper(qc) },
+    );
+    unmounts.push(hooks.unmount);
+    return hooks.result;
+  }
+  type WriteHooks = ReturnType<typeof renderWriteHooks>["current"];
+
+  function mountInbox() {
+    const page = renderHook(() => useQuery(inboxListOptions(WS_ID)), {
+      wrapper: createWrapper(qc),
+    });
+    unmounts.push(page.unmount);
+    return page.result;
+  }
+
+  function mockApi(
+    listInbox: () => Promise<InboxItem[]>,
+    { fail = false }: { fail?: boolean } = {},
+  ) {
+    const settle = <T,>(value: T) =>
+      fail ? Promise.reject(new Error("boom")) : Promise.resolve(value);
+    setApiInstance({
+      listInbox,
+      updateIssue: () => settle(makeIssue(1, { priority: "high" })),
+      batchUpdateIssues: () => settle({ updated: 1 }),
+    } as unknown as ApiClient);
+  }
+
+  beforeEach(() => {
+    qc = createQueryClient();
+  });
+
+  afterEach(() => {
+    unmounts.splice(0).forEach((unmount) => unmount());
+    qc.clear();
+  });
+
+  it.each(
+    writes.flatMap((w) => [
+      { ...w, issueEvent: false },
+      { ...w, issueEvent: true },
+    ]),
+  )(
+    "$name re-reads the request it interrupted (issue event meanwhile: $issueEvent)",
+    async ({ write, issueEvent }) => {
+      let release!: (items: InboxItem[]) => void;
+      const listInbox = vi
+        .fn<() => Promise<InboxItem[]>>()
+        .mockResolvedValueOnce([readItem])
+        .mockImplementationOnce(
+          () => new Promise((resolve) => (release = resolve)),
+        )
+        .mockResolvedValue([notification, readItem]);
+      mockApi(listInbox);
+      const hooks = renderWriteHooks();
+      const inbox = mountInbox();
+      await waitFor(() => expect(inbox.current.data).toEqual([readItem]));
+
+      // `inbox:new` while the Inbox is open; the list re-read is still out.
+      act(() => {
+        void onInboxInvalidate(qc, WS_ID);
+      });
+      await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("fetching");
+      if (issueEvent) {
+        // An `issue:updated` patching a listed row mid-request replaces the
+        // snapshot TanStack reverts to on cancel with a non-invalidated state.
+        onInboxIssueStatusChanged(qc, WS_ID, "issue-1", "in_progress");
+      }
+
+      await act(async () => {
+        await write(hooks.current);
+      });
+      release([notification, readItem]); // interrupted: its response is dropped
+
+      await waitFor(() =>
+        expect(inbox.current.data?.map((item) => item.id)).toEqual(["n2", "n1"]),
+      );
+      expect(listInbox).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it.each(writes)(
+    "$name adds no Inbox request when it interrupts none",
+    async ({ write }) => {
+      const listInbox = vi
+        .fn<() => Promise<InboxItem[]>>()
+        .mockResolvedValue([readItem]);
+      mockApi(listInbox);
+      const hooks = renderWriteHooks();
+      const inbox = mountInbox();
+      await waitFor(() => expect(inbox.current.data).toEqual([readItem]));
+
+      await act(async () => {
+        await write(hooks.current);
+      });
+
+      await waitFor(() =>
+        expect(inbox.current.data?.[0]?.issue_priority).toBe("high"),
+      );
+      expect(listInbox).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(writes)(
+    "$name keeps the pending refresh when a failed write rolls the rows back",
+    async ({ write }) => {
+      const listInbox = vi.fn<() => Promise<InboxItem[]>>();
+      mockApi(listInbox, { fail: true });
+      // The user is elsewhere: the list is cached, nothing observes it, and an
+      // `inbox:new` has marked it to re-read on the next visit.
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [readItem]);
+      await onInboxInvalidate(qc, WS_ID);
+      const hooks = renderWriteHooks();
+
+      await act(async () => {
+        await write(hooks.current).catch(() => {});
+      });
+
+      await waitFor(() =>
+        expect(qc.getQueryState(inboxKeys.list(WS_ID))?.isInvalidated).toBe(true),
+      );
+      expect(qc.getQueryData(inboxKeys.list(WS_ID))).toEqual([readItem]);
+      expect(listInbox).not.toHaveBeenCalled();
+    },
+  );
+
+  // Writes that overlap each other or a list request: the re-read must come
+  // after the last save, or it reads a pending write's old value and lands on
+  // top of its patch.
+  describe("overlapping writes", () => {
+    const rowA = makeInboxItem("n-a", "issue-1", { read: true, issue_priority: "none" });
+    const rowB = makeInboxItem("n-b", "issue-2", { read: true, issue_priority: "none" });
+    const newRow = makeInboxItem("n-c", "issue-3", {
+      issue_priority: "none",
+      created_at: "2025-01-02T00:00:00Z",
+    });
+    type Kind = "useUpdateIssue" | "useBatchUpdateIssues";
+
+    // List reads and saves complete only when the test says so. A read answers
+    // with the rows as they were when it reached the server.
+    function controlledServer(initial: InboxItem[]) {
+      let rows = initial;
+      const reads: Array<() => void> = [];
+      const saves = new Map<string, () => void>();
+      const listInbox = vi.fn(() => {
+        const snapshot = rows;
+        return new Promise<InboxItem[]>((resolve) =>
+          reads.push(() => resolve(snapshot)),
+        );
+      });
+      const save = (id: string, priority: UpdateIssueRequest["priority"]) =>
+        new Promise<void>((resolve) =>
+          saves.set(id, () => {
+            rows = rows.map((row) =>
+              row.issue_id === id ? { ...row, issue_priority: priority } : row,
+            );
+            resolve();
+          }),
+        );
+      setApiInstance({
+        listInbox,
+        updateIssue: (id: string, data: UpdateIssueRequest) =>
+          save(id, data.priority).then(() => ({ ...makeIssue(1), ...data, id })),
+        batchUpdateIssues: (ids: string[], updates: UpdateIssueRequest) =>
+          save(ids[0]!, updates.priority).then(() => ({ updated: ids.length })),
+      } as unknown as ApiClient);
+      return {
+        listInbox,
+        setRows: (next: InboxItem[]) => {
+          rows = next;
+        },
+        answerReads: () => reads.splice(0).forEach((answer) => answer()),
+        saving: (id: string) => saves.has(id),
+        commit: (id: string) => saves.get(id)!(),
+      };
+    }
+
+    function write(hooks: WriteHooks, kind: Kind, id: string) {
+      return kind === "useUpdateIssue"
+        ? hooks.single.mutateAsync({ id, priority: "high" })
+        : hooks.batch.mutateAsync({ ids: [id], updates: { priority: "high" } });
+    }
+
+    async function loadInbox(server: ReturnType<typeof controlledServer>) {
+      const inbox = mountInbox();
+      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(1));
+      server.answerReads();
+      await waitFor(() => expect(inbox.current.data).toBeDefined());
+      return () => inbox.current.data?.map((row) => [row.id, row.issue_priority]);
+    }
+
+    const pairings = [
+      ["useUpdateIssue", "useUpdateIssue"],
+      ["useBatchUpdateIssues", "useBatchUpdateIssues"],
+      ["useUpdateIssue", "useBatchUpdateIssues"],
+      ["useBatchUpdateIssues", "useUpdateIssue"],
+    ] as const;
+
+    // An `inbox:new` re-read is out when A's write interrupts it; B's write
+    // starts before A is saved and finds nothing to interrupt.
+    async function overlapWrites(first: Kind, second: Kind) {
+      const server = controlledServer([rowA, rowB]);
+      const hooks = renderWriteHooks();
+      const rendered = await loadInbox(server);
+      server.setRows([newRow, rowA, rowB]);
+      act(() => {
+        void onInboxInvalidate(qc, WS_ID);
+      });
+      await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+      let writeA!: Promise<unknown>;
+      let writeB!: Promise<unknown>;
+      act(() => {
+        writeA = write(hooks.current, first, "issue-1");
+      });
+      await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+      act(() => {
+        writeB = write(hooks.current, second, "issue-2");
+      });
+      await waitFor(() => expect(server.saving("issue-2")).toBe(true));
+      expect(qc.getQueryState(inboxKeys.list(WS_ID))?.fetchStatus).toBe("idle");
+      return { server, rendered, writeA, writeB };
+    }
+
+    const everySaved = [
+      ["n-c", "none"],
+      ["n-a", "high"],
+      ["n-b", "high"],
+    ];
+
+    it.each(pairings)(
+      "re-reads once, after the last of them saves (%s, then %s)",
+      async (first: Kind, second: Kind) => {
+        const { server, rendered, writeA, writeB } = await overlapWrites(first, second);
+
+        await act(async () => {
+          server.commit("issue-1");
+          await writeA;
+        });
+        await act(async () => {});
+        // A owes the re-read, but reading while B is unsaved would miss B.
+        expect(server.listInbox).toHaveBeenCalledTimes(2);
+
+        await act(async () => {
+          server.commit("issue-2");
+          await writeB;
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() => expect(rendered()).toEqual(everySaved));
+      },
+    );
+
+    it.each(pairings)(
+      "re-reads when both saves land in the same tick (%s, then %s)",
+      async (first: Kind, second: Kind) => {
+        const { server, rendered, writeA, writeB } = await overlapWrites(first, second);
+
+        // Each write settles while the other still counts as in flight.
+        await act(async () => {
+          server.commit("issue-1");
+          server.commit("issue-2");
+          await Promise.all([writeA, writeB]);
+        });
+        expect(qc.isMutating()).toBe(0);
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() => expect(rendered()).toEqual(everySaved));
+      },
+    );
+
+    it.each(["useUpdateIssue", "useBatchUpdateIssues"] as const)(
+      "%s re-reads a list request that started while it was saving",
+      async (kind: Kind) => {
+        const server = controlledServer([rowA]);
+        const hooks = renderWriteHooks();
+        const rendered = await loadInbox(server);
+
+        let writeA!: Promise<unknown>;
+        act(() => {
+          writeA = write(hooks.current, kind, "issue-1");
+        });
+        await waitFor(() => expect(server.saving("issue-1")).toBe(true));
+        // `inbox:new` mid-save: this read reaches the server before A is saved.
+        server.setRows([newRow, rowA]);
+        act(() => {
+          void onInboxInvalidate(qc, WS_ID);
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(2));
+
+        await act(async () => {
+          server.commit("issue-1");
+          await writeA;
+        });
+        await waitFor(() => expect(server.listInbox).toHaveBeenCalledTimes(3));
+        server.answerReads();
+
+        await waitFor(() =>
+          expect(rendered()).toEqual([
+            ["n-c", "none"],
+            ["n-a", "high"],
+          ]),
+        );
+      },
+    );
+  });
+});
+
+describe("comment mutations — owner revision and last activity", () => {
+  const issueId = "issue-1";
+  const detailKey = issueKeys.detail(WS_ID, issueId);
+  const lastActivityKey = issueKeys.listSorted(WS_ID, {
+    sort_by: "last_activity",
+    sort_direction: "desc",
+  });
+  const positionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+
+  function seed(qc: QueryClient) {
+    const issue = makeIssue(1, { revision: 1 });
+    const board: ListIssuesCache = {
+      byStatus: { unstarted: { issues: [issue], total: 1 } },
+    };
+    qc.setQueryData<Issue>(detailKey, issue);
+    qc.setQueryData<ListIssuesCache>(lastActivityKey, board);
+    qc.setQueryData<ListIssuesCache>(positionKey, board);
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(issueId), [
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "before",
+        parent_id: null,
+        comment_type: "comment",
+        reactions: [],
+        attachments: [],
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+  }
+
+  it("consumes an update response's issue revision and re-sorts activity", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    setApiInstance({
+      updateComment: vi.fn().mockResolvedValue({
+        id: "comment-1",
+        issue_id: issueId,
+        content: "after",
+        issue_revision: 2,
+      }),
+    } as unknown as ApiClient);
+    const { result } = renderHook(() => useUpdateComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        commentId: "comment-1",
+        content: "after",
+        attachmentIds: [],
+      });
+    });
+
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(lastActivityKey)?.isInvalidated).toBe(true);
+    // The owner revision also invalidates any loaded projection containing
+    // this issue, independent of sort.
+    expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+
+  it("invalidates the owner projection after a successful 204 delete", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    setApiInstance({
+      deleteComment: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("comment-1");
+    });
+
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(lastActivityKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+
+  // #8296: deleting a comment keeps its replies. The outcome (tombstone or
+  // removal) is applied only once the server confirms; the matrix itself lives
+  // in comment-deletion.test.ts.
+  it("keeps the timeline until the delete is confirmed, then keeps the replies", async () => {
+    configStore.getState().setCommentDeleteKeepRepliesSupported(true);
+    onTestFinished(() => configStore.getState().setCommentDeleteKeepRepliesSupported(false));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const [root] = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    const reply: TimelineEntry = { ...root!, id: "comment-2", parent_id: "comment-1", content: "reply" };
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(issueId), [root!, reply]);
+    let confirm!: () => void;
+    const deleteComment = vi.fn(() => new Promise<void>((resolve) => { confirm = resolve; }));
+    setApiInstance({ deleteComment } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.mutateAsync("comment-1");
+    });
+    await waitFor(() => expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: true }));
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([root, reply]);
+
+    await act(async () => {
+      confirm();
+      await pending;
+    });
+    const timeline = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    expect(timeline.map((e) => e.id)).toEqual(["comment-1", "comment-2"]);
+    expect(timeline[0]).toMatchObject({ content: "" });
+    expect(timeline[0]?.deleted_at).toEqual(expect.any(String));
+    expect(timeline[1]).toEqual(reply);
+    qc.clear();
+  });
+
+  // A server that has not declared the capability deletes the replies too:
+  // the client uses the legacy route and mirrors that outcome.
+  it("mirrors a reply-deleting server when the capability is not declared", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const [root] = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))!;
+    const reply: TimelineEntry = { ...root!, id: "comment-2", parent_id: "comment-1", content: "reply" };
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(issueId), [root!, reply]);
+    const deleteComment = vi.fn().mockResolvedValue(undefined);
+    setApiInstance({ deleteComment } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("comment-1");
+    });
+
+    expect(deleteComment).toHaveBeenCalledWith("comment-1", { keepReplies: false });
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toEqual([]);
+    qc.clear();
+  });
+
+  it("leaves the timeline untouched when the delete fails", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seed(qc);
+    const before = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId));
+    setApiInstance({
+      deleteComment: vi.fn().mockRejectedValue(new Error("nope")),
+    } as unknown as ApiClient);
+    const { result } = renderHook(() => useDeleteComment(issueId), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("comment-1").catch(() => undefined);
+    });
+
+    expect(qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))).toBe(before);
+    qc.clear();
   });
 });
 
@@ -950,5 +1415,78 @@ describe("useResolveComment", () => {
 
     // Only b1 is cleared; a1 stays resolved (unresolve never mirrors the clear).
     expect(resolvedIds(qc)).toEqual(["a1"]);
+  });
+});
+
+// MUL-6394: posting a comment while the Table view's grouped/facet caches are
+// loaded rejected `mutateAsync` with "Cannot read properties of undefined
+// (reading 'some')" — the comment WAS created server-side (the agent task
+// started), but the composer showed an error toast and never appended the
+// entry, so it only appeared after a reload.
+describe("useCreateComment — sibling caches under a shared key prefix", () => {
+  const ISSUE_ID = "issue-1";
+  const tableQuery = {
+    scope: { kind: "workspace" },
+    filters: {},
+    sort: { field: "position", direction: "asc" },
+  } as const;
+
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    setApiInstance({
+      createComment: vi.fn().mockResolvedValue({
+        id: "comment-1",
+        issue_id: ISSUE_ID,
+        author_type: "member",
+        author_id: "user-1",
+        content: "hello",
+        type: "comment",
+        parent_id: null,
+        reactions: [],
+        attachments: [],
+        created_at: "2026-08-19T00:00:00Z",
+        updated_at: "2026-08-19T00:00:00Z",
+        resolved_at: null,
+        resolved_by_type: null,
+        resolved_by_id: null,
+        issue_revision: 7,
+      }),
+    } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("appends the created comment even when non-row table caches are loaded", async () => {
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID), []);
+    // Grouped rows are an infinite cache and facets a plain object — both live
+    // under the `table-query` prefix next to the row pages, and neither has a
+    // `rows` array.
+    qc.setQueryData(issueKeys.tableGroups(WS_ID, tableQuery, { kind: "status" }), {
+      pages: [
+        { query_fingerprint: "sha256:groups", total: 0, groups: [], next_cursor: null },
+      ],
+      pageParams: [null],
+    });
+    qc.setQueryData(
+      issueKeys.tableFacets(WS_ID, { query: tableQuery, facets: [{ kind: "status" }] }),
+      { query_fingerprint: "sha256:facets", total: 0, facets: [] },
+    );
+
+    const { result } = renderHook(() => useCreateComment(ISSUE_ID), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ content: "hello" });
+    });
+
+    expect(
+      qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID))?.map((e) => e.id),
+    ).toEqual(["comment-1"]);
   });
 });

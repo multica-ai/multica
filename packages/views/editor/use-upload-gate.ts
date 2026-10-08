@@ -4,9 +4,10 @@
  * The submit gate for composers that accept attachments (MUL-4808).
  *
  * While a file is still uploading, the editor holds a `blob:` placeholder and
- * the attachment's id does not exist yet. Serializing at that moment strips
- * the blob (see ContentEditor's stripBlobUrls) and binds no id, so the send
- * succeeds while the file silently disappears from what the recipient gets.
+ * the attachment's id does not exist yet. Serializing at that moment emits
+ * nothing for the placeholder (see the image / fileCard `renderMarkdown`) and
+ * binds no id, so the send would succeed while the file silently disappears
+ * from what the recipient gets.
  * Every action that FIXES a draft — send, create, save, and the mode switch
  * that re-serializes a draft into another form — must therefore wait.
  *

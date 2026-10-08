@@ -1,28 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  __FRAGMENT_NAV_SHIM__,
-  withFragmentNavShim,
-} from "./iframe-fragment-nav";
-
-describe("withFragmentNavShim", () => {
-  it("appends the shim verbatim at the end of the original HTML", () => {
-    const html = "<h1 id='a'>A</h1><a href='#a'>jump</a>";
-    const out = withFragmentNavShim(html);
-    expect(out.startsWith(html)).toBe(true);
-    expect(out.endsWith(__FRAGMENT_NAV_SHIM__)).toBe(true);
-    expect(out).toBe(html + __FRAGMENT_NAV_SHIM__);
-  });
-
-  it("does not mutate the input string", () => {
-    const html = "<p>hi</p>";
-    withFragmentNavShim(html);
-    expect(html).toBe("<p>hi</p>");
-  });
-
-  it("handles empty input", () => {
-    expect(withFragmentNavShim("")).toBe(__FRAGMENT_NAV_SHIM__);
-  });
-});
+import { __FRAGMENT_NAV_SHIM__ } from "./iframe-fragment-nav";
 
 // The shim itself ships as a <script> string injected into a srcdoc iframe.
 // To exercise its runtime behavior in unit tests, evaluate the inner script

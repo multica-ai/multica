@@ -12,10 +12,28 @@ import (
 )
 
 const addIssueReaction = `-- name: AddIssueReaction :one
-INSERT INTO issue_reaction (issue_id, workspace_id, actor_type, actor_id, emoji)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (issue_id, actor_type, actor_id, emoji) DO UPDATE SET created_at = issue_reaction.created_at
-RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at
+WITH inserted AS (
+    INSERT INTO issue_reaction (issue_id, workspace_id, actor_type, actor_id, emoji)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (issue_id, actor_type, actor_id, emoji) DO NOTHING
+    RETURNING id, issue_id, workspace_id, actor_type, actor_id, emoji, created_at
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1
+    WHERE id IN (SELECT issue_id FROM inserted)
+    RETURNING revision
+)
+SELECT reaction.id, reaction.issue_id, reaction.workspace_id, reaction.actor_type, reaction.actor_id, reaction.emoji, reaction.created_at, COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision
+FROM inserted reaction
+UNION ALL
+SELECT reaction.id, reaction.issue_id, reaction.workspace_id, reaction.actor_type, reaction.actor_id, reaction.emoji, reaction.created_at, 0::bigint AS issue_revision
+FROM issue_reaction reaction
+WHERE reaction.issue_id = $1
+  AND reaction.actor_type = $3
+  AND reaction.actor_id = $4
+  AND reaction.emoji = $5
+  AND NOT EXISTS (SELECT 1 FROM inserted)
+LIMIT 1
 `
 
 type AddIssueReactionParams struct {
@@ -26,7 +44,18 @@ type AddIssueReactionParams struct {
 	Emoji       string      `json:"emoji"`
 }
 
-func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionParams) (IssueReaction, error) {
+type AddIssueReactionRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ActorType     string             `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Emoji         string             `json:"emoji"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	IssueRevision int64              `json:"issue_revision"`
+}
+
+func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionParams) (AddIssueReactionRow, error) {
 	row := q.db.QueryRow(ctx, addIssueReaction,
 		arg.IssueID,
 		arg.WorkspaceID,
@@ -34,7 +63,7 @@ func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionPara
 		arg.ActorID,
 		arg.Emoji,
 	)
-	var i IssueReaction
+	var i AddIssueReactionRow
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -43,6 +72,7 @@ func (q *Queries) AddIssueReaction(ctx context.Context, arg AddIssueReactionPara
 		&i.ActorID,
 		&i.Emoji,
 		&i.CreatedAt,
+		&i.IssueRevision,
 	)
 	return i, err
 }
@@ -81,9 +111,19 @@ func (q *Queries) ListIssueReactions(ctx context.Context, issueID pgtype.UUID) (
 	return items, nil
 }
 
-const removeIssueReaction = `-- name: RemoveIssueReaction :exec
-DELETE FROM issue_reaction
-WHERE issue_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
+const removeIssueReaction = `-- name: RemoveIssueReaction :one
+WITH deleted AS (
+    DELETE FROM issue_reaction
+    WHERE issue_id = $1 AND actor_type = $2 AND actor_id = $3 AND emoji = $4
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1
+    WHERE id IN (SELECT issue_id FROM deleted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision
 `
 
 type RemoveIssueReactionParams struct {
@@ -93,12 +133,19 @@ type RemoveIssueReactionParams struct {
 	Emoji     string      `json:"emoji"`
 }
 
-func (q *Queries) RemoveIssueReaction(ctx context.Context, arg RemoveIssueReactionParams) error {
-	_, err := q.db.Exec(ctx, removeIssueReaction,
+type RemoveIssueReactionRow struct {
+	Changed       bool  `json:"changed"`
+	IssueRevision int64 `json:"issue_revision"`
+}
+
+func (q *Queries) RemoveIssueReaction(ctx context.Context, arg RemoveIssueReactionParams) (RemoveIssueReactionRow, error) {
+	row := q.db.QueryRow(ctx, removeIssueReaction,
 		arg.IssueID,
 		arg.ActorType,
 		arg.ActorID,
 		arg.Emoji,
 	)
-	return err
+	var i RemoveIssueReactionRow
+	err := row.Scan(&i.Changed, &i.IssueRevision)
+	return i, err
 }

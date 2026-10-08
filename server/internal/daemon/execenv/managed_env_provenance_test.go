@@ -72,10 +72,9 @@ func TestPrepareLocalDirectoryWritesNoProvenance(t *testing.T) {
 	}
 }
 
-// TestPrepareNonIssueEnvWritesNoProvenance confirms non-issue envs (chat,
-// autopilot, quick-create) get no provenance: reuse targets only issue tasks,
-// so writing it elsewhere would be dead weight.
-func TestPrepareNonIssueEnvWritesNoProvenance(t *testing.T) {
+// TestPrepareManagedChatEnvWritesProvenance confirms chat reuse has the same
+// ownership proof as issue reuse while remaining scoped to its conversation.
+func TestPrepareManagedChatEnvWritesProvenance(t *testing.T) {
 	root := t.TempDir()
 	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: root,
@@ -92,7 +91,11 @@ func TestPrepareNonIssueEnvWritesNoProvenance(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	if _, err := ReadManagedEnvProvenance(env.RootDir); !os.IsNotExist(err) {
-		t.Fatalf("non-issue Prepare must not write managed env provenance; got err = %v", err)
+	prov, err := ReadManagedEnvProvenance(env.RootDir)
+	if err != nil {
+		t.Fatalf("read chat managed env provenance: %v", err)
+	}
+	if prov.WorkspaceID != "ws-prov-chat" || prov.ChatSessionID != "chat-1" || prov.AgentID != "agent-chat" || prov.IssueID != "" {
+		t.Fatalf("chat provenance owner mismatch: %+v", prov)
 	}
 }

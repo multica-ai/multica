@@ -1,17 +1,173 @@
-import type { TaskFailureReason } from "@multica/core/types";
+import type { useT } from "../../../i18n";
 
-// Human-readable copy for the back-end task failure reason enum. Surfaced
-// in the agent detail Recent Work tab when a task ended in failure — the
-// only place the front-end exposes failure_reason directly to the user.
-//
-// Lives next to the consuming tab (rather than in agents/presence) because
-// failed tasks no longer have a top-level workload state; failure context
-// is purely a detail-page concern now.
-export const failureReasonLabel: Record<TaskFailureReason, string> = {
-  agent_error: "Agent execution error",
-  timeout: "Task timed out",
-  codex_semantic_inactivity: "Codex semantic inactivity timeout",
-  runtime_offline: "Daemon offline",
-  runtime_recovery: "Daemon restarted",
-  manual: "Cancelled by user",
+type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+
+// Stable translation keys for the canonical server taxonomy, provider-specific
+// operational reasons, and coarse values still present on historical rows.
+// The wire value remains an open string: clients can meet a newer reason than
+// they know, and failureReasonLabel deliberately falls back to that raw value.
+export const FAILURE_REASON_I18N_KEYS = {
+  // Platform / scheduler side.
+  queued_expired: "queued_expired",
+  runtime_offline: "runtime_offline",
+  runtime_reconnect_timeout: "runtime_reconnect_timeout",
+  runtime_recovery: "runtime_recovery",
+  timeout: "timeout",
+  iteration_limit: "iteration_limit",
+  agent_blocked: "agent_blocked",
+  api_invalid_request: "api_invalid_request",
+  skill_bundle_unavailable: "skill_bundle_unavailable",
+  runtime_cli_timeout: "runtime_cli_timeout",
+  environment_prepare_failed: "environment_prepare_failed",
+  invalid_task_identity: "invalid_task_identity",
+  runtime_access_denied: "runtime_access_denied",
+
+  // Agent process side — provider.
+  "agent_error.provider_auth_or_access":
+    "agent_error_provider_auth_or_access",
+  "agent_error.provider_quota_limit": "agent_error_provider_quota_limit",
+  "agent_error.provider_capacity_or_rate_limit":
+    "agent_error_provider_capacity_or_rate_limit",
+  "agent_error.provider_server_error": "agent_error_provider_server_error",
+  "agent_error.provider_network": "agent_error_provider_network",
+
+  // Agent process side — agent / runner.
+  "agent_error.process_failure": "agent_error_process_failure",
+  "agent_error.empty_or_unparseable_output":
+    "agent_error_empty_or_unparseable_output",
+  "agent_error.agent_timeout": "agent_error_agent_timeout",
+  "agent_error.context_overflow": "agent_error_context_overflow",
+  "agent_error.missing_config": "agent_error_missing_config",
+  "agent_error.model_not_found_or_unavailable":
+    "agent_error_model_not_found_or_unavailable",
+  "agent_error.runtime_version_unsupported":
+    "agent_error_runtime_version_unsupported",
+  "agent_error.runtime_missing_executable":
+    "agent_error_runtime_missing_executable",
+  "agent_error.unknown": "agent_error_unknown",
+
+  // Daemon operational reasons, outside the canonical taxonomy.
+  agent_fallback_message: "agent_fallback_message",
+  codex_semantic_inactivity: "codex_semantic_inactivity",
+  codex_resume_oversized: "codex_resume_oversized",
+  idle_watchdog: "idle_watchdog",
+  local_directory_error: "local_directory_error",
+  cancelled: "cancelled",
+
+  // Pre-MUL-1949 coarse values, still present on historical rows.
+  agent_error: "agent_error",
+  manual: "manual",
+  user_cancelled: "user_cancelled",
+} as const;
+
+type KnownFailureReason = keyof typeof FAILURE_REASON_I18N_KEYS;
+
+/**
+ * Localized label for a `failure_reason`, or `null` when there is nothing to
+ * show. Unknown values remain raw so an older installed client degrades
+ * truthfully when a newer backend adds a reason.
+ */
+export function failureReasonLabel(
+  reason: string | null | undefined,
+  t: AgentsT,
+): string | null {
+  if (!reason) return null;
+  if (!Object.prototype.hasOwnProperty.call(FAILURE_REASON_I18N_KEYS, reason)) {
+    return reason;
+  }
+  const key = FAILURE_REASON_I18N_KEYS[reason as KnownFailureReason];
+  return t(($) => $.task_failure.reasons[key]);
+}
+
+/**
+ * Label for a cancelled task the server cancelled for a persisted reason.
+ * User-initiated cancellation has no reason and stays unlabeled.
+ */
+export function cancelReasonLabel(
+  task: {
+    status: string;
+    error?: string | null;
+    failure_reason?: string | null;
+    cancelled_by?: { type: string };
+  },
+  t: AgentsT,
+): string | null {
+  if (task.status !== "cancelled") return null;
+  const reason = failureReasonLabel(task.failure_reason, t);
+  if (reason) return reason;
+  return task.error && !task.cancelled_by
+    ? t(($) => $.task_failure.cancelled_by_system)
+    : null;
+}
+
+/**
+ * Localized cancellation status with its recorded actor. Historical rows and
+ * malformed partial metadata deliberately return null so callers preserve the
+ * legacy plain "Cancelled" label instead of inventing an unknown person.
+ */
+export function cancellationActorLabel(
+  task: {
+    status: string;
+    cancelled_by?: { type: string; name?: string };
+  },
+  t: AgentsT,
+): string | null {
+  if (task.status !== "cancelled" || !task.cancelled_by) return null;
+  const { type } = task.cancelled_by;
+  if (type !== "member" && type !== "agent" && type !== "system") return null;
+  if (type === "system") {
+    return t(($) => $.task_failure.cancelled_by_system);
+  }
+  const name = task.cancelled_by.name?.trim();
+  return name
+    ? t(($) => $.task_failure.cancelled_by_actor, { name })
+    : null;
+}
+
+// Wire values that record a cancellation, not an error. A run the platform
+// stopped reads as cancelled even when its row carries status `failed`.
+const CANCELLATION_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  "cancelled",
+  "manual",
+  "user_cancelled",
+]);
+
+// Failures a retry cannot fix until someone changes configuration: the
+// non-retryable auth, quota, config, model, CLI, and runtime-ownership
+// reasons documented in server/pkg/taskfailure.
+const ACTION_REQUIRED_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  "runtime_access_denied",
+  "agent_error.provider_auth_or_access",
+  "agent_error.provider_quota_limit",
+  "agent_error.missing_config",
+  "agent_error.model_not_found_or_unavailable",
+  "agent_error.runtime_version_unsupported",
+  "agent_error.runtime_missing_executable",
+]);
+
+type TaskOutcome = {
+  status: string;
+  error?: string | null;
+  failure_reason?: string | null;
+  cancelled_by?: { type: string; name?: string };
 };
+
+/** A run that was stopped rather than one that broke. */
+export function isCancelledOutcome(task: TaskOutcome): boolean {
+  return task.status === "cancelled"
+    || (task.status === "failed" && CANCELLATION_FAILURE_REASONS.has(task.failure_reason ?? ""));
+}
+
+/** A failed run whose recovery is a configuration change, not a retry. */
+export function failureNeedsAction(task: TaskOutcome): boolean {
+  return task.status === "failed" && ACTION_REQUIRED_FAILURE_REASONS.has(task.failure_reason ?? "");
+}
+
+/**
+ * The one label for how a failed or cancelled run ended: its recorded reason,
+ * else who cancelled it. Null when only the plain status is known.
+ */
+export function runOutcomeLabel(task: TaskOutcome, t: AgentsT): string | null {
+  if (task.status === "failed") return failureReasonLabel(task.failure_reason, t);
+  return cancelReasonLabel(task, t) ?? cancellationActorLabel(task, t);
+}

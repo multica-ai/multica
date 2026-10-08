@@ -29,6 +29,8 @@ var errWSRPCUncertain = errors.New("ws rpc: sent but outcome unknown (connection
 // daemon gives up (MUL-4257).
 const wsRPCResponseGrace = 2 * time.Second
 
+var wsClaimUncertainFallbackDelay = batchClaimRequestTimeout + wsRPCResponseGrace
+
 // errWSRPCWriteBufferFull is returned when the connection's write buffer is
 // saturated; the caller falls back to HTTP rather than blocking the socket.
 var errWSRPCWriteBufferFull = errors.New("ws rpc: write buffer full")
@@ -304,21 +306,41 @@ func (c *wsRPCClient) deliver(resp protocol.RPCResponsePayload) {
 
 // ClaimTasksWSFirst is the WS-first claim policy (MUL-4257): it issues the
 // tasks.claim RPC over the WS control connection when one is attached, and
-// falls back to the HTTP claim endpoint on any transport failure (no
-// connection, write-buffer full, timeout) or server error. The request/response
-// bodies are identical to the HTTP endpoint so both transports are
-// interchangeable. Wired into the claim poller as part of the poller cutover.
+// falls back to the HTTP claim endpoint on transport failures that are known not
+// to have reached the server (no connection, write-buffer full, unsent timeout)
+// or server error. A sent-frame disconnect/timeout is uncertain, so it is
+// retried over HTTP only after a short safety window. The request/response bodies
+// are identical to the HTTP endpoint so both transports are interchangeable.
+// Wired into the claim poller as part of the poller cutover.
 func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	result, err := d.claimTasksWSFirst(ctx, daemonID, runtimeIDs, maxTasks)
+	return result.Tasks, err
+}
+
+func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (claimTasksResult, error) {
 	// Un-upgraded server without the batch route: a prior poll already learned
 	// this (via a 404), so go straight to the legacy per-runtime claim and skip
 	// the WS + batch attempts each cycle.
 	if d.batchClaimUnsupported.Load() {
-		return d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+		tasks, err := d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+		return claimTasksResult{Tasks: tasks}, err
 	}
-	if d.wsRPC.supportsRPCV1() {
-		var resp struct {
-			Tasks []*Task `json:"tasks"`
+	bypassWSOnce := false
+	if retryAfterNanos := d.wsClaimHTTPFallbackAfter.Load(); retryAfterNanos > 0 {
+		retryAfter := time.Unix(0, retryAfterNanos)
+		now := time.Now()
+		if now.Before(retryAfter) {
+			d.logger.Debug("ws claim outcome uncertain; delaying http fallback until safety window elapses",
+				"retry_after", retryAfter.Sub(now).Round(time.Millisecond))
+			return claimTasksResult{}, nil
 		}
+		if d.wsClaimHTTPFallbackAfter.CompareAndSwap(retryAfterNanos, 0) {
+			bypassWSOnce = true
+			d.logger.Debug("previous ws claim outcome uncertain; using http fallback for this claim cycle")
+		}
+	}
+	if !bypassWSOnce && d.wsRPC.supportsRPCV1() {
+		var resp claimTasksResult
 		// batchClaimRequestTimeout is the server-side execution budget; the
 		// daemon waits that plus the client's grace margin for the response.
 		_, err := d.wsRPC.CallIfRPCV1Supported(ctx, "tasks.claim", batchClaimRequestTimeout, map[string]any{
@@ -327,21 +349,29 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 			"max_tasks":   maxTasks,
 		}, &resp)
 		if err == nil {
-			return resp.Tasks, nil
+			resp.ClaimedOverWS = true
+			return resp, nil
 		}
 		if errors.Is(err, errWSRPCUncertain) {
 			// The WS claim may have committed server-side; claiming the same
-			// free slots again over HTTP would double-claim. Skip this cycle —
-			// an orphaned server-side claim is recovered by stale reclaim and
-			// the next poll picks up anything still queued.
-			d.logger.Debug("ws claim outcome uncertain after disconnect; skipping fallback this cycle")
-			return nil, nil
+			// free slots again over HTTP immediately would double-claim. Skip
+			// this cycle, then force one HTTP batch claim after the server-side
+			// execution budget plus response grace has elapsed. If the WS claim
+			// committed, the task is already dispatched and stale reclaim owns
+			// recovery; if it did not, HTTP regains liveness for the queued task.
+			delay := wsClaimUncertainFallbackDelay
+			if delay < 0 {
+				delay = 0
+			}
+			d.wsClaimHTTPFallbackAfter.Store(time.Now().Add(delay).UnixNano())
+			d.logger.Debug("ws claim outcome uncertain after disconnect; delaying http fallback", "retry_after", delay)
+			return claimTasksResult{}, nil
 		}
 		d.logger.Debug("ws claim failed; falling back to http", "error", err)
 	}
-	tasks, err := d.client.ClaimTasks(ctx, daemonID, runtimeIDs, maxTasks)
+	result, err := d.client.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks)
 	if err == nil {
-		return tasks, nil
+		return result, nil
 	}
 	// Server has no batch route (404): freeze the old API contract by falling
 	// back to the legacy per-runtime claim loop, and remember it so we don't
@@ -349,7 +379,8 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 	if isBatchClaimUnsupported(err) {
 		d.batchClaimUnsupported.Store(true)
 		d.logger.Info("batch claim route unsupported by server; using legacy per-runtime claim")
-		return d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+		tasks, legacyErr := d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+		return claimTasksResult{Tasks: tasks}, legacyErr
 	}
-	return nil, err
+	return claimTasksResult{}, err
 }

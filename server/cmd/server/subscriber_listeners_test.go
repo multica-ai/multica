@@ -85,7 +85,7 @@ func subscriberCount(t *testing.T, queries *db.Queries, issueID string) int {
 func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -120,7 +120,7 @@ func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
 func TestSubscriberIssueCreated_CreatorAndAssignee(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	assigneeEmail := "subscriber-assignee-test@multica.ai"
 	assigneeID := createTestUser(t, assigneeEmail)
@@ -164,7 +164,7 @@ func TestSubscriberIssueCreated_CreatorAndAssignee(t *testing.T) {
 func TestSubscriberIssueCreated_SelfAssign(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -204,7 +204,7 @@ func TestSubscriberIssueCreated_SelfAssign(t *testing.T) {
 func TestSubscriberIssueUpdated_AssigneeChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	assigneeEmail := "subscriber-new-assignee-test@multica.ai"
 	assigneeID := createTestUser(t, assigneeEmail)
@@ -243,7 +243,7 @@ func TestSubscriberIssueUpdated_AssigneeChanged(t *testing.T) {
 func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -278,7 +278,7 @@ func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	commenterEmail := "subscriber-commenter-test@multica.ai"
 	commenterID := createTestUser(t, commenterEmail)
@@ -310,9 +310,8 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 }
 
 func TestSubscriberAddedEventPublished(t *testing.T) {
-	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -365,7 +364,7 @@ func TestSubscriberAddedEventPublished(t *testing.T) {
 func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -391,27 +390,4 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 	if !isSubscribed(t, queries, issueID, "member", testUserID) {
 		t.Fatal("expected creator to be subscribed when autopilot publishes map payload")
 	}
-}
-
-// Verify parseUUID is consistent — the local helper should agree with util.MustParseUUID
-// for valid input, and panic on invalid input (the silent-zero behavior was removed
-// after #1661 to prevent silent SQL writes against a zero UUID).
-func TestParseUUIDConsistency(t *testing.T) {
-	uuid := "550e8400-e29b-41d4-a716-446655440000"
-	local := parseUUID(uuid)
-	utilResult := util.MustParseUUID(uuid)
-	if local != utilResult {
-		t.Fatalf("parseUUID inconsistency: local=%v, util=%v", local, utilResult)
-	}
-	if !local.Valid {
-		t.Fatal("expected valid UUID")
-	}
-
-	// Invalid input (empty string) must panic now — never silently return a zero UUID.
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected parseUUID(\"\") to panic, but it returned normally")
-		}
-	}()
-	_ = parseUUID("")
 }

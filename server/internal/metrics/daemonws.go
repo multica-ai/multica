@@ -17,6 +17,10 @@ type DaemonWSCollector struct {
 	wakeupPublishErrors  *prometheus.Desc
 	wakeupReceivedTotal  *prometheus.Desc
 	wakeupDeliveredTotal *prometheus.Desc
+	runtimeGonePublished *prometheus.Desc
+	runtimeGoneErrors    *prometheus.Desc
+	runtimeGoneReceived  *prometheus.Desc
+	runtimeGoneDelivered *prometheus.Desc
 }
 
 func NewDaemonWSCollector(m *daemonws.Metrics) *DaemonWSCollector {
@@ -31,6 +35,10 @@ func NewDaemonWSCollector(m *daemonws.Metrics) *DaemonWSCollector {
 		wakeupPublishErrors:  newDaemonWSDesc("wakeup_publish_errors_total", "Total daemon wakeup Redis publish errors."),
 		wakeupReceivedTotal:  newDaemonWSDesc("wakeup_received_total", "Total daemon wakeups received from the Redis relay."),
 		wakeupDeliveredTotal: prometheus.NewDesc("multica_daemonws_wakeup_delivered_total", "Total daemon wakeup local delivery attempts.", []string{"result"}, nil),
+		runtimeGonePublished: newDaemonWSDesc("runtime_gone_published_total", "Total runtime-gone notifications published to the Redis relay."),
+		runtimeGoneErrors:    newDaemonWSDesc("runtime_gone_publish_errors_total", "Total runtime-gone Redis publish errors."),
+		runtimeGoneReceived:  newDaemonWSDesc("runtime_gone_received_total", "Total runtime-gone notifications received from the Redis relay."),
+		runtimeGoneDelivered: prometheus.NewDesc("multica_daemonws_runtime_gone_delivered_total", "Total runtime-gone local delivery attempts.", []string{"result"}, nil),
 	}
 }
 
@@ -48,6 +56,10 @@ func (c *DaemonWSCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.wakeupPublishErrors,
 		c.wakeupReceivedTotal,
 		c.wakeupDeliveredTotal,
+		c.runtimeGonePublished,
+		c.runtimeGoneErrors,
+		c.runtimeGoneReceived,
+		c.runtimeGoneDelivered,
 	} {
 		ch <- desc
 	}
@@ -67,4 +79,9 @@ func (c *DaemonWSCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.wakeupReceivedTotal, prometheus.CounterValue, float64(m.WakeupReceivedTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.wakeupDeliveredTotal, prometheus.CounterValue, float64(m.WakeupDeliveredHit.Load()), "hit")
 	ch <- prometheus.MustNewConstMetric(c.wakeupDeliveredTotal, prometheus.CounterValue, float64(m.WakeupDeliveredMiss.Load()), "miss")
+	ch <- prometheus.MustNewConstMetric(c.runtimeGonePublished, prometheus.CounterValue, float64(m.RuntimeGonePublishedTotal.Load()))
+	ch <- prometheus.MustNewConstMetric(c.runtimeGoneErrors, prometheus.CounterValue, float64(m.RuntimeGonePublishErrors.Load()))
+	ch <- prometheus.MustNewConstMetric(c.runtimeGoneReceived, prometheus.CounterValue, float64(m.RuntimeGoneReceivedTotal.Load()))
+	ch <- prometheus.MustNewConstMetric(c.runtimeGoneDelivered, prometheus.CounterValue, float64(m.RuntimeGoneDeliveredHit.Load()), "hit")
+	ch <- prometheus.MustNewConstMetric(c.runtimeGoneDelivered, prometheus.CounterValue, float64(m.RuntimeGoneDeliveredMiss.Load()), "miss")
 }

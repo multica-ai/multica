@@ -1,30 +1,21 @@
 {
   "title": "検索",
-  "description": "ページ、イシュー、プロジェクト、メンバーを検索します",
+  "description": "ページ、タスク、プロジェクト、メンバーを検索します",
   "placeholder": "コマンドを入力するか検索...",
   "groups": {
     "pages": "ページ",
     "commands": "コマンド",
     "members": "メンバー",
     "projects": "プロジェクト",
-    "issues": "イシュー",
+    "issues": "タスク",
+    "cancelled": "キャンセル済み",
     "recent": "最近の項目"
-  },
-  "pages": {
-    "inbox": "インボックス",
-    "my_issues": "マイイシュー",
-    "issues": "イシュー",
-    "projects": "プロジェクト",
-    "agents": "エージェント",
-    "runtimes": "ランタイム",
-    "skills": "スキル",
-    "settings": "設定"
   },
   "commands": {
     "current_theme_aria": "現在のテーマ",
-    "new_issue": "新規イシュー",
+    "new_issue": "新規タスク",
     "new_project": "新規プロジェクト",
-    "copy_issue_link": "イシューのリンクをコピー",
+    "copy_issue_link": "タスクのリンクをコピー",
     "copy_identifier": "識別子をコピー ({{identifier}})",
     "fold_all_comments": "すべてのコメントを折りたたむ",
     "unfold_all_comments": "すべてのコメントを展開",
@@ -38,7 +29,7 @@
   },
   "empty": {
     "no_results": "結果が見つかりませんでした。",
-    "type_to_search": "イシューやプロジェクトを検索するには入力してください"
+    "type_to_search": "タスクやプロジェクトを検索するには入力してください"
   },
   "trigger": {
     "label": "検索..."

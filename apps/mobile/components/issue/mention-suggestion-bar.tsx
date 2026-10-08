@@ -30,6 +30,13 @@ import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
+import {
+  CLOSED_CATEGORIES,
+  issueBehavesAsAny,
+  issueColumnCategory,
+} from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { useT } from "@/lib/i18n";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -43,6 +50,7 @@ import {
 } from "@/data/viewed-issues-store";
 import type { MentionMarker } from "@/lib/mention-serialize";
 import { cn } from "@/lib/utils";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 
 type Mode = "comment" | "chat";
 
@@ -75,6 +83,10 @@ export function MentionSuggestionBar({
 }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const isChat = mode === "chat";
+  // Rows are icon-only, so colour is the only thing that can carry a custom
+  // status's identity here. (MUL-6243)
+  const catalog = useIssueStatuses();
+  const { t } = useT("issues");
 
   // Comment-mode data — disabled in chat mode to avoid wasted fetches.
   const { data: members = [] } = useQuery({
@@ -137,11 +149,11 @@ export function MentionSuggestionBar({
 
       const out: Row[] = [];
       if (matchedRecent.length > 0) {
-        out.push({ kind: "section", label: "Recent" });
+        out.push({ kind: "section", label: t("suggestions.recent") });
         for (const i of matchedRecent) out.push({ kind: "issue", issue: i });
       }
       if (matchedMine.length > 0) {
-        out.push({ kind: "section", label: "My issues" });
+        out.push({ kind: "section", label: t("suggestions.my_issues") });
         for (const i of matchedMine) out.push({ kind: "issue", issue: i });
       }
       if (out.length === 0) out.push({ kind: "empty" });
@@ -159,10 +171,19 @@ export function MentionSuggestionBar({
     // assignee can never act on; web hides them, mobile must too.
     const myRole =
       members.find((m) => m.user_id === userId)?.role ?? null;
+    const runnableAgentIds = new Set(
+      agents
+        .filter(
+          (agent) =>
+            !agent.archived_at && isAgentRuntimeBound(agent),
+        )
+        .map((agent) => agent.id),
+    );
     const matchedAgents = [...agents]
       .filter(
         (a) =>
           !a.archived_at &&
+          isAgentRuntimeBound(a) &&
           (!q || a.name.toLowerCase().includes(q)) &&
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
       )
@@ -171,27 +192,30 @@ export function MentionSuggestionBar({
     // A re-activated squad re-appears on the next list refetch.
     const matchedSquads = [...squads]
       .filter(
-        (s) => !s.archived_at && (!q || s.name.toLowerCase().includes(q)),
+        (s) =>
+          !s.archived_at &&
+          runnableAgentIds.has(s.leader_id) &&
+          (!q || s.name.toLowerCase().includes(q)),
       )
       .sort((a, b) => a.name.localeCompare(b.name));
 
     const out: Row[] = [];
     if (showAll) out.push({ kind: "all" });
     if (matchedMembers.length > 0) {
-      out.push({ kind: "section", label: "Members" });
+      out.push({ kind: "section", label: t("picker.people") });
       for (const m of matchedMembers) out.push({ kind: "member", member: m });
     }
     if (matchedAgents.length > 0) {
-      out.push({ kind: "section", label: "Agents" });
+      out.push({ kind: "section", label: t("picker.agents") });
       for (const a of matchedAgents) out.push({ kind: "agent", agent: a });
     }
     if (matchedSquads.length > 0) {
-      out.push({ kind: "section", label: "Squads" });
+      out.push({ kind: "section", label: t("picker.squads") });
       for (const s of matchedSquads) out.push({ kind: "squad", squad: s });
     }
     if (out.length === 0) out.push({ kind: "empty" });
     return out;
-  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId]);
+  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId, t]);
 
   if (!visible) return null;
 
@@ -258,9 +282,9 @@ export function MentionSuggestionBar({
                   <Text className="text-xs font-medium text-brand">@</Text>
                 </View>
                 <Text className="flex-1 text-sm text-foreground">
-                  Everyone
+                  {t("suggestions.everyone")}
                 </Text>
-                <Badge label="All" />
+                <Badge label={t("suggestions.all")} />
               </Pressable>
             );
           }
@@ -284,13 +308,15 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.member.name}
                 </Text>
-                <Badge label="Member" />
+                <Badge label={t("suggestions.member")} />
               </Pressable>
             );
           }
           if (item.kind === "agent") {
+            const runtimeBound = isAgentRuntimeBound(item.agent);
             return (
               <Pressable
+                disabled={!runtimeBound}
                 onPress={() =>
                   onSelect({
                     type: "agent",
@@ -298,13 +324,21 @@ export function MentionSuggestionBar({
                     name: item.agent.name,
                   })
                 }
-                className="flex-row items-center gap-3 px-3 py-2 active:bg-secondary"
+                className={cn(
+                  "flex-row items-center gap-3 px-3 py-2 active:bg-secondary",
+                  !runtimeBound && "opacity-50",
+                )}
               >
                 <ActorAvatar type="agent" id={item.agent.id} size={28} showPresence />
                 <Text className="flex-1 text-sm text-foreground">
                   {item.agent.name}
                 </Text>
-                <Badge label="Agent" tone="brand" />
+                <Badge
+                  label={runtimeBound
+                    ? t("picker.agent")
+                    : t("picker.needs_runtime")}
+                  tone={runtimeBound ? "brand" : "outline"}
+                />
               </Pressable>
             );
           }
@@ -324,14 +358,16 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.squad.name}
                 </Text>
-                <Badge label="Squad" tone="outline" />
+                <Badge label={t("picker.squad")} tone="outline" />
               </Pressable>
             );
           }
           // issue
-          const closed =
-            item.issue.status === "done" ||
-            item.issue.status === "cancelled";
+          // By CATEGORY, not by key: a custom status in the completed category is
+          // done, and `status === "done"` silently disagrees — the row would
+          // render at full opacity as though the work were still open.
+          // (MUL-6243)
+          const closed = issueBehavesAsAny(item.issue, CLOSED_CATEGORIES);
           return (
             <Pressable
               onPress={() =>
@@ -347,7 +383,12 @@ export function MentionSuggestionBar({
               )}
             >
               <View className="size-7 items-center justify-center">
-                <StatusIcon status={item.issue.status} size={16} />
+                <StatusIcon
+                  status={item.issue.status}
+                  category={issueColumnCategory(item.issue)}
+                  icon={catalog.iconOf(item.issue.status)} color={catalog.colorOf(item.issue.status)}
+                  size={16}
+                />
               </View>
               <Text className="text-sm font-medium text-foreground">
                 {item.issue.identifier}
@@ -376,7 +417,7 @@ function Badge({
   return (
     <View
       className={cn(
-        "px-1.5 py-0.5 rounded",
+        "px-1.5 py-0.5 rounded-xs",
         tone === "brand"
           ? "bg-brand/10"
           : tone === "outline"

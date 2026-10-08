@@ -24,12 +24,12 @@ export function WorkspaceLoader({ name }: { name?: string | null }) {
       <div className="flex flex-col items-center gap-4">
         <MulticaIcon className="size-8 animate-pulse" />
         {name ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {t(($) => $.workspace_loader.loading_named_prefix)}{" "}
             <span className="font-medium text-foreground">{name}</span>…
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">{t(($) => $.workspace_loader.loading_workspace)}</p>
+          <p className="text-body text-muted-foreground">{t(($) => $.workspace_loader.loading_workspace)}</p>
         )}
       </div>
     </div>

@@ -77,10 +77,10 @@ func runtimeLivenessKey(runtimeID string) string {
 // of an unexpired key is the signal "this runtime is alive right now"; the
 // sweeper consults this before marking a stale-in-DB runtime offline.
 type RedisLivenessStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisLivenessStore(rdb *redis.Client) *RedisLivenessStore {
+func NewRedisLivenessStore(rdb redis.UniversalClient) *RedisLivenessStore {
 	return &RedisLivenessStore{rdb: rdb}
 }
 
@@ -107,15 +107,25 @@ func (s *RedisLivenessStore) IsAliveBatch(ctx context.Context, runtimeIDs []stri
 	for i, id := range runtimeIDs {
 		keys[i] = runtimeLivenessKey(id)
 	}
-	values, err := s.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
+	pipe := s.rdb.Pipeline()
+	commands := make([]*redis.StringCmd, len(keys))
+	for i, key := range keys {
+		commands[i] = pipe.Get(ctx, key)
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
 		slog.Warn("liveness mget failed; falling back to DB",
 			"error", err, "count", len(keys))
 		return nil, false
 	}
 	out := make(map[string]bool, len(runtimeIDs))
-	for i, id := range runtimeIDs {
-		out[id] = values[i] != nil
+	for i, command := range commands {
+		if err := command.Err(); err != nil && !errors.Is(err, redis.Nil) {
+			slog.Warn("liveness get failed; falling back to DB",
+				"error", err, "count", len(keys))
+			return nil, false
+		}
+		out[runtimeIDs[i]] = command.Err() == nil
 	}
 	return out, true
 }

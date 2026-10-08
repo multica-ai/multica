@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
 import type {
   RuntimeProfile,
-  RuntimeProtocolFamily,
+  RuntimeProfileType,
 } from "@multica/core/types";
 import {
   runtimeProfileListOptions,
@@ -41,10 +41,12 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProviderLogo } from "./provider-logo";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
-  PROTOCOL_FAMILIES,
+  RUNTIME_TYPES,
   buildRuntimeCatalog,
   formatCommandLine,
   parseCommandLine,
+  profileRuntimeType,
+  runtimeTypeLabel,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -94,7 +96,7 @@ export function RuntimeProfilesDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Carries the chosen family from create-step-1 into the form.
   const [draftFamily, setDraftFamily] =
-    useState<RuntimeProtocolFamily>(PROTOCOL_FAMILIES[0] ?? "claude");
+    useState<RuntimeProfileType>(RUNTIME_TYPES[0] ?? "claude");
 
   const catalog = useMemo(() => buildRuntimeCatalog(profiles), [profiles]);
   const entries = useMemo(
@@ -118,7 +120,7 @@ export function RuntimeProfilesDialog({
       >
         <DialogHeader className="border-b px-6 py-5">
           <div className="flex items-start justify-between gap-3">
-            <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
+            <DialogTitle className="flex min-w-0 items-center gap-2 text-title-sm">
               <Server
                 aria-hidden="true"
                 className="h-4 w-4 shrink-0 text-muted-foreground"
@@ -159,7 +161,7 @@ export function RuntimeProfilesDialog({
               </DialogClose>
             </div>
           </div>
-          <DialogDescription className="text-xs">
+          <DialogDescription className="text-caption">
             <span className="block">
               {intent === "create"
                 ? t(($) => $.profiles.create_dialog_description, {
@@ -185,7 +187,9 @@ export function RuntimeProfilesDialog({
             mode={state.mode}
             step={state.mode === "create" ? state.step : "details"}
             family={
-              state.mode === "edit" ? state.profile.protocol_family : draftFamily
+              state.mode === "edit"
+                ? profileRuntimeType(state.profile)
+                : draftFamily
             }
             profile={state.mode === "edit" ? state.profile : null}
             standaloneCreate={intent === "create"}
@@ -271,7 +275,7 @@ function CatalogList({
   return (
     <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
       <div className="flex shrink-0 items-center justify-between border-b bg-background px-4 py-3">
-        <h3 className="text-sm font-medium">
+        <h3 className="text-body font-medium">
           {t(($) => $.profiles.list_title)}
         </h3>
       </div>
@@ -285,7 +289,7 @@ function CatalogList({
             <div className="mb-2 flex items-center justify-between gap-3">
               <h4
                 id="runtime-profile-custom-section"
-                className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                className="text-caption font-medium uppercase tracking-wide text-muted-foreground"
               >
                 {t(($) => $.profiles.custom_section_title, {
                   count: catalog.customs.length,
@@ -332,13 +336,13 @@ function CatalogList({
               <span className="min-w-0">
                 <span
                   id="runtime-profile-builtin-section"
-                  className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                  className="block text-caption font-medium uppercase tracking-wide text-muted-foreground"
                 >
                   {t(($) => $.profiles.builtin_section_title, {
                     count: catalog.builtins.length,
                   })}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                <span className="mt-0.5 block truncate text-caption text-muted-foreground">
                   {t(($) => $.profiles.builtin_section_hint)}
                 </span>
               </span>
@@ -383,8 +387,8 @@ function EmptyCustomState({ onAddNew }: { onAddNew: () => void }) {
           <Server aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
         </span>
         <div className="min-w-0 flex-1">
-          <h5 className="text-sm font-medium">{t(($) => $.profiles.empty_title)}</h5>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          <h5 className="text-body font-medium">{t(($) => $.profiles.empty_title)}</h5>
+          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
             {t(($) => $.profiles.empty_description)}
           </p>
           <Button
@@ -413,7 +417,9 @@ function CatalogRow({
 }) {
   const { t } = useT("runtimes");
   const label =
-    entry.kind === "custom" ? entry.profile.display_name : entry.protocolFamily;
+    entry.kind === "custom"
+      ? entry.profile.display_name
+      : runtimeTypeLabel(entry.protocolFamily);
   const disabled = entry.kind === "custom" && !entry.profile.enabled;
   const isBuiltin = entry.kind === "builtin";
   return (
@@ -439,26 +445,26 @@ function CatalogRow({
         <span className="flex items-center gap-1.5">
           <span
             className={cn(
-              "truncate text-sm font-medium",
+              "truncate text-body font-medium",
               entry.kind === "builtin" && "capitalize",
             )}
           >
             {label}
           </span>
           {disabled && (
-            <span className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.profiles.badge_disabled)}
             </span>
           )}
         </span>
         {entry.kind === "custom" && (
-          <span className="block truncate text-xs capitalize text-muted-foreground">
-            {entry.protocolFamily}
+          <span className="block truncate text-caption capitalize text-muted-foreground">
+            {runtimeTypeLabel(entry.protocolFamily)}
           </span>
         )}
       </span>
       {isBuiltin && (
-        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="shrink-0 text-micro font-medium uppercase tracking-wide text-muted-foreground">
           {t(($) => $.profiles.builtin_reference)}
         </span>
       )}
@@ -492,10 +498,10 @@ function DetailPanel({
           <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border bg-background">
             <Server className="h-5 w-5 text-muted-foreground" />
           </span>
-          <h3 className="mt-4 text-base font-semibold">
+          <h3 className="mt-4 text-title-sm font-semibold">
             {t(($) => $.profiles.detail.default_title)}
           </h3>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-body leading-relaxed text-muted-foreground">
             {t(($) => $.profiles.detail.default_description)}
           </p>
         </div>
@@ -511,17 +517,17 @@ function DetailPanel({
             <ProviderLogo provider={entry.protocolFamily} className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold capitalize">
-              {entry.protocolFamily}
+            <h3 className="truncate text-title-sm font-semibold capitalize">
+              {runtimeTypeLabel(entry.protocolFamily)}
             </h3>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t(($) => $.profiles.builtin_detail.read_only)}
             </span>
           </div>
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">
+        <p className="mt-4 text-body text-muted-foreground">
           {t(($) => $.profiles.builtin_detail.description, {
-            family: entry.protocolFamily,
+            family: runtimeTypeLabel(entry.protocolFamily),
           })}
         </p>
       </div>
@@ -541,16 +547,16 @@ function DetailPanel({
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
               <ProviderLogo
-                provider={profile.protocol_family}
+                provider={profileRuntimeType(profile)}
                 className="h-5 w-5"
               />
             </span>
             <div className="min-w-0">
-              <h3 className="truncate text-base font-semibold">
+              <h3 className="truncate text-title-sm font-semibold">
                 {profile.display_name}
               </h3>
-              <span className="text-xs capitalize text-muted-foreground">
-                {profile.protocol_family}
+              <span className="text-caption capitalize text-muted-foreground">
+                {runtimeTypeLabel(profileRuntimeType(profile))}
               </span>
             </div>
           </div>
@@ -558,10 +564,12 @@ function DetailPanel({
 
         <dl className="mt-5 space-y-4">
           <DetailRow label={t(($) => $.profiles.detail.base_family)}>
-            <span className="capitalize">{profile.protocol_family}</span>
+            <span className="capitalize">
+              {runtimeTypeLabel(profileRuntimeType(profile))}
+            </span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
-            <span className="font-mono text-xs">{commandLine}</span>
+            <span className="font-mono text-caption">{commandLine}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.description)}>
             {profile.description ? (
@@ -620,10 +628,10 @@ function DetailRow({
 }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <dt className="text-caption font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </dt>
-      <dd className="mt-1 text-sm">{children}</dd>
+      <dd className="mt-1 text-body">{children}</dd>
     </div>
   );
 }
@@ -648,11 +656,11 @@ function ProfileFormView({
   wsId: string;
   mode: "create" | "edit";
   step: "family" | "details";
-  family: RuntimeProtocolFamily;
+  family: RuntimeProfileType;
   profile: RuntimeProfile | null;
   standaloneCreate: boolean;
   standaloneEdit: boolean;
-  onPickFamily: (family: RuntimeProtocolFamily) => void;
+  onPickFamily: (family: RuntimeProfileType) => void;
   onBack: () => void;
   onCancel: () => void;
   onSaved: (profile: RuntimeProfile) => void;
@@ -663,28 +671,30 @@ function ProfileFormView({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
             {t(($) => $.profiles.form.step_progress, { current: 1, total: 2 })}
           </p>
-          <h3 className="text-sm font-medium">
+          <h3 className="text-body font-medium">
             {t(($) => $.profiles.form.step_family_label)}
           </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.profiles.form.step_family_hint)}
           </p>
           <div
             className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
             aria-label={t(($) => $.profiles.form.family_label)}
           >
-            {PROTOCOL_FAMILIES.map((option) => (
+            {RUNTIME_TYPES.map((option) => (
               <button
                 key={option}
                 type="button"
                 onClick={() => onPickFamily(option)}
-                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ProviderLogo provider={option} className="h-4 w-4 shrink-0" />
-                <span className="truncate capitalize">{option}</span>
+                <span className="truncate capitalize">
+                  {runtimeTypeLabel(option)}
+                </span>
               </button>
             ))}
           </div>
@@ -736,7 +746,7 @@ function ProfileDetailsForm({
 }: {
   wsId: string;
   mode: "create" | "edit";
-  family: RuntimeProtocolFamily;
+  family: RuntimeProfileType;
   profile: RuntimeProfile | null;
   hideEditHeading: boolean;
   onBack: () => void;
@@ -791,7 +801,7 @@ function ProfileDetailsForm({
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
           display_name: values.displayName.trim(),
-          protocol_family: family,
+          runtime_type: family,
           command_name: commandName,
           fixed_args: fixedArgs,
           ...(description ? { description } : {}),
@@ -852,12 +862,12 @@ function ProfileDetailsForm({
         className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5"
       >
         {mode === "create" && (
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
             {t(($) => $.profiles.form.step_progress, { current: 2, total: 2 })}
           </p>
         )}
         {(mode === "create" || !hideEditHeading) && (
-          <h3 className="text-sm font-medium">
+          <h3 className="text-body font-medium">
             {mode === "create"
               ? t(($) => $.profiles.form.step_details_label)
               : t(($) => $.profiles.form.edit_title)}
@@ -865,14 +875,16 @@ function ProfileDetailsForm({
         )}
 
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-caption text-muted-foreground">
             {t(($) => $.profiles.form.family_label)}
           </Label>
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <ProviderLogo provider={family} className="h-4 w-4 shrink-0" />
-            <span className="text-sm capitalize">{family}</span>
+            <span className="text-body capitalize">
+              {runtimeTypeLabel(family)}
+            </span>
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t(($) => $.profiles.form.family_locked_hint)}
           </p>
         </div>
@@ -880,7 +892,7 @@ function ProfileDetailsForm({
         <div className="space-y-1.5">
           <Label
             htmlFor={`${idPrefix}-display-name`}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           >
             {t(($) => $.profiles.form.display_name_label)}
           </Label>
@@ -897,12 +909,12 @@ function ProfileDetailsForm({
                 ? `${idPrefix}-display-name-error`
                 : undefined
             }
-            className="h-9 text-sm"
+            className="h-9 text-body"
           />
           {hasError("displayName") && (
             <p
               id={`${idPrefix}-display-name-error`}
-              className="text-xs text-destructive"
+              className="text-caption text-destructive"
             >
               {t(($) => $.profiles.form.error_display_name_required)}
             </p>
@@ -910,7 +922,7 @@ function ProfileDetailsForm({
           {duplicateName && !hasError("displayName") && (
             <p
               id={`${idPrefix}-display-name-error`}
-              className="text-xs text-destructive"
+              className="text-caption text-destructive"
             >
               {t(($) => $.profiles.form.error_duplicate_name)}
             </p>
@@ -920,7 +932,7 @@ function ProfileDetailsForm({
         <div className="space-y-1.5">
           <Label
             htmlFor={`${idPrefix}-command`}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           >
             {t(($) => $.profiles.form.command_name_label)}
           </Label>
@@ -936,15 +948,15 @@ function ProfileDetailsForm({
             aria-describedby={
               hasError("commandLine") ? `${idPrefix}-command-error` : undefined
             }
-            className="h-9 font-mono text-sm"
+            className="h-9 font-mono text-body"
           />
           {commandError && (
-            <p id={`${idPrefix}-command-error`} className="text-xs text-destructive">
+            <p id={`${idPrefix}-command-error`} className="text-caption text-destructive">
               {commandError}
             </p>
           )}
           {parsedCommand.ok && (
-            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-micro text-muted-foreground">
               <div className="flex min-w-0 gap-1">
                 <span>{t(($) => $.profiles.form.command_preview_executable)}</span>
                 <span className="truncate font-mono text-foreground">
@@ -957,7 +969,7 @@ function ProfileDetailsForm({
                   {parsedCommand.fixedArgs.map((arg, index) => (
                     <span
                       key={`${arg}-${index}`}
-                      className="rounded bg-background px-1 font-mono text-foreground"
+                      className="rounded-xs bg-background px-1 font-mono text-foreground"
                     >
                       {arg}
                     </span>
@@ -971,7 +983,7 @@ function ProfileDetailsForm({
         <div className="space-y-1.5">
           <Label
             htmlFor={`${idPrefix}-description`}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           >
             {t(($) => $.profiles.form.description_label)}
           </Label>
@@ -982,7 +994,7 @@ function ProfileDetailsForm({
             value={values.description}
             onChange={(e) => setField("description", e.target.value)}
             placeholder={t(($) => $.profiles.form.description_placeholder)}
-            className="min-h-16 text-sm"
+            className="min-h-16 text-body"
           />
         </div>
 
@@ -994,7 +1006,7 @@ function ProfileDetailsForm({
             MUL-3308. */}
 
         {formError && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-caption text-destructive">
             {formError}
           </p>
         )}

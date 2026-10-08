@@ -511,7 +511,7 @@ func TestPruneCodexSessionStores(t *testing.T) {
 func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	storeDir := codexSessionStoreDir(home, codexSessionStoreKey("", "agent-1", "issue-old"))
+	storeDir := codexSessionStoreDir(home, codexSessionStoreKey("", TaskContextForEnv{AgentID: "agent-1", IssueID: "issue-old"}))
 	sessionID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
 	// A long-idle (30-day) store that still holds a resumable rollout.
 	seedRolloutAt(t, filepath.Join(storeDir, "2026", "06", "01", "rollout-2026-06-01T00-00-00-"+sessionID+".jsonl"), 16)
@@ -546,7 +546,7 @@ func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
 func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	storeDir := codexSessionStoreDir(home, codexSessionStoreKey("", "agent-1", "issue-active"))
+	storeDir := codexSessionStoreDir(home, codexSessionStoreKey("", TaskContextForEnv{AgentID: "agent-1", IssueID: "issue-active"}))
 	seedRolloutAt(t, filepath.Join(storeDir, "2026", "06", "01", "rollout-2026-06-01T00-00-00-x.jsonl"), 16)
 	// Idle past retention on disk (no remount refresh), but currently in use.
 	chtimesTree(t, storeDir, time.Now().Add(-30*24*time.Hour))
@@ -579,7 +579,7 @@ func TestPruneCodexSessionStores_IsolatesProfiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
 	// A store owned by the "staging" profile daemon, idle past retention.
-	stagingStore := codexSessionStoreDir(home, codexSessionStoreKey("staging", "agent-1", "issue-1"))
+	stagingStore := codexSessionStoreDir(home, codexSessionStoreKey("staging", TaskContextForEnv{AgentID: "agent-1", IssueID: "issue-1"}))
 	seedRolloutAt(t, filepath.Join(stagingStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-s.jsonl"), 16)
 	chtimesTree(t, stagingStore, time.Now().Add(-30*24*time.Hour))
 
@@ -649,8 +649,8 @@ func TestPruneCodexSessionStores_NoCrossProfileCollision(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("CODEX_HOME", home)
 		a, b := pair[0], pair[1]
-		storeA := codexSessionStoreDir(home, codexSessionStoreKey(a, "agent", "issue"))
-		storeB := codexSessionStoreDir(home, codexSessionStoreKey(b, "agent", "issue"))
+		storeA := codexSessionStoreDir(home, codexSessionStoreKey(a, TaskContextForEnv{AgentID: "agent", IssueID: "issue"}))
+		storeB := codexSessionStoreDir(home, codexSessionStoreKey(b, TaskContextForEnv{AgentID: "agent", IssueID: "issue"}))
 		seedRolloutAt(t, filepath.Join(storeA, "2026", "06", "01", "rollout-2026-06-01T00-00-00-a.jsonl"), 16)
 		seedRolloutAt(t, filepath.Join(storeB, "2026", "06", "01", "rollout-2026-06-01T00-00-00-b.jsonl"), 16)
 		chtimesTree(t, storeA, time.Now().Add(-30*24*time.Hour))

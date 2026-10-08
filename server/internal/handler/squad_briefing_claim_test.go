@@ -10,10 +10,11 @@ import (
 )
 
 // claimAgentInstructionsForTest claims the next queued task for runtimeID and
-// returns the claimed task id plus the agent Instructions carried on the claim
-// response (the field the squad-leader briefing is injected into). Empty task
-// id means no task was claimed.
-func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID string, instructions string, raw string) {
+// returns the claimed task id, the agent Instructions carried on the claim
+// response (the field the squad-leader briefing is injected into), and the
+// is_leader_task flag the daemon derives its squad-leader role from
+// (MUL-5811). Empty task id means no task was claimed.
+func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID string, instructions string, isLeaderTask bool, raw string) {
 	t.Helper()
 
 	w := httptest.NewRecorder()
@@ -28,8 +29,10 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 
 	var resp struct {
 		Task *struct {
-			ID    string `json:"id"`
-			Agent *struct {
+			ID                 string `json:"id"`
+			IsLeaderTask       bool   `json:"is_leader_task"`
+			LeaderRoleResolved bool   `json:"leader_role_resolved"`
+			Agent              *struct {
 				Instructions string `json:"instructions"`
 			} `json:"agent"`
 		} `json:"task"`
@@ -38,13 +41,20 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 		t.Fatalf("decode claim response: %v", err)
 	}
 	if resp.Task == nil {
-		return "", "", w.Body.String()
+		return "", "", false, w.Body.String()
+	}
+	// Every claim must advertise the capability, leader or not: its absence is
+	// how a daemon detects a server too old to resolve the role, and silently
+	// dropping it would send every upgraded daemon back to inferring the role
+	// from instructions text — the bug MUL-5811 removed.
+	if !resp.Task.LeaderRoleResolved {
+		t.Fatalf("claim response must set leader_role_resolved=true: %s", w.Body.String())
 	}
 	var instr string
 	if resp.Task.Agent != nil {
 		instr = resp.Task.Agent.Instructions
 	}
-	return resp.Task.ID, instr, w.Body.String()
+	return resp.Task.ID, instr, resp.Task.IsLeaderTask, w.Body.String()
 }
 
 // squadBriefingClaimFixture wires a runtime + leader agent + squad and returns
@@ -128,12 +138,17 @@ func TestClaim_LeaderTaskFromCommentMention_InjectsBriefing(t *testing.T) {
 	fx := newSquadBriefingClaimFixture(t, ctx, "Briefing inject")
 	want := enqueueClaimTask(t, ctx, fx, true /*isLeader*/, true /*withSquadID*/)
 
-	got, instr, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
+	got, instr, isLeader, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
 	if got != want {
 		t.Fatalf("claimed task id = %q, want %q: %s", got, want, raw)
 	}
 	if !strings.Contains(instr, "## Squad Operating Protocol") || !strings.Contains(instr, "## Squad Roster") {
 		t.Fatalf("expected squad-leader briefing in agent instructions, got:\n%s", instr)
+	}
+	// The daemon reads its leader role off this flag (MUL-5811), so an
+	// injected briefing must arrive with the flag set.
+	if !isLeader {
+		t.Fatalf("claim injected the briefing but reported is_leader_task=false: %s", raw)
 	}
 }
 
@@ -148,9 +163,12 @@ func TestClaim_NonLeaderTask_NoBriefing(t *testing.T) {
 	fx := newSquadBriefingClaimFixture(t, ctx, "Briefing nonleader")
 	enqueueClaimTask(t, ctx, fx, false /*isLeader*/, true /*withSquadID*/)
 
-	_, instr, _ := claimAgentInstructionsForTest(t, fx.RuntimeID)
+	_, instr, isLeader, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
 	if strings.Contains(instr, "## Squad Operating Protocol") || strings.Contains(instr, "## Squad Roster") {
 		t.Fatalf("non-leader task must NOT get squad briefing, got:\n%s", instr)
+	}
+	if isLeader {
+		t.Fatalf("non-leader task must not report is_leader_task=true: %s", raw)
 	}
 }
 
@@ -188,12 +206,17 @@ func TestClaim_LeaderTaskWithDanglingSquadID_NoBriefing(t *testing.T) {
 		t.Fatalf("expected task.squad_id to remain the dangling UUID after squad delete (no FK)")
 	}
 
-	got, instr, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
+	got, instr, isLeader, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
 	if got != want {
 		t.Fatalf("claimed task id = %q, want %q (claim must still succeed 200): %s", got, want, raw)
 	}
 	if strings.Contains(instr, "## Squad Operating Protocol") || strings.Contains(instr, "## Squad Roster") {
 		t.Fatalf("dangling squad_id must NOT get squad briefing, got:\n%s", instr)
+	}
+	// A leader task with no briefing has no roster to delegate to, so the
+	// daemon must not run it in the leader role either (MUL-5811).
+	if isLeader {
+		t.Fatalf("skipped injection must clear is_leader_task on the claim response: %s", raw)
 	}
 }
 
@@ -209,8 +232,43 @@ func TestClaim_LeaderTaskWithoutSquadID_NoBriefing(t *testing.T) {
 	fx := newSquadBriefingClaimFixture(t, ctx, "Briefing nullsquad")
 	enqueueClaimTask(t, ctx, fx, true /*isLeader*/, false /*withSquadID*/)
 
-	_, instr, _ := claimAgentInstructionsForTest(t, fx.RuntimeID)
+	_, instr, isLeader, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
 	if strings.Contains(instr, "## Squad Operating Protocol") || strings.Contains(instr, "## Squad Roster") {
 		t.Fatalf("leader task with NULL squad_id must NOT get squad briefing, got:\n%s", instr)
+	}
+	if isLeader {
+		t.Fatalf("skipped injection must clear is_leader_task on the claim response: %s", raw)
+	}
+}
+
+// TestClaim_LeaderSwappedAfterEnqueue_NoBriefingAndNoLeaderRole covers the
+// third skip path: the squad still exists, but its leader was reassigned after
+// this task was enqueued, so the claiming agent is no longer the leader. The
+// defensive gate already withheld the briefing; the flag must follow it down,
+// otherwise the daemon would boot a former leader into the leader role with no
+// roster and no protocol (MUL-5811).
+func TestClaim_LeaderSwappedAfterEnqueue_NoBriefingAndNoLeaderRole(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadBriefingClaimFixture(t, ctx, "Briefing swapped")
+	want := enqueueClaimTask(t, ctx, fx, true /*isLeader*/, true /*withSquadID*/)
+
+	// Hand the squad to a different agent AFTER enqueue.
+	otherAgentID, _ := createClaimReclaimAgentAndIssue(t, ctx, fx.RuntimeID, "Briefing swapped newleader")
+	if _, err := testPool.Exec(ctx, `UPDATE squad SET leader_id = $2 WHERE id = $1`, fx.SquadID, otherAgentID); err != nil {
+		t.Fatalf("swap squad leader: %v", err)
+	}
+
+	got, instr, isLeader, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
+	if got != want {
+		t.Fatalf("claimed task id = %q, want %q (claim must still succeed 200): %s", got, want, raw)
+	}
+	if strings.Contains(instr, "## Squad Operating Protocol") || strings.Contains(instr, "## Squad Roster") {
+		t.Fatalf("former leader must NOT get squad briefing, got:\n%s", instr)
+	}
+	if isLeader {
+		t.Fatalf("skipped injection must clear is_leader_task on the claim response: %s", raw)
 	}
 }

@@ -3,6 +3,7 @@
 interface ActivityBucketLike {
   total: number;
   failed: number;
+  completed: number;
 }
 
 interface SparklineProps {
@@ -21,17 +22,18 @@ interface SparklineProps {
 const SUCCESS_FILL = "var(--color-brand)";
 const SUCCESS_OPACITY = 0.6;
 const FAILED_FILL = "var(--color-destructive)";
+const NEUTRAL_FILL = "var(--color-muted-foreground)";
 const BASELINE_FILL = "var(--color-muted-foreground)";
 const BASELINE_OPACITY = 0.25;
 
 /**
- * Stacked bar sparkline — success bottom, failure top. One row, one shape,
- * two dimensions:
+ * Stacked bar sparkline — completed bottom, failed top, cancelled neutral.
+ * Two dimensions:
  *
  *   - **Column height** = total throughput that day (per-component scaled
  *     so a quiet agent reads "its own shape", not flattened by a noisy
  *     neighbour).
- *   - **Red share** = failure rate. A 100-runs-1-failed agent and a
+ *   - **Red share** = failed runs / all activity. A 100-runs-1-failed agent and a
  *     100-runs-99-failed agent must be told apart at scan speed; the only
  *     way to do that with a single column is to encode the second
  *     dimension *inside* the column.
@@ -118,17 +120,37 @@ export function Sparkline({
                 Math.max(1, Math.round((usableH * b.failed) / scaleDenominator)),
               )
             : 0;
-        const successH = totalH - failedH;
+        // Only completed runs earn a success segment. Whatever is left over
+        // — cancellations — is neither success nor failure, so it reads
+        // neutral rather than inflating the brand-coloured share.
+        const completedH =
+          b.completed > 0
+            ? Math.min(
+                totalH - failedH,
+                Math.max(1, Math.round((usableH * b.completed) / scaleDenominator)),
+              )
+            : 0;
+        const neutralH = totalH - failedH - completedH;
         const colTop = baselineY - totalH;
         return (
           <g key={i}>
-            {successH > 0 && (
+            {completedH > 0 && (
+              <rect
+                x={x}
+                y={colTop + failedH + neutralH}
+                width={colWidth}
+                height={completedH}
+                fill={SUCCESS_FILL}
+                fillOpacity={SUCCESS_OPACITY}
+              />
+            )}
+            {neutralH > 0 && (
               <rect
                 x={x}
                 y={colTop + failedH}
                 width={colWidth}
-                height={successH}
-                fill={SUCCESS_FILL}
+                height={neutralH}
+                fill={NEUTRAL_FILL}
                 fillOpacity={SUCCESS_OPACITY}
               />
             )}

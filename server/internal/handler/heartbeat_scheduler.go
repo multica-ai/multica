@@ -2,11 +2,14 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -15,54 +18,72 @@ import (
 //
 // Two implementations exist:
 //
-//   - PassthroughHeartbeatScheduler runs the legacy synchronous TouchAgentRuntimeLastSeen
+//   - PassthroughHeartbeatScheduler runs the synchronous TouchAgentRuntimeLastSeen
 //     followed by a MarkAgentRuntimeOnline fallback when the touch matches zero rows
 //     (sweeper-race recovery). It is the default Handler wiring so unit tests
-//     observe the bump immediately and the existing race-recovery test stays valid.
+//     observe the bump immediately.
 //
 //   - BatchedHeartbeatScheduler queues runtime IDs in memory and flushes them as a
 //     single bulk UPDATE every tick. Production wires this so a fleet of N runtimes
-//     beating every 15s costs ~1 DB transaction per tick instead of N. Sync paths
-//     (status flip, never-seen rows) still go through MarkAgentRuntimeOnline
-//     immediately; only the hot "online row, just bumping last_seen_at" path is
-//     batched. See cmd/server/main.go for the goroutine wiring and shutdown drain.
+//     beating every 15s costs ~1 DB transaction per tick instead of N. IDs
+//     omitted by UPDATE ... RETURNING are reconciled after each flush: rows
+//     raced offline are restored, while deleted rows invalidate their connection.
+//     See cmd/server/main.go for the goroutine wiring and shutdown drain.
 type HeartbeatScheduler interface {
 	// Schedule is called from the heartbeat hot path after the per-row flush
-	// window check has decided a DB write is warranted. Implementations must
-	// preserve the sweeper-race semantics: if rt.Status was "online" at SELECT
-	// time but the row is now offline, the scheduler must eventually flip it
-	// back online (sync path immediately; batched path defers to the runtime's
-	// next beat, which will see status="offline" and take the sync branch in
-	// recordHeartbeat).
-	Schedule(ctx context.Context, rt db.AgentRuntime) error
+	// window check has decided a DB write is warranted. Runtime ownership and
+	// status live in the connection lease. The workspace ID accompanies the
+	// runtime ID so a rare passthrough recovery can publish without another read.
+	//
+	// When a Schedule/flush path itself flips an offline row back online
+	// (sweeper-race fallback, batch-receipt reconciliation), it reports the
+	// recovery through RecoveryNotifier so the workspace-scoped daemon:register
+	// refresh fires exactly once per actual offline → online transition.
+	Schedule(ctx context.Context, runtimeID, workspaceID pgtype.UUID) error
 }
 
-// PassthroughHeartbeatScheduler is the synchronous, legacy-behavior scheduler.
-// Used as the default in handler.New so tests observe DB writes immediately,
-// and as the inline fallback inside BatchedHeartbeatScheduler for cases that
-// must commit before returning (offline→online flip, never-seen runtime).
+// PassthroughHeartbeatScheduler is the synchronous scheduler used as the
+// default in handler.New so tests observe DB writes immediately.
 type PassthroughHeartbeatScheduler struct {
 	queries *db.Queries
+	// RecoveryNotifier is optional; when nil, race recoveries stay silent
+	// (plain last_seen_at bookkeeping).
+	RecoveryNotifier RuntimeRecoveryNotifier
 }
 
 func NewPassthroughHeartbeatScheduler(queries *db.Queries) *PassthroughHeartbeatScheduler {
 	return &PassthroughHeartbeatScheduler{queries: queries}
 }
 
-func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
-	if rt.Status == "online" && rt.LastSeenAt.Valid {
-		rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, rt.ID)
-		if err != nil {
-			return err
-		}
-		if rows > 0 {
-			return nil
-		}
-		// Sweeper raced us to offline between the SELECT and this UPDATE.
-		// Fall through to MarkAgentRuntimeOnline to flip the row back.
+func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, runtimeID, workspaceID pgtype.UUID) error {
+	rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, runtimeID)
+	if err != nil {
+		return err
 	}
-	_, err := p.queries.MarkAgentRuntimeOnline(ctx, rt.ID)
+	if rows > 0 {
+		return nil
+	}
+	// The row either raced offline or was deleted. The conditional update
+	// reports an actual offline → online flip so the recovery refresh can fire;
+	// if another heartbeat already won the race (or the row is gone), the
+	// unconditional MarkAgentRuntimeOnline still bumps last_seen_at and
+	// preserves pgx.ErrNoRows for the deleted case.
+	flipped, err := p.queries.MarkAgentRuntimeOnlineIfOffline(ctx, runtimeID)
+	if err != nil {
+		return err
+	}
+	if flipped > 0 {
+		p.notifyRuntimeRecovered(ctx, workspaceID)
+		return nil
+	}
+	_, err = p.queries.MarkAgentRuntimeOnline(ctx, runtimeID)
 	return err
+}
+
+func (p *PassthroughHeartbeatScheduler) notifyRuntimeRecovered(ctx context.Context, workspaceID pgtype.UUID) {
+	if p.RecoveryNotifier != nil && workspaceID.Valid {
+		p.RecoveryNotifier.NotifyRuntimeRecovered(ctx, uuidToString(workspaceID))
+	}
 }
 
 // BatchedHeartbeatScheduler coalesces same-id Schedule calls within a tick
@@ -77,13 +98,16 @@ func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.Agen
 //
 // Bounded growth: pending is keyed by runtime ID, so its size is bounded by
 // the active runtime fleet (one entry per heartbeating runtime per tick).
-// Persistent DB errors are logged but do NOT re-queue the failed IDs — the
-// next beat from each runtime will reschedule naturally, and re-queuing on
-// a hard outage would just balloon the map.
+// Failed flushes are re-queued because the connection lease has already
+// advanced its local flush watermark; the map remains fleet-bounded during a
+// persistent outage and retries once per tick.
 type BatchedHeartbeatScheduler struct {
 	queries      *db.Queries
-	fallback     *PassthroughHeartbeatScheduler
+	runtimeGone  RuntimeGoneNotifier
 	tickInterval time.Duration
+	// RecoveryNotifier is optional; when nil, reconciled race recoveries stay
+	// silent (plain last_seen_at bookkeeping).
+	RecoveryNotifier RuntimeRecoveryNotifier
 
 	mu      sync.Mutex
 	pending map[pgtype.UUID]struct{}
@@ -96,17 +120,24 @@ type BatchedHeartbeatScheduler struct {
 // DefaultHeartbeatBatchInterval is the production tick cadence for the
 // BatchedHeartbeatScheduler. Chosen so the load-bearing chain
 // `flushInterval + heartbeatInterval + tickInterval < staleThresholdSeconds`
-// holds with a comfortable buffer (60 + 15 + 30 = 105 < 150). Lengthening
-// this requires bumping staleThresholdSeconds in lockstep.
+// holds with a comfortable buffer (60 + 15 + 30 = 105 < 150). One failed
+// flush retry adds another tick (135 < 150); additional failures keep the ID
+// fleet-bounded in pending until DB writes recover. Lengthening either interval
+// requires bumping RuntimeClaimFreshnessSeconds in lockstep.
 const DefaultHeartbeatBatchInterval = 30 * time.Second
 
-func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duration) *BatchedHeartbeatScheduler {
+// Only a row old enough for the sweeper to demote can be restored from a batch
+// receipt. A freshly-offline row was explicitly deregistered and must remain
+// offline even if an older heartbeat was already pending.
+const heartbeatReceiptRecoveryThreshold = time.Duration(service.RuntimeClaimFreshnessSeconds) * time.Second
+
+func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duration, runtimeGone RuntimeGoneNotifier) *BatchedHeartbeatScheduler {
 	if tickInterval <= 0 {
 		tickInterval = DefaultHeartbeatBatchInterval
 	}
 	return &BatchedHeartbeatScheduler{
 		queries:      queries,
-		fallback:     NewPassthroughHeartbeatScheduler(queries),
+		runtimeGone:  runtimeGone,
 		tickInterval: tickInterval,
 		pending:      make(map[pgtype.UUID]struct{}),
 		stopCh:       make(chan struct{}),
@@ -114,15 +145,9 @@ func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duratio
 	}
 }
 
-func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRuntime) error {
-	// Status flip (offline→online) and never-seen rows must commit before
-	// returning so callers / dependent reads observe the new state. Only
-	// the hot "already online, bumping last_seen_at" case is batched.
-	if rt.Status != "online" || !rt.LastSeenAt.Valid {
-		return b.fallback.Schedule(ctx, rt)
-	}
+func (b *BatchedHeartbeatScheduler) Schedule(_ context.Context, runtimeID, _ pgtype.UUID) error {
 	b.mu.Lock()
-	b.pending[rt.ID] = struct{}{}
+	b.pending[runtimeID] = struct{}{}
 	b.mu.Unlock()
 	return nil
 }
@@ -198,19 +223,102 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 	b.pending = make(map[pgtype.UUID]struct{})
 	b.mu.Unlock()
 
-	rows, err := b.queries.TouchAgentRuntimesLastSeenBatch(ctx, ids)
+	touched, err := b.queries.TouchAgentRuntimesLastSeenBatch(ctx, ids)
 	if err != nil {
-		// Don't requeue on persistent errors — see type comment.
+		// The connection lease advances its flush watermark when Schedule
+		// accepts the ID, so retain failed IDs here instead of waiting another
+		// full lease interval before retrying.
+		b.requeue(ids)
 		slog.Warn("heartbeat batch flush failed",
 			"scheduled", len(ids), "error", err)
 		return
 	}
-	if int(rows) < len(ids) {
-		// Some runtimes raced into a non-online state between Schedule and
-		// flush. Their next heartbeat sees status != "online" and falls
-		// through to the sync MarkAgentRuntimeOnline path in recordHeartbeat,
-		// so the divergence self-heals within one beat (~15s).
-		slog.Info("heartbeat batch flush: some runtimes raced to offline",
-			"scheduled", len(ids), "affected", rows)
+	if len(touched) == len(ids) {
+		return
+	}
+
+	touchedSet := make(map[pgtype.UUID]struct{}, len(touched))
+	for _, id := range touched {
+		touchedSet[id] = struct{}{}
+	}
+	omitted := make([]pgtype.UUID, 0, len(ids)-len(touched))
+	for _, id := range ids {
+		if _, ok := touchedSet[id]; !ok {
+			omitted = append(omitted, id)
+		}
+	}
+
+	states, err := b.queries.GetAgentRuntimeHeartbeatLeases(ctx, omitted)
+	if err != nil {
+		b.requeue(omitted)
+		slog.Warn("heartbeat batch reconciliation query failed",
+			"omitted", len(omitted), "error", err)
+		return
+	}
+	existing := make(map[pgtype.UUID]struct{}, len(states))
+	recovered := 0
+	preservedOffline := 0
+	missing := 0
+	now := time.Now()
+	for _, state := range states {
+		existing[state.ID] = struct{}{}
+		if state.Status != "offline" || !state.LastSeenAt.Valid || now.Sub(state.LastSeenAt.Time) < heartbeatReceiptRecoveryThreshold {
+			// The omission was not a stale-sweeper race. In particular, preserve
+			// recent explicit deregistration and its offline_reason metadata.
+			preservedOffline++
+			continue
+		}
+		if _, err := b.queries.MarkAgentRuntimeOnline(ctx, state.ID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				missing++
+				b.notifyRuntimeGone(state.ID)
+				continue
+			}
+			b.requeue([]pgtype.UUID{state.ID})
+			slog.Warn("heartbeat batch offline recovery failed",
+				"runtime_id", uuidToString(state.ID), "error", err)
+			continue
+		}
+		recovered++
+		b.notifyRuntimeRecovered(ctx, state.WorkspaceID)
+	}
+
+	for _, id := range omitted {
+		if _, ok := existing[id]; ok {
+			continue
+		}
+		missing++
+		b.notifyRuntimeGone(id)
+	}
+	slog.Info("heartbeat batch flush reconciled omitted runtimes",
+		"scheduled", len(ids),
+		"touched", len(touched),
+		"recovered", recovered,
+		"preserved_offline", preservedOffline,
+		"missing", missing,
+	)
+}
+
+func (b *BatchedHeartbeatScheduler) requeue(ids []pgtype.UUID) {
+	// A runtime can disconnect while its ID waits here, so a recovered DB may
+	// receive one final delayed last_seen_at refresh. That delay is bounded by
+	// one retry tick after recovery; keeping the ID is required because the
+	// connection lease already advanced its local flush watermark.
+	b.mu.Lock()
+	for _, id := range ids {
+		b.pending[id] = struct{}{}
+	}
+	b.mu.Unlock()
+}
+
+func (b *BatchedHeartbeatScheduler) notifyRuntimeGone(id pgtype.UUID) {
+	if b.runtimeGone != nil {
+		b.runtimeGone.NotifyRuntimeGone(uuidToString(id))
+	}
+}
+
+func (b *BatchedHeartbeatScheduler) notifyRuntimeRecovered(ctx context.Context, workspaceID pgtype.UUID) {
+	if b.RecoveryNotifier != nil && workspaceID.Valid {
+		b.RecoveryNotifier.NotifyRuntimeRecovered(ctx, uuidToString(workspaceID))
 	}
 }

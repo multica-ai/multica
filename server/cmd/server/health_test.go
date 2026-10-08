@@ -160,3 +160,53 @@ func TestServerHealthReadinessCachesResult(t *testing.T) {
 		t.Fatalf("QueryRow calls = %d, want 1", got)
 	}
 }
+
+// A restart that fails to bind leaves the previous instance serving the port,
+// and every /health probe still returns 200. The process identity below is what
+// lets a caller tell "my build answered" from "something answered".
+func TestServerHealthLiveHandlerReportsProcessIdentity(t *testing.T) {
+	startedAt := time.Date(2026, 8, 20, 10, 30, 0, 0, time.UTC)
+	h := &serverHealth{startedAt: startedAt, pid: 4242}
+
+	rec := httptest.NewRecorder()
+	h.liveHandler(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var body liveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode /health: %v", err)
+	}
+	if body.Status != "ok" {
+		t.Fatalf("status = %q, want ok", body.Status)
+	}
+	if body.PID != 4242 {
+		t.Fatalf("pid = %d, want 4242", body.PID)
+	}
+	if body.StartedAt != "2026-08-20T10:30:00Z" {
+		t.Fatalf("started_at = %q, want 2026-08-20T10:30:00Z", body.StartedAt)
+	}
+	if body.Commit != commit {
+		t.Fatalf("commit = %q, want %q", body.Commit, commit)
+	}
+}
+
+// newServerHealth is the only production constructor, so startedAt is never
+// zero in a running server. Tests build the struct literally; a zero time must
+// not be rendered as year 0001, which a caller would read as "started before
+// my launch" and report as a stale instance.
+func TestServerHealthLiveHandlerOmitsZeroStartedAt(t *testing.T) {
+	h := &serverHealth{pid: 7}
+
+	rec := httptest.NewRecorder()
+	h.liveHandler(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var body liveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode /health: %v", err)
+	}
+	if body.StartedAt != "" {
+		t.Fatalf("started_at = %q, want empty for a zero time", body.StartedAt)
+	}
+}

@@ -22,7 +22,7 @@
  * fallback. Differences are visual-only.
  */
 import { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
+import { View, type TextStyle } from "react-native";
 import Animated, {
   cancelAnimation,
   useAnimatedStyle,
@@ -41,6 +41,7 @@ import { Text } from "@/components/ui/text";
 import { formatElapsedSecs } from "@/lib/format-elapsed";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   pendingTask: ChatPendingTask | null | undefined;
@@ -58,38 +59,42 @@ interface Stage {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  bash: "Running command",
-  exec: "Running command",
-  read: "Reading files",
-  glob: "Reading files",
-  grep: "Searching code",
-  write: "Making edits",
-  edit: "Making edits",
-  multi_edit: "Making edits",
-  multiedit: "Making edits",
-  web_search: "Searching web",
-  websearch: "Searching web",
+  bash: "chat:status.running_command",
+  exec: "chat:status.running_command",
+  read: "chat:status.reading_files",
+  glob: "chat:status.reading_files",
+  grep: "chat:status.searching_code",
+  write: "chat:status.making_edits",
+  edit: "chat:status.making_edits",
+  multi_edit: "chat:status.making_edits",
+  multiedit: "chat:status.making_edits",
+  web_search: "chat:status.searching_web",
+  websearch: "chat:status.searching_web",
 };
 
 function pickStage(
   status: string | undefined,
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
+  t: (key: string) => string,
 ): Stage {
+  // Mirrors web: deferred is an older turn waiting for retry backoff, not
+  // active model work, so it must not fall through to "Thinking".
+  if (status === "deferred") return { label: t("chat:status.retrying") };
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "offline"
   ) {
-    return { label: "Offline", static: true };
+    return { label: t("chat:status.offline"), static: true };
   }
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "unstable"
   ) {
-    return { label: "Reconnecting" };
+    return { label: t("chat:status.reconnecting") };
   }
-  if (status === "queued") return { label: "Queued" };
-  if (status === "dispatched") return { label: "Starting up" };
+  if (status === "queued") return { label: t("chat:status.queued") };
+  if (status === "dispatched") return { label: t("chat:status.starting") };
 
   let latest: TaskMessagePayload | null = null;
   for (let i = taskMessages.length - 1; i >= 0; i--) {
@@ -99,15 +104,26 @@ function pickStage(
       break;
     }
   }
-  if (!latest) return { label: "Thinking" };
-  if (latest.type === "thinking") return { label: "Thinking" };
-  if (latest.type === "text") return { label: "Typing" };
+  if (!latest) return { label: t("chat:status.thinking") };
+  if (latest.type === "thinking") return { label: t("chat:status.thinking") };
+  if (latest.type === "text") return { label: t("chat:status.typing") };
   if (latest.type === "tool_use") {
     const slug = (latest.tool ?? "").toLowerCase();
-    return { label: TOOL_LABELS[slug] ?? "Working" };
+    const key = TOOL_LABELS[slug];
+    return { label: key ? t(key) : t("chat:status.working") };
   }
-  return { label: "Thinking" };
+  return { label: t("chat:status.thinking") };
 }
+
+// Tabular figures for the 1Hz counter — proportional digits change the text
+// width on 9s → 10s, which reflows the whole row once a second.
+//
+// This CANNOT be `className="tabular-nums"`. Tailwind compiles that utility to
+// `font-variant-numeric`, and react-native-css-interop's property allow-list
+// only carries `font-variant-caps` — the declaration is dropped, so the class
+// is a silent no-op on RN. `fontVariant` is the working equivalent. Hoisted so
+// the once-a-second re-render doesn't hand Text a fresh style object.
+const TABULAR_NUMS: TextStyle = { fontVariant: ["tabular-nums"] };
 
 export function StatusPill({
   pendingTask,
@@ -116,6 +132,7 @@ export function StatusPill({
 }: Props) {
   const taskId = pendingTask?.task_id;
   const createdAt = pendingTask?.created_at;
+  const { t } = useT("chat");
 
   // Anchor — locked per task. Reset on task_id change so a new run
   // restarts the timer from 0; mid-run we never reassign, otherwise the
@@ -132,10 +149,16 @@ export function StatusPill({
 
   if (!taskId) return null;
 
+  // Deferred retries retain task messages from the earlier attempt, so the
+  // newer server status must win over those stale running hints.
   const status =
-    taskMessages.length > 0 ? "running" : pendingTask?.status;
+    pendingTask?.status === "deferred"
+      ? "deferred"
+      : taskMessages.length > 0
+        ? "running"
+        : pendingTask?.status;
   const elapsedSec = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
-  const stage = pickStage(status, taskMessages, availability);
+  const stage = pickStage(status, taskMessages, availability, t);
 
   return (
     <View
@@ -145,7 +168,7 @@ export function StatusPill({
       {stage.static ? null : <BreathingDots />}
       <Text className="text-xs text-muted-foreground" numberOfLines={1}>
         {stage.label}
-        <Text className="text-xs text-muted-foreground/70">
+        <Text className="text-xs text-muted-foreground/70" style={TABULAR_NUMS}>
           {" · "}
           {formatElapsedSecs(elapsedSec)}
         </Text>

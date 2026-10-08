@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -85,6 +85,83 @@ type grokMessageStream struct {
 	closed bool
 }
 
+// grokSupplementSession exposes xAI's ACP interjection extension only while
+// the matching session/prompt request is active. Grok Build does not advertise
+// this vendor extension during initialize, so the daemon separately gates the
+// feature by the CLI version that introduced atomic in-turn interjections.
+type grokSupplementSession struct {
+	client    *hermesClient
+	mu        sync.RWMutex
+	sessionID string
+	active    atomic.Bool
+}
+
+// grokSupplementTimeout bounds the wait for an ACP interjection acknowledgement.
+var grokSupplementTimeout = 8 * time.Second
+
+func (s *grokSupplementSession) stop() {
+	s.active.Store(false)
+}
+
+func (s *grokSupplementSession) ready() bool {
+	if !s.active.Load() {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sessionID != ""
+}
+
+func (s *grokSupplementSession) send(ctx context.Context, text string) error {
+	if !s.active.Load() {
+		return fmt.Errorf("grok turn is no longer active")
+	}
+	s.mu.RLock()
+	sessionID := s.sessionID
+	s.mu.RUnlock()
+	if sessionID == "" {
+		return fmt.Errorf("grok session is not ready for interjection")
+	}
+	// ACP custom method names are underscore-prefixed on the JSON-RPC wire;
+	// Grok's ACP server strips that marker before routing to x.ai/interject.
+	rpcCtx, cancel := context.WithTimeout(ctx, grokSupplementTimeout)
+	defer cancel()
+	response, err := s.client.request(rpcCtx, "_x.ai/interject", map[string]any{
+		"sessionId": sessionID,
+		"text":      text,
+	})
+	if err != nil {
+		return fmt.Errorf("grok x.ai/interject failed: %w", err)
+	}
+	// Grok's extension wraps its acknowledgement inside the JSON-RPC result:
+	// {"result":{"status":"queued"}}. The extension can also return an
+	// in-band error, so a successful JSON-RPC frame alone is not delivery.
+	var result struct {
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(response, &result); err != nil {
+		return fmt.Errorf("grok x.ai/interject returned an invalid response: %w", err)
+	}
+	if len(result.Error) > 0 && string(result.Error) != "null" {
+		var providerError string
+		if err := json.Unmarshal(result.Error, &providerError); err != nil || providerError == "" {
+			providerError = "provider extension error"
+		}
+		return fmt.Errorf("grok x.ai/interject rejected: %s", providerError)
+	}
+	var nested struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(result.Result, &nested); err != nil {
+		return fmt.Errorf("grok x.ai/interject returned an invalid result: %w", err)
+	}
+	if nested.Status != "queued" {
+		return fmt.Errorf("grok x.ai/interject returned status %q, want queued", nested.Status)
+	}
+	return nil
+}
+
 func newGrokMessageStream(size int) *grokMessageStream {
 	return &grokMessageStream{ch: make(chan Message, size)}
 }
@@ -144,9 +221,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	grokArgs = append(grokArgs, filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...)
 	grokArgs = append(grokArgs, "stdio")
 
-	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, grokArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", grokArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(grokArgs,
+		trustAgentCommandPositional(1, "agent"),
+		trustAgentCommandPositional(len(grokArgs)-1, "stdio"),
+	))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -173,7 +253,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("grok stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start grok: %w", err)
 	}
@@ -189,9 +269,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	msgStream := newGrokMessageStream(256)
 	resCh := make(chan Result, 1)
+	supplements := &grokSupplementSession{}
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Grok streams interim narration and the final answer as the same
+	// agent_message_chunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
@@ -220,11 +303,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// kimi/traecli do so the UI sees consistent snake_case names.
 				msg.Tool = kimiToolNameFromTitle(msg.Tool)
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -237,12 +316,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 		},
 	}
+	supplements.client = c
 
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -260,12 +339,17 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		// Set when the ACP runtime refuses the session we asked to
+		// resume. Only that is curable by starting a fresh session, so
+		// handshake/network failures below must leave it false.
+		var resumeRejected bool
 		effectiveModel := strings.TrimSpace(opts.Model)
 
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -312,7 +396,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
 		// See hermes.go for why sending an unsupported transport tanks session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "grok", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "grok", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -326,9 +410,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("grok session/load failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				// A runtime that refuses the recorded id has to say so here:
+				// without ResumeRejected the daemon reads the bare failure as
+				// "checked, not a rejection", keeps the pointer and replays the
+				// same dead session on every later turn (GH #8116).
+				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
+					runCtx, "grok", "session/load", err, timeout, b.cfg.Logger)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 				return
 			}
 			var changed bool
@@ -367,8 +455,9 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		c.sessionID = sessionID
-		// Early session pin so a cancelled run still preserves resume pointer.
-		msgStream.send(Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+		supplements.mu.Lock()
+		supplements.sessionID = sessionID
+		supplements.mu.Unlock()
 		b.cfg.Logger.Info("grok session created", "session_id", sessionID)
 
 		if opts.Model != "" {
@@ -379,18 +468,22 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				b.cfg.Logger.Warn("grok set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("grok could not switch to model %q: %v", opts.Model, err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if setupFailureWithholdsSessionID(opts) {
+					sessionID = ""
+				} else if isACPSessionNotFound(err) {
 					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
 						"backend", "grok",
 						"session_id", sessionID,
 					)
 					sessionID = ""
+					resumeRejected = true
 				}
 				resCh <- Result{
-					Status:     finalStatus,
-					Error:      finalError,
-					DurationMs: time.Since(startTime).Milliseconds(),
-					SessionID:  sessionID,
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
 				}
 				return
 			}
@@ -404,13 +497,28 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
 		}
 
+		// Session pin for the daemon (PinTaskSession keys off
+		// MessageStatus+SessionID), deliberately sent only once setup has
+		// succeeded and the prompt is about to go out. Pinning right after
+		// session creation used to publish the id before set_model could fail,
+		// and FailAgentTask merges session_id with COALESCE — so a setup failure
+		// could no longer take the id back and left a ghost pointer on the task
+		// row for the next turn to resume forever (GH #8116). A cancel between
+		// here and the prompt response is still covered: this send happens first.
+		msgStream.send(Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+
 		streamingCurrentTurn.Store(true)
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+		_, err = c.requestAndNotifySent(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
 				{"type": "text", "text": userText},
 			},
+		}, func() {
+			if opts.EnableTaskSupplement {
+				supplements.active.Store(true)
+			}
 		})
+		supplements.stop()
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
@@ -427,20 +535,36 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 						"session_id", sessionID,
 					)
 					sessionID = ""
+					resumeRejected = true
 				}
 			}
 		} else {
 			select {
 			case pr := <-promptDone:
-				if pr.stopReason == "cancelled" {
+				switch pr.stopReason {
+				case "cancelled":
 					finalStatus = "aborted"
 					finalError = "grok cancelled the prompt"
+				case "max_tokens":
+					finalStatus = "failed"
+					finalError = "grok reached its maximum generated tokens (max_tokens)"
+				case "max_turn_requests":
+					finalStatus = "failed"
+					finalError = "grok reached its maximum turn requests (max_turn_requests)"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				// `session/load` carries no model id (only `session/new`
+				// does), so a resumed session with no configured model would
+				// otherwise bucket its whole spend under "unknown" — which
+				// prices at $0 because no pricing row matches. The turn's
+				// own `_meta.modelId` is authoritative; use it.
+				if effectiveModel == "" {
+					effectiveModel = pr.modelID
+				}
+				// xAI prices the turn itself and reports the result here.
+				// Carrying it through is the only way the ≥200K long-context
+				// surcharge reaches the bill — token counts alone cannot
+				// reconstruct which tier a request hit.
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForGrokNotificationQuiescence(runCtx, activity, readerDone)
@@ -466,20 +590,18 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		drainCancel()
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text stream show a
-		// terminal upstream-LLM failure (auth / rate-limit / HTTP 4xx).
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// terminal upstream-LLM failure (auth / rate-limit / HTTP 4xx). It reads
+		// the full text stream, not the deliverable, so a give-up turn that
+		// lands before a tool call stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -488,16 +610,22 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      sessionID,
+			ResumeRejected: resumeRejected,
+			Usage:          usageMap,
 		}
 	}()
 
-	return &Session{Messages: msgStream.ch, Result: resCh}, nil
+	session := &Session{Messages: msgStream.ch, Result: resCh}
+	if opts.EnableTaskSupplement {
+		session.Supplement = supplements.send
+		session.SupplementReady = supplements.ready
+	}
+	return session, nil
 }
 
 // Grok's ACP `authenticate` method ids (from `initialize`.authMethods).
@@ -546,31 +674,7 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 // session/prompt response. Without this window, cancelling the process at the
 // response boundary can truncate the final text or usage update.
 func waitForGrokNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(grokNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(grokReaderDrainGrace)
-	defer hard.Stop()
-
-	for {
-		select {
-		case <-activity:
-			if !quiet.Stop() {
-				select {
-				case <-quiet.C:
-				default:
-				}
-			}
-			quiet.Reset(grokNotificationQuietTime)
-		case <-quiet.C:
-			return
-		case <-readerDone:
-			return
-		case <-hard.C:
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, grokNotificationQuietTime, grokReaderDrainGrace)
 }
 
 // envHasNonEmpty reports whether an `os/exec`-style env slice

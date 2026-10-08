@@ -1,0 +1,271 @@
+{
+  "tabs": {
+    "all": "All",
+    "created": "Created",
+    "assigned": "Assigned",
+    "agents": "Agents",
+    "members": "Members"
+  },
+  "status": {
+    "queued": "Queued",
+    "deferred": "Queued",
+    "dispatched": "Starting",
+    "waiting_local_directory": "Waiting for directory",
+    "running": "Running",
+    "completed": "Done",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked"
+  },
+  "category": {
+    "unstarted": "Unstarted",
+    "started": "Started",
+    "done": "Done",
+    "closed": "Closed"
+  },
+  "priority": {
+    "none": "No priority",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "urgent": "Urgent"
+  },
+  "filters": {
+    "title": "Filters",
+    "status": "Status",
+    "priority": "Priority",
+    "assignee": "Assignee",
+    "project": "Project",
+    "label": "Label",
+    "clear": "Clear filters",
+    "apply": "Apply",
+    "due_date": "Due date"
+  },
+  "list": {
+    "empty": "No issues match your filters",
+    "count_other": "{{count}} issues",
+    "search_placeholder": "Search issues and projects"
+  },
+  "detail": {
+    "properties": "Properties",
+    "activity": "Activity",
+    "comments": "Comments",
+    "comment": "Comment",
+    "reply": "Reply",
+    "add_comment": "Add comment...",
+    "description": "Description",
+    "add_description": "Add description...",
+    "runs": "Runs",
+    "copy_link": "Copy link",
+    "open_on_web": "Open on web",
+    "delete_comment": "Delete comment",
+    "edit_comment": "Edit comment",
+    "no_runs": "No runs yet"
+  },
+  "new": {
+    "title": "New issue",
+    "title_placeholder": "Issue title",
+    "create": "Create issue",
+    "creating": "Creating...",
+    "description_placeholder": "Description... (type @ to mention)"
+  },
+  "edit": {
+    "title": "Edit issue",
+    "save": "Save changes",
+    "saving": "Saving..."
+  },
+  "activity": {
+    "created": "created the issue",
+    "status_changed": "changed status: {{from}} → {{to}}",
+    "priority_changed": "changed priority: {{from}} → {{to}}",
+    "self_assigned": "self-assigned",
+    "removed_assignee": "removed assignee",
+    "assigned_to": "assigned to {{name}}",
+    "assignee_changed": "changed assignee",
+    "start_date_set": "set start date to {{date}}",
+    "start_date_removed": "removed start date",
+    "due_date_set": "set due date to {{date}}",
+    "due_date_removed": "removed due date",
+    "title_changed": "renamed: \"{{from}}\" → \"{{to}}\"",
+    "description_updated": "updated description",
+    "duplicate_marked": "marked this issue as a duplicate of {{identifier}}",
+    "duplicate_unmarked": "unmarked this issue as a duplicate of {{identifier}}",
+    "duplicate_unmarked_to": "unmarked this issue as a duplicate of {{identifier}} and moved it to {{status}}",
+    "duplicate_unmarked_original_deleted": "removed the duplicate mark, {{identifier}} was deleted",
+    "duplicate_added": "marked {{identifier}} as a duplicate of this issue",
+    "duplicate_removed": "unmarked {{identifier}} as a duplicate of this issue",
+    "tasks_completed_one": "completed {{count}} run",
+    "tasks_completed_other": "completed {{count}} runs",
+    "tasks_failed_one": "failed {{count}} run",
+    "tasks_failed_other": "failed {{count}} runs",
+    "squad_action_with_reason": "evaluated and took action: {{reason}}",
+    "squad_action": "evaluated and took action",
+    "squad_no_action_with_reason": "evaluated: no action needed ({{reason}})",
+    "squad_no_action": "evaluated: no action needed",
+    "squad_failed_with_reason": "evaluation failed: {{reason}}",
+    "squad_failed": "evaluation failed",
+    "squad_evaluated": "evaluated the squad trigger",
+    "commented": "commented"
+  },
+  "errors": {
+    "create_failed": "Failed to create issue",
+    "load_failed": "Failed to load issues: {{message}}"
+  },
+  "empty": {
+    "filtered": "No issues match the current filters.",
+    "assigned": "No issues assigned to you.",
+    "created": "You haven't created any issues.",
+    "agents": "No issues assigned to agents or squads.",
+    "all": "No issues in this workspace.",
+    "members": "No issues assigned to a member."
+  },
+  "menu": {
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "edit_details": "Edit details",
+    "copy_link": "Copy link",
+    "open_web": "Open on web",
+    "delete_issue": "Delete issue",
+    "issue_actions": "Issue actions"
+  },
+  "delete": {
+    "title": "Delete issue?",
+    "message": "{{identifier}} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone."
+  },
+  "summary": {
+    "comment": "Comment run",
+    "autopilot": "Autopilot run",
+    "chat": "Chat run",
+    "quick_create": "Quick create",
+    "direct": "Run"
+  },
+  "cancel": {
+    "title": "Cancel run?",
+    "message": "The agent will stop after the current step.",
+    "keep_running": "Keep running",
+    "cancel_task": "Cancel run"
+  },
+  "form": {
+    "discard_title": "Discard changes?",
+    "discard_message_issue": "Your edits to this issue will be lost.",
+    "keep_editing": "Keep editing",
+    "save_failed": "Failed to save"
+  },
+  "picker": {
+    "unassigned": "Unassigned",
+    "agent": "Agent",
+    "needs_runtime": "Needs runtime",
+    "leader_needs_runtime": "Leader needs runtime",
+    "squad": "Squad",
+    "no_matches": "No matches.",
+    "no_project": "No project",
+    "no_projects": "No projects in this workspace yet.\nCreate them on web.",
+    "no_labels": "No labels in this workspace yet.",
+    "create_label": "Create \"{{name}}\"",
+    "no_members_agents": "No members or agents in this workspace yet.",
+    "people": "People",
+    "agents": "Agents",
+    "squads": "Squads",
+    "issues": "Issues",
+    "everyone": "Everyone (@all)",
+    "unknown": "Unknown",
+    "search_people": "Search people",
+    "search_projects": "Search projects",
+    "search_labels": "Search labels",
+    "search_members_agents": "Search members or agents",
+    "search_people_issues": "Search people or issues",
+    "reference_issue": "Reference an issue",
+    "clear": "Clear"
+  },
+  "comments": {
+    "reply": "Reply",
+    "react": "React...",
+    "copy": "Copy",
+    "select_text": "Select Text",
+    "copy_link": "Copy Link",
+    "resolve": "Resolve Thread",
+    "unresolve": "Unresolve Thread",
+    "delete": "Delete",
+    "delete_title": "Delete comment?",
+    "delete_keep_replies": "This comment will be permanently deleted. Any replies to it stay in the thread. This cannot be undone.",
+    "delete_with_replies": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+    "more_reactions": "More reactions...",
+    "fallback_actor": "comment",
+    "composer_placeholder": "Add a comment…",
+    "composer_pill": "Add a comment, type @ to mention..."
+  },
+  "suggestions": {
+    "everyone": "Everyone",
+    "all": "All",
+    "member": "Member",
+    "recent": "Recent",
+    "my_issues": "My issues"
+  },
+  "resolved": {
+    "a11y_folded_one": "Resolved thread by {{authors}}, {{count}} message. Tap to expand.",
+    "a11y_folded_other": "Resolved thread by {{authors}}, {{count}} messages. Tap to expand.",
+    "summary_one": "Resolved · {{count}} message by {{authors}}",
+    "summary_other": "Resolved · {{count}} messages by {{authors}}",
+    "resolved_by": "Resolved by {{name}}",
+    "collapse": "Collapse",
+    "collapse_a11y": "Collapse resolved thread"
+  },
+  "failed": {
+    "send": "Couldn't send",
+    "retry": "Retry",
+    "retry_a11y": "Retry sending comment",
+    "discard": "Discard",
+    "discard_a11y": "Discard failed comment"
+  },
+  "resources": {
+    "title": "Attach repository",
+    "url": "Repository URL",
+    "branch": "Starting branch (optional)",
+    "label": "Label (optional)",
+    "attach": "Attach",
+    "attaching": "Attaching...",
+    "branch_hint": "Runs start from this branch and open their pull requests against it. Leave empty to use the repository default branch.",
+    "commit": "This is a commit ID, not a branch. Runs deliver back to the branch they start from. For a one-off revision, pass --ref to multica repo checkout.",
+    "too_long": "Use at most 255 characters.",
+    "invalid_characters": "A branch name can't contain spaces or any of ~ ^ : ? * [ \\",
+    "invalid": "Not a valid branch name.",
+    "failed": "Failed to attach resource",
+    "error": "Unknown error"
+  },
+  "runs": {
+    "active": "Active",
+    "past": "Past",
+    "title": "Agent Runs",
+    "status": {
+      "queued": "Queued",
+      "deferred": "Deferred",
+      "dispatched": "Dispatched to agent",
+      "running": "Running",
+      "waiting_local_directory": "Waiting for local directory",
+      "completed": "Run succeeded",
+      "failed": "Run failed",
+      "cancelled": "Cancelled"
+    }
+  },
+  "header_filter": "Filter",
+  "new_badge": "New",
+  "jump_a11y_one": "Jump to {{count}} new message",
+  "jump_a11y_other": "Jump to {{count}} new messages",
+  "a11y": {
+    "agent_working": "Agent working — open runs",
+    "remove_mention": "Remove mention {{name}}",
+    "retry_upload": "Retry upload of {{name}}",
+    "open_file": "Open {{name}}",
+    "remove_file": "Remove {{name}}"
+  },
+  "summary.comment": "Comment run",
+  "summary.chat": "Chat run",
+  "summary.direct": "Run",
+  "cancel.title": "Cancel run?",
+  "cancel.cancel_task": "Cancel run"
+}

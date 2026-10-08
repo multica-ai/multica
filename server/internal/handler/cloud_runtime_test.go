@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,7 +86,7 @@ func TestCreateCloudRuntimeNodeForwardsBody(t *testing.T) {
 	}
 }
 
-func TestCloudRuntimeDisabledReturnsUnavailable(t *testing.T) {
+func TestCloudRuntimeDisabledReturnsForbidden(t *testing.T) {
 	useCloudRuntimeProxy(t, &fakeCloudRuntimeProxy{enabled: false})
 
 	req := newRequest(http.MethodGet, "/api/cloud-runtime/nodes", nil)
@@ -93,8 +94,12 @@ func TestCloudRuntimeDisabledReturnsUnavailable(t *testing.T) {
 
 	testHandler.ListCloudRuntimeNodes(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
+	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body["code"] != "cloud_runtime_not_configured" {
+		t.Fatalf("unexpected disabled response: body=%v err=%v", body, err)
 	}
 }
 

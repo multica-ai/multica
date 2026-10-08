@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, WebContents } from "electron";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

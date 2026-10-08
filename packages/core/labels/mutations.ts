@@ -3,6 +3,7 @@ import { api } from "../api";
 import { labelKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import { issueKeys } from "../issues/queries";
+import { workspaceKeys } from "../workspace/queries";
 import {
   invalidateIssueLabelDerivatives,
   onIssueLabelsChanged,
@@ -69,9 +70,10 @@ export function useUpdateLabel() {
       // stale copy of this label is refetched. The list cache is the source
       // of truth; byIssue views will re-render with the fresh data.
       qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
-      // Issues now embed labels (denormalized snapshot), so a rename/recolor
-      // also has to refresh the issues caches that hold those snapshots.
+      // Issues and workspace skill lists embed label snapshots, so a
+      // rename/recolor also has to refresh those caches.
       qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     },
   });
 }
@@ -100,9 +102,10 @@ export function useDeleteLabel() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
-      // A deleted label still lives in cached issue.labels arrays until we
-      // refetch — invalidate so list/board chips drop the orphan.
+      // A deleted label still lives in cached issue/skill.labels arrays
+      // until we refetch — invalidate so list chips drop the orphan.
       qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     },
   });
 }
@@ -155,17 +158,27 @@ function workspaceKeysForLabels(resourceType: "agent" | "skill", wsId: string) {
   return ["workspaces", wsId, resourceType === "agent" ? "agents" : "skills"] as const;
 }
 
+async function cancelIssueLabelMutationQueries(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  issueId: string,
+) {
+  await Promise.all([
+    qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
+    qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.childrenAll(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) }),
+  ]);
+}
+
 export function useAttachLabel(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (labelId: string) => api.attachLabel(issueId, labelId),
     onMutate: async (labelId) => {
-      await Promise.all([
-        qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
-      ]);
+      await cancelIssueLabelMutationQueries(qc, wsId, issueId);
       const prev = qc.getQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId));
       // Only patch when we already know the current label set — otherwise
       // appending `[label]` to an empty array would wipe denormalized
@@ -194,8 +207,7 @@ export function useAttachLabel(issueId: string) {
       // when the backend gave us one — otherwise the optimistic patch from
       // onMutate stands until onSettled's invalidation refetches.
       if (data && Array.isArray(data.labels)) {
-        qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), data);
-        onIssueLabelsChanged(qc, wsId, issueId, data.labels);
+        onIssueLabelsChanged(qc, wsId, issueId, data.labels, data.issue_revision);
       }
     },
     onSettled: () => {
@@ -235,11 +247,7 @@ export function useDetachLabel(issueId: string) {
   return useMutation({
     mutationFn: (labelId: string) => api.detachLabel(issueId, labelId),
     onMutate: async (labelId) => {
-      await Promise.all([
-        qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
-      ]);
+      await cancelIssueLabelMutationQueries(qc, wsId, issueId);
       const prev = qc.getQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId));
       const next = prev
         ? { ...prev, labels: prev.labels.filter((l: Label) => l.id !== labelId) }
@@ -254,6 +262,11 @@ export function useDetachLabel(issueId: string) {
       if (ctx?.prev) {
         qc.setQueryData(labelKeys.byIssue(wsId, issueId), ctx.prev);
         patchIssueLabels(qc, wsId, issueId, ctx.prev.labels);
+      }
+    },
+    onSuccess: (data: IssueLabelsResponse) => {
+      if (data && Array.isArray(data.labels)) {
+        onIssueLabelsChanged(qc, wsId, issueId, data.labels, data.issue_revision);
       }
     },
     onSettled: () => {

@@ -12,7 +12,6 @@ vi.mock("../i18n", () => ({
         sidebar: {
           discord_card: {
             title: "Join our Discord",
-            description: "Chat with the team and other builders.",
             dismiss: "Dismiss",
           },
         },

@@ -1,0 +1,25 @@
+---
+title: Mettre les agents au travail
+description: Les quatre façons de déclencher un agent, et où suivre l'avancement ensuite.
+---
+
+Dans Multica, les agents ne se mettent pas au travail d'eux-mêmes. Chaque exécution est déclenchée par une action explicite. Il existe quatre façons de le faire :
+
+| Méthode | Idéal pour | Comment |
+| --- | --- | --- |
+| **Assigner une tâche** | L'agent prend en charge ce travail de bout en bout | [Assignez la tâche à un agent](/assigning-issues) ; il démarre immédiatement lorsque la tâche est en `todo` ou dans un statut ultérieur |
+| **@mention dans un commentaire** | Demander à un agent de traiter une demande précise sans changer l'assigné de la tâche | [@mentionnez-le dans un commentaire](/mentioning-agents), ou répondez au commentaire de l'agent pour poursuivre la conversation |
+| **Discussion directe** | Une question ou un essai rapide qui ne nécessite pas de tâche | [Démarrez une discussion avec l'agent](/chat) ; chaque message déclenche une exécution |
+| **Automatisation** | Un travail récurrent qui doit s'exécuter selon une planification ou sur des événements externes | [Créez une automatisation](/autopilots), déclenchée par une planification, un webhook ou manuellement |
+
+Les quatre méthodes partagent ces règles :
+
+- Vous ne pouvez déclencher que les agents que vous **avez la permission d'exécuter**, ce que détermine le paramètre Accès de l'agent — et non votre rôle dans l'espace de travail.
+- Avant de déclencher depuis une tâche, un **aperçu des déclenchements** sous le champ de saisie indique exactement qui ce contenu va réveiller ; utilisez `/note` pour laisser un message sans déclencher aucun agent.
+- Les tâches en `backlog` ne déclenchent pas d'exécution ; passez la tâche en `todo` et l'agent assigné démarre.
+
+## Suivre l'avancement
+
+Chaque déclenchement crée une [exécution](/tasks). L'avancement s'affiche en direct là où vous l'avez déclenchée — le fil d'activité de la tâche ou la fenêtre de discussion ; le journal d'exécution affiche l'exécution complète et permet de l'arrêter ou de la relancer.
+
+Lorsqu'une exécution tarde à démarrer, c'est généralement que le runtime est hors ligne — consultez la section sur les exécutions qui ne démarrent pas dans [Dépannage](/troubleshooting).

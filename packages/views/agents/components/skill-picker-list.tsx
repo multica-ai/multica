@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Search } from "lucide-react";
+import { Search } from "lucide-react";
+import { SkillIcon } from "../../skills/lib/skill-icon";
 import type { SkillSummary } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -85,7 +86,7 @@ export function SkillPickerList({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t(($) => $.create_dialog.skills_section.search_placeholder)}
-              className="h-8 pl-7 text-xs"
+              className="h-8 pl-7 text-caption"
             />
           </div>
         </div>
@@ -93,13 +94,13 @@ export function SkillPickerList({
 
       <div className="max-h-64 space-y-0.5 overflow-y-auto p-1.5">
         {loading ? (
-          <div className="py-6 text-center text-xs text-muted-foreground">
+          <div className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.create_dialog.skills_section.list_loading)}
           </div>
         ) : skills.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted-foreground">{resolvedEmpty}</div>
+          <div className="py-6 text-center text-caption text-muted-foreground">{resolvedEmpty}</div>
         ) : filtered.length === 0 ? (
-          <div className="py-6 text-center text-xs text-muted-foreground">{resolvedNoMatch}</div>
+          <div className="py-6 text-center text-caption text-muted-foreground">{resolvedNoMatch}</div>
         ) : (
           filtered.map((skill) => {
             const isSelected = selectedIds.has(skill.id);
@@ -122,11 +123,11 @@ export function SkillPickerList({
                   tabIndex={-1}
                   className="pointer-events-none"
                 />
-                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SkillIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{skill.name}</div>
+                  <div className="truncate text-body font-medium">{skill.name}</div>
                   {skill.description ? (
-                    <div className="truncate text-xs text-muted-foreground">
+                    <div className="truncate text-caption text-muted-foreground">
                       {skill.description}
                     </div>
                   ) : null}

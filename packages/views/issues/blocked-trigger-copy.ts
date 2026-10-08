@@ -5,6 +5,35 @@ import type { useT } from "../i18n";
 // same reason the same way. `reason_code` is the enumeration-safe wire code; the
 // label it maps to never reveals the target's identity — the caller supplies the
 // name it already has from the user's own mention markup.
+//
+// A label must not assert a cause the code does not carry. `invocation_not_allowed`
+// is deliberately ambiguous server-side (see dispatch/reason.go): it covers BOTH
+// "you may not invoke this target" and "this id resolved to nothing here". Copy
+// that blamed permission alone sent people to audit agent visibility settings over
+// what was really a mistyped mention uuid (MUL-5548), so both labels name the two
+// possibilities instead.
+//
+// `agent_runtime_required` and `runtime_offline` are kept apart for the same
+// reason (MUL-5559): an unbound agent has no machine to reconnect, so "runtime
+// offline" copy sends the user looking for a computer that does not exist. The
+// fix it needs is binding the agent to a runtime.
+//
+// `runtime_unusable` is the third member of that family (MUL-6164): the machine
+// IS reachable and its agent CLI cannot be executed there, so "offline" copy
+// sends the user to reconnect something that is already connected. The fix is a
+// reinstall on that machine, and the system comment the server leaves on the
+// issue carries the exact command.
+//
+// `runtime_access_denied` is another member of that family (PUCK-89): the
+// target is permitted but its agent owner cannot execute it on the selected
+// private runtime. No retry helps — the fix is making the runtime public or
+// rebinding/copying the agent to a runtime its owner can use.
+//
+// `runtime_profile_missing` is split from `runtime_unusable`
+// on the same rule: the CLI there runs perfectly and is missing a runtime
+// profile (DSH's `multica` profile, which supplies the protocol Multica
+// drives). "Reinstall the CLI" copy sends the user to re-run an install that
+// was never broken; the fix is installing the profile.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
 // Full sentence — for tooltips and other surfaces with room to explain.
@@ -16,6 +45,14 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_target_unavailable);
     case "runtime_offline":
       return t(($) => $.comment.trigger_blocked_runtime_offline);
+    case "runtime_unusable":
+      return t(($) => $.comment.trigger_blocked_runtime_unusable);
+    case "runtime_profile_missing":
+      return t(($) => $.comment.trigger_blocked_runtime_profile_missing);
+    case "agent_runtime_required":
+      return t(($) => $.comment.trigger_blocked_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -31,6 +68,14 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_target_unavailable);
     case "runtime_offline":
       return t(($) => $.comment.trigger_blocked_short_runtime_offline);
+    case "runtime_unusable":
+      return t(($) => $.comment.trigger_blocked_short_runtime_unusable);
+    case "runtime_profile_missing":
+      return t(($) => $.comment.trigger_blocked_short_runtime_profile_missing);
+    case "agent_runtime_required":
+      return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
+    case "runtime_access_denied":
+      return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

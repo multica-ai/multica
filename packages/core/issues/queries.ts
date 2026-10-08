@@ -4,16 +4,32 @@ import {
   queryOptions,
   type QueryClient,
 } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type {
-  GroupedIssuesResponse,
   Issue,
-  IssueStatus,
+  IssueAssigneeType,
+  IssueStatusCategory,
+  IssueTableFacetsRequest,
+  IssueTableGroupSpec,
+  IssueTableGroupsRequest,
+  IssueTableQuerySpec,
+  IssueTableRowsRequest,
   ListGroupedIssuesParams,
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
 import { ALL_STATUSES } from "./config";
+import { issueColumnCategory } from "./status-category";
+
+export function issueTasksOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.tasks(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    enabled: !!issueId,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
 
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
@@ -47,6 +63,31 @@ export const issueKeys = {
     filter: IssueFlatFilter,
     sort?: IssueSortParam,
   ) => [...issueKeys.flatAll(wsId), "export", scope, filter, sort ?? {}] as const,
+  tableAll: (wsId: string) => [...issueKeys.all(wsId), "table-query"] as const,
+  tableGroups: (
+    wsId: string,
+    query: IssueTableQuerySpec,
+    group: IssueTableGroupsRequest["group"],
+  ) => [...issueKeys.tableAll(wsId), "groups", query, group] as const,
+  tableFacets: (
+    wsId: string,
+    request: IssueTableFacetsRequest,
+  ) => [...issueKeys.tableAll(wsId), "facets", request] as const,
+  tableRows: (
+    wsId: string,
+    query: IssueTableQuerySpec,
+    group: IssueTableGroupSpec,
+    groupKey: string | null,
+    hierarchy: boolean,
+    parentId: string | null,
+  ) => [
+    ...issueKeys.tableAll(wsId),
+    "rows",
+    query,
+    group,
+    groupKey,
+    { hierarchy, parentId },
+  ] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -75,15 +116,31 @@ export const issueKeys = {
    * cache helpers don't have to special-case a non-bucketed shape under
    * the `my` prefix.
    */
-  projectGantt: (wsId: string, projectId: string) =>
-    [...issueKeys.projectGanttAll(wsId), projectId] as const,
+  projectGantt: (
+    wsId: string,
+    projectId: string,
+    assigneeTypes?: IssueAssigneeType[],
+  ) =>
+    [
+      ...issueKeys.projectGanttAll(wsId),
+      projectId,
+      assigneeTypes ?? null,
+    ] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
+  /** Prefix for every per-issue duplicate-relation query in a workspace. */
+  duplicatesAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "duplicates"] as const,
+  duplicates: (wsId: string, id: string) =>
+    [...issueKeys.duplicatesAll(wsId), id] as const,
+  /** Prefix for every per-parent children query in a workspace. */
+  childrenAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "children"] as const,
   children: (wsId: string, id: string) =>
-    [...issueKeys.all(wsId), "children", id] as const,
+    [...issueKeys.childrenAll(wsId), id] as const,
   /** Prefix for invalidating all batched-children queries in a workspace. */
   childrenByParentsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "children-by-parents"] as const,
@@ -136,7 +193,21 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
+  sourceContextPreview: (wsId: string, anchorCommentId: string) =>
+    ["source-context", "preview", wsId, anchorCommentId] as const,
 };
+
+export function sourceContextPreviewOptions(
+  wsId: string,
+  anchorCommentId: string | null | undefined,
+) {
+  return queryOptions({
+    queryKey: issueKeys.sourceContextPreview(wsId, anchorCommentId ?? ""),
+    queryFn: () => api.getCommentSubIssuePreview(anchorCommentId!),
+    enabled: !!anchorCommentId,
+    staleTime: 0,
+  });
+}
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
@@ -172,309 +243,120 @@ export type AssigneeGroupedIssuesFilter = Omit<
   "group_by" | "limit" | "offset" | "group_assignee_type" | "group_assignee_id"
 >;
 
-/** Page size per status column. */
+/** Size of the issue list's first page, all categories together. */
 export const ISSUE_PAGE_SIZE = 50;
-export const ISSUE_FLAT_PAGE_SIZE = 100;
 
 /**
- * Statuses fetched and paginated into the list/board cache — every lifecycle
- * status, `cancelled` included. `cancelled` is a first-class default status
- * (MUL-4290), so it lives in the cache and renders like any other column;
- * there is no separate "visible board" subset. This constant governs
- * fetch/cache membership.
+ * CATEGORIES fetched and paginated into the list/board cache — all four,
+ * `closed` included. It lives in the cache even when hidden by the surface's
+ * display preferences; there is no separate
+ * "visible board" subset. This constant governs fetch/cache membership.
+ *
+ * These are internal legacy cache buckets, not user-facing columns.
+ * Board/List use independently paged exact-key table branches; Swimlane uses
+ * compound status branches. Never derive visible column identity from this cache.
  */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
+export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
   const out = [];
-  for (const status of PAGINATED_STATUSES) {
+  for (const status of PAGINATED_CATEGORIES) {
     const bucket = data.byStatus[status];
     if (bucket) out.push(...bucket.issues);
   }
   return out;
 }
 
+/**
+ * One request for the list's first page, grouped into the category buckets
+ * here. Every reader of this cache looks an issue up by id and none pages a
+ * bucket, so one shared window serves them all. Each bucket's `total` is its
+ * own row count. A custom status the server did not resolve falls back to
+ * `issueColumnCategory`'s bucket, so no row is dropped.
+ */
 async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
-  const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
-    ),
-  );
+  const res = await api.listIssues({ limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter });
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_STATUSES.forEach((status, i) => {
-    const res = responses[i]!;
-    byStatus[status] = { issues: res.issues, total: res.total };
-  });
+  for (const category of PAGINATED_CATEGORIES) {
+    const issues = res.issues.filter((issue) => issueColumnCategory(issue) === category);
+    byStatus[category] = { issues, total: issues.length };
+  }
   return { byStatus };
 }
 
-/**
- * "All my issues" — union of three server filters:
- *   assignee_id=me OR creator_id=me OR involves_user_id=me
- *
- * The backend has no OR-across-user-filters today, so we run the three
- * existing single-filter fetches in parallel and dedupe on the client by
- * issue id within each status bucket. Order within each bucket preserves
- * the first-seen position (each sub-fetch is already server-sorted).
- *
- * Personal lists are bounded (tens to a few hundred issues across all
- * three relations), so 3× the request count is acceptable — a single
- * fetchFirstPages already runs 7 status fetches in parallel, so the total
- * here is 21 small parallel requests. Easy enough; no need to add a new
- * backend query just for this scope.
- *
- * `total` per bucket is set to the merged length, not the true server
- * total — pagination on the "All" scope is out of scope; the first
- * 50-per-status × 3 widening (deduped) is what the page renders.
- */
-const MERGE_PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
-const MERGE_STATUS_RANK: Record<string, number> = {
-  backlog: 0,
-  todo: 1,
-  in_progress: 2,
-  in_review: 3,
-  done: 4,
-  blocked: 5,
-  cancelled: 6,
-};
-
-/**
- * Comparator mirroring the server's ORDER BY semantics (including
- * `property:<id>` sorts and missing-values-last). The merged "All" scope
- * concatenates three independently-ordered queries, so without a re-sort the
- * relation order (assigned → created → involves) would override the sort the
- * user picked — e.g. assigned=9 rendering before created=1 (review round 3).
- */
-export function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
-  const by = sort?.sort_by ?? "position";
-  const dir = by !== "position" && sort?.sort_direction === "desc" ? -1 : 1;
-  // created_at DESC then id DESC, mirroring the server's unique ORDER BY
-  // suffix — ids disambiguate bulk-created issues that share a timestamp.
-  const tieBreak = () =>
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime() ||
-    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
-
-  const missingAware = (av: string | null, bv: string | null): number => {
-    if (!av && !bv) return tieBreak();
-    if (!av) return 1;
-    if (!bv) return -1;
-    return dir * av.localeCompare(bv) || tieBreak();
-  };
-
-  if (by.startsWith("property:")) {
-    const propertyId = by.slice("property:".length);
-    const av = a.properties?.[propertyId];
-    const bv = b.properties?.[propertyId];
-    const aMissing = av === undefined || Array.isArray(av) || typeof av === "boolean";
-    const bMissing = bv === undefined || Array.isArray(bv) || typeof bv === "boolean";
-    if (aMissing && bMissing) return tieBreak();
-    if (aMissing) return 1;
-    if (bMissing) return -1;
-    if (typeof av === "number" && typeof bv === "number") return dir * (av - bv) || tieBreak();
-    return dir * String(av).localeCompare(String(bv)) || tieBreak();
-  }
-  switch (by) {
-    case "status":
-      return dir * ((MERGE_STATUS_RANK[a.status] ?? 9) - (MERGE_STATUS_RANK[b.status] ?? 9)) || tieBreak();
-    case "priority":
-      return dir * ((MERGE_PRIORITY_RANK[a.priority] ?? 9) - (MERGE_PRIORITY_RANK[b.priority] ?? 9)) || tieBreak();
-    case "title":
-      return dir * a.title.localeCompare(b.title) || tieBreak();
-    case "created_at":
-      return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) || tieBreak();
-    case "updated_at":
-      return dir * (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) || tieBreak();
-    case "start_date":
-      return missingAware(a.start_date, b.start_date);
-    case "due_date":
-      return missingAware(a.due_date, b.due_date);
-    case "position":
-    default:
-      return a.position - b.position || tieBreak();
-  }
-}
-
-async function fetchAllFlatPages(
-  filter: IssueFlatFilter,
-  sort?: IssueSortParam,
-): Promise<Issue[]> {
-  const issues: Issue[] = [];
-  const seenIds = new Set<string>();
-  let offset = 0;
-  while (true) {
-    const response = await api.listIssues({
-      ...filter,
-      ...sort,
-      limit: ISSUE_FLAT_PAGE_SIZE,
-      offset,
-    });
-    let added = 0;
-    for (const issue of response.issues) {
-      if (seenIds.has(issue.id)) continue;
-      seenIds.add(issue.id);
-      issues.push(issue);
-      added += 1;
-    }
-    if (issues.length >= response.total) break;
-    if (response.issues.length === 0 || added === 0) {
-      throw new Error("Issue export pagination did not advance");
-    }
-    // Advance by what the server actually returned. This guarantees progress
-    // even if an older server clamps the requested page size differently.
-    offset += response.issues.length;
-  }
-  return issues;
-}
-
-async function fetchAllMyFlatIssues(
-  userId: string,
-  filter: IssueFlatFilter,
-  sort?: IssueSortParam,
-): Promise<Issue[]> {
-  const relations = await Promise.all([
-    fetchAllFlatPages({ ...filter, assignee_id: userId }, sort),
-    fetchAllFlatPages({ ...filter, creator_id: userId }, sort),
-    fetchAllFlatPages({ ...filter, involves_user_id: userId }, sort),
-  ]);
-  const byId = new Map<string, Issue>();
-  for (const issues of relations) {
-    for (const issue of issues) byId.set(issue.id, issue);
-  }
-  return [...byId.values()].sort((a, b) => compareIssuesForSort(a, b, sort));
-}
-
-export function issueFlatListOptions(
+export function issueTableGroupsOptions(
   wsId: string,
-  scope: string,
-  filter: IssueFlatFilter,
-  userId?: string,
-  sort?: IssueSortParam,
+  query: IssueTableQuerySpec,
+  group: IssueTableGroupsRequest["group"],
 ) {
-  const allMyIssues = scope === "all" && !!userId;
   return infiniteQueryOptions({
-    queryKey: issueKeys.flat(wsId, scope, filter, sort),
-    initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
-      if (allMyIssues) {
-        const issues = await fetchAllMyFlatIssues(userId, filter, sort);
-        return { issues, total: issues.length };
-      }
-      return api.listIssues({
-        ...filter,
-        ...sort,
-        limit: ISSUE_FLAT_PAGE_SIZE,
-        offset: pageParam,
-      });
-    },
-    getNextPageParam: (lastPage, allPages) => {
-      if (allMyIssues) return undefined;
-      const loaded = allPages.reduce((count, page) => count + page.issues.length, 0);
-      return loaded < lastPage.total ? loaded : undefined;
-    },
+    queryKey: issueKeys.tableGroups(wsId, query, group),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api.listIssueTableGroups({
+        query,
+        group,
+        page: { limit: 100, cursor: pageParam },
+    }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     placeholderData: keepPreviousData,
+    retry: false,
   });
 }
 
-export function issueFlatExportOptions(
+/** One independently-addressable Table branch page.
+ *
+ * Table keeps every cursor page under its own query key so a refreshed head
+ * can detach stale tail cursors before their responses land. Keep the request,
+ * key shape, transition placeholder, and retry policy together here — the
+ * dynamic branch graph in views should not duplicate this API contract. */
+export function issueTableRowPageOptions(
   wsId: string,
-  scope: string,
-  filter: IssueFlatFilter,
-  userId?: string,
-  sort?: IssueSortParam,
+  request: IssueTableRowsRequest,
+) {
+  const cursor = request.page?.cursor ?? null;
+  return queryOptions({
+    queryKey: [
+      ...issueKeys.tableRows(
+        wsId,
+        request.query,
+        request.group,
+        request.group_key,
+        request.hierarchy.enabled,
+        request.parent_id,
+      ),
+      "page",
+      cursor,
+    ] as const,
+    queryFn: () => api.listIssueTableRows(request),
+    placeholderData: keepPreviousData,
+    retry: false,
+    // Dynamic useQueries observers detach/reinstall as sibling branches enter
+    // and leave the viewport. Keep an errored page errored until the user hits
+    // Retry — but still let a successful-but-invalidated page refetch on
+    // reattach, so a row page that gets WS-invalidated while its observer is
+    // detached doesn't stay stranded stale under the global `staleTime: Infinity`
+    // default (correct count, missing issue).
+    //
+    // Both guards are needed: `retryOnMount` covers a first-load error (no
+    // data), while the `refetchOnMount` guard covers a background-refetch error
+    // on a page that still holds data — TanStack flags such a page
+    // `isInvalidated`, so a plain `refetchOnMount: true` would re-fire the
+    // failing request on every reattach instead of waiting for explicit Retry.
+    retryOnMount: false,
+    refetchOnMount: (query) => query.state.status !== "error",
+  });
+}
+
+export function issueTableFacetsOptions(
+  wsId: string,
+  request: IssueTableFacetsRequest,
 ) {
   return queryOptions({
-    queryKey: issueKeys.flatExport(wsId, scope, filter, sort),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyFlatIssues(userId, filter, sort)
-        : fetchAllFlatPages(filter, sort),
-    staleTime: 0,
+    queryKey: issueKeys.tableFacets(wsId, request),
+    queryFn: () => api.listIssueTableFacets(request),
   });
-}
-
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
-  const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
-  ]);
-  const byStatus: ListIssuesCache["byStatus"] = {};
-  for (const status of PAGINATED_STATUSES) {
-    const seen = new Set<string>();
-    const merged: Issue[] = [];
-    for (const cache of [byAssignee, byCreator, byInvolves]) {
-      const bucket = cache.byStatus[status];
-      if (!bucket) continue;
-      for (const issue of bucket.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        merged.push(issue);
-      }
-    }
-    merged.sort((a, b) => compareIssuesForSort(a, b, sort));
-    byStatus[status] = { issues: merged, total: merged.length };
-  }
-  return { byStatus };
-}
-
-/**
- * Sibling of {@link fetchAllMyFirstPages} for the assignee-grouped board
- * view. Runs the three single-filter grouped queries in parallel and
- * merges groups by (assignee_type, assignee_id), deduping issues within
- * each group. Extra filters from the page (statuses, priorities, etc.)
- * pass through unchanged.
- */
-async function fetchAllMyAssigneeGroups(
-  userId: string,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-): Promise<GroupedIssuesResponse> {
-  const variants: AssigneeGroupedIssuesFilter[] = [
-    { ...filter, assignee_id: userId },
-    { ...filter, creator_id: userId },
-    { ...filter, involves_user_id: userId },
-  ];
-  const responses = await Promise.all(
-    variants.map((f) =>
-      api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: 0,
-        ...sort,
-        ...f,
-      }),
-    ),
-  );
-  const groupKey = (g: GroupedIssuesResponse["groups"][number]) =>
-    `${g.assignee_type ?? "_"}::${g.assignee_id ?? "_"}`;
-  const merged = new Map<string, GroupedIssuesResponse["groups"][number]>();
-  for (const res of responses) {
-    for (const group of res.groups) {
-      const key = groupKey(group);
-      const existing = merged.get(key);
-      if (!existing) {
-        merged.set(key, {
-          ...group,
-          issues: [...group.issues],
-          total: group.issues.length,
-        });
-        continue;
-      }
-      const seen = new Set(existing.issues.map((i) => i.id));
-      for (const issue of group.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        existing.issues.push(issue);
-      }
-      existing.total = existing.issues.length;
-    }
-  }
-  const groups = [...merged.values()];
-  for (const group of groups) {
-    group.issues.sort((a, b) => compareIssuesForSort(a, b, sort));
-  }
-  return { groups };
 }
 
 /**
@@ -483,58 +365,12 @@ async function fetchAllMyAssigneeGroups(
  * `Issue[]` for consumers. Mutations and ws-updaters must use
  * `setQueryData<ListIssuesCache>(...)` and preserve the byStatus shape.
  *
- * Fetches the first page of each paginated status in parallel. Use
- * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
+ * Fetches the first page in one request and buckets it by category.
  */
 export function issueListOptions(wsId: string, sort?: IssueSortParam) {
   return queryOptions({
     queryKey: issueKeys.listSorted(wsId, sort),
     queryFn: () => fetchFirstPages({}, sort),
-    select: flattenIssueBuckets,
-    placeholderData: keepPreviousData,
-  });
-}
-
-export function issueAssigneeGroupsOptions(
-  wsId: string,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-) {
-  return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.assigneeGroups(wsId, { ...filter, ...sort }),
-    queryFn: () =>
-      api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: 0,
-        ...sort,
-        ...filter,
-      }),
-    placeholderData: keepPreviousData,
-  });
-}
-
-/**
- * Server-filtered issue list for the My Issues page.
- * Each scope gets its own cache entry so switching tabs is instant after first load.
- */
-export function myIssueListOptions(
-  wsId: string,
-  scope: string,
-  filter: MyIssuesFilter,
-  // Required when scope === "all" — the user id whose three relations
-  // (assignee, creator, agents+squads) we union over. For every other
-  // scope the filter object already carries the relevant id and userId
-  // is ignored.
-  userId?: string,
-  sort?: IssueSortParam,
-) {
-  return queryOptions({
-    queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
-        : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
@@ -555,13 +391,17 @@ export const PROJECT_GANTT_PAGE_LIMIT = 500;
  */
 export const PROJECT_GANTT_MAX_ISSUES = 10_000;
 
-async function fetchProjectGanttIssues(projectId: string) {
+async function fetchProjectGanttIssues(
+  projectId: string,
+  assigneeTypes?: IssueAssigneeType[],
+) {
   const issues = [];
   let offset = 0;
   while (offset < PROJECT_GANTT_MAX_ISSUES) {
     const res = await api.listIssues({
       project_id: projectId,
       scheduled: true,
+      ...(assigneeTypes?.length ? { assignee_types: assigneeTypes } : {}),
       limit: PROJECT_GANTT_PAGE_LIMIT,
       offset,
     });
@@ -586,35 +426,16 @@ async function fetchProjectGanttIssues(projectId: string) {
  * `total` is reached so an oversized project can't silently lose bars past
  * the first page.
  */
-export function projectGanttIssuesOptions(wsId: string, projectId: string) {
-  return queryOptions({
-    queryKey: issueKeys.projectGantt(wsId, projectId),
-    queryFn: () => fetchProjectGanttIssues(projectId),
-  });
-}
-
-export function myIssueAssigneeGroupsOptions(
+export function projectGanttIssuesOptions(
   wsId: string,
-  scope: string,
-  filter: AssigneeGroupedIssuesFilter,
-  // See myIssueListOptions for the userId contract — only consulted when
-  // scope === "all", and powers the 3-fetch grouped union.
-  userId?: string,
-  sort?: IssueSortParam,
+  projectId: string,
+  // The page's assignee-type tab narrows the Gantt exactly like every
+  // other mode — same scope, same single mapping upstream.
+  assigneeTypes?: IssueAssigneeType[],
 ) {
-  return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.myAssigneeGroups(wsId, scope, { ...filter, ...sort }),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyAssigneeGroups(userId, filter, sort)
-        : api.listGroupedIssues({
-            group_by: "assignee",
-            limit: ISSUE_PAGE_SIZE,
-            offset: 0,
-            ...sort,
-            ...filter,
-          }),
-    placeholderData: keepPreviousData,
+  return queryOptions({
+    queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes),
+    queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes),
   });
 }
 
@@ -628,11 +449,18 @@ export function issueDetailOptions(wsId: string, id: string) {
 /**
  * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
  *
- * Backs the Linear-style autolink: the backend `q` search matches an
- * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
- * both hit number 123), so the exact `identifier === value` filter here is
- * what enforces the workspace prefix. A non-existent or wrong-prefix
- * identifier resolves to `null` and renders as plain text.
+ * Backs the Linear-style autolink. This is an EXACT lookup, so it goes to
+ * `GET /api/issues/{identifier}` — the server parses `PREFIX-NUMBER`, checks
+ * the prefix against the workspace's own `issue_prefix`, and reads the issue
+ * through the unique `(workspace_id, number)` index. A non-existent or
+ * wrong-prefix identifier 404s, which maps to `null` here and renders as
+ * plain text — the same contract the previous implementation had.
+ *
+ * It deliberately does NOT use `/api/issues/search`: that endpoint runs the
+ * workspace-wide full-text query (title/description/comment `LIKE`, ranking,
+ * and snippet subqueries) which is orders of magnitude more expensive than a
+ * point read, and autolink resolution was the dominant caller of it
+ * (MUL-6268).
  *
  * Server state → TanStack Query; the key includes `wsId` and the identifier,
  * so identical identifiers across the app share one request. Caller gates
@@ -641,14 +469,18 @@ export function issueDetailOptions(wsId: string, id: string) {
 export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
-    queryFn: async ({ signal }) => {
-      const res = await api.searchIssues({
-        q: identifier,
-        limit: 10,
-        include_closed: true,
-        signal,
-      });
-      return res.issues.find((i) => i.identifier === identifier) ?? null;
+    // Keep this small, cacheable lookup alive when the last mention unmounts.
+    // A remount can then share its request instead of aborting and restarting it.
+    queryFn: async () => {
+      try {
+        return await api.getIssue(identifier);
+      } catch (err) {
+        // Unknown identifier / wrong workspace prefix → render as plain text.
+        // Any other failure (401/5xx) must keep propagating so the query
+        // can retry instead of being cached as "no such issue".
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
     },
     // Identifier→issue mapping is effectively immutable; avoid refetch churn
     // when the same key renders across many comments/messages.
@@ -670,10 +502,28 @@ export function childIssueProgressOptions(wsId: string) {
   });
 }
 
+/** Both sides of an issue's duplicate relation: its original and its duplicates. */
+export function issueDuplicatesOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: issueKeys.duplicates(wsId, id),
+    queryFn: () => api.listIssueDuplicates(id),
+    // Same reason as childIssuesOptions: a mark written while this workspace
+    // is not the active realtime subscription would otherwise leave the
+    // Infinity-stale snapshot wrong when the issue is opened again.
+    refetchOnMount: "always",
+  });
+}
+
 export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
+    // Child creation can happen while this workspace is not the active
+    // realtime subscription (for example, an agent creates it while a
+    // desktop tab is showing another workspace). The global Infinity
+    // staleTime would otherwise reuse an incomplete children snapshot when
+    // the parent is opened again, with no later event guaranteed to heal it.
+    refetchOnMount: "always",
   });
 }
 

@@ -115,6 +115,7 @@ export function KeyboardShortcutsTab() {
     <SettingsTab
       title={t(($) => $.shortcuts.title)}
       description={t(($) => $.shortcuts.description)}
+      scope="device"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
@@ -185,7 +186,7 @@ export function KeyboardShortcutsTab() {
       })}
 
       {visibleActions.length === 0 ? (
-        <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed px-4 py-10 text-center text-body text-muted-foreground">
           {t(($) => $.shortcuts.no_results)}
         </div>
       ) : null}
@@ -195,7 +196,10 @@ export function KeyboardShortcutsTab() {
         description={t(($) => $.shortcuts.fixed.description)}
       >
         <SettingsCard>
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.open_settings)} shortcut={createShortcutChord(",", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.close_tab)} shortcut={createShortcutChord("W", { primary: true })} />
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_tab_1_to_8)} shortcut={createShortcutChord("1–8", { primary: true })} />
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_last_tab)} shortcut={createShortcutChord("9", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_in)} shortcut={createShortcutChord("Plus", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_out)} shortcut={createShortcutChord("Minus", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.reset_zoom)} shortcut={createShortcutChord("0", { primary: true })} />
@@ -260,7 +264,10 @@ function ShortcutRow({
 }) {
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
-  const description = t(($) => $.shortcuts.actions[action.id].description);
+  // Keep descriptions in the search index, but only show non-obvious behavior.
+  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "send"].includes(action.id)
+    ? t(($) => $.shortcuts.actions[action.id].description)
+    : undefined;
   const errorText = error?.kind === "reserved"
     ? t(($) => $.shortcuts.reserved_error)
     : error?.kind === "send"
@@ -297,7 +304,7 @@ function ShortcutRow({
             onKeyDown={recording ? onCapture : undefined}
             onBlur={onCancelRecording}
             className={cn(
-              "inline-flex h-8 min-w-28 items-center justify-center rounded-md border bg-background px-2.5 font-mono text-xs font-medium shadow-xs outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex h-8 min-w-28 items-center justify-center rounded-md border bg-background px-2.5 font-mono text-caption font-medium shadow-xs outline-none transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring",
               recording && "border-brand bg-brand/5 text-brand ring-2 ring-brand/20",
               error && "border-destructive text-destructive ring-destructive/20",
             )}
@@ -341,11 +348,11 @@ function ShortcutRow({
           </Button>
         </div>
         {errorText ? (
-          <span role="alert" className="max-w-72 text-right text-xs text-destructive">
+          <span role="alert" className="max-w-72 text-right text-caption text-destructive">
             {errorText}
           </span>
         ) : recording ? (
-          <span className="text-right text-[11px] text-muted-foreground">
+          <span className="text-right text-micro text-muted-foreground">
             {t(($) => $.shortcuts.record_hint)}
           </span>
         ) : null}

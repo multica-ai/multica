@@ -209,7 +209,7 @@ export function LabelPicker({
   const resolvedTriggerRender =
     triggerRender ??
     (hasLabels ? (
-      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
+      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors" />
     ) : undefined);
 
   return (
@@ -250,7 +250,7 @@ export function LabelPicker({
           <button
             type="button"
             onClick={openManage}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent transition-colors"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body text-muted-foreground hover:bg-accent transition-colors"
           >
             <Settings2 className="h-3.5 w-3.5" />
             <span>{t(($) => $.pickers.label.manage_action)}</span>

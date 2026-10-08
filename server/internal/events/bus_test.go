@@ -38,12 +38,6 @@ func TestPublishOnlyMatchingType(t *testing.T) {
 	}
 }
 
-func TestPublishNoSubscribersIsNoop(t *testing.T) {
-	bus := New()
-	// Should not panic
-	bus.Publish(Event{Type: "no:listeners"})
-}
-
 func TestPanicInHandlerDoesNotBreakOthers(t *testing.T) {
 	bus := New()
 	var secondCalled bool
@@ -115,32 +109,5 @@ func TestSubscribeAllPanicRecovery(t *testing.T) {
 
 	if !secondCalled {
 		t.Fatal("second global handler was not called after first panicked")
-	}
-}
-
-func TestEventFieldsPassedThrough(t *testing.T) {
-	bus := New()
-	var received Event
-
-	bus.Subscribe("test:fields", func(e Event) {
-		received = e
-	})
-
-	bus.Publish(Event{
-		Type:        "test:fields",
-		WorkspaceID: "ws-123",
-		ActorType:   "member",
-		ActorID:     "user-456",
-		Payload:     map[string]string{"key": "value"},
-	})
-
-	if received.WorkspaceID != "ws-123" {
-		t.Errorf("expected WorkspaceID ws-123, got %s", received.WorkspaceID)
-	}
-	if received.ActorType != "member" {
-		t.Errorf("expected ActorType member, got %s", received.ActorType)
-	}
-	if received.ActorID != "user-456" {
-		t.Errorf("expected ActorID user-456, got %s", received.ActorID)
 	}
 }

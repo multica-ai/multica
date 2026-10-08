@@ -17,6 +17,7 @@ import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
+import { useT } from "@/lib/i18n";
 
 /**
  * Shared Stack.Screen options for every iOS formSheet-presented sheet route.
@@ -101,6 +102,7 @@ function RealtimeSubscriptions() {
  */
 export default function WorkspaceLayout() {
   const { workspace: slug } = useLocalSearchParams<{ workspace: string }>();
+  const { t } = useT("navigation");
   const { data: workspaces, isLoading } = useQuery(workspaceListOptions());
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
 
@@ -135,21 +137,21 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]"
           options={{
-            title: "Issue",
-            headerBackTitle: "Back",
+            title: t("navigation:routes.issue"),
+            headerBackTitle: t("back"),
           }}
         />
         <Stack.Screen
           name="project/[id]"
           options={{
-            title: "Project",
-            headerBackTitle: "Back",
+            title: t("navigation:routes.project"),
+            headerBackTitle: t("back"),
           }}
         />
         <Stack.Screen
           name="project/[id]/edit"
           options={{
-            title: "Edit Project",
+            title: t("navigation:routes.edit_project"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -157,7 +159,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]/edit"
           options={{
-            title: "Edit Issue",
+            title: t("navigation:routes.edit_issue"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -165,11 +167,12 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="project/new"
           options={{
-            title: "New Project",
+            title: t("navigation:routes.new_project"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
         />
+        <Stack.Screen name="inbox/[id]" options={SHEET_OPTIONS} />
         {/* Issue-detail formSheet pickers. All share the same sheet config:
             explicit numeric detents to dodge expo/expo#42904+#42965 (the
             `fitToContents` zero-size / padding bugs on iOS 26 + Expo 55),
@@ -195,7 +198,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: t("navigation:routes.assignee"),
           }}
         />
         <Stack.Screen
@@ -207,7 +210,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Mention",
+            title: t("navigation:routes.mention"),
           }}
         />
         <Stack.Screen
@@ -260,7 +263,7 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: t("navigation:routes.assignee"),
           }}
         />
         <Stack.Screen
@@ -291,36 +294,57 @@ export default function WorkspaceLayout() {
         <Stack.Screen name="switch-workspace" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="more/issues"
-          options={{ title: "Issues", headerBackTitle: "Back" }}
+            options={{
+              title: t("navigation:routes.issues"),
+              headerBackTitle: t("back"),
+            }}
         />
         <Stack.Screen
           name="more/projects"
-          options={{ title: "Projects", headerBackTitle: "Back" }}
+            options={{
+              title: t("navigation:routes.projects"),
+              headerBackTitle: t("back"),
+            }}
         />
         <Stack.Screen
           name="more/agents"
-          options={{ title: "Agents", headerBackTitle: "Back" }}
+            options={{
+              title: t("navigation:routes.agents"),
+              headerBackTitle: t("back"),
+            }}
         />
         <Stack.Screen
           name="more/pins"
-          options={{ title: "Pinned", headerBackTitle: "Back" }}
+            options={{
+              title: t("navigation:routes.pinned"),
+              headerBackTitle: t("back"),
+            }}
         />
         <Stack.Screen
           name="more/settings"
-          options={{ title: "Settings", headerBackTitle: "Back" }}
+            options={{
+              title: t("navigation:routes.settings"),
+              headerBackTitle: t("back"),
+            }}
         />
         <Stack.Screen
           name="more/settings/profile"
-          options={{ title: "Profile", headerBackTitle: "Settings" }}
+            options={{
+              title: t("navigation:routes.profile"),
+              headerBackTitle: t("navigation:routes.settings"),
+            }}
         />
         <Stack.Screen
           name="more/settings/notifications"
-          options={{ title: "Notifications", headerBackTitle: "Settings" }}
+            options={{
+              title: t("navigation:routes.notifications"),
+              headerBackTitle: t("navigation:routes.settings"),
+            }}
         />
         <Stack.Screen
           name="new-issue"
           options={{
-            title: "New Issue",
+            title: t("navigation:routes.new_issue"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -328,7 +352,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="search"
           options={{
-            title: "Search",
+            title: t("navigation:routes.search"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}

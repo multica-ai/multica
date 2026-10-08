@@ -18,14 +18,14 @@ describe("ProjectStartDatePicker", () => {
     expect(screen.getByText("Mar 1")).toBeInTheDocument();
   });
 
-  it("emits start_date: null when the date is cleared", async () => {
+  it("emits start_date: null from the empty row above the calendar", async () => {
     const onUpdate = vi.fn();
     const user = userEvent.setup();
     renderWithI18n(
       <ProjectStartDatePicker startDate="2026-03-01" onUpdate={onUpdate} />,
     );
     await user.click(screen.getByText("Mar 1")); // open popover
-    await user.click(screen.getByRole("button", { name: "Clear date" }));
+    await user.click(screen.getByRole("button", { name: "No start date" }));
     expect(onUpdate).toHaveBeenCalledWith({ start_date: null });
   });
 });
@@ -41,14 +41,14 @@ describe("ProjectDueDatePicker", () => {
     expect(screen.getByText("Mar 1")).toBeInTheDocument();
   });
 
-  it("emits due_date: null when the date is cleared", async () => {
+  it("emits due_date: null from the empty row above the calendar", async () => {
     const onUpdate = vi.fn();
     const user = userEvent.setup();
     renderWithI18n(
       <ProjectDueDatePicker dueDate="2026-03-01" onUpdate={onUpdate} />,
     );
     await user.click(screen.getByText("Mar 1")); // open popover
-    await user.click(screen.getByRole("button", { name: "Clear date" }));
+    await user.click(screen.getByRole("button", { name: "No due date" }));
     expect(onUpdate).toHaveBeenCalledWith({ due_date: null });
   });
 });

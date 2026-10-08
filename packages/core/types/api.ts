@@ -1,6 +1,7 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
+import type { IssuePropertyValues, PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
-import type { Project } from "./project";
+import type { Project, ProjectStatus } from "./project";
 
 // Issue API
 export interface CreateIssueRequest {
@@ -20,11 +21,46 @@ export interface CreateIssueRequest {
   /** Issue-scoped label IDs to attach in the same transaction as the create.
    *  Unknown or non-issue ids are rejected by the server with 400. */
   label_ids?: string[];
+  /** ID-keyed custom-property values validated and persisted atomically with
+   * the issue. */
+  properties?: IssuePropertyValues;
 }
 
+export interface CreateCommentSubIssueManualRequest {
+  mode: "manual";
+  capture_token: string;
+  issue: CreateIssueRequest;
+}
+
+export interface CreateCommentSubIssueAgentRequest {
+  mode: "agent";
+  capture_token: string;
+  quick_create: {
+    agent_id?: string;
+    squad_id?: string;
+    prompt: string;
+    priority?: IssuePriority;
+    due_date?: string;
+    project_id?: string | null;
+    attachment_ids?: string[];
+  };
+}
+
+export type CreateCommentSubIssueRequest =
+  | CreateCommentSubIssueManualRequest
+  | CreateCommentSubIssueAgentRequest;
+
 export interface UpdateIssueRequest {
+  /** Legacy aggregate compare-and-swap token. New text editors use field
+   * baselines so unrelated issue activity does not reject their edits. */
+  expected_revision?: number;
   title?: string;
+  /** Authoritative title the editor adopted before producing this update. */
+  title_base?: string;
   description?: string;
+  /** Authoritative description the editor had adopted before producing this
+   * update. The server uses it to merge channel media that landed meanwhile. */
+  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
@@ -44,10 +80,37 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
-  /** Free-text handoff instruction injected into the started run's opening
-   *  context (MUL-3375). Only consumed when a run actually starts. Control
-   *  field — strip from optimistic cache patches. */
-  handoff_note?: string;
+  /** Marks this issue as a duplicate of another issue (MUL-7349). The server
+   *  also sets status to cancelled; any later status change away from
+   *  cancelled removes the mark. Write-only — read it back through
+   *  `listIssueDuplicates`. Control field: strip from optimistic patches. */
+  duplicate_of_issue_id?: string;
+}
+
+/** Both sides of an issue's duplicate relation (MUL-7349). */
+export interface IssueDuplicates {
+  /** The original this issue duplicates, when it is marked as a duplicate. */
+  duplicate_of: Issue | null;
+  /** Issues marked as duplicates of this one. */
+  duplicates: Issue[];
+}
+
+/**
+ * Server-owned drag intent. The client may use a provisional position for its
+ * optimistic animation, but the canonical position is derived from these
+ * workspace-scoped neighbors by `POST /api/issues/:id/move`.
+ */
+export interface MoveIssueRequest
+  extends Pick<
+    UpdateIssueRequest,
+    | "status"
+    | "assignee_type"
+    | "assignee_id"
+    | "parent_issue_id"
+    | "project_id"
+  > {
+  before_id: string | null;
+  after_id: string | null;
 }
 
 /** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means
@@ -61,14 +124,11 @@ export interface IssueTriggerPreviewParams {
 }
 
 /** One issue that WILL start a run under the prospective write. `agent_id` is
- *  the runnable agent (squad leader for squads). `handoff_supported` is the
- *  soft-gate signal: false when the target runtime is too old to render a
- *  handoff note (gray the note box; the assignment still works). */
+ *  the runnable agent (squad leader for squads). */
 export interface IssueTriggerPreviewItem {
   issue_id: string;
   agent_id: string;
   source: string;
-  handoff_supported: boolean;
 }
 
 export interface IssueTriggerPreview {
@@ -85,6 +145,15 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
+  /**
+   * Filter by lifecycle category rather than by exact key, so one bucket holds
+   * all concrete and custom statuses in that phase. Task views use exact
+   * status keys for their columns instead. The web client's
+   * `ApiClient.listIssues` does not send it.
+   */
+  status_category?: IssueStatusCategory;
+  /** Multi-value form of `status_category`. OR within the field. */
+  status_categories?: IssueStatusCategory[];
   priority?: IssuePriority;
   /** Multi-value table facet. OR within the field. */
   priorities?: IssuePriority[];
@@ -126,8 +195,9 @@ export interface ListIssuesParams {
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   /** Custom-property filter: definition id → accepted values (option ids or
-   *  "true"/"false" for checkbox). OR within a definition, AND across. */
-  properties?: Record<string, string[]>;
+   *  "true"/"false" for checkbox; a plain string is exact equality, an
+   *  operator object narrows it). OR within a definition, AND across. */
+  properties?: Record<string, PropertyFilterValue[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -146,6 +216,7 @@ export interface ListIssuesParams {
     | "title"
     | "created_at"
     | "updated_at"
+    | "last_activity"
     | "start_date"
     | "due_date"
     | `property:${string}`;
@@ -174,8 +245,9 @@ export interface ListGroupedIssuesParams {
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   /** Custom-property filter: definition id → accepted values (option ids or
-   *  "true"/"false" for checkbox). OR within a definition, AND across. */
-  properties?: Record<string, string[]>;
+   *  "true"/"false" for checkbox; a plain string is exact equality, an
+   *  operator object narrows it). OR within a definition, AND across. */
+  properties?: Record<string, PropertyFilterValue[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -194,6 +266,7 @@ export interface ListGroupedIssuesParams {
     | "title"
     | "created_at"
     | "updated_at"
+    | "last_activity"
     | "start_date"
     | "due_date"
     | `property:${string}`;
@@ -219,19 +292,241 @@ export interface GroupedIssuesResponse {
   groups: IssueAssigneeGroup[];
 }
 
-/** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
+// Server-authoritative Table query contract. Membership, grouping and counts
+// are evaluated against the complete result set; the browser only owns view
+// state such as collapsed groups/parents.
+export type IssueTableScope =
+  | { kind: "workspace"; assignee_types?: IssueAssigneeType[] }
+  | { kind: "project"; project_id: string; assignee_types?: IssueAssigneeType[] }
+  | { kind: "assignee"; actor: IssueActorRef }
+  | { kind: "creator"; actor: IssueActorRef }
+  | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
+
+export interface IssueTableFilters {
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignees?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creators?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  /** Lifecycle status of the parent project. A separate dimension from
+   *  `project_ids` (AND across the two); an issue with no project never
+   *  matches. */
+  project_statuses?: ProjectStatus[];
+  label_ids?: string[];
+  /** Same shape as `ListIssuesParams.properties`: bare strings are exact
+   *  equality / "No value", operator objects narrow scalar matches. */
+  properties?: Record<string, PropertyFilterValue[]>;
+  date?: {
+    field: "created_at" | "updated_at";
+    start: string;
+    end: string;
+  };
+  working_only?: boolean;
+  /** Match the running-task issue projection returned by
+   *  `/api/working-agents`. An explicit empty list matches nothing. */
+  working_issue_ids?: string[];
+  include_sub_issues?: boolean;
+}
+
+export type IssueTableSortField =
+  | "position"
+  | "status"
+  | "priority"
+  | "title"
+  | "created_at"
+  | "updated_at"
+  | "last_activity"
+  | "start_date"
+  | "due_date"
+  | `property:${string}`;
+
+export interface IssueTableQuerySpec {
+  scope: IssueTableScope;
+  filters: IssueTableFilters;
+  search?: string;
+  sort: {
+    field: IssueTableSortField;
+    direction: "asc" | "desc";
+  };
+}
+
+export type IssueTableGroupSpec =
+  | { kind: "none" }
+  | { kind: "status" }
+  /**
+   * Group by the CATEGORY a status behaves as, not by the status key.
+   *
+   * Retained for installed clients. New Board/List/Swimlane surfaces group by
+   * concrete status keys, not categories. The descriptor still reports
+   * `value.kind === "status"` for response compatibility; the group KEY is
+   * what distinguishes category buckets from concrete statuses. By default
+   * buckets use the seven-value wire enum; category_format=lifecycle opts into
+   * unstarted/started/done/closed.
+   * (MUL-6243)
+   */
+  | { kind: "status_category"; category_format?: "lifecycle" }
+  | { kind: "assignee" }
+  | { kind: "project" }
+  | { kind: "parent" }
+  | {
+      kind: "compound";
+      primary: "assignee" | "project" | "parent";
+      /** `status_category` folds custom statuses into their category's cell. */
+      secondary: "status" | "status_category";
+      /** Omit for legacy seven-value category buckets; only for status_category. */
+      category_format?: "lifecycle";
+      /** Optional visible secondary buckets. When present, the server pages
+       * only primary groups that contain at least one matching card and
+       * returns `total` for that complete visible result set. */
+      secondary_values?: IssueStatus[] | IssueStatusCategory[];
+    }
+  | { kind: "property"; property_id: string; include_empty?: boolean };
+
+/** Response-side actor reference. Kept open for forward compatibility: an
+ * installed desktop client may receive a new actor kind from a newer server. */
+export interface IssueTableActorRef {
+  type: string;
+  id: string;
+}
+
+export interface IssueTableParentRef {
+  id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: string;
+}
+
+export type IssueTableGroupValue =
+  | { kind: "status"; status: string }
+  | { kind: "assignee"; actor: IssueTableActorRef | null }
+  | { kind: "project"; project_id: string | null }
+  | {
+      kind: "parent";
+      parent_id: string | null;
+      parent: IssueTableParentRef | null;
+      value_state: "value" | "unavailable" | "unset";
+    }
+  | {
+      kind: "property";
+      property_id: string;
+      value?: string | boolean | null;
+      value_state: "value" | "unavailable" | "unset";
+    };
+
+export interface IssueTableGroupDescriptor {
+  key: string;
+  value: IssueTableGroupValue;
+  count: number;
+  /** Present for compound groups. These opaque keys can be passed straight
+   * back to `/table/rows`; clients must not reconstruct them. */
+  secondary_groups?: IssueTableGroupDescriptor[];
+}
+
+export interface IssueTablePageRequest {
+  limit?: number;
+  cursor?: string | null;
+}
+
+export interface IssueTableGroupsRequest {
+  query: IssueTableQuerySpec;
+  group: Exclude<IssueTableGroupSpec, { kind: "none" }>;
+  page?: IssueTablePageRequest;
+}
+
+export interface IssueTableGroupsResponse {
+  query_fingerprint: string;
+  total: number;
+  groups: IssueTableGroupDescriptor[];
+  next_cursor: string | null;
+}
+
+export interface IssueTableRowsRequest {
+  query: IssueTableQuerySpec;
+  group: IssueTableGroupSpec;
+  group_key: string | null;
+  hierarchy: { enabled: boolean };
+  parent_id: string | null;
+  page?: IssueTablePageRequest;
+}
+
+export interface IssueTableRow {
+  issue: Issue;
+  direct_child_count: number;
+}
+
+export interface IssueTableRowsResponse {
+  query_fingerprint: string;
+  group_key: string | null;
+  parent_id: string | null;
+  total: number;
+  rows: IssueTableRow[];
+  branch_total: number;
+  next_cursor: string | null;
+}
+
+export type IssueTableFacetSpec =
+  | { kind: "status" }
+  | { kind: "priority" }
+  | { kind: "assignee" }
+  | { kind: "creator" }
+  | { kind: "project" }
+  | { kind: "label" }
+  | { kind: "property"; property_id: string }
+  /** Agents running issue work inside this surface. `key` is the agent id,
+   *  `count` its running-task count. Evaluated against the surface's own scope
+   *  and filters, so the header chip counts the same rows the list shows. */
+  | { kind: "working_agents" };
+
+export interface IssueTableFacetsRequest {
+  query: IssueTableQuerySpec;
+  facets: IssueTableFacetSpec[];
+  /** Existing callers default to true. Count-only UIs can skip the extra scan. */
+  include_total?: boolean;
+}
+
+export interface IssueTableFacetValue {
+  key: string;
+  count: number;
+}
+
+export interface IssueTableFacet {
+  kind: IssueTableFacetSpec["kind"];
+  property_id?: string;
+  values: IssueTableFacetValue[];
+}
+
+export interface IssueTableFacetsResponse {
+  query_fingerprint: string;
+  total: number;
+  facets: IssueTableFacet[];
+}
+
+/** One agent running issue work inside a single issue surface. Projected from
+ *  the `working_agents` facet, so the count is already narrowed by that
+ *  surface's scope and every active filter. Name/avatar are resolved from the
+ *  workspace agent directory, not carried here. */
+export interface WorkingAgentSummary {
+  id: string;
+  running_task_count: number;
+}
+
+/** Per-category bucket in the issue list cache. The list's fetch sets `total` to the bucket's row count. */
 export interface IssueStatusBucket {
   issues: Issue[];
   total: number;
 }
 
 /**
- * Frontend cache shape for the issue list. Data is bucketed by status so
- * each column can paginate independently. Assembled from per-status
- * `api.listIssues` responses by the query functions in `issues/queries.ts`.
+ * Frontend cache shape for the issue list. Data is bucketed by status
+ * category. Assembled from one `api.listIssues` response by the query
+ * functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
-  byStatus: Partial<Record<IssueStatus, IssueStatusBucket>>;
+  /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */
+  byStatus: Partial<Record<IssueStatusCategory, IssueStatusBucket>>;
 }
 
 export interface SearchIssueResult extends Issue {
@@ -243,7 +538,6 @@ export interface SearchIssueResult extends Issue {
 
 export interface SearchIssuesResponse {
   issues: SearchIssueResult[];
-  total: number;
 }
 
 export interface SearchProjectResult extends Project {
@@ -253,7 +547,60 @@ export interface SearchProjectResult extends Project {
 
 export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
-  total: number;
+}
+
+// Local search index sync (MUL-7754): GET /api/search-index/manifest,
+// GET /api/search-index/snapshot, POST /api/search-index/changes.
+
+/** Issue as the local search index stores it: a search row without match fields. */
+export interface SearchIndexIssue extends Issue {
+  /** Sub-second `updated_at`, which server search breaks ranking ties with. */
+  search_updated_at: string;
+}
+
+/** Project as the local index stores it. Issue and resource counts are not synced. */
+export interface SearchIndexProject extends Project {
+  search_updated_at: string;
+}
+
+export interface SearchIndexComment {
+  id: string;
+  issue_id: string;
+  content: string;
+  /** Sub-second RFC 3339 timestamp. */
+  created_at: string;
+}
+
+export interface SearchIndexManifest {
+  /** Opaque catch-up cursor for the snapshot the new copy starts from. */
+  cursor: string;
+  issue_count: number;
+  comment_count: number;
+  project_count: number;
+  /** UTF-8 bytes of every title, description, and live comment. */
+  text_bytes: number;
+}
+
+export interface SearchIndexSnapshotPage {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  /** Every project, on the first page only. */
+  projects: SearchIndexProject[];
+  next_after_number: number;
+  done: boolean;
+}
+
+export interface SearchIndexChanges {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  projects: SearchIndexProject[];
+  deleted: {
+    issues: string[];
+    comments: string[];
+    projects: string[];
+  };
+  cursor: string;
+  has_more: boolean;
 }
 
 export interface UpdateMeRequest {

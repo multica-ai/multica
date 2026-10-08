@@ -18,11 +18,11 @@ export interface IssueSurfaceActivity {
   runningIssueIds: Set<string>;
 }
 
-function isQueuedTaskStatus(status: AgentTask["status"]) {
+function isQueuedTaskStatus(status: AgentTask["status"], wakeupId?: string) {
   return (
     status === "queued" ||
     status === "dispatched" ||
-    status === "waiting_local_directory"
+    status === "waiting_local_directory" || (status === "deferred" && !!wakeupId)
   );
 }
 
@@ -49,7 +49,7 @@ export function selectIssueTasks(
   for (const task of snapshot) {
     if (task.issue_id !== issueId) continue;
     if (task.status === "running") running.push(task);
-    else if (isQueuedTaskStatus(task.status)) queued.push(task);
+    else if (isQueuedTaskStatus(task.status, task.wakeup_id)) queued.push(task);
   }
   return { running, queued };
 }
@@ -61,7 +61,7 @@ export function deriveIssueSurfaceActivity(
 
   for (const task of tasks) {
     if (!task.issue_id) continue;
-    if (task.status !== "running" && !isQueuedTaskStatus(task.status)) {
+    if (task.status !== "running" && !isQueuedTaskStatus(task.status, task.wakeup_id)) {
       continue;
     }
 

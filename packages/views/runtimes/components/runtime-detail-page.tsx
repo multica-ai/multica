@@ -16,7 +16,9 @@ import {
 } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { AppLink, useNavigation } from "../../navigation";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
+import { AppLink } from "../../navigation";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import {
   buildRuntimeMachines,
@@ -88,7 +90,6 @@ export function RuntimeDetailPage({
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
-  const navigation = useNavigation();
   const qc = useQueryClient();
   const healthLabel = useHealthLabel();
   const timeAgo = useTimeAgo();
@@ -184,14 +185,18 @@ export function RuntimeDetailPage({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
-            <p className="text-sm font-medium">
+            <p className="text-body font-medium">
               {t(($) => $.machine.not_found_title)}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               {t(($) => $.machine.not_found_hint)}
             </p>
           </div>
-          <Button size="sm" onClick={() => navigation.push(paths.runtimes())}>
+          <Button
+            size="sm"
+            render={<AppLink href={paths.runtimes()} />}
+            nativeButton={false}
+          >
             {t(($) => $.detail.all_runtimes)}
           </Button>
         </div>
@@ -203,9 +208,9 @@ export function RuntimeDetailPage({
   const busyCount = machine.runningCount + machine.queuedCount;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="shrink-0 border-b bg-background px-4 pb-5 pt-3 sm:px-6">
-        <div className="mx-auto max-w-[1440px]">
-          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <header className="shrink-0 border-b bg-background pb-5 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
+          <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
             <AppLink
               href={paths.runtimes()}
               className="rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -226,25 +231,25 @@ export function RuntimeDetailPage({
               </div>
               <div className="min-w-0 pt-0.5">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <h1 className="min-w-0 text-balance text-xl font-semibold tracking-tight sm:text-2xl">
+                  <h1 className="min-w-0 text-balance text-title-lg font-semibold tracking-tight sm:text-display-sm">
                     {machine.title}
                   </h1>
-                  <span className="inline-flex items-center gap-1.5 text-xs">
+                  <span className="inline-flex items-center gap-1.5 text-caption">
                     <HealthIcon health={machine.health} />
                     {healthLabel(machine.health)}
                   </span>
                   {machine.isCurrent && (
-                    <span className="rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
+                    <span className="rounded-xs bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
                       {t(($) => $.machine.this_machine)}
                     </span>
                   )}
                 </div>
                 {machine.subtitle && (
-                  <p className="mt-1 text-sm text-muted-foreground">
+                  <p className="mt-1 text-body text-muted-foreground">
                     {machine.subtitle}
                   </p>
                 )}
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
                   <span>
                     {t(($) => $.machine.runtime_count, {
                       count: machineRuntimes.length,
@@ -261,7 +266,7 @@ export function RuntimeDetailPage({
                   <MachineCliSection
                     machine={machine}
                     currentUserId={currentUserId}
-                    canManageAnyRuntime={isAdmin}
+                    canManagePublicRuntimes={isAdmin}
                   />
                   {machine.lastSeenAt && (
                     <span>{timeAgo(machine.lastSeenAt)}</span>
@@ -289,13 +294,13 @@ export function RuntimeDetailPage({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-background">
-        <div className="mx-auto w-full max-w-[1440px] p-4 sm:p-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold">
+              <h2 className="text-body font-semibold">
                 {t(($) => $.machine.metrics.runtimes)}
               </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 text-caption text-muted-foreground">
                 {t(($) => $.machine.select_runtime)}
               </p>
             </div>
@@ -315,6 +320,7 @@ export function RuntimeDetailPage({
               <RuntimeList
                 runtimes={machineRuntimes}
                 now={now}
+                machineTitle={machine.title}
                 runtimeHref={(childRuntimeId) =>
                   paths.runtimeSettings(machine.id, childRuntimeId)
                 }
@@ -324,14 +330,14 @@ export function RuntimeDetailPage({
             <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
               <Server
                 aria-hidden="true"
-                className="h-7 w-7 text-muted-foreground/40"
+                className="h-7 w-7 text-faint-foreground"
               />
-              <p className="mt-3 text-sm font-medium">
+              <p className="mt-3 text-body font-medium">
                 {bootstrapping
                   ? t(($) => $.page.bootstrapping.title)
                   : t(($) => $.machine.no_runtimes_title)}
               </p>
-              <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+              <p className="mt-1 max-w-sm text-caption text-muted-foreground">
                 {bootstrapping
                   ? t(($) => $.page.bootstrapping.hint)
                   : t(($) => $.machine.no_runtimes_hint)}
@@ -365,18 +371,20 @@ export function RuntimeDetailPage({
 function MachineDetailSkeleton() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b px-6 pb-5 pt-3">
-        <Skeleton className="h-3 w-36" />
-        <div className="mt-4 flex items-start gap-4">
-          <Skeleton className="h-14 w-14 rounded-xl" />
-          <div className="flex-1">
-            <Skeleton className="h-7 w-64" />
-            <Skeleton className="mt-2 h-4 w-40" />
-            <Skeleton className="mt-3 h-3 w-72" />
+      <div className="border-b pb-5 pt-3">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER)}>
+          <Skeleton className="h-3 w-36" />
+          <div className="mt-4 flex items-start gap-4">
+            <Skeleton className="h-14 w-14 rounded-xl" />
+            <div className="flex-1">
+              <Skeleton className="h-7 w-64" />
+              <Skeleton className="mt-2 h-4 w-40" />
+              <Skeleton className="mt-3 h-3 w-72" />
+            </div>
           </div>
         </div>
       </div>
-      <div className="mx-auto w-full max-w-[1440px] p-6">
+      <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-6")}>
         <Skeleton className="h-4 w-24" />
         <Skeleton className="mt-2 h-3 w-72" />
         <div className="mt-4 overflow-hidden rounded-lg border">

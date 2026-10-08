@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -190,7 +191,7 @@ func TestRunRepoRemoveRejectsMissingRepoWithoutPatch(t *testing.T) {
 }
 
 func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
-	var body map[string]string
+	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/repo/checkout" {
 			http.NotFound(w, r)
@@ -198,6 +199,9 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode checkout body: %v", err)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer mat_repo_checkout_test" {
+			t.Fatalf("Authorization = %q, want task-scoped bearer", got)
 		}
 		json.NewEncoder(w).Encode(map[string]string{
 			"path":        "/work/repo",
@@ -210,11 +214,12 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_AGENT_NAME", "Test Agent")
 	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
 	t.Setenv("MULTICA_REPO_CHECKOUT_MODE", "isolated")
 
-	previousRef := repoCheckoutRef
-	repoCheckoutRef = "release/v2"
-	defer func() { repoCheckoutRef = previousRef }()
+	previousRef, previousFresh := repoCheckoutRef, repoCheckoutFresh
+	repoCheckoutRef, repoCheckoutFresh = "release/v2", true
+	defer func() { repoCheckoutRef, repoCheckoutFresh = previousRef, previousFresh }()
 
 	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
 		t.Fatalf("runRepoCheckout: %v", err)
@@ -224,5 +229,131 @@ func TestRunRepoCheckoutForwardsManagedCheckoutMode(t *testing.T) {
 	}
 	if got := body["ref"]; got != "release/v2" {
 		t.Fatalf("ref = %q, want release/v2", got)
+	}
+	if got := body["retry_busy"]; got != true {
+		t.Fatalf("retry_busy = %v, want true", got)
+	}
+	if got := body["fresh"]; got != true {
+		t.Fatalf("fresh = %v, want true", got)
+	}
+}
+
+func TestRepoCheckoutSummary(t *testing.T) {
+	t.Parallel()
+	const repoURL = "https://github.com/org/repo.git"
+	for _, tc := range []struct {
+		name   string
+		result repoCheckoutResult
+		want   []string
+	}{
+		{
+			name:   "new branch",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task"},
+			want:   []string{"Checked out " + repoURL + " → /work/repo (branch: agent/test/task)"},
+		},
+		{
+			name:   "kept for local work",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/old", Kept: "local_work", UncommittedFiles: 2, UnpushedCommits: 1},
+			want: []string{
+				"Kept the existing checkout of " + repoURL + " at /work/repo (branch: agent/test/old; 2 uncommitted files, 1 unpushed commit)",
+				"nothing was reset, cleaned, or switched",
+				"re-run with --fresh",
+			},
+		},
+		{
+			name:   "kept on the task branch",
+			result: repoCheckoutResult{Path: "/work/repo", BranchName: "agent/test/task", Kept: "task_branch"},
+			want:   []string{"(branch: agent/test/task, this task's branch; 0 uncommitted files, 0 unpushed commits)"},
+		},
+		{
+			name:   "kept on a detached HEAD",
+			result: repoCheckoutResult{Path: "/work/repo", Kept: "local_work", UnpushedCommits: 3},
+			want:   []string{"(branch: detached HEAD; 0 uncommitted files, 3 unpushed commits)"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := repoCheckoutSummary(repoURL, tc.result)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("summary missing %q:\n%s", want, got)
+				}
+			}
+			if kept := strings.HasPrefix(got, "Kept "); kept != (tc.result.Kept != "") {
+				t.Fatalf("summary reads kept=%v for Kept=%q:\n%s", kept, tc.result.Kept, got)
+			}
+		})
+	}
+}
+
+func TestRunRepoCheckoutRequiresTaskCredential(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_PORT", "12345")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"})
+	if err == nil || !strings.Contains(err.Error(), "MULTICA_TOKEN not set") {
+		t.Fatalf("runRepoCheckout error = %v, want missing task credential", err)
+	}
+}
+
+func TestRunRepoCheckoutRetriesServiceUnavailable(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("X-Multica-Retryable", "repo-busy")
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "repository busy", http.StatusServiceUnavailable)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"path":        "/work/repo",
+			"branch_name": "agent/test/task",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_NAME", "Test Agent")
+	t.Setenv("MULTICA_TASK_ID", "task-1")
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
+
+	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err != nil {
+		t.Fatalf("runRepoCheckout: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("checkout attempts = %d, want 2", attempts)
+	}
+}
+
+func TestRunRepoCheckoutDoesNotRetryUnmarkedServiceUnavailable(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "daemon unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_DAEMON_PORT", strings.TrimPrefix(srv.URL, "http://127.0.0.1:"))
+	t.Setenv("MULTICA_TOKEN", "mat_repo_checkout_test")
+	if err := runRepoCheckout(&cobra.Command{}, []string{"https://github.com/org/repo.git"}); err == nil {
+		t.Fatal("runRepoCheckout unexpectedly succeeded")
+	}
+	if attempts != 1 {
+		t.Fatalf("checkout attempts = %d, want 1", attempts)
+	}
+}
+
+func TestRepoCheckoutRetryDelay(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
+	if got := repoCheckoutRetryDelay("7", now); got != 7*time.Second {
+		t.Fatalf("seconds delay = %s, want 7s", got)
+	}
+	if got := repoCheckoutRetryDelay(now.Add(time.Minute).Format(http.TimeFormat), now); got != 30*time.Second {
+		t.Fatalf("capped date delay = %s, want 30s", got)
+	}
+	if got := repoCheckoutRetryDelay("invalid", now); got != time.Second {
+		t.Fatalf("default delay = %s, want 1s", got)
 	}
 }

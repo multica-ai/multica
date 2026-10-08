@@ -1,0 +1,40 @@
+---
+title: Domaines maintenus par la communauté
+description: Quelles parties de Multica sont maintenues par des contributeurs de la communauté, ce que cela implique pour le support, et comment signaler un problème dans l'un de ces domaines.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+La majeure partie de Multica est développée et prise en charge par l'équipe principale. Quelques domaines ont été apportés par des bénévoles qui en sont restés les mainteneurs. Ces domaines sont livrés dans chaque version, mais ne bénéficient d'aucun SLA de support officiel.
+
+Cette page en est la liste de référence. Elle existe pour que vous sachiez sur quoi vous vous appuyez avant d'y bâtir un flux de travail, et pour que les personnes qui ont contribué à ce travail soient créditées nommément.
+
+## Ce que signifie « maintenu par la communauté »
+
+**Ce à quoi nous nous engageons.** Le domaine est livré dans chaque version. L'équipe principale veille à ce qu'il continue de compiler et que ses tests restent au vert lors des refactorisations de la couche partagée, et transmet à ses mainteneurs les issues qui concernent ce domaine.
+
+**Ce que nous ne pouvons pas promettre.** Nous n'utilisons pas ces plateformes au quotidien : nous ne pouvons donc pas vérifier leur comportement en conditions réelles. Un bug qui nécessite un accès réel à la plateforme dépend de la disponibilité d'un bénévole, ce qui exclut toute garantie de délai de réponse.
+
+**Comment un domaine est retiré.** Si un domaine cesse de fonctionner d'une manière que nous ne pouvons pas corriger sans accès réel, et qu'aucun correctif n'apparaît au bout de quelques versions, nous pouvons le déprécier plutôt que de le laisser discrètement cassé. Cette règle protège les mainteneurs autant que vous : un bénévole qui manque de temps ou passe à autre chose ne doit de correctif à personne.
+
+## Les domaines
+
+| Domaine | Code | Mainteneurs | Depuis | Statut |
+| --- | --- | --- | --- | --- |
+| [Intégration de messagerie DingTalk](/dingtalk-bot-integration) | `server/internal/integrations/dingtalk` | [@yyclaw](https://github.com/yyclaw) | 2026-08 | Actif |
+| [Intégration de messagerie WeCom](/channels) | `server/internal/integrations/wecom` | [@leroy-chen](https://github.com/leroy-chen), [@seacen](https://github.com/seacen) | 2026-08 | Actif |
+| [Intégration de messagerie Telegram](/telegram-bot-integration) | `server/internal/integrations/telegram` | [@leonzone](https://github.com/leonzone) | 2026-08 | Actif |
+
+Cette liste ne change que lorsque la responsabilité d'un domaine change. Tout ce qui n'y figure pas est maintenu par l'équipe principale.
+
+## Signaler un problème dans l'un de ces domaines
+
+<Callout type="warning">
+Ouvrez une [issue GitHub](https://github.com/multica-ai/multica/issues). Merci de ne pas contacter un mainteneur en message privé ni de le @-mentionner directement — les mainteneurs ont accepté d'être le premier interlocuteur pour les questions que **nous** leur transmettons, pas un service d'assistance que n'importe qui peut solliciter.
+</Callout>
+
+Le formulaire d'issue comporte un champ **Area**. C'est en le remplissant que vous nous permettez de transmettre le signalement au bon mainteneur : cela vaut bien un clic de plus.
+
+## Devenir mainteneur
+
+Si vous apportez une nouvelle intégration ou un autre domaine conséquent, nous aurons cette conversation avec vous avant la fusion : ce à quoi nous nous engageons, ce que nous vous demanderions, et la règle de retrait ci-dessus. Vous pouvez tout à fait refuser — cela change la façon dont le domaine est étiqueté, pas le fait que le travail soit fusionné.

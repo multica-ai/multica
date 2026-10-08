@@ -122,6 +122,9 @@ func openBrowser(url string) error {
 }
 
 func runAuthLogin(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("login"); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("token") {
 		tokenFlag, _ := cmd.Flags().GetString("token")
 		// `--token mul_xxx` (space form) is what users actually type — that's
@@ -233,7 +236,7 @@ func detectOutboundIP(serverURL string) net.IP {
 }
 
 func runAuthLoginBrowser(cmd *cobra.Command) error {
-	serverURL := resolveServerURL(cmd)
+	serverURL := resolveHumanServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
 	flagHost := callbackHostFlagValue(cmd)
@@ -328,7 +331,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		"expires_in_days": expiresInDays,
 	}, &patResp)
 	if err != nil {
-		return cli.WithUserMessage("Sign-in did not complete: the server could not issue an access token for the CLI. Run `multica login` again.", err)
+		return cli.WithUserMessageUnlessNetwork("Sign-in did not complete: the server could not issue an access token for the CLI. Run `multica login` again.", err)
 	}
 
 	// Verify the PAT works.
@@ -338,7 +341,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		Email string `json:"email"`
 	}
 	if err := patClient.GetJSON(ctx, "/api/me", &me); err != nil {
-		return cli.WithUserMessage("Sign-in did not complete: the server did not accept the new credential. Run `multica login` again.", err)
+		return cli.WithUserMessageUnlessNetwork("Sign-in did not complete: the server did not accept the new credential. Run `multica login` again.", err)
 	}
 
 	// Save to config. Reset workspace data on every login — the user or
@@ -441,7 +444,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
-		return cli.WithUserMessage("Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again.", err)
+		return cli.WithUserMessageUnlessNetwork("Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again.", err)
 	}
 
 	profile := resolveProfile(cmd)
@@ -461,7 +464,14 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 }
 
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
+	if err := requireTaskLocalConfigRoot(); err != nil {
+		return err
+	}
+	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
+	if taskContext && !strings.HasPrefix(token, "mat_") {
+		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+	}
 	serverURL := resolveServerURL(cmd)
 
 	if token == "" {
@@ -483,11 +493,15 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	if taskContext {
+		fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\n", serverURL, me.Name, me.Email)
+		return nil
+	}
+
 	prefix := token
 	if len(prefix) > 12 {
 		prefix = prefix[:12] + "..."
 	}
-
 	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
 	return nil
 }
@@ -532,6 +546,9 @@ const callbackSuccessHTML = `<!DOCTYPE html>
 </html>`
 
 func runAuthLogout(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("logout"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	if cfg.Token == "" {

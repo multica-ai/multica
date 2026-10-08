@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -547,10 +548,10 @@ func TestCreateComment_SquadLeaderMentionTaskDoesNotSelfTriggerAssignedFallback(
 }
 
 // TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFallback
-// pins MUL-4024's thread-parent gap: a member reply to the leader's earlier
-// comment queues L through EnqueueTaskForThreadParent (is_leader_task=false,
-// squad_id=NULL). L's reply from that generic task must not queue L again as
-// the assigned squad leader.
+// pins the self-trigger guard across the thread-parent path: a member reply to
+// the leader's earlier comment continues L in the leader role (MUL-7006), and
+// L's reply from THAT task must still not queue L again as the assigned squad
+// leader.
 func TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFallback(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -637,10 +638,10 @@ func TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFall
 	if err := testPool.QueryRow(ctx, `
 		SELECT id FROM agent_task_queue
 		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-		  AND is_leader_task = FALSE AND squad_id IS NULL
+		  AND is_leader_task = TRUE AND squad_id = $3
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, issueID, fx.LeaderID).Scan(&threadParentTaskID); err != nil {
+	`, issueID, fx.LeaderID, fx.SquadID).Scan(&threadParentTaskID); err != nil {
 		t.Fatalf("load leader thread-parent task: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, threadParentTaskID); err != nil {
@@ -653,7 +654,98 @@ func TestCreateComment_SquadLeaderThreadParentTaskDoesNotSelfTriggerAssignedFall
 	})
 
 	if got := countQueuedLeaderTasks(); got != 0 {
-		t.Fatalf("leader reply from generic thread-parent task queued %d leader tasks, want 0", got)
+		t.Fatalf("leader reply from the thread-parent task queued %d leader tasks, want 0", got)
+	}
+}
+
+// TestCreateComment_ReplyToAgentCommentContinuesAuthoringRole pins MUL-7006: a
+// member reply to an agent comment continues the ROLE the replied-to comment
+// was written in. A comment authored by a squad-leader run continues as a
+// leader task — which is what keeps the squad briefing, the coordinator's
+// managed workdir, and its provider session across the turn. A worker-role
+// comment, or one with no recorded authoring run, stays a generic direct-agent
+// task.
+func TestCreateComment_ReplyToAgentCommentContinuesAuthoringRole(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	cases := []struct {
+		name         string
+		seedLeader   bool // the authoring task ran in the leader role
+		stampTask    bool // the comment records which run authored it
+		archiveSquad bool // the squad was deleted (soft-archived) since
+		wantLeader   bool
+	}{
+		{name: "leader-role comment continues as leader", seedLeader: true, stampTask: true, wantLeader: true},
+		{name: "worker-role comment stays direct agent", seedLeader: false, stampTask: true, wantLeader: false},
+		{name: "unrecorded authoring run stays direct agent", seedLeader: true, stampTask: false, wantLeader: false},
+		{name: "archived squad stays direct agent", seedLeader: true, stampTask: true, archiveSquad: true, wantLeader: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runtimeID := dbfx.Runtime(t, "reply-role runtime")
+			leaderID := dbfx.Agent(t, "Reply Role Leader", runtimeID)
+			squadID := dbfx.Squad(t, "Reply Role Squad", leaderID)
+			issueID := dbfx.Issue(t, "reply continues authoring role", testutil.Cols{
+				"assignee_type": "squad",
+				"assignee_id":   squadID,
+			})
+
+			var taskSquadID any
+			if tc.seedLeader {
+				taskSquadID = squadID
+			}
+			authoringTaskID := dbfx.Task(t, leaderID, testutil.Cols{
+				"runtime_id":     runtimeID,
+				"issue_id":       issueID,
+				"status":         "completed",
+				"is_leader_task": tc.seedLeader,
+				"squad_id":       taskSquadID,
+			})
+			// An unstamped comment models a row written before source_task_id
+			// existed (migration 120), or an agent write with no X-Task-ID.
+			var sourceTaskID any
+			if tc.stampTask {
+				sourceTaskID = authoringTaskID
+			}
+			parentID := dbfx.Comment(t, issueID, "prior turn", testutil.Cols{
+				"author_type":    "agent",
+				"author_id":      leaderID,
+				"source_task_id": sourceTaskID,
+			})
+			if tc.archiveSquad {
+				// DeleteSquad transfers the issue to the leader agent and then
+				// soft-archives the squad; the leader's old comments outlive it.
+				dbfx.Exec(t, `UPDATE squad SET archived_at = now() WHERE id = $1`, squadID)
+				dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, leaderID)
+			}
+
+			req := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+				"content":   "any update?",
+				"parent_id": parentID,
+			}), "id", issueID)
+			testutil.Call(t, testHandler.CreateComment, req).Want(http.StatusCreated)
+
+			var gotLeader bool
+			var gotSquadID *string
+			dbfx.QueryRow(t, `
+				SELECT is_leader_task, squad_id FROM agent_task_queue
+				WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+				ORDER BY created_at DESC
+				LIMIT 1
+			`, issueID, leaderID).Scan(&gotLeader, &gotSquadID)
+
+			if gotLeader != tc.wantLeader {
+				t.Fatalf("reply-triggered task is_leader_task = %v, want %v", gotLeader, tc.wantLeader)
+			}
+			switch {
+			case tc.wantLeader && (gotSquadID == nil || *gotSquadID != squadID):
+				t.Fatalf("leader continuation squad_id = %v, want %s", gotSquadID, squadID)
+			case !tc.wantLeader && gotSquadID != nil:
+				t.Fatalf("direct-agent continuation stamped squad_id = %s, want NULL", *gotSquadID)
+			}
+		})
 	}
 }
 

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS plugin_remote_mcp_oauth_state_expiry_idx;

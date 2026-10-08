@@ -1,5 +1,5 @@
-import { AgentCreationStudio } from "@multica/views/agents";
+import { ChooseCreateMethodPage } from "@multica/views/agents/choose-create-method-page";
 
 export default function NewAgentRoute() {
-  return <AgentCreationStudio />;
+  return <ChooseCreateMethodPage />;
 }

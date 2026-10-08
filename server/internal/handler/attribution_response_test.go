@@ -11,6 +11,42 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestTaskCommentChangeCancellation(t *testing.T) {
+	id := "11111111-1111-1111-1111-111111111111"
+	for _, tc := range []struct {
+		name, taskID, status, context string
+		want                          bool
+	}{
+		{"edited input", id, "cancelled", `{"comment_change_cancelled_task_id":"` + id + `"}`, true},
+		{"manual stop", id, "cancelled", `{}`, false},
+		{"retry inherits context", "22222222-2222-2222-2222-222222222222", "cancelled", `{"comment_change_cancelled_task_id":"` + id + `"}`, false},
+		{"not cancelled", id, "running", `{"comment_change_cancelled_task_id":"` + id + `"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := taskToResponse(db.AgentTaskQueue{ID: parseUUID(tc.taskID), Status: tc.status, Context: []byte(tc.context)}, "")
+			if got.CancelledByCommentChange != tc.want {
+				t.Fatalf("cancelled_by_comment_change = %v, want %v", got.CancelledByCommentChange, tc.want)
+			}
+		})
+	}
+}
+
+func TestComputeTaskKindPreservesLinkedQuickCreateOrigin(t *testing.T) {
+	issueID := parseUUID("11111111-1111-1111-1111-111111111111")
+	if got := computeTaskKind(db.AgentTaskQueue{
+		IssueID: issueID,
+		Context: []byte(`{"type":"quick_create","prompt":"Create an issue"}`),
+	}); got != "quick_create" {
+		t.Fatalf("linked quick-create kind = %q, want quick_create", got)
+	}
+	if got := computeTaskKind(db.AgentTaskQueue{
+		IssueID: issueID,
+		Context: []byte(`{"head_sha":"abc123"}`),
+	}); got != "direct" {
+		t.Fatalf("ordinary linked task kind = %q, want direct", got)
+	}
+}
+
 // TestTaskAttributionBase covers the pure row→attribution mapping (MUL-4302 §9):
 // source label + precise flag, initiator/originator raw refs, evidence, lineage —
 // no DB, no name hydration.

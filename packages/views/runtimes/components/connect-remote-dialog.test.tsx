@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { configStore } from "@multica/core/config";
 import enCommon from "../../locales/en/common.json";
@@ -8,6 +9,16 @@ import enRuntimes from "../../locales/en/runtimes.json";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 
 const TEST_RESOURCES = { en: { common: enCommon, runtimes: enRuntimes } };
+
+// Mocked at the module boundary rather than through navigator.clipboard: jsdom
+// exposes no clipboard, and user-event installs a getter-only stub of its own
+// that would swallow the assertion. Assert what the button hands to copyText,
+// not what the browser then does with it.
+const clipboard = vi.hoisted(() => ({
+  copyText: vi.fn<(text: string) => Promise<boolean>>(),
+}));
+
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: clipboard.copyText }));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
@@ -23,8 +34,17 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspaceSlug: () => "workspace-test",
 }));
 
+const wsEventState = vi.hoisted(() => ({
+  handler: null as ((payload: unknown) => void) | null,
+}));
+
+const WINDOWS_CMD =
+  "irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex";
+
 vi.mock("@multica/core/realtime", () => ({
-  useWSEvent: vi.fn(),
+  useWSEvent: (_event: string, handler: (payload: unknown) => void) => {
+    wsEventState.handler = handler;
+  },
 }));
 
 vi.mock("../../navigation", () => ({
@@ -60,12 +80,12 @@ function renderDialog(config?: {
   );
 }
 
-const ligatureClasses = [
-  "[font-variant-ligatures:none]",
-  "[font-feature-settings:'liga'_0]",
-];
-
 describe("ConnectRemoteDialog", () => {
+  beforeEach(() => {
+    wsEventState.handler = null;
+    clipboard.copyText.mockReset().mockResolvedValue(true);
+  });
+
   it("uses cloud setup commands by default", () => {
     const { baseElement } = renderDialog();
 
@@ -96,23 +116,37 @@ describe("ConnectRemoteDialog", () => {
     );
   });
 
-  it("disables font ligatures in setup command code", () => {
-    const { baseElement } = renderDialog();
+  // The install command is OS-specific, so the dialog can't hardcode one.
+  // Before this switch existed the dialog shipped only the curl command and
+  // Windows users had no path at all, despite scripts/install.ps1. The switch
+  // itself is covered in common/cli-install-command.test.tsx; this checks it
+  // is wired through to step 1's copy button.
+  it("copies the installer for the platform picked in step 1", async () => {
+    const user = userEvent.setup();
+    renderDialog();
 
-    const setupCode = Array.from(baseElement.querySelectorAll("code")).find((node) =>
-      node.textContent?.includes("multica setup"),
-    );
+    await user.click(screen.getByRole("tab", { name: "Windows" }));
+    await user.click(screen.getAllByRole("button", { name: "Copy" })[0]!);
 
-    expect(setupCode).toHaveClass(...ligatureClasses);
+    await waitFor(() => {
+      expect(clipboard.copyText).toHaveBeenCalledWith(WINDOWS_CMD);
+    });
   });
 
-  it("disables font ligatures in fallback token command code", () => {
+  it("transitions from setup instructions to the connected state", async () => {
     const { baseElement } = renderDialog();
 
-    const tokenCode = Array.from(baseElement.querySelectorAll("code")).find((node) =>
-      node.textContent?.includes("multica login --token <YOUR_TOKEN>"),
-    );
+    expect(baseElement).toHaveTextContent("multica setup");
+    act(() => {
+      wsEventState.handler?.({ runtime_id: "rt-test" });
+    });
 
-    expect(tokenCode).toHaveClass(...ligatureClasses);
+    await waitFor(() => {
+      expect(screen.getByText("Computer connected")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Create an agent" }),
+      ).toBeInTheDocument();
+    });
+    expect(baseElement).not.toHaveTextContent("multica setup");
   });
 });

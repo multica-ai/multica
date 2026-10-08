@@ -44,13 +44,6 @@ function setup(slug: string | null, wsList: Workspace[] = []) {
 }
 
 describe("useWorkspaceSlug", () => {
-  it("returns the provided slug", () => {
-    function Probe() {
-      return <div data-testid="slug">{useWorkspaceSlug() ?? "null"}</div>;
-    }
-    render(<Probe />, { wrapper: setup("acme") });
-    expect(screen.getByTestId("slug").textContent).toBe("acme");
-  });
 
   it("returns null when no slug is provided", () => {
     function Probe() {

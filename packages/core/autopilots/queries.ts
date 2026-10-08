@@ -3,6 +3,7 @@ import { api } from "../api";
 
 export const autopilotKeys = {
   all: (wsId: string) => ["autopilots", wsId] as const,
+  usage: (wsId: string) => [...autopilotKeys.all(wsId), "usage"] as const,
   list: (wsId: string) => [...autopilotKeys.all(wsId), "list"] as const,
   detail: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "detail", id] as const,
@@ -17,6 +18,16 @@ export const autopilotKeys = {
   cronPreview: (wsId: string, expr: string, tz: string) =>
     [...autopilotKeys.all(wsId), "cron-preview", expr, tz] as const,
 };
+
+export function autopilotQuotaUsageOptions(wsId: string) {
+  return queryOptions({
+    queryKey: autopilotKeys.usage(wsId),
+    queryFn: () => api.getAutopilotQuotaUsage(),
+    enabled: wsId.length > 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
 
 export function autopilotListOptions(wsId: string) {
   return queryOptions({

@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -19,6 +21,36 @@ func TestSkillBundleCacheLoadStore(t *testing.T) {
 	}
 	if got.Content != bundle.Content || len(got.Files) != 1 || got.Files[0].Content != "rules" {
 		t.Fatalf("unexpected bundle: %+v", got)
+	}
+}
+
+func TestSkillBundleCacheStoreRetriesRenameWhenDestinationExists(t *testing.T) {
+	cache := NewSkillBundleCache(t.TempDir())
+	bundle := testSkillBundle()
+	ref := skillRefFromBundle(bundle)
+	renameCalls := 0
+	cache.rename = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 1 {
+			if err := os.MkdirAll(newPath, 0o755); err != nil {
+				return err
+			}
+			return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: fs.ErrExist}
+		}
+		return os.Rename(oldPath, newPath)
+	}
+
+	if err := cache.Store("ws-1", bundle); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if renameCalls != 2 {
+		t.Fatalf("rename calls = %d, want 2", renameCalls)
+	}
+	if _, ok := cache.Load("ws-1", ref); !ok {
+		t.Fatal("expected cache hit after EEXIST recovery")
+	}
+	if _, err := os.Stat(filepath.Dir(cache.bundlePath("ws-1", ref))); err != nil {
+		t.Fatalf("stat stored bundle directory: %v", err)
 	}
 }
 

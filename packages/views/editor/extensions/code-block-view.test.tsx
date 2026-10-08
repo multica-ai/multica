@@ -29,6 +29,7 @@ vi.mock("../../i18n", () => ({
     t: (sel: (s: Record<string, Record<string, string>>) => string) =>
       sel({
         code_block: {
+          html_preview: "Localized HTML preview",
           copy_code: "Copy code",
           show_preview: "Show preview",
           show_source: "Show source",
@@ -65,6 +66,7 @@ describe("CodeBlockView — html language toggle", () => {
     });
     const frame = document.querySelector("iframe");
     expect(frame).toBeTruthy();
+    expect(frame?.getAttribute("title")).toBe("Localized HTML preview");
     expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
     // NodeViewContent (and its enclosing <pre>) MUST remain mounted —
     // unmounting would break Tiptap's bindings and prevent editing.

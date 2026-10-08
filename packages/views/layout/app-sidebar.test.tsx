@@ -1,15 +1,29 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog([]),
+}));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import { renderWithI18n } from "../test/i18n";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
+  sidebarState: { setOpenMobile: vi.fn() },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
-  inboxItems: { current: [] as { id: string; read: boolean }[] },
+  // Captures the sidebar's invitation accept/decline mutations so the
+  // self-heal wiring (error → invalidate the pending list) is observable.
+  invitationApi: {
+    accept: vi.fn(),
+    decline: vi.fn(),
+    invalidateQueries: vi.fn(),
+    mutations: [] as Array<Record<string, unknown>>,
+  },
   navigation: { current: { pathname: "/acme/issues" } },
   summary: { current: [] as { workspace_id: string; count: number }[] },
   workspaces: {
@@ -56,17 +70,19 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
     children,
     isActive,
     render,
+    ...props
   }: {
     children: React.ReactNode;
     isActive?: boolean;
     render?: React.ReactElement<{ href?: string }>;
-  }) => (
-    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
+  } & React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props} type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
       {children}
     </button>
   ),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
+  useSidebar: () => ({ setOpenMobile: sidebarState.setOpenMobile }),
 }));
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -112,7 +128,11 @@ vi.mock("@multica/core/chat", () => ({
     { getState: () => chatStore.current },
   ),
 }));
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  // Spread the real module so pure helpers (resolveRouteIconName, used by the
+  // nav to derive each item's icon from its href) stay intact; only the
+  // workspace/context hooks below are stubbed to control routes in tests.
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
   useWorkspacePaths: () => ({
@@ -139,13 +159,17 @@ vi.mock("@multica/core/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getBaseUrl: () => "http://127.0.0.1:8080",
+      acceptInvitation: invitationApi.accept,
+      declineInvitation: invitationApi.decline,
     },
   };
 });
 vi.mock("@multica/core/inbox/queries", () => ({
-  deduplicateInboxItems: (items: unknown[]) => items,
-  inboxKeys: { list: () => ["inbox"], unreadSummary: () => ["inbox", "unread-summary"] },
   inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
+  // The nav badge and the switcher dot read the SAME cross-workspace summary,
+  // so the fixture that drives one drives the other.
+  useInboxUnreadCount: (currentWsId: string | null) =>
+    summary.current.find((s) => s.workspace_id === currentWsId)?.count ?? 0,
   hasOtherWorkspaceUnread: (
     entries: { workspace_id: string; count: number }[],
     currentWsId: string | null,
@@ -170,17 +194,19 @@ vi.mock("@multica/core/workspace/queries", () => ({
 }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useMutation: () => ({ isPending: false, mutate: vi.fn() }),
+  useMutation: (options: Record<string, unknown> = {}) => {
+    invitationApi.mutations.push(options);
+    return { isPending: false, mutate: vi.fn() };
+  },
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
-    if (queryKey[0] === "inbox") return { data: inboxItems.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
   },
-  useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: invitationApi.invalidateQueries }),
 }));
 
 describe("PinRow", () => {
@@ -227,6 +253,72 @@ describe("PinRow", () => {
       "true",
     );
     expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+
+  it("keeps the parent route active until a hidden pin is expanded", () => {
+    const originalPins = pins.current;
+    pins.current = Array.from({ length: 6 }, (_, index) => ({
+      ...originalPins[0]!,
+      id: `pin-${index + 1}`,
+      item_id: `issue-${index + 1}`,
+      position: index,
+    }));
+    navigation.current.pathname = "/acme/issues/issue-6";
+    detail.current = {
+      isPending: false,
+      isError: false,
+      data: { identifier: "MUL-123", title: "Pinned issue", status: "todo" },
+      error: null,
+    };
+
+    try {
+      const { container } = renderWithI18n(<AppSidebar />);
+      const parent = () => container.querySelector('button[data-href="/acme/issues"]');
+      const lastPin = () => container.querySelector('button[data-href="/acme/issues/issue-6"]');
+
+      expect(lastPin()).not.toBeInTheDocument();
+      expect(parent()).toHaveAttribute("data-active", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: "Show 1 more…" }));
+      expect(lastPin()).toHaveAttribute("data-active", "true");
+      expect(parent()).not.toHaveAttribute("data-active");
+
+      fireEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+      expect(lastPin()).not.toBeInTheDocument();
+      expect(parent()).toHaveAttribute("data-active", "true");
+    } finally {
+      pins.current = originalPins;
+    }
+  });
+});
+
+// On a phone the sidebar is a Sheet laid over the page, so a nav tap that
+// leaves it open renders the destination underneath and reads as a dead tap.
+describe("mobile sheet dismissal", () => {
+  beforeEach(() => {
+    sidebarState.setOpenMobile.mockClear();
+    navigation.current = { pathname: "/acme/issues" };
+  });
+
+  it("dismisses the sheet once the route changes", () => {
+    const { rerender } = render(<AppSidebar />);
+    sidebarState.setOpenMobile.mockClear();
+
+    navigation.current = { pathname: "/acme/inbox" };
+    rerender(<AppSidebar />);
+
+    expect(sidebarState.setOpenMobile).toHaveBeenCalledWith(false);
+  });
+
+  // Closing on `pathname` rather than per-link keeps every route out of the
+  // sidebar covered at once — nav groups, pins, and the switcher's own push.
+  it("does not re-dismiss while the route holds still", () => {
+    const { rerender } = render(<AppSidebar />);
+    sidebarState.setOpenMobile.mockClear();
+
+    rerender(<AppSidebar />);
+
+    expect(sidebarState.setOpenMobile).not.toHaveBeenCalled();
   });
 });
 
@@ -297,10 +389,27 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
   });
 });
 
+describe("navigation item presentation", () => {
+  it("keeps Analytics and Settings styled like the other nav items", () => {
+    const { container } = render(<AppSidebar />);
+    const referenceClassName = container.querySelector(
+      'button[data-href="/acme/issues"]',
+    )?.className;
+
+    expect(referenceClassName).toBeTruthy();
+
+    for (const href of ["/acme/usage", "/acme/settings"]) {
+      expect(container.querySelector(`button[data-href="${href}"]`)?.className).toBe(
+        referenceClassName,
+      );
+    }
+  });
+});
+
 describe("personal nav — Chat", () => {
   beforeEach(() => {
     chatSessions.current = [];
-    inboxItems.current = [];
+    summary.current = [];
     navigation.current = { pathname: "/acme/issues" };
     chatStore.current = { activeSessionId: null, isOpen: false };
     appForeground.current = true;
@@ -314,7 +423,7 @@ describe("personal nav — Chat", () => {
     chatNav(container)?.querySelector("number-flow-react") ?? null;
 
   it("keeps persistent Inbox and Chat counters static", () => {
-    inboxItems.current = [{ id: "inbox-1", read: false }];
+    summary.current = [{ workspace_id: "ws-1", count: 1 }];
     chatSessions.current = [{ id: "chat-1", unread_count: 2 }];
     const { container } = render(<AppSidebar />);
     const inboxBadge = container
@@ -391,5 +500,41 @@ describe("personal nav — Chat", () => {
     appForeground.current = false;
     const { container } = render(<AppSidebar />);
     expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
+  });
+});
+
+describe("Pending invitation self-heal", () => {
+  beforeEach(() => {
+    invitationApi.accept.mockReset();
+    invitationApi.decline.mockReset();
+    invitationApi.invalidateQueries.mockClear();
+    invitationApi.mutations.length = 0;
+    invitationApi.accept.mockRejectedValue(new Error("invitation is not pending"));
+    invitationApi.decline.mockRejectedValue(new Error("invitation is not pending"));
+    navigation.current.pathname = "/acme/issues";
+    workspaces.current = [];
+  });
+
+  // "invitation is not pending" means the row on screen was concluded from
+  // another surface. Both mutations must invalidate the pending list on
+  // failure so the stale row drops instead of surviving until restart.
+  it("invalidates the pending-invitations list when accept or decline fails", async () => {
+    render(<AppSidebar />);
+    expect(invitationApi.mutations).toHaveLength(2);
+
+    for (const options of invitationApi.mutations as Array<{
+      mutationFn: (id: string) => Promise<unknown>;
+      onError?: (...args: unknown[]) => unknown;
+      onSettled?: (...args: unknown[]) => unknown;
+    }>) {
+      const settle = options.onError ?? options.onSettled;
+      expect(settle).toBeTypeOf("function");
+      invitationApi.invalidateQueries.mockClear();
+      await expect(options.mutationFn("inv-1")).rejects.toThrow("invitation is not pending");
+      await settle!(new Error("invitation is not pending"), "inv-1", undefined, undefined);
+      expect(invitationApi.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["invitations"] });
+    }
+    expect(invitationApi.accept).toHaveBeenCalledTimes(1);
+    expect(invitationApi.decline).toHaveBeenCalledTimes(1);
   });
 });

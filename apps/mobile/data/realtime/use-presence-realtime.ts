@@ -16,8 +16,7 @@
  *   - task:progress / task:message — fire many times per active task. The
  *     presence cache only needs lifecycle transitions, not per-step updates.
  *
- * Reconnect: re-invalidate runtimes + snapshot (NOT agents — agent identity
- * doesn't drift while we're offline; runtime status and task counts do).
+ * Reconnect: re-invalidate runtimes + agents + snapshot after missed events.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
@@ -39,12 +38,11 @@ export function usePresenceRealtime() {
         queryClient.invalidateQueries({ queryKey: snapshotKey });
 
       return [
-        // Daemon lifecycle — register events mean a runtime came online or
-        // re-registered; the sweeper's offline transitions are NOT pushed as
-        // a WS event, but the next agent:status / task:* event will pull a
-        // fresh runtime list anyway, and the 30s wall-clock tick masks the
-        // gap. Heartbeats deliberately omitted.
-        ws.on("daemon:register", invalidateRuntimes),
+        // Daemon lifecycle; heartbeats deliberately omitted.
+        ws.on("daemon:register", () => {
+          invalidateRuntimes();
+          invalidateAgents();
+        }),
 
         // Agent identity churn — visible in pickers / chat header straight
         // away, so invalidate the cached list.
@@ -61,12 +59,10 @@ export function usePresenceRealtime() {
         ws.on("task:failed", invalidateSnapshot),
         ws.on("task:cancelled", invalidateSnapshot),
 
-        // We may have missed sweeper-driven runtime offline transitions
-        // while disconnected — refetch runtimes + snapshot. Agents not
-        // re-invalidated because agent:created / archived are rare enough
-        // that the user can pull-to-refresh if needed.
+        // Recover all presence inputs after missed sweeper transitions.
         ws.onReconnect(() => {
           invalidateRuntimes();
+          invalidateAgents();
           invalidateSnapshot();
         }),
       ];

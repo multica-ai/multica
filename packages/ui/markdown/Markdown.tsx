@@ -1,8 +1,8 @@
 import * as React from 'react'
-import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import rehypeSanitize from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -14,6 +14,7 @@ import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessIssueIdentifiers } from './issue-identifiers'
 import { preprocessMentionShortcodes } from './mentions'
+import { markdownSanitizeSchema, markdownUrlTransform } from './sanitize'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
 
@@ -87,64 +88,6 @@ export interface MarkdownProps {
   autolinkIssueIdentifiers?: boolean
 }
 
-// Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and Multica's internal mention/slash protocols.
-const sanitizeSchema = {
-  ...defaultSchema,
-  protocols: {
-    ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
-    // Permit inline data-URI images (QR codes, charts, base64 screenshots).
-    // The scheme gate only allows `data:` through here; attributes.img below
-    // narrows it to image/* so non-image data URIs are still rejected.
-    src: [...(defaultSchema.protocols?.src ?? []), 'data'],
-  },
-  attributes: {
-    ...defaultSchema.attributes,
-    div: [
-      ...(defaultSchema.attributes?.div ?? []),
-      'dataType',
-      'dataHref',
-      'dataFilename',
-    ],
-    code: [
-      ...(defaultSchema.attributes?.code ?? []),
-      ['className', /^language-/],
-      ['className', /^math-/],
-      ['className', /^hljs/],
-    ],
-    img: [
-      // Drop the default plain `src` entry so the value allow-list below is the
-      // one findDefinition resolves — it returns the first match by name, so a
-      // bare `src` string would otherwise shadow (and disable) the allow-list.
-      ...(defaultSchema.attributes?.img ?? []).filter(
-        (attr) => (typeof attr === 'string' ? attr : attr[0]) !== 'src',
-      ),
-      'alt',
-      // Allow inline data:image/* URIs while leaving every other src form
-      // (http/https/site-relative) exactly as before: the negative lookahead
-      // keeps all non-data values, and data: is narrowed to images only.
-      ['src', /^data:image\//i, /^(?!data:)/i],
-    ],
-  },
-}
-
-/**
- * Custom URL transform that allows Multica internal protocols while keeping
- * the default security for all other URLs.
- */
-function urlTransform(url: string): string {
-  if (url.startsWith('mention://')) return url
-  if (url.startsWith('slash://skill/')) return url
-  // Allow inline data:image/* URIs — defaultUrlTransform strips every data: URL
-  // to '', which would blank the src even after rehype-sanitize keeps it. Kept
-  // in sync with the image/* narrowing in sanitizeSchema (protocols.src +
-  // attributes.img) so both gates agree on what a valid inline image is.
-  if (/^data:image\//i.test(url)) return url
-  return defaultUrlTransform(url)
-}
-
-
 // File path detection regex - matches paths starting with /, ~/, or ./
 const FILE_PATH_REGEX =
   /^(?:\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma)$/i
@@ -175,7 +118,7 @@ function createComponents(
           <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm">{filename}</p>
+              <p className="truncate text-body">{filename}</p>
             </div>
             {href && (
               <button
@@ -289,7 +232,7 @@ function createComponents(
       ol: ({ children }) => <ol className="list-decimal list-inside my-1">{children}</ol>,
       li: ({ children }) => <li className="my-0.5">{children}</li>,
       // Plain tables
-      table: ({ children }) => <table className="my-2 font-mono text-sm">{children}</table>,
+      table: ({ children }) => <table className="my-2 font-mono text-body">{children}</table>,
       th: ({ children }) => <th className="text-left pr-4">{children}</th>,
       td: ({ children }) => <td className="pr-4">{children}</td>
     }
@@ -328,7 +271,7 @@ function createComponents(
       // Clean tables
       table: ({ children }) => (
         <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
+          <table className="min-w-full text-body">{children}</table>
         </div>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
@@ -337,12 +280,12 @@ function createComponents(
       ),
       td: ({ children }) => <td className="py-2 px-3 border-b border-border/50">{children}</td>,
       // Headings - H1/H2 same size, differentiated by weight
-      h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-5 mb-3">{children}</h1>,
+      h1: ({ children }) => <h1 className="font-sans text-title-sm font-bold mt-5 mb-3">{children}</h1>,
       h2: ({ children }) => (
-        <h2 className="font-sans text-base font-semibold mt-4 mb-3">{children}</h2>
+        <h2 className="font-sans text-title-sm font-semibold mt-4 mb-3">{children}</h2>
       ),
       h3: ({ children }) => (
-        <h3 className="font-sans text-sm font-semibold mt-4 mb-2">{children}</h3>
+        <h3 className="font-sans text-body font-semibold mt-4 mb-2">{children}</h3>
       ),
       // Blockquotes
       blockquote: ({ children }) => (
@@ -393,16 +336,16 @@ function createComponents(
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>,
-    td: ({ children }) => <td className="py-3 px-4 text-sm">{children}</td>,
+    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-body">{children}</th>,
+    td: ({ children }) => <td className="py-3 px-4 text-body">{children}</td>,
     tr: ({ children }) => <tr className="hover:bg-muted/30 transition-colors">{children}</tr>,
     // Rich headings
-    h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-7 mb-4">{children}</h1>,
+    h1: ({ children }) => <h1 className="font-sans text-title-sm font-bold mt-7 mb-4">{children}</h1>,
     h2: ({ children }) => (
-      <h2 className="font-sans text-base font-semibold mt-6 mb-3">{children}</h2>
+      <h2 className="font-sans text-title-sm font-semibold mt-6 mb-3">{children}</h2>
     ),
-    h3: ({ children }) => <h3 className="font-sans text-sm font-semibold mt-5 mb-3">{children}</h3>,
-    h4: ({ children }) => <h4 className="text-sm font-semibold mt-3 mb-1">{children}</h4>,
+    h3: ({ children }) => <h3 className="font-sans text-body font-semibold mt-5 mb-3">{children}</h3>,
+    h4: ({ children }) => <h4 className="text-body font-semibold mt-3 mb-1">{children}</h4>,
     // Styled blockquotes
     blockquote: ({ children }) => (
       <blockquote className="border-l-4 border-foreground/30 bg-muted/30 pl-4 pr-3 py-2 my-3 rounded-r-md">
@@ -417,7 +360,7 @@ function createComponents(
             type="checkbox"
             checked={checked}
             readOnly
-            className="mr-2 rounded border-muted-foreground"
+            className="mr-2 rounded-xs border-muted-foreground"
           />
         )
       }
@@ -483,8 +426,8 @@ export function Markdown({
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
         ]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-        urlTransform={urlTransform}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
+        urlTransform={markdownUrlTransform}
         components={components}
       >
         {processedContent}

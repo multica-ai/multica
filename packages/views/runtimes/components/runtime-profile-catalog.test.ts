@@ -1,10 +1,12 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { RuntimeProfile } from "@multica/core/types";
 import {
   buildRuntimeCatalog,
   formatCommandLine,
   parseCommandLine,
-  PROTOCOL_FAMILIES,
+  runtimeTypeLabel,
+  RUNTIME_TYPES,
 } from "./runtime-profile-catalog";
 
 function profile(
@@ -41,11 +43,11 @@ describe("buildRuntimeCatalog", () => {
       id: "prof-1",
       protocolFamily: "codex",
     });
-    expect(catalog.builtins).toHaveLength(PROTOCOL_FAMILIES.length);
+    expect(catalog.builtins).toHaveLength(RUNTIME_TYPES.length);
     expect(catalog.builtins[0]).toMatchObject({
       kind: "builtin",
-      id: `builtin:${PROTOCOL_FAMILIES[0]}`,
-      protocolFamily: PROTOCOL_FAMILIES[0],
+      id: `builtin:${RUNTIME_TYPES[0]}`,
+      protocolFamily: RUNTIME_TYPES[0],
     });
   });
 
@@ -66,6 +68,24 @@ describe("buildRuntimeCatalog", () => {
   });
 });
 
+describe("runtimeTypeLabel", () => {
+  // The picker and the profile it creates must not disagree about what the
+  // target is called: every surface reads the label from here.
+  it("names a target whose product name differs from its stored id", () => {
+    expect(runtimeTypeLabel("omp")).toBe("Oh-My-Pi");
+  });
+
+  it("passes through ids that are their own label", () => {
+    expect(runtimeTypeLabel("pi")).toBe("pi");
+    expect(runtimeTypeLabel("claude")).toBe("claude");
+  });
+
+  // A target the client does not recognise still has to render as something.
+  it("falls back to the raw value for an unknown target", () => {
+    expect(runtimeTypeLabel("future-runtime")).toBe("future-runtime");
+  });
+});
+
 describe("parseCommandLine", () => {
   it("splits a pasted executable and fixed args", () => {
     expect(parseCommandLine("agent --model composer-2.5")).toEqual({
@@ -76,7 +96,9 @@ describe("parseCommandLine", () => {
   });
 
   it("preserves quoted whitespace and escaped characters", () => {
-    expect(parseCommandLine(`agent --flag "a b c" path\\ with\\ spaces`)).toEqual({
+    expect(
+      parseCommandLine(`agent --flag "a b c" path\\ with\\ spaces`),
+    ).toEqual({
       ok: true,
       commandName: "agent",
       fixedArgs: ["--flag", "a b c", "path with spaces"],

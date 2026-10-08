@@ -85,6 +85,15 @@ describe("shortcut store", () => {
     expect(sanitizeShortcutOverrides({ openSearch: cmdP })).toEqual({});
   });
 
+  it("keeps persisted punctuation overrides that remain reachable on desktop", () => {
+    const ctrlAmpersand = createShortcutChord("&", { primary: true });
+
+    configureShortcutRuntime("desktop");
+    expect(
+      sanitizeShortcutOverrides({ openSearch: ctrlAmpersand }),
+    ).toEqual({ openSearch: ctrlAmpersand });
+  });
+
   it("finds conflicts against defaults and overrides", () => {
     expect(
       findShortcutConflict(
@@ -93,7 +102,7 @@ describe("shortcut store", () => {
       ),
     ).toBe("openSearch");
 
-    const custom = createShortcutChord("1", { primary: true });
+    const custom = createShortcutChord("G", { primary: true });
     useShortcutStore.getState().setShortcut("goInbox", custom);
     expect(findShortcutConflict("goChat", custom)).toBe("goInbox");
   });

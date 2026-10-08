@@ -127,6 +127,18 @@ var (
 		"other":             "other",
 	}
 
+	knownEmailRateLimitActions = map[string]string{
+		"workspace_invitation": "workspace_invitation",
+		"other":                "other",
+	}
+
+	knownEmailRateLimitGates = map[string]string{
+		"actor":     "actor",
+		"workspace": "workspace",
+		"recipient": "recipient",
+		"other":     "other",
+	}
+
 	knownGithubEventKinds = map[string]string{
 		"pull_request":              "pull_request",
 		"pull_request_review":       "pull_request_review",
@@ -345,6 +357,14 @@ func NormalizeWebhookDeliveryStatus(value string) string {
 
 func NormalizeWebhookRateLimitGate(value string) string {
 	return normalizeFromAllowList(value, knownWebhookRateLimitGates, "other")
+}
+
+func NormalizeEmailRateLimitAction(value string) string {
+	return normalizeFromAllowList(value, knownEmailRateLimitActions, "other")
+}
+
+func NormalizeEmailRateLimitGate(value string) string {
+	return normalizeFromAllowList(value, knownEmailRateLimitGates, "other")
 }
 
 func NormalizeGithubEventKind(value string) string {

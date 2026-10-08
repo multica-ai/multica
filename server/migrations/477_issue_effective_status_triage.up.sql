@@ -1,0 +1,9 @@
+-- Intentionally empty (MUL-7400).
+--
+-- This file added `triage` to the fast path of issue_effective_status(), the
+-- SQL mirror of issuestatus.Effective, on the premise that no catalog row could
+-- ever hold the key. That premise was migrations 475-476, which this change
+-- also empties. Without the fast-path entry the key falls through to the
+-- catalog lookup and, finding no row, returns unchanged — the same answer.
+--
+-- Migration 478 owns the current definition of the function.

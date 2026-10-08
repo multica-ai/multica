@@ -90,18 +90,23 @@ function makeRow(
 
 function renderToolbar(rows: AgentListRow[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const ui = (nextRows: AgentListRow[]) => (
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <AgentBatchToolbar
-          rows={rows}
+          rows={nextRows}
           members={[]}
           currentUserId="user-1"
           onClear={() => {}}
         />
       </I18nProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(ui(rows));
+  return {
+    ...view,
+    rerenderRows: (nextRows: AgentListRow[]) => view.rerender(ui(nextRows)),
+  };
 }
 
 beforeEach(() => {
@@ -127,13 +132,25 @@ describe("AgentBatchToolbar — action order", () => {
   });
 });
 
-describe("AgentBatchToolbar — bulk Set access scope", () => {
-  it("shows the Set access scope button for active owned agents", () => {
-    renderToolbar([makeRow("a", "user-1")]);
-    expect(
-      screen.getByRole("button", { name: "Set access scope" }),
-    ).toBeInTheDocument();
+describe("AgentBatchToolbar — presence", () => {
+  it("closes dialogs and removes the toolbar when selection becomes empty", async () => {
+    const view = renderToolbar([makeRow("a", "user-1")]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText(/Applies to 1 agents/);
+
+    view.rerenderRows([]);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Applies to 1 agents/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Set access scope" }),
+      ).not.toBeInTheDocument();
+    });
   });
+});
+
+describe("AgentBatchToolbar — bulk Set access scope", () => {
 
   it("renders Applies to N with skip count in the dialog", async () => {
     renderToolbar([

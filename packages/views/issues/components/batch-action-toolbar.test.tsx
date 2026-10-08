@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { Issue } from "@multica/core/types";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 
@@ -134,5 +134,19 @@ describe("BatchActionToolbar picker wiring", () => {
   it("renders nothing when nothing is selected", () => {
     render(<BatchActionToolbar issues={[makeIssue({ id: "a" })]} />);
     expect(screen.queryByTestId("status-picker")).toBeNull();
+  });
+
+  it("removes the toolbar after the final selected issue is cleared", async () => {
+    const issues = [makeIssue({ id: "a" })];
+    selection.selectedIds = new Set(["a"]);
+    const view = render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("status-picker")).toBeInTheDocument();
+    selection.selectedIds = new Set();
+    view.rerender(<BatchActionToolbar issues={issues} />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("status-picker")).not.toBeInTheDocument();
+    });
   });
 });

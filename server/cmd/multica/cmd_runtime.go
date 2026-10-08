@@ -35,7 +35,7 @@ var runtimeUsageCmd = &cobra.Command{
 
 var runtimeActivityCmd = &cobra.Command{
 	Use:   "activity <runtime-id>",
-	Short: "Get hourly task activity for a runtime",
+	Short: "Get hourly run activity for a runtime",
 	Args:  exactArgs(1),
 	RunE:  runRuntimeActivity,
 }
@@ -62,7 +62,8 @@ var runtimeDeleteCmd = &cobra.Command{
 	Short: "Delete a runtime from the workspace",
 	Long: "Delete a runtime registration from the workspace.\n\n" +
 		"By default this refuses when active agents are still bound to the runtime. " +
-		"Pass --cascade to archive those agents, cancel their queued/running tasks, and delete the runtime.",
+		"Pass --cascade to unbind those agents, cancel their queued or active runs, and delete the runtime. " +
+		"Unbound agents keep their configuration, chats and run history; bind them to another runtime to run them again.",
 	Args: exactArgs(1),
 	RunE: runRuntimeDelete,
 }
@@ -95,7 +96,7 @@ func init() {
 	runtimeRenameCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime delete
-	runtimeDeleteCmd.Flags().Bool("cascade", false, "Archive active agents bound to the runtime, cancel their tasks, then delete the runtime")
+	runtimeDeleteCmd.Flags().Bool("cascade", false, "Unbind active agents from the runtime, cancel their runs, then delete the runtime")
 	runtimeDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -231,13 +232,20 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 
 	conflict, ok := runtimeDeleteConflict(err)
 	if !ok {
+		// Any other 409 is a deliberate, already-explained refusal — most often
+		// a profile-backed instance that cannot be deleted on its own. Show the
+		// server's guidance instead of a raw HTTP wrapper; --cascade cannot get
+		// past these, so there is nothing more for this command to try.
+		if _, msg, isConflict := serverConflictMessage(err); isConflict {
+			return errors.New(msg)
+		}
 		return fmt.Errorf("delete runtime: %w", err)
 	}
 
 	cascade, _ := cmd.Flags().GetBool("cascade")
 	if !cascade {
 		return fmt.Errorf(
-			"delete runtime: runtime has active agents bound to it (%s); archive or reassign them first, or rerun with --cascade to archive them and delete the runtime",
+			"delete runtime: runtime has active agents bound to it (%s); rebind them to another runtime first, or rerun with --cascade to unbind them and delete the runtime (the agents and their history are kept)",
 			strings.Join(conflict.AgentDisplays(), ", "),
 		)
 	}
@@ -246,7 +254,7 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 		"expected_active_agent_ids": conflict.AgentIDs(),
 	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/archive-agents-and-delete", body, &result); err != nil {
+	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/unbind-agents-and-delete", body, &result); err != nil {
 		return fmt.Errorf("cascade delete runtime: %w", err)
 	}
 	result["id"] = runtimeID
@@ -349,6 +357,38 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// serverConflictMessage pulls the server's own sentence out of a 409 body.
+//
+// The refusals behind runtime and profile deletion are written to be read by
+// the person who ran the command — they name the machine, the profile and what
+// to do instead. HTTPError.Error() would bury that sentence inside a raw JSON
+// dump of the whole response, which is what a blocked user used to see.
+func serverConflictMessage(err error) (code string, message string, ok bool) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return "", "", false
+	}
+	body := strings.TrimSpace(httpErr.Body)
+	if body == "" {
+		return "", "", false
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &payload) != nil {
+		// Not JSON. An older or proxied server can still put a readable
+		// sentence here, and swallowing it would be worse than passing it
+		// through — there is nothing to leak when the body was never
+		// structured in the first place.
+		return "", body, true
+	}
+	if strings.TrimSpace(payload.Error) == "" {
+		return payload.Code, "", false
+	}
+	return payload.Code, payload.Error, true
+}
+
 type runtimeDeleteConflictPayload struct {
 	Code         string `json:"code"`
 	Error        string `json:"error"`
@@ -404,8 +444,18 @@ func printRuntimeDeleteResult(cmd *cobra.Command, result map[string]any) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 
+	if agentsUnbound, ok := result["agents_unbound"]; ok {
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; unbound %v agent(s)", strVal(result, "id"), agentsUnbound)
+		if paused, ok := result["autopilots_paused"]; ok {
+			fmt.Fprintf(os.Stderr, " and paused %v autopilot(s)", paused)
+		}
+		fmt.Fprintln(os.Stderr, ".")
+		return nil
+	}
+	// Compatibility fallback for an older server that only returns the
+	// pre-MUL-5559 mirror.
 	if agentsArchived, ok := result["agents_archived"]; ok {
-		fmt.Fprintf(os.Stderr, "Runtime %s deleted; archived %v agent(s).\n", strVal(result, "id"), agentsArchived)
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; processed %v agent(s).\n", strVal(result, "id"), agentsArchived)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Runtime %s deleted.\n", strVal(result, "id"))

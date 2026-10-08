@@ -1,0 +1,25 @@
+{
+  "name": "@multica/plugin-sdk",
+  "version": "0.1.0",
+  "description": "Client SDK for Multica plugin surfaces.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./protocol": "./protocol.ts"
+  },
+  "files": [
+    "index.ts",
+    "protocol.ts",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
+    "@multica/tsconfig": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

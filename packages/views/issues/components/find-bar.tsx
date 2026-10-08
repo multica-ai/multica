@@ -74,7 +74,7 @@ export function FindBar({
         aria-label={t(($) => $.detail.find.placeholder)}
         className="h-7 w-44 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
       />
-      <span className="min-w-[3.5rem] shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+      <span className="min-w-[3.5rem] shrink-0 whitespace-nowrap text-right text-caption tabular-nums text-muted-foreground">
         {countLabel}
       </span>
       <div className="flex items-center">

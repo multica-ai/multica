@@ -47,9 +47,15 @@ export function runtimeUsageByHourOptions(runtimeId: string, days: number, tz: s
   });
 }
 
-export function runtimeListOptions(wsId: string, owner?: "me") {
+/**
+ * `wsSlug` targets a workspace other than the active one. The server resolves
+ * the workspace from the slug header before the `workspace_id` param, so the
+ * param alone cannot reach a workspace the app has not navigated to — which is
+ * exactly the create-workspace flow's situation.
+ */
+export function runtimeListOptions(wsId: string, owner?: "me", wsSlug?: string) {
   return queryOptions({
     queryKey: owner === "me" ? runtimeKeys.listMine(wsId) : runtimeKeys.list(wsId),
-    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }),
+    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }, wsSlug),
   });
 }

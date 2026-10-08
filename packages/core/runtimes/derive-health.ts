@@ -7,12 +7,14 @@ import type { AgentRuntime } from "../types";
 import type { RuntimeHealth } from "./types";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
-// The runtime sweeper GCs runtimes that have been offline for 7 days. We
-// flag the last 24 hours of that window so users can rescue a runtime
-// before it disappears silently.
-const ABOUT_TO_GC_THRESHOLD_MS = 6 * 24 * 3600 * 1000; // 6 days
+// Long-offline is a display state based on observed reachability. It does
+// not promise when or whether server-side cleanup will happen.
+const LONG_OFFLINE_THRESHOLD_MS = 6 * 24 * 3600 * 1000; // 6 days
 
-export function deriveRuntimeHealth(runtime: AgentRuntime, now: number): RuntimeHealth {
+export function deriveRuntimeHealth(
+  runtime: Pick<AgentRuntime, "status" | "last_seen_at">,
+  now: number,
+): RuntimeHealth {
   if (runtime.status === "online") return "online";
 
   // No last_seen timestamp ever recorded — treat as long-offline. This is
@@ -22,6 +24,6 @@ export function deriveRuntimeHealth(runtime: AgentRuntime, now: number): Runtime
   const offlineFor = now - lastSeen;
 
   if (offlineFor < FIVE_MINUTES_MS) return "recently_lost";
-  if (offlineFor > ABOUT_TO_GC_THRESHOLD_MS) return "about_to_gc";
+  if (offlineFor > LONG_OFFLINE_THRESHOLD_MS) return "long_offline";
   return "offline";
 }

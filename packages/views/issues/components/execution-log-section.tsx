@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
+import { ChevronRight, Loader2, Maximize2, Square } from "lucide-react";
 import { toast } from "sonner";
-import { api, dispatchReasonCode } from "@multica/core/api";
-import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
-import { useTimeAgo } from "../../i18n";
+import { api } from "@multica/core/api";
+import { issueTasksOptions } from "@multica/core/issues/queries";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import type { AgentTask } from "@multica/core/types";
+import { cn } from "@multica/ui/lib/utils";
+import { useLocale, useTimeAgo } from "../../i18n";
 import {
   Tooltip,
   TooltipContent,
@@ -16,13 +18,38 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
+import { compareActiveIssueTasks } from "./active-task-order";
+import { formatDuration as formatAgentTime } from "../../dashboard/utils";
+import {
+  formatTokens,
+  formatUsd,
+  summarizeTaskUsage,
+  summarizeTaskUsageAcross,
+} from "../../runtimes/utils";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { IssueRunsDialog, RunTriggerLabel, runBarTone } from "./issue-runs-dialog";
+import {
+  buildRunTimeline,
+  cumulativeCostAt,
+  idleSpanAround,
+  runIndexAt,
+  stepCurvePath,
+  type RunTimeline,
+  type TimelineRun,
+} from "./issue-run-timeline";
+import { canRetryRun, RetryRunButton } from "./retry-run-button";
+import { TaskStatusIcon } from "./task-status-icon";
+import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { WakeupRunLabel } from "./wakeup-source-chip";
 
 // Right-panel section that lists every agent run for this issue. Active
-// runs sit at the top (always visible when present); past runs (terminal
-// statuses) collapse behind a "Show past runs (N)" toggle.
+// runs sit at the top (always visible when present); below them a spend
+// sparkline (the issue's cumulative cost over time, above a track of its runs)
+// and the latest few past runs. The full history lives in the Runs dialog the
+// header total, the sparkline and the "Open timeline" row open — 21 rows do not
+// belong in a 320px column, and the dialog can lay them out in time.
 //
 // Replaces:
 //   - the click-to-expand timeline that used to live inside the in-body live
@@ -46,7 +73,13 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 interface ExecutionLogSectionProps {
   issueId: string;
+  /** Shown in the Runs dialog's subtitle so it names the issue it lays out. */
+  identifier?: string;
+  issueTitle?: string;
 }
+
+// How many past runs the sidebar lists before deferring to the Runs dialog.
+const LATEST_PAST_RUNS = 3;
 
 // Past-runs sort priority: newest first by timestamp. When two runs
 // share the same timestamp, failed ranks above cancelled, which ranks
@@ -57,22 +90,18 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({ issueId, identifier, issueTitle }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
-  const [showPast, setShowPast] = useState(false);
+  const [runsOpen, setRunsOpen] = useState(false);
+  const pricings = useCustomPricingStore((s) => s.pricings);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
   // a `["issues", "tasks"]` prefix-match — no local WS subscriptions
   // needed, and the cache stays fresh even when this component isn't
   // mounted (e.g. user cancels from agent-side, then navigates here).
-  const { data: tasks = [] } = useQuery({
-    queryKey: issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId),
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
-  });
+  const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
 
   const activeTasks = useMemo(
     () =>
@@ -85,7 +114,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
           // what tells the user the agent is alive and will resume.
           t.status === "waiting_local_directory" ||
           t.status === "running",
-      ),
+      ).toSorted(compareActiveIssueTasks),
     [tasks],
   );
 
@@ -108,91 +137,407 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     });
   }, [tasks]);
 
+  // Sidebar-only figures: the sparkline and the agent-time line. Priced
+  // with the same helpers as the dialog, and re-derived on a saved custom rate
+  // for the same reason IssueRunsTotal subscribes.
+  const timeline = useMemo(
+    () => buildRunTimeline(tasks, Date.now()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `pricings` re-prices on a saved custom rate
+    [tasks, pricings],
+  );
+  const pastRuns = useMemo(() => timeline.runs.filter((run) => !run.active), [timeline]);
+
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 
+  const latest = pastTasks.slice(0, LATEST_PAST_RUNS);
+  const hiddenCount = pastTasks.length - latest.length;
+  const openRuns = () => setRunsOpen(true);
+
   return (
-    <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
-          open ? "" : "text-muted-foreground hover:text-foreground"
-        }`}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.execution_log.section)}
-        <ChevronRight
-          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
-            open ? "rotate-90" : ""
+    // `@container/execution-log`: the header's three items only fit side by
+    // side above a certain width, and the width that decides it is the
+    // sidebar's — a resizable 260–420px panel — not the viewport's. See
+    // IssueRunsTotal for the tier this container drives.
+    <div className="@container/execution-log">
+      {/* Header is two independent targets, not one: the label + chevron
+          collapse the section, the total on the right opens the Runs dialog.
+          Nesting a button inside a button is invalid HTML, so they are
+          siblings in a flex row rather than a button wrapping a button. */}
+      <div className="mb-2 flex w-full items-center gap-1">
+        <button
+          type="button"
+          className={`flex min-w-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-caption font-medium transition-colors hover:bg-accent/70 ${
+            open ? "" : "text-muted-foreground hover:text-foreground"
           }`}
-        />
+          onClick={() => setOpen(!open)}
+        >
+          {/* The section label is the one item here that may shrink, so it
+              carries the nowrap + ellipsis pair. Without it the squeezed
+              button broke "Execution log" across two lines (MUL-5804) — a
+              section heading that reflows is a layout bug, not a narrow
+              column. The tier below keeps the ellipsis from ever showing at
+              the panel's 260px minimum; it is the backstop for a longer
+              translation, not the everyday state. */}
+          <span className="truncate">{t(($) => $.execution_log.section)}</span>
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
+              open ? "rotate-90" : ""
+            }`}
+          />
+        </button>
         {activeTasks.length > 0 && (
-          <span className="ml-auto inline-flex items-center gap-1 text-info">
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-info">
             <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
-            <span className="font-mono tabular-nums">{activeTasks.length}</span>
+            <span className="font-mono text-caption tabular-nums">{activeTasks.length}</span>
           </span>
         )}
-      </button>
+        <IssueRunsTotal
+          tasks={tasks}
+          alone={activeTasks.length === 0}
+          onOpen={openRuns}
+        />
+      </div>
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
             <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
           ))}
+          {activeTasks.length > 0 && pastRuns.length > 0 && (
+            <div className="my-1.5 border-t border-border/60" />
+          )}
 
-          {pastTasks.length > 0 && (
+          {timeline.pricedCount > 0 && <RunSpendSparkline timeline={timeline} onOpen={openRuns} />}
+          {timeline.agentMs > 0 && (
+            <p className="truncate px-1 pb-1 text-caption text-muted-foreground">
+              {t(($) => $.execution_log.agent_time, {
+                duration: formatAgentTime(timeline.agentMs / 1000, "0s"),
+              })}
+              <span className="text-faint-foreground"> · </span>
+              {t(($) => $.execution_log.elapsed, {
+                duration: formatAgentTime(timeline.elapsedMs / 1000, "0s"),
+              })}
+            </p>
+          )}
+
+          {latest.length > 0 && (
             <>
-              {activeTasks.length > 0 && (
-                <div className="my-1.5 border-t border-border/60" />
-              )}
-              <button
-                type="button"
-                onClick={() => setShowPast(!showPast)}
-                className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-              >
-                <ChevronRight
-                  className={`!size-3 shrink-0 stroke-[2.5] transition-transform ${
-                    showPast ? "rotate-90" : ""
-                  }`}
-                />
-                {showPast
-                  ? t(($) => $.execution_log.hide_past, { count: pastTasks.length })
-                  : t(($) => $.execution_log.show_past, { count: pastTasks.length })}
-              </button>
-              {showPast && (
-                <div className="mt-0.5 space-y-0.5">
-                  {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} issueId={issueId} />
-                  ))}
-                </div>
-              )}
+              <div className="px-1 pt-2 pb-0.5 text-micro text-muted-foreground">
+                {t(($) => $.execution_log.latest)}
+              </div>
+              {latest.map((task) => (
+                <PastRow key={task.id} task={task} issueId={issueId} />
+              ))}
             </>
           )}
+          <button
+            type="button"
+            onClick={openRuns}
+            className="flex w-full items-center gap-1.5 rounded-xs px-1 py-1.5 text-caption transition-colors hover:bg-accent/40"
+          >
+            <Maximize2 aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t(($) => $.execution_log.open_timeline)}</span>
+            {hiddenCount > 0 && (
+              <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+                {t(($) => $.execution_log.more_runs, { count: hiddenCount })}
+              </span>
+            )}
+          </button>
         </div>
       )}
+      <IssueRunsDialog
+        open={runsOpen}
+        onOpenChange={setRunsOpen}
+        issueId={issueId}
+        identifier={identifier ?? ""}
+        issueTitle={issueTitle}
+        tasks={tasks}
+      />
     </div>
   );
 }
 
-// ─── Trigger description ────────────────────────────────────────────────────
+// ─── Spend sparkline ───────────────────────────────────────────────────────
 
-// Primary source: the canonical snapshot taken at task creation time
-// (comment text / autopilot title). Survives source edits/deletes and
-// is information-dense — far better than a structural label.
+const SPARK_HEIGHT = 34;
+// The curve tops out a little below the box, so the dot at its end has room.
+const SPARK_HEADROOM = 0.9;
+// Same idea as the Runs dialog's slop: a run a few seconds long is a 3px
+// sliver here, and the pointer only has to come near it.
+const SPARK_SLOP_PX = 6;
+
+// The Runs dialog's chart in miniature: the issue's cumulative cost as a step
+// curve over a track of its runs, on one time axis. Whatever the run count it
+// spans the column — the one-bar-per-run strip it replaced drew 12px bars from
+// the left, so an issue with three runs showed three bars in a corner of an
+// empty strip (MUL-7780) — and clicking it opens the same chart full size.
+// Hovering works like the dialog: a crosshair that follows the pointer, and a
+// tooltip naming the run under it or, between runs, the quiet stretch and what
+// the issue had spent by then.
+function RunSpendSparkline({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () => void }) {
+  const { t } = useT("issues");
+  const locale = useLocale();
+  const [hover, setHover] = useState<{ t: number; width: number } | null>(null);
+  const [d0, d1] = timeline.domain;
+  const [e0, e1] = timeline.extent;
+  const xPct = (ms: number) => ((ms - d0) / (d1 - d0)) * 100;
+  const yMax = timeline.totalCost / SPARK_HEADROOM;
+  const yPct = (cost: number) => (1 - cost / yMax) * 100;
+  const { line, area } = stepCurvePath(timeline.cumulative, timeline.domain, yMax);
+  const last = timeline.cumulative[timeline.cumulative.length - 1];
+
+  const trackPointer = (event: React.PointerEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const at = d0 + ((event.clientX - rect.left) / rect.width) * (d1 - d0);
+    setHover({ t: Math.min(Math.max(at, e0), e1), width: rect.width });
+  };
+  const hoverIndex = hover
+    ? runIndexAt(timeline.runs, hover.t, (SPARK_SLOP_PX / hover.width) * (d1 - d0))
+    : -1;
+  const hovered = hoverIndex >= 0 ? timeline.runs[hoverIndex] : undefined;
+  // One dot, on whatever the pointer is about: the hovered run's step, the
+  // curve under the crosshair between runs, or at rest, where the curve ends.
+  const dot = hover
+    ? hovered
+      ? hovered.usage
+        ? { t: hovered.endMs, cost: hovered.costSoFar }
+        : null
+      : { t: hover.t, cost: cumulativeCostAt(timeline.cumulative, hover.t) }
+    : last
+      ? { t: last.t, cost: last.cost }
+      : null;
+
+  // The axis ends: clock times while the whole issue is today's, days once it
+  // spans more; "Now" while a run is still going.
+  const [startLabel, endLabel] = useMemo(() => {
+    const today = new Date().toDateString();
+    const hour = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+    const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+    const allToday = new Date(e0).toDateString() === today;
+    const end =
+      timeline.activeCount > 0
+        ? t(($) => $.execution_log.sparkline_now)
+        : allToday
+          ? hour.format(e1)
+          : new Date(e1).toDateString() === today
+            ? t(($) => $.runs_timeline.day_today)
+            : day.format(e1);
+    return [allToday ? hour.format(e0) : day.format(e0), end];
+  }, [e0, e1, timeline.activeCount, locale, t]);
+
+  return (
+    <div className="px-1 pb-1">
+      <Tooltip trackCursorAxis="x">
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              onClick={onOpen}
+              onPointerMove={trackPointer}
+              onPointerDown={trackPointer}
+              onPointerLeave={() => setHover(null)}
+              aria-label={t(($) => $.execution_log.strip_aria)}
+            />
+          }
+          className="relative block w-full rounded-xs text-left"
+        >
+          <span aria-hidden className="relative block" style={{ height: SPARK_HEIGHT }}>
+            <svg
+              className="absolute inset-0 size-full overflow-visible"
+              viewBox="0 0 1000 100"
+              preserveAspectRatio="none"
+            >
+              <path d={area} fill="var(--chart-1)" fillOpacity={0.1} />
+              <path
+                d={line}
+                fill="none"
+                stroke="var(--chart-1)"
+                strokeWidth={1.5}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+            {dot && (
+              <span
+                className="absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-chart-1 ring-2 ring-background"
+                style={{ left: `${xPct(dot.t)}%`, top: `${yPct(dot.cost)}%` }}
+              />
+            )}
+          </span>
+          <span aria-hidden className="relative mt-1 block h-2 rounded-full bg-muted">
+            {timeline.runs.map((run) => (
+              <span
+                key={run.task.id}
+                data-run={run.task.id}
+                className={cn(
+                  "absolute inset-y-0 min-w-[3px] rounded-full transition-opacity",
+                  runBarTone(run, run === timeline.peak),
+                  hovered && run !== hovered && "opacity-35",
+                )}
+                style={{
+                  left: `${xPct(run.startMs)}%`,
+                  width: `${xPct(run.endMs) - xPct(run.startMs)}%`,
+                }}
+              />
+            ))}
+          </span>
+          {hover && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-0 w-px bg-foreground/30"
+              style={{ left: `${xPct(hover.t)}%`, height: SPARK_HEIGHT + 12 }}
+            />
+          )}
+          <span aria-hidden className="mt-0.5 flex justify-between text-micro tabular-nums text-muted-foreground">
+            <span>{startLabel}</span>
+            <span>{endLabel}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 flex-col items-start gap-0">
+          {hovered ? (
+            <SparklineRunSummary run={hovered} />
+          ) : hover ? (
+            <SparklineIdleSummary timeline={timeline} at={hover.t} />
+          ) : (
+            t(($) => $.execution_log.usage_total_tooltip)
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+function SparklineRunSummary({ run }: { run: TimelineRun }) {
+  const { t } = useT("issues");
+  const trigger = useTriggerText(run.task);
+  const status = useStatusLabel(run.task.status);
+  const cost = run.usage?.cost;
+  return (
+    <>
+      <RunTriggerLabel task={run.task} fallback={trigger}>
+        {(label) => <span className="max-w-full truncate">{label}</span>}
+      </RunTriggerLabel>
+      <span className="text-micro text-muted-foreground">
+        {[
+          // A run still going has not reported usage yet — that is not "none".
+          cost != null ? formatUsd(cost) : run.active ? null : t(($) => $.execution_log.strip_no_usage),
+          run.durationMs != null ? formatAgentTime(run.durationMs / 1000, "0s") : null,
+          run.task.status === "completed" ? null : status,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    </>
+  );
+}
+
+function SparklineIdleSummary({ timeline, at }: { timeline: RunTimeline; at: number }) {
+  const { t } = useT("issues");
+  const { fromMs, toMs } = idleSpanAround(timeline.runs, at);
+  return (
+    <>
+      <span>{t(($) => $.runs_timeline.hover_no_run)}</span>
+      <span className="text-micro text-muted-foreground">
+        {[
+          fromMs != null && toMs != null
+            ? t(($) => $.runs_timeline.hover_idle, { duration: formatAgentTime((toMs - fromMs) / 1000, "0s") })
+            : null,
+          t(($) => $.runs_timeline.tooltip_total, {
+            cost: formatUsd(cumulativeCostAt(timeline.cumulative, at)),
+          }),
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    </>
+  );
+}
+
+// ─── Issue total ───────────────────────────────────────────────────────────
+
+// The issue's run count and whole spend, as a header affordance: "21 runs ·
+// $166". Answers "what has this issue cost" without expanding anything, and is
+// the entry point to the Runs dialog.
 //
-// Retry tasks inherit the parent's trigger_summary on the DB side (so the
-// snapshot survives across attempts), but a row that just shows the
-// inherited summary is indistinguishable from its parent. We prepend
-// "Retry #N" when parent_task_id is set so retries are scannable as
-// retries even when their summary is inherited.
+// The cost is left out when no run on the issue has recorded usage — an issue
+// whose runs all predate usage reporting shows its run count rather than a
+// "$0.00" that would read as "this was free".
 //
-// Fallback chain for legacy tasks created before the snapshot field
-// shipped, OR for sources we don't snapshot (direct assignment / chat):
-// degrade to a short structural label by trigger source. New tasks
-// (post-061 migration) almost always hit the snapshot path.
+// Narrow sections drop the run count and keep the cost. Something has to give
+// at the narrow end — the header's full form needs ~246px next to the
+// active-run chip and the sidebar's 260px minimum leaves 228px — and the count
+// is the piece whose absence costs least: the cost answers "what has this
+// issue spent", and the runs are listed right below. It is a figure that
+// yields, never a figure's digits: a clipped "$31.1…" would read as a
+// different number than the issue actually spent.
+export function IssueRunsTotal({
+  tasks,
+  alone,
+  onOpen,
+}: {
+  tasks: AgentTask[];
+  alone: boolean;
+  onOpen: () => void;
+}) {
+  const { t } = useT("issues");
+  // Custom rates are read imperatively inside `estimateCost`, so a saved rate
+  // change does not re-render this on its own — subscribe and make the memo
+  // depend on the snapshot, or the header total keeps quoting the old price
+  // until the task list refetches.
+  const pricings = useCustomPricingStore((s) => s.pricings);
+  const total = useMemo(
+    () => summarizeTaskUsageAcross(tasks.map((task) => task.usage)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+    [tasks, pricings],
+  );
+  const runCount = tasks.filter((task) => task.status !== "deferred").length;
+  if (runCount === 0) return null;
+
+  // Two thresholds because the header has two shapes, and the tier should cost
+  // the reader a figure only where the row genuinely runs out: beside the
+  // active-run chip the full form needs ~246px, alone ~218px. Written as whole
+  // literal classes — Tailwind scans source text, so a composed string would
+  // generate neither. `@max-…` (rather than showing at `@min-…`) is what makes
+  // a host that renders this outside the section's `@container` degrade to the
+  // full form instead of silently losing the count forever. With no cost to
+  // keep, the count is the whole affordance and never tiers away.
+  const narrowTier = !total
+    ? ""
+    : alone
+      ? "@max-[14rem]/execution-log:hidden"
+      : "@max-[16rem]/execution-log:hidden";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<button type="button" onClick={onOpen} />}
+        className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption tabular-nums transition-colors hover:bg-accent/70 ${
+          alone ? "ml-auto" : ""
+        }`}
+      >
+        <span className={`text-muted-foreground ${narrowTier}`}>
+          {t(($) => $.execution_log.summary_runs, { count: runCount })}
+        </span>
+        {total && (
+          <>
+            <span className={`text-faint-foreground ${narrowTier}`}>·</span>
+            <span className="font-medium">{formatUsd(total.cost)}</span>
+          </>
+        )}
+      </TooltipTrigger>
+      <TooltipContent>{t(($) => $.execution_log.usage_total_tooltip)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// Trigger description and status labels live in ./task-run-labels so the
+// usage dialog lists a run exactly the way this section does.
 
 // ─── Row visual config ─────────────────────────────────────────────────────
 
 const STATUS_TONE: Record<AgentTask["status"], string> = {
   queued: "text-warning",
+  deferred: "text-warning",
   dispatched: "text-warning",
   // Same tone as queued/dispatched — visually "stopped" so users see the
   // task is parked, but distinguished by the status label.
@@ -205,48 +550,6 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 
 // ─── Active row ────────────────────────────────────────────────────────────
 
-import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
-
-function useTriggerText(task: AgentTask): string {
-  const { t } = useT("issues");
-  const isRetry = !!task.parent_task_id;
-  const retryPrefix = isRetry
-    ? task.attempt && task.attempt > 1
-      ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
-      : t(($) => $.execution_log.trigger_retry_prefix)
-    : "";
-
-  if (task.trigger_summary) return retryPrefix + stripMentionMarkdown(task.trigger_summary);
-  if (isRetry) {
-    return task.attempt && task.attempt > 1
-      ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
-      : t(($) => $.execution_log.trigger_retry);
-  }
-  if (task.autopilot_run_id) return t(($) => $.execution_log.trigger_autopilot);
-  if (task.trigger_comment_id) return t(($) => $.execution_log.trigger_comment);
-  // Assignment-triggered run that carried a handoff note: show the note inline
-  // (truncated by TriggerText) the way comment triggers show their text, so the
-  // row reads as the handoff instead of the generic "initial run".
-  if (task.handoff_note) {
-    return retryPrefix + t(($) => $.execution_log.trigger_handoff_prefix) + stripMentionMarkdown(task.handoff_note);
-  }
-  return t(($) => $.execution_log.trigger_initial);
-}
-
-function useStatusLabel(status: AgentTask["status"]): string {
-  const { t } = useT("issues");
-  switch (status) {
-    case "queued": return t(($) => $.execution_log.status_queued);
-    case "dispatched": return t(($) => $.execution_log.status_dispatched);
-    case "waiting_local_directory":
-      return t(($) => $.execution_log.status_waiting_local_directory);
-    case "running": return t(($) => $.execution_log.status_running);
-    case "completed": return t(($) => $.execution_log.status_completed);
-    case "failed": return t(($) => $.execution_log.status_failed);
-    case "cancelled": return t(($) => $.execution_log.status_cancelled);
-  }
-}
-
 // One active (running / queued / dispatched / parked) task row. Running rows
 // keep status to a single live elapsed timer; transcript and stop stay available
 // as hover actions. Transcript content lazy-loads on click via TranscriptButton,
@@ -254,9 +557,11 @@ function useStatusLabel(status: AgentTask["status"]): string {
 export function ActiveTaskRow({
   task,
   issueId,
+  onTranscriptOpenChange,
 }: {
   task: AgentTask;
   issueId: string;
+  onTranscriptOpenChange?: (open: boolean, fromKeyboard?: boolean) => void;
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
@@ -302,9 +607,20 @@ export function ActiveTaskRow({
     setConfirmOpen(true);
   };
 
+  // Deliberately no token figure on an active row: the daemon reports usage
+  // once, after `runner.run` returns (server/internal/daemon/daemon.go), and
+  // the write publishes no realtime event — so a running task has no usage to
+  // show, and would not learn of it mid-run if it did. Rendering the branch
+  // anyway would only ever be exercised by hand-written fixtures, which is a
+  // test that asserts a scenario production cannot produce. Restore it in the
+  // same change that adds incremental reporting + cache invalidation.
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      {task.wakeup_id ? (
+        <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
+      ) : (
+        <TriggerText text={trigger} />
+      )}
       <TaskCommentCoverage task={task} />
       <RowStatus title={label}>
         {task.status === "running" ? (
@@ -323,6 +639,7 @@ export function ActiveTaskRow({
             agentName=""
             isLive={task.status === "running"}
             title={t(($) => $.execution_log.transcript_tooltip)}
+            onOpenChange={onTranscriptOpenChange}
           />
         )}
         <Tooltip>
@@ -335,7 +652,7 @@ export function ActiveTaskRow({
                 aria-label={t(($) => $.execution_log.cancel_task_aria)}
               />
             }
-            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center justify-center rounded-xs p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {cancelling ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -364,80 +681,76 @@ export function ActiveTaskRow({
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const { t: tAgents } = useT("agents");
   const timeAgo = useTimeAgo();
-  const [retrying, setRetrying] = useState(false);
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
+  // A failed run always explains itself. A cancelled one only when the SERVER
+  // cancelled it for a persisted reason (worktree claim gate, preserved-work
+  // delivery). Actor provenance is rendered independently below.
   const failureLabel =
-    task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
-      : null;
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason, tAgents)
+      : cancelReasonLabel(task, tAgents);
+  const cancellationLabel = cancellationActorLabel(task, tAgents);
+  // Hovering the status mark reveals the localized reason, never the raw
+  // `task.error`. That field is operator-facing English prose the daemon and
+  // server write for classification and logs (#7411) — pasting it into a
+  // tooltip made every non-English workspace read English at the exact moment
+  // something broke, and dragged absolute worktree paths and machine names
+  // into hover text and screenshots. The full diagnostic stays one click away
+  // in the transcript's Run details.
+  const statusTitle = cancellationLabel
+    ? [cancellationLabel, failureLabel].filter(Boolean).join(" · ")
+    : failureLabel ?? label;
 
-  // Retry only makes sense for terminal-but-not-success rows. Passing
-  // task.id targets this specific row's agent — without it, the rerun
-  // endpoint would fall back to the issue's current assignee and the
-  // wrong agent would fire on rows whose agent has since been displaced
-  // (e.g. reassignment, squad worker, or a one-off @-mention agent).
-  const canRetry = task.status === "failed" || task.status === "cancelled";
-
-  const handleRetry = async () => {
-    if (retrying) return;
-    setRetrying(true);
-    try {
-      await api.rerunIssue(issueId, task.id);
-    } catch (e) {
-      // A rerun is now re-gated on the operator's invoke permission (MUL-4525):
-      // a structured 403 means the agent can't be triggered, not a transient
-      // failure — localize it instead of echoing the server's generic message.
-      toast.error(
-        dispatchReasonCode(e) === "invocation_not_allowed"
-          ? t(($) => $.execution_log.retry_blocked)
-          : e instanceof Error
-            ? e.message
-            : t(($) => $.execution_log.retry_failed),
-      );
-    } finally {
-      // Reset on both success and failure: the past row stays mounted
-      // (its task.id is unchanged), so leaving `retrying` true on success
-      // would pin the button as a permanent spinner.
-      setRetrying(false);
-    }
-  };
+  // What this run cost, in the slot the relative timestamp used to hold.
+  //
+  // The sidebar is 288px and the row already carries an avatar, the trigger
+  // text, and a status mark; a third column would come straight out of the
+  // trigger, which is what people scan this list for. The list is sorted
+  // newest-first, so "which run came first" is already expressed by position —
+  // the exact "when" is the detail, and how much it cost is the new question.
+  // The displaced timestamp moves into the row tooltip below, together with
+  // the duration, token count and model — the split lives in the Runs dialog.
+  //
+  // `null` (no usage recorded) renders an em dash, never $0: a run from before
+  // usage reporting was not free, we simply have no figure for it.
+  const usage = summarizeTaskUsage(task.usage);
+  const rowTitle = [
+    time,
+    task.started_at && task.completed_at
+      ? formatDuration(task.started_at, new Date(task.completed_at).getTime())
+      : "",
+    usage ? formatTokens(usage.tokens) : "",
+    usage?.models.join(", ") ?? "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <RowShell task={task}>
-      <TriggerText text={trigger} />
+    <RowShell task={task} title={rowTitle}>
+      {task.wakeup_id ? (
+        <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
+      ) : (
+        <TriggerText text={trigger} />
+      )}
       <TaskCommentCoverage task={task} />
-      <RowStatus title={failureLabel ?? label}>
+      <RowStatus title={statusTitle}>
         <TaskStatusIcon status={task.status} />
-        <span className="sr-only">{failureLabel ?? label}</span>
-        <span className="text-muted-foreground">{time}</span>
+        <span className="sr-only">
+          {[statusTitle, time].filter(Boolean).join(" · ")}
+        </span>
+        {usage ? (
+          <span className="tabular-nums">{formatUsd(usage.cost)}</span>
+        ) : (
+          <span className="text-faint-foreground">—</span>
+        )}
       </RowStatus>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  disabled={retrying}
-                  aria-label={t(($) => $.execution_log.retry_task_aria)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {retrying ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCcw className="h-3.5 w-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-          </Tooltip>
-        )}
+        {canRetryRun(task) && <RetryRunButton task={task} issueId={issueId} />}
       </RowActions>
     </RowShell>
   );
@@ -447,13 +760,22 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 function RowShell({
   task,
+  title,
   children,
 }: {
   task: AgentTask;
+  /** Carries the details the right column no longer has room for (time,
+   *  duration, model). Lives on the row, not on RowStatus, because RowStatus
+   *  is swapped out for the action buttons on hover — a title there would
+   *  disappear at exactly the moment the pointer arrives. */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
+    <div
+      title={title || undefined}
+      className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded-xs px-1 py-1.5 transition-colors hover:bg-accent/40"
+    >
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
@@ -470,7 +792,7 @@ function RowShell({
 }
 
 function TriggerText({ text }: { text: string }) {
-  return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+  return <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{text}</span>;
 }
 
 function supportsCommentCoverage(status: AgentTask["status"]): boolean {
@@ -510,7 +832,7 @@ export function TaskCommentCoverage({ task }: { task: AgentTask }) {
   if (commentIds.size <= 1) return null;
 
   return (
-    <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">
+    <span className="shrink-0 whitespace-nowrap text-micro text-muted-foreground">
       {t(($) => $.execution_log.included_comments, { count: commentIds.size })}
     </span>
   );
@@ -526,24 +848,11 @@ function RowStatus({
   return (
     <div
       title={title}
-      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs [@media(hover:hover)]:group-hover/execution-log-row:hidden"
+      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-caption [@media(hover:hover)]:group-hover/execution-log-row:hidden"
     >
       {children}
     </div>
   );
-}
-
-function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
-  switch (status) {
-    case "completed":
-      return <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 text-success" />;
-    case "failed":
-      return <XCircle aria-hidden="true" className="h-3.5 w-3.5 text-destructive" />;
-    case "cancelled":
-      return <Ban aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />;
-    default:
-      return null;
-  }
 }
 
 // Action slot — visible by default for touch devices. On hover-capable

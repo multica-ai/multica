@@ -13,6 +13,8 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import type { Agent } from "@multica/core/types";
+import { isAgentRuntimeBound } from "@multica/core/agents";
+import { toast } from "sonner";
 import { useT } from "../../i18n";
 
 /**
@@ -120,8 +122,17 @@ function AgentPickerItem({
   isCurrent: boolean;
   onSelect: (agent: Agent) => void;
 }) {
+  const { t } = useT("chat");
+  const runtimeBound = isAgentRuntimeBound(agent);
   return (
-    <PickerItem selected={isCurrent} onClick={() => onSelect(agent)}>
+    <PickerItem
+      selected={isCurrent}
+      disabled={!runtimeBound}
+      tooltip={
+        runtimeBound ? undefined : t(($) => $.window.agent_needs_runtime_hint)
+      }
+      onClick={() => onSelect(agent)}
+    >
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
@@ -130,6 +141,11 @@ function AgentPickerItem({
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
+      {!runtimeBound && (
+        <span className="shrink-0 text-micro text-amber-600 dark:text-amber-400">
+          {t(($) => $.window.agent_needs_runtime)}
+        </span>
+      )}
     </PickerItem>
   );
 }
@@ -167,7 +183,13 @@ export function NewChatButton({
               size="icon-sm"
               className="rounded-full text-muted-foreground"
               aria-label={label}
-              onClick={() => onStart(only)}
+              onClick={() => {
+                if (only && !isAgentRuntimeBound(only)) {
+                  toast.error(t(($) => $.input.runtime_required_toast));
+                  return;
+                }
+                onStart(only);
+              }}
             />
           }
         >

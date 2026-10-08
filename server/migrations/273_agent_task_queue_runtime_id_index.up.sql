@@ -1,0 +1,28 @@
+-- Single statement: CREATE INDEX CONCURRENTLY cannot run inside a transaction
+-- or share a multi-command migration file.
+--
+-- agent_task_queue has never carried a plain runtime_id index. Every existing
+-- one is partial — idx_agent_task_queue_runtime_pending (004),
+-- idx_agent_task_queue_claim_candidates (067),
+-- idx_agent_task_queue_dispatched_prepare (125) — and a partial index is only
+-- usable when the planner can prove the query predicate implies the index
+-- predicate. Two all-status consumers therefore had no index at all:
+--
+--   1. Workspace teardown, which has to find every task belonging to a
+--      workspace's runtimes regardless of status (MUL-5999).
+--   2. The runtime_id foreign key itself. PostgreSQL does not index the
+--      referencing side of a FK, so `DELETE FROM agent_runtime` runs its
+--      ON DELETE CASCADE probe (`WHERE runtime_id = $1`) once per deleted
+--      runtime row — with no usable index that is a full scan of the largest
+--      table in the database per runtime, on the ordinary delete path too.
+--
+-- Cheap to carry: runtime_id is set on essentially every row, so this is a
+-- one-entry-per-row btree with no maintenance beyond what the FK column
+-- already implies.
+--
+-- The trailing id column is what makes teardown's keyset paging free: the sweep
+-- pages with `runtime_id = $1 AND id > $cursor ORDER BY id`, and without id in
+-- the index every page would have to read the runtime's whole task set and sort
+-- it before applying LIMIT.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_task_queue_runtime_id
+    ON agent_task_queue (runtime_id, id);

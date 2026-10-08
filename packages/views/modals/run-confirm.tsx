@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -12,55 +11,81 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Spinner } from "@multica/ui/components/ui/spinner";
-import type { IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
+import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions } from "@multica/core/workspace/queries";
-import { runtimeListOptions, readRuntimeCliVersion, handoffSupported } from "@multica/core/runtimes";
-import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
+import { useShortcut, shortcutMatchesEvent, isPlainShortcut } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { useStatusLabel } from "../issues/utils/status-label";
 import { useT } from "../i18n";
 
-const MAX_HANDOFF_NOTE = 2000;
+// i18next inlines {{name}} / {{status}} into the sentence, but their position
+// varies by language ("{{name}} 会…" vs "Once assigned, {{name}} will…" vs
+// "{{name}}'s leader…"). Fence each one with a sentinel so we can bold just
+// those spans at render time without splitting copy into per-language
+// prefix/suffix keys. Bolding is also what marks a custom status name as a
+// status rather than an ordinary word ("Move this issue to Later.").
+const FENCE = "\u0000";
 
-// i18next inlines {{name}} into the sentence, but the actor's position varies by
-// language ("{{name}} 会…" vs "Once assigned, {{name}} will…" vs "{{name}}'s
-// leader…"). Fence the name with a sentinel so we can bold just that span at
-// render time without splitting copy into per-language prefix/suffix keys.
-const NAME_FENCE = "\u0000";
+const fenced = (value: string) => `${FENCE}${value}${FENCE}`;
 
-function boldName(text: string): ReactNode {
-  const parts = text.split(NAME_FENCE);
-  if (parts.length !== 3) return text;
+function boldFenced(text: string): ReactNode {
+  const parts = text.split(FENCE);
+  // Every fenced span contributes one odd-indexed part; an unfenced string is
+  // a single part and renders as-is.
+  if (parts.length < 3) return text;
   return (
     <>
-      {parts[0]}
-      <span className="font-semibold text-foreground">{parts[1]}</span>
-      {parts[2]}
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className="font-semibold text-foreground">
+            {part}
+          </span>
+        ) : (
+          part
+        ),
+      )}
     </>
   );
 }
 
 interface RunConfirmData {
   issueIds?: string[];
-  // Assign is the only mode: agent/squad assignment is the sole issue write that
-  // needs the pre-trigger confirmation. Batch status changes apply directly now
-  // (MUL-4155), so there is no "status" mode.
-  mode?: "assign";
+  // The two issue writes that hand work to an agent, and the only two that
+  // confirm. `assign` gives the issue an agent/squad owner; `promote` moves an
+  // already-owned issue out of the backlog category, which starts the run on
+  // its own (RunSourceStatus). Batch status changes still apply directly
+  // (MUL-4155) — `promote` is the single-issue picker path only (MUL-6463).
+  mode?: "assign" | "promote";
+  /** promote only: the status KEY the issue is moving to. */
+  status?: IssueStatus;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
   assigneeName?: string;
+  issueRevision?: number;
 }
 
 /**
- * Pre-trigger confirmation for issue assignment that may start agent runs
- * (MUL-3375 §4). Shows what the unified backend predicate says will start (via
- * the preview endpoint — never a frontend guess), lets the user attach a
- * handoff note and choose "暂不开始", then applies the change. Dismissing the
- * dialog (X / Esc / click-outside) cancels without any write. Shared by single
- * assign (1 id) and batch assign (N ids).
+ * Handoff confirmation for the issue writes that start agent runs.
+ *
+ * The rule is "dialog = you are handing this to an agent", NOT "you are
+ * confirming N runs" (MUL-5010). It therefore does no pre-flight prediction:
+ * opening it fires no request, so the buttons are usable on the first frame.
+ * Previously it called POST /api/issues/preview-trigger on open and blocked the
+ * whole dialog behind a "检查中…" spinner; because that query is keyed per issue
+ * id with staleTime 0, every new issue was a guaranteed cache miss and the wait
+ * was unavoidable.
+ *
+ * Completion is silent: the assignee/status change and any run it starts
+ * surface through the issue's normal updates, so the confirm adds no result
+ * toast. Whether a run starts stays the server's existing decision at write
+ * time. Dismissing the dialog (X / Esc / click-outside) cancels without any
+ * write. Shared by single assign (1 id), batch assign (N ids), and the
+ * single-issue promotion out of backlog.
  */
 export function RunConfirmModal({
   onClose,
@@ -70,177 +95,168 @@ export function RunConfirmModal({
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
+  const { t: tIssues } = useT("issues");
   const { getActorName } = useActorName();
+  const sendShortcut = useShortcut("send");
   const d = (data ?? {}) as RunConfirmData;
   const issueIds = d.issueIds ?? [];
 
-  const [note, setNote] = useState("");
   // Which footer action is in flight, so only the clicked button shows a
-  // spinner (the request runs an agent on the server for note assigns, so it is
-  // not instant — the disabled-only state read as frozen).
+  // spinner (the write is not instant — the disabled-only state read as frozen).
   const [pendingAction, setPendingAction] = useState<"go" | "suppress" | null>(null);
   const submitting = pendingAction !== null;
 
   const updateIssue = useUpdateIssue();
   const batchUpdate = useBatchUpdateIssues();
 
-  const preview = useIssueTriggerPreview({
-    issueIds,
-    assigneeType: d.assigneeType ?? null,
-    assigneeId: d.assigneeId ?? null,
-    enabled: issueIds.length > 0,
-  });
-
-  const loading = preview.isLoading;
-  const willStart = preview.totalCount > 0;
-  const canNote = willStart;
-
-  // Local-first handoff-support verdict. For a concrete agent assignee the
-  // target runtime is exactly that agent's, and its CLI version is already warm
-  // in the prefetched agent + runtime caches (useWorkspacePresencePrefetch) —
-  // so we can decide whether the note box is usable synchronously, the same way
-  // the quick-create version gate does, instead of waiting on the preview
-  // round-trip just to learn something the client already holds. Squad /
-  // unresolved-agent stay `null` and fall through to the server's verdict,
-  // because their resolved trigger set (hence runtime versions) is only known
-  // after the backend predicate lands.
   const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery({ ...agentListOptions(wsId), enabled: !!wsId });
-  const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
-  const localHandoff = useMemo<boolean | null>(() => {
-    if (d.assigneeType !== "agent" || !d.assigneeId) return null;
-    const agent = agents.find((a) => a.id === d.assigneeId);
-    if (!agent?.runtime_id) return null;
-    const runtime = runtimes.find((r) => r.id === agent.runtime_id);
-    if (!runtime) return null;
-    return handoffSupported(readRuntimeCliVersion(runtime.metadata));
-  }, [d.assigneeType, d.assigneeId, agents, runtimes]);
+  // Built-ins resolve through i18n, custom statuses through the catalog, so the
+  // promotion headline reads the same way the picker the user just used does.
+  const statusLabel = useStatusLabel(wsId);
 
-  // Soft gate: an old runtime can't render the note. Disable the box but let
-  // the assignment proceed (MUL-3375 §6.3). The local verdict resolves it
-  // instantly when available; otherwise we use the server's preview value once
-  // it lands (and only then, since `canNote` is false while loading).
-  const noteDisabled =
-    localHandoff !== null ? localHandoff === false : canNote && !preview.handoffSupported;
+  // A promotion carries the status and nothing else: the owner is already on
+  // the issue, and re-sending the same assignee would turn a status write into
+  // an assignee write on the server's side of the trigger predicate.
+  const isPromote = d.mode === "promote" && !!d.status;
 
   const applyTo = (extra: Partial<UpdateIssueRequest>) => {
-    const base: UpdateIssueRequest = {
-      assignee_type: d.assigneeType ?? null,
-      assignee_id: d.assigneeId ?? null,
-    };
+    const base: UpdateIssueRequest = isPromote
+      ? { status: d.status }
+      : {
+          assignee_type: d.assigneeType ?? null,
+          assignee_id: d.assigneeId ?? null,
+        };
     return { ...base, ...extra };
   };
+
+  // The copy names whoever the issue is handed to; for a squad that is the
+  // squad itself, since its leader deciding who works is an internal detail.
+  const assigneeName =
+    d.assigneeName ??
+    getActorName(d.assigneeType === "squad" ? "squad" : "agent", d.assigneeId ?? "");
 
   const submit = async (suppressRun: boolean) => {
     if (issueIds.length === 0 || submitting) return;
     setPendingAction(suppressRun ? "suppress" : "go");
-    const payload = applyTo({
-      ...(suppressRun ? { suppress_run: true } : {}),
-      ...(!suppressRun && canNote && !noteDisabled && note.trim()
-        ? { handoff_note: note.trim() }
-        : {}),
-    });
+    const payload = applyTo(suppressRun ? { suppress_run: true } : {});
     try {
+      // Completion is silent, exactly as before: the assignee and any run show
+      // up through the issue's normal assignee / run-status updates, so there is
+      // no result toast to add here. Whether a run started is the server's
+      // existing decision at write time, not something this dialog reports.
       if (issueIds.length === 1) {
-        await updateIssue.mutateAsync({ id: issueIds[0]!, ...payload });
+        await updateIssue.mutateAsync({
+          id: issueIds[0]!,
+          ...payload,
+        });
       } else {
         await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
       }
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.run_confirm.toast_failed));
+      toast.error(
+        errorCode(err) === "revision_conflict"
+          ? tIssues(($) => $.revision.conflict)
+          : err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.run_confirm.toast_failed),
+      );
       setPendingAction(null);
     }
   };
 
-  // A squad doesn't "work" — its leader evaluates the issue and delegates. The
-  // copy reflects that (see issues.json squad_leader_*).
-  const isSquad = d.assigneeType === "squad";
+  /**
+   * The configured `send` chord confirms the assignment, the same chord that
+   * creates from the issue composer (MUL-5694).
+   *
+   * Bound on the dialog, not on a single control, because the chord means "run
+   * the primary action" no matter which control has focus — and with only the
+   * footer left to focus, that is precisely where the keycap on the confirm
+   * button would otherwise be advertising a dead key.
+   */
+  const onDialogKeyDown = (e: React.KeyboardEvent) => {
+    // A held chord submits once, and the Enter that commits an IME
+    // composition is the user picking a candidate, never a confirmation.
+    if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+    if (!shortcutMatchesEvent(sendShortcut, e.nativeEvent)) return;
+    // Only a BARE Enter activates a focused button (Chromium fires no click
+    // for ⌘/Ctrl+Enter), so a `send` remapped to plain Enter is the one case
+    // where confirming here too would double-write — and on "Don't start yet"
+    // the two writes would disagree about suppress_run. Every chord form
+    // reaches the footer as a dead key without us, so it must not be skipped.
+    const activatesFocusedButton =
+      isPlainShortcut(sendShortcut, "Enter") &&
+      e.target instanceof HTMLElement &&
+      e.target.closest("button") !== null;
+    if (activatesFocusedButton) return;
+    e.preventDefault();
+    void submit(false);
+  };
 
-  const headline: ReactNode = (() => {
-    if (!willStart) {
-      return t(($) => $.run_confirm.nothing_assign);
-    }
-    // Single trigger → name the assignee (bolded), resolved from the preview's
-    // runnable agent (squad leader for squads). Batch → count.
-    if (preview.triggers.length === 1) {
-      if (isSquad) {
-        const name = d.assigneeName ?? getActorName("squad", d.assigneeId ?? "");
-        return boldName(t(($) => $.run_confirm.will_start_named_squad, { name: `${NAME_FENCE}${name}${NAME_FENCE}` }));
-      }
-      const name = d.assigneeName ?? getActorName("agent", preview.triggers[0]!.agent_id);
-      return boldName(t(($) => $.run_confirm.will_start_named, { name: `${NAME_FENCE}${name}${NAME_FENCE}` }));
-    }
-    return isSquad
-      ? t(($) => $.run_confirm.will_start_squad, { count: preview.totalCount })
-      : t(($) => $.run_confirm.will_start, { count: preview.totalCount });
-  })();
+  // States the action, not a prediction: the write is certain, the run is
+  // conditional, so the copy names no run count. The promotion names the
+  // status it is moving to by its workspace label — a custom status is only
+  // recognisable by the name its admin gave it.
+  const headline: ReactNode = boldFenced(
+    isPromote
+      ? t(($) => $.run_confirm.promote_single, {
+          name: fenced(assigneeName),
+          status: fenced(statusLabel(d.status ?? "")),
+        })
+      : issueIds.length > 1
+        ? t(($) => $.run_confirm.assign_batch, {
+            name: fenced(assigneeName),
+            count: issueIds.length,
+          })
+        : t(($) => $.run_confirm.assign_single, { name: fenced(assigneeName) }),
+  );
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
-      <DialogContent>
+      {/* Wider than the primitive's sm:max-w-sm: the two actions are long
+          phrases, not "Cancel"/"Save". In French they measure ~435px with the
+          send-shortcut keycaps against the 352px the default leaves, so the
+          dialog's overflow-auto showed a horizontal scrollbar. */}
+      <DialogContent className="sm:max-w-lg" onKeyDown={onDialogKeyDown}>
         <DialogHeader>
-          <DialogTitle>{t(($) => $.run_confirm.title_assign)}</DialogTitle>
-          <DialogDescription>
-            {loading ? (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Spinner className="size-3.5" />
-                {t(($) => $.run_confirm.checking)}
-              </span>
-            ) : (
-              headline
-            )}
-          </DialogDescription>
+          <DialogTitle>
+            {isPromote
+              ? t(($) => $.run_confirm.title_promote)
+              : t(($) => $.run_confirm.title_assign)}
+          </DialogTitle>
+          <DialogDescription>{headline}</DialogDescription>
         </DialogHeader>
 
-        {/* The note box stays mounted while the preview is in flight (disabled),
-            so the dialog opens at its resolved height instead of growing when
-            the predicate lands. Parked (no run) is the only case without a note,
-            and it can't be a Backlog assign (those skip this modal), so it is
-            rare. */}
-        {loading || canNote ? (
-          <div className="grid gap-1.5">
-            <label className="text-sm font-medium" htmlFor="handoff-note">
-              {t(($) => $.run_confirm.note_label)}
-            </label>
-            <Textarea
-              id="handoff-note"
-              value={note}
-              maxLength={MAX_HANDOFF_NOTE}
-              // Only block on the preview round-trip when we have no local
-              // verdict (squad). With a local verdict the box is usable the
-              // instant it opens — supported → editable, old runtime → disabled
-              // — never a "checking…" wait.
-              disabled={submitting || noteDisabled || (localHandoff === null && loading)}
-              placeholder={t(($) => $.run_confirm.note_placeholder)}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-            />
-            {noteDisabled && (localHandoff !== null || !loading) ? (
-              <p className="text-xs text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
-            ) : null}
-          </div>
-        ) : null}
-
-        <DialogFooter>
-          {loading ? (
-            <Button type="button" disabled>
+        {/* The only spinner left is on the button the user just pressed, and it
+            reflects the write in flight — never a pre-flight check. */}
+        {/* flex-wrap keeps a longer translation, or a larger text size, from
+            bringing the scrollbar back: the actions stack instead. */}
+        <DialogFooter className="sm:flex-wrap">
+          <Button type="button" variant="outline" disabled={submitting} onClick={() => submit(true)}>
+            {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
+          </Button>
+          <Button type="button" disabled={submitting} onClick={() => submit(false)}>
+            {pendingAction === "go" ? (
               <Spinner className="size-4" />
-            </Button>
-          ) : willStart ? (
-            <>
-              <Button type="button" variant="outline" disabled={submitting} onClick={() => submit(true)}>
-                {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
-              </Button>
-              <Button type="button" disabled={submitting} onClick={() => submit(false)}>
-                {pendingAction === "go" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.start)}
-              </Button>
-            </>
-          ) : (
-            <Button type="button" disabled={submitting} onClick={() => submit(false)}>
-              {pendingAction === "go" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.apply)}
-            </Button>
-          )}
+            ) : (
+              <>
+                {isPromote
+                  ? t(($) => $.run_confirm.confirm_promote)
+                  : t(($) => $.run_confirm.confirm_assign)}
+                {/* Decorative: the accessible name stays the button's own copy,
+                    not "Confirm assignment Command Enter". Absent when `send`
+                    is unbound. */}
+                {sendShortcut ? (
+                  <ShortcutKeycaps
+                    shortcut={sendShortcut}
+                    decorative
+                    className="ml-1"
+                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                  />
+                ) : null}
+              </>
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

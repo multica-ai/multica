@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -226,6 +227,47 @@ func TestAutopilotFailureMonitor_AgentCreatorRoutesToOwner(t *testing.T) {
 	}
 	if got := item["recipient_type"]; got != "member" {
 		t.Fatalf("expected member recipient_type, got %v", got)
+	}
+}
+
+func TestAutopilotFailureMonitor_FormerCreatorFallsBackToWorkspaceManagers(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	cfg := failureMonitorConfig{
+		Interval:  time.Hour,
+		Lookback:  7 * 24 * time.Hour,
+		MinRuns:   10,
+		FailRatio: 0.9,
+	}
+	agentID := pickFixtureAgent(t)
+	autopilot := seedAutopilot(
+		t,
+		queries,
+		"Failure monitor: former member creator",
+		"member",
+		parseUUID(uuid.NewString()),
+		agentID,
+	)
+	seedAutopilotRuns(t, autopilot.ID, 11, 10, time.Now().Add(-2*time.Hour))
+	var inboxEvents []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		inboxEvents = append(inboxEvents, e)
+	})
+
+	tickAutopilotFailureMonitor(context.Background(), queries, bus, cfg)
+
+	if got := reloadAutopilotStatus(t, queries, autopilot.ID); got != "paused" {
+		t.Fatalf("expected paused, got %q", got)
+	}
+	if len(inboxEvents) != 1 {
+		t.Fatalf("paused fallback events = %d, want workspace owner", len(inboxEvents))
+	}
+	item := inboxEvents[0].Payload.(map[string]any)["item"].(map[string]any)
+	if got := item["recipient_id"]; got != testUserID {
+		t.Fatalf("paused fallback recipient = %s, want workspace owner %s", got, testUserID)
+	}
+	if got := item["recipient_type"]; got != "member" {
+		t.Fatalf("paused fallback recipient type = %q, want member", got)
 	}
 }
 

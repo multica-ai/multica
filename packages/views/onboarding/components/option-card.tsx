@@ -37,7 +37,7 @@ export function OptionCard({
       )}
     >
       <RadioMark selected={selected} />
-      <span className="text-[14.5px] font-normal leading-tight text-foreground">
+      <span className="text-body font-normal leading-tight text-foreground">
         {label}
       </span>
     </button>
@@ -83,7 +83,7 @@ export function OtherOptionCard({
         className="flex w-full items-center gap-3.5 px-4 py-2.5 text-left"
       >
         <RadioMark selected={selected} />
-        <span className="text-[14.5px] font-normal leading-tight text-foreground">
+        <span className="text-body font-normal leading-tight text-foreground">
           {t(($) => $.option_card.other_label)}
         </span>
       </button>
@@ -96,7 +96,7 @@ export function OtherOptionCard({
             onChange={(e) => onOtherChange(e.target.value)}
             placeholder={placeholder}
             maxLength={OTHER_INPUT_MAX_LENGTH}
-            className="h-8 rounded-none border-x-0 border-t-0 border-b px-0 text-sm shadow-none focus-visible:border-foreground focus-visible:ring-0"
+            className="h-8 rounded-none border-x-0 border-t-0 border-b px-0 text-body shadow-none focus-visible:border-foreground focus-visible:ring-0"
             aria-label={placeholder}
           />
         </div>

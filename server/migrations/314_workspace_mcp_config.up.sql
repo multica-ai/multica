@@ -1,0 +1,11 @@
+-- Workspace-level MCP configuration (GH #6062, MUL-5421).
+--
+-- Shares one MCP server set across every agent in the workspace instead of
+-- forcing the same servers to be re-entered on each agent. Deliberately the
+-- same shape as agent.mcp_config (046_agent_mcp_config): a nullable JSONB
+-- document holding `{"mcpServers": {<name>: {...}}}`.
+--
+-- NULL keeps its meaning from the agent column — "nothing configured at this
+-- layer" — so every existing workspace starts out with no shared servers and
+-- no agent's effective configuration changes until an admin sets one.
+ALTER TABLE workspace ADD COLUMN mcp_config jsonb;

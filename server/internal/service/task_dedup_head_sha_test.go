@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -24,25 +23,7 @@ import (
 
 func newHeadShaDedupPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dbURL)
-	if err != nil {
-		t.Skipf("database unavailable: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("database unreachable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
+	return sharedTestPool(t)
 }
 
 // headShaDedupFixture builds a workspace / runtime / agent / issue, plus an
@@ -192,26 +173,14 @@ const (
 	shaB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-// Behavior 1: a pending task for SHA A does NOT satisfy a request when HEAD has
-// advanced to SHA B — dedup MISSES so a fresh review can enqueue against B.
-func TestHeadShaDedup_AdvancedHeadMissesDedup(t *testing.T) {
-	ctx := context.Background()
-	pool := newHeadShaDedupPool(t)
-	q := db.New(pool)
-	fx := createHeadShaDedupFixture(t, ctx, pool, shaB, "open")
-
-	// A run began against A and is still pending.
-	enqueueReviewTask(t, ctx, q, fx, shaA)
-
-	// A request for the new HEAD (B) must NOT dedup — the pending task is for A.
-	if hasPending(t, ctx, q, fx, shaB) {
-		t.Fatalf("dedup HIT for SHA B while only a SHA A task is pending — B would get zero review coverage (the TEN-356 bug)")
-	}
-}
-
-// Behavior 2: re-pushing to a branch mid-review invalidates dedup. The resolver
-// now returns the PR's new head, and a request for that head misses the old
-// task — the platform-level equivalent of "fresh run against new HEAD".
+// Re-pushing to a branch mid-review invalidates dedup. The resolver now returns
+// the PR's new head, and a request for that head misses the old task — the
+// platform-level equivalent of "fresh run against new HEAD".
+//
+// Along the way it pins both halves of head-SHA dedup: a same-SHA re-request
+// still coalesces (an unchanged HEAD must not spawn duplicate reviewer runs),
+// and a pending task for SHA A does not satisfy a request for SHA B (the
+// TEN-356 bug: B would get zero review coverage).
 func TestHeadShaDedup_RepushInvalidatesDedup(t *testing.T) {
 	ctx := context.Background()
 	pool := newHeadShaDedupPool(t)
@@ -241,26 +210,11 @@ func TestHeadShaDedup_RepushInvalidatesDedup(t *testing.T) {
 		t.Fatalf("ResolveIssueReviewSHA after repush = %q, want %q", got, shaB)
 	}
 	if hasPending(t, ctx, q, fx, shaB) {
-		t.Fatalf("dedup HIT for new HEAD B after repush — a fresh review would be suppressed")
+		t.Fatalf("dedup HIT for new HEAD B while only a SHA A task is pending — B would get zero review coverage (the TEN-356 bug)")
 	}
 }
 
-// Behavior 3: same-SHA re-requests still dedup, so an unchanged HEAD does not
-// spawn wasteful duplicate reviewer runs.
-func TestHeadShaDedup_SameShaStillDedups(t *testing.T) {
-	ctx := context.Background()
-	pool := newHeadShaDedupPool(t)
-	q := db.New(pool)
-	fx := createHeadShaDedupFixture(t, ctx, pool, shaA, "open")
-
-	enqueueReviewTask(t, ctx, q, fx, shaA)
-
-	if !hasPending(t, ctx, q, fx, shaA) {
-		t.Fatalf("dedup MISS for the same SHA A — an unchanged HEAD should coalesce, not re-run")
-	}
-}
-
-// Behavior 4 (fall-back safety): an issue with no linked PR has no review SHA,
+// Fall-back safety: an issue with no linked PR has no review SHA,
 // so dedup falls back to the pre-TEN-356 (issue_id, agent_id) key and keeps
 // coalescing exactly as before.
 func TestHeadShaDedup_NoLinkedPRFallsBackToLegacyKey(t *testing.T) {

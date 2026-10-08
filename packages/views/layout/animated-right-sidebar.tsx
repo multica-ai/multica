@@ -1,8 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { motion } from "motion/react";
 import type { Layout, PanelSize } from "react-resizable-panels";
+import {
+  isEditableShortcutTarget,
+  shortcutMatchesEvent,
+  useShortcut,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 
 export const rightSidebarPanelMotionProps = {
@@ -79,6 +92,31 @@ export function useAnimatedRightSidebarState(initialOpen: boolean) {
   }, []);
 
   return { open, visualOpen, motionEnabled, beginToggle, handleResize };
+}
+
+/** Toggle the right sidebar only for the visible detail page that owns it. */
+export function useRightSidebarShortcut(
+  targetRef: RefObject<HTMLElement | null>,
+  onToggle: () => void,
+) {
+  const shortcut = useShortcut("toggleRightSidebar");
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (!shortcutMatchesEvent(shortcut, event)) return;
+
+      const target = targetRef.current;
+      if (!target || target.getClientRects().length === 0) return;
+
+      event.preventDefault();
+      onToggle();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onToggle, shortcut, targetRef]);
 }
 
 export function AnimatedRightSidebar({

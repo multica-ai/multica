@@ -4,9 +4,10 @@ import StarterKit from "@tiptap/starter-kit";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { forwardRef, useImperativeHandle } from "react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import { createSuggestionPopupRender } from "./suggestion-popup";
+import { isPickerAcceptKey } from "../../common/picker-keys";
 import { PatchedListItem } from "./list-item";
 
 interface TestItem {
@@ -217,33 +218,57 @@ describe("createSuggestionPopupRender", () => {
 });
 
 // ---------------------------------------------------------------------------
-// isPickerAcceptKey — the shared accept-key policy (MUL-3685)
+// Escape containment (MUL-5429): Escape while a picker is open must close ONLY
+// the picker. ProseMirror calls preventDefault() for a handled key but never
+// stops propagation, and Base UI's dismiss layer listens for Escape on
+// `document` in the BUBBLE phase without consulting defaultPrevented — so
+// without an explicit stopPropagation the same keypress also closed the host
+// create-issue dialog and threw the draft away. The plain document listener
+// below stands in for that dismiss layer.
 // ---------------------------------------------------------------------------
 
-describe("isPickerAcceptKey", () => {
-  const accepts = (init: KeyboardEventInit) =>
-    isPickerAcceptKey(new KeyboardEvent("keydown", init));
+describe("Escape containment while a picker is open", () => {
+  function watchHostEscape() {
+    const hostEscape = vi.fn();
+    document.addEventListener("keydown", hostEscape);
+    return {
+      hostEscape,
+      stop: () => document.removeEventListener("keydown", hostEscape),
+    };
+  }
 
-  it("treats Enter and plain Tab as accept keys", () => {
-    expect(accepts({ key: "Enter" })).toBe(true);
-    expect(accepts({ key: "Tab" })).toBe(true);
-  });
+  it.each(["@", "/"] as const)(
+    "closes the %s popup on Escape without letting the key reach the host dialog",
+    async (char) => {
+      const ed = makeEditor(char);
+      await triggerSuggestion(ed, `${char}a`);
+      const { hostEscape, stop } = watchHostEscape();
 
-  it("keeps Enter an accept key regardless of modifiers (Mod-Enter unchanged)", () => {
-    expect(accepts({ key: "Enter", metaKey: true })).toBe(true);
-  });
+      await act(async () => {
+        fireEvent.keyDown(ed.view.dom, { key: "Escape" });
+      });
+      stop();
 
-  it("does not treat Shift+Tab or Ctrl/Cmd/Alt+Tab as accept keys", () => {
-    expect(accepts({ key: "Tab", shiftKey: true })).toBe(false);
-    expect(accepts({ key: "Tab", ctrlKey: true })).toBe(false);
-    expect(accepts({ key: "Tab", metaKey: true })).toBe(false);
-    expect(accepts({ key: "Tab", altKey: true })).toBe(false);
-  });
+      await expectPopupClosed();
+      expect(hostEscape).not.toHaveBeenCalled();
+    },
+  );
 
-  it("ignores unrelated keys", () => {
-    expect(accepts({ key: "ArrowDown" })).toBe(false);
-    expect(accepts({ key: "Escape" })).toBe(false);
-    expect(accepts({ key: "a" })).toBe(false);
+  it("still lets Escape reach the host when no picker is open", async () => {
+    const ed = makeEditor("@");
+    await act(async () => {
+      ed.commands.focus("end");
+    });
+    const { hostEscape, stop } = watchHostEscape();
+
+    await act(async () => {
+      fireEvent.keyDown(ed.view.dom, { key: "Escape" });
+    });
+    stop();
+
+    // With no picker open Escape is the host dialog's own close shortcut and
+    // must keep working — the fix must not swallow Escape unconditionally.
+    expect(hostEscape).toHaveBeenCalledTimes(1);
   });
 });
 

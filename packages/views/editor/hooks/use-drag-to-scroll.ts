@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Tap-vs-drag gesture for a horizontally scrollable element.
+ * Tap-vs-drag gesture for a scrollable element.
  *
  * Solves a specific collision: the inline Mermaid diagram opens the viewer when
- * clicked, but a wide diagram also invites dragging to see the rest of it.
+ * clicked, but a zoomed-in diagram also invites dragging to see the rest of it.
  * Without an intent test every drag ends in a `click` and the viewer opens on
  * top of the user, which reads as the diagram fighting back.
  *
@@ -14,10 +14,10 @@
  * surprise the user by opening on release either.
  *
  * Touch is the one pointer type the browser already drag-scrolls by itself on
- * an `overflow-x: auto` element, and whose vertical drags belong to the page —
- * so touch is left alone here and only watched for intent, with the browser
- * announcing its takeover via `pointercancel`. Every other pointer (mouse, pen)
- * has no native drag-to-scroll and is panned below.
+ * an `overflow: auto` element, handing the drag on to the page once the
+ * element runs out of room — so touch is left alone here and only watched for
+ * intent, with the browser announcing its takeover via `pointercancel`. Every
+ * other pointer (mouse, pen) has no native drag-to-scroll and is panned below.
  */
 
 import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
@@ -32,6 +32,7 @@ interface GestureState {
   startX: number;
   startY: number;
   startScrollLeft: number;
+  startScrollTop: number;
   dragged: boolean;
 }
 
@@ -68,6 +69,7 @@ export function useDragToScroll({
       startX: event.clientX,
       startY: event.clientY,
       startScrollLeft: event.currentTarget.scrollLeft,
+      startScrollTop: event.currentTarget.scrollTop,
       dragged: false,
     };
   }, []);
@@ -90,12 +92,13 @@ export function useDragToScroll({
       }
     }
 
-    // Touch scrolls itself; driving scrollLeft here too would double the speed.
+    // Touch scrolls itself; driving the scroll here too would double the speed.
     if (isTouch(gesture)) return;
     // Assigning past either end is clamped by the browser, so an unscrollable
     // diagram simply stays put — the gesture is still a drag, and still
     // suppresses the tap below.
     event.currentTarget.scrollLeft = gesture.startScrollLeft - deltaX;
+    event.currentTarget.scrollTop = gesture.startScrollTop - deltaY;
   }, []);
 
   const onPointerUp = useCallback(

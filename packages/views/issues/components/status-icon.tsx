@@ -1,4 +1,11 @@
-import type { IssueStatus } from "@multica/core/types";
+import { statusCategoryOfKey } from "@multica/core/issues";
+import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
+import type {
+  BuiltInIssueStatus,
+  IssueStatus,
+  IssueStatusCategory,
+  IssueStatusIcon,
+} from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
 // ---------------------------------------------------------------------------
@@ -143,7 +150,7 @@ function CancelledIcon() {
 // Renderer map
 // ---------------------------------------------------------------------------
 
-const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
+const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
   backlog: BacklogIcon,
   todo: TodoIcon,
   in_progress: InProgressIcon,
@@ -153,28 +160,83 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
   cancelled: CancelledIcon,
 };
 
+const CATEGORY_RENDERER: Record<IssueStatusCategory, BuiltInIssueStatus> = {
+  unstarted: "todo",
+  started: "in_progress",
+  done: "done",
+  closed: "cancelled",
+};
+
+const ICON_RENDERERS: Record<IssueStatusIcon, () => React.ReactNode> = {
+  dotted: BacklogIcon,
+  circle: TodoIcon,
+  half: InProgressIcon,
+  three_quarters: InReviewIcon,
+  check: DoneIcon,
+  slash: BlockedIcon,
+  cross: CancelledIcon,
+};
+
+const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
+  backlog: "text-muted-foreground",
+  todo: "text-muted-foreground",
+  in_progress: "text-warning",
+  in_review: "text-success",
+  done: "text-info",
+  blocked: "text-destructive",
+  cancelled: "text-muted-foreground",
+};
+
 // ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
 
 export function StatusIcon({
   status,
+  category: categoryProp,
+  color,
+  icon,
   className = "h-4 w-4",
   inheritColor = false,
 }: {
   status: IssueStatus | string;
+  /**
+   * Resolved category, for callers that hold the workspace catalog. Without it
+   * the key resolves on its own, which is exact for the 7 built-ins and falls
+   * back to `unstarted` for a custom key this render has no catalog for.
+   */
+  category?: IssueStatusCategory;
+  /** A custom status's `#rrggbb`. Built-ins keep their semantic token color. */
+  color?: string | null;
+  /** Custom geometry, independent of category. Unknown/absent uses the default. */
+  icon?: string | null;
   className?: string;
   inheritColor?: boolean;
 }) {
-  const knownStatus = status in STATUS_RENDERERS ? (status as IssueStatus) : null;
-  const cfg = knownStatus ? STATUS_CONFIG[knownStatus] : null;
-  const Renderer = knownStatus ? STATUS_RENDERERS[knownStatus] : TodoIcon;
+  // Built-ins stay locked; custom geometry never determines lifecycle behavior.
+  const category = categoryProp ?? statusCategoryOfKey(status);
+  const builtIn = isBuiltInIssueStatus(status) ? status : null;
+  const customRenderer = icon && Object.hasOwn(ICON_RENDERERS, icon)
+    ? ICON_RENDERERS[icon as IssueStatusIcon]
+    : null;
+  const Renderer = (builtIn ? STATUS_RENDERERS[builtIn] : customRenderer)
+    ?? STATUS_RENDERERS[CATEGORY_RENDERER[category]] ?? TodoIcon;
+  // A custom color wins over the category's token, but only when the caller
+  // isn't already forcing the glyph to inherit (selected rows, dark chips).
+  const useCustomColor = !builtIn && !inheritColor && Boolean(color);
 
   return (
     <svg
       viewBox="0 0 14 14"
       fill="none"
-      className={`${className} ${inheritColor ? "" : cfg?.iconColor ?? "text-muted-foreground"} shrink-0`}
+      style={useCustomColor ? { color: color ?? undefined } : undefined}
+      className={`${className} ${
+        inheritColor || useCustomColor
+          ? ""
+          : builtIn
+            ? BUILT_IN_ICON_COLOR[builtIn]
+            : STATUS_CONFIG[category]?.iconColor ?? "text-muted-foreground"
+      } shrink-0`}
     >
       <Renderer />
     </svg>

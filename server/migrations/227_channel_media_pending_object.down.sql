@@ -1,0 +1,1 @@
+DROP TABLE channel_media_pending_object;

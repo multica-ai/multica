@@ -31,7 +31,7 @@
 // / issue. On a database with years of history that is sustained heavy
 // load. Use --sleep-between-slices to throttle on a busy production DB,
 // and coordinate a maintenance window with the DB team before a
-// full-history run (see docs/timezone-architecture-rfc.md §7.1).
+// full-history run.
 //
 // Operator note: this command does NOT call prune_task_usage_hourly_dirty.
 // The dirty queue starts empty during backfill (triggers fire only on

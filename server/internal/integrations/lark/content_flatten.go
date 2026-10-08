@@ -21,12 +21,13 @@ import (
 // knows which one applies — so flattening stays mention-agnostic.
 //
 // Non-text media types render as a stable bracketed placeholder so the
-// agent sees that *something* was attached without us downloading the
-// binary. Attachment ingestion is explicitly out of scope (tracked as a
-// separate attachment-pipeline issue), and merge_forward is intercepted
-// by the enricher before it reaches here (expanding it needs an HTTP
-// round-trip); the inline placeholder is only a fallback for a forward
-// nested inside another forward.
+// agent sees that *something* was attached without this fast path
+// downloading the binary; the detached media resolver separately fetches
+// the resource and binds it as a chat attachment, with the placeholder
+// as the durable fallback. merge_forward is intercepted by the enricher
+// before it reaches here (expanding it needs an HTTP round-trip); the
+// inline placeholder is only a fallback for a forward nested inside
+// another forward.
 func flattenContent(msgType, rawContent string) string {
 	switch msgType {
 	case "text":
@@ -39,7 +40,7 @@ func flattenContent(msgType, rawContent string) string {
 		return "[File]"
 	case "audio":
 		return "[Audio]"
-	case "media":
+	case "media", "video":
 		return "[Video]"
 	case "sticker":
 		return "[Sticker]"
@@ -80,6 +81,11 @@ type larkPostSpan struct {
 	Href     string `json:"href"`
 	UserID   string `json:"user_id"`
 	UserName string `json:"user_name"`
+	ImageKey string `json:"image_key"`
+	FileKey  string `json:"file_key"`
+	FileName string `json:"file_name"`
+	Name     string `json:"name"`
+	MimeType string `json:"mime_type"`
 }
 
 // flattenPostContent flattens a received `post` body.content into plain
@@ -89,10 +95,11 @@ type larkPostSpan struct {
 // ("Lark 集成", then a link "PR #3277") read as space-separated words.
 //
 // A link span renders as "text (href)" so the URL survives into the
-// agent's context; an `at` span renders as its @_user_N placeholder (or
-// the inline user_name when Lark already resolved it) so a downstream
-// resolveMentions pass can substitute the display name. Media spans
-// degrade to the same bracketed placeholders flattenContent uses.
+// agent's context; an `at` span renders as its @_user_N placeholder so
+// a downstream resolveMentions pass can substitute the display name
+// (falling back to the inline user_name when the placeholder is absent).
+// Media spans degrade to the same bracketed placeholders flattenContent
+// uses.
 func flattenPostContent(raw string) string {
 	if raw == "" {
 		return ""
@@ -136,14 +143,15 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 				parts = append(parts, s.Href)
 			}
 		case "at":
-			// Prefer an already-resolved display name; otherwise emit
-			// the user_id, which on the receive side is the @_user_N
-			// placeholder a later resolveMentions pass maps to a name.
+			// Prefer the @_user_N placeholder so a later
+			// resolveMentions pass can map it to a display name and
+			// strip the bot's own mention; fall back to the inline
+			// user_name when the placeholder is absent.
 			switch {
-			case s.UserName != "":
-				parts = append(parts, "@"+s.UserName)
 			case s.UserID != "":
 				parts = append(parts, s.UserID)
+			case s.UserName != "":
+				parts = append(parts, "@"+s.UserName)
 			}
 		case "img":
 			parts = append(parts, "[Image]")

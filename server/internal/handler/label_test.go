@@ -199,7 +199,6 @@ func TestIssueLabelAttachDetach(t *testing.T) {
 }
 
 func TestIssueLabelRejectsNonIssueScope(t *testing.T) {
-	withResourceLabelsFlag(t, testHandler, true)
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":    "Issue rejects agent label",
@@ -499,7 +498,6 @@ func TestLabelNameAllowsEmoji(t *testing.T) {
 }
 
 func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
-	withResourceLabelsFlag(t, testHandler, true)
 	name := "shared-scope-label-" + uuid.NewString()[:8]
 	for _, resourceType := range []string{"issue", "agent", "skill"} {
 		w := httptest.NewRecorder()
@@ -529,22 +527,7 @@ func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
 	}
 }
 
-func TestResourceLabelWritesRequireReleaseFlag(t *testing.T) {
-	withResourceLabelsFlag(t, testHandler, false)
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/labels", map[string]any{
-		"resource_type": "agent",
-		"name":          "blocked-resource-label-" + uuid.NewString()[:8],
-		"color":         "#3b82f6",
-	})
-	testHandler.CreateLabel(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("CreateLabel without release flag: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
 func TestDeleteResourceLabelCleansAssignments(t *testing.T) {
-	withResourceLabelsFlag(t, testHandler, true)
 	agentID := createHandlerTestAgent(t, "Resource Label Cleanup", nil)
 	skillID := insertHandlerTestSkill(t, "resource-label-cleanup", "# cleanup")
 

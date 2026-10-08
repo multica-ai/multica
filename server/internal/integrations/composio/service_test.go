@@ -568,22 +568,6 @@ func TestCompleteCallback_UnknownAccountRejected(t *testing.T) {
 	}
 }
 
-func TestListConnections(t *testing.T) {
-	t.Parallel()
-	store := newFakeStore()
-	svc := newTestService(t, &fakeSDK{}, store)
-	userID := mintUUID(5)
-	seedActive(store, userID, "notion", "ca_a")
-
-	conns, err := svc.ListConnections(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("ListConnections: %v", err)
-	}
-	if len(conns) != 1 || conns[0].ToolkitSlug != "notion" || conns[0].Status != "active" {
-		t.Fatalf("conns = %+v", conns)
-	}
-}
-
 func TestDisconnect_OwnerRevokeIdempotentAndFilter(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()

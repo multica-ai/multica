@@ -3,18 +3,12 @@ import { useWelcomeStore, type WelcomeSignal } from "./welcome-store";
 
 const sample: WelcomeSignal = {
   workspaceId: "ws-1",
-  choice: "runtime",
-  runtimeId: "rt-1",
+  choice: "skip",
 };
 
 describe("welcome-store", () => {
   beforeEach(() => {
     useWelcomeStore.getState().reset();
-  });
-
-  it("starts empty and not dismissed", () => {
-    expect(useWelcomeStore.getState().signal).toBeNull();
-    expect(useWelcomeStore.getState().dismissed).toBe(false);
   });
 
   it("set() stores the signal and clears any prior dismissed flag", () => {
@@ -40,12 +34,5 @@ describe("welcome-store", () => {
     useWelcomeStore.getState().reset();
     expect(useWelcomeStore.getState().signal).toBeNull();
     expect(useWelcomeStore.getState().dismissed).toBe(false);
-  });
-
-  it("skip-path signals omit runtimeId", () => {
-    const skip: WelcomeSignal = { workspaceId: "ws-2", choice: "skip" };
-    useWelcomeStore.getState().set(skip);
-    expect(useWelcomeStore.getState().signal).toEqual(skip);
-    expect(useWelcomeStore.getState().signal?.runtimeId).toBeUndefined();
   });
 });

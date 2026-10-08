@@ -50,6 +50,7 @@ export function BrowserNotificationSetting() {
   return (
     <SettingsCard>
       <SettingsRow
+        anchor="browser"
         label={t(($) => $.notifications.browser.label)}
         description={statusHint}
       >
@@ -59,7 +60,7 @@ export function BrowserNotificationSetting() {
             </Button>
           )}
           {permission === "granted" && (
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            <span className="shrink-0 text-caption font-medium text-muted-foreground">
               {t(($) => $.notifications.browser.enabled_badge)}
             </span>
           )}

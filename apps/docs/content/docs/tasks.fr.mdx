@@ -1,0 +1,175 @@
+---
+title: "Exécutions"
+description: "Comment une exécution d'agent est mise en file d'attente, exécutée, arrêtée et relancée."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Chaque fois qu'un agent commence à travailler, Multica crée une **exécution**. Elle enregistre ce qui a déclenché le travail, à quel agent il a été confié, où il en est et s'il a finalement réussi.
+
+## Tâches et exécutions
+
+Une tâche contient l'objectif, la discussion, l'assigné et le statut final d'un travail ; une exécution correspond à un passage d'un agent sur ce travail.
+
+| | Tâche | Exécution |
+| --- | --- | --- |
+| Ce qu'elle enregistre | Un travail qui avance | Un passage d'agent |
+| Durée de vie | Peut être discutée, modifiée et réassignée à plusieurs reprises | Du déclenchement jusqu'à l'achèvement, l'échec ou l'annulation |
+| Cardinalité | Une tâche peut couvrir de nombreuses exécutions | Chaque exécution a son propre enregistrement |
+
+Ainsi, une même tâche peut être confiée successivement à différents agents, ou relancée après un échec. Chaque passage produit un nouvel enregistrement d'exécution ; les enregistrements précédents ne sont jamais écrasés.
+
+## Sources de déclenchement
+
+Chacun des éléments suivants peut déclencher une exécution :
+
+- Assigner une tâche à un agent ou à un squad.
+- Mentionner un agent dans un commentaire.
+- Envoyer un message à un agent dans une discussion.
+- Une automatisation qui se déclenche selon une planification ou à partir d'un événement externe.
+
+Les points d'entrée fournissent des contextes différents, mais l'exécution fonctionne toujours de la même façon : Multica crée une exécution, un runtime la prend en charge, et le runtime invoque l'outil de codage IA configuré pour l'agent.
+
+## Cycle de vie d'une exécution
+
+Une exécution passe généralement par ces états :
+
+| État | Signification |
+| --- | --- |
+| `deferred` | Programmée pour plus tard ; entre dans la file d'attente à l'heure prévue |
+| `queued` | En attente de prise en charge par un runtime |
+| `dispatched` | Un runtime l'a prise en charge et démarre l'outil de codage IA |
+| `waiting_local_directory` | Le répertoire local cible est occupé par une autre exécution ; attente de la libération du verrou du répertoire |
+| `running` | L'outil de codage IA est en cours d'exécution |
+| `completed` | L'exécution s'est terminée normalement |
+| `failed` | L'exécution a rencontré une erreur ou a été interrompue |
+| `cancelled` | L'exécution a été arrêtée manuellement |
+
+Lorsque le runtime est en ligne, une nouvelle exécution démarre généralement rapidement ; si le runtime passe hors ligne après l'entrée de l'exécution dans la file d'attente, l'exécution reste en file d'attente jusqu'à son rétablissement. Le travail en file d'attente n'expire pas pour avoir trop attendu — un runtime qui continue d'envoyer ses signaux de vie (heartbeats) est occupé, pas disparu, et son arriéré peut donc s'écouler aussi longtemps que nécessaire. Une exécution en file d'attente n'échoue que lorsque les **deux** conditions sont réunies : son runtime est silencieux depuis plus longtemps que le délai de grâce de reconnexion, **et** l'exécution elle-même est en file d'attente depuis aussi longtemps. La seconde condition compte lorsque vous assignez du travail à une machine déjà en veille — l'exécution bénéficie quand même d'un délai de grâce complet pour vous laisser la réveiller, au lieu d'échouer immédiatement.
+
+<Callout type="info">
+Si le système sait déjà, avant le déclenchement, que le runtime cible est hors ligne, certaines actions immédiates indiquent que l'exécution ne peut pas démarrer pour le moment au lieu de créer une exécution que personne ne pourra prendre en charge.
+</Callout>
+
+Un runtime dont le signal de vie est sain peut mener de longues exécutions ; le serveur ne met jamais fin de force à une exécution simplement parce qu'elle dure depuis un moment. Le runtime détermine si le processus est bloqué en fonction de l'activité réelle ; consultez [Variables d'environnement](/environment-variables#configuration-du-daemon) pour les réglages correspondants.
+
+## Consulter l'historique des exécutions
+
+Toutes les exécutions produites par une tâche sont listées dans la section **Journal d'exécution** de la barre latérale droite de la tâche — pas sur une page ou un onglet séparé. La section est dépliée par défaut : les exécutions actives restent épinglées en haut, et celles qui sont terminées se trouvent derrière **Afficher les exécutions passées (N)**. Chaque ligne indique la source du déclenchement, l'agent qui exécute, l'état et la durée. Si vous ne voyez pas la section, ouvrez la barre latérale avec le bouton de panneau dans l'en-tête de la tâche ; sur les écrans étroits, elle est repliée au départ.
+
+Le journal se met à jour via la connexion temps réel tant que la page reste ouverte — les nouvelles exécutions, les changements d'état et les commentaires de l'agent apparaissent sans rechargement manuel.
+
+Pendant qu'un agent travaille, l'en-tête de la tâche affiche aussi une pastille en direct, par exemple « Engineer travaille ». La survoler affiche les mêmes exécutions actives, ce qui permet de suivre la progression sans quitter la page.
+
+Depuis cet endroit, vous pouvez :
+
+- Cliquer sur **Voir la transcription** sur une ligne pour voir les messages de l'agent, les appels d'outils et la sortie d'erreur. Pour une exécution encore en cours, la transcription continue de s'afficher en direct tant que la boîte de dialogue reste ouverte, et un bouton **Plus récents d'abord** inverse l'ordre des événements.
+- Arrêter les exécutions programmées, en file d'attente, en démarrage, en attente d'un répertoire local ou en cours.
+- Relancer une exécution en échec ou annulée.
+
+![Journal d'exécution dans la barre latérale de la tâche : exécutions actives au-dessus des exécutions passées](/images/docs/quickstart-run-result.webp)
+
+![Enregistrement d'exécution : chronologie des états, résumé de l'agent et appels d'outils individuels](/images/docs/task-transcript.webp)
+
+<Callout type="warning">
+Changer l'assigné ou le statut d'une tâche n'arrête pas une exécution déjà démarrée. Pour en interrompre une, arrêtez l'exécution correspondante dans le journal d'exécution. Les exécutions actives ne sont annulées avec une tâche que lorsque la tâche est supprimée.
+</Callout>
+
+## Échecs et relances automatiques
+
+Les défaillances transitoires — un runtime brièvement hors ligne, un redémarrage du daemon, un délai d'exécution dépassé ou une interruption réseau dans l'outil de codage IA — peuvent déclencher une relance automatique. Par défaut, une exécution ordinaire est tentée au plus deux fois ; les interruptions réseau de l'outil ont droit à trois tentatives au maximum.
+
+Les erreurs renvoyées par l'agent lui-même ne sont généralement pas relancées automatiquement. Identifiants expirés, quota épuisé, mauvaise configuration ou modèle incapable de traiter la requête : il faut d'abord corriger la cause, puis relancer manuellement.
+
+Le mode **Exécution seule** d'une automatisation ne relance pas automatiquement, pour éviter tout chevauchement avec la prochaine exécution planifiée. Le mode **Créer une tâche** produit des exécutions de tâche ordinaires, donc les défaillances d'infrastructure sont toujours relancées selon les règles ci-dessus. Les deux modes affichent leur résultat final dans l'historique des exécutions de l'automatisation.
+
+Lorsqu'une tâche n'a aucune autre exécution active et aucune nouvelle relance en attente, un échec fait repasser une tâche `in_progress` à `todo`.
+
+## Référence des motifs d'échec
+
+Les motifs d'échec affichés dans le journal d'exécution et dans les Statistiques se répartissent en deux groupes : les codes sans préfixe sont enregistrés par la plateforme ; les codes `agent_error.*` sont classés à partir des erreurs propres à l'outil de codage IA.
+
+**Côté plateforme**
+
+| Motif | Signification | Que faire |
+| --- | --- | --- |
+| `runtime_offline` | Le runtime est passé hors ligne pendant l'exécution | Rétablissez le runtime et relancez ; voir [Daemon et runtimes](/daemon-runtimes) |
+| `queued_expired` | Le runtime a cessé d'envoyer des signaux de vie pendant plus longtemps que le délai de grâce de reconnexion, et l'exécution était aussi en file d'attente depuis aussi longtemps | Vérifiez que le runtime est en ligne, puis relancez |
+| `runtime_recovery` | Le daemon a récupéré une exécution interrompue après son redémarrage | Relancez directement |
+| `environment_prepare_failed` | Le daemon n'a pas pu préparer l'environnement d'exécution — son répertoire de travail, ou la configuration locale du runtime qui y est écrite | Lisez l'erreur brute pour savoir quelle étape a échoué, puis vérifiez cette machine : espace disque, permissions, répertoire encore utilisé, ou configuration locale de l'outil de codage IA |
+| `cancelled` | Arrêtée manuellement, ou annulée avec un archivage ou une suppression | Rien à faire |
+| `timeout` | Dépassement de la limite de durée d'exécution configurée pour le daemon | Réduisez le périmètre de la tâche, ou ajustez `agent_timeout` du daemon |
+| `iteration_limit` | Plafond d'itérations d'une exécution atteint | Réduisez le périmètre de la tâche |
+| `agent_blocked` | L'agent a signalé qu'il ne peut pas continuer | Fournissez ce que son commentaire demande |
+| `api_invalid_request` | L'API de la plateforme a rejeté une requête invalide | Relancez ; signalez le problème s'il se reproduit |
+| `codex_semantic_inactivity` | Codex n'a produit aucune sortie utile pendant trop longtemps et a été jugé bloqué | Relancez, ou ajustez le délai d'inactivité de Codex |
+
+**Côté outil (`agent_error.*`, préfixe omis)**
+
+| Motif | Signification | Que faire |
+| --- | --- | --- |
+| `provider_auth_or_access` | Échec d'authentification ou accès refusé par le fournisseur du modèle (401/403) | Reconnectez-vous dans cet outil de codage IA, ou vérifiez la clé API |
+| `provider_quota_limit` | Quota ou solde épuisé (402) | Rechargez le compte ou changez de compte |
+| `provider_capacity_or_rate_limit` | Limite de débit atteinte ou capacité insuffisante (429/529) | Réessayez plus tard |
+| `provider_server_error` | Erreur serveur du fournisseur du modèle (5xx) | Réessayez plus tard |
+| `provider_network` | Échec réseau lors de la connexion au fournisseur du modèle | Relance automatique ; vérifiez le réseau de la machine d'exécution si le problème persiste |
+| `model_not_found_or_unavailable` | Le modèle n'existe pas ou est actuellement indisponible | Choisissez un modèle disponible dans les paramètres de l'agent |
+| `context_overflow` | Le contexte a dépassé la fenêtre du modèle | Réduisez le périmètre de la tâche ou le volume d'entrée |
+| `missing_config` | Une configuration requise, comme une clé API, est manquante | Renseignez les variables d'environnement de l'agent ou la configuration de l'outil |
+| `runtime_missing_executable` | L'exécutable de l'outil de codage IA est introuvable | Réinstallez l'outil ; voir [Installer les outils de codage IA](/install-agent-runtime) |
+| `runtime_version_unsupported` | La version de l'outil de codage IA est trop ancienne | Mettez l'outil à jour |
+| `process_failure` | Le processus de l'outil s'est terminé anormalement | Consultez l'enregistrement de l'exécution pour localiser la cause, puis relancez |
+| `empty_or_unparseable_output` | L'outil n'a produit aucune sortie, ou une sortie impossible à analyser | Relancez ; vérifiez l'installation de l'outil si le problème se reproduit |
+| `agent_timeout` | L'outil a été arrêté après être resté trop longtemps sans réponse | Relancez ou réduisez le périmètre de la tâche |
+| `unknown` | Échec non classé | Consultez l'erreur brute dans l'enregistrement de l'exécution |
+
+## Relance manuelle
+
+Cliquer sur le bouton Relancer l'exécution d'une ligne du journal d'exécution invoque **l'agent qui a traité cette exécution à ce moment-là**. Même si la tâche a été réassignée depuis, la relance ne bascule pas vers le nouvel assigné.
+
+Une relance conserve autant que possible les fichiers que l'exécution précédente a déjà écrits dans le répertoire local. Si la session d'origine est toujours sûre et que le même runtime prend en charge la relance, celle-ci poursuit aussi la session précédente. Les erreurs qui corrompent la session, comme un dépassement de contexte ou des requêtes invalides, démarrent plutôt une nouvelle session dans le répertoire de travail d'origine. Lorsque le répertoire d'origine n'existe plus, un nouveau répertoire de travail est utilisé.
+
+Vous pouvez aussi relancer la tâche en cours depuis le CLI :
+
+```bash
+multica issue rerun <issue-id>
+```
+
+Cette forme ne vise pas une exécution passée précise : elle utilise l'agent actuellement assigné à la tâche et démarre avec une nouvelle session et un nouveau répertoire de travail.
+
+## Fin d'exécution et fin de tâche
+
+`completed` signifie seulement que cette exécution précise s'est terminée normalement — cela ne confirme pas que l'objectif de la tâche est atteint. Vous pouvez toujours examiner le résultat, poursuivre la discussion, ajouter des exigences ou déclencher à nouveau l'agent.
+
+Le fait qu'une tâche soit terminée se juge à l'avancement réel du travail et au statut de la tâche.
+
+## Référence rapide des états et délais
+
+Les valeurs ci-dessous reflètent la configuration par défaut du serveur, pour des vérifications croisées rapides lors du dépannage.
+
+| État | Signification | Délai et conséquence |
+| --- | --- | --- |
+| `deferred` | Programmée pour plus tard | Passe à `queued` à l'heure prévue, puis les règles ci-dessous s'appliquent |
+| `queued` | En attente de prise en charge par un runtime | Attend tant que son runtime continue d'envoyer des signaux de vie, et dans tous les cas au moins un délai de grâce de reconnexion après la mise en file d'attente ; n'échoue que lorsque les deux fenêtres sont écoulées, et n'est pas relancée automatiquement |
+| `dispatched` | Prise en charge ; l'outil démarre | Considérée comme en échec après plus de **5 minutes** dans cet état |
+| `waiting_local_directory` | En attente de la libération du verrou du répertoire local | Pas de délai propre ; reprend le processus de démarrage une fois le répertoire libéré |
+| `running` | L'outil de codage IA est en cours d'exécution | Pas de durée maximale fixe ; la vivacité suit le signal de vie du runtime — un toutes les 15 secondes ; un runtime qui perd son signal de vie est marqué hors ligne au plus tard en 3 minutes environ, et ses exécutions échouent avec lui |
+
+La relance automatique ne couvre que les défaillances transitoires ci-dessous, et ne s'applique qu'aux exécutions rattachées à une tâche ou à une discussion (hors mode **Exécution seule** des automatisations) :
+
+| Motif d'échec relancé automatiquement | Nombre maximal de tentatives |
+| --- | --- |
+| Runtime hors ligne | 2 par défaut (première exécution + 1 relance) |
+| Récupérée après un redémarrage du daemon | 2 par défaut |
+| Délai d'exécution dépassé, selon la plateforme | 2 par défaut |
+| Codex bloqué sans sortie utile | 2 par défaut |
+| Échec du téléchargement du bundle de skills | 2 par défaut (le processus de l'agent n'a pas encore démarré à ce stade ; les bundles déjà téléchargés proviennent du cache local) |
+| Interruption réseau de l'outil | Jusqu'à 3 ; la dernière tentative démarre après un délai d'environ 5 secondes |
+
+Tous les autres motifs d'échec (authentification, quota, configuration, modèle, etc.) ne sont jamais relancés automatiquement ; corrigez d'abord la cause, puis relancez manuellement.
+
+## Étapes suivantes
+
+- [Daemon et runtimes](/daemon-runtimes) — sur quel ordinateur une exécution s'effectue.
+- [Assigner des tâches aux agents](/assigning-issues) — déclencher une exécution depuis une tâche.
+- [Mentionner des agents](/mentioning-agents) — ajouter des exigences dans les commentaires ou faire intervenir d'autres agents.

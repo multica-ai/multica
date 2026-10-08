@@ -17,6 +17,22 @@ import { isReservedSlug } from "@multica/core/paths";
 // router to `activeSession.url` with a navigation token. Nothing in this
 // file touches react-router.
 
+/**
+ * One captured scroll position.
+ *
+ * `contentKey` is an optional fingerprint of the rendered content, used by
+ * out-of-DOM scroll sources (the sandboxed HTML-attachment iframe — see
+ * multica-ai#6405) to invalidate restoration when the content changed
+ * (re-upload to the same attachment id). Plain `[data-tab-scroll-root]`
+ * containers leave it undefined; identity comparison (undefined ===
+ * undefined) means their behavior is unchanged.
+ */
+export interface ScrollMementoEntry {
+  top: number;
+  height: number;
+  contentKey?: string;
+}
+
 export interface TabMemento {
   /**
    * Scroll offsets keyed `${routePathname}::${containerKey}` where the
@@ -27,16 +43,36 @@ export interface TabMemento {
    * tab). `height` is the container's scrollHeight at capture time, kept
    * for diagnostics and future pre-sizing heuristics.
    */
-  scroll: Record<string, { top: number; height: number }>;
+  scroll: Record<string, ScrollMementoEntry>;
+  /**
+   * Generic restorable view-state entries, keyed like `scroll`
+   * (`${routePathname}::${entryKey}`). The memento's second kind of cargo:
+   * state that must survive the active tab's unmount but is not a scroll
+   * offset — e.g. "this route's comment-highlight deep link already
+   * landed". Unlike scroll these are not captured by DOM scan; views write
+   * them through the restoration adapter when the state changes
+   * (commitViewState) and read them back at mount.
+   */
+  view: Record<string, string>;
 }
 
 export function emptyMemento(): TabMemento {
-  return { scroll: {} };
+  return { scroll: {}, view: {} };
 }
 
 export function scrollMementoKey(routeKey: string, containerKey: string): string {
   return `${routeKey}::${containerKey}`;
 }
+
+/**
+ * Upper bound on a tab's view-state entries. Scroll entries are bounded by
+ * REPLACE-per-route, but view entries are only cleared by the views that own
+ * them — a long-lived (persisted) tab would otherwise accumulate one entry
+ * per notification ever opened in it. Oldest-written entries evict first;
+ * losing one merely re-runs a deep-link landing that old. Same bound as the
+ * in-session scroll cache (use-issue-detail-scroll-restore).
+ */
+const VIEW_MEMENTO_MAX_ENTRIES = 100;
 
 export interface TabSession {
   id: string;
@@ -54,7 +90,6 @@ export interface TabSession {
    */
   resourceKey: string;
   title: string;
-  icon: string;
   /**
    * Pinned tabs render at the left of the tab bar as icon-only, suppress the
    * X close button, and turn any `navigation.push()` originating in them into
@@ -79,6 +114,32 @@ export interface WorkspaceTabGroup {
   tabs: TabSession[];
   /** Must be a valid tab.id in `tabs`; the empty-tabs state is transient only. */
   activeTabId: string;
+  /**
+   * Recently visited resources in this workspace, newest first. Unlike each
+   * tab's session history, this list is shared by every tab in the group —
+   * the same split browsers make between per-tab Back/Forward and profile
+   * browsing history. Entries are resource-deduplicated and bounded.
+   */
+  browsingHistory: string[];
+  /**
+   * Last resolved display title for each browsing-history resource key.
+   * Kept separately so the URL list stays backward-compatible with v5
+   * payloads while cold-start menus can render useful labels before query
+   * caches refill.
+   */
+  browsingHistoryTitles: Record<string, string>;
+  /**
+   * Previously visited tabs of this group, most recent first. Never contains
+   * `activeTabId`, never contains an id that is no longer in `tabs`.
+   *
+   * This is the group's MRU (most-recently-used) order, and it exists for one
+   * question: where do we land when the active tab goes away? Closing a tab
+   * returns to the tab you were last looking at (MUL-5665), not to a
+   * positional neighbour — opening a detail tab from a list, then closing it,
+   * must put you back on that list even when the tab bar appended the new tab
+   * far away from it.
+   */
+  recentTabIds: string[];
 }
 
 interface TabStore {
@@ -126,16 +187,19 @@ interface TabStore {
   openTab: (
     path: string,
     title: string,
-    icon: string,
     opts?: { activate?: boolean },
   ) => string;
   /** Always creates a new tab (no dedupe) in the active workspace. */
-  addTab: (path: string, title: string, icon: string) => string;
+  addTab: (path: string, title: string) => string;
   /**
    * Close a tab. Finds it across all workspaces (callers like the X button
    * only know the tab id, not the owning workspace). If this is the last
    * tab in its workspace, reseed a default tab so the invariant
    * "every live workspace has at least one tab" holds.
+   *
+   * Closing the ACTIVE tab activates the group's most recently visited
+   * surviving tab (`recentTabIds`), falling back to the positional neighbour
+   * only when that order is empty.
    */
   closeTab: (tabId: string) => void;
   /** Close every other unpinned tab in the target tab's workspace. */
@@ -147,27 +211,45 @@ interface TabStore {
    */
   setActiveTab: (tabId: string) => void;
   /** Patch display metadata of a tab (title-sync). Finds across groups. */
-  updateTab: (tabId: string, patch: Partial<Pick<TabSession, "title" | "icon">>) => void;
+  updateTab: (tabId: string, patch: Partial<Pick<TabSession, "title">>) => void;
   /**
-   * In-tab navigation: update the active session's url/resourceKey/icon and
-   * its virtual history. This is the ONLY way a session's url changes; the
+   * In-tab navigation: update the active session's url/resourceKey and its
+   * virtual history. This is the ONLY way a session's url changes; the
    * Coordinator reconciles the router afterwards.
    */
   navigateActiveSession: (url: string, opts?: { replace?: boolean }) => void;
   /** Session-driven back/forward (there is no router history to pop). */
   goBack: () => void;
   goForward: () => void;
+  /** Jump directly to one entry in the active session's virtual history. */
+  goToHistoryIndex: (historyIndex: number) => void;
   /**
    * Persist captured scroll offsets for one route of a tab (Coordinator, on
    * deactivate / before in-tab navigation). REPLACE semantics per route: all
    * of the route's previous entries are dropped and the given ones written —
    * so a container scrolled back to 0 (captured as "no entry") clears its
-   * stale offset instead of resurrecting it on the next visit.
+   * stale offset instead of resurrecting it on the next visit. External
+   * sources (iframe documents) always write an entry, including top:0, so a
+   * contentKey change can replace a stale positive offset rather than leave
+   * it behind.
    */
   commitScrollMemento: (
     tabId: string,
     routeKey: string,
-    entries: Record<string, { top: number; height: number }>,
+    entries: Record<string, ScrollMementoEntry>,
+  ) => void;
+  /**
+   * Write (string) or clear (undefined) one generic view-state entry for one
+   * route of a tab (views, through the restoration adapter, at the moment
+   * the state changes). Unlike scroll there is no capture pass and no
+   * per-route REPLACE: each entry's lifecycle is owned by the view that
+   * writes it.
+   */
+  commitViewState: (
+    tabId: string,
+    routeKey: string,
+    entryKey: string,
+    value: string | undefined,
   ) => void;
   /**
    * Force-remount the active tab at the same URL: bump mountGeneration.
@@ -178,8 +260,8 @@ interface TabStore {
   /**
    * Close the active tab. The always-safe escape from a route-level crash:
    * unlike reloadActiveTab (remounts the same crashing URL), closing
-   * destroys the crashing session entirely and falls back to a sibling tab
-   * (or a reseeded default if it was the last tab).
+   * destroys the crashing session entirely and falls back to the last tab
+   * you were on (or a reseeded default if it was the last tab).
    */
   closeActiveTab: () => void;
   /**
@@ -212,34 +294,14 @@ interface TabStore {
 }
 
 // ---------------------------------------------------------------------------
-// Route → icon mapping (title comes from document.title, not from here)
+// Session identity helpers
 // ---------------------------------------------------------------------------
-
-const ROUTE_ICONS: Record<string, string> = {
-  inbox: "Inbox",
-  "my-issues": "CircleUser",
-  issues: "ListTodo",
-  projects: "FolderKanban",
-  autopilots: "ListTodo",
-  agents: "Bot",
-  runtimes: "Monitor",
-  skills: "BookOpenText",
-  settings: "Settings",
-};
-
-/**
- * Resolve a route icon from a pathname.
- *
- * Tab URLs are always workspace-scoped: `/{slug}/{route}/...`, so the route
- * segment lives at index 1. Pre-workspace flows (create, invite) are rendered
- * by the window overlay, never as tabs.
- *
- * Title is NOT determined here — it comes from document.title.
- */
-export function resolveRouteIcon(pathname: string): string {
-  const segments = pathname.split("/").filter(Boolean);
-  return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
-}
+//
+// A tab's icon is NOT part of this model. It is derived from `tab.url` at
+// render time via `routeIconForPath` (@multica/views/layout), which shares the
+// route → icon map in `@multica/core/paths` with the sidebar nav — so the two
+// surfaces cannot drift, and no stale icon can survive in persisted state.
+// Title is likewise not determined here; it comes from document.title.
 
 /** Extract the leading workspace slug from a path, or null if the path
  *  isn't workspace-scoped (global path, root, or empty). */
@@ -271,6 +333,32 @@ export function splitTabUrl(url: string): { pathname: string; suffix: string } {
 /** Dedup identity of a tab URL: its pathname (search/hash are view state). */
 export function resourceKeyForUrl(url: string): string {
   return splitTabUrl(url).pathname;
+}
+
+/**
+ * Dedup identity for the workspace-wide browsing history.
+ *
+ * Tab sessions intentionally treat search params as view state, but selecting
+ * an Inbox row changes the content being viewed without leaving /inbox. Keep
+ * those selections distinct in global History while leaving Back/Forward's
+ * pathname-based session semantics unchanged.
+ */
+export function browsingHistoryKeyForUrl(url: string): string {
+  return inboxSelectionKeyForUrl(url) ?? resourceKeyForUrl(url);
+}
+
+function inboxSelectionKeyForUrl(url: string): string | null {
+  const { pathname, suffix } = splitTabUrl(url);
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length !== 2 || segments[1] !== "inbox") return null;
+  if (!suffix.startsWith("?")) return null;
+
+  const hashIndex = suffix.indexOf("#");
+  const search = hashIndex === -1 ? suffix.slice(1) : suffix.slice(1, hashIndex);
+  const selectedKey = new URLSearchParams(search).get("issue");
+  if (!selectedKey) return null;
+
+  return `${pathname}?issue=${encodeURIComponent(selectedKey)}`;
 }
 
 /**
@@ -325,13 +413,12 @@ function createId(): string {
   return createSafeId();
 }
 
-function makeSession(url: string, title: string, icon: string): TabSession {
+function makeSession(url: string, title: string): TabSession {
   return {
     id: createId(),
     url,
     resourceKey: resourceKeyForUrl(url),
     title,
-    icon,
     pinned: false,
     history: { stack: [url], index: 0 },
     memento: emptyMemento(),
@@ -352,12 +439,241 @@ function defaultPathFor(slug: string): string {
 
 function defaultTabFor(slug: string): TabSession {
   const path = defaultPathFor(slug);
-  return makeSession(path, "Issues", resolveRouteIcon(path));
+  return makeSession(path, "Issues");
+}
+
+const BROWSING_HISTORY_MAX_ENTRIES = 100;
+
+function prependBrowsingHistoryEntry(
+  entries: string[],
+  url: string,
+): string[] {
+  if (entries[0] === url) return entries;
+  const resourceKey = browsingHistoryKeyForUrl(url);
+  return [
+    url,
+    ...entries.filter(
+      (entry) => browsingHistoryKeyForUrl(entry) !== resourceKey,
+    ),
+  ].slice(0, BROWSING_HISTORY_MAX_ENTRIES);
+}
+
+function normalizedBrowsingHistoryTitle(title: unknown): string | undefined {
+  if (typeof title !== "string" || title.trim().length === 0) return undefined;
+  return title;
+}
+
+function sameStringRecord(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => left[key] === right[key])
+  );
+}
+
+interface BrowsingVisitOptions {
+  replacedUrl?: string;
+  title?: string;
+}
+
+function withBrowsingVisit(
+  group: WorkspaceTabGroup,
+  slug: string,
+  url: string,
+  options: BrowsingVisitOptions = {},
+): WorkspaceTabGroup {
+  const clean = sanitizeTabPath(url);
+  if (!clean || extractWorkspaceSlug(clean) !== slug) return group;
+  const historyKey = browsingHistoryKeyForUrl(clean);
+  const replacedHistoryKey = options.replacedUrl
+    ? browsingHistoryKeyForUrl(options.replacedUrl)
+    : undefined;
+  const preserveDistinctInboxVisit =
+    options.replacedUrl !== undefined &&
+    replacedHistoryKey !== historyKey &&
+    (inboxSelectionKeyForUrl(clean) !== null ||
+      inboxSelectionKeyForUrl(options.replacedUrl) !== null);
+  const previousEntries = replacedHistoryKey && !preserveDistinctInboxVisit
+    ? group.browsingHistory.filter(
+        (entry) => browsingHistoryKeyForUrl(entry) !== replacedHistoryKey,
+      )
+    : group.browsingHistory;
+  const browsingHistory = prependBrowsingHistoryEntry(
+    previousEntries,
+    clean,
+  );
+  const knownTitle =
+    normalizedBrowsingHistoryTitle(options.title) ??
+    group.browsingHistoryTitles[historyKey] ??
+    (replacedHistoryKey
+      ? group.browsingHistoryTitles[replacedHistoryKey]
+      : undefined);
+  const browsingHistoryTitles: Record<string, string> = {};
+  for (const entry of browsingHistory) {
+    const entryKey = browsingHistoryKeyForUrl(entry);
+    const title =
+      entryKey === historyKey
+        ? knownTitle
+        : group.browsingHistoryTitles[entryKey];
+    if (title) browsingHistoryTitles[entryKey] = title;
+  }
+  return browsingHistory === group.browsingHistory &&
+    sameStringRecord(browsingHistoryTitles, group.browsingHistoryTitles)
+    ? group
+    : { ...group, browsingHistory, browsingHistoryTitles };
+}
+
+function withActiveSessionVisit(
+  group: WorkspaceTabGroup,
+  slug: string,
+): WorkspaceTabGroup {
+  const active = group.tabs.find((tab) => tab.id === group.activeTabId);
+  return active ? withBrowsingVisit(group, slug, active.url) : group;
+}
+
+function withBrowsingNavigation(
+  group: WorkspaceTabGroup,
+  slug: string,
+  current: TabSession,
+  nextUrl: string,
+  replace: boolean,
+): WorkspaceTabGroup {
+  const withOrigin = withBrowsingVisit(group, slug, current.url);
+  return withBrowsingVisit(withOrigin, slug, nextUrl, {
+    replacedUrl: replace ? current.url : undefined,
+  });
+}
+
+function withBrowsingHistoryTitle(
+  group: WorkspaceTabGroup,
+  url: string,
+  title: string,
+): WorkspaceTabGroup {
+  const normalizedTitle = normalizedBrowsingHistoryTitle(title);
+  if (!normalizedTitle) return group;
+  const historyKey = browsingHistoryKeyForUrl(url);
+  if (
+    !group.browsingHistory.some(
+      (entry) => browsingHistoryKeyForUrl(entry) === historyKey,
+    ) ||
+    group.browsingHistoryTitles[historyKey] === normalizedTitle
+  ) {
+    return group;
+  }
+  return {
+    ...group,
+    browsingHistoryTitles: {
+      ...group.browsingHistoryTitles,
+      [historyKey]: normalizedTitle,
+    },
+  };
+}
+
+function normalizeBrowsingHistory(value: unknown, slug: string): string[] {
+  if (!Array.isArray(value)) return [];
+  const result: string[] = [];
+  const seenResources = new Set<string>();
+  for (const candidate of value) {
+    if (typeof candidate !== "string") continue;
+    const clean = sanitizeTabPath(candidate);
+    if (!clean || extractWorkspaceSlug(clean) !== slug) continue;
+    const resourceKey = browsingHistoryKeyForUrl(clean);
+    if (seenResources.has(resourceKey)) continue;
+    seenResources.add(resourceKey);
+    result.push(clean);
+    if (result.length === BROWSING_HISTORY_MAX_ENTRIES) break;
+  }
+  return result;
+}
+
+function normalizeBrowsingHistoryTitles(
+  value: unknown,
+  browsingHistory: string[],
+  tabs: TabSession[],
+): Record<string, string> {
+  const persistedTitles =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const tabTitles = new Map(
+    tabs.flatMap((tab) => {
+      const title = normalizedBrowsingHistoryTitle(tab.title);
+      return title
+        ? [[browsingHistoryKeyForUrl(tab.url), title] as const]
+        : [];
+    }),
+  );
+  const result: Record<string, string> = {};
+  for (const url of browsingHistory) {
+    const historyKey = browsingHistoryKeyForUrl(url);
+    const title =
+      normalizedBrowsingHistoryTitle(persistedTitles[historyKey]) ??
+      tabTitles.get(historyKey);
+    if (title) result[historyKey] = title;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
 // Group helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Build a group with its MRU order reconciled against the new (tabs,
+ * activeTabId) pair. Every write that changes which tab is active or which
+ * tabs exist goes through here, so `recentTabIds` cannot drift from `tabs`.
+ *
+ * `prev` is the group being replaced: when the active tab changes, the
+ * outgoing tab becomes the most recent visit. Pass null when seeding a brand
+ * new group (nothing has been visited yet).
+ */
+function reconcileGroup(
+  prev: WorkspaceTabGroup | null,
+  tabs: TabSession[],
+  activeTabId: string,
+): WorkspaceTabGroup {
+  const live = new Set(tabs.map((t) => t.id));
+  const carried =
+    prev && prev.activeTabId !== activeTabId
+      ? [prev.activeTabId, ...prev.recentTabIds]
+      : (prev?.recentTabIds ?? []);
+
+  const recentTabIds: string[] = [];
+  for (const id of carried) {
+    if (id === activeTabId) continue;
+    if (!live.has(id)) continue; // closed tabs leave the MRU order
+    if (recentTabIds.includes(id)) continue;
+    recentTabIds.push(id);
+  }
+  return {
+    tabs,
+    activeTabId,
+    browsingHistory: prev?.browsingHistory ?? [],
+    browsingHistoryTitles: prev?.browsingHistoryTitles ?? {},
+    recentTabIds,
+  };
+}
+
+/**
+ * Which tab to activate when the active tab closes: the most recently
+ * visited surviving tab. Falls back to the positional neighbour when the MRU
+ * order has nothing live left — the tab was never left and returned to, or
+ * the group was rehydrated from a build that persisted no MRU order.
+ */
+function nextActiveAfterClose(
+  group: WorkspaceTabGroup,
+  nextTabs: TabSession[],
+  closedIndex: number,
+): string {
+  const survivors = new Set(nextTabs.map((t) => t.id));
+  const recent = group.recentTabIds.find((id) => survivors.has(id));
+  if (recent) return recent;
+  return nextTabs[Math.min(closedIndex, nextTabs.length - 1)].id;
+}
 
 function findTabLocation(
   byWorkspace: Record<string, WorkspaceTabGroup>,
@@ -391,7 +707,7 @@ function buildCloseOtherTabsResult(
 
   return {
     ...byWorkspace,
-    [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
+    [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
   };
 }
 
@@ -421,12 +737,18 @@ export const useTabStore = create<TabStore>()(
           // First time entering this workspace — create the group.
           const cleanDesired = desiredPath ? sanitizeTabPath(desiredPath) : null;
           const seedPath = cleanDesired ?? defaultPathFor(slug);
-          const tab = makeSession(seedPath, "Issues", resolveRouteIcon(seedPath));
+          const tab = makeSession(seedPath, "Issues");
+          const nextGroup = withBrowsingVisit(
+            reconcileGroup(null, [tab], tab.id),
+            slug,
+            seedPath,
+            { title: tab.title },
+          );
           set({
             activeWorkspaceSlug: slug,
             byWorkspace: {
               ...byWorkspace,
-              [slug]: { tabs: [tab], activeTabId: tab.id },
+              [slug]: nextGroup,
             },
           });
           return;
@@ -440,24 +762,37 @@ export const useTabStore = create<TabStore>()(
             const key = resourceKeyForUrl(clean);
             const match = existing.tabs.find((t) => t.resourceKey === key);
             if (match) {
+              const nextGroup = withBrowsingVisit(
+                reconcileGroup(existing, existing.tabs, match.id),
+                slug,
+                match.url,
+                { title: match.title },
+              );
               set({
                 activeWorkspaceSlug: slug,
                 byWorkspace: {
                   ...byWorkspace,
-                  [slug]: { ...existing, activeTabId: match.id },
+                  [slug]: nextGroup,
                 },
               });
               return;
             }
-            const tab = makeSession(clean, "Issues", resolveRouteIcon(clean));
+            const tab = makeSession(clean, "Issues");
+            const nextGroup = withBrowsingVisit(
+              reconcileGroup(
+                existing,
+                [...existing.tabs, tab],
+                tab.id,
+              ),
+              slug,
+              clean,
+              { title: tab.title },
+            );
             set({
               activeWorkspaceSlug: slug,
               byWorkspace: {
                 ...byWorkspace,
-                [slug]: {
-                  tabs: [...existing.tabs, tab],
-                  activeTabId: tab.id,
-                },
+                [slug]: nextGroup,
               },
             });
             return;
@@ -468,7 +803,7 @@ export const useTabStore = create<TabStore>()(
         set({ activeWorkspaceSlug: slug });
       },
 
-      openTab(path, title, icon, opts) {
+      openTab(path, title, opts) {
         const { activeWorkspaceSlug, byWorkspace } = get();
         const clean = sanitizeTabPath(path);
         if (!activeWorkspaceSlug || !clean) return "";
@@ -480,43 +815,92 @@ export const useTabStore = create<TabStore>()(
         const key = resourceKeyForUrl(clean);
         const existing = group.tabs.find((t) => t.resourceKey === key);
         if (existing) {
+          const historyBase = withActiveSessionVisit(
+            group,
+            activeWorkspaceSlug,
+          );
+          const nextGroup = withBrowsingVisit(
+            reconcileGroup(historyBase, group.tabs, existing.id),
+            activeWorkspaceSlug,
+            existing.url,
+            { title: existing.title },
+          );
           set({
             byWorkspace: {
               ...byWorkspace,
-              [activeWorkspaceSlug]: { ...group, activeTabId: existing.id },
+              [activeWorkspaceSlug]: nextGroup,
             },
           });
           return existing.id;
         }
 
-        const tab = makeSession(clean, title, icon);
+        const tab = makeSession(clean, title);
+        // Insert immediately right of the opener (the active tab) — browser
+        // convention for cmd/middle/menu opens (MUL-5860) — rather than
+        // appending. The pinned-first invariant caps the left edge: a pinned
+        // opener's "right" is the start of the unpinned zone. The explicit
+        // "+" button appends instead (see addTab).
+        const activeIndex = group.tabs.findIndex(
+          (t) => t.id === group.activeTabId,
+        );
+        const insertAt =
+          activeIndex >= 0
+            ? Math.max(activeIndex + 1, pinnedBoundary(group.tabs))
+            : group.tabs.length;
+        const nextTabs = [
+          ...group.tabs.slice(0, insertAt),
+          tab,
+          ...group.tabs.slice(insertAt),
+        ];
+        const historyBase = withActiveSessionVisit(
+          group,
+          activeWorkspaceSlug,
+        );
+        const nextGroup = withBrowsingVisit(
+          reconcileGroup(
+            historyBase,
+            nextTabs,
+            opts?.activate === true ? tab.id : group.activeTabId,
+          ),
+          activeWorkspaceSlug,
+          clean,
+          { title: tab.title },
+        );
         set({
           byWorkspace: {
             ...byWorkspace,
-            [activeWorkspaceSlug]: {
-              tabs: [...group.tabs, tab],
-              activeTabId: opts?.activate === true ? tab.id : group.activeTabId,
-            },
+            [activeWorkspaceSlug]: nextGroup,
           },
         });
         return tab.id;
       },
 
-      addTab(path, title, icon) {
+      addTab(path, title) {
         const { activeWorkspaceSlug, byWorkspace } = get();
         const clean = sanitizeTabPath(path);
         if (!activeWorkspaceSlug || !clean) return "";
         const group = byWorkspace[activeWorkspaceSlug];
         if (!group) return "";
 
-        const tab = makeSession(clean, title, icon);
+        const tab = makeSession(clean, title);
+        const historyBase = withActiveSessionVisit(
+          group,
+          activeWorkspaceSlug,
+        );
+        const nextGroup = withBrowsingVisit(
+          reconcileGroup(
+            historyBase,
+            [...group.tabs, tab],
+            group.activeTabId,
+          ),
+          activeWorkspaceSlug,
+          clean,
+          { title: tab.title },
+        );
         set({
           byWorkspace: {
             ...byWorkspace,
-            [activeWorkspaceSlug]: {
-              tabs: [...group.tabs, tab],
-              activeTabId: group.activeTabId,
-            },
+            [activeWorkspaceSlug]: nextGroup,
           },
         });
         return tab.id;
@@ -533,10 +917,16 @@ export const useTabStore = create<TabStore>()(
           // always has at least one tab. Closing a workspace as an explicit
           // action is a separate concern (Leave/Delete in Settings).
           const fresh = defaultTabFor(slug);
+          const nextGroup = withBrowsingVisit(
+            reconcileGroup(group, [fresh], fresh.id),
+            slug,
+            fresh.url,
+            { title: fresh.title },
+          );
           set({
             byWorkspace: {
               ...byWorkspace,
-              [slug]: { tabs: [fresh], activeTabId: fresh.id },
+              [slug]: nextGroup,
             },
           });
           return;
@@ -545,13 +935,13 @@ export const useTabStore = create<TabStore>()(
         const nextTabs = group.tabs.filter((t) => t.id !== tabId);
         const nextActiveTabId =
           group.activeTabId === tabId
-            ? nextTabs[Math.min(index, nextTabs.length - 1)].id
+            ? nextActiveAfterClose(group, nextTabs, index)
             : group.activeTabId;
 
         set({
           byWorkspace: {
             ...byWorkspace,
-            [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
+            [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
           },
         });
       },
@@ -573,7 +963,7 @@ export const useTabStore = create<TabStore>()(
           activeWorkspaceSlug: slug,
           byWorkspace: {
             ...byWorkspace,
-            [slug]: { ...group, activeTabId: tabId },
+            [slug]: reconcileGroup(group, group.tabs, tabId),
           },
         });
       },
@@ -585,15 +975,19 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
         const current = group.tabs[index];
         const next: TabSession = { ...current, ...patch };
-        if (next.title === current.title && next.icon === current.icon) {
-          return;
-        }
-        const nextTabs = [...group.tabs];
-        nextTabs[index] = next;
+        const titleChanged = next.title !== current.title;
+        const nextTabs = titleChanged ? [...group.tabs] : group.tabs;
+        if (titleChanged) nextTabs[index] = next;
+        const nextGroup = withBrowsingHistoryTitle(
+          titleChanged ? { ...group, tabs: nextTabs } : group,
+          next.url,
+          next.title,
+        );
+        if (!titleChanged && nextGroup === group) return;
         set({
           byWorkspace: {
             ...byWorkspace,
-            [slug]: { ...group, tabs: nextTabs },
+            [slug]: nextGroup,
           },
         });
       },
@@ -630,15 +1024,21 @@ export const useTabStore = create<TabStore>()(
           ...current,
           url: clean,
           resourceKey: resourceKeyForUrl(clean),
-          icon: resolveRouteIcon(splitTabUrl(clean).pathname),
           history: { stack, index: historyIndex },
         };
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
+        const nextGroup = withBrowsingNavigation(
+          { ...group, tabs: nextTabs },
+          activeWorkspaceSlug,
+          current,
+          clean,
+          replace,
+        );
         set({
           byWorkspace: {
             ...byWorkspace,
-            [activeWorkspaceSlug]: { ...group, tabs: nextTabs },
+            [activeWorkspaceSlug]: nextGroup,
           },
         });
       },
@@ -649,6 +1049,10 @@ export const useTabStore = create<TabStore>()(
 
       goForward() {
         stepHistory(get, set, +1);
+      },
+
+      goToHistoryIndex(historyIndex) {
+        setHistoryIndex(get, set, historyIndex);
       },
 
       commitScrollMemento(tabId, routeKey, entries) {
@@ -677,12 +1081,59 @@ export const useTabStore = create<TabStore>()(
           nextKeys.every((k) => {
             const prev = current.memento.scroll[k];
             const next = nextScroll[k];
-            return prev !== undefined && prev.top === next.top && prev.height === next.height;
+            return (
+              prev !== undefined &&
+              prev.top === next.top &&
+              prev.height === next.height &&
+              prev.contentKey === next.contentKey
+            );
           });
         if (unchanged) return;
 
         const nextTabs = [...group.tabs];
-        nextTabs[index] = { ...current, memento: { scroll: nextScroll } };
+        nextTabs[index] = {
+          ...current,
+          memento: { ...current.memento, scroll: nextScroll },
+        };
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: { ...group, tabs: nextTabs },
+          },
+        });
+      },
+
+      commitViewState(tabId, routeKey, entryKey, value) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
+        const current = group.tabs[index];
+
+        const key = scrollMementoKey(routeKey, entryKey);
+        // Skip the write when nothing changed (covers clearing an absent
+        // entry) — avoids a re-entrant store tick from inside a view effect.
+        if (current.memento.view[key] === value) return;
+
+        const nextView = { ...current.memento.view };
+        if (value === undefined) {
+          delete nextView[key];
+        } else {
+          // Re-writing an existing key refreshes its age (delete-then-set
+          // moves it to the end of the insertion order the eviction reads).
+          delete nextView[key];
+          nextView[key] = value;
+          const keys = Object.keys(nextView);
+          for (let i = 0; i < keys.length - VIEW_MEMENTO_MAX_ENTRIES; i++) {
+            delete nextView[keys[i]];
+          }
+        }
+
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = {
+          ...current,
+          memento: { ...current.memento, view: nextView },
+        };
         set({
           byWorkspace: {
             ...byWorkspace,
@@ -798,10 +1249,12 @@ export const useTabStore = create<TabStore>()(
           const fallbackSlug = validSlugs.values().next().value;
           if (fallbackSlug) {
             const fresh = defaultTabFor(fallbackSlug);
-            nextByWorkspace[fallbackSlug] = {
-              tabs: [fresh],
-              activeTabId: fresh.id,
-            };
+            nextByWorkspace[fallbackSlug] = withBrowsingVisit(
+              reconcileGroup(null, [fresh], fresh.id),
+              fallbackSlug,
+              fresh.url,
+              { title: fresh.title },
+            );
             nextActive = fallbackSlug;
             changed = true;
           }
@@ -817,7 +1270,7 @@ export const useTabStore = create<TabStore>()(
     }),
     {
       name: "multica_tabs",
-      version: 4,
+      version: 5,
       storage: createJSONStorage(() => createPersistStorage(defaultStorage)),
       migrate: (persistedState, version) => {
         // v1 → v2: flat `tabs` array → per-workspace grouping.
@@ -839,7 +1292,13 @@ export const useTabStore = create<TabStore>()(
         if (version < 4 && state && typeof state === "object") {
           state = migrateV3ToV4(state as V3Persisted);
         }
-        return state as V4Persisted;
+        // v4 → v5: add workspace browsing history. Existing per-tab stacks
+        // provide a best-effort seed so upgrading users do not lose every
+        // known destination even though v4 had no cross-tab timestamps.
+        if (version < 5 && state && typeof state === "object") {
+          state = migrateV4ToV5(state as V4Persisted);
+        }
+        return state as V5Persisted;
       },
       partialize: (state) => ({
         activeWorkspaceSlug: state.activeWorkspaceSlug,
@@ -850,11 +1309,16 @@ export const useTabStore = create<TabStore>()(
             slug,
             {
               activeTabId: group.activeTabId,
+              // Persisted so the first close after a restart still lands on
+              // the tab you were last looking at rather than falling back to
+              // the positional neighbour.
+              recentTabIds: group.recentTabIds,
+              browsingHistory: group.browsingHistory,
+              browsingHistoryTitles: group.browsingHistoryTitles,
               tabs: group.tabs.map((t) => ({
                 id: t.id,
                 url: t.url,
                 title: t.title,
-                icon: t.icon,
                 pinned: t.pinned,
                 history: t.history,
                 memento: t.memento,
@@ -863,74 +1327,138 @@ export const useTabStore = create<TabStore>()(
           ]),
         ),
       }),
-      merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<V4Persisted> | undefined;
-        if (!persisted?.byWorkspace) return currentState;
-
-        const byWorkspace: Record<string, WorkspaceTabGroup> = {};
-        for (const [slug, pGroup] of Object.entries(persisted.byWorkspace)) {
-          const tabs: TabSession[] = [];
-          for (const pTab of pGroup.tabs) {
-            const clean = sanitizeTabPath(pTab.url);
-            // Persisted url may have come from a stale version or a
-            // manual edit. Drop rather than rewrite so we never silently
-            // put users on a url that doesn't match the group's slug.
-            if (!clean || extractWorkspaceSlug(clean) !== slug) {
-              console.warn(
-                `[tab-store] dropping persisted tab "${pTab.url}" from ` +
-                  `group "${slug}" — url/slug mismatch`,
-              );
-              continue;
-            }
-            const stack =
-              Array.isArray(pTab.history?.stack) && pTab.history.stack.length > 0
-                ? pTab.history.stack
-                : [clean];
-            const index = Math.min(
-              Math.max(pTab.history?.index ?? stack.length - 1, 0),
-              stack.length - 1,
-            );
-            tabs.push({
-              id: pTab.id,
-              url: clean,
-              resourceKey: resourceKeyForUrl(clean),
-              title: pTab.title,
-              icon: pTab.icon,
-              pinned: pTab.pinned === true,
-              history: { stack, index },
-              memento:
-                pTab.memento && typeof pTab.memento.scroll === "object"
-                  ? pTab.memento
-                  : emptyMemento(),
-            });
-          }
-          if (tabs.length === 0) continue;
-          // Enforce the "pinned first" invariant on rehydration in case a
-          // user (or a buggy older write) persisted the pinned tabs out of
-          // order. Stable sort preserves intra-group order.
-          tabs.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
-          const activeTabId = tabs.some((t) => t.id === pGroup.activeTabId)
-            ? pGroup.activeTabId
-            : tabs[0].id;
-          byWorkspace[slug] = { tabs, activeTabId };
-        }
-
-        const activeWorkspaceSlug =
-          persisted.activeWorkspaceSlug && byWorkspace[persisted.activeWorkspaceSlug]
-            ? persisted.activeWorkspaceSlug
-            : (Object.keys(byWorkspace)[0] ?? null);
-
-        return { ...currentState, byWorkspace, activeWorkspaceSlug };
-      },
+      merge: (persistedState, currentState) =>
+        mergePersistedTabs(persistedState, currentState),
     },
   ),
 );
+
+/** The persisted slice of the store — what `merge` reads and rebuilds. */
+interface PersistedTabState {
+  activeWorkspaceSlug: string | null;
+  byWorkspace: Record<string, WorkspaceTabGroup>;
+}
+
+/**
+ * Rebuild live sessions from a persisted payload.
+ *
+ * Every persisted field is treated as untrusted: urls are re-sanitized and
+ * checked against their group's slug, history indices are clamped, and a
+ * missing memento is replaced. Fields that are *derivable* are not read at
+ * all — notably `icon`, which older builds persisted and which may name the
+ * icon a route used to have. The tab bar computes the icon from `url`, so a
+ * stale or unknown persisted name cannot survive rehydration.
+ *
+ * Exported for tests; production calls it through the persist `merge` hook.
+ */
+export function mergePersistedTabs<T extends PersistedTabState>(
+  persistedState: unknown,
+  currentState: T,
+): T {
+  const persisted = persistedState as Partial<V5Persisted> | undefined;
+  if (!persisted?.byWorkspace) return currentState;
+
+  const byWorkspace: Record<string, WorkspaceTabGroup> = {};
+  for (const [slug, pGroup] of Object.entries(persisted.byWorkspace)) {
+    const tabs: TabSession[] = [];
+    for (const pTab of pGroup.tabs) {
+      const clean = sanitizeTabPath(pTab.url);
+      // Persisted url may have come from a stale version or a
+      // manual edit. Drop rather than rewrite so we never silently
+      // put users on a url that doesn't match the group's slug.
+      if (!clean || extractWorkspaceSlug(clean) !== slug) {
+        console.warn(
+          `[tab-store] dropping persisted tab "${pTab.url}" from ` +
+            `group "${slug}" — url/slug mismatch`,
+        );
+        continue;
+      }
+      const stack =
+        Array.isArray(pTab.history?.stack) && pTab.history.stack.length > 0
+          ? pTab.history.stack
+          : [clean];
+      const index = Math.min(
+        Math.max(pTab.history?.index ?? stack.length - 1, 0),
+        stack.length - 1,
+      );
+      tabs.push({
+        id: pTab.id,
+        url: clean,
+        resourceKey: resourceKeyForUrl(clean),
+        title: pTab.title,
+        pinned: pTab.pinned === true,
+        history: { stack, index },
+        memento:
+          pTab.memento && typeof pTab.memento.scroll === "object"
+            ? {
+                scroll: pTab.memento.scroll,
+                // Persisted by builds that predate the generic view-state
+                // entries — normalize to the current shape.
+                view:
+                  typeof pTab.memento.view === "object" && pTab.memento.view
+                    ? pTab.memento.view
+                    : {},
+              }
+            : emptyMemento(),
+      });
+    }
+    if (tabs.length === 0) continue;
+    // Enforce the "pinned first" invariant on rehydration in case a
+    // user (or a buggy older write) persisted the pinned tabs out of
+    // order. Stable sort preserves intra-group order.
+    tabs.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
+    const activeTabId = tabs.some((t) => t.id === pGroup.activeTabId)
+      ? pGroup.activeTabId
+      : tabs[0].id;
+    // reconcileGroup filters the persisted MRU order down to live tab ids
+    // (tabs dropped just above), drops the active tab from it, and dedupes.
+    const browsingHistory = normalizeBrowsingHistory(
+      pGroup.browsingHistory,
+      slug,
+    );
+    byWorkspace[slug] = reconcileGroup(
+      {
+        tabs,
+        activeTabId,
+        recentTabIds: Array.isArray(pGroup.recentTabIds)
+          ? pGroup.recentTabIds.filter((id) => typeof id === "string")
+          : [],
+        browsingHistory,
+        browsingHistoryTitles: normalizeBrowsingHistoryTitles(
+          pGroup.browsingHistoryTitles,
+          browsingHistory,
+          tabs,
+        ),
+      },
+      tabs,
+      activeTabId,
+    );
+  }
+
+  const activeWorkspaceSlug =
+    persisted.activeWorkspaceSlug && byWorkspace[persisted.activeWorkspaceSlug]
+      ? persisted.activeWorkspaceSlug
+      : (Object.keys(byWorkspace)[0] ?? null);
+
+  return { ...currentState, byWorkspace, activeWorkspaceSlug };
+}
 
 function stepHistory(
   get: () => TabStore,
   set: (partial: Partial<TabStore>) => void,
   delta: -1 | 1,
 ) {
+  const active = getActiveTab(get());
+  if (!active) return;
+  setHistoryIndex(get, set, active.history.index + delta);
+}
+
+function setHistoryIndex(
+  get: () => TabStore,
+  set: (partial: Partial<TabStore>) => void,
+  historyIndex: number,
+) {
+  if (!Number.isInteger(historyIndex)) return;
   const { activeWorkspaceSlug, byWorkspace } = get();
   if (!activeWorkspaceSlug) return;
   const group = byWorkspace[activeWorkspaceSlug];
@@ -938,22 +1466,33 @@ function stepHistory(
   const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
   if (index < 0) return;
   const current = group.tabs[index];
-  const nextIndex = current.history.index + delta;
-  if (nextIndex < 0 || nextIndex >= current.history.stack.length) return;
-  const url = current.history.stack[nextIndex];
+  if (
+    historyIndex === current.history.index ||
+    historyIndex < 0 ||
+    historyIndex >= current.history.stack.length
+  ) {
+    return;
+  }
+  const url = current.history.stack[historyIndex];
   const next: TabSession = {
     ...current,
     url,
     resourceKey: resourceKeyForUrl(url),
-    icon: resolveRouteIcon(splitTabUrl(url).pathname),
-    history: { ...current.history, index: nextIndex },
+    history: { ...current.history, index: historyIndex },
   };
   const nextTabs = [...group.tabs];
   nextTabs[index] = next;
+  const nextGroup = withBrowsingNavigation(
+    { ...group, tabs: nextTabs },
+    activeWorkspaceSlug,
+    current,
+    url,
+    false,
+  );
   set({
     byWorkspace: {
       ...byWorkspace,
-      [activeWorkspaceSlug]: { ...group, tabs: nextTabs },
+      [activeWorkspaceSlug]: nextGroup,
     },
   });
 }
@@ -1013,15 +1552,31 @@ interface V4PersistedTab {
   id: string;
   url: string;
   title: string;
-  icon: string;
+  /**
+   * Legacy. v4 payloads written before route icons became derived state still
+   * carry an icon name, and that name can be stale (a tab opened on an older
+   * build kept whatever the route mapped to then). It is never read on
+   * rehydration — the tab bar derives the icon from `url` — and `partialize`
+   * drops it on the next write.
+   */
+  icon?: string;
   pinned: boolean;
   history: { stack: string[]; index: number };
-  memento: TabMemento;
+  /** `view` is absent in payloads written before the generic view-state
+   *  entries existed; rehydration normalizes it to `{}`. */
+  memento: { scroll: TabMemento["scroll"]; view?: TabMemento["view"] };
 }
 
 interface V4PersistedGroup {
   tabs: V4PersistedTab[];
   activeTabId: string;
+  /**
+   * MRU activation order. Optional: payloads written before MUL-5665 don't
+   * have it, and an absent order simply means the first close of that group
+   * falls back to the positional neighbour. Re-validated on rehydration, so
+   * a stale id from a hand-edited payload can never become the active tab.
+   */
+  recentTabIds?: string[];
 }
 
 interface V4Persisted {
@@ -1029,16 +1584,65 @@ interface V4Persisted {
   byWorkspace: Record<string, V4PersistedGroup>;
 }
 
+interface V5PersistedGroup extends V4PersistedGroup {
+  browsingHistory: string[];
+  browsingHistoryTitles?: Record<string, string>;
+}
+
+interface V5Persisted {
+  activeWorkspaceSlug: string | null;
+  byWorkspace: Record<string, V5PersistedGroup>;
+}
+
+export function migrateV4ToV5(v4: V4Persisted): V5Persisted {
+  const byWorkspace: Record<string, V5PersistedGroup> = {};
+  for (const [slug, group] of Object.entries(v4.byWorkspace ?? {})) {
+    const byId = new Map(group.tabs.map((tab) => [tab.id, tab]));
+    const orderedTabIds = [
+      group.activeTabId,
+      ...(group.recentTabIds ?? []),
+      ...group.tabs.map((tab) => tab.id),
+    ];
+    const seenTabIds = new Set<string>();
+    const candidates: string[] = [];
+    for (const tabId of orderedTabIds) {
+      if (seenTabIds.has(tabId)) continue;
+      seenTabIds.add(tabId);
+      const tab = byId.get(tabId);
+      if (!tab) continue;
+      candidates.push(tab.url, ...[...tab.history.stack].reverse());
+    }
+    byWorkspace[slug] = {
+      ...group,
+      browsingHistory: normalizeBrowsingHistory(candidates, slug),
+      browsingHistoryTitles: Object.fromEntries(
+        group.tabs.flatMap((tab) => {
+          const title = normalizedBrowsingHistoryTitle(tab.title);
+          return title
+            ? [[browsingHistoryKeyForUrl(tab.url), title] as const]
+            : [];
+        }),
+      ),
+    };
+  }
+  return {
+    activeWorkspaceSlug: v4.activeWorkspaceSlug ?? null,
+    byWorkspace,
+  };
+}
+
 export function migrateV3ToV4(v3: V3Persisted): V4Persisted {
   const byWorkspace: Record<string, V4PersistedGroup> = {};
   for (const [slug, group] of Object.entries(v3.byWorkspace ?? {})) {
     byWorkspace[slug] = {
       activeTabId: group.activeTabId,
+      // `icon` is deliberately not carried over: it is derived from the url
+      // at render time, and a v3 payload's icon may predate the current
+      // route → icon map.
       tabs: group.tabs.map((t) => ({
         id: t.id,
         url: t.path,
         title: t.title,
-        icon: t.icon,
         pinned: t.pinned,
         history: { stack: [t.path], index: 0 },
         memento: emptyMemento(),
@@ -1159,13 +1763,13 @@ export function useActiveTabUrl(): string | null {
 }
 
 /**
- * History tracking for the active tab as primitives. Subscribers re-render
- * only when the numeric index / length change (i.e. on actual navigations),
- * not on unrelated store updates.
+ * History tracking for the active tab. The stack reference changes only on
+ * actual navigation, so subscribers do not re-render for unrelated updates.
  */
 export function useActiveTabHistory(): {
   historyIndex: number;
   historyLength: number;
+  historyEntries: string[];
 } {
   const historyIndex = useTabStore(
     (s) => getActiveTab(s)?.history.index ?? 0,
@@ -1173,5 +1777,33 @@ export function useActiveTabHistory(): {
   const historyLength = useTabStore(
     (s) => getActiveTab(s)?.history.stack.length ?? 1,
   );
-  return { historyIndex, historyLength };
+  const historyEntries = useTabStore(
+    (s) => getActiveTab(s)?.history.stack ?? EMPTY_HISTORY_ENTRIES,
+  );
+  return { historyIndex, historyLength, historyEntries };
+}
+
+const EMPTY_HISTORY_ENTRIES: string[] = [];
+const EMPTY_BROWSING_HISTORY_TITLES: Record<string, string> = {};
+
+/** Workspace browsing history shared by all tabs, newest first. */
+export function useActiveBrowsingHistory(): string[] {
+  return useTabStore((s) => {
+    if (!s.activeWorkspaceSlug) return EMPTY_HISTORY_ENTRIES;
+    return (
+      s.byWorkspace[s.activeWorkspaceSlug]?.browsingHistory ??
+      EMPTY_HISTORY_ENTRIES
+    );
+  });
+}
+
+/** Persisted display-title fallbacks keyed by browsing-history resource. */
+export function useActiveBrowsingHistoryTitles(): Record<string, string> {
+  return useTabStore((s) => {
+    if (!s.activeWorkspaceSlug) return EMPTY_BROWSING_HISTORY_TITLES;
+    return (
+      s.byWorkspace[s.activeWorkspaceSlug]?.browsingHistoryTitles ??
+      EMPTY_BROWSING_HISTORY_TITLES
+    );
+  });
 }

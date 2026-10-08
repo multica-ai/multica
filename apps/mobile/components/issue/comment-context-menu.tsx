@@ -22,6 +22,7 @@ import { ActionSheetIOS, Alert } from "react-native";
 import { router } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
+import { useQuery } from "@tanstack/react-query";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -29,11 +30,14 @@ import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useActorLookup } from "@/data/use-actor-name";
 import {
+  commentDeleteKeepsReplies,
   useDeleteComment,
   useResolveComment,
   useToggleCommentReaction,
 } from "@/data/mutations/issues";
+import { appConfigOptions } from "@/data/queries/billing";
 import { QUICK_EMOJIS } from "@/lib/quick-emojis";
+import { i18n, useT } from "@/lib/i18n";
 
 const QUICK_ROW_SIZE = 5;
 
@@ -49,6 +53,13 @@ export function useCommentLongPress(
   const deleteComment = useDeleteComment(issueId);
   const resolveComment = useResolveComment(issueId);
   const { getName } = useActorLookup();
+  // Same config cache useDeleteComment reads when it runs, so the copy and
+  // the delete route agree.
+  const { data: keepReplies = false } = useQuery({
+    ...appConfigOptions(),
+    select: commentDeleteKeepsReplies,
+  });
+  const { t } = useT("issues");
 
   const onLongPress = useCallback(() => {
     const isOwn = entry.actor_type === "member" && entry.actor_id === userId;
@@ -79,20 +90,20 @@ export function useCommentLongPress(
       actions.push(action);
     };
 
-    push("Reply", { kind: "reply" });
-    push("React…", { kind: "react" });
+    push(t("comments.reply"), { kind: "reply" });
+    push(t("comments.react"), { kind: "react" });
     if (hasContent) {
-      push("Copy", { kind: "copy" });
-      push("Select Text", { kind: "select" });
+      push(t("comments.copy"), { kind: "copy" });
+      push(t("comments.select_text"), { kind: "select" });
     }
-    if (canCopyLink) push("Copy Link", { kind: "copyLink" });
+    if (canCopyLink) push(t("menu.copy_link"), { kind: "copyLink" });
     if (isRoot) {
-      push(resolved ? "Unresolve Thread" : "Resolve Thread", {
+      push(resolved ? t("comments.unresolve") : t("comments.resolve"), {
         kind: "resolve",
       });
     }
-    if (isOwn) push("Delete", { kind: "delete" });
-    push("Cancel", { kind: "cancel" });
+    if (isOwn) push(t("common:actions.delete"), { kind: "delete" });
+    push(t("common:actions.cancel"), { kind: "cancel" });
 
     const cancelButtonIndex = options.length - 1;
     const destructiveButtonIndex = isOwn
@@ -118,13 +129,15 @@ export function useCommentLongPress(
             // Set the reply target — the InlineCommentComposer subscribes
             // to this store, auto-expands, and threads the next submit
             // under entry.id via useCreateComment's `parentId`.
-            const actorName = getName(
-              entry.actor_type as "member" | "agent" | null | undefined,
-              entry.actor_id,
-            );
+            const actorName =
+              entry.actor_name ||
+              getName(
+                entry.actor_type as "member" | "agent" | null | undefined,
+                entry.actor_id,
+              );
             useReplyTargetStore.getState().setTarget({
               commentId: entry.id,
-              actorName: actorName || "comment",
+              actorName: actorName || t("comments.fallback_actor"),
               preview: entry.content ?? "",
             });
             return;
@@ -174,12 +187,16 @@ export function useCommentLongPress(
             return;
           case "delete":
             Alert.alert(
-              "Delete comment?",
-              "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+              t("comments.delete_title"),
+              // Promise kept replies only when the server declares it (#8296);
+              // older servers delete the replies too.
+              keepReplies
+                ? t("comments.delete_keep_replies")
+                : t("comments.delete_with_replies"),
               [
-                { text: "Cancel", style: "cancel" },
+                { text: t("common:actions.cancel"), style: "cancel" },
                 {
-                  text: "Delete",
+                  text: t("common:actions.delete"),
                   style: "destructive",
                   onPress: () => deleteComment.mutate(entry.id),
                 },
@@ -198,6 +215,9 @@ export function useCommentLongPress(
     toggleReaction,
     deleteComment,
     resolveComment,
+    getName,
+    keepReplies,
+    t,
   ]);
 
   return { onLongPress, isPressed };
@@ -213,7 +233,12 @@ function presentReactSheet(args: {
 }) {
   const { entry, reactions, userId, wsSlug, issueId, toggle } = args;
   const emojis = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE);
-  const options = [...emojis, "More reactions…", "Cancel"];
+  const t = i18n.t.bind(i18n);
+  const options = [
+    ...emojis,
+    t("issues:comments.more_reactions"),
+    t("common:actions.cancel"),
+  ];
   const cancelButtonIndex = options.length - 1;
 
   ActionSheetIOS.showActionSheetWithOptions(

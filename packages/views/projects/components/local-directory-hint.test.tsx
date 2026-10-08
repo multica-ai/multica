@@ -49,6 +49,7 @@ function makeLocalDirectoryResource(overrides: {
   daemon_id: string;
   local_path: string;
   label?: string;
+  execution_mode?: string;
 }): ProjectResource {
   return {
     id: `res-${overrides.local_path}`,
@@ -59,6 +60,9 @@ function makeLocalDirectoryResource(overrides: {
       daemon_id: overrides.daemon_id,
       local_path: overrides.local_path,
       ...(overrides.label ? { label: overrides.label } : {}),
+      ...(overrides.execution_mode
+        ? { execution_mode: overrides.execution_mode }
+        : {}),
     },
     label: null,
     position: 0,
@@ -113,6 +117,86 @@ describe("LocalDirectoryHint", () => {
       expect(screen.getByText("work")).toBeInTheDocument();
     });
     expect(screen.getByText(/Users\/foo\/work/)).toBeInTheDocument();
+  });
+
+  // The banner used to say "in-place" for every local_directory resource.
+  // Under worktree mode that is simply false — the agent runs in an isolated
+  // worktree and the named directory does not change — and it points the user
+  // at the wrong place to look for the work.
+  it("describes worktree mode as isolated, never in-place", async () => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockDaemonStatus.running = true;
+    mockListResources.mockResolvedValue({
+      resources: [
+        makeLocalDirectoryResource({
+          daemon_id: "daemon-A",
+          local_path: "/Users/foo/work",
+          label: "work",
+          execution_mode: "worktree",
+        }),
+      ],
+      total: 1,
+    });
+    renderHint("proj-1");
+    await waitFor(() => {
+      expect(screen.getByText(/isolated worktree of/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/in-place/i)).not.toBeInTheDocument();
+    // The mode's whole point is that results arrive as a branch; a user who
+    // only reads this banner still has to know where to find them.
+    expect(screen.getByText(/agent\/….*branch/i)).toBeInTheDocument();
+    // The path stays: it identifies the repository the branch lands in.
+    expect(screen.getByText(/Users\/foo\/work/)).toBeInTheDocument();
+  });
+
+  it("describes an explicit in_place resource as in-place", async () => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockDaemonStatus.running = true;
+    mockListResources.mockResolvedValue({
+      resources: [
+        makeLocalDirectoryResource({
+          daemon_id: "daemon-A",
+          local_path: "/Users/foo/work",
+          label: "work",
+          execution_mode: "in_place",
+        }),
+      ],
+      total: 1,
+    });
+    renderHint("proj-1");
+    await waitFor(() => {
+      expect(screen.getByText(/in-place/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/isolated worktree/i)).not.toBeInTheDocument();
+  });
+
+  // Absent (pre-mode resources) and anything a newer server might send both
+  // mean "assume the working copy is at stake" — claiming isolation we cannot
+  // verify is the one wrong answer here.
+  it("treats an absent or unknown mode as in-place", async () => {
+    mockDaemonStatus.daemonId = "daemon-A";
+    mockDaemonStatus.running = true;
+    mockListResources.mockResolvedValue({
+      resources: [
+        makeLocalDirectoryResource({
+          daemon_id: "daemon-A",
+          local_path: "/Users/foo/legacy",
+          label: "legacy",
+        }),
+        makeLocalDirectoryResource({
+          daemon_id: "daemon-A",
+          local_path: "/Users/foo/future",
+          label: "future",
+          execution_mode: "snapshot",
+        }),
+      ],
+      total: 2,
+    });
+    renderHint("proj-1");
+    await waitFor(() => {
+      expect(screen.getAllByText(/in-place/i)).toHaveLength(2);
+    });
+    expect(screen.queryByText(/isolated worktree/i)).not.toBeInTheDocument();
   });
 
   it("ignores resources pinned to a different daemon", async () => {

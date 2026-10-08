@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // fetchTimeline issues a GET /timeline request and returns the decoded entries
@@ -112,6 +114,28 @@ func TestListTimeline_ReturnsAllEntriesAscending(t *testing.T) {
 	}
 }
 
+func TestListTimeline_CommentIncludesRevision(t *testing.T) {
+	issueID := createIssueForTimeline(t, "Comment revision projection")
+	commentIDs, _ := seedTimelineEntries(t, issueID, 1, 0)
+	if _, err := testPool.Exec(context.Background(), `UPDATE comment SET revision = 7 WHERE id = $1`, commentIDs[0]); err != nil {
+		t.Fatalf("set comment revision: %v", err)
+	}
+
+	entries, status := fetchTimeline(t, issueID)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	for _, entry := range entries {
+		if entry.ID == commentIDs[0] {
+			if entry.Revision != 7 {
+				t.Fatalf("comment revision = %d, want 7", entry.Revision)
+			}
+			return
+		}
+	}
+	t.Fatalf("comment %s missing from timeline", commentIDs[0])
+}
+
 func TestListTimeline_MergesCommentsAndActivities(t *testing.T) {
 	issueID := createIssueForTimeline(t, "Merged entries test")
 	seedTimelineEntries(t, issueID, 3, 2)
@@ -131,6 +155,59 @@ func TestListTimeline_MergesCommentsAndActivities(t *testing.T) {
 	// register the activity listener, so there is no auto issue-created row.
 	if got, want := len(entries), 5; got != want {
 		t.Fatalf("entries = %d, want %d", got, want)
+	}
+}
+
+func TestListTimeline_HydratesDepartedMemberIdentity(t *testing.T) {
+	const (
+		name      = "Former Timeline Member"
+		avatarURL = "https://profiles.example.com/former.png"
+	)
+	userID := dbfx.User(
+		t,
+		name,
+		fmt.Sprintf("former-timeline-%d@example.com", time.Now().UnixNano()),
+		testutil.Cols{"avatar_url": avatarURL},
+	)
+	memberID := dbfx.Member(t, testWorkspaceID, userID, "member")
+	issueID := dbfx.Issue(t, "Departed member timeline identity")
+	commentID := dbfx.Comment(t, issueID, "Authored before leaving", testutil.Cols{
+		"author_id": userID,
+	})
+	activityID := dbfx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"issue_id":     issueID,
+		"actor_type":   "member",
+		"actor_id":     userID,
+		"action":       "description_updated",
+		"details":      testutil.Raw("'{}'::jsonb"),
+	})
+
+	// Membership is current workspace state. Timeline attribution must keep
+	// resolving through the global user row after that state is removed.
+	dbfx.Exec(t, `DELETE FROM member WHERE id = $1`, memberID)
+
+	entries, status := fetchTimeline(t, issueID)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	wantIDs := map[string]bool{commentID: false, activityID: false}
+	for _, entry := range entries {
+		if _, ok := wantIDs[entry.ID]; !ok {
+			continue
+		}
+		wantIDs[entry.ID] = true
+		if entry.ActorName != name {
+			t.Errorf("entry %s actor_name = %q, want %q", entry.ID, entry.ActorName, name)
+		}
+		if entry.ActorAvatarURL != avatarURL {
+			t.Errorf("entry %s actor_avatar_url = %q, want %q", entry.ID, entry.ActorAvatarURL, avatarURL)
+		}
+	}
+	for id, found := range wantIDs {
+		if !found {
+			t.Errorf("timeline entry %s missing", id)
+		}
 	}
 }
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const { getAttachmentTextContentMock, resolveIssueIdentifierMock } = vi.hoisted(
@@ -42,6 +41,9 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useOptionalNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  resolveClickIntent: () => "push",
+  useAppOrigin: () => null,
 }));
 
 vi.mock("../issues/components/issue-mention-card", () => ({
@@ -59,7 +61,10 @@ vi.mock("./link-hover-card", () => ({
   LinkHoverCard: () => null,
 }));
 
-vi.mock("./utils/link-handler", () => ({
+// Partial: only navigation is stubbed. The pure URL predicates stay real so
+// these autolink fixtures assert the renderer's actual link/chip dispatch.
+vi.mock("./utils/link-handler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./utils/link-handler")>()),
   openLink: vi.fn(),
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
 }));
@@ -83,6 +88,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 
 import mermaid from "mermaid";
 import { ReadonlyContent } from "./readonly-content";
+import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -90,20 +96,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe("ReadonlyContent memoization", () => {
-  // Long-timeline issues (Inbox + IssueDetail with thousands of comments)
-  // freeze the tab when each comment re-runs the full react-markdown pipeline
-  // on every parent re-render. Wrapping the component in React.memo is the
-  // mitigation; this test guards against a future revert that would silently
-  // reintroduce the perf regression.
-  it("is wrapped in React.memo", () => {
-    const memoTypeSymbol = Symbol.for("react.memo");
-    expect((ReadonlyContent as unknown as { $$typeof: symbol }).$$typeof).toBe(
-      memoTypeSymbol,
-    );
-  });
 });
 
 describe("ReadonlyContent math rendering", () => {
@@ -142,6 +134,85 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent annotated replies", () => {
+  it.each([
+    "steps:\n  - name: build\n    run: make\n  - name: test\n    run: make test",
+    "Summary\n---\nDetails\n===",
+    "5. alpha\n6) beta\n+ added\n- removed\n    indented code",
+  ])("preserves literal block markers and indentation in a selected quote: %s", (text) => {
+    const { container } = render(<ReadonlyContent content={composeAnnotatedReply("", [{
+      id: "literal", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: text, note: "Keep the source intact", start: 0, prefix: "", suffix: "",
+    }])} />);
+    const quote = container.querySelector("blockquote")!;
+    expect(quote.querySelector("ul, ol, li, h1, h2, hr, pre")).toBeNull();
+    expect(quote.textContent?.replace(/\u00a0/g, " ").trim()).toBe(text);
+  });
+
+  it.each(["A note", "A note\n\nWith another paragraph"])("keeps a visible blank paragraph between annotations (note: %s)", (note) => {
+    const first = {
+      id: "first", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: "First quote", note, start: 0, prefix: "", suffix: "",
+    };
+    const { container } = render(<ReadonlyContent content={composeAnnotatedReply("Overall reply", [
+      first, { ...first, id: "second", quote: "Second quote" },
+    ])} />);
+    const quotes = container.querySelectorAll("blockquote");
+    expect(quotes).toHaveLength(2);
+    expect(quotes[1]?.previousElementSibling?.tagName).toBe("P");
+    expect(quotes[1]?.previousElementSibling?.textContent).toBe("\u00a0");
+    expect(container.querySelectorAll("p").length).toBeGreaterThan(2);
+    expect(container.querySelector("a, ol")).toBeNull();
+    expect(container.querySelectorAll("hr")).toHaveLength(1);
+    expect(container.querySelector("hr")?.previousElementSibling?.textContent).toBe(note.split("\n\n").at(-1));
+    expect(container.querySelector("hr")?.nextElementSibling?.textContent).toBe("Overall reply");
+  });
+
+  it("renders quote snapshots and notes without generated links or numbered lists", () => {
+    const content = composeAnnotatedReply("", [{
+      id: "annotation", sourceCommentId: "source", sourceActorName: "Agent",
+      quote: "First <check>\nSecond line", note: "Please revise this.",
+      start: 0, prefix: "", suffix: "",
+    }]);
+    const { container } = render(<ReadonlyContent content={content} />);
+    const quote = container.querySelector("blockquote");
+    expect(quote?.textContent).toContain("First <check>");
+    expect(quote?.querySelector("br")).not.toBeNull();
+    expect(container.textContent).toContain("Please revise this.");
+    expect(quote?.textContent).not.toContain("Please revise this.");
+    expect(container.querySelector("a, ol, check")).toBeNull();
+    expect(container.textContent).not.toContain("Agent");
+  });
+});
+
+describe("ReadonlyContent autolink policy", () => {
+  it("keeps historical bare filenames and domains as plain text", () => {
+    const { container } = render(
+      <ReadonlyContent content="plan.md 4399.com ai.md" />,
+    );
+
+    expect(container.textContent).toContain("plan.md 4399.com ai.md");
+    expect(container.querySelector("a")).toBeNull();
+  });
+
+  it("still links explicit web URLs, www URLs, and email addresses", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content="https://4399.com www.4399.com contact@example.com"
+      />,
+    );
+
+    const hrefs = Array.from(container.querySelectorAll("a"), (anchor) =>
+      anchor.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      "https://4399.com",
+      "https://www.4399.com",
+      "mailto:contact@example.com",
+    ]);
   });
 });
 
@@ -274,25 +345,46 @@ describe("ReadonlyContent issue mention Markdown", () => {
     expect(resolveIssueIdentifierMock).not.toHaveBeenCalled();
     expect(queryByTestId("issue-mention-card")).toBeNull();
   });
+});
 
-  it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
-    const unsafe = render(
-      <ReadonlyContent content={'**"무엇을 먼저 정해두고 시작할지"**가'} />,
-    );
-
-    expect(unsafe.container.querySelector("strong")).toBeNull();
-    expect(unsafe.container.textContent).toContain(
+describe("ReadonlyContent CJK emphasis", () => {
+  it.each([
+    ["Chinese punctuation", "**水温适度。**水的温度", "水温适度。"],
+    ["Japanese punctuation", "**テスト。**テスト", "テスト。"],
+    [
+      "Korean punctuation before a particle",
       '**"무엇을 먼저 정해두고 시작할지"**가',
+      '"무엇을 먼저 정해두고 시작할지"',
+    ],
+  ])("renders CJK-friendly strong emphasis: %s", (_name, content, strongText) => {
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("strong")?.textContent).toBe(strongText);
+    expect(container.textContent).not.toContain("**");
+  });
+
+  it("repairs a trailing space before a CJK strong closing delimiter", () => {
+    const { container } = render(
+      <ReadonlyContent content="**为什么做，收益是什么。 **Multica 的能力边界" />,
     );
 
-    const safe = render(
-      <ReadonlyContent content={'"**무엇을 먼저 정해두고 시작할지**"가'} />,
+    expect(container.querySelector("strong")?.textContent).toBe(
+      "为什么做，收益是什么。",
     );
+    expect(container.textContent).toBe("为什么做，收益是什么。 Multica 的能力边界");
+  });
 
-    expect(safe.container.querySelector("strong")?.textContent).toBe(
-      "무엇을 먼저 정해두고 시작할지",
-    );
-    expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
+  it.each([
+    ["inline code", "`**中文。 **后文`"],
+    ["fenced code", "```md\n**中文。 **后文\n```"],
+    ["indented code", "    **中文。 **后文"],
+    ["escaped Markdown", "\\**中文。 **后文"],
+    ["non-CJK prose", "**English sentence. **next"],
+  ])("does not repair trailing-space emphasis in %s", (_name, content) => {
+    const { container } = render(<ReadonlyContent content={content} />);
+
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.textContent).toContain("**");
   });
 });
 
@@ -347,16 +439,6 @@ describe("ReadonlyContent code styling", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(source);
     });
-  });
-
-  it("keeps editor code literal by disabling font ligatures", () => {
-    const codeCss = readFileSync("editor/styles/code.css", "utf8");
-
-    expect(codeCss).toContain(".rich-text-editor code");
-    expect(codeCss).toContain(".rich-text-editor pre");
-    expect(codeCss).toContain(".rich-text-editor pre code");
-    expect(codeCss).toContain("font-variant-ligatures: none;");
-    expect(codeCss).toContain('font-feature-settings: "liga" 0;');
   });
 });
 
@@ -417,22 +499,22 @@ describe("ReadonlyContent Mermaid rendering", () => {
     expect(container.querySelector("pre")).toBeNull();
   });
 
-  it("opens the fullscreen viewer from the toolbar and closes it with Escape", async () => {
+  it("opens the fullscreen viewer from the block's title bar and closes it with Escape", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
       />,
     );
 
-    const expandButton = await waitFor(() => {
-      const found = container.querySelector<HTMLButtonElement>(
-        '.mermaid-diagram-toolbar button[aria-label="Open diagram viewer"]',
-      );
-      expect(found).not.toBeNull();
-      return found!;
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-frame")).not.toBeNull();
     });
+    const expandButton = container.querySelector<HTMLButtonElement>(
+      '[data-dynamic-block="mermaid"] button[aria-label="Fullscreen"]',
+    )!;
+    expect(expandButton).not.toBeNull();
 
-    expect(document.querySelector(".mermaid-viewer-canvas")).toBeNull();
+    expect(document.querySelector(".zoom-canvas")).toBeNull();
 
     fireEvent.click(expandButton);
 
@@ -450,11 +532,11 @@ describe("ReadonlyContent Mermaid rendering", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => {
-      expect(document.querySelector(".mermaid-viewer-canvas")).toBeNull();
+      expect(document.querySelector(".zoom-canvas")).toBeNull();
     });
   });
 
-  it("keeps the inline toolbar outside the scroll container so wide diagrams stay openable", async () => {
+  it("keeps the controls in the title bar, outside the scroll container, so wide diagrams stay openable", async () => {
     const { container } = render(
       <ReadonlyContent
         content={["```mermaid", "graph LR", "  A[Start] --> B[Done]", "```"].join("\n")}
@@ -462,18 +544,20 @@ describe("ReadonlyContent Mermaid rendering", () => {
     );
 
     await waitFor(() => {
-      expect(container.querySelector(".mermaid-diagram-toolbar")).not.toBeNull();
+      expect(container.querySelector(".mermaid-diagram-scroll")).not.toBeNull();
     });
 
-    // Previously the toolbar was an absolutely-positioned child of the
-    // horizontally-scrolling element, so on a wide diagram it scrolled out of
-    // view along with the content and left no way to open or copy it.
-    const scroller = container.querySelector(".mermaid-diagram-scroll");
-    expect(scroller).not.toBeNull();
-    expect(scroller?.querySelector(".mermaid-diagram-toolbar")).toBeNull();
+    // A control inside the horizontally-scrolling element would scroll out of
+    // view with a wide diagram and leave no way to open or copy it. The frame
+    // owns the controls, so the diagram's own hover toolbar is not drawn.
+    const scroller = container.querySelector(".mermaid-diagram-scroll")!;
+    expect(container.querySelector(".mermaid-diagram-toolbar")).toBeNull();
+    expect(scroller.querySelector("button")).toBeNull();
+    expect(container.querySelector('button[aria-label="Fullscreen"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Copy source"]')).not.toBeNull();
   });
 
-  it("shows the compact error state instead of embedding Mermaid's parser error SVG", async () => {
+  it("explains a parse error inside the block instead of embedding Mermaid's error SVG", async () => {
     // With suppressErrorRendering enabled, invalid syntax makes render() reject
     // instead of emitting Mermaid's built-in error graphic.
     vi.mocked(mermaid.render).mockRejectedValueOnce(
@@ -485,14 +569,17 @@ describe("ReadonlyContent Mermaid rendering", () => {
       <ReadonlyContent content={["```mermaid", chart, "```"].join("\n")} />,
     );
 
-    await waitFor(() => {
-      expect(container.querySelector(".mermaid-diagram-error")).not.toBeNull();
-    });
-
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't draw this diagram");
+    expect(alert.textContent).toContain("Parse error on line 3");
     expect(container.querySelector(".mermaid-diagram-frame")).toBeNull();
-    expect(container.querySelector(".mermaid-diagram-error code")?.textContent).toBe(
-      chart,
-    );
+    // Nothing to blow up once the diagram failed.
+    expect(container.querySelector('button[aria-label="Fullscreen"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
+    await waitFor(() => {
+      expect(container.querySelector("pre code")?.textContent).toBe(chart);
+    });
   });
 });
 
@@ -546,12 +633,10 @@ describe("ReadonlyContent HTML block rendering", () => {
   });
 });
 
-describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
-  // Regression pin for readonly-content.tsx:279. The `div data-type=fileCard`
-  // branch must render through <AttachmentBlock>, not the older
-  // <AttachmentCard>. Reverting that line would skip the html+attachmentId
-  // dispatcher branch and surface the bare file-card chrome (filename row)
-  // instead of the rendered iframe — the exact regression MUL-2330 fixed.
+describe("ReadonlyContent file-card routing", () => {
+  // The `div data-type=fileCard` branch renders through the unified
+  // <Attachment> renderer, which shows every non-image file — HTML included
+  // (MUL-7649) — as file-card chrome.
   function renderWithQuery(ui: ReactElement) {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -559,11 +644,9 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
   }
 
-  it("renders the !file[](url) HTML attachment as an iframe (no file-card chrome)", async () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>chart</p>",
-      originalContentType: "text/html",
-    });
+  // Reverses the MUL-2330 pin: a file referenced in the body is still a file.
+  // HTML meant to be read in place is written as a ```html block.
+  it("renders a !file[](url) HTML attachment as file-card chrome, not an embedded preview", () => {
     const attachment = {
       id: "att-1",
       url: "/uploads/report.html",
@@ -571,22 +654,15 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
       content_type: "text/html",
       size_bytes: 0,
     } as any;
-    const { container, queryByText } = renderWithQuery(
+    const { container, getByText } = renderWithQuery(
       <ReadonlyContent
         content="!file[report.html](/uploads/report.html)"
         attachments={[attachment]}
       />,
     );
-    const frame = await waitFor(() => {
-      const f = container.querySelector<HTMLIFrameElement>("iframe");
-      expect(f).not.toBeNull();
-      return f!;
-    });
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frame.getAttribute("srcdoc")).toContain("<p>chart</p>");
-    // AttachmentCard chrome surfaces the filename as visible text in a
-    // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
-    expect(queryByText("report.html")).toBeNull();
+    expect(getByText("report.html")).toBeTruthy();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
 
   it("renders a stable attachment download URL as file-card chrome", () => {

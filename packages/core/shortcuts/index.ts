@@ -8,6 +8,7 @@ export {
   isPlainShortcut,
   formatShortcut,
   isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
   isReservedShortcut,
   isShortcutAllowedForAction,
   type ShortcutActionDefinition,

@@ -8,13 +8,28 @@
     "autopilots": "Autopilot",
     "agents": "Agents",
     "squads": "Squads",
-    "usage": "Usage",
+    "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings"
   },
+  "tab": {
+    "issue": "Issue",
+    "project": "Project",
+    "autopilot": "Autopilot",
+    "agent": "Agent",
+    "member": "Member",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Machine",
+    "runtime": "Runtime",
+    "attachment": "Attachment",
+    "create_agent": "Create Agent",
+    "unknown": "Unknown page"
+  },
   "help": {
     "trigger": "Help",
+    "download_desktop": "Desktop app",
     "docs": "Docs",
     "changelog": "Change log",
     "discord": "Discord",
@@ -37,12 +52,13 @@
     "new_issue": "New Issue",
     "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
-    "workspace_group": "Workspace",
-    "configure_group": "Configure",
+    "work_group": "Work",
+    "ai_team_group": "AI Team",
+    "show_more_pins": "Show {{count}} more…",
+    "show_fewer_pins": "Show fewer",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Join our Discord",
-      "description": "Chat with the team and other builders.",
       "dismiss": "Dismiss"
     }
   }

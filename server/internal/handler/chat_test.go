@@ -33,6 +33,104 @@ func withChatTestWorkspaceCtx(t *testing.T, req *http.Request) *http.Request {
 	return req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, memberRow))
 }
 
+func TestSendChatMessage_ReportsPositionInsteadOfQueuedStatus(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatSendQueuePositionAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	send := func(content string) SendChatMessageResponse {
+		t.Helper()
+		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+			"content": content,
+		})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SendChatMessage(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("SendChatMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var response SendChatMessageResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode send response: %v", err)
+		}
+		return response
+	}
+
+	if first := send("first"); first.Queued {
+		t.Fatal("idle session's first task must not be reported as a queued follow-up")
+	}
+	if second := send("second"); !second.Queued {
+		t.Fatal("second task behind an in-flight head must be reported as queued")
+	}
+}
+
+func TestSendChatMessage_DeferredPredecessorStaysHeadAcrossPromotion(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "ChatSendDeferredPositionAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	send := func(content string) SendChatMessageResponse {
+		t.Helper()
+		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+			"content": content,
+		})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SendChatMessage(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("SendChatMessage: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var response SendChatMessageResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode send response: %v", err)
+		}
+		return response
+	}
+
+	predecessor := send("retrying prompt")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'deferred', priority = 3, fire_at = now() + interval '5 seconds'
+		WHERE id = $1
+	`, predecessor.TaskID); err != nil {
+		t.Fatalf("defer predecessor: %v", err)
+	}
+	followUp := send("new prompt")
+	if !followUp.Queued {
+		t.Fatal("a send behind a deferred retry must be reported as queued")
+	}
+
+	assertStableHead := func(stage string) {
+		t.Helper()
+		pending, err := testHandler.Queries.ListPendingChatTasksForSession(ctx, parseUUID(sessionID))
+		if err != nil {
+			t.Fatalf("list pending tasks %s: %v", stage, err)
+		}
+		if len(pending) != 2 || uuidToString(pending[0].ID) != predecessor.TaskID || uuidToString(pending[1].ID) != followUp.TaskID {
+			t.Fatalf("pending order %s = %+v, want deferred predecessor then follow-up", stage, pending)
+		}
+		messages, err := testHandler.Queries.ListChatMessages(ctx, parseUUID(sessionID))
+		if err != nil {
+			t.Fatalf("list transcript %s: %v", stage, err)
+		}
+		if len(messages) != 1 || messages[0].Content != "retrying prompt" {
+			t.Fatalf("transcript %s exposed queued follow-up: %+v", stage, messages)
+		}
+	}
+	assertStableHead("while deferred")
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'queued', fire_at = NULL WHERE id = $1
+	`, predecessor.TaskID); err != nil {
+		t.Fatalf("promote deferred predecessor: %v", err)
+	}
+	assertStableHead("after promotion")
+}
+
 // TestSendChatMessage_LinksAttachments verifies that attachments uploaded
 // against a chat_session (chat_message_id NULL) are back-filled with the
 // message_id when SendChatMessage receives the matching attachment_ids.

@@ -30,7 +30,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: server/go.mod
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
 
       - name: Setup pnpm

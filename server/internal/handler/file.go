@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,9 +16,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // extContentTypes overrides http.DetectContentType for extensions it gets wrong.
@@ -66,6 +70,16 @@ type AttachmentResponse struct {
 	Filename      string  `json:"filename"`
 	URL           string  `json:"url"`
 	DownloadURL   string  `json:"download_url"`
+	// AttachmentDownloadURL is a credential-free URL that forces a
+	// Content-Disposition: attachment across every storage mode, for the
+	// download BUTTON — unlike DownloadURL, which is load-intent and keeps
+	// serving media inline so the preview path (resolvePreviewMediaUrl) can
+	// render it. Like DownloadURL it can be short-lived (a 60s proxy capability,
+	// a presigned URL) and therefore MUST NOT be persisted, and it is emitted
+	// ONLY by the single-attachment endpoint (GetAttachmentByID), never in list
+	// responses. Empty when the server cannot mint one for the object's storage
+	// mode; clients fall back to DownloadURL. (MUL follow-up to #6092 / #6713.)
+	AttachmentDownloadURL string `json:"attachment_download_url,omitempty"`
 	// MarkdownURL is the durable, absolute-when-possible URL the client
 	// SHOULD persist into markdown bodies (issue descriptions, comments,
 	// chat messages). It is computed per deployment policy by
@@ -97,7 +111,56 @@ type AttachmentResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+// attachmentURLMode selects how DownloadURL is rendered on a response.
+//
+// MUL-5372 / GitHub #5999. A CloudFront-signed DownloadURL is ~800 chars, of
+// which ~630 are a Policy+Signature pair that is re-minted on every request
+// (the policy embeds now+TTL at second granularity). Emitting it for every
+// attachment of every list response is expensive three times over: raw payload,
+// a fresh RSA sign per attachment per request, and — because the bytes differ on
+// each read — it defeats any cache keyed on response content. Agents pay all
+// three and use none of it: they fetch files through the single-attachment
+// endpoint, which needs only the id.
+//
+// The mode is a caller capability declaration, never a server-side default
+// flip, so a client that does not know about it is served byte-identically to
+// before. See attachmentURLModeFromRequest.
+type attachmentURLMode int
+
+const (
+	// attachmentURLModeSigned pre-binds authorization into DownloadURL so the
+	// caller can hand it straight to a native resource load (browser <img>,
+	// Linking.openURL) that cannot attach an Authorization header. This is the
+	// default for every caller that does not opt out.
+	attachmentURLModeSigned attachmentURLMode = iota
+	// attachmentURLModeStable renders DownloadURL as the stable
+	// /api/attachments/{id}/download path. That endpoint re-signs and 302s on
+	// every hit, so the value stays correct forever and costs ~95 chars instead
+	// of ~800. Callers that pick this mode must be able to follow an
+	// authenticated redirect, or fetch a fresh signature from the
+	// single-attachment endpoint before handing a URL to a native loader.
+	attachmentURLModeStable
+)
+
+// ClientCapabilityStableAttachmentURLs is the X-Client-Capabilities token a
+// caller advertises to receive stable attachment paths instead of pre-signed
+// URLs in bulk responses. Reusing the existing capability header (rather than a
+// query parameter) keeps the declaration client-wide: it is a property of what
+// the caller can process, not of the resource being requested.
+const ClientCapabilityStableAttachmentURLs = "stable_attachment_urls"
+
+// attachmentURLModeFromRequest resolves the mode a request asked for. Absent or
+// unrecognized declarations resolve to attachmentURLModeSigned, which is what
+// makes this change safe to ship ahead of any client: the server default never
+// moves, callers migrate on their own release cadence.
+func attachmentURLModeFromRequest(r *http.Request) attachmentURLMode {
+	if r != nil && requestHasClientCapability(r, ClientCapabilityStableAttachmentURLs) {
+		return attachmentURLModeStable
+	}
+	return attachmentURLModeSigned
+}
+
+func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) AttachmentResponse {
 	id := uuidToString(a.ID)
 	resp := AttachmentResponse{
 		ID:           id,
@@ -106,13 +169,16 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		UploaderID:   uuidToString(a.UploaderID),
 		Filename:     a.Filename,
 		URL:          a.Url,
-		DownloadURL:  attachmentDownloadPath(id),
+		DownloadURL:  util.AttachmentDownloadPath(id),
 		MarkdownURL:  h.buildMarkdownURL(a, id),
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	if h.CFSigner != nil {
+	// Only CloudFront mode overrides the stable path here; the presign and proxy
+	// modes already leave DownloadURL as the stable path and resolve it at
+	// download time, so stable mode is a no-op for them.
+	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
 	if a.IssueID.Valid {
@@ -132,10 +198,6 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		resp.ChatMessageID = &s
 	}
 	return resp
-}
-
-func attachmentDownloadPath(id string) string {
-	return "/api/attachments/" + id + "/download"
 }
 
 // buildMarkdownURL chooses the durable URL the client persists into
@@ -172,7 +234,7 @@ func attachmentDownloadPath(id string) string {
 //     already broken before MUL-3192 and stay broken here, but we
 //     don't make them worse.
 func (h *Handler) buildMarkdownURL(a db.Attachment, id string) string {
-	relPath := attachmentDownloadPath(id)
+	relPath := util.AttachmentDownloadPath(id)
 	publicURL := strings.TrimRight(h.cfg.PublicURL, "/")
 
 	if h.storageURLIsPubliclyReadable(a.Url) {
@@ -277,10 +339,11 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 		slog.Error("failed to load attachments for comments", "error", err)
 		return nil
 	}
+	mode := attachmentURLModeFromRequest(r)
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
-		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a, mode))
 	}
 	return grouped
 }
@@ -304,7 +367,7 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
 	for _, a := range attachments {
 		mid := uuidToString(a.ChatMessageID)
-		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a, attachmentURLModeSigned))
 	}
 	return grouped
 }
@@ -314,8 +377,9 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 // ---------------------------------------------------------------------------
 
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "file upload not configured")
+		writeFeatureDisabled(w, "file_upload_not_configured", "file upload not configured")
 		return
 	}
 
@@ -420,17 +484,18 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			comment, err := h.Queries.GetComment(r.Context(), commentUUID)
-			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID {
+			// A deleted comment's tombstone takes no attachments.
+			if err != nil || uuidToString(comment.WorkspaceID) != workspaceID || comment.DeletedAt.Valid {
 				writeError(w, http.StatusForbidden, "invalid comment_id")
 				return
 			}
 			params.CommentID = comment.ID
 		}
 		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
-			// Re-use the existing private-agent gate so the user can still
-			// reach this session — covers role downgrade and agent
-			// visibility flips. The gate writes 4xx on failure.
-			session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
+			// Require the member-visible Chat projection as well as private-agent
+			// access. A cached command-only session id must not accept uploads that
+			// could later be attached by an old client and resurrect the session.
+			session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
 			if !ok {
 				return
 			}
@@ -445,14 +510,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		if taskID := r.FormValue("task_id"); taskID != "" {
 			// Authoritative task-token boundary (load-bearing, mirrors
 			// chat_history.go:chatHistorySession). X-Task-ID is only trustworthy
-			// when the auth middleware set it from a task-scoped `mat_` token —
-			// that path is also the ONLY one that stamps X-Actor-Source=task_token
-			// and strips a client-forged X-Task-ID. A normal JWT / `mul_` PAT
-			// leaves X-Actor-Source empty and does NOT strip a forged X-Task-ID,
-			// and resolveActor's fallback will accept a real X-Agent-ID +
-			// X-Task-ID pair. So without this gate a member who learns a task ID
-			// could forge both headers and inject an attachment onto another chat
-			// task's assistant reply — a cross-session/privacy leak.
+			// when the auth middleware set it from a task-scoped `mat_` token:
+			// that is the only branch that stamps it, because the middleware
+			// deletes any client-supplied agent/task identity first (MUL-3428).
+			// The gate is kept explicit because of what it protects — an
+			// attachment injected onto another chat task's assistant reply is a
+			// cross-session privacy leak, and this endpoint should say which
+			// credential it requires rather than rely on a distant strip.
 			if r.Header.Get("X-Actor-Source") != "task_token" {
 				writeError(w, http.StatusForbidden, "task_id upload is only available from within an agent task")
 				return
@@ -501,13 +565,51 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		params.Url = link
 
-		att, err := h.Queries.CreateAttachment(r.Context(), params)
+		var att db.CreateAttachmentRow
+		if params.CommentID.Valid {
+			// A comment attachment is written under the comment's lock, so a
+			// delete that commits while the object uploaded cannot leave it on
+			// a tombstone. A refused upload takes its stored object with it.
+			err = h.withLiveCommentLock(r.Context(), params.CommentID, params.WorkspaceID, func(qtx *db.Queries) error {
+				var createErr error
+				att, createErr = qtx.CreateAttachment(r.Context(), params)
+				return createErr
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				h.deleteS3Objects(r.Context(), []string{link})
+				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
+		} else {
+			att, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateAttachmentRow, error) {
+				return q.CreateAttachment(r.Context(), params)
+			})
+		}
 		if err != nil {
 			slog.Error("failed to create attachment record", "error", err)
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+			if att.IssueRevision > 0 && att.IssueID.Valid {
+				h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, uploaderType, uploaderID, map[string]any{
+					"issue_id":       uuidToString(att.IssueID),
+					"issue_revision": att.IssueRevision,
+				})
+			}
+			if att.CommentRevision > 0 && att.CommentID.Valid {
+				if comment, loadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+					ID:          att.CommentID,
+					WorkspaceID: att.WorkspaceID,
+				}); loadErr == nil {
+					commentID := uuidToString(comment.ID)
+					reactions := h.groupReactions(r, []pgtype.UUID{comment.ID})
+					attachments := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+					h.publish(protocol.EventCommentUpdated, workspaceID, uploaderType, uploaderID, map[string]any{
+						"comment": commentToResponse(comment, reactions[commentID], attachments[commentID]),
+					})
+				}
+			}
+			writeJSON(w, http.StatusOK, h.attachmentToResponse(att.Attachment(), attachmentURLModeFromRequest(r)))
 			return
 		}
 
@@ -554,9 +656,10 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := attachmentURLModeFromRequest(r)
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
-		resp[i] = h.attachmentToResponse(a)
+		resp[i] = h.attachmentToResponse(a, mode)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -571,7 +674,77 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+	// Always signed, regardless of what the caller advertised: this endpoint is
+	// the single source of fresh, natively-loadable URLs. Stable-mode callers
+	// (CLI `attachment download`, the web inline-media re-sign hook) exchange a
+	// stable path for a signature HERE, so honoring the capability would break
+	// the very flow that makes stable mode safe elsewhere.
+	resp := h.attachmentToResponse(att, attachmentURLModeSigned)
+	// Token-mode clients use this authenticated endpoint to replace the
+	// auth-gated API path with a URL that native media elements can load.
+	// Assert the same storage.DownloadPresigner that resolveAttachmentDownloadMode
+	// keys its presign decision on, so the mode resolution and the presign call
+	// can never disagree. An empty content disposition inherits the object's
+	// stored Content-Disposition (inline for media, attachment otherwise), which
+	// keeps images renderable inline while preserving the original download
+	// filename.
+	switch mode := h.resolveAttachmentDownloadMode(att.Url); mode {
+	case attachmentDownloadModeCloudFront:
+		// CloudFront mode: attachmentToResponse already set DownloadURL to an
+		// inline-intent signed URL. The download button needs the forced-
+		// attachment sibling. response-content-disposition is folded into the
+		// signed Resource (SignedURLWithContentDisposition), so a client cannot
+		// strip or alter it without invalidating the signature. Keying on the
+		// resolved mode (not h.CFSigner != nil) lets an explicit proxy/presign
+		// override take effect even when a signer is configured; the nil guard
+		// keeps an explicit cloudfront mode without a configured signer from
+		// panicking — the field is left empty and the client falls back to
+		// download_url, the same graceful degrade attachmentToResponse uses.
+		if h.CFSigner != nil {
+			resp.AttachmentDownloadURL = h.CFSigner.SignedURLWithContentDisposition(
+				att.Url,
+				storage.AttachmentContentDisposition(att.Filename),
+				time.Now().Add(h.attachmentDownloadURLTTL()),
+			)
+		}
+	case attachmentDownloadModePresign:
+		if presigner, ok := h.Storage.(storage.DownloadPresigner); ok {
+			key := h.Storage.KeyFromURL(att.Url)
+			signedURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), "")
+			if err != nil {
+				slog.Warn("failed to presign inline attachment URL", "id", uuidToString(att.ID), "key", key, "error", err)
+			} else {
+				resp.DownloadURL = signedURL
+			}
+			// Download-intent sibling: the same presigned object, but with a
+			// forced attachment disposition so the download button saves the
+			// file instead of previewing it. Independent of DownloadURL's inline
+			// signature above; either may be present without the other.
+			if dlURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), storage.AttachmentContentDisposition(att.Filename)); err != nil {
+				slog.Warn("failed to presign attachment download URL", "id", uuidToString(att.ID), "key", key, "error", err)
+			} else {
+				resp.AttachmentDownloadURL = dlURL
+			}
+		}
+	case attachmentDownloadModeProxy:
+		// Proxy mode has no signed storage URL to offer, so this response
+		// would otherwise hand back the auth-gated API path — which a
+		// native download on a token-mode client cannot authenticate,
+		// leaving the user with no file (MUL-5292). Mint a
+		// single-attachment, 60-second capability instead, so the same
+		// "replace the auth-gated path with something a native loader can
+		// fetch" contract holds in all three modes.
+		//
+		// Only here, never in attachmentToResponse: list responses are held
+		// far longer than the TTL, so a capability embedded in one would be
+		// expired by the time anything used it.
+		resp.DownloadURL = attachmentCapabilityPath(resp.ID, time.Now())
+		// Download-intent sibling capability (dl=1): the redemption route turns
+		// it into a Content-Disposition: attachment, for the download button.
+		resp.AttachmentDownloadURL = attachmentDownloadCapabilityPath(resp.ID, time.Now())
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {
@@ -679,7 +852,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
 
@@ -721,7 +894,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 		h.setAttachmentPreviewSecurityHeaders(w)
 		http.Redirect(w, r, signedURL, http.StatusFound)
 	case attachmentDownloadModeProxy:
-		h.proxyAttachmentDownload(w, r, att, key)
+		h.proxyAttachmentDownload(w, r, att, key, false)
 	default:
 		writeError(w, http.StatusInternalServerError, "invalid attachment download mode")
 	}
@@ -813,7 +986,7 @@ func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 //     (serveProxyRange). Multi-range is not implemented on this path; per
 //     RFC 7233 it is ignored and the full body is served (200), matching the
 //     seekable path's successful outcome rather than failing with 416.
-func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
+func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
@@ -827,7 +1000,13 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
+	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
+	if forceAttachment {
+		// Download-intent capability (dl=1): override the media-aware inline
+		// disposition so the browser saves the file instead of previewing it.
+		disposition = storage.AttachmentContentDisposition(att.Filename)
+	}
+	w.Header().Set("Content-Disposition", disposition)
 	// no-store predates Range support; keep it. Range/206 semantics are
 	// independent of caching — clients resume via Content-Range, not the cache.
 	w.Header().Set("Cache-Control", "no-store")
@@ -1116,7 +1295,7 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
 	key := h.Storage.KeyFromURL(att.Url)
@@ -1189,6 +1368,7 @@ func isTextPreviewable(contentType, filename string) bool {
 	}
 	switch ct {
 	case "application/json",
+		"application/x-ndjson",
 		"application/javascript",
 		"application/xml",
 		"application/x-yaml",
@@ -1205,7 +1385,7 @@ func isTextPreviewable(contentType, filename string) bool {
 		".txt", ".log",
 		".csv", ".tsv",
 		".html", ".htm",
-		".json", ".xml",
+		".json", ".jsonl", ".ndjson", ".xml",
 		".yml", ".yaml", ".toml", ".ini", ".conf",
 		".sh", ".bash", ".zsh",
 		".py", ".rb", ".go", ".rs",
@@ -1232,6 +1412,7 @@ func isTextPreviewable(contentType, filename string) bool {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	attachmentID := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
@@ -1261,6 +1442,12 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
+	// Captured-context attachments are immutable historical copies. They are
+	// deleted only with their target issue, workspace, or abandoned context.
+	if att.SourceContextID.Valid {
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
 
 	// Only the uploader (or workspace admin) can delete
 	uploaderID := uuidToString(att.UploaderID)
@@ -1273,13 +1460,42 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteAttachment(r.Context(), db.DeleteAttachmentParams{
-		ID:          att.ID,
-		WorkspaceID: att.WorkspaceID,
-	}); err != nil {
+	var deleted db.DeleteAttachmentRow
+	deleteParams := db.DeleteAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID}
+	err = h.withAttachmentOwnerLock(r.Context(), att, func(qtx *db.Queries) error {
+		var deleteErr error
+		deleted, deleteErr = qtx.DeleteAttachment(r.Context(), deleteParams)
+		return deleteErr
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The attachment is gone — with its comment, with its issue, or on its
+		// own — while this waited for the owner lock.
+		writeError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	if err != nil {
 		slog.Error("failed to delete attachment", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete attachment")
 		return
+	}
+	if deleted.Changed && att.IssueID.Valid {
+		h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, "member", userID, map[string]any{
+			"issue_id":       uuidToString(att.IssueID),
+			"issue_revision": deleted.IssueRevision,
+		})
+	}
+	if deleted.Changed && att.CommentID.Valid {
+		if comment, loadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+			ID:          att.CommentID,
+			WorkspaceID: att.WorkspaceID,
+		}); loadErr == nil {
+			commentID := uuidToString(comment.ID)
+			reactions := h.groupReactions(r, []pgtype.UUID{comment.ID})
+			attachments := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+			h.publish(protocol.EventCommentUpdated, workspaceID, "member", userID, map[string]any{
+				"comment": commentToResponse(comment, reactions[commentID], attachments[commentID]),
+			})
+		}
 	}
 
 	h.deleteS3Object(r.Context(), att.Url)
@@ -1290,28 +1506,97 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 // Attachment linking
 // ---------------------------------------------------------------------------
 
-// linkAttachmentsByIssueIDs links the given attachment IDs to an issue.
-// Only updates attachments that have no issue_id yet.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID) {
-	if err := h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:     issueID,
-		WorkspaceID: workspaceID,
-		Column3:     ids,
-	}); err != nil {
-		slog.Error("failed to link attachments to issue", "error", err)
+// linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
+// that did not already advance the issue revision can ask this visible change
+// to advance it exactly once.
+func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID, bumpRevision bool) (db.LinkAttachmentsToIssueRow, error) {
+	return h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+		IssueID:       issueID,
+		WorkspaceID:   workspaceID,
+		AttachmentIds: ids,
+		BumpRevision:  bumpRevision,
+	})
+}
+
+// attachmentOwnerLockAttempts bounds the re-read below. An attachment gains an
+// owner once, when the issue or comment it was uploaded for links it, so one
+// retry is enough in practice; the bound is what keeps a pathological
+// interleaving from looping.
+const attachmentOwnerLockAttempts = 3
+
+// withAttachmentOwnerLock runs write in a transaction that locks the
+// attachment's owners first — the issue, then the comment when it has one —
+// which is the issue -> comment -> child order LockIssueForDelete,
+// UpdateComment, LockLiveComment and CreateComment all take. Locking the
+// attachment row and then touching its issue is the opposite order, and closes
+// a deadlock cycle with issue teardown: teardown holds the issue and reaches
+// the same attachment through the issue_id cascade.
+//
+// The row is re-read under those locks, so a link that committed while this
+// waited is seen before the write; an attachment that gained an owner is
+// retried with that owner locked. Returns pgx.ErrNoRows when the attachment,
+// or the comment owning it, is gone.
+func (h *Handler) withAttachmentOwnerLock(ctx context.Context, att db.Attachment, write func(*db.Queries) error) error {
+	for attempt := 0; ; attempt++ {
+		fresh, err := h.attachmentOwnerLockAttempt(ctx, att, write)
+		if !errors.Is(err, errAttachmentOwnerChanged) {
+			return err
+		}
+		if attempt+1 >= attachmentOwnerLockAttempts {
+			return errors.New("attachment owner kept changing under the lock")
+		}
+		att = fresh
 	}
 }
 
-// linkAttachmentsByIDs links the given attachment IDs to a comment.
-// Only updates attachments that belong to the same issue and have no comment_id yet.
-func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID pgtype.UUID, ids []pgtype.UUID) {
-	if err := h.Queries.LinkAttachmentsToComment(ctx, db.LinkAttachmentsToCommentParams{
-		CommentID: commentID,
-		IssueID:   issueID,
-		Column3:   ids,
-	}); err != nil {
-		slog.Error("failed to link attachments to comment", "error", err)
+// errAttachmentOwnerChanged reports that the attachment gained or changed an
+// owner while the transaction was waiting, so the locks it took are the wrong
+// ones and the attempt must be retried against the new owner.
+var errAttachmentOwnerChanged = errors.New("attachment owner changed")
+
+func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachment, write func(*db.Queries) error) (db.Attachment, error) {
+	tx, err := h.beginWakeupWrite(ctx)
+	if err != nil {
+		return db.Attachment{}, err
 	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if att.IssueID.Valid {
+		// A missing issue is not an error here: its cascade took the attachment
+		// with it, which the re-read below reports as pgx.ErrNoRows.
+		if _, err := qtx.LockIssueForAttachmentWrite(ctx, db.LockIssueForAttachmentWriteParams{
+			ID:          att.IssueID,
+			WorkspaceID: att.WorkspaceID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.Attachment{}, err
+		}
+	}
+	if att.CommentID.Valid {
+		if _, err := qtx.LockLiveComment(ctx, db.LockLiveCommentParams{
+			ID:          att.CommentID,
+			WorkspaceID: att.WorkspaceID,
+		}); err != nil {
+			return db.Attachment{}, err
+		}
+	}
+	var fresh db.Attachment
+	if att.IssueID.Valid || att.CommentID.Valid {
+		fresh, err = qtx.GetAttachment(ctx, db.GetAttachmentParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	} else {
+		// Nothing to lock above: take the row itself so it cannot gain an owner
+		// between this read and the write.
+		fresh, err = qtx.LockAttachmentRow(ctx, db.LockAttachmentRowParams{ID: att.ID, WorkspaceID: att.WorkspaceID})
+	}
+	if err != nil {
+		return db.Attachment{}, err
+	}
+	if fresh.IssueID != att.IssueID || fresh.CommentID != att.CommentID {
+		return fresh, errAttachmentOwnerChanged
+	}
+	if err := write(qtx); err != nil {
+		return db.Attachment{}, err
+	}
+	return fresh, tx.Commit(ctx)
 }
 
 // deleteS3Object removes a single file from S3 by its CDN URL.

@@ -112,6 +112,12 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
+  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
   DropdownMenuItem: ({
     children,
     onClick,
@@ -204,6 +210,7 @@ function makeAdapter(
     back: vi.fn(),
     pathname: "/test-workspace/projects",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     ...overrides,
   };
@@ -297,14 +304,18 @@ describe("ProjectsPage compact row navigation", () => {
 
     expect(middleClick.defaultPrevented).toBe(true);
     expect(openInNewTab).toHaveBeenCalledTimes(3);
-    expect(openInNewTab).toHaveBeenNthCalledWith(1, "/test-workspace/projects/project-1");
-    expect(openInNewTab).toHaveBeenNthCalledWith(2, "/test-workspace/projects/project-1");
-    expect(openInNewTab).toHaveBeenNthCalledWith(3, "/test-workspace/projects/project-1");
+    expect(openInNewTab).toHaveBeenNthCalledWith(1, "/test-workspace/projects/project-1", "Launch Plan");
+    expect(openInNewTab).toHaveBeenNthCalledWith(2, "/test-workspace/projects/project-1", "Launch Plan");
+    expect(openInNewTab).toHaveBeenNthCalledWith(3, "/test-workspace/projects/project-1", "Launch Plan");
     expect(push).not.toHaveBeenCalled();
   });
 
+  // Web (no adapter): the row is a <div>, so nothing native catches a
+  // modifier or middle click — rowLink opens the browser tab itself instead
+  // of navigating in place (MUL-5456).
   it("has a single rowLink path for modifier and middle clicks without openInNewTab", () => {
     const push = vi.fn();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     renderProjects(makeAdapter({ push }));
     const row = projectRow();
 
@@ -318,9 +329,16 @@ describe("ProjectsPage compact row navigation", () => {
     row.dispatchEvent(middleClick);
 
     expect(middleClick.defaultPrevented).toBe(true);
-    expect(push).toHaveBeenCalledTimes(3);
-    expect(push).toHaveBeenNthCalledWith(1, "/test-workspace/projects/project-1");
-    expect(push).toHaveBeenNthCalledWith(2, "/test-workspace/projects/project-1");
-    expect(push).toHaveBeenNthCalledWith(3, "/test-workspace/projects/project-1");
+    expect(open).toHaveBeenCalledTimes(3);
+    for (const nth of [1, 2, 3]) {
+      expect(open).toHaveBeenNthCalledWith(
+        nth,
+        "/test-workspace/projects/project-1",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    }
+    expect(push).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 });

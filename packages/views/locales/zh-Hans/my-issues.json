@@ -1,25 +1,25 @@
 {
   "page": {
-    "breadcrumb": "我的 issue",
+    "breadcrumb": "我的任务",
     "workspace_fallback": "工作区",
-    "empty_title": "没有分配给你的 issue",
-    "empty_description": "你创建或被分配到的 issue 会显示在这里。"
+    "empty_title": "没有分配给你的任务",
+    "empty_description": "你创建或被分配到的任务会显示在这里。"
   },
   "header": {
     "scope": {
       "all_label": "全部",
       "all_description": "分给我的、我创建的、或我的智能体和小队相关的",
       "assigned_label": "已分配",
-      "assigned_description": "分配给我的 issue",
+      "assigned_description": "分配给我的任务",
       "created_label": "我创建的",
-      "created_description": "我创建的 issue",
+      "created_description": "我创建的任务",
       "agents_label": "我的智能体和小队",
-      "agents_description": "分配给我的智能体的 issue"
+      "agents_description": "分配给我的智能体的任务"
     },
     "filter_button": "筛选",
     "filter_status": "状态",
     "filter_priority": "优先级",
-    "issue_count_other": "{{count}} 个 issue",
+    "issue_count_other": "{{count}} 个任务",
     "reset_filters": "重置所有筛选",
     "display_settings": "显示设置",
     "grouping": "分组",
@@ -39,6 +39,6 @@
     "sort_manual": "手动"
   },
   "errors": {
-    "move_failed": "移动 issue 失败"
+    "move_failed": "移动任务失败"
   }
 }

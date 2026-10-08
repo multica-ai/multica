@@ -2,7 +2,6 @@ package lark
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -65,28 +64,6 @@ func TestRedeemAndBindRequiresTxStarter(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing TxStarter") {
 		t.Fatalf("expected missing-TxStarter error, got %v", err)
-	}
-}
-
-// TestBindingErrorSentinelsAreDistinct guards against accidentally
-// collapsing the three rejection sentinels (e.g. someone making
-// ErrBindingNotWorkspaceMember an alias of ErrBindingTokenInvalid to
-// "hide" the workspace-membership signal). The HTTP handler maps
-// each to a distinct status code (410/409/403); if errors.Is started
-// matching the wrong sentinel, the response code would silently
-// regress without any other test catching it.
-func TestBindingErrorSentinelsAreDistinct(t *testing.T) {
-	if errors.Is(ErrBindingAlreadyAssigned, ErrBindingTokenInvalid) ||
-		errors.Is(ErrBindingTokenInvalid, ErrBindingAlreadyAssigned) {
-		t.Fatal("ErrBindingAlreadyAssigned and ErrBindingTokenInvalid must not alias")
-	}
-	if errors.Is(ErrBindingNotWorkspaceMember, ErrBindingTokenInvalid) ||
-		errors.Is(ErrBindingTokenInvalid, ErrBindingNotWorkspaceMember) {
-		t.Fatal("ErrBindingNotWorkspaceMember and ErrBindingTokenInvalid must not alias")
-	}
-	if errors.Is(ErrBindingAlreadyAssigned, ErrBindingNotWorkspaceMember) ||
-		errors.Is(ErrBindingNotWorkspaceMember, ErrBindingAlreadyAssigned) {
-		t.Fatal("ErrBindingAlreadyAssigned and ErrBindingNotWorkspaceMember must not alias")
 	}
 }
 

@@ -34,15 +34,28 @@ func captureRuntimeStdout(t *testing.T, fn func() error) (string, error) {
 	os.Stdout = w
 	defer func() { os.Stdout = old }()
 
+	// Read while fn runs. A pipe nobody is draining stops accepting writes long
+	// before a command's output ends -- after 512 bytes on macOS -- so reading
+	// only once fn has returned deadlocks on anything that prints more.
+	type captured struct {
+		out []byte
+		err error
+	}
+	drained := make(chan captured, 1)
+	go func() {
+		out, err := io.ReadAll(r)
+		drained <- captured{out, err}
+	}()
+
 	runErr := fn()
 	if err := w.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
 	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
+	got := <-drained
+	if got.err != nil {
+		t.Fatalf("read stdout: %v", got.err)
 	}
-	return string(out), runErr
+	return string(got.out), runErr
 }
 
 func TestRunRuntimeDeleteStrictSuccessPrintsJSON(t *testing.T) {
@@ -134,7 +147,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 					{"id": "agent-2", "name": "Claude"},
 				},
 			})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/archive-agents-and-delete":
+		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/unbind-agents-and-delete":
 			cascadeCount++
 			var body struct {
 				ExpectedActiveAgentIDs []string `json:"expected_active_agent_ids"`
@@ -145,7 +158,7 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 			gotExpectedIDs = body.ExpectedActiveAgentIDs
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":          "ok",
-				"agents_archived": 2,
+				"agents_unbound":  2,
 				"tasks_cancelled": 1,
 			})
 		default:
@@ -175,7 +188,61 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON %q: %v", out, err)
 	}
-	if got["id"] != "rt-1" || got["deleted"] != true || got["agents_archived"] != float64(2) {
+	if got["id"] != "rt-1" || got["deleted"] != true || got["agents_unbound"] != float64(2) {
 		t.Fatalf("stdout = %#v, want cascade result", got)
+	}
+}
+
+// A profile-backed instance refusal is not something --cascade can retry past,
+// and the server already explains what to do instead. Wrapping it in
+// HTTPError.Error() used to print the whole JSON response at the user, burying
+// that guidance (GH #8456).
+func TestRunRuntimeDeleteProfileInstanceConflictShowsServerGuidance(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	const guidance = `cannot delete "MSI-S3TEST" on its own: it is registered from the custom runtime profile "Devin CLI (WSL)". It is offline, and Multica removes offline runtimes automatically after 7 days.`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code":                    "runtime_profile_instance_delete_unsupported",
+			"error":                   guidance,
+			"profile_name":            "Devin CLI (WSL)",
+			"auto_cleanup_after_days": 7,
+		})
+	}))
+	defer srv.Close()
+
+	err := runRuntimeDelete(newRuntimeDeleteTestCmd(srv.URL), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("expected the profile-instance refusal to surface as an error")
+	}
+	if err.Error() != guidance {
+		t.Fatalf("error = %q, want the server's guidance verbatim", err.Error())
+	}
+	if strings.Contains(err.Error(), "auto_cleanup_after_days") {
+		t.Fatalf("raw JSON leaked into the user-facing error: %q", err.Error())
+	}
+}
+
+// A 409 with no readable sentence must still fall back to the wrapper rather
+// than surfacing an empty error.
+func TestRunRuntimeDeleteConflictWithoutMessageKeepsWrapper(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":"something_new"}`))
+	}))
+	defer srv.Close()
+
+	err := runRuntimeDelete(newRuntimeDeleteTestCmd(srv.URL), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "delete runtime:") {
+		t.Fatalf("error = %q, want the generic wrapper", err.Error())
 	}
 }

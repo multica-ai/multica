@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,28 @@ func appMsg(id, text, createTime string) LarkMessage {
 // groupCfg enables the recent-context prefetch with the production window.
 func groupCfg() InboundEnricherConfig {
 	return InboundEnricherConfig{RecentContextSize: DefaultRecentContextSize}
+}
+
+// threadTextMsg is textMsg tagged with a Lark topic (话题) id, so tests
+// can seed a chat whose returned window interleaves several topics.
+func threadTextMsg(id, sender, text, createTime, threadID string) LarkMessage {
+	m := textMsg(id, sender, text, createTime)
+	m.ThreadID = threadID
+	return m
+}
+
+// cardMsg builds a Bot-sent interactive card (sender_type "app",
+// msg_type "interactive") — the shape the Bot's markdown replies take,
+// which flattens to a zero-signal "[interactive card]" placeholder.
+func cardMsg(id, createTime string) LarkMessage {
+	return LarkMessage{
+		MessageID:   id,
+		MessageType: "interactive",
+		Content:     `{"type":"template"}`,
+		SenderID:    "cli_bot",
+		SenderType:  "app",
+		CreateTime:  createTime,
+	}
 }
 
 func assertNoRecentContextFetchPlaceholder(t *testing.T, body string) {
@@ -84,6 +107,208 @@ func TestEnrichRecentContextGroupMention(t *testing.T) {
 	}
 	if got := fake.listParams[0].EndTime; got != 3 {
 		t.Errorf("end_time = %d, want 3 (3000ms -> 3s)", got)
+	}
+	// A non-topic group @-mention uses the chat container, never a thread
+	// scope — the #5835 topic path must not touch normal-group behavior.
+	if got := fake.listParams[0].ThreadID; got != "" {
+		t.Errorf("chat-level fetch must not set ThreadID, got %q", got)
+	}
+}
+
+// TestEnrichRecentContextTopicExcludesOtherTopics is the #5835 core: an
+// @-mention inside a Lark topic (话题) must see ONLY that topic's messages,
+// never a sibling topic that shares the chat_id. The fetch is topic-scoped
+// (ThreadID set, no end_time), and even though the fake returns interleaved
+// sibling-topic items the enricher's fail-closed thread_id filter drops
+// them, so no sibling content can leak into this topic's context (and,
+// downstream, its persisted turn).
+func TestEnrichRecentContextTopicExcludesOtherTopics(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byChat["oc_g"] = []LarkMessage{
+		threadTextMsg("om_trigger", "ou_user", "总结一下", "3000", "th_a"),
+		threadTextMsg("om_b2", "ou_carol", "话题B的机密", "2500", "th_b"),
+		threadTextMsg("om_a2", "ou_bob", "话题A第二条", "2000", "th_a"),
+		threadTextMsg("om_b1", "ou_dave", "话题B第一条", "1500", "th_b"),
+		threadTextMsg("om_a1", "ou_alice", "话题A第一条", "1000", "th_a"),
+	}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "总结一下",
+		CreateTime:     "3000",
+		ThreadID:       "th_a",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `<recent_context count="2">
+[User 1]: 话题A第一条
+[User 2]: 话题A第二条
+</recent_context>
+
+总结一下`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	// Exactly one fetch, scoped to the trigger's topic, with no end_time
+	// (the thread container rejects it).
+	if len(fake.listParams) != 1 {
+		t.Fatalf("expected one ListChatMessages call, got %d", len(fake.listParams))
+	}
+	if got := fake.listParams[0].ThreadID; got != "th_a" {
+		t.Errorf("list ThreadID = %q, want th_a (thread-scoped fetch)", got)
+	}
+	if got := fake.listParams[0].EndTime; got != 0 {
+		t.Errorf("thread fetch must omit end_time, got EndTime=%d", got)
+	}
+}
+
+// TestEnrichRecentContextTopicFailsClosedOnThreadID pins the second line of
+// defense: if Lark's thread container ever returns an item whose thread_id
+// is missing or does not match the trigger's topic, the enricher drops it
+// rather than trust it. Only the exact-match item survives.
+func TestEnrichRecentContextTopicFailsClosedOnThreadID(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byChat["oc_g"] = []LarkMessage{
+		threadTextMsg("om_trigger", "ou_user", "怎么办", "3000", "th_a"),
+		threadTextMsg("om_match", "ou_alice", "本话题内容", "2000", "th_a"),
+		threadTextMsg("om_other", "ou_bob", "别的话题内容", "1800", "th_b"),
+		threadTextMsg("om_missing", "ou_carol", "缺少话题字段", "1500", ""),
+	}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "怎么办",
+		CreateTime:     "3000",
+		ThreadID:       "th_a",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `<recent_context count="1">
+[User 1]: 本话题内容
+</recent_context>
+
+怎么办`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+}
+
+// TestEnrichRecentContextTopicDropsMessagesAfterTrigger covers the
+// client-side time anchor the topic path needs because the thread
+// container can't be bounded by end_time: an item created strictly after
+// the @-mention is dropped, keeping the window "up to the @-mention" like
+// the chat path.
+func TestEnrichRecentContextTopicDropsMessagesAfterTrigger(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byChat["oc_g"] = []LarkMessage{
+		threadTextMsg("om_after", "ou_bob", "触发之后才发的", "4000", "th_a"),
+		threadTextMsg("om_trigger", "ou_user", "看下上面", "3000", "th_a"),
+		threadTextMsg("om_before", "ou_alice", "触发之前的", "2000", "th_a"),
+	}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "看下上面",
+		CreateTime:     "3000",
+		ThreadID:       "th_a",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `<recent_context count="1">
+[User 1]: 触发之前的
+</recent_context>
+
+看下上面`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+}
+
+// TestEnrichRecentContextTopicFetchErrorNoChatFallback locks the fail-safe:
+// when a topic-scoped fetch fails, the enricher degrades to the readable
+// note and NEVER retries as a chat-wide fetch — a chat fallback would
+// re-open the exact cross-topic leak this change closes.
+func TestEnrichRecentContextTopicFetchErrorNoChatFallback(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.errByChat["oc_g"] = errors.New("boom")
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "在干嘛",
+		ThreadID:       "th_a",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `[Recent Lark context unavailable; continuing with the latest message.]
+
+在干嘛`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listParams) != 1 {
+		t.Fatalf("expected exactly one ListChatMessages call, got %d", len(fake.listParams))
+	}
+	// The single fetch stayed thread-scoped — no chat-wide fallback.
+	if fake.listParams[0].ThreadID != "th_a" {
+		t.Errorf("the single fetch must stay thread-scoped, got ThreadID=%q", fake.listParams[0].ThreadID)
+	}
+}
+
+// TestEnrichRecentContextExcludesBotInteractiveCards pins the #5835
+// acceptance item that the Bot's own interactive-card replies (which
+// flatten to a useless "[interactive card]" placeholder) are excluded from
+// the recent-context window rather than rendered as noise.
+func TestEnrichRecentContextExcludesBotInteractiveCards(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byChat["oc_g"] = []LarkMessage{
+		textMsg("om_trigger", "ou_user", "总结一下", "3000"),
+		cardMsg("om_card", "2500"),
+		textMsg("om_a", "ou_alice", "我改完了登录页", "1000"),
+	}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "总结一下",
+		CreateTime:     "3000",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `<recent_context count="1">
+[User 1]: 我改完了登录页
+</recent_context>
+
+总结一下`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	if strings.Contains(out.Body, "[interactive card]") {
+		t.Errorf("bot interactive card placeholder leaked into recent_context: %q", out.Body)
 	}
 }
 
@@ -451,12 +676,13 @@ func TestEnrichRecentContextRateLimitedDoesNotRetry(t *testing.T) {
 }
 
 // TestEnrichRecentContextProductionErrorShapes covers the classifier on
-// the real error shape ListChatMessages returns: a plain wrapped error
-// string ("...: code=%d msg=%q"), NOT an *APIError. The typed-APIError
-// tests above exercise classifyRecentContextAPIError, but production
-// traffic only ever reaches the string path, so pin that too — including
-// that token errors DO retry (client refreshes the token) while permission
-// and deleted errors do not.
+// the error shapes ListChatMessages returns in production: a wrapped
+// "...: code=%d msg=%q" string for a 2xx envelope, and the typed non-2xx
+// reply for everything Lark answers with a status code — including the
+// HTTP 400 it uses for a rejected tenant_access_token. The typed-APIError
+// tests above exercise classifyRecentContextAPIError directly; this pins
+// what actually arrives, including that token errors DO retry (the client
+// refreshes the token) while permission and deleted errors do not.
 func TestEnrichRecentContextProductionErrorShapes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -482,6 +708,33 @@ func TestEnrichRecentContextProductionErrorShapes(t *testing.T) {
 			err:       errors.New(`lark http client: list chat messages: code=99991663 msg="access token expired"`),
 			wantLine:  "[Recent Lark context temporarily unavailable; continuing with the latest message.]",
 			wantCalls: 2,
+		},
+		{
+			// The shape Lark actually sends for a rejected token: HTTP
+			// 400 with the code in the body. Its text carries `"code":`
+			// (JSON), not the `code=` the string heuristics look for, so
+			// only reading the typed code classifies it.
+			name: "token_expired_http_400_retries_then_degrades",
+			err: fmt.Errorf("lark http client: list chat messages: %w", &larkAPIStatusError{
+				StatusCode: 400,
+				Code:       codeTenantTokenInvalid,
+				Msg:        "Invalid access token for authorization.",
+				Raw:        `{"code":99991663,"msg":"Invalid access token for authorization."}`,
+			}),
+			wantLine:  "[Recent Lark context temporarily unavailable; continuing with the latest message.]",
+			wantCalls: 2,
+		},
+		{
+			// A code the classifier does not know must fall through to
+			// the text heuristics rather than swallow the status signal.
+			name: "unknown_code_falls_through_to_http_status",
+			err: fmt.Errorf("lark http client: list chat messages: %w", &larkAPIStatusError{
+				StatusCode: 403,
+				Code:       99991672,
+				Raw:        `{"code":99991672,"msg":""}`,
+			}),
+			wantLine:  "[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]",
+			wantCalls: 1,
 		},
 	}
 	for _, tc := range cases {

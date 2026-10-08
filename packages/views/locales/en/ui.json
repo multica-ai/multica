@@ -1,8 +1,11 @@
 {
   "attach_file": "Attach file",
-  "toggle_sidebar": "Toggle Sidebar",
-  "pagination_previous": "Go to previous page",
-  "pagination_next": "Go to next page",
+  "toggle_sidebar": "Toggle left sidebar",
   "copy_code": "Copy code",
-  "plain_text": "plain text"
+  "plain_text": "plain text",
+  "error_boundary": {
+    "title": "Something went wrong displaying this section.",
+    "description": "An unexpected error occurred.",
+    "try_again": "Try again"
+  }
 }

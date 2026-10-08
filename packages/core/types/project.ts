@@ -62,8 +62,8 @@ export interface ListProjectsResponse {
 //
 // Known types (UI must default-case unknown server-side additions):
 //   - github_repo: cloud-side git checkout, ref = { url, ref?, default_branch_hint? }
-//   - local_directory: in-place agent execution on a specific daemon,
-//     ref = { local_path, daemon_id, label? }
+//   - local_directory: agent execution on a specific daemon,
+//     ref = { local_path, daemon_id, label?, execution_mode? }
 export type ProjectResourceType = "github_repo" | "local_directory";
 
 export interface GithubRepoResourceRef {
@@ -72,10 +72,31 @@ export interface GithubRepoResourceRef {
   default_branch_hint?: string;
 }
 
+/**
+ * How tasks sharing one local directory are executed.
+ *
+ * - `in_place`: the agent works directly in the user's directory and tasks run
+ *   one at a time — a second task waits in `waiting_local_directory`. Edits
+ *   land in the user's working copy.
+ * - `worktree`: each task gets its own git worktree of that repo inside the
+ *   runtime's workspace, so tasks run concurrently and deliver their work as a
+ *   branch instead of touching the working copy. Every task of one conversation
+ *   shares that branch — `agent/<agent>/<issue>` — so a follow-up continues the
+ *   previous turn's work; a task with no conversation behind it gets
+ *   `agent/<agent>/<task>`. Continuation is decided by an ownership record in
+ *   the repo, not by the branch name, so a same-named branch the user made is
+ *   never adopted.
+ *
+ * Absent means `in_place`: resources created before the mode existed keep their
+ * original behavior, so this is optional rather than defaulted on the server.
+ */
+export type LocalDirectoryExecutionMode = "in_place" | "worktree";
+
 export interface LocalDirectoryResourceRef {
   local_path: string;
   daemon_id: string;
   label?: string;
+  execution_mode?: LocalDirectoryExecutionMode;
 }
 
 export type ProjectResourceRef =

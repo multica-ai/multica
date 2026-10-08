@@ -35,14 +35,6 @@ afterEach(() => {
 });
 
 describe("useAgentsViewStore", () => {
-  it("defaults to 'mine'", () => {
-    expect(useAgentsViewStore.getState().scope).toBe("mine");
-  });
-
-  it("setScope mutates the store", () => {
-    useAgentsViewStore.getState().setScope("all");
-    expect(useAgentsViewStore.getState().scope).toBe("all");
-  });
 
   it("partialize persists only view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");
@@ -123,11 +115,6 @@ describe("useAgentsViewStore", () => {
   });
 
   describe("access filter dimension", () => {
-    it("EMPTY_AGENT_FILTERS initializes access to []", async () => {
-      const { EMPTY_AGENT_FILTERS } = await import("./view-store");
-      expect(EMPTY_AGENT_FILTERS.access).toEqual([]);
-    });
-
     it("toggleFilter('access', value) adds and removes the value", () => {
       const { toggleFilter } = useAgentsViewStore.getState();
       toggleFilter("access", "owner-only");

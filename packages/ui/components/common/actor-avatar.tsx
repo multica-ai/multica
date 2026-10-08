@@ -8,6 +8,7 @@ import {
   DEFAULT_AVATAR_SIZE,
   type AvatarSize,
 } from "@multica/ui/lib/avatar-size";
+import { parseAvatarEmoji } from "@multica/ui/lib/avatar-emoji";
 import { MulticaIcon } from "./multica-icon";
 
 interface ActorAvatarProps {
@@ -33,6 +34,7 @@ function ActorAvatar({
 }: ActorAvatarProps) {
   const [imgError, setImgError] = useState(false);
   const px = AVATAR_SIZE_PX[size];
+  const emoji = parseAvatarEmoji(avatarUrl);
 
   useEffect(() => {
     setImgError(false);
@@ -46,7 +48,7 @@ function ActorAvatar({
       data-slot="avatar"
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-medium overflow-hidden",
-        (!avatarUrl || imgError) && "bg-muted text-muted-foreground",
+        (!avatarUrl || emoji || imgError) && "bg-muted text-muted-foreground",
         className,
         // rounded-full stays last so a call-site `className` can never override
         // the circle — avatar shape is a hard invariant, not a per-site choice.
@@ -54,7 +56,16 @@ function ActorAvatar({
       )}
       style={{ width: px, height: px, fontSize: px * 0.45 }}
     >
-      {avatarUrl && !imgError ? (
+      {emoji ? (
+        <span
+          role="img"
+          aria-label={name}
+          className="select-none leading-none"
+          style={{ fontSize: px * 0.58 }}
+        >
+          {emoji}
+        </span>
+      ) : avatarUrl && !imgError ? (
         <img
           src={avatarUrl}
           alt={name}

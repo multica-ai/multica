@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRequestId, createSafeId, generateUUID, isImeComposing } from "./utils";
+import {
+  createRequestId,
+  createSafeId,
+  generateUUID,
+  isImeComposing,
+  truncateWithEllipsis,
+} from "./utils";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -51,5 +57,52 @@ describe("isImeComposing", () => {
   it("returns false when not composing", () => {
     expect(isImeComposing({ nativeEvent: { isComposing: false, keyCode: 13 } })).toBe(false);
     expect(isImeComposing({ isComposing: false, keyCode: 13 })).toBe(false);
+  });
+});
+
+describe("truncateWithEllipsis", () => {
+  it("returns text shorter than maxLength unchanged", () => {
+    expect(truncateWithEllipsis("hello", 10)).toBe("hello");
+  });
+
+  it("returns text exactly equal to maxLength unchanged", () => {
+    expect(truncateWithEllipsis("hello", 5)).toBe("hello");
+  });
+
+  it("truncates longer text and appends an ellipsis within maxLength", () => {
+    const result = truncateWithEllipsis("hello world", 8);
+    expect(result).toBe("hello w…");
+    expect(Array.from(result)).toHaveLength(8);
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("trims trailing whitespace before the ellipsis", () => {
+    // The cut lands right after the space; it must not leave "hello …".
+    expect(truncateWithEllipsis("hello world", 7)).toBe("hello…");
+  });
+
+  it("never splits an astral character into a lone surrogate", () => {
+    const result = truncateWithEllipsis("🎉🎉🎉🎉🎉 party", 8);
+    expect(result).toBe("🎉🎉🎉🎉🎉 p…");
+    expect(Array.from(result)).toHaveLength(8);
+    // No unpaired high surrogate left dangling.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(result)).toBe(false);
+  });
+
+  it("measures the limit in code points, not UTF-16 code units", () => {
+    // Five emoji are 10 code units but 5 visible characters, so they fit
+    // within maxLength 8 and must not be truncated.
+    expect(truncateWithEllipsis("🎉🎉🎉🎉🎉", 8)).toBe("🎉🎉🎉🎉🎉");
+  });
+
+  it("truncates CJK content by code point", () => {
+    expect(truncateWithEllipsis("你好世界你好世界", 5)).toBe("你好世界…");
+  });
+
+  it("handles degenerate maxLength values without throwing", () => {
+    expect(truncateWithEllipsis("hello", 1)).toBe("…");
+    expect(truncateWithEllipsis("hello", 0)).toBe("");
+    expect(truncateWithEllipsis("hello", -5)).toBe("");
+    expect(truncateWithEllipsis("hello", Number.NaN)).toBe("…");
   });
 });

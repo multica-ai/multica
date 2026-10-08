@@ -3,6 +3,14 @@ SELECT * FROM project_resource
 WHERE project_id = $1
 ORDER BY position ASC, created_at ASC;
 
+-- name: ListProjectResourcesInWorkspace :many
+-- Workspace-scoped read for the daemon claim path. project_resource carries its
+-- own workspace_id, so a corrupt project reference cannot pull another tenant's
+-- repository URLs or local paths into a claim response.
+SELECT * FROM project_resource
+WHERE project_id = $1 AND workspace_id = $2
+ORDER BY position ASC, created_at ASC;
+
 -- name: ListProjectResourcesForProjects :many
 SELECT * FROM project_resource
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])

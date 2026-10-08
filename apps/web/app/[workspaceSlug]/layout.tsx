@@ -2,7 +2,7 @@
 
 import { use, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
 import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
@@ -11,6 +11,7 @@ import { NoAccessPage } from "@multica/views/workspace/no-access-page";
 import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
+import { workspaceSlugFromPathname } from "@/lib/workspace-slug-from-pathname";
 
 export default function WorkspaceLayout({
   children,
@@ -23,6 +24,7 @@ export default function WorkspaceLayout({
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const router = useRouter();
+  const pathname = usePathname();
 
   // Workspace routes require auth. If user is unauthenticated (initial visit
   // without a session, token expired, another tab logged out, etc.), bounce
@@ -44,9 +46,10 @@ export default function WorkspaceLayout({
     }
   }, [user, router]);
 
-  // Resolve workspace by slug from the React Query list cache.
-  // Enabled only when user is authenticated — otherwise the list query isn't seeded.
-  const { data: workspace, isFetched: listFetched } = useQuery({
+  // Resolve workspace by slug through the shared workspace-list query. A
+  // warm auth bootstrap reuses its cache; a cold route fetches it directly.
+  // Keep it disabled until identity has been verified.
+  const { data: workspace } = useQuery({
     ...workspaceBySlugOptions(workspaceSlug),
     enabled: !!user,
   });
@@ -55,7 +58,25 @@ export default function WorkspaceLayout({
   // the first child query's X-Workspace-Slug header is already correct.
   // setCurrentWorkspace self-dedupes + runs rehydrate as a side effect;
   // safe to call on every render.
-  if (workspace) {
+  //
+  // Gated on the live pathname because this is a module-global write from
+  // render, and the App Router can keep a previous workspace's layout mounted
+  // beside the incoming one. Both instances re-render on their own query
+  // activity, so an unguarded write let them alternate — every render flipping
+  // the singleton back to its own slug, indefinitely. Each flip tore down and
+  // rebuilt the realtime socket (packages/core/realtime/provider.tsx binds it
+  // to this slug) and re-pointed the @mention lookup, which reads the same
+  // singleton synchronously and falls back to an empty list when the workspace
+  // it names has no warm cache (packages/views/editor/extensions/
+  // mention-suggestion.tsx). Realtime went dead and the mention list came back
+  // empty for whichever workspace the user was actually looking at.
+  //
+  // Comparing against the pathname resolves it without an ownership handshake:
+  // the URL is the source of truth for workspace identity, and usePathname()
+  // is one value shared by every mounted instance, so exactly one layout — the
+  // routed one — can define it. Desktop needs its own protocol instead
+  // (workspace-route-layout.tsx) because it has no URL bar to appeal to.
+  if (workspace && workspaceSlug === workspaceSlugFromPathname(pathname)) {
     setCurrentWorkspace(workspaceSlug, workspace.id);
   }
 
@@ -84,8 +105,11 @@ export default function WorkspaceLayout({
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.
-  if (!listFetched) return loadingIndicator;
-  if (!workspace) {
+  // The selector returns undefined until the list has resolved, including
+  // after an initial request failure. It returns null only when an
+  // authoritative list does not contain this slug.
+  if (workspace === undefined) return loadingIndicator;
+  if (workspace === null) {
     // If we've resolved this slug before in this session, it was just
     // removed from our list (deleted/left/evicted). A navigate is almost
     // certainly in flight — render null to avoid a NoAccessPage flash.

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ---------------------------------------------------------------------------
@@ -43,23 +45,39 @@ const (
 
 // ModelListRequest represents a pending or completed model list request.
 // Supported is false when the provider ignores per-agent model
-// selection entirely (currently: hermes). The UI uses this to
-// disable its dropdown rather than silently accepting a value the
-// backend will drop.
+// selection entirely — agent.ModelSelectionSupported is the single
+// source of truth, and it names qwenpaw and mcode. Hermes is NOT in
+// that set: it honours opts.Model through the ACP `session/set_model`
+// RPC, so do not "align" this list by adding it (MUL-6606 — an earlier
+// version of this comment said hermes, which would have cost Hermes its
+// model picker outright). The UI uses this to disable its dropdown
+// rather than silently accepting a value the backend will drop.
 //
 // RunStartedAt is set when PopPending claims the request. It is
 // `json:"-"` because it's a server-side bookkeeping field — the UI only
 // needs Status / UpdatedAt to drive the polling loop.
 type ModelListRequest struct {
-	ID           string          `json:"id"`
-	RuntimeID    string          `json:"runtime_id"`
-	Status       ModelListStatus `json:"status"`
-	Models       []ModelEntry    `json:"models,omitempty"`
-	Supported    bool            `json:"supported"`
-	Error        string          `json:"error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	RunStartedAt *time.Time      `json:"-"`
+	ID        string          `json:"id"`
+	RuntimeID string          `json:"runtime_id"`
+	Status    ModelListStatus `json:"status"`
+	Models    []ModelEntry    `json:"models,omitempty"`
+	// UnavailableModels is advisory display copy, never a source of pickable
+	// values. Older daemons omit it and older clients ignore it.
+	UnavailableModels []UnavailableModelEntry `json:"unavailable_models,omitempty"`
+	Supported         bool                    `json:"supported"`
+	Error             string                  `json:"error,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	RunStartedAt      *time.Time              `json:"-"`
+	// Cached marks a response answered from the server-side catalog cache
+	// instead of a live daemon round trip (MUL-5444). Purely informational —
+	// Status is already "completed" and Models is already populated, so a client
+	// that ignores this field behaves exactly as before. CachedAt carries the
+	// snapshot's capture time for clients that want to surface freshness.
+	// Neither field is ever persisted in the request store; they only exist on
+	// the synthetic cache-hit response.
+	Cached   bool       `json:"cached,omitempty"`
+	CachedAt *time.Time `json:"cached_at,omitempty"`
 }
 
 // ModelEntry mirrors agent.Model for the wire. `Default` tags the
@@ -73,12 +91,39 @@ type ModelListRequest struct {
 // thinking_level selector. Older daemons (pre-2026-05) won't send this
 // field, which is fine: the UI hides the selector and the agent runs
 // with the runtime default.
+//
+// Every entry here is selectable. Models the runtime named but will not run are
+// carried separately in UnavailableModelEntry — see the invariant there.
 type ModelEntry struct {
-	ID       string         `json:"id"`
-	Label    string         `json:"label"`
-	Provider string         `json:"provider,omitempty"`
-	Default  bool           `json:"default,omitempty"`
-	Thinking *ModelThinking `json:"thinking,omitempty"`
+	ID                                  string             `json:"id"`
+	Label                               string             `json:"label"`
+	Provider                            string             `json:"provider,omitempty"`
+	Default                             bool               `json:"default,omitempty"`
+	Thinking                            *ModelThinking     `json:"thinking,omitempty"`
+	ServiceTiers                        []ModelServiceTier `json:"service_tiers,omitempty"`
+	SupportsExplicitStandardServiceTier bool               `json:"supports_explicit_standard_service_tier,omitempty"`
+}
+
+// UnavailableModelEntry is a model the runtime named but will not run on that
+// host — Claude Code reports one needing a newer CLI this way. `Reason` is the
+// runtime's own upgrade hint, shown so the gap reads as "your CLI is behind"
+// rather than "Multica does not support this model" (MUL-6961).
+//
+// INVARIANT: these never appear in `models`. A client that does not know this
+// field is an installed desktop build predating it, and such a client must not
+// be able to render one as a selectable model and persist an id its CLI
+// rejects. Keeping the lists disjoint is what makes that true without the old
+// client having to do anything.
+type UnavailableModelEntry struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type ModelServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ModelThinking is the wire shape for the per-model thinking catalog.
@@ -132,7 +177,7 @@ type ModelListStore interface {
 	// PopPending handles "queue empty after probe" by returning nil.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*ModelListRequest, error)
-	Complete(ctx context.Context, id string, models []ModelEntry, supported bool) error
+	Complete(ctx context.Context, id string, models []ModelEntry, unavailable []UnavailableModelEntry, supported bool) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -250,13 +295,14 @@ func (s *InMemoryModelListStore) PopPending(_ context.Context, runtimeID string)
 	return oldest, nil
 }
 
-func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, supported bool) error {
+func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, unavailable []UnavailableModelEntry, supported bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if req, ok := s.requests[id]; ok {
 		req.Status = ModelListCompleted
 		req.Models = models
+		req.UnavailableModels = unavailable
 		req.Supported = supported
 		req.UpdatedAt = time.Now()
 	}
@@ -283,38 +329,141 @@ func modelListRequestTerminal(status ModelListStatus) bool {
 // Handlers
 // ---------------------------------------------------------------------------
 
-// InitiateListModels creates a pending model list request for a runtime.
-// Called by the frontend; the daemon picks it up on its next heartbeat.
+// InitiateListModels answers a "list this runtime's models" request.
+//
+// Fast path: unless force=true, a cached catalog younger than
+// modelCatalogServeWindow is returned as an already-completed request, so the
+// picker renders immediately instead of waiting for the daemon
+// (stale-while-revalidate). Serving a snapshot older than
+// modelCatalogRevalidateAfter also enqueues a background refresh, which nobody
+// polls — its only job is to warm the cache for the next open. force=true is the
+// picker refresh action: it skips this server cache and waits for a live daemon
+// result.
+//
+// Slow path: enqueue a pending request the daemon claims on its next heartbeat,
+// and push a wakeup hint so "next heartbeat" is now rather than up to one
+// HeartbeatInterval away.
 func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 	if rt.Status != "online" {
 		writeError(w, http.StatusServiceUnavailable, "runtime is offline")
 		return
 	}
+	resolvedRuntimeID := uuidToString(rt.ID)
 
-	req, err := h.ModelListStore.Create(r.Context(), uuidToString(rt.ID))
+	if r.URL.Query().Get("force") != "true" {
+		if cached := h.cachedModelCatalog(r.Context(), resolvedRuntimeID); cached != nil {
+			age := cached.Age(time.Now())
+			if age >= modelCatalogRevalidateAfter {
+				h.revalidateModelCatalog(r.Context(), resolvedRuntimeID)
+			}
+			storedAt := cached.StoredAt
+			writeJSON(w, http.StatusOK, &ModelListRequest{
+				// Synthetic ID: no store record backs a cache hit. Clients only poll
+				// GET /models/{id} while status is pending/running, which this
+				// response never is.
+				ID:                randomID(),
+				RuntimeID:         resolvedRuntimeID,
+				Status:            ModelListCompleted,
+				Models:            cached.Models,
+				UnavailableModels: cached.UnavailableModels,
+				Supported:         cached.Supported,
+				CreatedAt:         storedAt,
+				UpdatedAt:         storedAt,
+				Cached:            true,
+				CachedAt:          &storedAt,
+			})
+			return
+		}
+	}
+
+	req, err := h.ModelListStore.Create(r.Context(), resolvedRuntimeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue model list request: "+err.Error())
 		return
 	}
+	h.requestDaemonPendingWork(resolvedRuntimeID, protocol.PendingWorkKindModelList)
 	writeJSON(w, http.StatusOK, req)
+}
+
+// cachedModelCatalog returns a usable cached catalog, or nil when the cache is
+// absent, cold, or unreadable. Cache problems must never fail the request — the
+// caller just falls back to the daemon round trip.
+func (h *Handler) cachedModelCatalog(ctx context.Context, runtimeID string) *ModelCatalogSnapshot {
+	if h.ModelCatalogCache == nil {
+		return nil
+	}
+	snapshot, err := h.ModelCatalogCache.Get(ctx, runtimeID)
+	if err != nil {
+		slog.Warn("model catalog cache read failed", "error", err, "runtime_id", runtimeID)
+		return nil
+	}
+	// fallback=false: a stored snapshot is by construction a real discovery
+	// result — fallback catalogs never enter the cache.
+	if snapshot == nil || !cacheableModelCatalog(snapshot.Models, snapshot.Supported, false) {
+		return nil
+	}
+	return snapshot
+}
+
+// revalidateModelCatalog enqueues a background discovery request whose result
+// only updates the cache. No client polls it; the store's own timeout sweeps the
+// record if the daemon never answers.
+//
+// Stampede control: skip when a request for this runtime is already queued. A
+// running request that has already been claimed is not visible to HasPending, so
+// two opens in the same second can enqueue two refreshes — bounded, cheap
+// (the daemon memoizes discovery for 60s), and strictly better than the
+// alternative of never refreshing.
+func (h *Handler) revalidateModelCatalog(ctx context.Context, runtimeID string) {
+	if h.ModelListStore == nil {
+		return
+	}
+	pending, err := h.ModelListStore.HasPending(ctx, runtimeID)
+	if err != nil {
+		slog.Debug("model catalog revalidate probe failed", "error", err, "runtime_id", runtimeID)
+		return
+	}
+	if pending {
+		return
+	}
+	if _, err := h.ModelListStore.Create(ctx, runtimeID); err != nil {
+		slog.Debug("model catalog revalidate enqueue failed", "error", err, "runtime_id", runtimeID)
+		return
+	}
+	h.requestDaemonPendingWork(runtimeID, protocol.PendingWorkKindModelList)
+}
+
+// requestDaemonPendingWork nudges the daemon to heartbeat now. Best-effort by
+// design: the daemon's scheduled heartbeat remains the correctness path, so a
+// missing notifier or an offline daemon only costs latency. Prefers the relay
+// notifier (reaches the API node holding the daemon's socket) and falls back to
+// the local hub, which is the whole cluster in single-node deployments.
+func (h *Handler) requestDaemonPendingWork(runtimeID, kind string) {
+	if runtimeID == "" {
+		return
+	}
+	if h.DaemonPendingWork != nil {
+		h.DaemonPendingWork.NotifyPendingWork(runtimeID, kind)
+		return
+	}
+	if h.DaemonHub != nil {
+		h.DaemonHub.NotifyPendingWork(runtimeID, kind)
+	}
 }
 
 // GetModelListRequest returns the status of a model list request.
 func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeModelPoll, runtimeID)
+	if !ok {
+		return
+	}
+
 	requestID := chi.URLParam(r, "requestId")
 
 	req, err := h.ModelListStore.Get(r.Context(), requestID)
@@ -322,7 +471,7 @@ func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
 		return
 	}
-	if req == nil {
+	if req == nil || req.RuntimeID != uuidToString(rt.ID) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}
@@ -358,10 +507,18 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var body struct {
-		Status    string       `json:"status"` // "completed" or "failed"
-		Models    []ModelEntry `json:"models"`
-		Supported *bool        `json:"supported"`
-		Error     string       `json:"error"`
+		Status string       `json:"status"` // "completed" or "failed"
+		Models []ModelEntry `json:"models"`
+		// UnavailableModels is what the runtime named but will not run. Older
+		// daemons omit it; absent simply means no advisory rows to show.
+		UnavailableModels []UnavailableModelEntry `json:"unavailable_models"`
+		Supported         *bool                   `json:"supported"`
+		Error             string                  `json:"error"`
+		// Fallback marks a completed report whose models are a static
+		// stand-in the provider substituted after discovery failed, not the
+		// runtime's real catalog. Older daemons omit it; absent means "this
+		// daemon cannot tell us", which stays the pre-MUL-5549 behaviour.
+		Fallback bool `json:"fallback"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -375,7 +532,7 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, supported); err != nil {
+		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, body.UnavailableModels, supported); err != nil {
 			// Surface the store failure as 5xx so the daemon can retry instead
 			// of swallowing the report (leaves the request stuck in running
 			// until the server-side timeout, which is exactly the "looks OK
@@ -383,6 +540,36 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 			slog.Error("ModelListStore Complete failed", "error", err, "request_id", requestID)
 			writeError(w, http.StatusInternalServerError, "failed to persist completion")
 			return
+		}
+		// Warm the catalog cache so the next picker open renders instantly
+		// (MUL-5444). A cache write failure is not the daemon's problem — the
+		// report itself succeeded — so it is logged, not surfaced.
+		//
+		// A completed-but-uncacheable result (empty catalog, or a runtime that
+		// does not honour per-agent model selection) is the freshest truth we
+		// have: drop any older snapshot instead of letting the fast path keep
+		// serving a catalog the runtime no longer advertises. Failed reports
+		// deliberately leave the cache alone — serving the last known good list
+		// through a transient discovery failure is the point of the cache.
+		//
+		// A fallback report is a failed report wearing a completed label: the
+		// models are a static stand-in, so they are neither fresh truth to
+		// store nor grounds to discard a real catalog we already hold. Treat it
+		// like a failure and leave the cache untouched (MUL-5549).
+		if h.ModelCatalogCache != nil {
+			switch modelCatalogCacheDecision(body.Models, supported, body.Fallback) {
+			case modelCatalogCacheStore:
+				if err := h.ModelCatalogCache.Put(r.Context(), runtimeID, body.Models, body.UnavailableModels, supported); err != nil {
+					slog.Warn("model catalog cache write failed", "error", err, "runtime_id", runtimeID)
+				}
+			case modelCatalogCacheDrop:
+				if err := h.ModelCatalogCache.Invalidate(r.Context(), runtimeID); err != nil {
+					slog.Warn("model catalog cache invalidate failed", "error", err, "runtime_id", runtimeID)
+				}
+			case modelCatalogCacheKeep:
+				slog.Debug("model discovery reported a fallback catalog; leaving cached catalog untouched",
+					"runtime_id", runtimeID, "count", len(body.Models))
+			}
 		}
 	} else {
 		if err := h.ModelListStore.Fail(r.Context(), requestID, body.Error); err != nil {

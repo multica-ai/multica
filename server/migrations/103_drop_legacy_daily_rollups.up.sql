@@ -1,6 +1,5 @@
 -- Drop the two legacy daily rollup pipelines now that `task_usage_hourly`
--- is the only read path (see docs/timezone-architecture-rfc.md §6,
--- Phase 3). Forward-only: there is no down migration that would put the
+-- is the only read path. Forward-only: there is no down migration that would put the
 -- data back, since by the time this ships:
 --
 --   * The hourly rollup has been live and writing every bucket since
@@ -27,8 +26,7 @@
 -- per-version stop), so a self-host operator who skips the documented
 -- backfill step would otherwise silently land in a state where dashboards
 -- show zeros (see SELF-HOST UPGRADE ORDER in
--- cmd/backfill_task_usage_hourly/main.go and
--- docs/timezone-architecture-rfc.md §6 / §7.1). Failing loud here is the
+-- cmd/backfill_task_usage_hourly/main.go). Failing loud here is the
 -- only thing that turns an undetected outage into a clear migration error.
 --
 -- The completion signal we trust is task_usage_hourly_rollup_state.watermark_at:

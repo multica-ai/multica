@@ -41,6 +41,54 @@ describe("ImageExtension.renderMarkdown", () => {
 // ---------------------------------------------------------------------------
 // file-card tokenizer round-trip
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// A placeholder is not content
+// ---------------------------------------------------------------------------
+// The document IS the persisted draft body, so anything renderMarkdown emits
+// for an in-flight upload becomes text that outlives the upload. Both node
+// types must stay silent until they hold a real URL.
+describe("in-flight placeholders never serialise", () => {
+  it("emits nothing for an uploading fileCard", () => {
+    // Serialising this used to write `!file[x.pdf]()` into the draft — a line
+    // the tokenizer below cannot parse back, so it survived as dead literal
+    // text and shipped with the comment.
+    expect(
+      fileCardRenderMarkdown({
+        attrs: { filename: "x.pdf", href: "", uploading: true } as never,
+      }),
+    ).toBe("");
+  });
+
+  it("emits nothing for a fileCard with no href, even when not marked uploading", () => {
+    expect(
+      fileCardRenderMarkdown({ attrs: { filename: "x.pdf", href: "" } as never }),
+    ).toBe("");
+  });
+
+  it("emits nothing for an uploading image", () => {
+    // Its src is a process-local blob: URL that dies on reload. This replaces
+    // the BLOB_IMAGE_RE scrub ContentEditor used to run after the fact.
+    expect(
+      imageRenderMarkdown({
+        attrs: { src: "blob:http://localhost/abc", alt: "x.png", uploading: true } as never,
+      }),
+    ).toBe("");
+  });
+
+  it("emits normally once the upload settled into a real URL", () => {
+    expect(
+      fileCardRenderMarkdown({
+        attrs: { filename: "x.pdf", href: "/api/attachments/a1/download", uploading: false } as never,
+      }),
+    ).toBe("!file[x.pdf](/api/attachments/a1/download)");
+    expect(
+      imageRenderMarkdown({
+        attrs: { src: "/api/attachments/a2/download", alt: "x.png", uploading: false } as never,
+      }),
+    ).toBe("![x.png](/api/attachments/a2/download)");
+  });
+});
+
 describe("file-card tokenizer", () => {
   it("round-trips a filename with all special chars", () => {
     const filename = "report[final](v2)\\draft.pdf";

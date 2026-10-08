@@ -1,0 +1,270 @@
+{
+  "tabs": {
+    "all": "全部",
+    "created": "我创建的",
+    "assigned": "我负责的",
+    "agents": "智能体",
+    "members": "成员"
+  },
+  "status": {
+    "queued": "排队中",
+    "deferred": "排队中",
+    "dispatched": "启动中",
+    "waiting_local_directory": "等待目录",
+    "running": "运行中",
+    "completed": "完成",
+    "failed": "失败",
+    "cancelled": "cancelled",
+    "backlog": "backlog",
+    "todo": "todo",
+    "in_progress": "in_progress",
+    "in_review": "in_review",
+    "done": "done",
+    "blocked": "blocked"
+  },
+  "category": {
+    "unstarted": "unstarted",
+    "started": "started",
+    "done": "done",
+    "closed": "closed"
+  },
+  "priority": {
+    "none": "无优先级",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "urgent": "紧急"
+  },
+  "filters": {
+    "title": "筛选",
+    "status": "状态",
+    "priority": "优先级",
+    "assignee": "负责人",
+    "project": "项目",
+    "label": "标签",
+    "clear": "清除筛选",
+    "apply": "应用",
+    "due_date": "截止日期"
+  },
+  "list": {
+    "empty": "没有符合筛选条件的任务",
+    "count_other": "{{count}} 个任务",
+    "search_placeholder": "搜索任务和项目"
+  },
+  "detail": {
+    "properties": "属性",
+    "activity": "动态",
+    "comments": "评论",
+    "comment": "评论",
+    "reply": "回复",
+    "add_comment": "添加评论...",
+    "description": "描述",
+    "add_description": "添加描述...",
+    "runs": "运行",
+    "copy_link": "复制链接",
+    "open_on_web": "在网页打开",
+    "delete_comment": "删除评论",
+    "edit_comment": "编辑评论",
+    "no_runs": "暂无运行"
+  },
+  "new": {
+    "title": "新建任务",
+    "title_placeholder": "任务标题",
+    "create": "创建任务",
+    "creating": "创建中...",
+    "description_placeholder": "描述...（输入 @ 提及）"
+  },
+  "edit": {
+    "title": "编辑任务",
+    "save": "保存修改",
+    "saving": "保存中..."
+  },
+  "activity": {
+    "created": "创建了任务",
+    "status_changed": "更改了状态：{{from}} → {{to}}",
+    "priority_changed": "更改了优先级：{{from}} → {{to}}",
+    "self_assigned": "指派给了自己",
+    "removed_assignee": "移除了负责人",
+    "assigned_to": "分配给 {{name}}",
+    "assignee_changed": "更改了负责人",
+    "start_date_set": "将开始日期设为 {{date}}",
+    "start_date_removed": "移除了开始日期",
+    "due_date_set": "将截止日期设为 {{date}}",
+    "due_date_removed": "移除了截止日期",
+    "title_changed": "重命名：\"{{from}}\" → \"{{to}}\"",
+    "description_updated": "更新了描述",
+    "duplicate_marked": "把这个任务标记为 {{identifier}} 的重复",
+    "duplicate_unmarked": "取消了这个任务对 {{identifier}} 的重复标记",
+    "duplicate_unmarked_to": "取消了这个任务对 {{identifier}} 的重复标记，并移至 {{status}}",
+    "duplicate_unmarked_original_deleted": "移除了重复标记，{{identifier}} 已被删除",
+    "duplicate_added": "把 {{identifier}} 标记为这个任务的重复",
+    "duplicate_removed": "取消了 {{identifier}} 对这个任务的重复标记",
+    "tasks_completed_other": "完成了 {{count}} 次运行",
+    "tasks_failed_other": "有 {{count}} 次运行失败",
+    "squad_action_with_reason": "评估后执行操作：{{reason}}",
+    "squad_action": "评估后执行操作",
+    "squad_no_action_with_reason": "评估结果：无需操作（{{reason}}）",
+    "squad_no_action": "评估结果：无需操作",
+    "squad_failed_with_reason": "评估失败：{{reason}}",
+    "squad_failed": "评估失败",
+    "squad_evaluated": "评估了小队触发器",
+    "commented": "发表了评论"
+  },
+  "errors": {
+    "create_failed": "创建任务失败",
+    "load_failed": "任务加载失败：{{message}}"
+  },
+  "empty": {
+    "filtered": "没有符合当前筛选条件的任务。",
+    "assigned": "没有分配给你的任务。",
+    "created": "你还没有创建任务。",
+    "agents": "没有分配给智能体或小队的任务。",
+    "all": "该工作区还没有任务。",
+    "members": "没有分配给成员的任务。"
+  },
+  "menu": {
+    "pin": "固定",
+    "unpin": "取消固定",
+    "edit_details": "编辑详情",
+    "copy_link": "复制链接",
+    "open_web": "在网页打开",
+    "delete_issue": "删除任务",
+    "issue_actions": "任务操作"
+  },
+  "delete": {
+    "title": "删除任务？",
+    "message": "{{identifier}} 及其评论、表情和附件将被永久删除，且无法撤销。"
+  },
+  "summary": {
+    "comment": "评论运行",
+    "autopilot": "自动化运行",
+    "chat": "聊天运行",
+    "quick_create": "快速创建",
+    "direct": "运行"
+  },
+  "cancel": {
+    "title": "取消运行？",
+    "message": "智能体会在当前步骤结束后停止。",
+    "keep_running": "继续运行",
+    "cancel_task": "取消运行"
+  },
+  "form": {
+    "discard_title": "放弃修改？",
+    "discard_message_issue": "你对这个任务的修改将会丢失。",
+    "keep_editing": "继续编辑",
+    "save_failed": "保存失败"
+  },
+  "picker": {
+    "unassigned": "未分配",
+    "agent": "智能体",
+    "needs_runtime": "需要运行时",
+    "leader_needs_runtime": "负责人需要运行时",
+    "squad": "小队",
+    "no_matches": "没有匹配结果。",
+    "no_project": "无项目",
+    "no_projects": "该工作区还没有项目。\n请在网页端创建。",
+    "no_labels": "该工作区还没有标签。",
+    "create_label": "创建 \"{{name}}\"",
+    "no_members_agents": "该工作区还没有成员或智能体。",
+    "people": "成员",
+    "agents": "智能体",
+    "squads": "小队",
+    "issues": "任务",
+    "everyone": "所有人（@all）",
+    "unknown": "未知",
+    "search_people": "搜索成员",
+    "search_projects": "搜索项目",
+    "search_labels": "搜索标签",
+    "search_members_agents": "搜索成员或智能体",
+    "search_people_issues": "搜索成员或任务",
+    "reference_issue": "引用任务",
+    "clear": "清除"
+  },
+  "comments": {
+    "reply": "回复",
+    "react": "回应...",
+    "copy": "复制",
+    "select_text": "选择文本",
+    "copy_link": "复制链接",
+    "resolve": "解决讨论",
+    "unresolve": "重新打开讨论",
+    "delete": "删除",
+    "delete_title": "删除评论？",
+    "delete_keep_replies": "该评论将被永久删除。其回复会保留在讨论中。此操作无法撤销。",
+    "delete_with_replies": "该评论将被永久删除，讨论中的回复也会一并移除。此操作无法撤销。",
+    "more_reactions": "更多表情...",
+    "fallback_actor": "评论",
+    "composer_placeholder": "添加评论...",
+    "composer_pill": "添加评论，输入 @ 提及..."
+  },
+  "suggestions": {
+    "everyone": "所有人",
+    "all": "全部",
+    "member": "成员",
+    "recent": "最近",
+    "my_issues": "我的任务"
+  },
+  "resolved": {
+    "a11y_folded_other": "由 {{authors}} 解决的讨论，{{count}} 条消息。点按展开。",
+    "summary_other": "已解决 · {{count}} 条消息，由 {{authors}} 处理",
+    "resolved_by": "由 {{name}} 解决",
+    "collapse": "收起",
+    "collapse_a11y": "收起已解决讨论"
+  },
+  "failed": {
+    "send": "无法发送",
+    "retry": "重试",
+    "retry_a11y": "重试发送评论",
+    "discard": "放弃",
+    "discard_a11y": "放弃失败的评论"
+  },
+  "resources": {
+    "title": "添加仓库",
+    "url": "仓库 URL",
+    "branch": "起始分支（可选）",
+    "label": "标签（可选）",
+    "attach": "添加",
+    "attaching": "添加中...",
+    "branch_hint": "运行会从这个分支开始，并针对它创建 Pull Request。留空则使用仓库默认分支。",
+    "commit": "这是提交 ID，不是分支。运行会回传到起始分支。如需一次性修订，请给 multica repo checkout 传入 --ref。",
+    "too_long": "最多使用 255 个字符。",
+    "invalid_characters": "分支名不能包含空格或 ~ ^ : ? * [ \\",
+    "invalid": "不是有效的分支名。",
+    "failed": "添加资源失败",
+    "error": "未知错误"
+  },
+  "runs": {
+    "active": "进行中",
+    "past": "历史",
+    "title": "智能体运行",
+    "status": {
+      "queued": "排队中",
+      "deferred": "已延后",
+      "dispatched": "已交给智能体",
+      "running": "运行中",
+      "waiting_local_directory": "等待本地目录可用",
+      "completed": "运行成功",
+      "failed": "运行失败",
+      "cancelled": "已取消"
+    }
+  },
+  "header_filter": "筛选",
+  "new_badge": "新",
+  "jump_a11y_other": "跳到 {{count}} 条新消息",
+  "a11y": {
+    "agent_working": "智能体处理中 — 打开运行",
+    "remove_mention": "移除提及 {{name}}",
+    "retry_upload": "重试上传 {{name}}",
+    "open_file": "打开 {{name}}",
+    "remove_file": "移除 {{name}}"
+  },
+  "summary.comment": "评论运行",
+  "summary.chat": "聊天运行",
+  "summary.direct": "运行",
+  "cancel.title": "取消运行？",
+  "cancel.cancel_task": "取消运行",
+  "picker.create_label": "创建 \"{{name}}\"",
+  "comments.composer_pill": "添加评论，输入 @ 提及...",
+  "resources.branch_hint": "运行会从这个分支开始，并针对它创建 Pull Request。留空则使用仓库默认分支。",
+  "resources.commit": "这是提交 ID，不是分支。运行会回传到起始分支。如需一次性修订，请给 multica repo checkout 传入 --ref。"
+}

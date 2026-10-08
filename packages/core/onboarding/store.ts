@@ -45,11 +45,10 @@ export async function saveQuestionnaire(
  * gate sees the updated user — most importantly the workspace layout
  * hard gate that redirects un-onboarded users back to /onboarding.
  *
- * v3 contract: this is the ONLY mechanism that flips `onboarded_at`
- * from the frontend. All Helper-agent / starter-issue creation is now
- * done by the welcome hook in the workspace shell using generic
- * `createAgent` / `createIssue` calls, AFTER this call has returned
- * and the user has been navigated into the workspace.
+ * This is the only frontend mechanism that flips `onboarded_at`.
+ * Runtime-connected onboarding creates Mika and enqueues the hidden opening
+ * turn before calling this function. The explicit no-runtime path may seed
+ * one setup-guide issue after navigation.
  *
  * `completionPath` is the client's view of which Step-3 exit the user
  * took; the server funnel-splits `onboarding_completed` on this value.

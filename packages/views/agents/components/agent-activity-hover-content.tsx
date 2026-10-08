@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { deriveAgentAvailability } from "@multica/core/agents";
+import { deriveAgentPresenceDetail } from "@multica/core/agents/derive-presence";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { workloadConfig } from "../presence";
 import { useT } from "../../i18n";
@@ -73,7 +74,10 @@ function AgentActivityTaskRow({
 
   const agent = agentById.get(task.agent_id);
   const runtime = runtimeFrom(agent?.runtime_id, runtimeById);
-  const availability = deriveAgentAvailability(runtime, now);
+  const availability = agent
+    ? deriveAgentPresenceDetail({ agent, runtime, tasks: [], now })
+        .availability
+    : "offline";
   const isRunning = task.status === "running";
   // queued/dispatched both read as "queued" in the user-facing copy —
   // `dispatched` is the daemon-acked sub-state of queued and not
@@ -97,7 +101,7 @@ function AgentActivityTaskRow({
     : task.created_at;
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex items-center gap-2 text-caption">
       <ActorAvatarBase
         name={getActorName("agent", task.agent_id)}
         initials={getActorInitials("agent", task.agent_id)}
@@ -108,6 +112,7 @@ function AgentActivityTaskRow({
       <span className="flex-1 truncate font-medium">
         {getActorName("agent", task.agent_id)}
       </span>
+      {task.wakeup_id && <Bell className="size-3 shrink-0 text-muted-foreground" aria-label={t(($) => $.wakeups.triggered_by_wakeup)} />}
       <span className="flex shrink-0 items-center gap-1.5">
         <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
         <span className={labelClass}>
@@ -141,7 +146,7 @@ export function AgentActivityHoverContent({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-xs font-medium text-muted-foreground">
+      <div className="text-caption font-medium text-muted-foreground">
         {/* One row per task, so count tasks — not agents. A single agent can
             run several tasks at once, so an agent-worded header here would
             disagree with the row count below. */}
@@ -199,7 +204,7 @@ export function WorkspaceAgentActivityHoverContent({
 
   if (issues.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.agent_activity.empty_hover)}
       </p>
     );
@@ -207,7 +212,7 @@ export function WorkspaceAgentActivityHoverContent({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="text-xs font-medium text-muted-foreground">
+      <div className="text-caption font-medium text-muted-foreground">
         {`${t(($) => $.agent_activity.issues_count, {
           count: issues.length,
         })} · ${t(($) => $.agent_activity.tasks_count, { count: taskCount })}`}
@@ -215,8 +220,8 @@ export function WorkspaceAgentActivityHoverContent({
       <div className="flex flex-col gap-2.5">
         {issues.map((issue) => (
           <div key={issue.id} className="flex flex-col gap-1.5">
-            <div className="flex items-baseline gap-1.5 text-xs">
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+            <div className="flex items-baseline gap-1.5 text-caption">
+              <span className="shrink-0 font-mono text-micro text-muted-foreground">
                 {issue.identifier}
               </span>
               <span className="truncate">{issue.title}</span>

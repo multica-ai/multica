@@ -13,6 +13,9 @@ import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
+import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { telegramInstallationsOptions } from "@multica/core/telegram";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
@@ -171,9 +175,24 @@ export function AgentOverviewPane({
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: dingtalkListing } = useQuery({
+    ...dingtalkInstallationsOptions(wsId),
+  });
+  const { data: wecomListing } = useQuery({
+    ...wecomInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const { data: telegramListing } = useQuery({
+    ...telegramInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
 
   const integrationsConfigured =
-    larkListing?.configured === true || slackListing?.configured === true;
+    larkListing?.configured === true ||
+    slackListing?.configured === true ||
+    dingtalkListing?.configured === true ||
+    wecomListing?.configured === true ||
+    telegramListing?.configured === true;
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime
@@ -201,10 +220,17 @@ export function AgentOverviewPane({
 
   const visibleSettingsTabs = useMemo(
     () =>
-      SETTINGS_TABS.filter(
-        (tab) => tab.id !== "runtime_config" || runtime?.provider === "openclaw",
-      ),
-    [runtime?.provider],
+      SETTINGS_TABS.filter((tab) => {
+        // Env is the only settings tab backed by a secret-bearing endpoint.
+        // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
+        // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
+        // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
+        // The server stays the boundary; this only removes a dead entry point.
+        if (tab.id === "env") return canEdit;
+        if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
+        return true;
+      }),
+    [canEdit, runtime?.provider],
   );
 
   const visibleViews = useMemo(
@@ -302,11 +328,11 @@ export function AgentOverviewPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div
-        className="shrink-0 overflow-x-auto border-b px-4 sm:px-6"
+        className="shrink-0 overflow-x-auto border-b"
         role="tablist"
         aria-label={t(($) => $.tabs.page_navigation_aria)}
       >
-        <div className="mx-auto flex max-w-[1440px] items-center gap-6">
+        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
           {TOP_TABS.map((tab) => (
             <button
               key={tab.id}
@@ -315,7 +341,7 @@ export function AgentOverviewPane({
               aria-selected={activeSection === tab.id}
               onClick={() => requestSection(tab.id)}
               className={cn(
-                "relative shrink-0 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                "relative shrink-0 py-3 text-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                 activeSection === tab.id
                   ? "text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-foreground"
                   : "text-muted-foreground hover:text-foreground",
@@ -327,7 +353,24 @@ export function AgentOverviewPane({
         </div>
       </div>
 
-      {/* Overview/Work scroll as one page. Sidebar views split scrolling on
+      {/* Header, tab bar, banners and every panel read PAGE_RAIL, so the page
+          is one centred column at every width (MUL-7107). The first pass put
+          the chrome on the rail and left the panels off it, which is the bug;
+          the second put everything full-bleed, which aligned the leading edge
+          and then stretched this two-column layout to 2200px and stranded the
+          summary card 1200px from the list it summarises.
+
+          A detail page is a document about one entity, not a table. Genuine
+          list surfaces — Issues, My Issues, member detail — stay full-bleed on
+          PAGE_GUTTER alone; `runtimes` and skill detail read the same rail.
+
+          Panels that own no inner gutter take PAGE_GUTTER on the rail element
+          itself; Work and the secondary nav layout take a bare rail because
+          their toolbar and nav rail already carry it. Below ~1730px the rail
+          is wider than the viewport, so it costs small and medium screens
+          nothing.
+
+          Overview/Work scroll as one page. Sidebar views split scrolling on
           md+ (nav rail pinned, content pane scrolls) like settings-page.tsx;
           below md the rail is a horizontal strip and the page scrolls whole. */}
       <div
@@ -337,7 +380,9 @@ export function AgentOverviewPane({
         )}
       >
         {effectiveView === "overview" && (
-          <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
+          <div
+            className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}
+          >
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
               <AgentOverviewSummary
@@ -350,16 +395,21 @@ export function AgentOverviewPane({
         )}
 
         {effectiveView === "work" && (
-          <div className="flex min-h-[620px] flex-col">
+          <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col")}>
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
           </div>
         )}
 
         {secondaryTabs.length > 0 && activeSecondaryTab && (
-          <div className="flex min-h-full flex-col md:h-full md:flex-row">
+          <div className={cn(PAGE_RAIL, "flex min-h-full flex-col md:h-full md:flex-row")}>
             {/* Content-surface color, no shell tint — same rule as the settings
                 nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
-            <aside className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
+            <aside
+              className={cn(
+                "shrink-0 overflow-x-auto border-b border-surface-border py-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
+                PAGE_GUTTER,
+              )}
+            >
               <div
                 className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
                 role="tablist"
@@ -376,7 +426,7 @@ export function AgentOverviewPane({
                       aria-selected={active}
                       onClick={() => requestView(tab.id)}
                       className={cn(
-                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
+                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
                         active
                           ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
                           : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
@@ -390,9 +440,9 @@ export function AgentOverviewPane({
             </aside>
 
             <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
+              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
                 <header>
-                  <h2 className="text-base font-medium text-balance">
+                  <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
                   </h2>
                 </header>
@@ -401,9 +451,7 @@ export function AgentOverviewPane({
                   {effectiveView === "instructions" && (
                     <InstructionsTab
                       agent={agent}
-                      onSave={(instructions) =>
-                        onUpdate(agent.id, { instructions })
-                      }
+                      onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                     />
                   )}
@@ -411,6 +459,7 @@ export function AgentOverviewPane({
                     <SkillsTab
                       agent={agent}
                       runtime={runtime}
+                      currentUserId={currentUserId}
                       canEdit={canEdit}
                     />
                   )}
@@ -418,6 +467,8 @@ export function AgentOverviewPane({
                     <McpConfigTab
                       agent={agent}
                       runtime={runtime}
+                      currentUserId={currentUserId}
+                      canEdit={canEdit}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                     />

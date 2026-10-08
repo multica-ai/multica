@@ -5,7 +5,7 @@
  *   - sessions(wsId)        → ChatSession[] for the workspace dropdown / sheet
  *   - messages(sessionId)   → ChatMessage[] for the active session
  *   - pendingTask(sessionId)→ ChatPendingTask, populated when an agent task is
- *                             in flight; cleared on chat:done / task:cancelled
+ *                             in flight; refreshed on terminal task events
  *
  * Same shape as web's `chatKeys` in packages/core/chat/queries.ts (mobile
  * owns its own copy per the "mirror, don't import" rule in apps/mobile/CLAUDE.md).

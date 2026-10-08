@@ -10,6 +10,11 @@
     "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Apply link",
+      "remove": "Remove link",
+      "close": "Close link editor"
+    },
     "heading_dropdown": {
       "text": "Text",
       "normal_text": "Normal Text",
@@ -34,7 +39,18 @@
     "copy_link": "Copy link",
     "delete": "Delete",
     "link_copied": "Link copied",
-    "copy_link_failed": "Failed to copy link"
+    "copy_link_failed": "Failed to copy link",
+    "copy_image": "Copy image",
+    "image_copied": "Image copied",
+    "copy_image_failed": "Couldn't copy image",
+    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size.",
+    "unavailable": "That image is no longer available — skipped it."
+  },
+  "canvas": {
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_fit": "Fit to view",
+    "zoom_actual": "Actual size"
   },
   "attachment": {
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
@@ -45,7 +61,37 @@
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
     "open_in_new_tab": "Open in new tab",
-    "remove": "Remove attachment"
+    "remove": "Remove attachment",
+    "previous": "Previous",
+    "next": "Next",
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "All deliverables",
+    "info": "Info",
+    "wrap_lines": "Wrap lines",
+    "viewport": "Viewport width",
+    "viewport_fill": "Fit",
+    "viewport_desktop": "Desktop",
+    "viewport_tablet": "Tablet",
+    "viewport_phone": "Phone",
+    "viewport_scale": "Scaled to {{percent}}%",
+    "view_source": "View source",
+    "view_mode": "View",
+    "view_tree": "Tree",
+    "view_raw": "Raw",
+    "structured_parse_failed": "Couldn't parse this file, so it's shown as text.",
+    "tree_show_more": "Show more ({{count}} left)",
+    "tree_items_one": "{{count}} item",
+    "tree_items_other": "{{count}} items",
+    "tree_keys_one": "{{count}} key",
+    "tree_keys_other": "{{count}} keys",
+    "table_empty": "No rows",
+    "table_rows_one": "{{count}} row",
+    "table_rows_other": "{{count}} rows",
+    "table_columns_one": "{{count}} column",
+    "table_columns_other": "{{count}} columns",
+    "address": "Address",
+    "address_hint": "?query",
+    "reload": "Reload"
   },
   "link_hover": {
     "copy_link": "Copy link",
@@ -57,11 +103,14 @@
     "group_users": "Users",
     "group_issues": "Issues",
     "all_members": "All members",
+    "agent_badge": "Agent",
+    "squad_badge": "Squad",
     "searching": "Searching...",
     "no_results": "No results",
     "group_current": "Current page",
     "group_recent": "Recently viewed",
-    "group_search": "Search results"
+    "group_search": "Search results",
+    "group_cancelled": "Cancelled"
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",
@@ -71,22 +120,41 @@
     }
   },
   "code_block": {
+    "html_preview": "HTML preview",
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
     "fullscreen": "Fullscreen"
+  },
+  "dynamic_block": {
+    "preview": "Preview",
+    "source": "Source",
+    "view": "View",
+    "copy_source": "Copy source",
+    "show_all": "Show all",
+    "rendering": "Rendering...",
+    "error_html": "The preview hit a script error",
+    "error_mermaid": "Couldn't draw this diagram",
+    "error_at_line": "{{message}} (line {{line}})",
+    "view_source": "View source",
+    "copy_error": "Copy error"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },
   "upload": {
     "failed": "Couldn't upload {{filename}}: {{reason}}",
-    "in_progress": "Uploading…"
+    "in_progress": "Uploading…",
+    "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
+    "remove": "Remove",
+    "uploading_label": "Uploading {{filename}}…",
+    "failed_label": "Couldn’t upload {{filename}}"
   },
   "title_editor": {
     "title_aria_label": "Title"
   },
   "mermaid": {
+    "diagram_label": "Mermaid diagram",
     "render_error": "Unable to render Mermaid diagram.",
     "rendering": "Rendering diagram…",
     "viewer_title": "Diagram",
@@ -96,11 +164,6 @@
     "copy_source": "Copy diagram source",
     "show_source": "Show source",
     "show_diagram": "Show diagram",
-    "zoom_in": "Zoom in",
-    "zoom_out": "Zoom out",
-    "zoom_fit": "Fit to view",
-    "zoom_actual": "Actual size",
-    "reset_view": "Reset view",
     "export": "Export",
     "export_png": "Download PNG",
     "export_svg": "Download SVG",

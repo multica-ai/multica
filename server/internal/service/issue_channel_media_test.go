@@ -1,0 +1,633 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+type afterCommitTxStarter struct {
+	pool        *pgxpool.Pool
+	afterCommit func()
+}
+
+func (s *afterCommitTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &afterCommitTx{Tx: tx, afterCommit: s.afterCommit}, nil
+}
+
+type afterCommitTx struct {
+	pgx.Tx
+	afterCommit func()
+}
+
+type rejectIssueCommitTxStarter struct {
+	pool *pgxpool.Pool
+	err  error
+}
+
+func (s *rejectIssueCommitTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &rejectIssueCommitTx{Tx: tx, err: s.err}, nil
+}
+
+type rejectIssueCommitTx struct {
+	pgx.Tx
+	err error
+}
+
+type recordingIssueAnalytics struct {
+	events []analytics.Event
+}
+
+func (a *recordingIssueAnalytics) Capture(event analytics.Event) {
+	a.events = append(a.events, event)
+}
+
+func (*recordingIssueAnalytics) Close() {}
+
+func (t *rejectIssueCommitTx) Commit(ctx context.Context) error {
+	_ = t.Tx.Rollback(ctx)
+	return t.err
+}
+
+func (t *afterCommitTx) Commit(ctx context.Context) error {
+	if err := t.Tx.Commit(ctx); err != nil {
+		return err
+	}
+	if t.afterCommit != nil {
+		t.afterCommit()
+		t.afterCommit = nil
+	}
+	return nil
+}
+
+func TestPublishAttachmentsChangedCarriesIssueScope(t *testing.T) {
+	bus := events.New()
+	svc := &IssueService{Bus: bus}
+	workspaceID := util.MustParseUUID("11111111-1111-4111-8111-111111111111")
+	issueID := util.MustParseUUID("22222222-2222-4222-8222-222222222222")
+	actorID := util.MustParseUUID("33333333-3333-4333-8333-333333333333")
+	var got events.Event
+	bus.Subscribe(protocol.EventIssueAttachmentsChanged, func(e events.Event) { got = e })
+
+	svc.PublishAttachmentsChanged(context.Background(), db.Issue{ID: issueID, WorkspaceID: workspaceID}, actorID)
+
+	if got.Type != protocol.EventIssueAttachmentsChanged || got.WorkspaceID != util.UUIDToString(workspaceID) || got.ActorType != "member" || got.ActorID != util.UUIDToString(actorID) {
+		t.Fatalf("event envelope = %+v", got)
+	}
+	payload, ok := got.Payload.(map[string]any)
+	if !ok || payload["issue_id"] != util.UUIDToString(issueID) {
+		t.Fatalf("event payload = %#v", got.Payload)
+	}
+}
+
+func TestPublishAttachmentsChangedAlsoBroadcastsUpdatedDescription(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, _, issueID := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	issueUUID := util.MustParseUUID(issueID)
+	actorID := util.MustParseUUID(userID)
+	const description = "![](/api/attachments/22222222-2222-4222-8222-222222222222/download)"
+	if _, err := pool.Exec(ctx, `UPDATE issue SET description = $1 WHERE id = $2`, description, issueUUID); err != nil {
+		t.Fatalf("update issue description: %v", err)
+	}
+	issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: issueUUID, WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	bus := events.New()
+	svc := &IssueService{Bus: bus, Queries: q}
+	var updated events.Event
+	var ordered []events.Event
+	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { updated = e })
+	bus.SubscribeAll(func(e events.Event) {
+		if e.Type == protocol.EventIssueUpdated || e.Type == protocol.EventIssueAttachmentsChanged {
+			ordered = append(ordered, e)
+		}
+	})
+
+	svc.PublishAttachmentsChanged(ctx, issue, actorID)
+
+	if updated.Type != protocol.EventIssueUpdated || updated.WorkspaceID != workspaceID || updated.ActorType != "member" || updated.ActorID != userID {
+		t.Fatalf("issue update envelope = %+v", updated)
+	}
+	payload, ok := updated.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("issue update payload = %#v", updated.Payload)
+	}
+	issuePayload, ok := payload["issue"].(map[string]any)
+	if !ok {
+		t.Fatalf("issue update body = %#v", payload["issue"])
+	}
+	gotDescription, ok := issuePayload["description"].(*string)
+	if !ok || gotDescription == nil || *gotDescription != description {
+		t.Fatalf("broadcast description = %#v, want %q", issuePayload["description"], description)
+	}
+	for _, key := range []string{"assignee_changed", "status_changed", "project_changed"} {
+		if changed, ok := payload[key].(bool); !ok || changed {
+			t.Fatalf("%s = %#v, want false", key, payload[key])
+		}
+	}
+	if len(ordered) != 2 || ordered[0].Type != protocol.EventIssueUpdated || ordered[1].Type != protocol.EventIssueAttachmentsChanged {
+		t.Fatalf("event order = %#v, want issue:updated then issue_attachments:changed", ordered)
+	}
+	attachmentPayload, ok := ordered[1].Payload.(map[string]any)
+	if !ok || attachmentPayload["issue_revision"] != issue.Revision {
+		t.Fatalf("attachment event payload = %#v, want revision %d", ordered[1].Payload, issue.Revision)
+	}
+}
+
+func TestCreateMediaGatedIssueCommitsDeferredTaskAtomicallyBeforeCreatedEvent(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	agentUUID := util.MustParseUUID(agentID)
+
+	bus := events.New()
+	wakeup := &stubWakeup{}
+	createdOverlay := json.RawMessage(`{"mcpServers":{"creator":{"url":"https://creator.example"}}}`)
+	taskService := &TaskService{
+		Queries:      q,
+		TxStarter:    pool,
+		Bus:          bus,
+		Composio:     &stubOverlayBuilder{resp: createdOverlay},
+		FeatureFlags: composioMCPAppsTestFlags(true),
+		Wakeup:       wakeup,
+	}
+	var competingTaskID pgtype.UUID
+	var competingErr error
+	txStarter := &afterCommitTxStarter{pool: pool, afterCommit: func() {
+		// This callback runs after the issue transaction is visible but before
+		// IssueService resumes. The old implementation committed only the issue,
+		// so this ordinary queued insert won the unique slot. The fixed path has
+		// already committed the deferred task in the same transaction.
+		var issueID, runtimeID pgtype.UUID
+		if err := pool.QueryRow(ctx, `
+			SELECT i.id, a.runtime_id
+			FROM issue i
+			JOIN agent a ON a.id = i.assignee_id
+			WHERE i.workspace_id = $1 AND i.title = 'Media-gated issue'`, workspaceUUID).
+			Scan(&issueID, &runtimeID); err != nil {
+			competingErr = fmt.Errorf("discover committed issue: %w", err)
+			return
+		}
+		competingErr = pool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+			VALUES ($1, $2, $3, 'queued', 1)
+			RETURNING id`, agentUUID, runtimeID, issueID).Scan(&competingTaskID)
+	}}
+	issueService := NewIssueService(q, txStarter, bus, nil, taskService)
+
+	var callbackErr error
+	var mergedCommentID pgtype.UUID
+	bus.Subscribe(protocol.EventIssueCreated, func(event events.Event) {
+		payload, ok := event.Payload.(map[string]any)
+		if !ok {
+			callbackErr = fmt.Errorf("issue:created payload = %#v", event.Payload)
+			return
+		}
+		issueID, ok := payload["issue_id"].(string)
+		if !ok {
+			callbackErr = fmt.Errorf("issue:created issue_id = %#v", payload["issue_id"])
+			return
+		}
+		issueUUID := util.MustParseUUID(issueID)
+
+		var status string
+		var mediaPending bool
+		var runtimeOverlay []byte
+		if err := pool.QueryRow(ctx, `
+			SELECT status, context->>'channel_issue_media_pending' = 'true', runtime_mcp_overlay
+			FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2`, issueUUID, agentUUID).Scan(&status, &mediaPending, &runtimeOverlay); err != nil {
+			callbackErr = fmt.Errorf("load task during issue:created: %w", err)
+			return
+		}
+		if status != "deferred" || !mediaPending {
+			callbackErr = fmt.Errorf("task during issue:created = status %q media_pending %v", status, mediaPending)
+			return
+		}
+		var runtimeOverlayValue, createdOverlayValue any
+		if err := json.Unmarshal(runtimeOverlay, &runtimeOverlayValue); err != nil {
+			callbackErr = fmt.Errorf("decode task overlay during issue:created: %w", err)
+			return
+		}
+		if err := json.Unmarshal(createdOverlay, &createdOverlayValue); err != nil || !reflect.DeepEqual(runtimeOverlayValue, createdOverlayValue) {
+			callbackErr = fmt.Errorf("task overlay during issue:created = %s, want %s", runtimeOverlay, createdOverlay)
+			return
+		}
+
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+			VALUES ($1, $2, 'member', $3, 'Immediate follow-up')
+			RETURNING id`, issueUUID, workspaceUUID, userUUID).Scan(&mergedCommentID); err != nil {
+			callbackErr = fmt.Errorf("insert immediate comment: %w", err)
+			return
+		}
+		if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+			IssueID:                 issueUUID,
+			AgentID:                 agentUUID,
+			NewTriggerCommentID:     mergedCommentID,
+			NewOriginatorUserID:     userUUID,
+			NewAccountableUserID:    userUUID,
+			NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
+			NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
+			NewTriggerEvidenceRefID: mergedCommentID,
+		}); !errors.Is(err, pgx.ErrNoRows) {
+			callbackErr = fmt.Errorf("new comment thread must not merge into the assignment: %v", err)
+		}
+	})
+
+	result, err := issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID:  workspaceUUID,
+		Title:        "Media-gated issue",
+		Status:       "todo",
+		Priority:     "medium",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   agentUUID,
+		CreatorType:  "member",
+		CreatorID:    userUUID,
+	}, IssueCreateOpts{AssignedAgentRunFireAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if callbackErr != nil {
+		t.Fatal(callbackErr)
+	}
+	if !result.AssignedTaskID.Valid {
+		t.Fatal("media-gated issue did not return its deferred task")
+	}
+	if len(wakeup.calls) != 1 || wakeup.calls[0].taskID != "" {
+		t.Fatalf("post-commit schedule wakeups = %+v, want one wakeup without a ready task id", wakeup.calls)
+	}
+	if !isDuplicatePendingTaskErr(competingErr) {
+		t.Fatalf("post-commit competing queued insert error = %v, want duplicate pending task", competingErr)
+	}
+	if competingTaskID.Valid {
+		t.Fatalf("post-commit competing task unexpectedly won: %s", util.UUIDToString(competingTaskID))
+	}
+
+	var taskID, triggerCommentID, runtimeID pgtype.UUID
+	var taskCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT id, trigger_comment_id, runtime_id, count(*) OVER ()
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		  AND status IN ('queued', 'dispatched', 'deferred')
+		ORDER BY created_at
+		LIMIT 1`, result.Issue.ID, agentUUID).
+		Scan(&taskID, &triggerCommentID, &runtimeID, &taskCount); err != nil {
+		t.Fatalf("load final pending task: %v", err)
+	}
+	if taskCount != 1 || taskID != result.AssignedTaskID || triggerCommentID.Valid {
+		t.Fatalf("pending task = count %d id %v trigger %v, want one assignment task %v without a comment trigger", taskCount, taskID, triggerCommentID, result.AssignedTaskID)
+	}
+	if wakeup.calls[0].runtimeID != util.UUIDToString(runtimeID) {
+		t.Fatalf("schedule wakeup runtime = %q, want %q", wakeup.calls[0].runtimeID, util.UUIDToString(runtimeID))
+	}
+}
+
+func TestCreateIssuePropertiesCommitFailureHasNoSideEffects(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	agentUUID := util.MustParseUUID(agentID)
+	propertyID := pgtype.UUID{Bytes: [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, Valid: true}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_property (id, workspace_id, name, type, config) VALUES ($1, $2, 'Commit property', 'text', '{}')`, propertyID, workspaceUUID); err != nil {
+		t.Fatalf("insert property: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, propertyID) })
+
+	bus := events.New()
+	createdEvents := 0
+	bus.Subscribe(protocol.EventIssueCreated, func(events.Event) { createdEvents++ })
+	taskService := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
+	analyticsSink := &recordingIssueAnalytics{}
+	injected := errors.New("injected issue commit failure")
+	issueService := NewIssueService(q, &rejectIssueCommitTxStarter{pool: pool, err: injected}, bus, analyticsSink, taskService)
+	var taskCountBefore int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentUUID).Scan(&taskCountBefore); err != nil {
+		t.Fatalf("count tasks before create: %v", err)
+	}
+	if taskCountBefore != 0 {
+		t.Fatalf("fixture agent has %d tasks before create, want 0", taskCountBefore)
+	}
+
+	_, err := issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID:  workspaceUUID,
+		Title:        "properties commit failure",
+		Status:       "todo",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   agentUUID,
+		CreatorType:  "member",
+		CreatorID:    userUUID,
+		Properties: map[pgtype.UUID]json.RawMessage{
+			propertyID: json.RawMessage(`"kept only if committed"`),
+		},
+	}, IssueCreateOpts{})
+	if !errors.Is(err, injected) {
+		t.Fatalf("Create error = %v, want injected commit failure", err)
+	}
+	if createdEvents != 0 {
+		t.Fatalf("published %d issue:created events after failed commit", createdEvents)
+	}
+	if len(analyticsSink.events) != 0 {
+		t.Fatalf("captured %d analytics events after failed commit", len(analyticsSink.events))
+	}
+	var issueCount, taskCountAfter int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND title = 'properties commit failure'`, workspaceUUID).Scan(&issueCount); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM agent_task_queue WHERE agent_id = $1`, agentUUID).Scan(&taskCountAfter); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if issueCount != 0 || taskCountAfter != 0 {
+		t.Fatalf("failed commit left side effects: issues=%d tasks_before=%d tasks_after=%d", issueCount, taskCountBefore, taskCountAfter)
+	}
+}
+
+func TestCreateIssuePropertiesAreVisibleAtCommitBeforeEnqueue(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	userUUID := util.MustParseUUID(userID)
+	agentUUID := util.MustParseUUID(agentID)
+	propertyID := pgtype.UUID{Bytes: [16]byte{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}, Valid: true}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_property (id, workspace_id, name, type, config) VALUES ($1, $2, 'Enqueue property', 'text', '{}')`, propertyID, workspaceUUID); err != nil {
+		t.Fatalf("insert property: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, propertyID) })
+
+	var atCommit map[string]any
+	txStarter := &afterCommitTxStarter{pool: pool, afterCommit: func() {
+		var raw []byte
+		if err := pool.QueryRow(ctx, `SELECT properties FROM issue WHERE workspace_id = $1 AND title = 'properties before enqueue'`, workspaceUUID).Scan(&raw); err != nil {
+			atCommit = map[string]any{"error": err.Error()}
+			return
+		}
+		_ = json.Unmarshal(raw, &atCommit)
+	}}
+	bus := events.New()
+	var createdEvents []events.Event
+	propertyChangedEvents := 0
+	bus.Subscribe(protocol.EventIssueCreated, func(event events.Event) {
+		createdEvents = append(createdEvents, event)
+	})
+	bus.Subscribe(protocol.EventIssuePropertiesChanged, func(events.Event) {
+		propertyChangedEvents++
+	})
+	taskService := &TaskService{Queries: q, TxStarter: pool, Bus: bus}
+	issueService := NewIssueService(q, txStarter, bus, nil, taskService)
+
+	result, err := issueService.Create(ctx, IssueCreateParams{
+		WorkspaceID:  workspaceUUID,
+		Title:        "properties before enqueue",
+		Status:       "todo",
+		Priority:     "none",
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   agentUUID,
+		CreatorType:  "member",
+		CreatorID:    userUUID,
+		Properties: map[pgtype.UUID]json.RawMessage{
+			propertyID: json.RawMessage(`"ready"`),
+		},
+	}, IssueCreateOpts{
+		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			var properties map[string]any
+			if err := json.Unmarshal(issue.Properties, &properties); err != nil {
+				return map[string]any{"error": err.Error()}
+			}
+			return map[string]any{"issue": map[string]any{"properties": properties}}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if atCommit[util.UUIDToString(propertyID)] != "ready" {
+		t.Fatalf("properties visible immediately after commit = %#v", atCommit)
+	}
+	if !result.AssignedTaskID.Valid {
+		t.Fatal("assigned task was not enqueued after property-bearing commit")
+	}
+	if len(createdEvents) != 1 || propertyChangedEvents != 0 {
+		t.Fatalf("create events = %d issue:created, %d property-changed; want 1 and 0", len(createdEvents), propertyChangedEvents)
+	}
+	payload, ok := createdEvents[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("issue:created payload = %#v", createdEvents[0].Payload)
+	}
+	issueSnapshot, ok := payload["issue"].(map[string]any)
+	if !ok {
+		t.Fatalf("issue:created issue snapshot = %#v", payload["issue"])
+	}
+	properties, ok := issueSnapshot["properties"].(map[string]any)
+	if !ok || properties[util.UUIDToString(propertyID)] != "ready" {
+		t.Fatalf("issue:created properties = %#v", issueSnapshot["properties"])
+	}
+}
+
+func TestHydrateDeferredChannelIssueTaskOverlayDoesNotOverwriteMergedCommentPlan(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	userUUID := util.MustParseUUID(userID)
+
+	plainService := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := plainService.EnqueueDeferredChannelIssueTask(ctx, db.Issue{
+		ID:           util.MustParseUUID(issueID),
+		WorkspaceID:  util.MustParseUUID(workspaceID),
+		AssigneeType: pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:   util.MustParseUUID(agentID),
+		CreatorType:  "member",
+		CreatorID:    userUUID,
+		Priority:     "medium",
+	}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("EnqueueDeferredChannelIssueTask: %v", err)
+	}
+
+	var commentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'New effective trigger')
+		RETURNING id`, task.IssueID, workspaceID, userID).Scan(&commentID); err != nil {
+		t.Fatalf("seed merged comment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET trigger_comment_id=$2 WHERE id=$1`, task.ID, commentID); err != nil {
+		t.Fatal(err)
+	}
+	mergedOverlay := json.RawMessage(`{"mcpServers":{"merged":{"url":"https://merged.example"}}}`)
+	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		IssueID:                 task.IssueID,
+		AgentID:                 task.AgentID,
+		NewTriggerCommentID:     commentID,
+		NewOriginatorUserID:     userUUID,
+		NewAccountableUserID:    userUUID,
+		NewRuntimeMcpOverlay:    mergedOverlay,
+		NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
+		NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
+		NewTriggerEvidenceRefID: commentID,
+	}); err != nil {
+		t.Fatalf("MergeCommentIntoPendingTask: %v", err)
+	}
+
+	hydrationBuilder := &stubOverlayBuilder{
+		resp: json.RawMessage(`{"mcpServers":{"stale":{"url":"https://stale.example"}}}`),
+	}
+	hydratingService := &TaskService{
+		Queries:      q,
+		Composio:     hydrationBuilder,
+		FeatureFlags: composioMCPAppsTestFlags(true),
+	}
+	if err := hydratingService.hydrateDeferredChannelIssueTaskOverlay(ctx, task); err != nil {
+		t.Fatalf("hydrateDeferredChannelIssueTaskOverlay: %v", err)
+	}
+
+	var triggerID pgtype.UUID
+	var storedOverlay []byte
+	if err := pool.QueryRow(ctx, `
+		SELECT trigger_comment_id, runtime_mcp_overlay
+		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&triggerID, &storedOverlay); err != nil {
+		t.Fatalf("load hydrated task: %v", err)
+	}
+	if triggerID != commentID {
+		t.Fatalf("trigger_comment_id = %s, want %s", util.UUIDToString(triggerID), util.UUIDToString(commentID))
+	}
+	var storedValue, mergedValue any
+	if err := json.Unmarshal(storedOverlay, &storedValue); err != nil {
+		t.Fatalf("decode stored runtime_mcp_overlay: %v", err)
+	}
+	if err := json.Unmarshal(mergedOverlay, &mergedValue); err != nil {
+		t.Fatalf("decode expected runtime_mcp_overlay: %v", err)
+	}
+	if !reflect.DeepEqual(storedValue, mergedValue) {
+		t.Fatalf("runtime_mcp_overlay = %s, want merged overlay %s", storedOverlay, mergedOverlay)
+	}
+}
+
+// The channel router publishes this snapshot for the issue it created, but
+// the media download gives others up to DefaultMediaTimeout to act on it. A
+// duplicate mark made in that window is on the row the snapshot reads, and
+// clients patch their cache with the snapshot, so it must carry the mark
+// rather than a null that erases it (MUL-7349).
+func TestPublishAttachmentsChangedKeepsDuplicateMark(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, _, issueID := seedAttributionFixture(t, pool)
+	workspaceUUID := util.MustParseUUID(workspaceID)
+	created, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: util.MustParseUUID(issueID), WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	var originalID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, number, title, creator_type, creator_id, priority, status)
+		VALUES ($1, (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+			'attr original', 'member', $2, 'none', 'in_progress')
+		RETURNING id`, workspaceID, userID).Scan(&originalID); err != nil {
+		t.Fatalf("seed original: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, originalID) })
+	original, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: util.MustParseUUID(originalID), WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		t.Fatalf("load original: %v", err)
+	}
+	workspace, err := q.GetWorkspace(ctx, workspaceUUID)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{"marked during the download", "cancelled", true},
+		// A pointer an older server left on a reopened issue is no mark.
+		{"pointer left on a reopened issue", "todo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE issue SET status = $1, duplicate_of_issue_id = $2 WHERE id = $3`,
+				tc.status, originalID, issueID); err != nil {
+				t.Fatalf("mark: %v", err)
+			}
+			bus := events.New()
+			svc := &IssueService{Bus: bus, Queries: q}
+			var updated events.Event
+			bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { updated = e })
+
+			svc.PublishAttachmentsChanged(ctx, created, util.MustParseUUID(userID))
+
+			payload, _ := updated.Payload.(map[string]any)
+			snapshot, ok := payload["issue"].(map[string]any)
+			if !ok {
+				t.Fatalf("issue update payload = %#v", updated.Payload)
+			}
+			value, present := snapshot["duplicate_of"]
+			if !present {
+				t.Fatal("snapshot has no duplicate_of key")
+			}
+			ref, _ := value.(map[string]any)
+			if !tc.want {
+				if ref != nil {
+					t.Fatalf("duplicate_of = %v, want null", ref)
+				}
+				return
+			}
+			want := map[string]any{
+				"id":         originalID,
+				"identifier": IssueIdentifier(workspace.IssuePrefix, original.Number),
+				"title":      "attr original",
+				"status":     "in_progress",
+			}
+			if len(ref) != len(want) {
+				t.Fatalf("duplicate_of = %v, want %v", ref, want)
+			}
+			for k, v := range want {
+				if ref[k] != v {
+					t.Fatalf("duplicate_of = %v, want %v", ref, want)
+				}
+			}
+		})
+	}
+}

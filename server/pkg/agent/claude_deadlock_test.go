@@ -15,10 +15,53 @@ import (
 // TestMain intercepts when the test binary is re-executed as a fake
 // child process by the agent backend. The fake's behavior is selected via
 // CLAUDE_FAKE_MODE; absent that env var, this is a normal `go test` run.
+//
+// Dispatching here rather than from a Test function is what lets a fake be
+// invoked with a real agent CLI's argv: TestMain runs before the testing
+// package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if os.Getenv(codeartsModelHelperEnv) == "1" {
+		runFakeCodeArtsModelHelper()
+		os.Exit(0)
+	}
+	if os.Getenv(opencodeStdinHelperEnv) == "1" {
+		runFakeOpencodeStdinHelper()
+		os.Exit(0)
+	}
+	// Cursor lifecycle fixtures re-execute this binary with the CLI's real argv.
+	if mode := os.Getenv(cursorFakeModeEnv); mode != "" {
+		runFakeCursorStream(mode)
+		os.Exit(0)
+	}
 	switch mode := os.Getenv("CLAUDE_FAKE_MODE"); mode {
 	case "":
+		// Preserve the production relationships while avoiding hundreds of
+		// milliseconds of intentional silence in every ACP fixture.
+		acpNotificationQuietTime = 100 * time.Millisecond
+		hermesNotificationQuietTime = 100 * time.Millisecond
+		grokNotificationQuietTime = 100 * time.Millisecond
+		zeroclawNotificationQuietTime = 100 * time.Millisecond
+		dimNotificationQuietTime = 100 * time.Millisecond
+		dimSessionLoadRetryDelay = 200 * time.Millisecond
+		collectDrainGrace = 750 * time.Millisecond
+		collectSettleGrace = 100 * time.Millisecond
+		probeWaitDelay = 500 * time.Millisecond
+		// Shortened outright rather than in proportion: no test compares these
+		// with another delay. The catalog retry floor now sits below the 75ms
+		// initialize retry backoff, the reverse of production.
+		openclawResultIdleGrace = 300 * time.Millisecond
+		codexCatalogRetryBackoff = 25 * time.Millisecond
+		// Fixtures that re-execute this binary inherit this environment. Under
+		// -race the runtime sleeps atexit_sleep_ms (1s by default) before every
+		// exit, which each of those fake CLIs would otherwise add to its test.
+		os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 		os.Exit(m.Run())
+	case "usage_fixture":
+		runFakeClaudeUsageFixture()
+		os.Exit(0)
+	case "supplement":
+		runFakeClaudeSupplement()
+		os.Exit(0)
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()
 		os.Exit(0)

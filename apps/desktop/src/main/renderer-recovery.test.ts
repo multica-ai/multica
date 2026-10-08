@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { createElectronReloadPrompt, installRendererRecoveryHandlers } from "./renderer-recovery";
 
@@ -208,7 +209,7 @@ describe("freeze/crash breadcrumb state machine", () => {
     expect(clearBreadcrumb).not.toHaveBeenCalled();
   });
 
-  it("recovering after a written breadcrumb clears it (no double-count, no false recovered:false)", async () => {
+  it("recovering after a written breadcrumb clears it, so the in-thread watchdog is the only reporter", async () => {
     vi.useFakeTimers();
     const fixture = makeWindow();
     const { persistBreadcrumb, clearBreadcrumb } = install(fixture);

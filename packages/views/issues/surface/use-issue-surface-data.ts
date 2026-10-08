@@ -1,38 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
-import {
-  useInfiniteQuery,
-  useQuery,
-  type QueryKey,
-} from "@tanstack/react-query";
-import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { Issue, Project } from "@multica/core/types";
 import { projectListOptions } from "@multica/core/projects/queries";
-import {
-  childIssueProgressOptions,
-  type AssigneeGroupedIssuesFilter,
-  type IssueFlatFilter,
-  type IssueSortParam,
-  type MyIssuesFilter,
-} from "@multica/core/issues/queries";
-import {
-  issueSurfaceAssigneeGroupsOptions,
-  issueSurfaceFlatOptions,
-  issueSurfaceGanttOptions,
-  issueSurfaceListOptions,
-} from "@multica/core/issues/surface/repository";
+import { childIssueProgressOptions } from "@multica/core/issues/queries";
+import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
 import {
   applyIssueFilters,
-  filterAssigneeGroups,
   type IssueFilterState,
   type IssueFilters,
 } from "../utils/filter";
-import { shouldAutoLoadNextWindowPage } from "../components/table-view-model";
 import type { ChildProgress } from "../components/list-row";
-import type { IssueSurfaceActivity } from "./activity";
+import type {
+  IssueStatusBranches,
+  IssueStatusPagination,
+} from "./use-issue-status-branches";
+import type { IssueGroupBranches } from "./use-issue-group-branches";
 
 const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
@@ -57,7 +45,9 @@ const EMPTY_PROJECTS: Project[] = [];
 function ganttCanvasRows(issues: Issue[], showCompleted: boolean): Issue[] {
   const dated = issues.filter((i) => i.start_date || i.due_date);
   if (showCompleted) return dated;
-  return dated.filter((i) => i.status !== "done" && i.status !== "cancelled");
+  // By CATEGORY: a custom status in done/cancelled is completed work, and
+  // "show completed" has to hide it too. (MUL-6243)
+  return dated.filter((i) => !issueBehavesAsAny(i, ["done", "closed"]));
 }
 
 export interface IssueSurfaceData {
@@ -65,26 +55,16 @@ export interface IssueSurfaceData {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen — or
-   *  `undefined` when that set is genuinely UNKNOWN (table mode while the
-   *  ids-facet window is still resolving, failed, or too large to
-   *  materialize). Consumers must present unknown as unknown; substituting
-   *  another incomplete window would publish a precise-looking wrong number
-   *  (round-5 review P2). See the `workingScopeIssues` memo for why the known
-   *  case is a projection of the render pipeline. */
-  workingScopeIssues: Issue[] | undefined;
+  /** Gantt only: the canvas rows the agents-working filter would leave on
+   *  screen. `undefined` on every other view mode, where the header chip
+   *  sources its count from the `working_agents` server facet instead. */
+  ganttWorkingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  filter: MyIssuesFilter;
-  loadMoreScope?: string;
-  loadMoreFilter?: MyIssuesFilter;
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
-  activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
-  activity: IssueSurfaceActivity;
+  statusPagination: IssueStatusPagination;
+  activeFilters: Omit<IssueFilters, "statusFilters">;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
   resolveTableExportLookups: (needs: {
@@ -94,24 +74,17 @@ export interface IssueSurfaceData {
     projectMap: Map<string, Project>;
     childProgressMap: Map<string, ChildProgress>;
   }>;
-  fetchNextFlatPage: () => Promise<unknown>;
-  hasNextFlatPage: boolean;
-  isFetchingNextFlatPage: boolean;
-  flatTotal: number;
-  /** The flat window query is in error state (initial or next-page fetch,
-   *  retries exhausted). Auto-advance loops MUST stop on this — re-firing
-   *  after every failed attempt is a request storm — and surface an explicit
-   *  Retry instead. */
-  flatWindowError: boolean;
-  /** The flat window failed before producing ANY data (cold load, retries
-   *  exhausted). This is NOT an empty workspace: isEmpty stays false and the
-   *  surface must render an error state with a Retry instead of the
-   *  create-issue empty state (round-5 review P2). */
-  flatWindowColdError: boolean;
-  /** Explicit recovery for flatWindowColdError — refetches the flat window. */
-  refetchFlatWindow: () => Promise<unknown>;
-  filterIssuesForExport: (issues: Issue[]) => Issue[];
   isLoading: boolean;
+  /**
+   * A filter catalog this surface depends on failed. The filter cannot be
+   * honoured without it, so the surface shows a retryable error rather than
+   * an unexplained empty board (MUL-6243) — or, for the project-status
+   * filter, an unfiltered one under an active chip.
+   */
+  isStatusCatalogError: boolean;
+  /** Re-runs the project list behind the project-status half of
+   *  {@link isStatusCatalogError}. */
+  retryProjectCatalog: () => void;
   /** The window's data is being revalidated while the previous snapshot is
    *  shown as a placeholder (sort/date change, or any grouped-board filter
    *  change). Drives the header's deferred refresh indicator — content stays
@@ -124,214 +97,124 @@ export function useIssueSurfaceData({
   wsId,
   queryPlan,
   projectId,
-  usesAssigneeBoard,
   usesGantt,
   usesTable,
+  serverStatusBranches,
+  serverGroupBranches,
   ganttShowCompleted,
-  sort,
-  tableFacets,
-  workingFacets,
-  activity,
   statusFilters,
+  hiddenStatusKeys,
+  statusFilterPending,
+  statusFilterError,
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
+  agentRunningFilter,
   creatorFilters,
   projectFilters,
   includeNoProject,
+  projectStatusFilters,
   labelFilters,
   propertyFilters,
-  agentRunningFilter,
+  workingIssueIDs,
   showSubIssues,
   loadProjects,
 }: {
   wsId: string;
   queryPlan: IssueSurfaceQueryPlan;
   projectId?: string;
-  usesAssigneeBoard: boolean;
   usesGantt: boolean;
   usesTable: boolean;
+  serverStatusBranches: IssueStatusBranches;
+  serverGroupBranches: IssueGroupBranches;
   /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
-  sort: IssueSortParam;
-  tableFacets: IssueFlatFilter;
-  /** tableFacets restricted to the running set (ids facet) — the working
-   *  chip's authoritative scope, and the table window itself while the
-   *  agents-working filter is on (identical query key in that state). */
-  workingFacets: IssueFlatFilter;
-  /** Owned by the controller so the agents-working facet and the client
-   *  display filters read the same task snapshot. */
-  activity: IssueSurfaceActivity;
   statusFilters: IssueStatus[];
+  hiddenStatusKeys: IssueStatus[];
+  /** A custom status filter is waiting on the catalog — hold loading. */
+  statusFilterPending: boolean;
+  /** The catalog failed, so a custom status filter cannot be honoured. */
+  statusFilterError: boolean;
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
+  agentRunningFilter: boolean;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
+  projectStatusFilters: ProjectStatus[];
   labelFilters: string[];
-  propertyFilters: Record<string, string[]>;
-  agentRunningFilter: boolean;
+  propertyFilters: Record<string, PropertyFilterValue[]>;
+  /** Distinct running-task issue ids projected by `/api/working-agents`. */
+  workingIssueIDs: ReadonlySet<string>;
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
-  const filterContext = useMemo(
-    () => ({ activityByIssueId: activity.activityByIssueId }),
-    [activity.activityByIssueId],
-  );
-
-  const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
-    () => ({
-      ...queryPlan.groupedScopeFilter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...ALL_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      project_ids: projectFilters,
-      include_no_project: includeNoProject,
-      label_ids: labelFilters,
-    }),
-    [
-      assigneeFilters,
-      creatorFilters,
-      includeNoAssignee,
-      includeNoProject,
-      labelFilters,
-      priorityFilters,
-      projectFilters,
-      queryPlan.groupedScopeFilter,
-      statusFilters,
-    ],
-  );
-
-  const activeAssigneeGroupsOptions = issueSurfaceAssigneeGroupsOptions(
-    wsId,
-    queryPlan,
-    assigneeGroupFilter,
-    sort,
-  );
-
-  const statusIssuesQuery = useQuery({
-    ...issueSurfaceListOptions(wsId, queryPlan, sort),
-    enabled: !usesAssigneeBoard && !usesGantt && !usesTable,
-  });
-  const assigneeGroupsQuery = useQuery({
-    ...activeAssigneeGroupsOptions,
-    enabled: usesAssigneeBoard,
-  });
   const ganttIssuesQuery = useQuery({
-    ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
+    ...issueSurfaceGanttOptions(wsId, projectId ?? "", queryPlan),
     enabled: usesGantt,
   });
-  const flatIssuesQuery = useInfiniteQuery({
-    ...issueSurfaceFlatOptions(wsId, queryPlan, sort, tableFacets),
-    enabled: usesTable,
-  });
-
-  const flatIssues = useMemo(
-    () =>
-      flatIssuesQuery.data?.pages.flatMap((page) => page.issues) ??
-      EMPTY_ISSUES,
-    [flatIssuesQuery.data?.pages],
-  );
-  const { fetchNextPage: fetchNextFlatPage } = flatIssuesQuery;
-  const fetchNextFlatPageNoCancel = useCallback(
-    () => fetchNextFlatPage({ cancelRefetch: false }),
-    [fetchNextFlatPage],
-  );
-  // The LATEST page's total, not page 1's: totals drift while concurrent
-  // writes land, and the pagination protocol itself advances on the latest
-  // page's total — a consumer holding page 1's stale (smaller) total while
-  // hasNextPage kept advancing is how the structure ceiling stopped being a
-  // hard limit (round-4 review P1#2).
-  const flatPages = flatIssuesQuery.data?.pages;
-  const flatTotal = flatPages?.[flatPages.length - 1]?.total ?? 0;
-
-  // Running-restricted window — the table branch of the workingScopeIssues
-  // projection below. While the agents-working filter is on this observer
-  // shares the main flat query's key (one fetch); while it is off, it keeps
-  // the filter's window warm and gives the chip its authoritative scope.
-  const hasRunningIssues = activity.runningIssueIds.size > 0;
-  const workingWindowEnabled = usesTable && hasRunningIssues;
-  const workingWindowQuery = useInfiniteQuery({
-    ...issueSurfaceFlatOptions(wsId, queryPlan, sort, workingFacets),
-    enabled: workingWindowEnabled,
-  });
-  // Materialize the running window ONLY under the same hard gates as the
-  // structure loop — while the agents-working filter is on this query IS the
-  // main table window (shared key), so an ungated chip-driven loop would
-  // stuff the main cache past the very ceiling TableView just enforced, and
-  // the running set has no server-side size bound (round-5 review P1). Under
-  // the gates the loop is bounded: an over-ceiling window stops after page 1
-  // (fresh total > ceiling) and presents as UNKNOWN instead of a number; an
-  // error stops the loop the same way.
-  //
-  // Ownership: this effect drives the query ONLY while the filter is OFF
-  // (background chip scope). Once the filter is on, the shared query already
-  // has pagination owners — TableView's structure loop and the scroll
-  // sentinel — and a second responder issuing fetchNextPage() from the same
-  // render snapshot cancel/restarts the first one's fetch. The abandoned
-  // HTTP request is not abortable (the queryFn does not thread AbortSignal),
-  // so every offset would be requested twice (round-6 review R1).
   const {
-    hasNextPage: workingWindowHasNext,
-    isFetchingNextPage: workingWindowFetchingNext,
-    isError: workingWindowError,
-    isPlaceholderData: workingWindowIsPlaceholder,
-    fetchNextPage: fetchNextWorkingWindowPage,
-  } = workingWindowQuery;
-  const workingWindowPages = workingWindowQuery.data?.pages;
-  const workingWindowTotal =
-    workingWindowPages?.[workingWindowPages.length - 1]?.total ?? 0;
-  const workingWindowLoaded = useMemo(
-    () =>
-      workingWindowPages?.reduce((count, page) => count + page.issues.length, 0) ??
-      0,
-    [workingWindowPages],
+    data: projectData,
+    refetch: refetchProjects,
+    isPending: projectsPending,
+    isError: projectsError,
+  } = useQuery({
+    ...projectListOptions(wsId),
+    enabled: loadProjects,
+  });
+  const projects = projectData ?? EMPTY_PROJECTS;
+  const projectMap = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
+    [projects],
   );
-  useEffect(() => {
-    if (
-      shouldAutoLoadNextWindowPage({
-        windowWanted: workingWindowEnabled && !agentRunningFilter,
-        total: workingWindowTotal,
-        loadedCount: workingWindowLoaded,
-        hasNextPage: workingWindowHasNext,
-        isFetchingNextPage: workingWindowFetchingNext,
-        hasError: workingWindowError,
-      })
-    ) {
-      // cancelRefetch: false — if some other observer already has a fetch in
-      // flight for this query, do nothing rather than cancel/restart it.
-      void fetchNextWorkingWindowPage({ cancelRefetch: false });
-    }
-  }, [
-    agentRunningFilter,
-    fetchNextWorkingWindowPage,
-    workingWindowEnabled,
-    workingWindowError,
-    workingWindowFetchingNext,
-    workingWindowHasNext,
-    workingWindowLoaded,
-    workingWindowTotal,
-  ]);
-  const bucketedIssues = useMemo(() => {
-    return usesAssigneeBoard
-      ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
-      : (statusIssuesQuery.data ?? EMPTY_ISSUES);
-  }, [assigneeGroupsQuery.data?.groups, statusIssuesQuery.data, usesAssigneeBoard]);
+  // Keyed off `projectData`, NOT `projects`: the latter falls back to
+  // EMPTY_PROJECTS while the query is loading or failed, which would build a
+  // defined-but-empty map. `applyIssueFilters` treats a defined map as
+  // authoritative, so that map would drop every issue and blank the board.
+  // `undefined` is the honest answer until the catalog actually arrives, and
+  // it makes the predicate a no-op.
+  const projectStatusById = useMemo(
+    () =>
+      projectData
+        ? new Map(projectData.map((project) => [project.id, project.status]))
+        : undefined,
+    [projectData],
+  );
+  // An unresolved catalog is "cannot answer yet", not "no filter". Showing
+  // UNFILTERED rows under an active chip is as wrong as blanking the surface,
+  // and a failed project request would leave it that way for good. So where a
+  // surface actually applies the client predicate, hold it in loading and
+  // report the failure — the same contract `statusFilterPending` /
+  // `statusFilterError` give a custom status filter. Table and the
+  // server-status branches filter server-side and never read the catalog.
+  const usesClientProjectStatusFilter =
+    projectStatusFilters.length > 0 &&
+    !usesTable &&
+    (usesGantt || !serverStatusBranches.enabled);
+  const projectCatalogPending = usesClientProjectStatusFilter && projectsPending;
+  const projectCatalogError = usesClientProjectStatusFilter && projectsError;
 
-  // `cancelled` is a first-class default status (MUL-4290): it is fetched into
-  // the cache like every other status and flows straight through to list /
-  // board / swimlane columns, header facet counts, batch selection, and the
-  // isEmpty check. The status filter narrows this set like any other status —
-  // it no longer unlocks an otherwise-hidden bucket.
+  const workingFilterContext = useMemo(
+    () => ({ runningIssueIds: workingIssueIDs, projectStatusById }),
+    [projectStatusById, workingIssueIDs],
+  );
+  const bucketedIssues = serverStatusBranches.enabled
+    ? serverStatusBranches.issues
+    : serverGroupBranches.enabled
+      ? serverGroupBranches.issues
+      : EMPTY_ISSUES;
+
+  // Status branches already reflect the visible category set chosen by the
+  // controller. Cancelled is hidden for a new view, but remains a first-class
+  // branch once the user restores it or selects it explicitly in a status
+  // filter; no client-only exclusion happens here.
   const ganttIssues = ganttIssuesQuery.data ?? EMPTY_ISSUES;
   const surfaceIssues = usesGantt
     ? ganttIssues
     : usesTable
-      ? flatIssues
+      ? EMPTY_ISSUES
       : bucketedIssues;
 
   const baseFilterState = useMemo<IssueFilterState>(
@@ -343,20 +226,22 @@ export function useIssueSurfaceData({
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
       labelFilters,
       propertyFilters,
       workingOnly: agentRunningFilter,
       showSubIssues,
     }),
     [
-      agentRunningFilter,
       assigneeFilters,
+      agentRunningFilter,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
       labelFilters,
       priorityFilters,
       projectFilters,
+      projectStatusFilters,
       propertyFilters,
       showSubIssues,
       statusFilters,
@@ -364,13 +249,20 @@ export function useIssueSurfaceData({
   );
 
   const issues = useMemo(
-    () => applyIssueFilters(surfaceIssues, baseFilterState, filterContext),
-    [baseFilterState, filterContext, surfaceIssues],
-  );
-  const filterIssuesForExport = useCallback(
-    (exportIssues: Issue[]) =>
-      applyIssueFilters(exportIssues, baseFilterState, filterContext),
-    [baseFilterState, filterContext],
+    () =>
+      serverStatusBranches.enabled
+        ? surfaceIssues
+        : applyIssueFilters(
+            surfaceIssues,
+            baseFilterState,
+            workingFilterContext,
+          ),
+    [
+      baseFilterState,
+      serverStatusBranches.enabled,
+      surfaceIssues,
+      workingFilterContext,
+    ],
   );
 
   const statuslessFilterState = useMemo<IssueFilterState>(
@@ -382,144 +274,62 @@ export function useIssueSurfaceData({
   );
 
   const swimlaneIssues = useMemo(
-    () => applyIssueFilters(surfaceIssues, statuslessFilterState, filterContext),
-    [filterContext, statuslessFilterState, surfaceIssues],
+    () =>
+      applyIssueFilters(
+        surfaceIssues,
+        statuslessFilterState,
+        workingFilterContext,
+      ),
+    [statuslessFilterState, surfaceIssues, workingFilterContext],
   );
 
   const filteredGanttIssues = useMemo(
     () =>
       ganttCanvasRows(
-        applyIssueFilters(ganttIssues, baseFilterState, filterContext),
+        applyIssueFilters(ganttIssues, baseFilterState, workingFilterContext),
         ganttShowCompleted,
       ),
-    [baseFilterState, filterContext, ganttIssues, ganttShowCompleted],
-  );
-
-  // The assignee-grouped board renders straight from `groups`, bypassing the
-  // flat applyIssueFilters output — re-apply the client-only display filters
-  // (Show sub-issues + agents-working) per group.
-  const filteredAssigneeGroups = useMemo(
-    () =>
-      filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
-        showSubIssues,
-        agentRunningFilter,
-        runningIssueIds: activity.runningIssueIds,
-        propertyFilters,
-      }),
     [
-      activity.runningIssueIds,
-      agentRunningFilter,
-      assigneeGroupsQuery.data?.groups,
-      propertyFilters,
-      showSubIssues,
+      baseFilterState,
+      ganttIssues,
+      ganttShowCompleted,
+      workingFilterContext,
     ],
   );
 
-  // The rows the agents-working filter leaves on screen — i.e. exactly what
-  // you get when you click the header chip.
+  const workingFilterState = useMemo<IssueFilterState>(
+    () => ({
+      ...baseFilterState,
+      workingOnly: true,
+    }),
+    [baseFilterState],
+  );
+
+  // The Gantt canvas rows the agents-working filter would leave on screen —
+  // i.e. exactly what you get when you click the header chip in Gantt.
   //
-  // This is deliberately a PROJECTION OF THE RENDER PIPELINE, not a second
-  // pass over the task snapshot: it reuses the same predicates, the same
-  // filter state and the same per-mode source as the rows below, with
-  // `workingOnly` forced on. Turning the filter on only adds `workingOnly` to
-  // this same pipeline, so the set is the post-click list whether the filter
-  // is currently on or off.
+  // Gantt is the one surface whose membership is NOT server-owned: it draws
+  // from a fully materialized scheduled-issue window, and its canvas
+  // projection (scheduled + dated + showCompleted) cannot be expressed in the
+  // Table query spec. So the header chip cannot source its count from the
+  // `working_agents` server facet here, and derives it from this set instead.
   //
-  // The chip counts AGENTS, not this list's length, so these are not equal
-  // (one agent can hold two of these rows). What this set does decide is
-  // WHICH agents the chip counts — only those working on rows that survive
-  // the filters. Re-deriving that scope from the snapshot instead is what
-  // made the chip disagree with the list it was filtering: any active
-  // status/assignee/label filter, or a sub-issue hidden by the display
-  // toggle, moved the list but not the chip (MUL-4884).
-  //
-  // Each branch below must take the SAME source the matching branch of
-  // IssueSurface renders:
-  //   - gantt          → the canvas set (scheduled + dated + showCompleted)
-  //   - assignee board → the grouped response, not the flat list
-  //   - table          → the ids-facet window (the query the filter itself
-  //     runs) — the table's offset pages are only a SLICE of its window, so
-  //     a loaded-rows projection says "nothing working" whenever the running
-  //     issues sit on unfetched pages (round-3 review P2#3)
-  //   - board / list / swimlane → the flat filtered list
-  //
-  // Swimlane deliberately has no branch: SwimLaneView draws its cards from
-  // `issues` (status filter applied) and only uses the statusless
-  // `swimlaneIssues` for LANE DISCOVERY, so scoping the chip to the
-  // statusless set would count rows the canvas never draws.
-  const workingScopeIssues = useMemo(() => {
-    if (usesGantt) {
-      return ganttCanvasRows(
-        applyIssueFilters(
-          ganttIssues,
-          { ...baseFilterState, workingOnly: true },
-          filterContext,
-        ),
-        ganttShowCompleted,
-      );
-    }
-    if (usesAssigneeBoard) {
-      return (
-        filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
-          showSubIssues,
-          agentRunningFilter: true,
-          runningIssueIds: activity.runningIssueIds,
-          propertyFilters,
-        }) ?? []
-      ).flatMap((group) => group.issues);
-    }
-    if (usesTable) {
-      // The table's loaded pages are only a SLICE of its window, so no
-      // fallback to them can honestly claim a precise working set. The scope
-      // is either the COMPLETE ids-facet window (fetched to the end for THIS
-      // key, no error), an empty running set (trivially complete without a
-      // request), or UNKNOWN — resolving, failed, or over the
-      // materialization ceiling (round-5 review P2). Consumers render
-      // unknown as unknown; they never get a number to mis-present.
-      //
-      // Placeholder data is explicitly EXCLUDED from completeness: on a
-      // re-key (running set or facet change) keepPreviousData shows the OLD
-      // key's window, and pairing those rows with the NEW task snapshot
-      // publishes a precise-looking number for a scope nobody fetched —
-      // including re-publishing a ceiling-capped old window as if it were
-      // complete (round-6 review P2#1). While the new key resolves, the
-      // scope is unknown.
-      if (!hasRunningIssues) return EMPTY_ISSUES;
-      const workingWindowComplete =
-        workingWindowQuery.data !== undefined &&
-        !workingWindowIsPlaceholder &&
-        !workingWindowHasNext &&
-        !workingWindowError;
-      if (!workingWindowComplete) return undefined;
-      return applyIssueFilters(
-        workingWindowQuery.data.pages.flatMap((page) => page.issues),
-        { ...baseFilterState, workingOnly: true },
-        filterContext,
-      );
-    }
-    return applyIssueFilters(
-      surfaceIssues,
-      { ...baseFilterState, workingOnly: true },
-      filterContext,
+  // Every other view mode (list / board / swimlane / table) resolves the same
+  // question through that facet, against the identical scope + filters the
+  // rows come from. Rebuilding a second complete issue window client-side to
+  // decorate the chip is what the server facet exists to avoid.
+  const ganttWorkingScopeIssues = useMemo(() => {
+    if (!usesGantt) return undefined;
+    return ganttCanvasRows(
+      applyIssueFilters(ganttIssues, workingFilterState, workingFilterContext),
+      ganttShowCompleted,
     );
   }, [
-    activity.runningIssueIds,
-    assigneeGroupsQuery.data?.groups,
-    baseFilterState,
-    filterContext,
     ganttIssues,
     ganttShowCompleted,
-    hasRunningIssues,
-    propertyFilters,
-    showSubIssues,
-    surfaceIssues,
-    usesAssigneeBoard,
     usesGantt,
-    usesTable,
-    workingWindowError,
-    workingWindowHasNext,
-    workingWindowIsPlaceholder,
-    workingWindowQuery.data,
+    workingFilterState,
+    workingFilterContext,
   ]);
 
   const {
@@ -527,18 +337,6 @@ export function useIssueSurfaceData({
     refetch: refetchChildProgress,
   } = useQuery(childIssueProgressOptions(wsId));
   const childProgressMap = childProgressData ?? EMPTY_CHILD_PROGRESS;
-  const {
-    data: projectData,
-    refetch: refetchProjects,
-  } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: loadProjects,
-  });
-  const projects = projectData ?? EMPTY_PROJECTS;
-  const projectMap = useMemo(
-    () => new Map(projects.map((project) => [project.id, project])),
-    [projects],
-  );
   const resolveTableExportLookups = useCallback(
     async (needs: { projects: boolean; childProgress: boolean }) => {
       const [projectResult, progressResult] = await Promise.all([
@@ -571,22 +369,21 @@ export function useIssueSurfaceData({
     ],
   );
 
-  const visibleStatuses = useMemo<IssueStatus[]>(() => {
-    // Default view shows every lifecycle status, `cancelled` last (its
-    // canonical position in ALL_STATUSES). An active status filter narrows to
-    // the selected subset while preserving that order.
-    if (statusFilters.length > 0) {
-      return ALL_STATUSES.filter((s) => statusFilters.includes(s));
-    }
-    return ALL_STATUSES;
-  }, [statusFilters]);
+  const catalog = useIssueStatuses(wsId);
 
-  // Hidden columns are the lifecycle statuses not currently visible, so
-  // `cancelled` participates in the board show/hide controls exactly like the
-  // rest of the statuses.
+  const visibleStatuses = useMemo<IssueStatus[]>(() => {
+    // An explicit exact-key filter wins over hidden column preferences.
+    return visibleStatusKeys(
+      statusFilters,
+      hiddenStatusKeys,
+      catalog,
+    );
+  }, [statusFilters, hiddenStatusKeys, catalog]);
+
+  // Each catalog status can be hidden or restored independently.
   const hiddenStatuses = useMemo<IssueStatus[]>(
-    () => ALL_STATUSES.filter((s) => !visibleStatuses.includes(s)),
-    [visibleStatuses],
+    () => statusColumnKeys(catalog).filter((s) => !visibleStatuses.includes(s)),
+    [catalog, visibleStatuses],
   );
 
   const activeFilters = useMemo(
@@ -594,17 +391,20 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
+      agentRunningFilter,
+      runningIssueIds: workingIssueIDs,
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
+      projectStatusById,
       labelFilters,
       propertyFilters,
-      agentRunningFilter,
       showSubIssues,
     }),
     [
-      agentRunningFilter,
       assigneeFilters,
+      agentRunningFilter,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -612,65 +412,52 @@ export function useIssueSurfaceData({
       propertyFilters,
       priorityFilters,
       projectFilters,
+      projectStatusById,
+      projectStatusFilters,
       showSubIssues,
+      workingIssueIDs,
     ],
   );
 
-  const isLoading = usesAssigneeBoard
-    ? assigneeGroupsQuery.isLoading
-    : usesGantt
-      ? ganttIssuesQuery.isLoading
-      : usesTable
-        ? flatIssuesQuery.isLoading
-        : statusIssuesQuery.isLoading;
+  // `statusFilterPending` holds the surface in loading while a CUSTOM status
+  // filter waits for the catalog to say which column it belongs to. Without it
+  // the surface reported "loaded, zero results" — an empty board with no
+  // spinner — for the whole cold-load window. (MUL-6243)
+  const isLoading =
+    statusFilterPending ||
+    projectCatalogPending ||
+    (serverGroupBranches.enabled
+      ? serverGroupBranches.isLoading
+      : usesGantt
+        ? ganttIssuesQuery.isLoading
+        : serverStatusBranches.enabled
+          ? serverStatusBranches.isLoading
+          : false);
 
   // Placeholder-backed revalidation of the ACTIVE query only. First loads are
   // isLoading (no previous data to place-hold); gantt has no placeholder
   // phase (its key carries no sort/filter).
-  const isRefreshing = usesAssigneeBoard
-    ? assigneeGroupsQuery.isPlaceholderData
-    : usesGantt
-      ? false
-      : usesTable
-        ? flatIssuesQuery.isPlaceholderData
-        : statusIssuesQuery.isPlaceholderData;
+  const isRefreshing = serverGroupBranches.enabled
+    ? serverGroupBranches.isRefreshing
+    : serverStatusBranches.enabled
+      ? serverStatusBranches.isRefreshing
+      : false;
 
   return {
     surfaceIssues,
     projectIssues: surfaceIssues,
     issues,
     swimlaneIssues,
-    workingScopeIssues,
+    ganttWorkingScopeIssues,
     filteredGanttIssues,
-    assigneeGroups: usesAssigneeBoard ? filteredAssigneeGroups : undefined,
-    assigneeGroupQueryKey: usesAssigneeBoard
-      ? activeAssigneeGroupsOptions.queryKey
-      : undefined,
-    assigneeGroupFilter: usesAssigneeBoard ? assigneeGroupFilter : undefined,
-    filter: queryPlan.queryFilter,
-    loadMoreScope: queryPlan.loadMoreScope,
-    loadMoreFilter: queryPlan.loadMoreFilter,
     ganttIssues,
     visibleStatuses,
     hiddenStatuses,
+    statusPagination: serverStatusBranches.pagination,
     activeFilters,
-    activity,
     childProgressMap,
     projectMap,
     resolveTableExportLookups,
-    // cancelRefetch: false — the structure loop and the scroll sentinel are
-    // independent responders on this query; the default cancel/restart
-    // semantics turn a same-snapshot double call into a duplicated HTTP
-    // request, because the abandoned fetch is not abortable (the queryFn
-    // does not thread AbortSignal) (round-6 review R1).
-    fetchNextFlatPage: fetchNextFlatPageNoCancel,
-    hasNextFlatPage: flatIssuesQuery.hasNextPage ?? false,
-    isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,
-    flatTotal,
-    flatWindowError: flatIssuesQuery.isError,
-    flatWindowColdError: flatIssuesQuery.isError && flatIssuesQuery.data === undefined,
-    refetchFlatWindow: flatIssuesQuery.refetch,
-    filterIssuesForExport,
     isLoading,
     isRefreshing,
     // isEmpty asserts "this window has no issues". The board/list/swimlane
@@ -679,15 +466,24 @@ export function useIssueSurfaceData({
     // window is empty, so never claim it (same "uncertain → don't assert"
     // rule as surface membership). GanttView renders its own accurate
     // "no scheduled issues" empty state instead of the generic create-issue
-    // one. A FAILED table fetch proves nothing either: total defaults to 0
-    // after a cold-load error, and claiming empty there swaps a 5xx/offline
-    // for a "create your first issue" screen with no recovery path (round-5
-    // review P2) — only a successful zero-result window is empty.
+    // one. Table owns its own branch-level loading, empty and retry states,
+    // so this shared legacy surface projection never asserts Table empty.
     isEmpty:
       !isLoading &&
+      !statusFilterError &&
+      !projectCatalogError &&
       !usesGantt &&
-      (usesTable
-        ? !flatIssuesQuery.isError && flatTotal === 0
-        : surfaceIssues.length === 0),
+      !usesTable &&
+      (serverStatusBranches.enabled
+        ? serverStatusBranches.isTotalKnown &&
+          serverStatusBranches.total === 0
+        : serverGroupBranches.enabled &&
+          !serverGroupBranches.isError &&
+          serverGroupBranches.total === 0),
+    // Widened past the status catalog: this flag means "a filter catalog this
+    // surface depends on is down", and the error state's copy and retry fit
+    // either one. `retryStatusCatalog` refetches both.
+    isStatusCatalogError: statusFilterError || projectCatalogError,
+    retryProjectCatalog: refetchProjects,
   };
 }

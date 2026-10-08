@@ -1,0 +1,118 @@
+{
+  "manifest_version": 1,
+  "key": "com.example.deploy-sentinel",
+  "name": "Deploy Sentinel",
+  "description": "Correlates production incidents with recent deploys, and lets an agent request a rollback under the team's own rules.",
+  "version": "1.0.0",
+  "author": { "name": "Example Infra Team", "url": "https://example.com" },
+
+  "scopes": [
+    "issues:read",
+    "issues:write",
+    "comments:read",
+    "comments:write",
+    "storage:workspace",
+    "net:sentinel.example.com",
+    "net:metrics.example.com"
+  ],
+
+  "config": {
+    "service_prefix": {
+      "type": "string",
+      "label": "Service name prefix",
+      "required": true
+    },
+    "rollback_window_minutes": {
+      "type": "number",
+      "label": "How recent a deploy must be to be rollback-eligible",
+      "required": true
+    },
+    "require_incident_label": {
+      "type": "bool",
+      "label": "Only correlate issues labelled as incidents"
+    },
+    "environment": {
+      "type": "enum",
+      "label": "Environment",
+      "options": ["production", "staging"],
+      "required": true
+    },
+    "sentinel_token": {
+      "type": "secret",
+      "label": "Deploy Sentinel API token",
+      "required": true
+    },
+    "metrics_credential": {
+      "type": "secret",
+      "label": "Metrics MCP server token"
+    }
+  },
+
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "incident",
+        "type": "issue_panel",
+        "name": "Deploy Sentinel",
+        "entry": "ui/main.js",
+        "platforms": ["web", "desktop"]
+      }
+    ],
+
+    "hooks": [
+      {
+        "key": "correlate_deploys",
+        "name": "Correlate recent deploys",
+        "description": "Given a service and a time window, list the deploys that landed in that window with their commit, author and blast radius. Call this first when investigating a production incident: it is the fastest way to find out what changed. Returns an empty list when nothing deployed, which is itself a useful answer.",
+        "input_schema": {
+          "type": "object",
+          "required": ["service"],
+          "properties": {
+            "service": { "type": "string", "description": "Service name, without the configured prefix." },
+            "window_minutes": { "type": "number", "description": "How far back to look. Defaults to 120." }
+          }
+        },
+        "triggers": ["agent", "manual", "ui"],
+        "transport": { "type": "http", "url": "https://sentinel.example.com/hooks/correlate" },
+        "timeout_ms": 15000
+      },
+      {
+        "key": "request_rollback",
+        "name": "Request a rollback",
+        "description": "Open a rollback change request for one deploy. This does NOT roll anything back by itself: it files the request and returns a change id for a human to approve. Refuses deploys older than the configured window, and requires a written reason that goes into the change record.",
+        "input_schema": {
+          "type": "object",
+          "required": ["deploy_id", "reason"],
+          "properties": {
+            "deploy_id": { "type": "string" },
+            "reason": { "type": "string", "description": "Why this deploy is suspected. Goes into the change record verbatim." }
+          }
+        },
+        "triggers": ["agent", "manual"],
+        "transport": { "type": "http", "url": "https://sentinel.example.com/hooks/rollback" },
+        "timeout_ms": 20000
+      },
+      {
+        "key": "page_oncall",
+        "name": "Page the on-call engineer",
+        "description": "Fires when an issue is created or changes status, so a new incident reaches a human without anybody watching the board.",
+        "triggers": ["event"],
+        "events": ["issue.created", "issue.status_changed"],
+        "transport": { "type": "http", "url": "https://sentinel.example.com/hooks/page" },
+        "timeout_ms": 10000
+      },
+      {
+        "key": "metrics",
+        "name": "Metrics queries",
+        "description": "Tools from the team's own metrics MCP server: time series, alert history, and service dependency lookups.",
+        "triggers": ["agent"],
+        "transport": { "type": "mcp", "url": "https://metrics.example.com/mcp" },
+        "timeout_ms": 30000
+      }
+    ],
+
+    "resources": [
+      { "type": "skill", "key": "incident-response", "entry": "skills/incident-response/SKILL.md" }
+    ]
+  }
+}

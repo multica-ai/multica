@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronRight } from "lucide-react";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Card } from "@multica/ui/components/ui/card";
 import type { TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { useT } from "../../i18n";
 
 interface ResolvedThreadBarProps {
@@ -21,23 +22,28 @@ const MAX_NAMED_AUTHORS = 2;
 
 // Distinct authors across `entries`, first-seen order, collapsed to a label
 // ("Alice", "Alice, Bob", "Alice, Bob and 2 others"). Shared by both bars.
+// Deleted comments name no author.
 function useAuthorsLabel(entries: TimelineEntry[]): string {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
 
   const seen = new Set<string>();
-  const authors: Array<{ type: string; id: string }> = [];
+  const authors: Array<{ type: string; id: string; name?: string }> = [];
   for (const e of entries) {
+    if (isDeletedComment(e)) continue;
     const key = `${e.actor_type}:${e.actor_id}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    authors.push({ type: e.actor_type, id: e.actor_id });
+    authors.push({ type: e.actor_type, id: e.actor_id, name: e.actor_name });
   }
 
   if (authors.length <= MAX_NAMED_AUTHORS) {
-    return authors.map((a) => getActorName(a.type, a.id)).join(", ");
+    return authors.map((a) => a.name || getActorName(a.type, a.id)).join(", ");
   }
-  const named = authors.slice(0, MAX_NAMED_AUTHORS).map((a) => getActorName(a.type, a.id)).join(", ");
+  const named = authors
+    .slice(0, MAX_NAMED_AUTHORS)
+    .map((a) => a.name || getActorName(a.type, a.id))
+    .join(", ");
   return t(($) => $.comment.resolve.bar_authors_more, {
     names: named,
     count: authors.length - MAX_NAMED_AUTHORS,
@@ -51,7 +57,9 @@ function useAuthorsLabel(entries: TimelineEntry[]): string {
 export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBarProps) {
   const { t } = useT("issues");
   const authorsLabel = useAuthorsLabel([entry, ...replies]);
-  const count = 1 + replies.length;
+  // Deleted replies render nothing when the thread is expanded, so the folded
+  // count must not promise them either.
+  const count = 1 + replies.filter((reply) => !isDeletedComment(reply)).length;
 
   return (
     <Card className="!py-0 !gap-0 overflow-hidden">
@@ -60,7 +68,7 @@ export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBa
         onClick={onExpand}
         className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors cursor-pointer hover:bg-muted/50"
       >
-        <span className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-2.5 text-body text-muted-foreground">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span className="truncate">
             {t(($) => $.comment.resolve.bar, { count, authors: authorsLabel })}
@@ -93,7 +101,7 @@ export function CommentsFoldBar({ replies, onExpand }: CommentsFoldBarProps) {
       onClick={onExpand}
       className="flex w-full items-center justify-between rounded-md bg-muted/45 px-3 py-2.5 text-left transition-colors cursor-pointer hover:bg-muted"
     >
-      <span className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+      <span className="flex min-w-0 items-center gap-2.5 text-body text-muted-foreground">
         <ChevronRight className="h-3.5 w-3.5 rotate-90 shrink-0" />
         <span className="truncate">
           {t(($) => $.comment.resolve.fold, { count: replies.length, authors: authorsLabel })}

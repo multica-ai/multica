@@ -18,6 +18,7 @@ const navigationStub: NavigationAdapter = {
   back: vi.fn(),
   pathname: "/",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (path: string) => path,
 };
 
@@ -96,12 +97,12 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
   };
 }
 
-function makeTemplate(runtimeId: string): Agent {
+function makeDuplicateSource(runtimeId: string): Agent {
   return {
-    id: "agent-template",
+    id: "agent-source",
     workspace_id: "ws-1",
     runtime_id: runtimeId,
-    name: "Template Agent",
+    name: "Source Agent",
     description: "",
     instructions: "",
     avatar_url: null,
@@ -231,8 +232,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     expect(screen.getByText("My Runtime", { selector: "span.truncate" })).toBeInTheDocument();
   });
 
-  it("in duplicate mode, does not pre-fill the template's runtime when it's now locked", async () => {
-    // Template runtime is owned by someone else and now private — the
+  it("in duplicate mode, does not pre-fill the source agent's runtime when it's now locked", async () => {
+    // The source runtime is owned by someone else and now private — the
     // duplicate flow used to seed with it anyway, leaving the user with
     // a Create button that 403s server-side. Now we fall back to the
     // first usable runtime instead.
@@ -248,8 +249,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       owner_id: ME,
       visibility: "private",
     });
-    const template = makeTemplate("rt-others-private");
-    const { onCreate } = renderDialog([othersPrivate, mine], template);
+    const duplicateSource = makeDuplicateSource("rt-others-private");
+    const { onCreate } = renderDialog([othersPrivate, mine], duplicateSource);
 
     expect(
       screen.getByText("My Runtime", { selector: "span.truncate" }),
@@ -265,8 +266,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-mine");
   });
 
-  it("disables Create when the selected runtime is locked (template + no usable fallback)", () => {
-    // Edge case: template points at a locked runtime AND the workspace
+  it("disables Create when the selected runtime is locked (duplicate source + no usable fallback)", () => {
+    // Edge case: the source agent points at a locked runtime AND the workspace
     // has no usable alternatives in scope. The defense-in-depth gate on
     // the Create button must keep the user from submitting a 403.
     const onlyOthersPrivate = makeRuntime({
@@ -278,8 +279,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     // Flip the picker to "All" so the locked runtime is at least
     // visible — that's the scope where the selected-but-locked state
     // can persist after the initial seed search returns nothing.
-    const template = makeTemplate("rt-only-others-private");
-    renderDialog([onlyOthersPrivate], template);
+    const duplicateSource = makeDuplicateSource("rt-only-others-private");
+    renderDialog([onlyOthersPrivate], duplicateSource);
 
     // The Create button is rendered by lucide-free CTA text "Create".
     const createBtn = screen

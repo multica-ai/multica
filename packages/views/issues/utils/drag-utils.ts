@@ -8,10 +8,15 @@ import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import type { BoardColumnGroup } from "../components/board-column";
 
-export type DragMoveUpdates = Pick<
+export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "position"
+  "status" | "assignee_type" | "assignee_id" | "project_id" | "position"
 >;
+
+export type DragMoveUpdates = DragMoveTargetUpdates & {
+  before_id: string | null;
+  after_id: string | null;
+};
 
 const UNASSIGNED_GROUP_ID = "assignee:unassigned";
 
@@ -42,12 +47,20 @@ export function assigneeGroupId(
   return type && id ? `assignee:${type}:${id}` : UNASSIGNED_GROUP_ID;
 }
 
+/** Mirrors the server's project group key (`project:<id>` / `project:none`)
+ *  so a column built from a descriptor and one built from a card agree. */
+export function projectGroupId(projectId: string | null): string {
+  return `project:${projectId ?? "none"}`;
+}
+
 export function getIssueGroupId(
   issue: Issue,
   grouping: IssueGrouping,
   knownOptionIds?: ReadonlySet<string>,
 ): string {
+  // Column identity is the exact status key, including custom statuses.
   if (grouping === "status") return statusGroupId(issue.status);
+  if (grouping === "project") return projectGroupId(issue.project_id ?? null);
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) {
     const value = issue.properties?.[propertyId];
@@ -87,6 +100,17 @@ export function computePosition(ids: string[], activeId: string, issueMap: Map<s
   if (idx === 0) return getPos(ids[1]!) - 1;
   if (idx === ids.length - 1) return getPos(ids[idx - 1]!) + 1;
   return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
+}
+
+export function getMoveAnchors(
+  ids: readonly string[],
+  activeId: string,
+): Pick<DragMoveUpdates, "before_id" | "after_id"> {
+  const index = ids.indexOf(activeId);
+  return {
+    before_id: index > 0 ? ids[index - 1]! : null,
+    after_id: index >= 0 && index < ids.length - 1 ? ids[index + 1]! : null,
+  };
 }
 
 /**
@@ -129,6 +153,9 @@ export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolea
     const optionId = typeof value === "string" ? value : null;
     return optionId === (group.propertyOptionId ?? null);
   }
+  if (group.projectId !== undefined) {
+    return (issue.project_id ?? null) === group.projectId;
+  }
   return (
     (issue.assignee_type ?? null) === (group.assigneeType ?? null) &&
     (issue.assignee_id ?? null) === (group.assigneeId ?? null)
@@ -138,11 +165,22 @@ export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolea
 export function getMoveUpdates(
   group: BoardColumnGroup,
   position: number,
-): DragMoveUpdates {
-  if (group.status) return { status: group.status, position };
+  /** Same-key reordering must not emit a status write or trigger automation. */
+  issue?: Pick<Issue, "status" | "status_category">,
+): DragMoveTargetUpdates {
+  if (group.status) {
+    const keepsStatus =
+      issue !== undefined &&
+      issue.status === group.status;
+    if (keepsStatus) return { position };
+    return { status: group.status, position };
+  }
   // Property columns: the value change is not part of UpdateIssueRequest —
   // the board applies it through useSetIssueProperty after the position move.
   if (group.propertyId !== undefined) return { position };
+  if (group.projectId !== undefined) {
+    return { project_id: group.projectId, position };
+  }
   return {
     assignee_type: group.assigneeType ?? null,
     assignee_id: group.assigneeId ?? null,

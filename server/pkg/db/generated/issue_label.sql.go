@@ -39,21 +39,32 @@ func (q *Queries) AttachLabelToAgent(ctx context.Context, arg AttachLabelToAgent
 	return err
 }
 
-const attachLabelToIssue = `-- name: AttachLabelToIssue :exec
-INSERT INTO issue_to_label (issue_id, label_id)
-SELECT $1::uuid, $2::uuid
-WHERE EXISTS (
-    SELECT 1 FROM issue i
-    WHERE i.id = $1::uuid
-      AND i.workspace_id = $3::uuid
+const attachLabelToIssue = `-- name: AttachLabelToIssue :one
+WITH inserted AS (
+    INSERT INTO issue_to_label (issue_id, label_id)
+    SELECT $1::uuid, $2::uuid
+    WHERE EXISTS (
+        SELECT 1 FROM issue i
+        WHERE i.id = $1::uuid
+          AND i.workspace_id = $3::uuid
+    )
+      AND EXISTS (
+        SELECT 1 FROM issue_label l
+        WHERE l.id = $2::uuid
+          AND l.workspace_id = $3::uuid
+          AND l.resource_type = 'issue'
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE id IN (SELECT issue_id FROM inserted)
+    RETURNING revision
 )
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = $2::uuid
-      AND l.workspace_id = $3::uuid
-      AND l.resource_type = 'issue'
-)
-ON CONFLICT DO NOTHING
+SELECT EXISTS(SELECT 1 FROM inserted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision
 `
 
 type AttachLabelToIssueParams struct {
@@ -62,11 +73,54 @@ type AttachLabelToIssueParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+type AttachLabelToIssueRow struct {
+	Changed       bool  `json:"changed"`
+	IssueRevision int64 `json:"issue_revision"`
+}
+
+func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssueParams) (AttachLabelToIssueRow, error) {
+	row := q.db.QueryRow(ctx, attachLabelToIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
+	var i AttachLabelToIssueRow
+	err := row.Scan(&i.Changed, &i.IssueRevision)
+	return i, err
+}
+
+const attachLabelToIssueOnCreate = `-- name: AttachLabelToIssueOnCreate :exec
+WITH touched_issue AS (
+    UPDATE issue
+    SET last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE issue.id = $1::uuid
+      AND issue.workspace_id = $3::uuid
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_to_label
+          WHERE issue_to_label.issue_id = $1::uuid
+            AND issue_to_label.label_id = $2::uuid
+      )
+      AND EXISTS (
+          SELECT 1 FROM issue_label
+          WHERE issue_label.id = $2::uuid
+            AND issue_label.workspace_id = $3::uuid
+            AND issue_label.resource_type = 'issue'
+      )
+    RETURNING issue.id
+)
+INSERT INTO issue_to_label (issue_id, label_id)
+SELECT $1::uuid, $2::uuid
+WHERE EXISTS (SELECT 1 FROM touched_issue)
+ON CONFLICT DO NOTHING
+`
+
+type AttachLabelToIssueOnCreateParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	LabelID     pgtype.UUID `json:"label_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
 // Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue
 // and the label belong to the given workspace. A future caller that forgets
 // handler-level prechecks still cannot attach labels across workspaces.
-func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssueParams) error {
-	_, err := q.db.Exec(ctx, attachLabelToIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
+func (q *Queries) AttachLabelToIssueOnCreate(ctx context.Context, arg AttachLabelToIssueOnCreateParams) error {
+	_, err := q.db.Exec(ctx, attachLabelToIssueOnCreate, arg.IssueID, arg.LabelID, arg.WorkspaceID)
 	return err
 }
 
@@ -152,10 +206,10 @@ func (q *Queries) DeleteAgentLabelAssignmentsByLabel(ctx context.Context, labelI
 	return err
 }
 
-const deleteAgentLabelAssignmentsByRuntime = `-- name: DeleteAgentLabelAssignmentsByRuntime :exec
+const deleteAgentLabelAssignmentsBySystemRuntimeAgents = `-- name: DeleteAgentLabelAssignmentsBySystemRuntimeAgents :exec
 
 DELETE FROM agent_to_label
-WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1)
+WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system')
 `
 
 // The single-entity cleanups above cover one agent/skill at a time. The runtime
@@ -163,11 +217,12 @@ WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1)
 // owning agents disappear without passing through a per-entity delete.
 // Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
 // workspace's existing multi-table teardown.
-// Runtime teardown hard-deletes every agent bound to the runtime (archived and
-// system; active agents are refused by a 409 guard). Clear their label links by
-// runtime so none survive the agent hard-delete.
-func (q *Queries) DeleteAgentLabelAssignmentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByRuntime, runtimeID)
+// Runtime teardown hard-deletes the system agents bound to the runtime (user
+// agents are unbound and kept since MUL-5559). Clear only those agents' label
+// links so none survive the agent hard-delete — a surviving unbound agent must
+// keep its labels.
+func (q *Queries) DeleteAgentLabelAssignmentsBySystemRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsBySystemRuntimeAgents, runtimeID)
 	return err
 }
 
@@ -244,15 +299,26 @@ func (q *Queries) DetachLabelFromAgent(ctx context.Context, arg DetachLabelFromA
 	return err
 }
 
-const detachLabelFromIssue = `-- name: DetachLabelFromIssue :exec
-DELETE FROM issue_to_label
-WHERE issue_id = $1::uuid
-  AND label_id = $2::uuid
-  AND EXISTS (
-      SELECT 1 FROM issue i
-      WHERE i.id = $1::uuid
-        AND i.workspace_id = $3::uuid
-  )
+const detachLabelFromIssue = `-- name: DetachLabelFromIssue :one
+WITH deleted AS (
+    DELETE FROM issue_to_label
+    WHERE issue_id = $1::uuid
+      AND label_id = $2::uuid
+      AND EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = $1::uuid
+            AND i.workspace_id = $3::uuid
+      )
+    RETURNING issue_id
+), bumped AS (
+    UPDATE issue
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE id IN (SELECT issue_id FROM deleted)
+    RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
+       COALESCE((SELECT revision FROM bumped), 0)::bigint AS issue_revision
 `
 
 type DetachLabelFromIssueParams struct {
@@ -261,11 +327,18 @@ type DetachLabelFromIssueParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+type DetachLabelFromIssueRow struct {
+	Changed       bool  `json:"changed"`
+	IssueRevision int64 `json:"issue_revision"`
+}
+
 // Workspace-guarded DELETE: only deletes if the issue is in the given
 // workspace. Mirror of the attach query.
-func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromIssueParams) error {
-	_, err := q.db.Exec(ctx, detachLabelFromIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
-	return err
+func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromIssueParams) (DetachLabelFromIssueRow, error) {
+	row := q.db.QueryRow(ctx, detachLabelFromIssue, arg.IssueID, arg.LabelID, arg.WorkspaceID)
+	var i DetachLabelFromIssueRow
+	err := row.Scan(&i.Changed, &i.IssueRevision)
+	return i, err
 }
 
 const detachLabelFromSkill = `-- name: DetachLabelFromSkill :exec

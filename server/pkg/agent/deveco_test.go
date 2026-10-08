@@ -208,6 +208,46 @@ func TestDevecoProcessEventsHappyPath(t *testing.T) {
 	}
 }
 
+func TestDevecoProcessEventsToolErrorEmitsResult(t *testing.T) {
+	t.Parallel()
+
+	b := &devecoBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_toolerr","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_toolerr","part":{"type":"tool","tool":"read","callID":"functions.read:1","state":{"status":"error","input":{"filePath":"/missing.md"},"error":"File not found: /missing.md"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_toolerr","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q", result.status, "completed")
+	}
+
+	close(ch)
+	var toolUses, toolResults int
+	var failedToolResult Message
+	for msg := range ch {
+		switch msg.Type {
+		case MessageToolUse:
+			toolUses++
+		case MessageToolResult:
+			toolResults++
+			failedToolResult = msg
+		}
+	}
+	if toolUses != 1 || toolResults != 1 {
+		t.Fatalf("tool messages are not paired: tool_use=%d tool_result=%d", toolUses, toolResults)
+	}
+	if failedToolResult.CallID != "functions.read:1" {
+		t.Errorf("failed tool callID: got %q", failedToolResult.CallID)
+	}
+	if failedToolResult.Output != "File not found: /missing.md" {
+		t.Errorf("failed tool output: got %q", failedToolResult.Output)
+	}
+}
+
 func TestDevecoProcessEventsErrorCausesFailedStatus(t *testing.T) {
 	t.Parallel()
 

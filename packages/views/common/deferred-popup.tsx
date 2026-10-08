@@ -19,9 +19,10 @@ import { cloneElement, useState, type ReactElement, type ReactNode } from "react
  *   swaps the element mid-gesture (no pointerenter/pointerdown warming),
  *   every event of the gesture lands on a node that is still attached —
  *   both for real pointers and for synthetic sequences (tests, assistive
- *   tech). The in-flight click is stopped from propagating so the popup's
- *   just-mounted outside-press dismissal doesn't treat it as an outside
- *   click and close the popover in the same breath.
+ *   tech). The in-flight click is prevented and stopped so an enclosing link
+ *   cannot perform native navigation, and the popup's just-mounted
+ *   outside-press dismissal doesn't treat it as an outside click and close
+ *   the popover in the same breath.
  * - `Enter`/`Space` do the same for keyboard.
  *
  * Only for uncontrolled usages: callers that pass `open`/`onOpenChange`/
@@ -70,6 +71,7 @@ export function DeferredPopup({
   };
   const handlers = {
     onClick: (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
       mountOpen();
     },

@@ -55,9 +55,11 @@ func TestCodexShellEnvAllowlistUsesExactTaskAndSafeInheritedNames(t *testing.T) 
 		"CUSTOM_FLAG":        "enabled",
 		"ANTHROPIC_API_KEY":  "agent-secret",
 	}
+	authorizedExplicit := []string{"ANTHROPIC_API_KEY"}
 
-	got := CodexShellEnvAllowlist(inherited, explicit)
+	got := CodexShellEnvAllowlist(inherited, explicit, authorizedExplicit)
 	want := []string{
+		"ANTHROPIC_API_KEY",
 		"APPDATA",
 		"COMSPEC",
 		"CUSTOM_FLAG",
@@ -72,6 +74,42 @@ func TestCodexShellEnvAllowlistUsesExactTaskAndSafeInheritedNames(t *testing.T) 
 		"SSL_CERT_FILE",
 		"SystemRoot",
 		"USERPROFILE",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CodexShellEnvAllowlist() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCodexShellEnvAllowlistOnlyAuthorizesExplicitCustomSecrets(t *testing.T) {
+	t.Parallel()
+
+	inherited := []string{
+		"PATH=/usr/bin",
+		"CUSTOM_ACCESS_TOKEN=host-secret",
+		"HOST_SECRET=host-secret",
+		"MULTICA_TOKEN=daemon-secret",
+	}
+	explicit := map[string]string{
+		"CUSTOM_ACCESS_TOKEN": "agent-secret",
+		"x_secret":            "agent-secret",
+		"Y_KEY":               "agent-secret",
+		"UNAUTHORIZED_TOKEN":  "daemon-secret",
+		"MULTICA_TOKEN":       "mat_task",
+	}
+	authorizedExplicit := []string{
+		"custom_access_token", // Authorization matching is case-insensitive.
+		"X_SECRET",
+		"Y_KEY",
+		"HOST_SECRET", // Authorization alone cannot expose an inherited value.
+	}
+
+	got := CodexShellEnvAllowlist(inherited, explicit, authorizedExplicit)
+	want := []string{
+		"CUSTOM_ACCESS_TOKEN",
+		"MULTICA_TOKEN",
+		"PATH",
+		"x_secret",
+		"Y_KEY",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CodexShellEnvAllowlist() = %#v, want %#v", got, want)

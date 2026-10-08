@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -12,6 +12,7 @@ import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
+import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -25,11 +26,21 @@ import {
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
+import { createBestEffortDevLog } from "./dev-log";
+import { appendMissingPathDirs } from "./path-fallback";
 import {
   writeFreezeBreadcrumb,
-  readAndClearFreezeBreadcrumb,
+  readFreezeBreadcrumb,
+  ackFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
+import {
+  loadWindowState,
+  resolveWindowOptions,
+  saveWindowStateToFile,
+  snapshotWindowState,
+  windowStateFilePath,
+} from "./window-state";
 import {
   encodeIssueWindowArgument,
   parseIssueWindowRequest,
@@ -43,6 +54,7 @@ import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
   MainRendererMessageQueue,
   parseMainRendererChannelState,
+  TAB_SELECTION_SHORTCUT_CHANNEL,
   type MainRendererMessageChannel,
 } from "../shared/main-renderer-messages";
 import { AuthSessionCoordinator } from "./auth-session-coordinator";
@@ -96,18 +108,21 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // or any daemon-manager spawn.
 if (process.platform !== "win32") {
   fixPath();
-  // Fallback: prepend common install locations in case fix-path came up
-  // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
-  // to duplicate — PATH lookups short-circuit on first match.
-  const fallbackPaths = [
+  // Fallback: ensure common install locations are on PATH when fix-path came
+  // up short (broken shell rc, non-interactive $SHELL, missing entries).
+  // Append only missing dirs — never prepend. Prepending /usr/local/bin over
+  // a recovered login PATH shadows nvm/fnm Node with a stale system binary
+  // (e.g. Node 12), which breaks shebang CLIs (`#!/usr/bin/env node`) such as
+  // CodeBuddy and OpenClaw during daemon --version probes.
+  process.env.PATH = appendMissingPathDirs(process.env.PATH ?? "", [
     "/opt/homebrew/bin",
     "/usr/local/bin",
     join(homedir(), ".local/bin"),
-  ];
-  process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
+  ]);
 }
 
 const PROTOCOL = "multica";
+const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
 // Where the main process parks a freeze/crash breadcrumb until the next
 // renderer boot flushes it to telemetry. Lives in userData so it survives a
@@ -132,6 +147,7 @@ const rendererRouteContexts = new WeakMap<
   Electron.WebContents,
   RendererRouteContext
 >();
+
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -208,41 +224,6 @@ function getSystemLocale(): string {
   return app.getPreferredSystemLanguages()[0] ?? "en";
 }
 
-function createRendererWebPreferences(
-  systemLocale: string,
-  additionalArguments: string[] = [],
-): Electron.WebPreferences {
-  return {
-    preload: join(__dirname, "../preload/index.js"),
-    sandbox: false,
-    webSecurity: false,
-    // Required for the Chromium PDF viewer (PDFium) to activate inside
-    // iframes — used by the attachment preview modal for application/pdf
-    // files. Default is false in Electron; without it <iframe src=*.pdf>
-    // renders blank.
-    //
-    // Security trade-off, accepted intentionally:
-    //   1. These windows already run with `webSecurity: false` +
-    //      `sandbox: false`, so `plugins: true` does not meaningfully widen
-    //      the renderer's attack surface beyond what is already accepted.
-    //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
-    //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
-    //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
-    //      cannot land in this renderer.
-    //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
-    //      and only handles the `application/pdf` MIME.
-    //
-    // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
-    // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
-    // to that view, keeping the main renderer plugin-free.
-    plugins: true,
-    additionalArguments: [
-      `--multica-locale=${systemLocale}`,
-      ...additionalArguments,
-    ],
-  };
-}
-
 function loadRenderer(window: BrowserWindow): void {
   const rendererEntry = join(__dirname, "../renderer/index.html");
   const rendererURL =
@@ -284,6 +265,18 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
     if (result === "close-tab") {
       event.preventDefault();
       window.webContents.send("tab:close-active");
+    } else if (result === "open-settings") {
+      event.preventDefault();
+      // Settings is a tab, so it can only live in the tabbed main window.
+      // Routing through the queue means the chord also works from a
+      // dedicated issue window — and from one that outlived the main window,
+      // which is recreated and only then handed the request.
+      dispatchToMainRenderer("settings:open", null);
+    } else if (typeof result === "object" && result.action === "select-tab") {
+      event.preventDefault();
+      // Product tabs only exist in the main window. Route there even when the
+      // chord came from a dedicated issue window, matching Settings behavior.
+      dispatchToMainRenderer(TAB_SELECTION_SHORTCUT_CHANNEL, result.key);
     } else if (result) {
       event.preventDefault();
     }
@@ -299,13 +292,28 @@ function createWindow(): BrowserWindow {
   lastKnownSystemLocale = systemLocale;
 
   mainRendererMessages.resetReady();
+
+  // Restore prior size/position/maximized/fullscreen (#5244), constraining
+  // bounds to the work area of the display the window will land on.
+  const stateFile = windowStateFilePath(app.getPath("userData"));
+  const savedWindowState = loadWindowState(stateFile);
+  const windowOpts = resolveWindowOptions(
+    savedWindowState,
+    screen.getAllDisplays().map((d) => d.workArea),
+    screen.getPrimaryDisplay().workArea,
+  );
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: windowOpts.width,
+    height: windowOpts.height,
+    ...(windowOpts.x != null && windowOpts.y != null
+      ? { x: windowOpts.x, y: windowOpts.y }
+      : {}),
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 17 },
+    // Center the native controls in the main window's 40px tab toolbar.
+    trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
     // Windows/Linux pick up the window/taskbar icon from this option.
@@ -316,9 +324,31 @@ function createWindow(): BrowserWindow {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: createRendererWebPreferences(systemLocale),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+    ),
   });
   const window = mainWindow;
+
+  // Persist bounds on resize/move (debounced) and on close so the next
+  // launch restores size/position and max/fullscreen flags. getNormalBounds
+  // is used so maximized/fullscreen still saves the restore size.
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistWindowState = () => {
+    const snap = snapshotWindowState(window);
+    if (snap) saveWindowStateToFile(stateFile, snap);
+  };
+  const schedulePersistWindowState = () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(persistWindowState, 400);
+  };
+  window.on("resize", schedulePersistWindowState);
+  window.on("move", schedulePersistWindowState);
+  window.on("close", () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistWindowState();
+  });
 
   window.on("closed", () => {
     if (mainWindow === window) {
@@ -338,6 +368,12 @@ function createWindow(): BrowserWindow {
   );
 
   window.on("ready-to-show", () => {
+    // Restore max/fullscreen after normal bounds are applied.
+    if (windowOpts.isFullScreen) {
+      window.setFullScreen(true);
+    } else if (windowOpts.isMaximized) {
+      window.maximize();
+    }
     window.show();
   });
 
@@ -357,23 +393,20 @@ function createWindow(): BrowserWindow {
   // Dev-mode renderer diagnostics. When the renderer crashes hard enough
   // that DevTools can't be opened (white screen with no clickable surface),
   // the only way to recover the actual JS error is to forward it from the
-  // main process to the terminal running `make dev`. Without these, the
+  // main process to the dev launcher log. Without these, the
   // user sees only the daemon-manager polling noise (`Render frame was
   // disposed before WebFrameMain could be accessed`) which is a downstream
   // symptom, not the cause.
   //
-  // Gated by `is.dev` to keep production stderr clean — packaged builds
-  // don't have a terminal anyway, and we ship to crash-reporting separately.
-  if (is.dev) {
-    const log = (tag: string, ...args: unknown[]) =>
-      process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
-
+  // Gated by `is.dev` to keep production logs clean — packaged builds ship
+  // failures to crash-reporting separately.
+  if (devLog) {
     // Forward every renderer-side console.* call. The detail object also
     // carries source URL + line — included so a thrown stack trace from
     // window.onerror is traceable back to a file.
     window.webContents.on("console-message", (details) => {
       const { level, message, sourceId, lineNumber } = details;
-      log(level, `${message} (${sourceId}:${lineNumber})`);
+      devLog(level, `${message} (${sourceId}:${lineNumber})`);
     });
 
     // Fires when loadURL / loadFile can't reach its target (dev server
@@ -383,13 +416,12 @@ function createWindow(): BrowserWindow {
       "did-fail-load",
       (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
         if (errorCode === -3) return;
-        log(
+        devLog(
           "did-fail-load",
           `code=${errorCode} desc=${errorDescription} url=${validatedURL} mainFrame=${isMainFrame}`,
         );
       },
     );
-
   }
 
   installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
@@ -398,11 +430,11 @@ function createWindow(): BrowserWindow {
       dialog.showMessageBox(window, options),
     ),
     getDiagnosticContext: () => {
+      // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
+      // when installed per-user) and the bucketed route below already says
+      // which page the window was on, which is the part we can act on.
       const routeContext = rendererRouteContexts.get(window.webContents);
-      return {
-        windowUrl: window.webContents.getURL(),
-        ...(routeContext ? { desktopRoute: routeContext } : {}),
-      };
+      return routeContext ? { desktopRoute: routeContext } : {};
     },
     // Only persist in production: a true hang/crash can't report itself, so we
     // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
@@ -421,6 +453,7 @@ function createWindow(): BrowserWindow {
       ? undefined
       : () =>
           clearFreezeBreadcrumb(freezeBreadcrumbPath(), `main:${window.id}`),
+    log: devLog,
   });
 
   installContextMenu(window.webContents);
@@ -447,9 +480,11 @@ function createIssueWindow(context: IssueWindowContext): void {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: createRendererWebPreferences(systemLocale, [
-      encodeIssueWindowArgument(context),
-    ]),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+      [encodeIssueWindowArgument(context)],
+    ),
   });
 
   issueWindows.add(window);
@@ -483,11 +518,11 @@ function createIssueWindow(context: IssueWindowContext): void {
       dialog.showMessageBox(window, options),
     ),
     getDiagnosticContext: () => {
+      // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
+      // when installed per-user) and the bucketed route below already says
+      // which page the window was on, which is the part we can act on.
       const routeContext = rendererRouteContexts.get(window.webContents);
-      return {
-        windowUrl: window.webContents.getURL(),
-        ...(routeContext ? { desktopRoute: routeContext } : {}),
-      };
+      return routeContext ? { desktopRoute: routeContext } : {};
     },
     persistBreadcrumb: is.dev
       ? undefined
@@ -503,6 +538,7 @@ function createIssueWindow(context: IssueWindowContext): void {
       ? undefined
       : () =>
           clearFreezeBreadcrumb(freezeBreadcrumbPath(), `issue:${window.id}`),
+    log: devLog,
   });
 
   installContextMenu(window.webContents);
@@ -620,8 +656,8 @@ if (!gotTheLock) {
     // IPC: open URL in default browser (used by renderer for Google login).
     // All scheme-allowlist enforcement lives in openExternalSafely — this
     // is the single audit point for renderer-controlled URLs reaching the
-    // OS shell under the app's intentional webSecurity: false + sandbox:
-    // false configuration.
+    // OS shell under the app's intentional webSecurity: false configuration
+    // (the renderer itself runs sandboxed).
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
     });
@@ -668,7 +704,16 @@ if (!gotTheLock) {
     // reported when it happened — the renderer was hung or gone). Read-and-
     // clear so a failure reports exactly once.
     ipcMain.on("freeze:get-last", (event) => {
-      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
+      event.returnValue = readFreezeBreadcrumb(freezeBreadcrumbPath());
+    });
+
+    // The renderer got its breadcrumb event to posthog — retire that exact
+    // payload. A newer failure recorded since the read keeps its own ts and
+    // survives to be reported on the next boot.
+    ipcMain.on("freeze:ack", (event, ts: unknown) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) return;
+      if (typeof ts !== "number" || !Number.isFinite(ts)) return;
+      ackFreezeBreadcrumb(freezeBreadcrumbPath(), ts);
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer

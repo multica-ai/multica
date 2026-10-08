@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { selectRecentContexts, useRecentContextStore, type RecentContextEntry } from "@multica/core/chat";
@@ -15,13 +16,20 @@ function mentionKey(item: Pick<MentionItem, "type" | "id">): string {
   return `${item.type}:${item.id}`;
 }
 
-function issueToMentionItem(issue: Pick<Issue, "id" | "identifier" | "title" | "status">, group: "current" | "recent"): MentionItem {
+function issueToMentionItem(
+  issue: Pick<Issue, "id" | "identifier" | "title" | "status"> & Partial<Pick<Issue, "status_category">>,
+  group: "current" | "recent",
+): MentionItem {
   return {
     id: issue.id,
     label: issue.identifier,
     type: "issue",
     description: issue.title,
     status: issue.status,
+    // Carried, not dropped: the list picks its glyph and its dimming from the
+    // category, so losing it here made a custom done status in Current/Recent
+    // render as an active Todo. (MUL-6243)
+    statusCategory: issueStatusCategory(issue) ?? undefined,
     group,
   };
 }

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import type { AutopilotAssigneeType } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -43,6 +44,10 @@ export function AgentPicker({
 
   const activeAgents = useMemo(() => agents.filter((a) => !a.archived_at), [agents]);
   const activeSquads = useMemo(() => squads.filter((s) => !s.archived_at), [squads]);
+  const agentsById = useMemo(
+    () => new Map(activeAgents.map((agent) => [agent.id, agent])),
+    [activeAgents],
+  );
 
   const selectedAgent =
     assignee?.type === "agent" ? activeAgents.find((a) => a.id === assignee.id) : undefined;
@@ -103,30 +108,49 @@ export function AgentPicker({
         <>
           {filteredAgents.length > 0 && (
             <PickerSection label={t(($) => $.agent_picker.agents_group)}>
-              {filteredAgents.map((a) => (
-                <PickerItem
-                  key={a.id}
-                  selected={isSelected("agent", a.id)}
-                  onClick={() => handlePick("agent", a.id)}
-                >
-                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-                  <span className="truncate">{a.name}</span>
-                </PickerItem>
-              ))}
+              {filteredAgents.map((a) => {
+                const runtimeBound = isAgentRuntimeBound(a);
+                return (
+                  <PickerItem
+                    key={a.id}
+                    selected={isSelected("agent", a.id)}
+                    disabled={!runtimeBound}
+                    tooltip={
+                      runtimeBound
+                        ? undefined
+                        : t(($) => $.agent_picker.agent_runtime_required)
+                    }
+                    onClick={() => handlePick("agent", a.id)}
+                  >
+                    <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
+                    <span className="truncate">{a.name}</span>
+                  </PickerItem>
+                );
+              })}
             </PickerSection>
           )}
           {filteredSquads.length > 0 && (
             <PickerSection label={t(($) => $.agent_picker.squads_group)}>
-              {filteredSquads.map((s) => (
-                <PickerItem
-                  key={s.id}
-                  selected={isSelected("squad", s.id)}
-                  onClick={() => handlePick("squad", s.id)}
-                >
-                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
-                  <span className="truncate">{s.name}</span>
-                </PickerItem>
-              ))}
+              {filteredSquads.map((s) => {
+                const leader = agentsById.get(s.leader_id);
+                const runtimeBound = !!leader && isAgentRuntimeBound(leader);
+                return (
+                  <PickerItem
+                    key={s.id}
+                    selected={isSelected("squad", s.id)}
+                    disabled={!runtimeBound}
+                    tooltip={
+                      runtimeBound
+                        ? undefined
+                        : t(($) => $.agent_picker.squad_runtime_required)
+                    }
+                    onClick={() => handlePick("squad", s.id)}
+                  >
+                    <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
+                    <span className="truncate">{s.name}</span>
+                  </PickerItem>
+                );
+              })}
             </PickerSection>
           )}
         </>

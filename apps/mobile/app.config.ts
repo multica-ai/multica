@@ -26,12 +26,27 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",
-    // 1024x1024 source shared with the desktop client
-    // (apps/desktop/build/icon.png). Expo prebuild generates every required
-    // iOS icon size from this single PNG.
+    // 1024x1024 full-bleed, no-alpha source that belongs to mobile alone. Do
+    // not point this back at the desktop icon (apps/desktop/build/icon.png):
+    // that one is padded for macOS, and iOS would mask it a second time, which
+    // is the white ring from #6995. Expo prebuild generates every required iOS
+    // icon size from this single PNG.
     icon: "./assets/icon.png",
     ios: {
-      supportsTablet: false,
+      // Expo keeps the top-level portrait policy for iPhone while adding all
+      // iPad orientations required for multitasking when tablet support is on.
+      supportsTablet: true,
+      // Pins DEVELOPMENT_TEAM on every prebuild. Leaving it unset is the normal
+      // path — `expo run:ios` then resolves a signing identity from the Keychain
+      // itself, which is right when the Apple ID owns exactly one team. With
+      // several (a personal team plus an employer's) it takes the *first*
+      // identity found whenever the terminal is non-interactive, writes that
+      // choice into the generated ios/, and never clears it again: prebuild only
+      // writes DEVELOPMENT_TEAM when a value is present, so a project pinned to
+      // the wrong team stays wrong until ios/ is deleted. Setting this re-applies
+      // the intended team on every `scripts/ios-run.sh` run, which also repairs
+      // an already-mispinned checkout.
+      appleTeamId: process.env.EXPO_APPLE_TEAM_ID,
       // Per-variant bundle id overrides exist for one reason: an Apple ID
       // can only sign bundle prefixes it owns, so contributors not on the
       // Multica Apple Developer team (and external users self-building a

@@ -41,6 +41,7 @@
         "support",
         "status",
         "legal",
+        "licensing",
         "privacy",
         "terms",
         "security",
@@ -94,6 +95,13 @@
         "sdk",
         "tokens",
         "cli"
+      ]
+    },
+    {
+      "label": "DingTalk account-bind route",
+      "description": "`/dingtalk/bind` is a global pre-workspace route where a member links their DingTalk identity. Reserve the prefix so a workspace slug cannot shadow it.",
+      "slugs": [
+        "dingtalk"
       ]
     },
     {
