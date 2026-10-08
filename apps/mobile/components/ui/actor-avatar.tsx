@@ -25,6 +25,8 @@ import { useActorLookup, getInitials } from "@/data/use-actor-name";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { PresenceDot } from "@/components/ui/presence-dot";
+import { GeneratedAvatar } from "@/components/ui/generated-avatar";
+import { parseGeneratedSeed } from "@/lib/avatar-seed";
 import { THEME } from "@/lib/theme";
 
 // `system` actors are server-side automation (state changes triggered by the
@@ -117,6 +119,10 @@ function BareAvatar({
     : avatarUrl;
   const displayName =
     name ?? (type === "system" ? "Multica" : getName(type, id));
+  // `gen:<seed>` display marker (MAKE-291): server-side precedence already
+  // picked this value (image > generated > legacy emoji), and the marker is
+  // not a renderable URL, so it takes its own branch ahead of emoji.
+  const seed = parseGeneratedSeed(rawUrl);
   const emoji = rawUrl?.startsWith("emoji:")
     ? rawUrl.slice("emoji:".length).trim() || null
     : null;
@@ -124,6 +130,21 @@ function BareAvatar({
     !emoji && rawUrl && /^(https?:|data:|file:|asset:)/.test(rawUrl)
       ? rawUrl
       : null;
+
+  if (seed) {
+    return (
+      <View
+        style={{ width: size, height: size, borderRadius: radius, overflow: "hidden" }}
+        accessibilityLabel={type === "system" ? "" : displayName}
+      >
+        <GeneratedAvatar
+          seed={seed}
+          size={size}
+          accessibilityLabel={displayName ?? undefined}
+        />
+      </View>
+    );
+  }
 
   if (emoji) {
     return (

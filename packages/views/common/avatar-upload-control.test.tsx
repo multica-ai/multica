@@ -163,6 +163,28 @@ describe("AvatarUploadControl", () => {
     );
   });
 
+  // MAKE-291: a `gen:<seed>` display marker must preview as the generated
+  // avatar, not be handed to <img> as if it were a URL (which would 404 and
+  // drop the control to the Bot placeholder — losing the identity the server
+  // just resolved).
+  it("previews the generated avatar from a gen: marker", () => {
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value="gen:11111111-1111-1111-1111-111111111111"
+        onUploaded={vi.fn()}
+        onEmojiSelected={vi.fn()}
+      />,
+    );
+
+    const svg = document.querySelector('[data-slot="generated-avatar"]');
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute("data-avatar-seed")).toBe(
+      "11111111-1111-1111-1111-111111111111",
+    );
+    expect(document.querySelector("img")).toBeNull();
+  });
+
   // An edit caller PATCHes on every pick. Two in flight at once are
   // last-one-to-arrive-wins on the server, so the user's newer choice can lose
   // to the older one and stick — the avatar has to be locked until the save

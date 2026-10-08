@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/avatar"
 	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -8067,6 +8068,23 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 	})
 }
 
+// agentDisplayAvatar projects the stored (avatar_url, avatar_seed) pair into
+// the display value broadcast with agent status events: explicit image >
+// `gen:<seed>` > legacy `emoji:<x>` > nil. Display-only — see internal/avatar
+// (MAKE-291). The service layer never signed storage URLs, and it does not
+// start now: markers and raw values pass through unchanged.
+func agentDisplayAvatar(a db.Agent) *string {
+	stored := ""
+	if a.AvatarUrl.Valid {
+		stored = a.AvatarUrl.String
+	}
+	display := avatar.Display(stored, a.AvatarSeed)
+	if display == "" {
+		return nil
+	}
+	return &display
+}
+
 // agentToMap builds a simple map for broadcasting agent status updates.
 func agentToMap(a db.Agent) map[string]any {
 	var rc any
@@ -8079,7 +8097,7 @@ func agentToMap(a db.Agent) map[string]any {
 		"runtime_id":           util.UUIDToString(a.RuntimeID),
 		"name":                 a.Name,
 		"description":          a.Description,
-		"avatar_url":           util.TextToPtr(a.AvatarUrl),
+		"avatar_url":           agentDisplayAvatar(a),
 		"runtime_mode":         a.RuntimeMode,
 		"runtime_config":       rc,
 		"visibility":           a.Visibility,
