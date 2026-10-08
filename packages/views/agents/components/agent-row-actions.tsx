@@ -248,8 +248,8 @@ export function AgentRowActions({
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
                   <AlertCircle className="h-5 w-5 text-destructive" />
                 </div>
-                <div className="flex-1">
-                  <AlertDialogTitle>
+                <div className="min-w-0 flex-1">
+                  <AlertDialogTitle className="break-all">
                     {t(($) => $.row_actions.archive_dialog_title, { name: agent.name })}
                   </AlertDialogTitle>
                   <AlertDialogDescription>
