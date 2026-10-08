@@ -5177,6 +5177,10 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 	}
 
+	if retried == nil {
+		s.reconcileIssueAfterTaskFailure(ctx, task)
+	}
+
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
@@ -6011,15 +6015,42 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 	return failed, nil
 }
 
+// reconcileIssueAfterTaskFailure resets only the built-in active status when
+// no runnable work remains. Both ordinary callbacks and sweepers use the same
+// guarded write; only its winner emits an issue update.
+func (s *TaskService) reconcileIssueAfterTaskFailure(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("failure reconciliation: load issue failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
+		return
+	}
+	updated, err := s.Queries.ReconcileIssueAfterTaskFailure(ctx, db.ReconcileIssueAfterTaskFailureParams{
+		SourceTaskID:     task.ID,
+		ID:               task.IssueID,
+		WorkspaceID:      issue.WorkspaceID,
+		ExpectedRevision: issue.Revision,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		slog.Warn("failure reconciliation: reset issue failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
+		return
+	}
+	s.broadcastIssueUpdated(ctx, updated, "in_progress")
+}
+
 // HandleFailedTasks runs the post-failure side effects for a batch of
 // freshly-failed tasks: optional auto-retry, task:failed event broadcast,
 // agent status reconciliation, and (when an issue has no remaining active
 // task and isn't being retried) resetting the issue back to todo so the
-// daemon can pick it up again.
+// board stops presenting an idle issue as actively running.
 //
-// All callers that surface a task as failed — sweepers, FailTask,
-// recover-orphans — funnel through here so the same UI-consistency
-// guarantees apply on every code path.
+// Sweepers and orphan recovery use this batch path. FailTaskWithTransition
+// owns its retry transaction and shares only the guarded issue reconciliation.
 func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTaskQueue) int {
 	if len(tasks) == 0 {
 		return 0
@@ -6061,47 +6092,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		if t.IssueID.Valid {
 			if issue, err := s.Queries.GetIssue(ctx, t.IssueID); err == nil {
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
-				// Reset stuck in_progress issues only when no other active
-				// task exists for the issue and no retry was just enqueued.
 				issueKey := util.UUIDToString(t.IssueID)
-				// Only "an agent is actively working" resets, and since
-				// MUL-7240 that is the fixed in_progress key alone. in_review
-				// and blocked are excluded because a human or an external
-				// dependency owns the issue then; a CUSTOM started status is
-				// excluded because custom statuses inherit lifecycle only, not
-				// the active-status recovery rule. Effective() no longer
-				// projects a nonterminal custom key onto a built-in, so this is
-				// a key comparison on purpose. (MUL-6243, MUL-7240)
-				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				if !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
-					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
-					if checkErr != nil {
-						slog.Warn("handle failed tasks: active check failed",
-							"issue_id", issueKey,
-							"error", checkErr,
-						)
-					} else if !hasActive {
-						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							SourceTaskID: t.ID,
-							ID:           t.IssueID,
-							Status:       "todo",
-							WorkspaceID:  issue.WorkspaceID,
-						})
-						if updateErr != nil {
-							slog.Warn("handle failed tasks: reset stuck issue failed",
-								"issue_id", issueKey,
-								"error", updateErr,
-							)
-						} else {
-							// This direct reset bypasses the HTTP UpdateIssue
-							// handler that normally emits issue:updated, so emit
-							// it here too. Without it the board / status-filter
-							// caches keep showing the issue as in_progress until
-							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(ctx, updatedIssue, issue.Status)
-						}
-					}
+					s.reconcileIssueAfterTaskFailure(ctx, t)
 				}
 			}
 		}
