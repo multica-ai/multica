@@ -433,7 +433,7 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 ```
 
 - `--until-status KEY` — this issue's status is that key (built-in or one of the workspace's statuses).
-- `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. With several linked pull requests, any one satisfies it.
+- `--until-pr checks` — a linked GitHub, Forgejo, Gitea or GitLab pull request's checks finish, passing or failing, on its current head. `--until-pr merged` — a linked pull request or merge request merges. With several linked pull requests, any one satisfies it.
 - `--until-children-done` — every sub-issue, staged or not, is closed (`done` or `cancelled`). With `--stage N` it waits only for staged sub-issues up to stage N, and stage N must have at least one. A parent with no sub-issues never fires. The parent's assignee already gets the sub-issue wakeup described under Stages; do not add this condition for the same wake.
 - `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), or `in_review`.
 - The same form also accepts `--until-assignee member|agent|squad:ID`, `--until-label LABEL_ID`, and `--until-property PROPERTY_ID=VALUE` (VALUE may be JSON). `multica issue wakeup create --help` lists them.
@@ -450,10 +450,10 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 - Members create the same rules from the issue sidebar. The parent's stage wake (see Stages above) appears there as a system rule; a member may turn it off for one issue or set its instruction, which your `[WAKEUP]` block then carries.
 
 Read current state with issue get, comment list, and run inspection before
-judging business completion. Wait for a linked pull request with `--until-pr`
-(`checks` or `merged`) rather than polling it from a timer. There is no separate
-CI event; when the woken run needs check details or logs, use the existing
-GitHub tools. A failed run does not imply its business goal is complete.
+judging business completion. Wait for a linked pull request or merge request with
+`--until-pr` (`checks` or `merged`) rather than polling it from a timer. There is
+no separate CI event; when the woken run needs check details or logs, use the
+provider's existing tools. A failed run does not imply its business goal is complete.
 Automatic retry chains are not followed by event filters; subscribe to a new run
 if needed. Once the goal is met, disable any continuous configuration. Every
 wakeup runs under ordinary execution and comment delivery rules; the one

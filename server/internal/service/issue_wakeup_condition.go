@@ -244,36 +244,72 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 		met, fingerprint, observed := childrenDone(c, children)
 		return met, fingerprint, observed, nil
 	case "pull_request":
-		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,'')
-			FROM github_pull_request pr JOIN issue_pull_request ipr ON ipr.pull_request_id=pr.id WHERE ipr.issue_id=$1`, w.IssueID)
+		type pullRequestFact struct {
+			Provider string
+			Number   int32
+			State    string
+			Head     string
+			Checks   string
+		}
+		var facts []pullRequestFact
+		rows, err := tx.Query(ctx, `
+			SELECT 'github',pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,'')
+			FROM github_pull_request pr JOIN issue_pull_request ipr ON ipr.pull_request_id=pr.id WHERE ipr.issue_id=$1
+			UNION ALL
+			SELECT pr.provider,pr.pr_number,pr.state,pr.head_sha,
+				CASE
+					WHEN COUNT(cs.*)=0 THEN ''
+					WHEN BOOL_OR(cs.state='failed') THEN 'FAILURE'
+					WHEN BOOL_OR(cs.state='pending') THEN 'PENDING'
+					ELSE 'SUCCESS'
+				END
+			FROM vcs_pull_request pr
+			JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id=pr.id
+			LEFT JOIN vcs_commit_status cs ON cs.connection_id=pr.connection_id AND cs.sha=pr.head_sha AND pr.head_sha<>''
+			WHERE ipr.issue_id=$1
+			GROUP BY pr.id,pr.provider,pr.pr_number,pr.state,pr.head_sha`, w.IssueID)
 		if err != nil {
 			return false, "", nil, err
 		}
-		var keys []string
-		var prs []map[string]any
 		for rows.Next() {
-			var number int32
-			var state, head, checks string
-			if err = rows.Scan(&number, &state, &head, &checks); err != nil {
+			var fact pullRequestFact
+			if err = rows.Scan(&fact.Provider, &fact.Number, &fact.State, &fact.Head, &fact.Checks); err != nil {
 				rows.Close()
 				return false, "", nil, err
 			}
-			switch c.Event {
-			case "merged":
-				if state == "merged" {
-					keys = append(keys, fmt.Sprintf("%d", number))
-					prs = append(prs, map[string]any{"number": number, "state": state})
-				}
-			case "checks_finished":
-				if head != "" && slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks) {
-					keys = append(keys, fmt.Sprintf("%d@%s:%s", number, head, checks))
-					prs = append(prs, map[string]any{"number": number, "head_sha": head, "checks": strings.ToLower(checks)})
-				}
-			}
+			facts = append(facts, fact)
 		}
 		rows.Close()
 		if err = rows.Err(); err != nil {
 			return false, "", nil, err
+		}
+		var keys []string
+		var prs []map[string]any
+		for _, fact := range facts {
+			keyPrefix := ""
+			if fact.Provider != "github" {
+				keyPrefix = fact.Provider + ":"
+			}
+			switch c.Event {
+			case "merged":
+				if fact.State == "merged" {
+					keys = append(keys, fmt.Sprintf("%s%d", keyPrefix, fact.Number))
+					pr := map[string]any{"number": fact.Number, "state": fact.State}
+					if fact.Provider != "github" {
+						pr["provider"] = fact.Provider
+					}
+					prs = append(prs, pr)
+				}
+			case "checks_finished":
+				if fact.Head != "" && slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, fact.Checks) {
+					keys = append(keys, fmt.Sprintf("%s%d@%s:%s", keyPrefix, fact.Number, fact.Head, fact.Checks))
+					pr := map[string]any{"number": fact.Number, "head_sha": fact.Head, "checks": strings.ToLower(fact.Checks)}
+					if fact.Provider != "github" {
+						pr["provider"] = fact.Provider
+					}
+					prs = append(prs, pr)
+				}
+			}
 		}
 		sort.Strings(keys)
 		return len(keys) > 0, "pr:" + strings.Join(keys, ","), map[string]any{"pull_requests": prs}, nil
