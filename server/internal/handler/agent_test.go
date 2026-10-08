@@ -819,9 +819,10 @@ func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
 		wantAvatar string
 		wantGen    bool
 	}{
-		// MAKE-291: no more random emoji at creation. The default identity is
-		// the generated avatar — avatar_url stays NULL in storage and the
-		// response projects `gen:<seed>` from the column DEFAULT's seed.
+		// MAKE-291: no random emoji at creation. An agent that selected
+		// nothing gets the generated avatar — avatar_url stays NULL in
+		// storage and the response projects `gen:<seed>` from the column
+		// DEFAULT's seed.
 		{name: "omitted", wantGen: true},
 		{name: "empty", avatarURL: ptr(""), wantGen: true},
 		{
@@ -829,13 +830,13 @@ func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
 			avatarURL:  ptr("https://cdn.example.com/avatars/agent.png"),
 			wantAvatar: "https://cdn.example.com/avatars/agent.png",
 		},
-		// Emoji support is preserved as an explicit choice — the legacy
-		// suggestion set stays usable (decision 9), it just isn't the default.
+		// Approved precedence (MAKE-301 H.1): image > emoji > generated. An
+		// emoji chosen at creation is stored AND displayed; it is not hidden
+		// by the always-present seed.
 		{
 			name:       "explicit emoji",
 			avatarURL:  ptr("emoji:\U0001F454"),
-			wantGen:    true,
-			wantAvatar: "",
+			wantAvatar: "emoji:\U0001F454",
 		},
 	}
 
@@ -893,16 +894,18 @@ func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
 				if *response.AvatarURL != "gen:"+storedSeed {
 					t.Errorf("CreateAgent: avatar_url = %q, want gen:%q (marker must carry the persisted seed)", *response.AvatarURL, storedSeed)
 				}
-				// Default creation stores nothing in avatar_url; an explicit
-				// emoji choice stores the legacy marker as fallback identity.
-				if tt.avatarURL == nil || *tt.avatarURL == "" {
-					if storedURL.Valid {
-						t.Errorf("CreateAgent: stored avatar_url = %q, want NULL (no random emoji assignment)", storedURL.String)
-					}
-				} else if !storedURL.Valid || storedURL.String != *tt.avatarURL {
-					t.Errorf("CreateAgent: stored avatar_url = (%t, %q), want %q (emoji stays persisted as fallback)", storedURL.Valid, storedURL.String, *tt.avatarURL)
+				// Default creation stores nothing in avatar_url.
+				if storedURL.Valid {
+					t.Errorf("CreateAgent: stored avatar_url = %q, want NULL (no random emoji assignment)", storedURL.String)
 				}
 				return
+			}
+			// An explicit choice (image or emoji) is stored verbatim and is
+			// what the response displays; the seed exists but does not win.
+			if tt.avatarURL != nil && *tt.avatarURL != "" {
+				if !storedURL.Valid || storedURL.String != *tt.avatarURL {
+					t.Errorf("CreateAgent: stored avatar_url = (%t, %q), want %q (explicit choice stays persisted)", storedURL.Valid, storedURL.String, *tt.avatarURL)
+				}
 			}
 			if *response.AvatarURL != tt.wantAvatar {
 				t.Errorf("CreateAgent: avatar_url = %q, want %q", *response.AvatarURL, tt.wantAvatar)
@@ -983,6 +986,63 @@ func TestUpdateAgent_GeneratedAvatarSurvivesRenameAndRoundTrip(t *testing.T) {
 	}
 	if after := getAvatar(t); after != before {
 		t.Errorf("round-trip changed the avatar: %q -> %q", before, after)
+	}
+}
+
+func TestUpdateAgent_EmojiAvatarRemainsVisibleWithSeed(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	const agentName = "avatar-emoji-precedence"
+	agentID := createHandlerTestAgent(t, agentName, nil)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent WHERE workspace_id = $1 AND name = $2`,
+			testWorkspaceID, agentName,
+		)
+	})
+
+	const emoji = "emoji:🦊"
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(
+		newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{"avatar_url": emoji}), "id", agentID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent(emoji): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.AvatarURL == nil || *response.AvatarURL != emoji {
+		t.Fatalf("UpdateAgent(emoji): avatar_url = %v, want %q", response.AvatarURL, emoji)
+	}
+
+	var storedURL pgtype.Text
+	var storedSeed string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT avatar_url, avatar_seed FROM agent WHERE id = $1`, parseUUID(agentID),
+	).Scan(&storedURL, &storedSeed); err != nil {
+		t.Fatalf("load updated agent: %v", err)
+	}
+	if !storedURL.Valid || storedURL.String != emoji {
+		t.Fatalf("stored avatar_url = (%t, %q), want %q", storedURL.Valid, storedURL.String, emoji)
+	}
+	if storedSeed == "" {
+		t.Fatal("stored avatar_seed is empty")
+	}
+
+	get := httptest.NewRecorder()
+	testHandler.GetAgent(get, withURLParam(newRequest(http.MethodGet, "/api/agents/"+agentID, nil), "id", agentID))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GetAgent: expected 200, got %d: %s", get.Code, get.Body.String())
+	}
+	var fetched AgentResponse
+	if err := json.NewDecoder(get.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode GetAgent response: %v", err)
+	}
+	if fetched.AvatarURL == nil || *fetched.AvatarURL != emoji {
+		t.Fatalf("GetAgent avatar_url = %v, want %q", fetched.AvatarURL, emoji)
 	}
 }
 

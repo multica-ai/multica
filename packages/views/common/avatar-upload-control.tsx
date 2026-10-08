@@ -159,8 +159,8 @@ export function AvatarUploadControl({
   const emoji = parseAvatarEmoji(value);
   // `gen:<seed>` display marker (MAKE-291): preview the generated avatar
   // rather than feeding the marker to <img> as if it were a URL. Server-side
-  // precedence already picked this value over any stored emoji, so the
-  // preview shows exactly what ActorAvatar will render.
+  // precedence only emits this marker when no stored image or valid emoji won,
+  // so the preview shows exactly what ActorAvatar will render.
   const seed = parseGeneratedSeed(value);
   const resolved = value && !emoji && !seed ? resolvePublicFileUrl(value) : null;
   const hasImage = !!resolved && !previewError;

@@ -16,7 +16,9 @@ import (
 //   - avatar_url is byte-for-byte untouched (legacy emoji stays persisted),
 //   - an already-present seed is never overwritten,
 //   - the whole migration is idempotent (re-running is a no-op),
-//   - newly inserted rows get a seed from the column DEFAULT.
+//   - newly inserted rows get a seed from the column DEFAULT,
+//   - down preserves avatar_url while removing the seed column, and
+//   - down followed by up regenerates unique seeds for every row.
 func TestAgentAvatarSeedBackfill(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -138,7 +140,6 @@ func TestAgentAvatarSeedBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query after re-run: %v", err)
 	}
-	defer rows2.Close()
 	for rows2.Next() {
 		var (
 			id   uuid.UUID
@@ -153,6 +154,7 @@ func TestAgentAvatarSeedBackfill(t *testing.T) {
 			t.Errorf("agent %s: seed changed across re-run: %q -> %q (backfill must never overwrite a seed)", name, snapshot[id], seed)
 		}
 	}
+	rows2.Close()
 	if err := rows2.Err(); err != nil {
 		t.Fatalf("iterate agents after re-run: %v", err)
 	}
@@ -175,6 +177,69 @@ func TestAgentAvatarSeedBackfill(t *testing.T) {
 	}
 	if seeds[newSeed] {
 		t.Errorf("post-migration insert: DEFAULT seed %q collides with a backfilled seed", newSeed)
+	}
+	snapshot[uuid.MustParse("44444444-4444-4444-4444-444444444444")] = newSeed
+
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "565_agent_avatar_seed.down.sql")); err != nil {
+		t.Fatalf("apply 565 down: %v", err)
+	}
+	var seedColumnCount int
+	if err := conn.QueryRow(ctx, `
+		SELECT count(*)
+		FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = 'agent' AND column_name = 'avatar_seed'
+	`, schema).Scan(&seedColumnCount); err != nil {
+		t.Fatalf("inspect avatar_seed after down: %v", err)
+	}
+	if seedColumnCount != 0 {
+		t.Fatalf("avatar_seed columns after down = %d, want 0", seedColumnCount)
+	}
+
+	var emojiURL, imageURL string
+	var nullURL, newAgentURL *string
+	if err := conn.QueryRow(ctx, `
+		SELECT
+			(SELECT avatar_url FROM agent WHERE name = 'legacy-emoji'),
+			(SELECT avatar_url FROM agent WHERE name = 'legacy-image'),
+			(SELECT avatar_url FROM agent WHERE name = 'legacy-null'),
+			(SELECT avatar_url FROM agent WHERE name = 'new-agent')
+	`).Scan(&emojiURL, &imageURL, &nullURL, &newAgentURL); err != nil {
+		t.Fatalf("read avatar_url values after down: %v", err)
+	}
+	if emojiURL != "emoji:👔" || imageURL != "https://cdn.example.com/a.png" || nullURL != nil || newAgentURL != nil {
+		t.Fatalf("avatar_url values changed after down: emoji=%q image=%q null=%v new=%v", emojiURL, imageURL, nullURL, newAgentURL)
+	}
+
+	apply("after down")
+	rows3, err := conn.Query(ctx, `SELECT id, avatar_url, avatar_seed FROM agent ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query agents after down/up: %v", err)
+	}
+	regenerated := map[string]bool{}
+	for rows3.Next() {
+		var id uuid.UUID
+		var url *string
+		var seed string
+		if err := rows3.Scan(&id, &url, &seed); err != nil {
+			t.Fatalf("scan agent after down/up: %v", err)
+		}
+		if seed == "" {
+			t.Errorf("agent %s: empty seed after down/up", id)
+		}
+		if regenerated[seed] {
+			t.Errorf("agent %s: regenerated seed %q is not unique", id, seed)
+		}
+		regenerated[seed] = true
+		if seed == snapshot[id] {
+			t.Errorf("agent %s: seed did not regenerate after down/up: %q", id, seed)
+		}
+	}
+	rows3.Close()
+	if err := rows3.Err(); err != nil {
+		t.Fatalf("iterate agents after down/up: %v", err)
+	}
+	if len(regenerated) != 4 {
+		t.Fatalf("regenerated unique seeds = %d, want 4", len(regenerated))
 	}
 }
 

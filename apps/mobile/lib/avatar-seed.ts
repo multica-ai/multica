@@ -2,8 +2,8 @@
  * Generated agent avatars (MAKE-291) — character art foundation.
  *
  * The server projects `avatar_url` responses as `gen:<seed>` when the row has
- * a persisted `avatar_seed` and no explicit image (display precedence: image >
- * generated > legacy `emoji:<x>` > placeholder). This module parses that
+ * a persisted `avatar_seed` and no explicit image or emoji (display precedence:
+ * image > existing `emoji:<x>` > generated > placeholder). This module parses that
  * marker and derives the avatar's design deterministically from the seed
  * alone — same seed, same avatar, forever; renaming the agent, reconnecting a
  * provider, or restarting anything cannot change it.

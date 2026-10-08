@@ -22,13 +22,31 @@ func TestDisplayPrecedence(t *testing.T) {
 			want:   "data:image/svg+xml,%3Csvg%3E%3C/svg%3E",
 		},
 		{
-			name:   "generated wins over legacy emoji when seed exists",
+			name:   "existing emoji wins over generated seed",
 			stored: "emoji:\U0001F454",
+			seed:   "11111111-1111-1111-1111-111111111111",
+			want:   "emoji:\U0001F454",
+		},
+		{
+			name:   "emoji with surrounding whitespace is preserved",
+			stored: "  emoji:\U0001F981  ",
+			seed:   "11111111-1111-1111-1111-111111111111",
+			want:   "emoji:\U0001F981",
+		},
+		{
+			name:   "bare emoji marker with no glyph is not a choice, generated wins",
+			stored: "emoji:",
 			seed:   "11111111-1111-1111-1111-111111111111",
 			want:   "gen:11111111-1111-1111-1111-111111111111",
 		},
 		{
-			name:   "generated wins over empty stored value",
+			name:   "emoji marker with only whitespace payload is not a choice",
+			stored: "emoji:   ",
+			seed:   "11111111-1111-1111-1111-111111111111",
+			want:   "gen:11111111-1111-1111-1111-111111111111",
+		},
+		{
+			name:   "generated is the default when nothing is stored",
 			stored: "",
 			seed:   "11111111-1111-1111-1111-111111111111",
 			want:   "gen:11111111-1111-1111-1111-111111111111",
@@ -42,6 +60,12 @@ func TestDisplayPrecedence(t *testing.T) {
 		{
 			name:   "empty when neither exists",
 			stored: "",
+			seed:   "",
+			want:   "",
+		},
+		{
+			name:   "bare emoji marker and no seed projects nothing renderable",
+			stored: "emoji:",
 			seed:   "",
 			want:   "",
 		},
@@ -66,16 +90,21 @@ func TestDisplayPrecedence(t *testing.T) {
 // provider, or runtime are not parameters at all, and the same pair must
 // always project the same value.
 func TestDisplayDeterministic(t *testing.T) {
-	stored := "emoji:\U0001F9E1"
 	seed := "22222222-2222-2222-2222-222222222222"
-	first := Display(stored, seed)
-	for i := 0; i < 10; i++ {
-		if got := Display(stored, seed); got != first {
-			t.Fatalf("Display is not deterministic: run %d = %q, first = %q", i, got, first)
+	for _, tc := range []struct{ stored, want string }{
+		{"", "gen:" + seed},
+		{"emoji:\U0001F9E1", "emoji:\U0001F9E1"},
+		{"https://cdn.example.com/a.png", "https://cdn.example.com/a.png"},
+	} {
+		first := Display(tc.stored, seed)
+		for i := 0; i < 10; i++ {
+			if got := Display(tc.stored, seed); got != first {
+				t.Fatalf("Display(%q) is not deterministic: run %d = %q, first = %q", tc.stored, i, got, first)
+			}
 		}
-	}
-	if first != "gen:"+seed {
-		t.Fatalf("Display = %q, want %q", first, "gen:"+seed)
+		if first != tc.want {
+			t.Fatalf("Display(%q) = %q, want %q", tc.stored, first, tc.want)
+		}
 	}
 }
 

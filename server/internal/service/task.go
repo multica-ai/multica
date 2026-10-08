@@ -8070,7 +8070,7 @@ func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, ag
 
 // agentDisplayAvatar projects the stored (avatar_url, avatar_seed) pair into
 // the display value broadcast with agent status events: explicit image >
-// `gen:<seed>` > legacy `emoji:<x>` > nil. Display-only — see internal/avatar
+// existing `emoji:<x>` > `gen:<seed>` > nil. Display-only — see internal/avatar
 // (MAKE-291). The service layer never signed storage URLs, and it does not
 // start now: markers and raw values pass through unchanged.
 func agentDisplayAvatar(a db.Agent) *string {

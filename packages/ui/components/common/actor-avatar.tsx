@@ -38,9 +38,9 @@ function ActorAvatar({
   const px = AVATAR_SIZE_PX[size];
   const emoji = parseAvatarEmoji(avatarUrl);
   // `gen:<seed>` display marker (MAKE-291): the server already resolved
-  // precedence — explicit image beats seed, seed beats legacy emoji — so the
-  // value here is the winner. A marker is never a renderable URL, so image
-  // URLs can't collide with this branch.
+  // precedence — explicit image beats an existing emoji, which beats a
+  // generated seed — so the value here is the winner. A marker is never a
+  // renderable URL, so image URLs can't collide with this branch.
   const seed = parseGeneratedSeed(avatarUrl);
 
   useEffect(() => {

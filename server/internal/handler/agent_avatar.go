@@ -49,7 +49,7 @@ func (h *Handler) newAgentAvatar(w http.ResponseWriter, r *http.Request, avatarU
 
 // projectAvatarDisplay projects a stored (avatar_url, avatar_seed) pair into
 // the display value an API response carries (MAKE-291): explicit image >
-// `gen:<seed>` > legacy `emoji:<x>` > empty (client-side placeholder).
+// existing `emoji:<x>` > `gen:<seed>` > empty (client-side placeholder).
 // Stored image URLs go through resolveAvatarURL so storage objects keep
 // being signed exactly as before; marker values pass through untouched.
 // The result is display-only — writes are guarded in acceptAvatarURL.

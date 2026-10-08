@@ -120,7 +120,7 @@ function BareAvatar({
   const displayName =
     name ?? (type === "system" ? "Multica" : getName(type, id));
   // `gen:<seed>` display marker (MAKE-291): server-side precedence already
-  // picked this value (image > generated > legacy emoji), and the marker is
+  // picked this value (image > existing emoji > generated), and the marker is
   // not a renderable URL, so it takes its own branch ahead of emoji.
   const seed = parseGeneratedSeed(rawUrl);
   const emoji = rawUrl?.startsWith("emoji:")

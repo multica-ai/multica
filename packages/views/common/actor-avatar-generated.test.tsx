@@ -2,7 +2,7 @@
  * Rendering precedence for generated avatars (MAKE-291).
  *
  * The server resolves precedence into a single value per response (image >
- * gen:<seed> > emoji:<x> > empty), so what matters client-side is that each
+ * emoji:<x> > gen:<seed> > empty), so what matters client-side is that each
  * value class renders the right branch and that a `gen:` marker can never
  * reach the <img> path (it is not a URL — a broken img would fall through to
  * the placeholder and silently lose the identity).
