@@ -684,7 +684,7 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 			}
 			return outcome, fmt.Errorf(
 				"could not record branch %s as this conversation's: %w; the task worktree is preserved "+
-					"at %s (listed by `git worktree list` in %s) — a follow-up run will start 
+					"at %s (listed by `git worktree list` in %s) — a follow-up run will start "+
 					"a new branch instead of continuing this one",
 				w.Branch, recErr, w.Path, w.GitRoot)
 		}
