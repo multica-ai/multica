@@ -14,6 +14,8 @@ Provide a title and a concise description. Let the primitive manage focus trappi
 
 Only close a submitting dialog after the operation succeeds. Preserve its input and show an error on failure. The UI Lab save interaction is a local demonstration; it makes no API request.
 
+HTML code previews use the focused `HtmlPreviewSurface` in `packages/views/editor/` instead of a portal. Its native dialog promotes the existing inline iframe to the browser's top layer without changing its DOM parent or reloading its document. Keep the preview mounted when switching to source. Verify repeated open/close, focus restoration, backdrop dismissal and inline height restoration in a browser; jsdom cannot verify iframe document retention. Escape works when focus is in the parent document; keyboard events inside a cross-origin iframe do not reach it.
+
 ## Correct
 
 ```tsx
