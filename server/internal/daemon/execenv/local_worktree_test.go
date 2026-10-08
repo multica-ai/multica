@@ -1729,7 +1729,7 @@ func TestFinalizeRefusesToRecordADeliveryFromOffTheBranch(t *testing.T) {
 	if err == nil {
 		t.Fatal("Finalize recorded a delivery that is not the branch's tip")
 	}
-	if !strings.Contains(err.Error(), "did not deliver onto its own branch") {
+	if !strings.Contains(err.Error(), "did not deliver a fast-forward of its conversation branch") {
 		t.Errorf("error does not explain the mismatch: %v", err)
 	}
 	if outcome.PreservedPath != wt.Path {
