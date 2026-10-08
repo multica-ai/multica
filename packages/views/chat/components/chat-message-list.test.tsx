@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
@@ -63,7 +63,6 @@ function taskMsg(
 
 describe("ChatMessageList queued head actions (#9107)", () => {
   const messages: ChatMessage[] = [
-    { id: "older", chat_session_id: "s1", role: "user", content: "Earlier prompt", task_id: "older-task", created_at: "2026-10-01T00:00:00Z" },
     { id: "head", chat_session_id: "s1", role: "user", content: "First queued prompt", task_id: TASK_ID, created_at: "2026-10-01T00:01:00Z" },
   ];
   const queued: ChatPendingTask = { task_id: TASK_ID, status: "queued", supports_queue: true, queued_tasks: [] };
@@ -90,15 +89,21 @@ describe("ChatMessageList queued head actions (#9107)", () => {
     return { ...view, onEditQueuedTask, onRemoveQueuedTask, update: (pending: ChatPendingTask) => view.rerender(tree(pending)) };
   }
 
-  it("offers Edit and Remove for the queued head beside its status", async () => {
+  it("offers Edit and Remove for the only queued message and calls back with its task ID", async () => {
     const view = setup();
-    const olderRow = view.container.querySelector('[data-row-key="older"]') as HTMLElement;
-    expect(within(olderRow).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByText("First queued prompt")).toBeInTheDocument();
+    expect(view.container.querySelectorAll('[data-row-key="head"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll("[data-row-key]")).toHaveLength(1);
     expect(screen.getAllByText("Queued").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit queued message" }));
+    const editButton = screen.getByRole("button", { name: "Edit queued message" });
+    const removeButton = screen.getByRole("button", { name: "Remove queued message" });
+    expect(editButton).toBeInTheDocument();
+    expect(removeButton).toBeInTheDocument();
+
+    fireEvent.click(editButton);
     await waitFor(() => expect(view.onEditQueuedTask).toHaveBeenCalledWith(TASK_ID));
-    fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
+    fireEvent.click(removeButton);
     await waitFor(() => expect(view.onRemoveQueuedTask).toHaveBeenCalledWith(TASK_ID));
     expect(view.onEditQueuedTask).toHaveBeenCalledTimes(1);
     expect(view.onRemoveQueuedTask).toHaveBeenCalledTimes(1);
@@ -151,6 +156,20 @@ describe("ChatMessageList queued head actions (#9107)", () => {
     expect(view.onRemoveQueuedTask).not.toHaveBeenCalled();
     await act(async () => finish?.());
     expect(remove).toBeEnabled();
+  });
+});
+
+describe("ChatMessageList empty state", () => {
+  it("renders no message rows when the list is empty", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList messages={[]} pendingTask={null} availability="online" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(container.querySelectorAll("[data-row-key]")).toHaveLength(0);
   });
 });
 
