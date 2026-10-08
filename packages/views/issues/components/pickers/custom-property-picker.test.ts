@@ -49,4 +49,9 @@ describe("isCustomPropertyReadOnly", () => {
     expect(isCustomPropertyReadOnly(multi, [MEMBER, AGENT])).toBe(false);
     expect(isCustomPropertyReadOnly(multi, [AGENT])).toBe(false);
   });
+
+  it("keeps multi_text and multi_url editable", () => {
+    expect(isCustomPropertyReadOnly(property({ type: "multi_text" }), ["alpha"])).toBe(false);
+    expect(isCustomPropertyReadOnly(property({ type: "multi_url" }), undefined)).toBe(false);
+  });
 });

@@ -52,7 +52,7 @@ const (
 	maxPropertyActorValues = 20
 )
 
-var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor", "multi_text", "multi_url"}
 
 // Property icons use stable catalog keys that the Web client maps to Lucide
 // glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
