@@ -1620,6 +1620,101 @@ func TestFinalizeFastForwardsConversationBranchToOffBranchDelivery(t *testing.T)
 	finalizeOK(t, next)
 }
 
+// A failed checkpoint update must not leave the conversation branch advanced
+// without its matching state record. Git's multi-ref transaction is all-or-none
+// even when the checkpoint ref is locked by another process.
+func TestFinalizeFastForwardKeepsRefsWhenCheckpointIsLocked(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	originalTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	originalState, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("read initial state: %v", err)
+	}
+
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "delivered off branch\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	commonDir, err := gitCommonDirFor(repo)
+	if err != nil {
+		t.Fatalf("git common dir: %v", err)
+	}
+	lockPath := filepath.Join(commonDir, filepath.FromSlash(userStateRef(wt.Branch))+".lock")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		t.Fatalf("create ref directory: %v", err)
+	}
+	if err := os.WriteFile(lockPath, []byte("busy"), 0o600); err != nil {
+		t.Fatalf("lock checkpoint ref: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(lockPath) })
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize succeeded despite a locked checkpoint ref")
+	}
+	if outcome.Branch != "" {
+		t.Errorf("Branch = %q, want no claimed delivery", outcome.Branch)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != originalTip {
+		t.Errorf("conversation branch advanced to %s, want %s", got, originalTip)
+	}
+	state, err := readUserStateRef(repo, wt.Branch)
+	if err != nil || state != originalState {
+		t.Errorf("state ref = %q, err = %v; want %s", state, err, originalState)
+	}
+	if got := gitRun(t, repo, "rev-parse", "repo/task-branch"); got != delivered {
+		t.Errorf("delivery ref = %s, want %s", got, delivered)
+	}
+	if _, statErr := os.Stat(wt.Path); statErr != nil {
+		t.Errorf("delivery worktree was not preserved: %v", statErr)
+	}
+}
+
+// A concurrent branch move after verification must fail the expected-old-SHA
+// check without publishing the new checkpoint either.
+func TestFastForwardStateRejectsStaleConversationTip(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	originalTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	originalState, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("read initial state: %v", err)
+	}
+
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	other := filepath.Join(t.TempDir(), "conversation")
+	gitRun(t, repo, "worktree", "add", "--quiet", other, wt.Branch)
+	writeFile(t, filepath.Join(other, "concurrent.txt"), "concurrent work\n")
+	gitRun(t, other, "add", "-A")
+	gitRun(t, other, "commit", "-m", "concurrent work")
+	concurrentTip := gitRun(t, other, "rev-parse", "HEAD")
+	gitRun(t, repo, "worktree", "remove", "--force", other)
+
+	if err := wt.recordFastForwardState(originalTip, delivered, worktreeTestLogger()); err == nil {
+		t.Fatal("stale compare-and-swap advanced the conversation branch")
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != concurrentTip {
+		t.Errorf("conversation branch = %s, want concurrent tip %s", got, concurrentTip)
+	}
+	state, err := readUserStateRef(repo, wt.Branch)
+	if err != nil || state != originalState {
+		t.Errorf("state ref = %q, err = %v; want %s", state, err, originalState)
+	}
+}
+
 // Moving the ref is only safe when nobody else has the conversation branch
 // checked out. git update-ref itself does not protect linked worktrees, so keep
 // the successful delivery preserved rather than changing another checkout's
