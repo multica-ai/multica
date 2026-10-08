@@ -237,7 +237,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 		TracksState      bool        `json:"tracks_state"`
 		SnapshotPending  bool        `json:"snapshot_pending"`
 	}{
-		wire:            (*wire)(w),
+		wire:             (*wire)(w),
 		CreatedBranch:    w.createdBranch,
 		PreparedStateRef: w.preparedStateRef,
 		UserState:        w.userState,

@@ -2078,17 +2078,6 @@ func TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain(t *testing.T
 	}
 }
 
-// Production never prepares in the daemon's own process: PrepareIsolated runs
-// Prepare in a helper and the Environment comes back as JSON. Every guarantee
-// Finalize makes depends on state this struct keeps unexported, and ordinary
-// marshalling drops those fields without a word — the daemon then finalized a
-// worktree it believed it owned nothing of. This test runs two turns across
-// that boundary, which is where the in-process tests above cannot look.
-//
-// It also goes through Prepare, the entry point the daemon calls, with a full
-// issue claim, so the plumbing from the claim is covered too: the issue
-// identifier names the branch, and the workspace, agent and issue become the
-// identity the branch is recorded under.
 // The daemon finalizes the JSON-decoded worktree returned by the preparation
 // helper, not the in-process worktree. The expected checkpoint ref must survive
 // that boundary or every off-branch fast-forward is rejected as unprepared.
@@ -2148,6 +2137,17 @@ func TestIsolatedPrepareFastForwardsOffBranchDelivery(t *testing.T) {
 	}
 }
 
+// Production never prepares in the daemon's own process: PrepareIsolated runs
+// Prepare in a helper and the Environment comes back as JSON. Every guarantee
+// Finalize makes depends on state this struct keeps unexported, and ordinary
+// marshalling drops those fields without a word — the daemon then finalized a
+// worktree it believed it owned nothing of. This test runs two turns across
+// that boundary, which is where the in-process tests above cannot look.
+//
+// It also goes through Prepare, the entry point the daemon calls, with a full
+// issue claim, so the plumbing from the claim is covered too: the issue
+// identifier names the branch, and the workspace, agent and issue become the
+// identity the branch is recorded under.
 func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
