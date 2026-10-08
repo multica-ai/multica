@@ -2,9 +2,13 @@
 
 import { cn } from "@multica/ui/lib/utils";
 import {
+  buildAvatarScene,
   deriveAvatarDesign,
-  type GeneratedAvatarDesign,
+  deriveIllustratedVariant,
+  type AvatarGradient,
+  type AvatarShape,
 } from "@multica/ui/lib/avatar-seed";
+import { getIllustratedAvatarAsset, hasIllustratedAvatarAsset } from "@multica/ui/lib/avatar-catalog";
 
 interface GeneratedAvatarProps {
   /** The persisted avatar_seed (the payload of a `gen:<seed>` marker). */
@@ -16,17 +20,44 @@ interface GeneratedAvatarProps {
 }
 
 /**
- * Deterministic generated agent avatar (MAKE-291). A geometric robot mark on
- * a seeded two-hue gradient, drawn as inline SVG so it stays crisp at every
- * avatar size and needs no network round-trip. Design derives purely from
- * `seed` — see `lib/avatar-seed.ts`; rendering only ever draws what the
- * design says, so identity is stable across renames, refreshes, and restarts.
- *
- * Deliberately restrained: gradient + one texture + one face. Anything more
- * stops reading at 16px.
+ * Deterministic generated agent avatar (MAKE-291). An original chibi
+ * companion character — one of five archetypes (fox, bear, owl, dragon,
+ * android) with an authored silhouette, gradient-shaded fur/metal, a
+ * coordinated outfit, reference-style expressive eyes, and a seed-stable
+ * role accessory. All five archetypes (Fox, Bear, Owl, Dragon, Android) use approved
+ * illustrated raster assets; the generic procedural SVG renderer remains as the
+ * fallback for unsupported archetypes or missing assets. Design derives
+ * purely from `seed` (see `lib/avatar-seed.ts`) so identity is stable across
+ * renames, refreshes, and restarts, with matching web/desktop/mobile selection
+ * semantics.
  */
 function GeneratedAvatar({ seed, name, className }: GeneratedAvatarProps) {
   const design = deriveAvatarDesign(seed);
+
+  const variant = deriveIllustratedVariant(design.archetype, seed);
+  // Illustrated assets win only when the catalog actually holds them; an
+  // unsupported archetype or missing asset falls through to the generic
+  // procedural renderer below.
+  if (variant && hasIllustratedAvatarAsset(design.archetype, variant)) {
+    const asset = getIllustratedAvatarAsset(design.archetype, variant, 48);
+    return (
+      <img
+        src={asset.src}
+        srcSet={asset.srcSet}
+        sizes="(max-width: 32px) 32px, (max-width: 48px) 48px, 96px"
+        alt={name}
+        className={cn("h-full w-full object-contain", className)}
+        data-slot="generated-avatar"
+        data-avatar-seed={seed}
+        data-avatar-archetype={design.archetype}
+        data-avatar-variant={variant}
+        draggable={false}
+        decoding="async"
+      />
+    );
+  }
+
+  const scene = buildAvatarScene(design);
   return (
     <svg
       viewBox="0 0 64 64"
@@ -35,134 +66,93 @@ function GeneratedAvatar({ seed, name, className }: GeneratedAvatarProps) {
       className={cn("h-full w-full", className)}
       data-slot="generated-avatar"
       data-avatar-seed={seed}
+      data-avatar-archetype={design.archetype}
     >
-      <GeneratedAvatarArt design={design} />
+      <GeneratedAvatarArt defs={scene.defs} shapes={scene.shapes} />
     </svg>
   );
 }
 
+/** Translates one scene gradient to a DOM <defs> child. */
+function SceneGradient({ grad }: { grad: AvatarGradient }) {
+  if (grad.kind === "linear") {
+    return (
+      <linearGradient id={grad.id} x1={grad.x1} y1={grad.y1} x2={grad.x2} y2={grad.y2}>
+        {grad.stops.map((s, i) => (
+          <stop key={i} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
+        ))}
+      </linearGradient>
+    );
+  }
+  return (
+    <radialGradient id={grad.id} cx={grad.cx} cy={grad.cy} r={grad.r}>
+      {grad.stops.map((s, i) => (
+        <stop key={i} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
+      ))}
+    </radialGradient>
+  );
+}
+
 /**
- * The paint itself, split out so tests (and any future raster path) can
- * assert on the design-driven structure without mounting the wrapper.
- * Geometry is fixed in a 64×64 space; the circle clip lives in the parent
- * avatar container (rounded-full), so corners stay square here on purpose.
+ * The paint itself, split out so tests can assert on the scene-driven
+ * structure without mounting the wrapper. Geometry is fixed in a 64×64
+ * space; the circle clip lives in the parent avatar container
+ * (rounded-full), so corners stay square here on purpose.
  */
-function GeneratedAvatarArt({ design }: { design: GeneratedAvatarDesign }) {
-  const { hue, hue2, pattern, face, antenna } = design;
+function GeneratedAvatarArt({
+  defs,
+  shapes,
+}: {
+  defs: AvatarGradient[];
+  shapes: AvatarShape[];
+}) {
   return (
     <>
-      <rect width="64" height="64" fill={`hsl(${hue}, 58%, 42%)`} />
-      <rect
-        width="64"
-        height="64"
-        fill={`hsl(${hue2}, 62%, 34%)`}
-        opacity="0.9"
-      />
-
-      {pattern === 1 && (
-        <g
-          stroke="#fff"
-          strokeOpacity="0.10"
-          strokeWidth="6"
-          strokeLinecap="round"
-        >
-          <line x1="-10" y1="22" x2="40" y2="-8" />
-          <line x1="-4" y1="46" x2="54" y2="10" />
-          <line x1="8" y1="66" x2="66" y2="30" />
-          <line x1="30" y1="74" x2="74" y2="46" />
-        </g>
+      {defs.length > 0 && (
+        <defs>
+          {defs.map((g) => (
+            <SceneGradient key={g.id} grad={g} />
+          ))}
+        </defs>
       )}
-      {pattern === 2 && (
-        <g fill="#fff" fillOpacity="0.12">
-          <circle cx="12" cy="14" r="3" />
-          <circle cx="34" cy="9" r="3" />
-          <circle cx="55" cy="18" r="3" />
-          <circle cx="8" cy="38" r="3" />
-          <circle cx="30" cy="32" r="3" />
-          <circle cx="54" cy="42" r="3" />
-          <circle cx="16" cy="58" r="3" />
-          <circle cx="44" cy="56" r="3" />
-        </g>
-      )}
-      {pattern === 3 && (
-        <g
-          fill="none"
-          stroke="#fff"
-          strokeOpacity="0.12"
-          strokeWidth="4"
-        >
-          <circle cx="32" cy="32" r="12" />
-          <circle cx="32" cy="32" r="24" />
-          <circle cx="32" cy="32" r="36" />
-        </g>
-      )}
-
-      {/* Robot mark: neutral so it reads on any hue, chunky enough to
-          survive 16px. Head + one of three face variants + antenna/ears. */}
-      <g>
-        {antenna && (
-          <line
-            x1="32"
-            y1="16"
-            x2="32"
-            y2="8"
-            stroke="#fff"
-            strokeOpacity="0.95"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
-        )}
-        {antenna ? (
-          <circle cx="32" cy="7" r="3.5" fill="#fff" fillOpacity="0.95" />
-        ) : (
-          <g fill="#fff" fillOpacity="0.95">
-            <rect x="9" y="27" width="7" height="14" rx="3.5" />
-            <rect x="48" y="27" width="7" height="14" rx="3.5" />
-          </g>
-        )}
-        <rect
-          x="15"
-          y="16"
-          width="34"
-          height="34"
-          rx="11"
-          fill="#fff"
-          fillOpacity="0.95"
-        />
-        {face === 0 && (
-          <rect
-            x="21"
-            y="27"
-            width="22"
-            height="9"
-            rx="4.5"
-            fill={`hsl(${hue}, 45%, 26%)`}
-          />
-        )}
-        {face === 1 && (
-          <g fill={`hsl(${hue}, 45%, 26%)`}>
-            <circle cx="25.5" cy="31.5" r="4.5" />
-            <circle cx="38.5" cy="31.5" r="4.5" />
-          </g>
-        )}
-        {face === 2 && (
-          <g fill={`hsl(${hue}, 45%, 26%)`}>
-            <rect x="21" y="27" width="8.5" height="9" rx="2" />
-            <rect x="34.5" y="27" width="8.5" height="9" rx="2" />
-          </g>
-        )}
-        {/* Mouth slot: constant across variants — one fixed landmark keeps
-            the three face styles reading as the same family. */}
-        <rect
-          x="26"
-          y="41"
-          width="12"
-          height="3.5"
-          rx="1.75"
-          fill={`hsl(${hue}, 45%, 26%)`}
-          fillOpacity="0.75"
-        />
-      </g>
+      {shapes.map((shape, i) => {
+        const common = {
+          key: i,
+          // SVG's default fill is black — a stroke-only shape (rings, arcs)
+          // must explicitly opt out or it paints a black blob.
+          fill: shape.fill ?? (shape.stroke !== undefined ? "none" : undefined),
+          stroke: shape.stroke,
+          strokeWidth: shape.strokeWidth,
+          opacity: shape.opacity,
+          strokeLinecap: shape.strokeLinecap,
+          strokeLinejoin: shape.strokeLinejoin,
+        };
+        switch (shape.type) {
+          case "rect":
+            return (
+              <rect
+                {...common}
+                x={shape.x}
+                y={shape.y}
+                width={shape.width}
+                height={shape.height}
+                rx={shape.rx}
+              />
+            );
+          case "circle":
+            return <circle {...common} cx={shape.cx} cy={shape.cy} r={shape.r} />;
+          case "ellipse":
+            return (
+              <ellipse {...common} cx={shape.cx} cy={shape.cy} rx={shape.rx} ry={shape.ry} />
+            );
+          case "line":
+            return (
+              <line {...common} x1={shape.x1} y1={shape.y1} x2={shape.x2} y2={shape.y2} />
+            );
+          case "path":
+            return <path {...common} d={shape.d} />;
+        }
+      })}
     </>
   );
 }

@@ -19,6 +19,7 @@
     "./lib/avatar-size": "./lib/avatar-size.ts",
     "./lib/avatar-emoji": "./lib/avatar-emoji.ts",
     "./lib/avatar-seed": "./lib/avatar-seed.ts",
+    "./lib/avatar-catalog": "./lib/avatar-catalog.ts",
     "./lib/data-table": "./lib/data-table.ts",
     "./lib/code-style": "./lib/code-style.ts",
     "./lib/clipboard": "./lib/clipboard.ts",
