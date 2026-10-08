@@ -162,6 +162,10 @@ type LocalWorktree struct {
 	// turn replayed and still be recorded as having delivered it, which is how
 	// the user's edits went missing from the turn after (MUL-6881 review).
 	BaseCommit string
+	// preparedStateRef is the exact checkpoint ref written before the agent ran.
+	// Finalize must not overwrite a concurrent checkpoint update, even when the
+	// conversation branch itself has not moved.
+	preparedStateRef string
 	// DirtyBaseCaptured records that the user had uncommitted tracked edits
 	// which were replayed into the worktree.
 	DirtyBaseCaptured bool
@@ -1498,13 +1502,19 @@ func (w *LocalWorktree) recordFastForwardState(from, tip string, logger *slog.Lo
 	if w.userState == "" {
 		return fmt.Errorf("branch %s has no user snapshot to record", w.Branch)
 	}
+	if w.preparedStateRef == "" {
+		return fmt.Errorf("branch %s has no checkpoint recorded before this turn; refusing to overwrite an unknown state", w.Branch)
+	}
 	record, err := createBranchRecord(w.GitRoot, w.Branch, w.userState, tip, w.owner)
 	if err != nil {
 		return err
 	}
 	branchRef := "refs/heads/" + w.Branch
-	input := fmt.Sprintf("start\nupdate %s %s %s\nupdate %s %s\nprepare\ncommit\n",
-		branchRef, tip, from, userStateRef(w.Branch), record)
+	// Compare-and-swap BOTH refs. The prepared checkpoint is the only state
+	// this turn is entitled to replace; a concurrent writer can update it
+	// without moving the branch, and must not be silently overwritten.
+	input := fmt.Sprintf("start\nupdate %s %s %s\nupdate %s %s %s\nprepare\ncommit\n",
+		branchRef, tip, from, userStateRef(w.Branch), record, w.preparedStateRef)
 	out, err := runGitInput(w.GitRoot, input, "update-ref", "--stdin")
 	if err != nil {
 		return fmt.Errorf("atomically fast-forward branch %s from %s to %s and record its checkpoint: %s: %w",
@@ -1594,9 +1604,11 @@ func (w *LocalWorktree) recordState(checkpoint string, logger *slog.Logger) erro
 	if w == nil || !w.tracksState || w.Branch == "" || w.userState == "" {
 		return nil
 	}
-	if _, err := writeBranchRecord(w.GitRoot, w.Branch, w.userState, checkpoint, w.owner); err != nil {
+	record, err := writeBranchRecord(w.GitRoot, w.Branch, w.userState, checkpoint, w.owner)
+	if err != nil {
 		return err
 	}
+	w.preparedStateRef = record
 	if logger != nil {
 		logger.Debug("execenv: recorded the local-directory snapshot for the task branch",
 			"branch", w.Branch, "checkpoint", checkpoint)

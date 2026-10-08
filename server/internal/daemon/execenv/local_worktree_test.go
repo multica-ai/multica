@@ -1715,6 +1715,93 @@ func TestFastForwardStateRejectsStaleConversationTip(t *testing.T) {
 	}
 }
 
+// A concurrent writer may replace the checkpoint without moving the branch.
+// Finalize must not erase that record: both refs have to be compare-and-swapped
+// against the exact values this task owned before the agent ran.
+func TestFinalizeFastForwardRejectsConcurrentCheckpointUpdate(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	originalTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	preparedState := wt.preparedStateRef
+	if preparedState == "" {
+		t.Fatal("Prepare did not record its checkpoint")
+	}
+
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	// A different snapshot makes a valid but distinct checkpoint record,
+	// even though the conversation branch still points at originalTip.
+	otherSnapshot := gitRun(t, repo, "commit-tree", wt.userState+"^{tree}", "-m", "concurrent snapshot")
+	concurrentState, err := writeBranchRecord(repo, wt.Branch, otherSnapshot, originalTip, wt.owner)
+	if err != nil {
+		t.Fatalf("write concurrent checkpoint: %v", err)
+	}
+	if concurrentState == preparedState {
+		t.Fatal("concurrent checkpoint did not change the state ref")
+	}
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize overwrote a concurrently updated checkpoint")
+	}
+	if outcome.Branch != "" {
+		t.Errorf("Branch = %q, want no claimed delivery", outcome.Branch)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != originalTip {
+		t.Errorf("conversation branch = %s, want %s", got, originalTip)
+	}
+	state, err := readUserStateRef(repo, wt.Branch)
+	if err != nil || state != concurrentState {
+		t.Errorf("checkpoint ref = %q, err = %v; want %s", state, err, concurrentState)
+	}
+	if got := gitRun(t, repo, "rev-parse", "repo/task-branch"); got != delivered {
+		t.Errorf("delivery ref = %s, want %s", got, delivered)
+	}
+	if _, statErr := os.Stat(wt.Path); statErr != nil {
+		t.Errorf("delivery worktree was not preserved: %v", statErr)
+	}
+}
+
+// If Prepare could not publish a checkpoint, Finalize must preserve the
+// off-branch delivery rather than overwrite an unknown record.
+func TestFinalizeFastForwardRejectsMissingPreparedCheckpoint(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	originalTip := gitRun(t, repo, "rev-parse", wt.Branch)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+
+	// Simulate another actor removing the state ref after Prepare.
+	gitRun(t, repo, "update-ref", "-d", userStateRef(wt.Branch))
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize succeeded after its prepared checkpoint was deleted")
+	}
+	if outcome.Branch != "" || outcome.PreservedPath != wt.Path {
+		t.Errorf("outcome = %+v, want preserved worktree and no claimed branch", outcome)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != originalTip {
+		t.Errorf("conversation branch = %s, want %s", got, originalTip)
+	}
+	if _, err := readUserStateRef(repo, wt.Branch); err == nil {
+		t.Fatal("Finalize recreated a concurrently deleted checkpoint")
+	}
+	if _, statErr := os.Stat(wt.Path); statErr != nil {
+		t.Errorf("delivery worktree was not preserved: %v", statErr)
+	}
+}
+
 // Moving the ref is only safe when nobody else has the conversation branch
 // checked out. git update-ref itself does not protect linked worktrees, so keep
 // the successful delivery preserved rather than changing another checkout's
