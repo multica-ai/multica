@@ -229,20 +229,22 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 	type wire LocalWorktree
 	return json.Marshal(struct {
 		*wire
-		CreatedBranch   bool        `json:"created_branch"`
-		UserState       string      `json:"user_state"`
-		PriorState      string      `json:"prior_state"`
-		Owner           branchOwner `json:"owner"`
-		TracksState     bool        `json:"tracks_state"`
-		SnapshotPending bool        `json:"snapshot_pending"`
+		CreatedBranch    bool        `json:"created_branch"`
+		PreparedStateRef string      `json:"prepared_state_ref"`
+		UserState        string      `json:"user_state"`
+		PriorState       string      `json:"prior_state"`
+		Owner            branchOwner `json:"owner"`
+		TracksState      bool        `json:"tracks_state"`
+		SnapshotPending  bool        `json:"snapshot_pending"`
 	}{
 		wire:            (*wire)(w),
-		CreatedBranch:   w.createdBranch,
-		UserState:       w.userState,
-		PriorState:      w.priorState,
-		Owner:           w.owner,
-		TracksState:     w.tracksState,
-		SnapshotPending: w.snapshotPending,
+		CreatedBranch:    w.createdBranch,
+		PreparedStateRef: w.preparedStateRef,
+		UserState:        w.userState,
+		PriorState:       w.priorState,
+		Owner:            w.owner,
+		TracksState:      w.tracksState,
+		SnapshotPending:  w.snapshotPending,
 	})
 }
 
@@ -250,17 +252,19 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 	type wire LocalWorktree
 	aux := struct {
 		*wire
-		CreatedBranch   bool        `json:"created_branch"`
-		UserState       string      `json:"user_state"`
-		PriorState      string      `json:"prior_state"`
-		Owner           branchOwner `json:"owner"`
-		TracksState     bool        `json:"tracks_state"`
-		SnapshotPending bool        `json:"snapshot_pending"`
+		CreatedBranch    bool        `json:"created_branch"`
+		PreparedStateRef string      `json:"prepared_state_ref"`
+		UserState        string      `json:"user_state"`
+		PriorState       string      `json:"prior_state"`
+		Owner            branchOwner `json:"owner"`
+		TracksState      bool        `json:"tracks_state"`
+		SnapshotPending  bool        `json:"snapshot_pending"`
 	}{wire: (*wire)(w)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	w.createdBranch = aux.CreatedBranch
+	w.preparedStateRef = aux.PreparedStateRef
 	w.userState = aux.UserState
 	w.priorState = aux.PriorState
 	w.owner = aux.Owner

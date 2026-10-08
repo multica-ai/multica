@@ -2089,6 +2089,65 @@ func TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain(t *testing.T
 // issue claim, so the plumbing from the claim is covered too: the issue
 // identifier names the branch, and the workspace, agent and issue become the
 // identity the branch is recorded under.
+// The daemon finalizes the JSON-decoded worktree returned by the preparation
+// helper, not the in-process worktree. The expected checkpoint ref must survive
+// that boundary or every off-branch fast-forward is rejected as unprepared.
+func TestIsolatedPrepareFastForwardsOffBranchDelivery(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	env, err := PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot:  t.TempDir(),
+		WorkspaceID:     testBranchOwner.WorkspaceID,
+		TaskID:          turnOneTask,
+		IssueIdentifier: "MUL-8541",
+		Provider:        "claude",
+		AgentName:       "J",
+		Task: TaskContextForEnv{
+			IssueID: testBranchOwner.ConversationID,
+			AgentID: testBranchOwner.AgentID,
+		},
+		LocalWorktree: &LocalWorktreeParams{LocalPath: repo},
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("PrepareIsolated: %v", err)
+	}
+	wt := env.LocalWorktree
+	if wt.preparedStateRef == "" {
+		t.Fatal("PrepareIsolated lost the prepared checkpoint ref across JSON")
+	}
+	original := gitRun(t, repo, "rev-parse", wt.Branch)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "isolated off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+	if delivered == original {
+		t.Fatal("test did not create a new delivery commit")
+	}
+
+	outcome := finalizeOK(t, wt)
+	if outcome.Branch != wt.Branch {
+		t.Fatalf("delivered branch = %q, want %q", outcome.Branch, wt.Branch)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != delivered {
+		t.Fatalf("conversation branch = %s, want %s", got, delivered)
+	}
+	ref, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("readUserStateRef: %v", err)
+	}
+	record, err := readBranchRecord(repo, ref)
+	if err != nil {
+		t.Fatalf("readBranchRecord: %v", err)
+	}
+	if record.checkpoint != delivered {
+		t.Errorf("checkpoint = %s, want delivered tip %s", record.checkpoint, delivered)
+	}
+}
+
 func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
