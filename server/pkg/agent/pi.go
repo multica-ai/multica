@@ -373,35 +373,58 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	timeout := opts.Timeout
 
-	// Pi's --session flag expects a file path where events are appended.
-	// The path doubles as our opaque session identifier: we return it as
-	// SessionID and expect it back as ResumeSessionID on the next turn.
+	// The persisted JSONL path is our opaque session identifier. OMP's
+	// --session is strictly resume-only; let it create fresh sessions in a
+	// private directory, then return the transcript it actually persisted.
 	sessionPath := opts.ResumeSessionID
-	if sessionPath == "" {
-		p, err := newPiSessionPath()
+	var sessionDir string
+	var sessionLock *os.File
+	if label == "omp" && sessionPath == "" {
+		dir, err := piSessionDir()
 		if err != nil {
-			return nil, fmt.Errorf("%s session path: %w", label, err)
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
 		}
-		sessionPath = p
-	}
-	if err := ensurePiSessionFile(sessionPath); err != nil {
-		return nil, fmt.Errorf("%s session file: %w", label, err)
-	}
-	sessionLock, locked, err := tryLockPiSessionFile(sessionPath)
-	if err != nil {
-		return nil, fmt.Errorf("%s session lock: %w", label, err)
-	}
-	if !locked {
-		if opts.ResumeSessionID != "" {
-			return piSessionBusyResult(label, sessionPath), nil
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
 		}
-		return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+		sessionDir, err = os.MkdirTemp(dir, "omp-")
+		if err != nil {
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
+		}
+	} else {
+		if sessionPath == "" {
+			sessionPath, err = newPiSessionPath()
+			if err != nil {
+				return nil, fmt.Errorf("%s session path: %w", label, err)
+			}
+		}
+		if label != "omp" {
+			if err := ensurePiSessionFile(sessionPath); err != nil {
+				return nil, fmt.Errorf("%s session file: %w", label, err)
+			}
+		}
+		var locked bool
+		sessionLock, locked, err = tryLockPiSessionFile(sessionPath)
+		if err != nil {
+			return nil, fmt.Errorf("%s session lock: %w", label, err)
+		}
+		if !locked {
+			if opts.ResumeSessionID != "" {
+				return piSessionBusyResult(label, sessionPath), nil
+			}
+			return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+		}
 	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 	processCtx, cancelProcess := context.WithCancel(runCtx)
 
-	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	var args []string
+	if label == "omp" {
+		args = buildOmpArgs(sessionPath, sessionDir, opts, b.cfg.Logger)
+	} else {
+		args = buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
@@ -747,6 +770,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = lastTurnError
 		} else if runCtx.Err() == nil {
 			authoritativeTerminal = true
+		}
+
+		if sessionDir != "" {
+			var sessionErr error
+			sessionPath, sessionErr = findOmpSessionFile(sessionDir)
+			if sessionErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("omp session file: %v", sessionErr)
+			}
 		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
