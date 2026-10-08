@@ -259,10 +259,12 @@ func TestPlatformRemoveAutostartRefusesUnmarkedUnit(t *testing.T) {
 
 // TestPlatformRemoveAutostartKeepsUnmarkedXdgAlongsideManagedUnit is the
 // review's coexistence scenario: a Multica-created unit plus a hand-written
-// .desktop at our XDG name. Disabling Multica's registration may remove the
-// unit but must leave the user's .desktop alone — the sweep funnels through
-// the marker-checked removeXdgAutostartFile, which enable and the
-// `daemon start` refresh use as well, so this covers all three call sites.
+// .desktop at our XDG name. Disabling Multica's registration must leave the
+// user's .desktop alone — the sweep funnels through the marker-checked
+// removeXdgAutostartFile, which enable and the `daemon start` refresh use as
+// well, so this covers all three call sites. Per round 5's keep-the-unit
+// semantics, disable unlinks the marked unit (retaining its restart policy)
+// rather than deleting it.
 func TestPlatformRemoveAutostartKeepsUnmarkedXdgAlongsideManagedUnit(t *testing.T) {
 	if !systemdAvailable() {
 		t.Skip("systemctl not available")
@@ -277,6 +279,7 @@ func TestPlatformRemoveAutostartKeepsUnmarkedXdgAlongsideManagedUnit(t *testing.
 		t.Fatalf("xdgAutostartPath: %v", err)
 	}
 	writeAutostartFixture(t, unitPath, markedUnitFixture(t))
+	linkUnit(t, unitPath, "default.target.wants")
 	writeAutostartFixture(t, xdgPath, "[Desktop Entry]\nType=Application\nName=hand-written\nExec=/usr/bin/true\n")
 
 	_, changed, err := platformRemoveAutostart("")
@@ -284,10 +287,16 @@ func TestPlatformRemoveAutostartKeepsUnmarkedXdgAlongsideManagedUnit(t *testing.
 		t.Fatalf("platformRemoveAutostart = %v", err)
 	}
 	if !changed {
-		t.Fatalf("changed = false, want true — the marked unit should be removed")
+		t.Fatalf("changed = false, want true — the unit's enablement link should be removed")
 	}
-	if _, statErr := os.Stat(unitPath); !errors.Is(statErr, fs.ErrNotExist) {
-		t.Fatalf("marked unit still present (stat err = %v), want it removed", statErr)
+
+	// The marked unit is unlinked but retained (restart policy for the
+	// running service); the user's unmarked .desktop must be untouched.
+	if _, statErr := os.Stat(unitPath); statErr != nil {
+		t.Fatalf("managed unit file was deleted (%v) — disable must keep it, unlinked", statErr)
+	}
+	if systemdUnitLinkedAnywhere(unitPath) {
+		t.Fatal("managed unit still wants-linked — it would start at the next login")
 	}
 	if _, statErr := os.Stat(xdgPath); statErr != nil {
 		t.Fatalf("unmarked .desktop was deleted (%v) — only Multica-created files may be removed", statErr)
