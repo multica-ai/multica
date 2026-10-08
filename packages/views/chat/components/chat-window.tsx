@@ -927,6 +927,8 @@ export function ChatWindow() {
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
+          onEditQueuedTask={handleEditQueuedTask}
+          onRemoveQueuedTask={handleRemoveQueuedTask}
           firstItemIndex={firstItemIndex}
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}

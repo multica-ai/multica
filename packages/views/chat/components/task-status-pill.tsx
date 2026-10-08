@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
+import { Button } from "@multica/ui/components/ui/button";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { UnicodeSpinner } from "@multica/ui/components/common/unicode-spinner";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -15,6 +17,8 @@ interface Props {
   taskMessages: readonly TaskMessagePayload[];
   /** Resolved presence; pass `undefined` to suppress availability hints. */
   availability: AgentAvailability | undefined;
+  onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+  onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
 }
 
 interface Stage {
@@ -170,8 +174,24 @@ export function TaskStatusPill({
   pendingTask,
   taskMessages,
   availability,
+  onEditQueuedTask,
+  onRemoveQueuedTask,
 }: Props) {
+  const { t } = useT("chat");
   const resolveStage = useResolveStage();
+  const [busyAction, setBusyAction] = useState<"edit" | "remove" | null>(null);
+  const runQueuedAction = async (
+    action: "edit" | "remove",
+    handler: (taskId: string) => Promise<void> | void,
+  ) => {
+    if (!pendingTask.task_id) return;
+    setBusyAction(action);
+    try {
+      await handler(pendingTask.task_id);
+    } finally {
+      setBusyAction(null);
+    }
+  };
   // Anchor: locked on first render. Once set we never reassign — otherwise
   // the timer would visibly snap backwards when an optimistic-seeded
   // `Date.now()` anchor is later replaced by a server-side created_at that
@@ -221,6 +241,33 @@ export function TaskStatusPill({
         </ShimmerText>
         <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
       </span>
+      {pendingTask.task_id && pendingTask.status === "queued" &&
+        pendingTask.supports_queue === true && onEditQueuedTask && onRemoveQueuedTask && (
+        <span className="flex shrink-0 items-center" aria-busy={busyAction !== null}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled={busyAction !== null}
+            title={t(($) => $.queue.edit)}
+            aria-label={t(($) => $.queue.edit)}
+            onClick={() => void runQueuedAction("edit", onEditQueuedTask)}
+          >
+            {busyAction === "edit" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Pencil aria-hidden="true" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled={busyAction !== null}
+            title={t(($) => $.queue.remove)}
+            aria-label={t(($) => $.queue.remove)}
+            onClick={() => void runQueuedAction("remove", onRemoveQueuedTask)}
+          >
+            {busyAction === "remove" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+          </Button>
+        </span>
+      )}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { Attachment, TaskMessagePayload } from "@multica/core/types";
+import type { Attachment, ChatMessage, ChatPendingTask, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import zhHansAgents from "../../locales/zh-Hans/agents.json";
@@ -60,6 +60,99 @@ function taskMsg(
 ): TaskMessagePayload {
   return { task_id: TASK_ID, seq, type, ...extra } as TaskMessagePayload;
 }
+
+describe("ChatMessageList queued head actions (#9107)", () => {
+  const messages: ChatMessage[] = [
+    { id: "older", chat_session_id: "s1", role: "user", content: "Earlier prompt", task_id: "older-task", created_at: "2026-10-01T00:00:00Z" },
+    { id: "head", chat_session_id: "s1", role: "user", content: "First queued prompt", task_id: TASK_ID, created_at: "2026-10-01T00:01:00Z" },
+  ];
+  const queued: ChatPendingTask = { task_id: TASK_ID, status: "queued", supports_queue: true, queued_tasks: [] };
+
+  function setup(pendingTask: ChatPendingTask = queued) {
+    const onEditQueuedTask = vi.fn<(taskId: string) => Promise<void>>().mockResolvedValue();
+    const onRemoveQueuedTask = vi.fn<(taskId: string) => Promise<void>>().mockResolvedValue();
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), []);
+    const tree = (pending: ChatPendingTask) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={messages}
+            pendingTask={pending}
+            availability="online"
+            onEditQueuedTask={onEditQueuedTask}
+            onRemoveQueuedTask={onRemoveQueuedTask}
+          />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const view = render(tree(pendingTask));
+    return { ...view, onEditQueuedTask, onRemoveQueuedTask, update: (pending: ChatPendingTask) => view.rerender(tree(pending)) };
+  }
+
+  it("offers Edit and Remove for the queued head beside its status", async () => {
+    const view = setup();
+    const olderRow = view.container.querySelector('[data-row-key="older"]') as HTMLElement;
+    expect(within(olderRow).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Queued").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message" }));
+    await waitFor(() => expect(view.onEditQueuedTask).toHaveBeenCalledWith(TASK_ID));
+    fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
+    await waitFor(() => expect(view.onRemoveQueuedTask).toHaveBeenCalledWith(TASK_ID));
+    expect(view.onEditQueuedTask).toHaveBeenCalledTimes(1);
+    expect(view.onRemoveQueuedTask).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["dispatched", "running", "waiting_local_directory", "deferred", undefined])(
+    "does not infer queued actions from presence when server status is %s",
+    (status) => {
+      setup({ ...queued, status });
+      expect(screen.queryByRole("button", { name: "Edit queued message" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Remove queued message" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("requires the queue capability and a pending head task", () => {
+    const view = setup({ ...queued, supports_queue: undefined });
+    expect(screen.queryByRole("button", { name: "Edit queued message" })).not.toBeInTheDocument();
+    view.update({ ...queued, task_id: undefined });
+    expect(screen.queryByRole("button", { name: "Edit queued message" })).not.toBeInTheDocument();
+  });
+
+  it("updates the stable footer while memoized messages keep the same identity", () => {
+    const view = setup();
+    expect(screen.getByRole("button", { name: "Edit queued message" })).toBeInTheDocument();
+    view.update({ ...queued, status: "dispatched" });
+    expect(screen.queryByRole("button", { name: "Edit queued message" })).not.toBeInTheDocument();
+    view.update(queued);
+    expect(screen.getByRole("button", { name: "Edit queued message" })).toBeInTheDocument();
+  });
+
+  it("targets the server head when a queued retry owns an earlier task's input", async () => {
+    const retryId = "11111111-1111-4111-8111-111111111111";
+    const view = setup({ ...queued, task_id: retryId });
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message" }));
+    await waitFor(() => expect(view.onEditQueuedTask).toHaveBeenCalledWith(retryId));
+    fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
+    await waitFor(() => expect(view.onRemoveQueuedTask).toHaveBeenCalledWith(retryId));
+    expect(view.onEditQueuedTask).not.toHaveBeenCalledWith(TASK_ID);
+  });
+
+  it("blocks both actions while editing the head", async () => {
+    const view = setup();
+    let finish: (() => void) | undefined;
+    view.onEditQueuedTask.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message" }));
+    expect(screen.getByRole("button", { name: "Edit queued message" })).toBeDisabled();
+    const remove = screen.getByRole("button", { name: "Remove queued message" });
+    expect(remove).toBeDisabled();
+    fireEvent.click(remove);
+    expect(view.onRemoveQueuedTask).not.toHaveBeenCalled();
+    await act(async () => finish?.());
+    expect(remove).toBeEnabled();
+  });
+});
 
 function pdfAttachment(id: string): Attachment {
   return {

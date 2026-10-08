@@ -111,6 +111,24 @@ beforeEach(() => {
 // closed, and a background claim would consume the row out from under the
 // composer the user is waiting on (here, or on their other device).
 describe("useChatDraftRestore ownership (#5219)", () => {
+  it("recovers a durable queued edit with attachments after the composer remounts", async () => {
+    const restore = { ...RESTORE, task_id: "queued-head", attachments: [{ id: "att-1" } as Attachment] };
+    h.listChatDraftRestores.mockResolvedValue({ restores: [restore] });
+    const first = renderHook(() => useChatDraftRestore("sA", true), { wrapper });
+    await waitFor(() => expect(first.result.current.restoreDraftRequest).toMatchObject({
+      id: restore.id, content: restore.content, attachments: restore.attachments, sessionId: "sA", serverRestoreId: restore.id,
+    }));
+    first.unmount();
+    expect(h.consumeChatDraftRestore).not.toHaveBeenCalled();
+
+    const reopened = renderHook(() => useChatDraftRestore("sA", true), { wrapper });
+    await waitFor(() => expect(reopened.result.current.restoreDraftRequest?.attachments).toEqual(restore.attachments));
+    expect(h.listChatDraftRestores).toHaveBeenCalledTimes(2);
+    act(() => reopened.result.current.handleRestoreDraftApplied());
+    expect(h.store.markDraftRestoreApplied).toHaveBeenCalledWith(restore.id);
+    await waitFor(() => expect(h.consumeChatDraftRestore).toHaveBeenCalledWith("sA", restore.id));
+  });
+
   it("does not fetch, offer, or consume from a composer the user cannot see", async () => {
     const { result } = renderHook(() => useChatDraftRestore("sA", false), { wrapper });
 

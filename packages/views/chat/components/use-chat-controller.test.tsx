@@ -713,6 +713,33 @@ describe("useChatController queued task actions", () => {
     );
   });
 
+  it.each(["edit", "remove"] as const)(
+    "keeps explicit queued-head %s queued-only after a dispatch 409",
+    async (action) => {
+      const taskId = "11111111-1111-4111-8111-111111111111";
+      const pending: ChatPendingTask = {
+        task_id: taskId,
+        status: "queued",
+        supports_queue: true,
+        queued_tasks: [{ task_id: "next", status: "queued", created_at: "2026-07-01T00:00:01Z" }],
+      };
+      h.queryClient.getQueryData.mockReturnValue(pending);
+      vi.mocked(api.cancelTaskById).mockRejectedValue(new ApiError("task is no longer queued", 409, "Conflict"));
+      const result = setup("sA", [sA], [agentA], pending);
+
+      await act(async () => {
+        await (action === "edit" ? result.current.handleEditQueuedTask : result.current.handleRemoveQueuedTask)(taskId);
+      });
+
+      expect(api.cancelTaskById).toHaveBeenCalledTimes(1);
+      expect(api.cancelTaskById).toHaveBeenCalledWith(taskId, { queuedAction: action, sessionId: "sA" });
+      expect(h.queryClient.setQueryData).toHaveBeenLastCalledWith(expect.anything(), pending);
+      expect(h.removeFromCaches).not.toHaveBeenCalled();
+      expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+      expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["chat", "pending-task", "sA"] });
+    },
+  );
+
   it("refetches the durable restore when a queued edit response is lost", async () => {
     vi.mocked(api.cancelTaskById).mockRejectedValue(new Error("response lost"));
     const result = setup("sA", [sA], [agentA]);
