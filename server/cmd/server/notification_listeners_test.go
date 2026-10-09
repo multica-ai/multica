@@ -447,6 +447,105 @@ func TestNotification_CommentCreated(t *testing.T) {
 	}
 }
 
+func TestNotification_CommentMentionIncludesBody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	targetEmail := "notif-comment-mention-body@multica.ai"
+	targetID := createTestUser(t, targetEmail)
+	t.Cleanup(func() { cleanupTestUser(t, targetEmail) })
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	content := "请查看 [@同事](mention://member/" + targetID + ") 的反馈"
+	var mentionEvent map[string]any
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		item, ok := payload["item"].(map[string]any)
+		if ok && item["type"] == "mentioned" {
+			mentionEvent = item
+		}
+	})
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"comment": handler.CommentResponse{
+				ID:         "00000000-0000-0000-0000-000000000000",
+				IssueID:    issueID,
+				AuthorType: "member",
+				AuthorID:   testUserID,
+				Content:    content,
+				Type:       "comment",
+			},
+			"issue_title":  "Mention body regression",
+			"issue_status": "todo",
+		},
+	})
+
+	items := inboxItemsForRecipient(t, queries, targetID)
+	if len(items) != 1 || items[0].Type != "mentioned" {
+		t.Fatalf("expected one mentioned inbox item, got %+v", items)
+	}
+	if !items[0].Body.Valid || items[0].Body.String != content {
+		t.Errorf("mentioned body = %+v, want %q", items[0].Body, content)
+	}
+	if mentionEvent == nil {
+		t.Fatal("missing mentioned inbox:new event")
+	}
+	if body, ok := mentionEvent["body"].(*string); !ok || body == nil || *body != content {
+		t.Errorf("mentioned event body = %#v, want %q", mentionEvent["body"], content)
+	}
+}
+
+func TestNotification_IssueDescriptionMentionIncludesBody(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	targetEmail := "notif-description-mention-body@multica.ai"
+	targetID := createTestUser(t, targetEmail)
+	t.Cleanup(func() { cleanupTestUser(t, targetEmail) })
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	description := "请看 [@同事](mention://member/" + targetID + ") 的任务说明"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          issueID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "Description mention regression",
+				Description: &description,
+				Status:      "todo",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+		},
+	})
+	items := inboxItemsForRecipient(t, queries, targetID)
+	if len(items) != 1 || items[0].Type != "mentioned" {
+		t.Fatalf("expected one mentioned inbox item, got %+v", items)
+	}
+	if !items[0].Body.Valid || items[0].Body.String != description {
+		t.Errorf("description mention body = %+v, want %q", items[0].Body, description)
+	}
+}
+
 // TestNotification_SystemCommentSkipsInboxAndMentions guards the MUL-2538
 // must-fix: a comment with author_type='system' (the platform-generated
 // child-done parent notify) must NOT create any inbox rows for parent

@@ -556,6 +556,7 @@ func notifyMentionedMembers(
 	issueTitle string,
 	issueStatus string,
 	title string,
+	body string,
 	skip map[string]bool,
 	details []byte,
 ) {
@@ -640,6 +641,7 @@ func notifyMentionedMembers(
 			Severity:      "info",
 			IssueID:       parseUUID(issueID),
 			Title:         title,
+			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
 			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
@@ -701,7 +703,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if issue.Description != nil && *issue.Description != "" {
 			mentions := parseMentions(*issue.Description)
 			notifyMentionedMembers(bus, queries, e, mentions, issue.ID, issue.Title, issue.Status,
-				issue.Title, skip, emptyDetails)
+				issue.Title, *issue.Description, skip, emptyDetails)
 		}
 	})
 
@@ -890,7 +892,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				}
 				skip := map[string]bool{e.ActorID: true}
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+					issue.Title, *issue.Description, skip, emptyDetails)
 			}
 		}
 	})
@@ -953,7 +955,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if len(mentions) > 0 {
 			skip := map[string]bool{e.ActorID: true}
 			notifyMentionedMembers(bus, queries, e, mentions, issueID, issueTitle, issueStatus,
-				issueTitle, skip, commentDetails)
+				issueTitle, commentContent, skip, commentDetails)
 		}
 	})
 
