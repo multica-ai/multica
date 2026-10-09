@@ -167,6 +167,7 @@ function LanguageRow() {
     { value: "ko", label: t(($) => $.preferences.language.korean) },
     { value: "ja", label: t(($) => $.preferences.language.japanese) },
     { value: "fr", label: t(($) => $.preferences.language.french) },
+    { value: "es", label: t(($) => $.preferences.language.spanish) },
   ];
 
   // Persist locally → sync to user.language → reload. Reload (vs in-place
@@ -219,7 +220,10 @@ function LanguageRow() {
           aria-label={t(($) => $.preferences.language.title)}
         >
           <SelectValue>
-            {languageOptions.find((option) => option.value === currentLocale)?.label}
+            {
+              languageOptions.find((option) => option.value === currentLocale)
+                ?.label
+            }
           </SelectValue>
         </SelectTrigger>
         <SelectContent align="end">
@@ -258,8 +262,14 @@ function RunningAgentReplyRow() {
   const value = useCommentComposerStore((s) => s.runningAgentReply);
   const setValue = useCommentComposerStore((s) => s.setRunningAgentReply);
   const options: { value: RunningAgentReply; label: string }[] = [
-    { value: "steer", label: t(($) => $.preferences.running_agent_reply.steer) },
-    { value: "after_run", label: t(($) => $.preferences.running_agent_reply.after_run) },
+    {
+      value: "steer",
+      label: t(($) => $.preferences.running_agent_reply.steer),
+    },
+    {
+      value: "after_run",
+      label: t(($) => $.preferences.running_agent_reply.after_run),
+    },
   ];
 
   return (
@@ -389,7 +399,9 @@ function IssueFieldsMatrix() {
         <tbody className="divide-y divide-surface-border">
           {MANUAL_CREATE_FIELDS.map((field: ManualCreateField) => {
             const fieldLabel = t(($) => $.issue.fields[field]);
-            const quickSupported = (QUICK_CREATE_FIELDS as readonly string[]).includes(field);
+            const quickSupported = (
+              QUICK_CREATE_FIELDS as readonly string[]
+            ).includes(field);
             return (
               <tr key={field}>
                 <th scope="row" className="px-4 py-2.5 text-left font-normal">
@@ -400,14 +412,19 @@ function IssueFieldsMatrix() {
                     <Checkbox
                       checked={quickFields.includes(field as QuickCreateField)}
                       onCheckedChange={(checked) =>
-                        setQuickVisible(field as QuickCreateField, checked === true)
+                        setQuickVisible(
+                          field as QuickCreateField,
+                          checked === true,
+                        )
                       }
                       aria-label={`${fieldLabel} · ${quickLabel}`}
                     />
                   ) : (
                     <span
                       className="text-faint-foreground"
-                      aria-label={t(($) => $.preferences.issue_fields.unsupported)}
+                      aria-label={t(
+                        ($) => $.preferences.issue_fields.unsupported,
+                      )}
                       title={t(($) => $.preferences.issue_fields.unsupported)}
                     >
                       —
@@ -514,19 +531,30 @@ function TimezoneRow() {
           <span className="shrink-0 text-caption text-muted-foreground">
             {utcOffset(current)}
           </span>
-          <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          <ChevronsUpDown
+            aria-hidden="true"
+            className="size-4 shrink-0 text-muted-foreground"
+          />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 p-0">
           {/* Plain substring matching: fuzzy ranking puts "Antarctica/Vostok"
               next to "Asia/Tokyo" for "tok", which reads as a wrong result. */}
           <Command
             filter={(itemValue, search) =>
-              itemValue.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) ? 1 : 0
+              itemValue
+                .toLocaleLowerCase()
+                .includes(search.trim().toLocaleLowerCase())
+                ? 1
+                : 0
             }
           >
-            <CommandInput placeholder={t(($) => $.preferences.timezone.search)} />
+            <CommandInput
+              placeholder={t(($) => $.preferences.timezone.search)}
+            />
             <CommandList>
-              <CommandEmpty>{t(($) => $.preferences.timezone.empty)}</CommandEmpty>
+              <CommandEmpty>
+                {t(($) => $.preferences.timezone.empty)}
+              </CommandEmpty>
               <CommandItem
                 value={`${browser} ${t(($) => $.preferences.timezone.browser_suffix)}`}
                 data-checked={value === BROWSER_TZ_VALUE}
@@ -536,7 +564,9 @@ function TimezoneRow() {
                   {browser}
                   {t(($) => $.preferences.timezone.browser_suffix)}
                 </span>
-                <span className="text-caption text-muted-foreground">{utcOffset(browser)}</span>
+                <span className="text-caption text-muted-foreground">
+                  {utcOffset(browser)}
+                </span>
               </CommandItem>
               {options.map(({ tz, offset }) => (
                 <CommandItem
@@ -545,8 +575,12 @@ function TimezoneRow() {
                   data-checked={value === tz}
                   onSelect={() => void handleChange(tz)}
                 >
-                  <span className="min-w-0 flex-1 truncate font-mono text-caption">{tz}</span>
-                  <span className="text-caption text-muted-foreground">{offset}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-caption">
+                    {tz}
+                  </span>
+                  <span className="text-caption text-muted-foreground">
+                    {offset}
+                  </span>
                 </CommandItem>
               ))}
             </CommandList>
