@@ -81,15 +81,7 @@ while IFS= read -r line; do
         *'"content":'*)
           ;;
         *)
-          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content and prompt"}}\n' "$id"
-          exit 0
-          ;;
-      esac
-      case "$line" in
-        *'"prompt":'*)
-          ;;
-        *)
-          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content and prompt"}}\n' "$id"
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"session/prompt must send content"}}\n' "$id"
           exit 0
           ;;
       esac
@@ -1046,12 +1038,9 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if !strings.Contains(requests, `"mcpServers":[]`) {
 		t.Fatalf("session/load must include mcpServers, got:\n%s", requests)
 	}
-	// Kiro docs use content, but Kiro CLI 2.1.1 still requires prompt.
+	// Kiro standardized on the content field.
 	if !strings.Contains(requests, `"content":[`) {
 		t.Fatalf("session/prompt must send Kiro content field, got:\n%s", requests)
-	}
-	if !strings.Contains(requests, `"prompt":[`) {
-		t.Fatalf("session/prompt must send standard ACP prompt field for Kiro 2.1.1 compatibility, got:\n%s", requests)
 	}
 }
 
