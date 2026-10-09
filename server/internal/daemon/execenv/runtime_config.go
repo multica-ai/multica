@@ -215,7 +215,7 @@ func runtimeConfigPath(workDir, provider string) string {
 		return filepath.Join(workDir, "CODEBUDDY.md")
 	case "qwen":
 		return filepath.Join(workDir, "QWEN.md")
-	case "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwenpaw", "mcode", "dim", "zeroclaw":
+	case "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwenpaw", "mcode", "dim", "zeroclaw", "commandcode":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""
