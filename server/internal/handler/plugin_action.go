@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -60,6 +62,10 @@ type pluginActor struct {
 	// member row to check permissions against, which is exactly why the
 	// endpoints that need one refuse it.
 	Member db.Member
+	// InstallToken distinguishes standing plugin credentials from event-hook
+	// callbacks. A few write operations can derive their human authorizer from
+	// the installation, while an event callback with no human must fail closed.
+	InstallToken bool
 }
 
 func (a pluginActor) isMember() bool { return a.Type == "member" }
@@ -185,6 +191,7 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
 		installationID = installation.ID
+		actor.InstallToken = true
 	}
 
 	caller, err := h.PluginService.AuthorizePluginAction(r.Context(), uuidToString(installationID), memberUserID, scope)
@@ -323,6 +330,131 @@ func publicPluginContext(context service.PluginContext) publicapiv1.Context {
 		}
 	}
 	return payload
+}
+
+type pluginIssueCursor struct {
+	Version int32 `json:"version"`
+	Number  int32 `json:"number"`
+}
+
+func encodePluginIssueCursor(number int32) string {
+	raw, _ := json.Marshal(pluginIssueCursor{Version: 1, Number: number})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodePluginIssueCursor(w http.ResponseWriter, r *http.Request, value string) (int32, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_cursor", "cursor is malformed")
+		return 0, false
+	}
+	var cursor pluginIssueCursor
+	if err := json.Unmarshal(raw, &cursor); err != nil || cursor.Version != 1 || cursor.Number < 1 {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_cursor", "cursor is malformed")
+		return 0, false
+	}
+	return cursor.Number, true
+}
+
+// ListPluginIssues — GET /v1/issues
+func (h *Handler) ListPluginIssues(w http.ResponseWriter, r *http.Request) {
+	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesRead)
+	if !ok {
+		return
+	}
+
+	query := r.URL.Query()
+	params := db.ListPluginActionIssuesParams{
+		WorkspaceID: caller.WorkspaceID,
+		IssueScope:  caller.IssueScope,
+	}
+	if value := strings.TrimSpace(query.Get("status")); value != "" {
+		params.Status = pgtype.Text{String: value, Valid: true}
+	}
+	if value := strings.TrimSpace(query.Get("status_category")); value != "" {
+		category, valid := issuestatus.ParseCategory(value)
+		if !valid {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "status_category is invalid")
+			return
+		}
+		// Expand to concrete status keys rather than filtering through the
+		// catalog join: built-in statuses are valid in workspaces whose
+		// catalog seed has not landed, and the key-set predicate keeps the
+		// (workspace_id, status) index usable. Same pattern as the issue
+		// list endpoints. (MUL-6243)
+		keys, err := issuestatus.ExpandCategories(r.Context(), h.Queries, caller.WorkspaceID, []string{category})
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to resolve status categories")
+			return
+		}
+		params.StatusKeys = keys
+	}
+	for _, filter := range []struct {
+		name   string
+		target *pgtype.UUID
+	}{
+		{"project_id", &params.ProjectID},
+		{"assignee_id", &params.AssigneeID},
+	} {
+		value := strings.TrimSpace(query.Get(filter.name))
+		if value == "" {
+			continue
+		}
+		parsed, err := util.ParseUUID(value)
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", filter.name+" must be a valid UUID")
+			return
+		}
+		*filter.target = parsed
+	}
+	if value := strings.TrimSpace(query.Get("has_active_tasks")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "has_active_tasks must be a boolean")
+			return
+		}
+		params.HasActiveTasks = pgtype.Bool{Bool: parsed, Valid: true}
+	}
+	limit := int32(publicapiv1.DefaultPageSize)
+	if value := strings.TrimSpace(query.Get("limit")); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || parsed < 1 || parsed > publicapiv1.MaxPageSize {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 200")
+			return
+		}
+		limit = int32(parsed)
+	}
+	if value := strings.TrimSpace(query.Get("cursor")); value != "" {
+		number, ok := decodePluginIssueCursor(w, r, value)
+		if !ok {
+			return
+		}
+		params.CursorNumber = pgtype.Int4{Int32: number, Valid: true}
+	}
+	params.Limit = limit + 1
+
+	rows, err := h.Queries.ListPluginActionIssues(r.Context(), params)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list issues")
+		return
+	}
+	hasMore := int32(len(rows)) > limit
+	if hasMore {
+		rows = rows[:int(limit)]
+	}
+	prefix := ""
+	if workspace, err := h.Queries.GetWorkspace(r.Context(), caller.WorkspaceID); err == nil {
+		prefix = workspace.IssuePrefix
+	}
+	payload := make([]publicapiv1.Issue, 0, len(rows))
+	for _, row := range rows {
+		payload = append(payload, publicPluginIssueFromRow(row, prefix))
+	}
+	response := publicapiv1.IssueListResponse{Issues: payload}
+	if hasMore && len(rows) > 0 {
+		response.NextCursor = encodePluginIssueCursor(rows[len(rows)-1].Number)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // GetPluginIssue — GET /v1/issues/{issue_ref}
@@ -479,6 +611,47 @@ func (h *Handler) pluginIssuePayload(r *http.Request, caller service.PluginActio
 	}
 }
 
+func publicPluginIssueFromRow(row db.ListPluginActionIssuesRow, issuePrefix string) publicapiv1.Issue {
+	app := issueToResponse(db.Issue{
+		ID:             row.ID,
+		WorkspaceID:    row.WorkspaceID,
+		Title:          row.Title,
+		Description:    row.Description,
+		Status:         row.Status,
+		Priority:       row.Priority,
+		AssigneeType:   row.AssigneeType,
+		AssigneeID:     row.AssigneeID,
+		CreatorType:    row.CreatorType,
+		CreatorID:      row.CreatorID,
+		ParentIssueID:  row.ParentIssueID,
+		Position:       row.Position,
+		DueDate:        row.DueDate,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+		Number:         row.Number,
+		ProjectID:      row.ProjectID,
+		StartDate:      row.StartDate,
+		Metadata:       row.Metadata,
+		Stage:          row.Stage,
+		Properties:     row.Properties,
+		Revision:       row.Revision,
+		LastActivityAt: row.LastActivityAt,
+	}, issuePrefix)
+	payload := publicapiv1.Issue{
+		ID: app.ID, WorkspaceID: app.WorkspaceID, Number: app.Number, Identifier: app.Identifier,
+		Title: app.Title, Description: app.Description, Status: app.Status,
+		StatusCategory: issuestatus.WireCategory(app.Status, row.StatusCategory.String),
+		Priority:       app.Priority, AssigneeType: app.AssigneeType, AssigneeID: app.AssigneeID,
+		CreatorType: app.CreatorType, CreatorID: app.CreatorID, ParentIssueID: app.ParentIssueID,
+		ProjectID: app.ProjectID, Position: app.Position, Stage: app.Stage,
+		StartDate: app.StartDate, DueDate: app.DueDate, CreatedAt: app.CreatedAt,
+		UpdatedAt: app.UpdatedAt, Revision: app.Revision, LastActivityAt: app.LastActivityAt,
+		Metadata: app.Metadata, Properties: app.Properties,
+		ActiveTaskCount: row.ActiveTaskCount,
+	}
+	return payload
+}
+
 // ListPluginComments — GET /v1/issues/{issue_ref}/comments
 func (h *Handler) ListPluginComments(w http.ResponseWriter, r *http.Request) {
 	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeCommentsRead)
@@ -519,6 +692,131 @@ func publicPluginComment(comment db.Comment) publicapiv1.Comment {
 		out.DeletedAt = comment.DeletedAt.Time.UTC().Format(timeFormatRFC3339)
 	}
 	return out
+}
+
+func (h *Handler) pluginTaskActorUserID(w http.ResponseWriter, r *http.Request, caller service.PluginActionCaller, actor pluginActor) (pgtype.UUID, bool) {
+	if actor.isMember() {
+		return actor.Member.UserID, true
+	}
+	if !actor.InstallToken {
+		publicapiv1.WriteProblem(w, r, http.StatusForbidden, "member_required", "this endpoint requires a human-authorized plugin call")
+		return pgtype.UUID{}, false
+	}
+	installerID := caller.Installation.InstalledBy
+	if !installerID.Valid {
+		publicapiv1.WriteProblem(w, r, http.StatusForbidden, "installer_required", "the Plugin installation has no installing member")
+		return pgtype.UUID{}, false
+	}
+	if _, err := h.getWorkspaceMember(r.Context(), uuidToString(installerID), uuidToString(caller.WorkspaceID)); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusForbidden, "installer_membership_revoked", "the member who installed this Plugin is no longer active")
+		return pgtype.UUID{}, false
+	}
+	return installerID, true
+}
+
+func validPluginTaskPriority(value string) bool {
+	switch value {
+	case "urgent", "high", "medium", "low", "none":
+		return true
+	default:
+		return false
+	}
+}
+
+func pluginTaskPriorityWire(value int32) string {
+	switch value {
+	case 4:
+		return "urgent"
+	case 3:
+		return "high"
+	case 2:
+		return "medium"
+	case 1:
+		return "low"
+	default:
+		return "none"
+	}
+}
+
+// CreatePluginIssueTask — POST /v1/issues/{issue_ref}/tasks
+func (h *Handler) CreatePluginIssueTask(w http.ResponseWriter, r *http.Request) {
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeTasksWrite)
+	if !ok {
+		return
+	}
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	if !ok {
+		return
+	}
+
+	var req publicapiv1.CreateIssueTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	agentID, err := util.ParseUUID(strings.TrimSpace(req.AgentID))
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "agent_id must be a valid UUID")
+		return
+	}
+	handoffNote := sanitizeNullBytes(req.HandoffNote)
+	if len(handoffNote) > 40000 {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "handoff_note is too long")
+		return
+	}
+	priority := issue.Priority
+	if req.Priority != nil {
+		priority = *req.Priority
+		if !validPluginTaskPriority(priority) {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "priority is invalid")
+			return
+		}
+	}
+
+	actorUserID, ok := h.pluginTaskActorUserID(w, r, caller, actor)
+	if !ok {
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          agentID,
+		WorkspaceID: caller.WorkspaceID,
+	})
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "agent not found")
+		return
+	}
+	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_agent", "agent must be active and bound to a runtime")
+		return
+	}
+	actorID := uuidToString(actorUserID)
+	if !h.canInvokeAgent(r.Context(), agent, "member", actorID, actorID, uuidToString(caller.WorkspaceID)) {
+		publicapiv1.WriteProblem(w, r, http.StatusForbidden, "invocation_not_allowed", "the authorizing member may not invoke this agent")
+		return
+	}
+
+	task, err := h.TaskService.EnqueuePluginIssueTask(r.Context(), issue, agent, handoffNote, priority, actorUserID, caller.Installation.ID)
+	if err != nil {
+		if errors.Is(err, service.ErrDuplicatePendingTask) {
+			publicapiv1.WriteProblem(w, r, http.StatusConflict, "duplicate_pending_task", "a pending task already exists for this issue and agent")
+			return
+		}
+		if errors.Is(err, service.ErrIssueInTriage) {
+			publicapiv1.WriteProblem(w, r, http.StatusForbidden, "issue_in_triage", "the issue is in triage")
+			return
+		}
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to create the task")
+		return
+	}
+	writeJSON(w, http.StatusCreated, publicapiv1.IssueTask{
+		ID:        uuidToString(task.ID),
+		IssueID:   uuidToString(task.IssueID),
+		AgentID:   uuidToString(task.AgentID),
+		RuntimeID: uuidToString(task.RuntimeID),
+		Status:    task.Status,
+		Priority:  pluginTaskPriorityWire(task.Priority),
+		CreatedAt: task.CreatedAt.Time.UTC().Format(timeFormatRFC3339),
+	})
 }
 
 // CreatePluginComment — POST /v1/issues/{issue_ref}/comments

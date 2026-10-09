@@ -119,6 +119,9 @@ const (
 	// The dedicated chat_session_id column still exists for its own consumers;
 	// this makes the attribution UI's jump-to-evidence path uniform (MUL-4302 §2).
 	EvidenceChat EvidenceKind = "chat"
+	// EvidencePluginInstallation points at the installation whose authorized
+	// human asked for an explicit run through the Plugin Action API.
+	EvidencePluginInstallation EvidenceKind = "plugin_installation"
 )
 
 // TriggerKind enumerates every path that can enqueue a run. Kept as an explicit
@@ -143,6 +146,7 @@ const (
 	KindRetry             TriggerKind = "retry"
 	KindRerun             TriggerKind = "rerun"
 	KindDeferredFallback  TriggerKind = "deferred_fallback"
+	KindPluginAction      TriggerKind = "plugin_action"
 )
 
 // Result is the attribution stamped onto a queued run.

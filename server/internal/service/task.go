@@ -1426,6 +1426,19 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin)
 }
 
+type enqueueAgentTaskOptions struct {
+	AgentID             pgtype.UUID
+	TriggerCommentID    pgtype.UUID
+	CoalescedCommentIDs []pgtype.UUID
+	IsLeader            bool
+	SquadID             pgtype.UUID
+	ForceFreshSession   bool
+	HandoffNote         string
+	RerunOfTaskID       pgtype.UUID
+	Priority            string
+	Attribution         attribution.Result
+}
+
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
@@ -1456,26 +1469,60 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Warn("mention task enqueue refused: attribution fail-closed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, err
 	}
-	originatorUserID := attr.UserID
+	return s.enqueueResolvedAgentTask(ctx, issue, agent, enqueueAgentTaskOptions{
+		AgentID:             agentID,
+		TriggerCommentID:    triggerCommentID,
+		CoalescedCommentIDs: coalescedCommentIDs,
+		IsLeader:            isLeader,
+		SquadID:             squadID,
+		ForceFreshSession:   forceFreshSession,
+		HandoffNote:         handoffNote,
+		RerunOfTaskID:       rerunOfTaskID,
+		Priority:            issue.Priority,
+		Attribution:         attr,
+	})
+}
+
+// EnqueuePluginIssueTask creates the explicit agent run requested through the
+// Plugin Action API. The caller must already have resolved a current member as
+// the human authorizer; installationID records the surface that carried the
+// authorization without changing the accountable human.
+func (s *TaskService) EnqueuePluginIssueTask(ctx context.Context, issue db.Issue, agent db.Agent, handoffNote, priority string, actorUserID, installationID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, OriginNamed); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if !actorUserID.Valid || !installationID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("plugin task enqueue requires a member actor and plugin installation")
+	}
+	return s.enqueueResolvedAgentTask(ctx, issue, agent, enqueueAgentTaskOptions{
+		AgentID:     agent.ID,
+		HandoffNote: handoffNote,
+		Priority:    priority,
+		Attribution: attribution.DirectHumanRun(actorUserID, attribution.EvidencePluginInstallation, installationID),
+	})
+}
+
+func (s *TaskService) enqueueResolvedAgentTask(ctx context.Context, issue db.Issue, agent db.Agent, options enqueueAgentTaskOptions) (db.AgentTaskQueue, error) {
+	originatorUserID := options.Attribution.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
-	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(options.Attribution)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
-		AgentID:              agentID,
+		AgentID:              options.AgentID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
-		Priority:             priorityToInt(issue.Priority),
-		TriggerCommentID:     triggerCommentID,
-		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
-		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
-		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
-		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		SquadID:              squadID,
+		Priority:             priorityToInt(options.Priority),
+		TriggerCommentID:     options.TriggerCommentID,
+		CoalescedCommentIds:  options.CoalescedCommentIDs,
+		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, options.TriggerCommentID),
+		IsLeaderTask:         pgtype.Bool{Bool: options.IsLeader, Valid: options.IsLeader},
+		ForceFreshSession:    pgtype.Bool{Bool: options.ForceFreshSession, Valid: options.ForceFreshSession},
+		HandoffNote:          pgtype.Text{String: options.HandoffNote, Valid: options.HandoffNote != ""},
+		SquadID:              options.SquadID,
 		OriginatorUserID:     originatorUserID,
-		AccountableUserID:    attr.AccountableUserID,
-		RuleVersionID:        attr.RuleVersionID,
-		RerunOfTaskID:        rerunOfTaskID,
+		AccountableUserID:    options.Attribution.AccountableUserID,
+		RuleVersionID:        options.Attribution.RuleVersionID,
+		RerunOfTaskID:        options.RerunOfTaskID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -1488,19 +1535,17 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	})
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
-		// unique index rejected this insert. That is benign — a sibling run
-		// already covers this target — so log it at debug and return a typed
-		// sentinel the caller maps to a coalesced outcome / 409 rather than a
-		// 500 that leaks the raw constraint name (#5914).
+		// unique index rejected this insert. Return the stable sentinel so
+		// callers map it to 409 instead of leaking the constraint name (#5914).
 		if isDuplicatePendingTaskErr(err) {
-			slog.Debug("mention task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+			slog.Debug("agent task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(options.AgentID))
 			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
 		}
-		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		slog.Error("agent task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(options.AgentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	slog.Info("agent task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(options.AgentID), "is_leader_task", options.IsLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
