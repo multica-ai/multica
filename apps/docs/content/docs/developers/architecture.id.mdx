@@ -1,0 +1,131 @@
+---
+title: Arsitektur proyek
+description: Pelajari bagaimana klien, layanan Go, daemon eksekusi, dan paket frontend bersama milik Multica bekerja sama.
+---
+
+Multica terdiri dari backend Go, beberapa klien, dan daemon yang berjalan di komputer eksekusi. PostgreSQL menyimpan data kolaborasi; daemon mengklaim task dan memanggil alat coding AI lokal.
+
+Halaman yang berfokus pada implementasi ini menggunakan istilah **task** untuk entitas scheduler internal, API, dan database di balik **Eksekusi** pada produk. UI dan dokumentasi produk menyebutnya Eksekusi; pengenal seperti `TaskService` dan `task_id` tetap tidak berubah demi kompatibilitas.
+
+```text
+Web / Desktop / Mobile / CLI
+             │
+       HTTP + WebSocket
+             │
+      Go API ───────── PostgreSQL
+             │
+      daemon WebSocket
+             │
+     local daemon ─── AI coding tools
+```
+
+Untuk penjelasan yang berfokus pada produk, lihat [Bagaimana Multica bekerja](/how-multica-works). Halaman ini berfokus pada bagaimana kode disusun berlapis.
+
+## Struktur repositori
+
+| Direktori | Tanggung jawab | Teknologi utama |
+| --- | --- | --- |
+| `server/` | API, autentikasi, penjadwalan task, integrasi, CLI, dan daemon | Go, Chi, sqlc, gorilla/websocket |
+| `apps/web/` | Klien browser dan landing page | Next.js App Router |
+| `apps/desktop/` | Klien desktop dan manajemen proses lokal | Electron, electron-vite |
+| `apps/mobile/` | Klien iOS mandiri | Expo, React Native |
+| `apps/docs/` | Situs dokumentasi multibahasa | Next.js, Fumadocs |
+| `packages/core/` | Klien API, types, queries, mutations, dan logika bisnis yang tidak bergantung pada platform | TanStack Query, Zustand |
+| `packages/ui/` | UI fondasi tanpa logika bisnis | shadcn, Base UI |
+| `packages/views/` | Halaman dan komponen bisnis yang dibagikan oleh Web dan Desktop | React |
+| `packages/tsconfig/`, `packages/eslint-config/` | Konfigurasi tooling bersama | TypeScript, ESLint |
+
+Paket bersama mengekspor berkas sumber `.ts` dan `.tsx` secara langsung dan dikompilasi oleh aplikasi yang menggunakannya. Arah dependensi adalah `views → core + ui`; `core` dan `ui` tidak saling bergantung.
+
+## Berbagi kode antara Web dan Desktop
+
+Web dan Desktop berbagi tiga lapisan:
+
+1. `packages/core` menangani API, caching, izin, dan state yang tidak bergantung pada platform.
+2. `packages/ui` menyediakan komponen fondasi.
+3. `packages/views` menyusun halaman bisnis.
+
+Kemampuan platform seperti routing, cookies, dan Electron IPC tetap berada di lapisan aplikasi. Halaman bersama melakukan navigasi melalui `NavigationAdapter` dan tidak mengimpor `next/*` atau `react-router-dom` secara langsung.
+
+Sebagai contoh, fitur Tugas yang dibutuhkan oleh Web dan Desktop biasanya menyentuh:
+
+```text
+packages/core/issues/      queries, mutations, cache updates
+packages/views/issues/     pages and business components
+apps/web/platform/         Next.js routing adapter
+apps/desktop/.../platform/ Electron routing adapter
+```
+
+Mobile tidak menggunakan ulang halaman React ini. Mobile dapat mengimpor types dan pure functions dari `@multica/core`, tetapi memiliki UI, query keys, state, realtime subscriptions, dan proses rilisnya sendiri.
+
+## State frontend
+
+Data server dan state klien dikelola secara terpisah:
+
+- **TanStack Query** memiliki data server seperti Tugas, agent, anggota, dan item inbox.
+- **Zustand** memiliki state klien seperti filter, draft, dialog, dan layout.
+- Ruang kerja saat ini ditentukan oleh route, dan hanya dicerminkan di lapisan platform ketika dibutuhkan untuk request, namespace yang persisten, atau reconnect.
+- React Context hanya membawa "plumbing" platform seperti ID ruang kerja dan navigation adapter.
+
+Event WebSocket harus memperbarui atau menginvalidasi cache TanStack Query. Jangan menyalin objek server ke dalam Zustand. Mutation yang melakukan navigasi, seperti membuat, menghapus, atau meninggalkan ruang kerja, harus menunggu konfirmasi server sebelum membersihkan state lokal.
+
+Respons API diparsing dengan skema zod di boundary `packages/core/api/`. Klien Desktop yang sudah terpasang mungkin terhubung ke backend yang lebih baru, sehingga JSON dari jaringan tidak boleh di-assert langsung sebagai TypeScript type.
+
+## Lapisan backend
+
+Entry point utama berada di `server/cmd/`:
+
+| Entry point | Tujuan |
+| --- | --- |
+| `server` | Menjalankan API HTTP, layanan WebSocket, scheduler, dan worker integrasi |
+| `multica` | CLI dan daemon lokal |
+| `migrate` | Menjalankan migrasi database |
+| `backfill_*` | Alat backfill data untuk rilis tertentu |
+
+Request biasanya mengalir ke arah berikut:
+
+```text
+router → middleware → handler → service → sqlc query → PostgreSQL
+```
+
+- `internal/middleware/` menangani autentikasi, ruang kerja, dan boundary request.
+- `internal/handler/` memparsing input HTTP dan menghasilkan respons.
+- `internal/service/` memiliki workflow bisnis lintas-query dan transaksi.
+- `pkg/db/queries/` berisi SQL yang ditulis manual.
+- `pkg/db/generated/` dihasilkan oleh sqlc dan tidak boleh diedit langsung.
+- `internal/integrations/` menangani event eksternal dari GitHub, Slack, Feishu, dan layanan lain.
+- `internal/storage/` menangani attachment lokal dan S3.
+
+PostgreSQL adalah source of truth untuk data bisnis. Redis bersifat opsional dan digunakan untuk event realtime antar-instance, caching, atau koordinasi sementara. Tanpa Redis, environment development single-instance menggunakan implementasi in-process.
+
+## Koneksi realtime
+
+Multica memiliki dua jalur WebSocket yang berbeda:
+
+- `internal/realtime/` mengirimkan perubahan Tugas, komentar, inbox, dan lainnya ke klien pengguna.
+- `internal/daemonws/` menghubungkan daemon untuk membangunkan runtime dan melakukan daemon RPC.
+
+WebSocket mengurangi latency, tetapi database tetap menjadi state final. Klien harus mengkalibrasi ulang melalui query setelah reconnect. Daemon juga mempertahankan jalur polling sehingga satu disconnect tidak dapat membuat task yang mengantre tersangkut selamanya.
+
+## Jalur kode untuk satu eksekusi
+
+1. Pengguna menugaskan sebuah Tugas, menyebut (mention) seorang agent, atau sebuah otomasi terpicu.
+2. `TaskService` membuat task yang mengantre dan memberi tahu runtime yang sesuai.
+3. Daemon mengklaim task melalui daemon API.
+4. Server menerbitkan kredensial sementara yang terikat pada task dan agent tersebut.
+5. Daemon menyiapkan direktori lokal dan memanggil provider backend yang sesuai di `pkg/agent`.
+6. Tool berjalan secara lokal sementara daemon mengunggah progres, pesan, dan status akhir.
+7. Server memperbarui task dan Tugas, lalu menyegarkan klien melalui realtime events.
+
+Lapisan provider adapter menyeragamkan startup, streaming events, pembatalan, dan data usage di berbagai alat coding AI, sementara daemon tetap memiliki direktori lokal dan session.
+
+## Boundary multi-ruang kerja
+
+Query bisnis harus dibatasi (scoped) oleh `workspace_id`, dan membership diperiksa sebelum request masuk ke route ruang kerja. `X-Workspace-ID` memilih ruang kerja saat ini tetapi tidak menggantikan pemeriksaan otorisasi.
+
+Assignee dari sebuah Tugas bersifat polimorfik dan dapat menunjuk ke anggota, agent, atau Squad. Query baru, cache key, dan realtime events harus mempertahankan baik ruang kerja maupun tipe assignee, bukan mengasumsikan bahwa ID resource adalah konteks yang unik secara global.
+
+## Langkah selanjutnya
+
+- [Kontribusi](/developers/contributing) — Environment lokal, worktree, dan lokasi test.
+- [Konvensi pengembangan](/developers/conventions) — Kontrak repositori untuk naming, terminologi, dan copy bahasa Tionghoa.

@@ -1,0 +1,111 @@
+{
+  "title": "Analitik",
+  "tab_usage": "Penggunaan",
+  "header": {
+    "timezone_and_updated": "{{tz}} · diperbarui {{time}}",
+    "refresh": "Segarkan"
+  },
+  "filter": {
+    "project_label": "Proyek",
+    "all_projects": "Semua proyek",
+    "period_label": "Periode"
+  },
+  "kpi": {
+    "cost_label": "Biaya · {{days}}H",
+    "tokens_label": "Token · {{days}}H",
+    "tokens_hint": "Input {{input}} · Output {{output}}",
+    "run_time_label": "Waktu eksekusi · {{days}}H",
+    "run_time_hint": "Dari {{tasks}} eksekusi",
+    "tasks_label": "Eksekusi · {{days}}H",
+    "tasks_hint": "{{failed}} gagal"
+  },
+  "dim": {
+    "label": "Dimensi",
+    "daily": "Harian",
+    "weekly": "Mingguan"
+  },
+  "daily": {
+    "title_cost": "Biaya harian",
+    "title_tokens": "Token harian",
+    "title_time": "Waktu eksekusi harian",
+    "title_tasks": "Eksekusi harian",
+    "title_errors": "Error harian",
+    "metric_cost": "Biaya",
+    "metric_tokens": "Token",
+    "metric_time": "Waktu",
+    "metric_tasks": "Eksekusi",
+    "no_data": "Tidak ada penggunaan dalam periode ini.",
+    "metric_label": "Metrik"
+  },
+  "weekly": {
+    "title_cost": "Biaya mingguan",
+    "title_tokens": "Token mingguan",
+    "title_time": "Waktu eksekusi mingguan",
+    "title_tasks": "Eksekusi mingguan",
+    "title_errors": "Error mingguan",
+    "partial_label": "{{range}} (sebagian · {{covered}} / 7 hari)"
+  },
+  "errors": {
+    "kpi_failed_label": "Eksekusi gagal · {{days}}H",
+    "kpi_failed_hint": "Dari {{total}} eksekusi",
+    "kpi_rate_label": "Tingkat kegagalan · {{days}}H",
+    "kpi_agents_label": "Agent terdampak · {{days}}H",
+    "kpi_agents_hint": "Terburuk {{name}} · {{count}}",
+    "tooltip_rate": "Tingkat error",
+    "class": {
+      "auth": "Auth",
+      "rate_limit": "Rate limit",
+      "timeout": "Timeout",
+      "provider": "Provider",
+      "runtime": "Runtime",
+      "agent": "Agent",
+      "other": "Lainnya"
+    },
+    "title": "Error",
+    "summary": "{{failed}} dari {{total}} eksekusi gagal · {{rate}}",
+    "mix_title": "Komposisi kegagalan · {{failed}}",
+    "mix_label": "Komposisi kegagalan",
+    "codes_label": "Kode error",
+    "by_agent": "Pelaku teratas",
+    "sort_label": "Urutkan pelaku berdasarkan",
+    "sort_failed": "Kegagalan",
+    "sort_rate": "Tingkat",
+    "header_agent": "Agent",
+    "header_failed": "Gagal",
+    "header_runs": "Eksekusi",
+    "header_rate": "Tingkat",
+    "other_agents": "Agent lainnya",
+    "low_sample": "Kurang dari {{count}} eksekusi dalam periode ini — tingkat ini tidak bermakna.",
+    "no_data": "Tidak ada eksekusi gagal dalam periode ini.",
+    "show_reasons": "Tampilkan kode error",
+    "hide_reasons": "Sembunyikan kode error",
+    "show_all": "Tampilkan semua {{count}}",
+    "show_less": "Tampilkan {{count}} teratas"
+  },
+  "leaderboard": {
+    "title": "Peringkat",
+    "caption": "{{count}} agent",
+    "caption_with_deleted": "{{count}} agent · {{deleted}} dihapus",
+    "sort_label": "Urutkan agent berdasarkan",
+    "deleted_agents": "Agent yang dihapus",
+    "other_agents": "Agent lainnya",
+    "header_agent": "Agent",
+    "header_tokens": "Token",
+    "header_cost": "Biaya",
+    "header_time": "Waktu",
+    "header_tasks": "Eksekusi",
+    "usage_unreported_other": "{{count}} eksekusi tidak melaporkan penggunaan",
+    "usage_unreported_pending_other": "{{count}} eksekusi tidak melaporkan penggunaan · total masih diproses",
+    "usage_totals_pending": "Total penggunaan masih diproses",
+    "show_all": "Tampilkan semua",
+    "show_less": "Tampilkan {{count}} teratas",
+    "no_data": "Tidak ada aktivitas agent dalam periode ini."
+  },
+  "empty": {
+    "title": "Belum ada penggunaan",
+    "body": "Jalankan agent untuk melihat penggunaan token dan waktu eksekusi."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "title": "Penagihan (halaman uji)",
+  "subtitle": "Passthrough langsung ke /api/v1/billing/* milik multica-cloud. Bukan UI final — hanya semua endpoint yang dijejalkan ke satu halaman agar kita bisa memverifikasi alur proxy + Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Saldo",
+    "credits_suffix": "kredit",
+    "meta": "micro mentah: {{micro}} · pemilik: {{owner}}… · diperbarui {{updated}}"
+  },
+  "buy": {
+    "title": "Beli kredit / Kelola penagihan",
+    "no_tiers": "Belum ada tingkat harga yang dikonfigurasi. Cloud mungkin belum memiliki kunci Stripe — checkout akan mengembalikan 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} kredit",
+    "tier_bonus": " + {{credits}} bonus",
+    "tier_bonus_with_expiry": " + {{credits}} bonus ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Buka Portal Penagihan Stripe",
+    "portal_hint": "400 wajar terjadi untuk pengguna yang belum pernah membayar (belum ada catatan pelanggan Stripe).",
+    "toast_no_url": "Cloud tidak mengembalikan URL checkout",
+    "toast_checkout_failed": "Checkout gagal",
+    "toast_no_portal_url": "Tidak ada URL portal yang dikembalikan",
+    "toast_portal_failed": "Portal gagal"
+  },
+  "checkout": {
+    "session_label": "Sesi checkout {{prefix}}…",
+    "loading": "Memuat status pesanan…",
+    "fetch_failed": "Gagal mengambil status: {{error}}",
+    "fetch_failed_unknown": "error tidak diketahui",
+    "final_status": "Status akhir: {{status}}",
+    "polling_status": "Polling status… saat ini: {{status}}",
+    "status_unknown": "tidak diketahui",
+    "label_order": "Pesanan",
+    "label_tier": "Tingkat",
+    "label_charged": "Ditagih",
+    "charged_value": "{{money}} · {{credits}} kredit",
+    "charged_with_bonus": "{{money}} · {{credits}} kredit + {{bonus}} bonus",
+    "clear_url": "Hapus dari URL"
+  },
+  "transactions": {
+    "title": "Transaksi",
+    "empty": "Belum ada transaksi.",
+    "credits_value": "{{value}} kredit",
+    "row_meta": "{{date}} · saldo setelah: {{balance}} kredit · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Batch kredit",
+    "empty": "Belum ada batch.",
+    "remaining_over_total": "{{remaining}} / {{total}} kredit",
+    "id_suffix": "{{id}}…",
+    "consumed": "Terpakai: {{value}} kredit",
+    "expires_suffix": " · berakhir {{value}}",
+    "never_expires_suffix": " · tidak pernah berakhir"
+  },
+  "topups": {
+    "title": "Pesanan topup",
+    "empty": "Belum ada pesanan topup.",
+    "amount_to_credits": "{{money}} → {{credits}} kredit",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} kredit + {{bonus}} bonus",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "workspace": {
+    "title": "Penagihan",
+    "description": "Kelola paket, batas, kursi manusia, dan penagihan Stripe ruang kerja ini.",
+    "loading": "Memuat penagihan ruang kerja",
+    "plan": {
+      "free": "Gratis",
+      "pro": "Pro",
+      "unknown": "Paket tidak diketahui"
+    },
+    "status": {
+      "inactive": "Tidak aktif",
+      "active": "Aktif",
+      "trialing": "Masa percobaan",
+      "past_due": "Terlambat bayar",
+      "canceled": "Dibatalkan",
+      "incomplete": "Belum lengkap",
+      "incomplete_expired": "Pengaturan kedaluwarsa",
+      "paused": "Dijeda",
+      "unpaid": "Belum dibayar",
+      "unknown": "Status tidak diketahui"
+    },
+    "load_failed": {
+      "title": "Penagihan sementara tidak tersedia",
+      "description": "Tidak dapat memuat detail langganan. Coba lagi."
+    },
+    "actions": {
+      "retry": "Coba lagi",
+      "retry_autopilots": "Coba lagi penggunaan otomatisasi",
+      "upgrade": "Upgrade ke Pro",
+      "manage": "Kelola penagihan",
+      "add_seats": "Tambah kursi",
+      "cancel": "Batal",
+      "continue_to_stripe": "Lanjutkan ke Stripe"
+    },
+    "errors": {
+      "action_title": "Tindakan penagihan gagal",
+      "temporarily_unavailable": "Penagihan sementara tidak tersedia. Coba lagi sesaat lagi.",
+      "not_enabled": "Langganan ruang kerja tidak diaktifkan untuk deployment ini. Hubungi administrator Anda.",
+      "permission_changed": "Peran ruang kerja Anda tidak lagi mengizinkan tindakan ini. Muat ulang halaman untuk melihat akses Anda saat ini.",
+      "checkout_response": "Checkout tidak dapat dibuka karena respons server tidak terbaca. Coba lagi tanpa mengubah interval yang Anda pilih.",
+      "already_subscribed": "Ruang kerja ini sudah memiliki langganan. Paket saat ini telah diperbarui.",
+      "checkout_failed": "Checkout tidak dapat dibuat. Coba lagi sesaat lagi.",
+      "portal_response": "Portal Penagihan tidak dapat dibuka karena respons server tidak terbaca.",
+      "portal_unavailable": "Portal Penagihan tidak tersedia untuk ruang kerja ini. Paket saat ini telah diperbarui.",
+      "portal_failed": "Portal Penagihan tidak dapat dibuka. Coba lagi sesaat lagi."
+    },
+    "return": {
+      "cancel_title": "Checkout dibatalkan",
+      "cancel_description": "Tidak ada perubahan paket yang dilakukan.",
+      "portal_title": "Detail penagihan diperbarui",
+      "syncing_title": "Mengaktifkan langganan Anda",
+      "syncing_description": "Pembayaran selesai. Kami menunggu Stripe mengonfirmasi perubahan paket.",
+      "timeout_description": "Pembayaran telah diterima, tetapi langganan masih dalam proses sinkronisasi. Muat ulang halaman ini sesaat lagi.",
+      "active_title": "Pro aktif",
+      "active_description": "Ruang kerja ini sekarang memiliki akses Pro."
+    },
+    "past_due": {
+      "title": "Pembayaran perlu perhatian",
+      "description": "Perbarui metode pembayaran Anda di pengelolaan penagihan.",
+      "grace_description": "Perbarui metode pembayaran Anda sebelum {{date}} untuk tetap memiliki akses Pro."
+    },
+    "subscription_notice": {
+      "canceling_title": "Pembatalan telah dijadwalkan",
+      "canceling_description": "Langganan Anda akan dibatalkan pada {{date}}.",
+      "canceling_description_without_date": "Langganan ini dijadwalkan dibatalkan pada akhir periode saat ini.",
+      "incomplete_title": "Pengaturan langganan belum lengkap",
+      "incomplete_description": "Buka pengelolaan penagihan untuk menyelesaikan atau meninjau pengaturan pembayaran.",
+      "incomplete_expired_title": "Pengaturan langganan kedaluwarsa",
+      "incomplete_expired_description": "Pengaturan pembayaran sebelumnya kedaluwarsa tanpa mengaktifkan Pro. Mulai upgrade baru saat siap.",
+      "paused_title": "Langganan dijeda",
+      "paused_description": "Buka pengelolaan penagihan untuk meninjau penjedaan dan opsi pemulihan yang tersedia.",
+      "unpaid_title": "Langganan belum dibayar",
+      "unpaid_description": "Buka pengelolaan penagihan untuk menyelesaikan saldo yang belum dibayar.",
+      "canceled_title": "Langganan dibatalkan"
+    },
+    "current": {
+      "title": "Paket saat ini",
+      "plan": "Paket ruang kerja",
+      "members": "Anggota manusia",
+      "members_description": "Agent dan undangan yang tertunda tidak dihitung sebagai kursi.",
+      "member_count_other": "{{count}} anggota",
+      "billing_interval": "Interval penagihan",
+      "period_end": "Periode saat ini berakhir"
+    },
+    "upgrade": {
+      "title": "Upgrade ke Pro",
+      "description": "Pilih interval penagihan, lalu konfirmasikan jumlah kursi saat ini dan jumlah akhir di Stripe Checkout.",
+      "interval_label": "Interval penagihan",
+      "monthly": "Bulanan",
+      "yearly": "Tahunan",
+      "pro_for_team_other": "Pro untuk {{count}} kursi manusia",
+      "price_loading": "Memuat harga langganan",
+      "unit_price": "{{price}} per kursi manusia",
+      "price_at_checkout": "Server menghitung ulang anggota manusia sebelum pembelian. Stripe Checkout menampilkan harga per kursi dan total yang resmi sebelum Anda membayar."
+    },
+    "management": {
+      "title": "Pengelolaan langganan",
+      "description": "Metode pembayaran, faktur, dan pembatalan.",
+      "portal": "Portal Penagihan Stripe",
+      "portal_unavailable": "Tidak ada Portal Penagihan Stripe yang tersedia untuk ruang kerja ini."
+    },
+    "limits": {
+      "title": "Penggunaan dan batas",
+      "issues": "Tugas",
+      "autopilots": "Eksekusi otomatisasi",
+      "unlimited": "Tidak terbatas",
+      "per_month": "{{count}} / bulan",
+      "usage_loading": "Memuat penggunaan otomatisasi",
+      "usage_label": "Penggunaan kuota otomatisasi",
+      "current_usage": "Penggunaan saat ini",
+      "reached": "Batas tercapai",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "{{used}} selesai · {{reserved}} sedang berjalan",
+      "resets_at": "Direset {{date}}",
+      "usage_unavailable": "Penggunaan sementara tidak tersedia"
+    },
+    "seats": {
+      "title": "Kursi",
+      "description": "Kursi yang dibeli mencakup anggota manusia saat ini dan undangan yang tertunda. Agent tidak pernah menggunakan kursi.",
+      "human_members": "Kursi terpakai",
+      "billed": "Kursi yang dibeli",
+      "pending_invitations": "Undangan tertunda",
+      "pending_invitations_description": "Undangan aktif mencadangkan kursi yang dibeli sampai diterima atau kedaluwarsa.",
+      "available": "Kursi tersedia",
+      "available_description": "Kursi yang dibeli dikurangi anggota dan undangan yang dicadangkan.",
+      "pending": "Jumlah kursi yang dijadwalkan",
+      "pending_description": "Berlaku pada periode penagihan berikutnya.",
+      "seat_count_other": "{{count}} kursi",
+      "pending_with_date_other": "{{count}} kursi mulai {{date}}",
+      "none_pending": "Tidak ada perubahan terjadwal",
+      "not_subscribed": "Tidak ada langganan aktif",
+      "unavailable": "Tidak tersedia",
+      "summary_loading": "Memuat detail kursi langganan",
+      "summary_unavailable_title": "Beberapa detail kursi tidak tersedia",
+      "summary_unavailable_description": "Paket saat ini masih ditampilkan, tetapi jumlah kursi yang dibeli dan dijadwalkan tidak dapat dimuat.",
+      "members_over_capacity_title": "Jumlah anggota melebihi kursi yang dibeli",
+      "members_over_capacity_description": "Ruang kerja ini memiliki {{actual}} anggota tetapi hanya {{purchased}} kursi yang dibeli. Tambahkan cukup kursi atau hapus anggota sebelum mengirim lebih banyak undangan.",
+      "occupancy_over_capacity_description": "Ruang kerja ini menempati {{occupied}} dari {{purchased}} kursi yang dibeli ({{members}} anggota dan {{reserved}} undangan tertunda). Tambahkan kursi, hapus anggota, atau batalkan undangan tertunda sebelum mengundang orang lain.",
+      "updated": "Pembelian kursi dikirim",
+      "available_help": "Cara kursi tersedia dihitung"
+    },
+    "seat_purchase": {
+      "title": "Tambah kursi",
+      "description": "Masukkan jumlah kursi yang akan ditambahkan. Perkiraan Stripe terbaru akan muncul sebelum Anda mengonfirmasi.",
+      "additional_label": "Kursi tambahan",
+      "additional_hint": "Masukkan jumlah kursi yang ditambahkan, bukan total baru.",
+      "preview_loading": "Memperbarui perkiraan...",
+      "preview_unreadable": "Perkiraan tidak dapat dibaca. Ubah jumlah kursi atau coba lagi.",
+      "preview_failed": "Perkiraan sementara tidak tersedia. Coba lagi sesaat lagi.",
+      "capacity_out_of_sync": "Jumlah kursi di Stripe tidak cocok dengan catatan penagihan. Hubungi dukungan sebelum mencoba lagi pembelian ini.",
+      "in_progress": "Pembelian kursi lain sedang diproses. Tunggu sampai selesai; hubungi dukungan jika tetap di sini.",
+      "purchase_unreadable": "Respons pembelian tidak dapat dibaca. Coba lagi penawaran ini; permintaan pembelian yang sama akan digunakan kembali.",
+      "purchase_failed": "Kursi tidak dapat ditambahkan. Coba lagi dengan penawaran yang sama, atau muat ulang jika telah kedaluwarsa.",
+      "payment_failed": "Pembayaran tidak dapat diselesaikan. Perbarui metode pembayaran di Stripe, lalu minta penawaran baru.",
+      "quote_changed": "Jumlah kursi atau perkiraan berubah. Tinjau penawaran yang diperbarui sebelum mengonfirmasi lagi.",
+      "seats_after": "Kursi setelah pembelian",
+      "charge_today": "Perkiraan tagihan hari ini",
+      "next_invoice": "Perkiraan perpanjangan berikutnya",
+      "tax_notice": "Stripe menentukan pajak, kredit, dan detail faktur akhir. Kursi akan tersedia setelah Stripe mengonfirmasi pembaruan langganan.",
+      "confirm_other": "Tambah {{count}} kursi",
+      "pending_title": "Pembelian kursi sedang diproses",
+      "pending_description_other": "Stripe sedang mengonfirmasi pembaruan langganan menjadi {{count}} kursi.",
+      "delayed_title": "Konfirmasi kursi membutuhkan waktu lebih lama dari perkiraan",
+      "delayed_description": "Pemeriksaan otomatis telah berhenti. Pembelian mungkin masih akan selesai; periksa lagi nanti atau hubungi dukungan sebelum memulai pembelian lain.",
+      "delayed_description_with_expiry": "Pemeriksaan otomatis telah berhenti. Jika percobaan masih tertunda setelah {{date}}, muat ulang halaman ini sebelum meminta penawaran lain; hubungi dukungan jika tetap tertunda.",
+      "submitted_other": "Pembelian untuk {{count}} kursi telah dikirim. Kapasitas baru akan muncul setelah Stripe mengonfirmasinya.",
+      "error_title": "Tidak dapat memperbarui perkiraan"
+    },
+    "confirm": {
+      "title": "Lanjutkan ke Stripe Checkout?",
+      "description": "Interval penagihan: {{interval}}. Anggota manusia saat ini: {{count}}. Stripe akan menghitung ulang kursi dan menampilkan jumlah akhir sebelum pembayaran."
+    }
+  },
+  "shared": {
+    "request_failed": "Permintaan gagal",
+    "refresh": "Muat ulang",
+    "paging": "halaman {{page}} / {{totalPages}} · {{total}} total",
+    "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "Mengarahkan Anda kembali ke penagihan ruang kerja…",
+    "load_failed_title": "Tidak dapat membuka penagihan ruang kerja",
+    "load_failed_description": "Anda kembali dari Stripe, tetapi kami tidak dapat memuat daftar ruang kerja Anda untuk membuka halaman penagihan yang tepat. Buka Pengaturan Ruang Kerja → Penagihan untuk memeriksa status saat ini.",
+    "workspace_missing_title": "Tidak dapat menemukan ruang kerja itu",
+    "workspace_missing_description": "Anda kembali dari Stripe, tetapi ruang kerja ini tidak lagi tersedia untuk Anda — mungkin telah dihapus, atau akses Anda berubah. Buka Penagihan di ruang kerja yang Anda harapkan untuk memeriksa status saat ini.",
+    "retry": "Coba lagi",
+    "go_to_app": "Buka Multica"
+  }
+}

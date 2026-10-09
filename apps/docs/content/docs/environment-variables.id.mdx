@@ -1,0 +1,326 @@
+---
+title: Variabel lingkungan
+description: Konfigurasi umum server, storage, integrasi, dan runtime untuk hosting mandiri Multica.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica membaca variabel lingkungan saat proses startup. Setelah mengubah salah satunya, restart proses API, web, atau daemon yang terdampak. `docker compose restart` pada Docker Compose tidak membaca ulang `.env`; buat ulang container dengan `up -d` agar perubahan berlaku.
+
+Halaman ini hanya mencantumkan konfigurasi yang terkait deployment; variabel test dan variabel eksekusi internal tidak dibahas di sini. Ini adalah referensi yang dikelompokkan — untuk langkah deployment lengkap, lihat [panduan cepat hosting mandiri](/self-host-quickstart).
+
+## Konfigurasi produksi minimum
+
+```dotenv
+DATABASE_URL=postgres://user:password@postgres:5432/multica?sslmode=require
+JWT_SECRET=<long-random-secret>
+APP_ENV=production
+FRONTEND_ORIGIN=https://multica.example.com
+MULTICA_APP_URL=https://multica.example.com
+MULTICA_PUBLIC_URL=https://api.multica.example.com
+```
+
+Anda juga perlu memilih layanan email, jika tidak, kode verifikasi dan undangan hanya akan dituliskan ke log server.
+
+<Callout type="warning">
+`JWT_SECRET` wajib diisi di produksi: dengan `APP_ENV=production`, backend menolak untuk boot jika nilainya kosong atau berupa placeholder yang dikenal (buat satu dengan `openssl rand -hex 32`). Jangan mengatur `MULTICA_DEV_VERIFICATION_CODE`.
+</Callout>
+
+## API dan database
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `DATABASE_URL` | database `multica` lokal | String koneksi PostgreSQL |
+| `DATABASE_MAX_CONNS` | `25` | Jumlah koneksi database maksimum per proses API |
+| `DATABASE_MIN_CONNS` | `5` | Jumlah koneksi minimum yang dipertahankan setiap proses API |
+| `DATABASE_SEARCH_WORK_MEM_MB` | `64` | Batas atas `work_mem` PostgreSQL dalam MB untuk setiap node plan pencarian; atur `1`-`64` untuk menurunkannya atau `0` untuk mengikuti default database/session |
+| `DATABASE_REPLICA_URL` | kosong | String koneksi replica PostgreSQL read-only opsional; koneksi baru divalidasi sebagai read-only, sementara logika bisnis harus secara eksplisit memilih (opt-in) pembacaan eventual-consistency di dalam kode |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | Jumlah koneksi replica maksimum per proses API |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | Jumlah koneksi replica minimum yang dipertahankan setiap proses API |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Budget retry pada level container yang dibagi antara migration dan startup API; atur ke `0` untuk satu kali percobaan fail-fast per fase |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Timeout fallback untuk setiap upaya koneksi saat startup; `connect_timeout` native pgx, `PGCONNECT_TIMEOUT`, atau pengaturan service memiliki prioritas lebih tinggi |
+| `PORT` | `8080` | Port tempat API mendengarkan (listen) |
+| `JWT_SECRET` | wajib diisi di produksi | Secret untuk JWT sign-in dan beberapa alur signing; produksi menolak boot jika kosong atau berupa placeholder yang dikenal |
+| `APP_ENV` | kosong | Atur ke `production` di lingkungan produksi |
+| `AUTH_TOKEN_TTL` | `720h` (30 hari) | Masa berlaku JWT dan cookie browser; menerima Go duration atau bilangan bulat positif dalam detik. Session bersifat sliding: session yang terus digunakan akan diterbitkan ulang (re-issued) bukan kedaluwarsa, mulai dari titik tengah masa berlakunya. Nilai di bawah `60s` dibatasi (clamped) menjadi `60s` |
+| `LOG_LEVEL` | default aplikasi | Level log |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | Berapa lama menunggu setelah sinyal terminasi sebelum graceful shutdown dimulai |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | Berapa lama runtime yang offline boleh menyambung kembali sebelum eksekusi yang sedang berjalan (in-flight) dinyatakan gagal; nilai di bawah `150s` dibatasi (clamped) |
+
+Saat mengatur shutdown hold di Kubernetes, `terminationGracePeriodSeconds` harus lebih besar daripada hold ditambah waktu yang dibutuhkan oleh shutdown yang sesungguhnya.
+
+Batas koneksi primary dan replica bersifat independen. Hitung jumlah totalnya di seluruh proses API terhadap batas atas koneksi cluster PostgreSQL. Koneksi replica di-recycle setelah lima menit secara default untuk menyegarkan validasi read-only setelah promosi. Kegagalan koneksi replica secara transparan fallback ke primary dan membuka circuit pasif singkat; tidak ada probe database tambahan di background. Pembacaan dari replica tidak memiliki batas staleness yang dipaksakan di level aplikasi, jadi pantau lag pada level database dan pertahankan pembacaan yang sensitif terhadap konsistensi tetap di primary.
+
+## URL publik dan akses browser
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `FRONTEND_ORIGIN` | kosong | Origin frontend yang dikunjungi pengguna; digunakan untuk CORS, cookie, dan tautan undangan |
+| `MULTICA_APP_URL` | fallback ke `FRONTEND_ORIGIN` | URL web yang dapat dijangkau pengguna; digunakan oleh sign-in CLI dan URL penautan akun |
+| `MULTICA_PUBLIC_URL` | kosong | URL API publik; digunakan untuk URL webhook dan instruksi koneksi runtime |
+| `MULTICA_DAEMON_SERVER_URL` | fallback ke `MULTICA_PUBLIC_URL`, lalu `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | URL server yang disisipkan oleh proses API ke dalam `multica setup self-host`; atur ini saat daemon menjangkau API melalui URL yang berbeda dari URL webhook publik |
+| `CORS_ALLOWED_ORIGINS` | kosong | Origin HTTP tambahan yang diizinkan, dipisahkan koma |
+| `ALLOWED_ORIGINS` | fallback ke origin CORS / frontend | Allowlist origin WebSocket, dipisahkan koma |
+| `COOKIE_DOMAIN` | kosong | Wajib diisi saat frontend dan API menggunakan host yang berbeda dan browser berbicara langsung ke domain API; biarkan kosong untuk deployment satu domain |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` dikembalikan oleh endpoint `/api/config` yang tidak memerlukan autentikasi dan terlihat oleh client. Perlakukan ini sebagai konfigurasi publik; jangan pernah menaruh kredensial, token, atau secret lain di dalamnya.
+</Callout>
+
+Saat frontend dan API berjalan pada host yang berbeda dan browser berbicara langsung ke domain API, Anda harus mengatur `COOKIE_DOMAIN` — jika tidak, browser tidak dapat membaca cookie CSRF: setiap request tulis akan mengembalikan `403 CSRF validation failed` sementara request baca berjalan normal. Gunakan domain induk (parent domain) tersempit yang mencakup kedua host (`.agent.example.com` lebih baik daripada `.example.com`). Pengaturan ini menyebarkan cookie session sign-in ke setiap host di bawah domain tersebut, yang hanya dapat diterima saat semua host itu dioperasikan oleh pihak terpercaya yang sama. Setelah mengubahnya, hapus cookie lama di kedua host dan sign in kembali. Jika Anda mengikuti resep same-origin pada [panduan cepat hosting mandiri](/self-host-quickstart#3-pilih-cara-mengakses) (browser hanya mengunjungi domain app), biarkan nilainya kosong. Jangan gunakan alamat IP — browser mengabaikan cookie yang Domain-nya berupa IP.
+
+<Callout type="warning">
+Deployment yang dihosting mandiri harus mengatur `FRONTEND_ORIGIN`. Tanpa itu, tautan undangan, atribut keamanan cookie, dan pemeriksaan origin WebSocket semuanya bisa tidak sesuai dengan domain Anda yang sebenarnya.
+</Callout>
+
+## Email dan masuk
+
+### Resend
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `RESEND_API_KEY` | kosong | Mengaturnya akan mengaktifkan Resend |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Alamat pengirim; harus milik domain yang sudah terverifikasi |
+
+### SMTP
+
+SMTP memiliki prioritas lebih tinggi daripada Resend kapan pun `SMTP_HOST` tidak kosong.
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `SMTP_HOST` | kosong | Host SMTP; mengaturnya akan mengaktifkan SMTP |
+| `SMTP_PORT` | `25` | Nilai umum: 25, 587, 465 |
+| `SMTP_USERNAME` | kosong | Username; biarkan kosong untuk relay anonim |
+| `SMTP_PASSWORD` | kosong | Password |
+| `SMTP_FROM_EMAIL` | fallback ke `RESEND_FROM_EMAIL` | Envelope From dan message From |
+| `SMTP_TLS` | `starttls` | `implicit`, `smtps`, atau `ssl` berarti implicit TLS; port 465 mengaktifkannya secara otomatis |
+| `SMTP_TLS_INSECURE` | `false` | Melewati verifikasi sertifikat; hanya untuk jaringan internal yang terpercaya |
+| `SMTP_EHLO_NAME` | hostname | EHLO/FQDN yang dibutuhkan oleh relay yang ketat |
+
+### Google OAuth
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | kosong | Client ID OAuth Google |
+| `GOOGLE_CLIENT_SECRET` | kosong | Client secret OAuth Google |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Harus sama persis dengan callback URL di Google Console |
+
+### Lingkup pendaftaran
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `ALLOW_SIGNUP` | `true` | Apakah akun baru dapat dibuat saat tidak ada allowlist yang dikonfigurasi |
+| `ALLOWED_EMAILS` | kosong | Alamat email lengkap yang diizinkan untuk mendaftar, dipisahkan koma |
+| `ALLOWED_EMAIL_DOMAINS` | kosong | Domain email yang diizinkan untuk mendaftar, dipisahkan koma |
+| `DISABLE_WORKSPACE_CREATION` | `false` | Memblokir semua pengguna dari membuat Ruang Kerja; tidak ada pengecualian untuk owner/admin |
+| `MULTICA_DEV_VERIFICATION_CODE` | kosong | Kode test 6 digit yang fixed untuk lingkungan non-produksi |
+
+Untuk urutan evaluasi allowlist yang tepat, lihat [Masuk dan pendaftaran](/auth-setup#pembatasan-pendaftaran).
+
+## Penyimpanan lampiran
+
+Saat `S3_BUCKET` tidak diatur, Multica menggunakan disk lokal.
+
+### S3 atau storage yang kompatibel
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `S3_BUCKET` | kosong | Nama bucket; jangan gunakan hostname lengkap |
+| `S3_REGION` | `us-west-2` | Region tempat bucket berada |
+| `AWS_ACCESS_KEY_ID` | credential chain default SDK | Access key statis |
+| `AWS_SECRET_ACCESS_KEY` | credential chain default SDK | Secret key statis |
+| `AWS_ENDPOINT_URL` | kosong | Endpoint yang kompatibel dengan S3, seperti MinIO |
+| `S3_USE_PATH_STYLE` | `true` jika memakai endpoint custom | Apakah menggunakan path-style addressing |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, atau `proxy` |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Masa berlaku signed download URL |
+
+Gunakan `ATTACHMENT_DOWNLOAD_MODE=proxy` saat endpoint — misalnya MinIO internal — tidak dapat dijangkau dari browser.
+
+### Disk lokal
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | Direktori untuk file dan metadata; membutuhkan persistent volume |
+| `LOCAL_UPLOAD_BASE_URL` | kosong | Base URL publik opsional; saat kosong, URL relatif in-app yang dikembalikan |
+
+### CloudFront
+
+| Variabel | Deskripsi |
+|---|---|
+| `CLOUDFRONT_DOMAIN` | Domain CDN |
+| `CLOUDFRONT_KEY_PAIR_ID` | Key pair ID CloudFront |
+| `CLOUDFRONT_PRIVATE_KEY` | Private key lengkap |
+| `CLOUDFRONT_PRIVATE_KEY_SECRET` | Gunakan saat membaca private key dari Secrets Manager |
+
+## Redis dan rate limiting
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `REDIS_URL` | kosong | Satu-satunya connection URL yang digunakan oleh semua fitur berbasis Redis, termasuk rate limiting bersama, event realtime, lease WebSocket channel, dan cache token |
+| `REDIS_CLUSTER_MODE` | `false` | Memaksa penggunaan client Redis Cluster, termasuk untuk endpoint konfigurasi tunggal; cluster mode membutuhkan database 0 dan `REALTIME_RELAY_MODE=sharded` |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | Atur `true` saat Redis yang dikelola (managed) memblokir `CLIENT SETNAME` |
+| `RATE_LIMIT_AUTH` | `5` | Jumlah request per IP per menit untuk mengirim kode verifikasi atau memulai proses masuk melalui Google |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | Jumlah verifikasi kode per IP per menit |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Jumlah undangan Ruang Kerja yang boleh dibuat oleh setiap pengundang per sliding window 10 menit; `0` menonaktifkan gate ini |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Jumlah undangan Ruang Kerja yang boleh dibuat oleh seluruh admin per Ruang Kerja per sliding window 24 jam; `0` menonaktifkan gate ini |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Jumlah undangan yang boleh diterima satu alamat email penerima (setelah dinormalisasi) di seluruh Ruang Kerja per sliding window 24 jam; `0` menonaktifkan gate ini |
+| `RATE_LIMIT_TRUSTED_PROXIES` | kosong | CIDR proxy yang diizinkan memberikan `X-Forwarded-For`, dipisahkan koma |
+| `MULTICA_TRUSTED_PROXIES` | kosong | CIDR proxy terpercaya untuk webhook automation dan koneksi realtime |
+
+Deployment di belakang reverse proxy harus mencantumkan range proxy yang sebenarnya. Jangan mempercayai semua sumber secara menyeluruh, karena client dapat memalsukan forwarded IP.
+
+Rate limit auth membutuhkan `REDIS_URL`; tanpa itu, log startup mencatat bahwa rate limiting auth dinonaktifkan. Limit undangan tetap berjalan di memori lokal proses tanpa Redis, dan menjadi dibagikan antar-replica saat Redis dikonfigurasi. Jika Redis yang sudah dikonfigurasi menjadi tidak tersedia untuk sementara, rate limiting auth fails open (mengizinkan request lewat), sementara pembuatan undangan mengembalikan `503` yang dapat di-retry, bukan mengirim email tanpa proteksi.
+
+## Integrasi eksternal
+
+| Integrasi | Variabel | Deskripsi |
+|---|---|---|
+| GitHub | `GITHUB_APP_SLUG` | Slug GitHub App |
+| GitHub | `GITHUB_WEBHOOK_SECRET` | Secret signing untuk HMAC webhook dan connect-state |
+| GitHub | `GITHUB_APP_ID` | Dibutuhkan untuk status CI dan mergeability pada kartu PR serta repository picker "pick from GitHub" |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | Private key PEM lengkap yang berpasangan dengan App ID; kegunaan sama seperti di atas |
+| Lark | `MULTICA_LARK_SECRET_KEY` | Key enkripsi kredensial 32-byte yang di-encode Base64 |
+| Slack | `MULTICA_SLACK_SECRET_KEY` | Key enkripsi token 32-byte yang di-encode Base64 |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Key enkripsi Bot token 32-byte yang di-encode Base64 |
+| Composio | `COMPOSIO_API_KEY` | Mengaktifkan koneksi tool Composio |
+| Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL API callback; dapat fallback ke `MULTICA_PUBLIC_URL` |
+| Composio | `COMPOSIO_STATE_SECRET` | Secret signing OAuth state; dapat diturunkan dari `JWT_SECRET` |
+| Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Saklar integrasi Forgejo/Gitea/GitLab; aktif secara default di compose |
+| Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Key enkripsi 32-byte yang di-encode Base64 (`openssl rand -base64 32`); fitur ini sama sekali tidak tersedia tanpanya |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Key 32-byte yang di-encode Base64 untuk secret yang tersimpan dan surface launch URL terenkripsi |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origin browser khusus tanpa cookie yang diarahkan ke backend ini; harus berbeda dari origin app/API dan mempertahankan `Host` |
+| Plugins | `MULTICA_PLUGIN_API_URL` | Base URL Plugin Public API lengkap dengan versi, misalnya `https://plugin-api.example.com/v1`; fallback ke `MULTICA_PUBLIC_URL` + `/v1` |
+| Plugins | `MULTICA_PLUGIN_DIR` | Direktori absolut opsional yang digunakan untuk mem-publish bundle plugin lokal saat development |
+
+Tanpa `GITHUB_APP_ID` dan private key, PR tetap akan ditautkan, dicerminkan (mirror), dan memindahkan Tugas saat merge seperti biasa, tetapi kartu tidak menampilkan status CI atau mergeability, dan entri repository "pick from GitHub" dinonaktifkan.
+
+Untuk langkah setup, lihat [Integrasi GitHub](/github-integration#pengaturan-hosting-mandiri), [Bot Lark](/lark-bot-integration#pengaturan-hosting-mandiri), [Bot Slack](/slack-bot-integration#pengaturan-hosting-mandiri), dan [Bot Telegram](/telegram-bot-integration#pengaturan-hosting-mandiri).
+
+## LLM sisi server
+
+Grup ini mengonfigurasi generasi assist sisi server, seperti judul percakapan; ini bukan kredensial alat coding AI yang digunakan agent untuk menjalankan eksekusi.
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `MULTICA_LLM_API_KEY` | kosong | API key yang kompatibel dengan OpenAI |
+| `MULTICA_LLM_BASE_URL` | kosong | Endpoint yang kompatibel dengan OpenAI |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | Digunakan saat request tidak menentukan model |
+| `MULTICA_LLM_MAX_RETRIES` | `2` | Batas atas retry per call; `0` menonaktifkan retry, `1`–`5` membatasinya di N |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | Menambahkan `chat_template_kwargs: {"enable_thinking": false}` ke setiap request, untuk gateway yang mengenali field tersebut |
+
+`MULTICA_LLM_MAX_RETRIES` adalah satu-satunya sumber untuk retry policy. Biarkan tidak diatur untuk default 2, atur `0` untuk mengirim tepat satu request per call, atau atur 1–5 untuk membatasi retry sejumlah itu. Ini adalah batas atas, bukan kuota: hanya kegagalan yang retryable yang menggunakannya, dan sebuah keberhasilan atau deadline milik caller sendiri dapat mengakhiri call lebih cepat. Nilai lain — negatif, non-numerik, atau di atas 5 — akan membuat startup gagal, bukan dikoreksi secara diam-diam. Batas atas ini adalah budget latency: backoff dimulai pada 0.5s dan berlipat dua hingga batas 8s, sehingga budget yang lebih besar akan melampaui deadline milik caller sendiri dan mengubah kegagalan yang retryable menjadi timeout. Retry mencakup kegagalan koneksi serta HTTP 408, 409, 429, dan 5xx; semua respons 4xx lainnya dikembalikan apa adanya. Server mencatat policy efektif saat startup sebagai `llm retry policy`, tanpa kredensial apa pun di baris tersebut.
+
+`MULTICA_LLM_DISABLE_THINKING` ditujukan untuk gateway yang model-nya menghabiskan satu pass reasoning ("thinking") yang mendominasi budget latency dari call assist. Saat diatur ke `true` (atau `1`), server menambahkan `chat_template_kwargs: {"enable_thinking": false}` ke setiap body request; gateway yang meneruskan field tersebut — deployment bergaya vLLM/sglang dan beberapa rute LiteLLM bergaya GLM/Qwen — kemudian melewati pass thinking tersebut. Endpoint OpenAI standar menolak field body yang tidak dikenal, jadi aktifkan ini hanya saat upstream Anda menerimanya. Model keluarga GPT-5.6 sudah mendapatkan `reasoning_effort: none` pada request follow-up questions. Chat auto-titling tidak mengirim field reasoning apa pun; switch ini memengaruhinya hanya saat upstream yang dikonfigurasi menerima `chat_template_kwargs`. Nilai yang diterima adalah `true`/`false` dan `1`/`0` (tidak case-sensitive); nilai lain membuat startup gagal. Log startup melaporkan state efektif bersama retry policy.
+
+Dua fitur menggunakan layer ini, dan masing-masing mengirim konten chat ke endpoint yang Anda konfigurasi:
+
+- **Chat auto-titling** — pesan pertama pengguna dari session chat baru, dikirim apa adanya (verbatim). Attachment tidak pernah disertakan.
+- **Follow-up questions** (tombol saran di bawah balasan agent) — bagian akhir percakapan: hingga 6 pesan, dengan balasan yang sedang dijawab dibatasi pada 3000 karakter dan setiap pesan yang lebih lama pada 800 karakter.
+
+Saat API key dan base URL keduanya kosong, layer ini nonaktif dan sama sekali tidak membuat request upstream — kedua fitur di atas tidak mengirim apa pun. Itu adalah konfigurasi yang didukung saat policy Anda tidak mengizinkan layer ini mengirim konten chat ke luar deployment: session chat tetap menggunakan judul yang diturunkan client dari pesan pertama, tombol follow-up question tidak muncul, dan semua hal lain tidak terpengaruh.
+
+<Callout type="info">
+Ini hanya mencakup layer assist. Menjalankan sebuah agent adalah jalur data yang terpisah: saat seorang agent menjawab chat, daemon Anda mengeksekusi alat coding AI milik agent tersebut menggunakan kredensial milik alat itu sendiri, dan tidak meneruskan pengaturan `MULTICA_LLM_*` di atas kepadanya. (Variabel koneksi Multica yang di-scope per eksekusi, yang dibutuhkan agent, disuntikkan secara terpisah oleh daemon.) Mengosongkan variabel di atas tidak memengaruhi jalur tersebut — kendalikan jalur itu melalui konfigurasi runtime agent.
+</Callout>
+
+## Konfigurasi daemon
+
+Variabel di bawah ini dibaca pada komputer yang menjalankan agent Anda, bukan di dalam container API.
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | URL API / WebSocket Multica; juga menerima `http(s)` |
+| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Nama device yang ditampilkan di daftar runtime |
+| `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Nama tampilan runtime |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Interval polling eksekusi saat tidak ada wake event yang datang |
+| `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Batas atas untuk safety poll claim WebSocket yang sehat, dikonfigurasi secara independen dari `MULTICA_DAEMON_POLL_INTERVAL`; jitter ke bawah membuat default normal menjadi `2m30s`–`2m45s`, sementara server lama dan claim yang tidak pasti tetap menggunakan poll interval biasa |
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Interval heartbeat |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Batas atas eksekusi konkuren per daemon |
+| `MULTICA_AGENT_TIMEOUT` | `0` | Batas waktu absolut per eksekusi; `0` berarti tidak terbatas |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Batas atas waktu diam tanpa output dan tanpa eksekusi tool; `0` menonaktifkan watchdog sepenuhnya |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | sama seperti `MULTICA_AGENT_IDLE_WATCHDOG` | Batas atas waktu diam untuk satu tool call; atur ini hanya untuk memberi tool lebih banyak ruang dibanding yang diberikan ke model, `0` berarti tidak pernah menghentikan paksa (force-stop) sebuah tool call. Background shell Cursor tetap in-flight hingga proses yang dimilikinya keluar; pada batas ini, daemon menghentikan proses-proses tersebut dan memberi Cursor budget watchdog baru untuk menghasilkan hasil terminalnya. Jika kepemilikan proses atau cleanup tidak dapat diverifikasi, policy pembatalan eksekusi biasa berlaku |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | Ambang waktu diam khusus OpenCode |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | sama seperti `MULTICA_AGENT_IDLE_WATCHDOG` | Ambang semantic-silence Codex. Timer milik Codex sendiri tidak dapat melihat bahwa sebuah tool sedang berjalan, jadi timer ini mengikuti nilai yang lebih besar antara budget idle / tool, bukan menyimpan batas atas tersendiri yang lebih singkat |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Override eksplisit untuk batas atas no-progress pada first-turn Codex; `0` menjaga default. Waktu tunggu first-turn efektif tetap dibatasi oleh `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` dan timeout eksekusi secara keseluruhan — atur `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` secara strict di atas nilai ini (dengan sedikit margin), atau waktu tunggu akan dipotong ke nilai tersebut dan retry startup model-catalog akan dilewati. Nilai yang sama tidak cukup: timer semantic diaktifkan lebih dulu, sehingga pada durasi yang sama, retry tetap bisa hilang |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start`, `thread/resume`: `60s` | Batas atas handshake startup Codex app-server. Nilai eksplisit akan menimpa kedua budget tersebut secara global |
+| `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` | Grace period setelah pembatalan agar Codex app-server dapat mengakui (acknowledge) `turn/interrupt` dan mengeluarkan `turn/completed`, mempertahankan penggunaan token final sebelum cleanup proses dipaksakan. Pada host yang luar biasa lambat, sesuaikan nilai ini berdasarkan interrupt latency yang tercatat di log daemon |
+| `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; hosting mandiri `false` | Apakah akan memeriksa dan menerapkan update CLI secara otomatis |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Interval pemeriksaan update |
+| `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Apakah akan restart ke binary `multica` yang digantikan di disk secara out-of-band (`brew upgrade`, pengunduhan ulang, build lokal). Independen dari `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Direktori root untuk direktori kerja eksekusi |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Hanya Linux/macOS. Direktori induk untuk direktori temp privat per eksekusi; harus berupa direktori absolut yang sudah ada dan dapat ditulis, dan nilai yang tidak valid akan membuat startup eksekusi gagal, bukan fallback ke `/tmp`. Pilih path yang singkat — tool turunan (child tools) dapat melakukan bind AF_UNIX socket di bawahnya, dan `sun_path` dibatasi 108 byte di Linux dan 104 byte di macOS |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Mempertahankan direktori eksekusi untuk keperluan debugging |
+
+Untuk konteks internal yang disuntikkan daemon ke dalam task agent, lihat [Lingkungan runtime task](/daemon-runtimes#lingkungan-runtime-eksekusi).
+
+Setiap alat coding AI menerima `MULTICA_<PROVIDER>_PATH` dan `MULTICA_<PROVIDER>_MODEL` untuk menimpa path command dan model default. QwenPaw dan MiniMax Code tidak memiliki variabel model karena Multica tidak pernah mengirimkan model ke keduanya; variabel path MiniMax Code adalah `MULTICA_MCODE_PATH` — lihat [Perbandingan alat coding AI](/providers#sumber-model). DeepSeek Harness mendukung `MULTICA_DSH_PATH` dan `MULTICA_DSH_MODEL` (model id dari katalog dsh, misalnya `deepseek-official/deepseek-chat`). DeepSeek Harness juga menerima `MULTICA_DSH_PROFILE_BUNDLE`: daftar bundle yang dipisahkan koma untuk diinstal ke dalam profile `multica` miliknya saat profile tersebut belum ada, dicoba secara berurutan, di mana setiap entri berupa npm spec, direktori, atau tarball yang sudah di-pack. Variabel ini tidak diatur secara default, dan protokol `--stdio` yang dijalankan Multica adalah yang disediakan oleh profile tersebut, sehingga variabel yang tidak diatur membuat instalasi DSH tidak tersentuh dan daemon melaporkan profile yang hilang, bukan mendaftarkan runtime yang tidak dapat digunakan. Bridge milik Multica sendiri belum ada di npm registry publik, sehingga pemilihan nilainya dibahas di [Instal runtime agent](/install-agent-runtime); apa pun yang Anda atur akan diinstal ke DSH home setiap host daemon tanpa konfirmasi lebih lanjut, jadi perlakukan ini sebagai keputusan supply-chain. Instalasi yang diaktifkan oleh `MULTICA_DSH_PROFILE_BUNDLE` dibatasi secara sengaja: ia berjalan paling banyak sekali per daemon lifetime, hanya saat probe melaporkan bahwa profile benar-benar tidak ada, dan kegagalan dicatat dengan output asli dari package manager serta hanya di-retry setelah daemon restart. Probe yang timeout, atau yang menjawab dengan versi protokol yang tidak dijalankan oleh daemon ini, akan dilaporkan dan tidak pernah ditimpa dengan instalasi baru — daemon tidak menimpa profile yang memang sudah sengaja ada di sana. Untuk mendiagnosis, cari `DSH runtime profile` di log daemon; untuk membatalkan instalasi, hapus `$DSH_HOME/profiles/multica` (default `~/.dsh/profiles/multica`). `MULTICA_DSH_PLUGIN_PATH` menimpa direktori tempat instalasi me-resolve pnpm. DSH Desktop menyimpan pnpm yang diteruskan oleh `dsh plugin` di dalam direktori runtime-commands miliknya sendiri, baik di macOS maupun Windows, dan daemon menemukan serta menambahkannya (prepend) secara otomatis — termasuk layout bervers yang digunakan oleh Desktop yang lebih baru — sehingga variabel ini hanya dibutuhkan untuk instalasi yang tidak dapat ditemukan oleh daemon, atau untuk membuat instalasi menggunakan pnpm milik Anda sendiri. Mengatur variabel ini mengganti pencarian secara menyeluruh: jika direktorinya tidak ada, instalasi akan fallback ke pnpm apa pun yang ada di `PATH` daemon, bukan ke yang sudah dibundel. Linux tidak memiliki DSH Desktop, sehingga di sana instalasi selalu menggunakan `PATH`. Dim mendukung `MULTICA_DIM_PATH` dan `MULTICA_DIM_MODEL` (model id dari katalog dim). ZeroClaw mendukung `MULTICA_ZEROCLAW_PATH` tetapi tidak memiliki variabel model; pemilihan model dimiliki oleh agent profile-nya. Argumen default machine-wide melalui `MULTICA_<PROVIDER>_ARGS` saat ini didukung untuk lima alat: Claude Code, Codex, CodeBuddy, Qwen Code, dan QwenPaw. Variabelnya adalah `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, dan `MULTICA_QWENPAW_ARGS`. Contohnya:
+
+```dotenv
+MULTICA_CLAUDE_PATH=/opt/bin/claude
+MULTICA_CLAUDE_ARGS=--max-turns 40
+```
+
+Cleanup background yang terverifikasi pada Cursor membutuhkan Linux 6.9 atau lebih baru (process-group pidfds), dukungan kernel macOS untuk query identitas proses dan audit-token signalling, atau nested Job Object yang berhasil ditetapkan di Windows. Di macOS, setiap proses disinyal menggunakan versi PID yang diverifikasi kernel; tidak dibutuhkan penggabungan grup same-session. API macOS ini bersifat private dan diperiksa pada saat capture. Sebuah launch yang tidak dapat diklaim (claimed) mengembalikan hasil tool aslinya dan menggunakan idle watchdog biasa, termasuk saat tool watchdog diatur `0`. Pekerjaan yang sudah diklaim tetap in-flight jika cleanup tidak dapat dikonfirmasi. Dengan tool watchdog diatur ke `0`, tidak ada batas semacam itu sama sekali: background work yang sudah diklaim membuat eksekusi tetap in-flight selama ia berjalan, sehingga eksekusi hanya dibatasi oleh `MULTICA_AGENT_TIMEOUT`, yang defaultnya adalah `0`.
+
+Proses background Cursor yang dimiliki (owned) juga dihentikan saat eksekusi selesai secara normal, sehingga server background yang dimulai oleh eksekusi tersebut tidak secara sengaja bertahan melewati finalisasi. macOS dapat mengenali child process yang terlambat melalui identitas original-parent yang tersimpan, tetapi tidak dapat membuktikan sebuah chain yang proses perantaranya menghilang sebelum observasi dilakukan. Proses semacam itu, pekerjaan yang keluar dari grup yang dipantau, atau error ownership/signalling yang persisten dapat meninggalkan background work. Cleanup yang tidak terkonfirmasi dicatat di log dan tidak pernah memberikan recovery window successful-cleanup; proses yang tidak dikenal tidak dibunuh (killed) hanya berdasarkan PID numerik atau process group-nya.
+
+Urutan prioritas adalah command-line flag → environment variable → `~/.multica/config.json` → default built-in. Untuk perilaku watchdog, lihat [Daemon dan runtime](/daemon-runtimes).
+
+### Menyimpan konfigurasi daemon secara persisten
+
+Pengaturan umum sisi daemon juga dapat dituliskan ke `~/.multica/config.json` daripada mengandalkan shell environment variable; profile bernama menyimpan miliknya di `~/.multica/profiles/<name>/config.json`:
+
+```bash
+multica config set poll_interval 10s
+multica config show
+```
+
+Key yang didukung:
+
+| Key | Default | Deskripsi |
+|---|---|---|
+| `server_url` | `ws://localhost:8080/ws` | URL API / WebSocket Multica |
+| `app_url` | kosong | URL web yang digunakan untuk sign-in browser |
+| `workspace_id` | kosong | Ruang Kerja default |
+| `device_name` | hostname | Nama device yang ditampilkan di daftar runtime |
+| `runtime_name` | `Local Agent` | Nama tampilan runtime |
+| `workspaces_root` | path yang mengikuti profile di bawah `~` | Direktori root untuk direktori kerja eksekusi |
+| `max_concurrent_tasks` | `20` | Batas atas eksekusi konkuren; `0` atau kosong berarti tidak diatur |
+| `poll_interval` | `30s` | Interval polling eksekusi |
+| `ws_claim_poll_interval` | `3m` | Batas atas untuk safety poll claim WebSocket yang sehat, independen dari `poll_interval`; daemon menerapkan jitter yang hanya ke arah bawah |
+| `heartbeat_interval` | `15s` | Interval heartbeat |
+| `agent_timeout` | tidak terbatas | Batas waktu absolut per eksekusi |
+| `codex_semantic_inactivity_timeout` | diturunkan | Ambang semantic-silence Codex. Jika tidak ada yang diatur, nilainya mengikuti yang lebih besar antara budget idle dan tool watchdog; budget tool `0` fallback ke budget idle, dan hanya saat seluruh watchdog suite dinonaktifkan Codex mempertahankan nilai `10m` miliknya sendiri |
+| `codex_handshake_timeout` | `30s`; `thread/start`, `thread/resume`: `60s` | Batas atas handshake startup Codex app-server. Nilai eksplisit akan menimpa kedua budget tersebut secara global |
+| `disable_auto_update` | mengikuti environment | `true` mematikan auto-update; `false` menghapus override lokal dan kembali ke env var atau default |
+| `auto_update_check_interval` | `6h` | Interval pemeriksaan update |
+| `disable_auto_reload` | mengikuti environment | `true` menghentikan daemon dari mengikuti binary yang digantikan di disk; `false` menghapus override lokal. Diselesaikan secara terpisah dari `disable_auto_update` |
+
+Beberapa aturan nilai:
+
+- Key duration menerima Go duration positif (seperti `10s`, `2h`); `0s` dan nilai negatif ditolak. Satu pengecualian adalah `agent_timeout`: `0s` valid dan secara eksplisit menonaktifkan batas waktu eksekusi.
+- Memberikan string kosong akan menghapus nilai yang tersimpan (persisted) dan fallback ke env var atau default built-in, misalnya `multica config set poll_interval ""`.
+- `max_concurrent_tasks` membutuhkan integer non-negatif.
+- Nilai `workspaces_root` yang relatif dikonversi menjadi path absolut saat disimpan.
+
+## Observability dan analytics
+
+| Variabel | Default | Deskripsi |
+|---|---|---|
+| `DO_NOT_TRACK` | kosong (telemetry aktif) | Atur `1` atau `true` (tidak case-sensitive) untuk menghentikan pengumpulan dan pengiriman telemetry self-host anonim first-party |
+| `ANALYTICS_DISABLED` | `false` | Atur `true` untuk mematikan reporting PostHog |
+| `POSTHOG_API_KEY` | kosong | Reporting mati saat tidak diatur; atur untuk menggunakan proyek PostHog Anda sendiri |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | Host PostHog |
+| `METRICS_ADDR` | kosong | Alamat listen metrics Prometheus; kosong berarti tidak dijalankan |
+| `REALTIME_METRICS_TOKEN` | kosong | Bearer token yang melindungi `/health/realtime` |
+
+Telemetry self-host first-party mengirim satu snapshot level-deployment per hari UTC ke endpoint `https://telemetry.multica.ai/v1/telemetry/events` yang tetap dan tidak dapat dikonfigurasi. Snapshot ini berisi versi rilis resmi; jumlah Ruang Kerja, anggota manusia yang unik, agent aktif, dan daemon aktif 24 jam yang sudah di-bucket; serta jumlah eksekusi agregat untuk 24 jam sebelumnya. Snapshot ini tidak pernah menyertakan nama, alamat email atau domain, alamat IP, identifier bisnis, detail host/device, repository, model/plugin, prompt/output, comment/chat, path, data token/cost, kredensial, error, stack, atau log. Ini hanya digunakan untuk memahami adopsi versi yang dihosting mandiri, rentang ukuran deployment, dan penggunaan agregat — bukan untuk keputusan billing, licensing, autentikasi, atau keamanan.
+
+`DO_NOT_TRACK` dan `ANALYTICS_DISABLED` bersifat independen. Yang pertama mengontrol snapshot anonim first-party ini; yang kedua mengontrol integrasi PostHog opsional.
+
+## Langkah selanjutnya
+
+- [Masuk dan pendaftaran](/auth-setup) — metode masuk dan pembatasan pendaftaran.
+- [Pemecahan masalah](/troubleshooting) — diagnosis berbasis gejala untuk masalah deployment.
+- [Daemon dan runtime](/daemon-runtimes) — bagian sisi daemon dari konfigurasi ini.
+</content>

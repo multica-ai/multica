@@ -1,0 +1,53 @@
+{
+  "header": {
+    "back": "Kembali",
+    "log_out": "Keluar"
+  },
+  "not_found": {
+    "title": "Undangan tidak ditemukan",
+    "description": "Undangan ini mungkin telah kedaluwarsa, dicabut, atau tidak terkait dengan akun Anda.",
+    "go_to_dashboard": "Ke dashboard"
+  },
+  "accepted": {
+    "title": "Anda bergabung dengan {{workspace_name}}!",
+    "redirecting": "Mengalihkan ke ruang kerja..."
+  },
+  "declined": {
+    "title": "Undangan ditolak",
+    "description": "Anda tidak akan ditambahkan ke ruang kerja ini.",
+    "go_to_dashboard": "Ke dashboard"
+  },
+  "main": {
+    "join_title": "Bergabung dengan {{workspace_name}}",
+    "fallback_workspace_name": "ruang kerja",
+    "invited_role_admin": "mengundang Anda untuk bergabung sebagai admin.",
+    "invited_role_member": "mengundang Anda untuk bergabung sebagai anggota.",
+    "already_handled_accepted": "Undangan ini sudah diterima.",
+    "already_handled_declined": "Undangan ini sudah ditolak.",
+    "expired": "Undangan ini telah kedaluwarsa.",
+    "decline": "Tolak",
+    "declining": "Menolak...",
+    "accept": "Terima & Bergabung",
+    "joining": "Bergabung..."
+  },
+  "errors": {
+    "accept_failed": "Gagal menerima undangan",
+    "decline_failed": "Gagal menolak undangan"
+  },
+  "batch": {
+    "log_out": "Keluar",
+    "empty_title": "Tidak ada undangan tertunda",
+    "empty_hint": "Lanjutkan untuk menyiapkan ruang kerja Anda sendiri.",
+    "empty_continue": "Lanjutkan ke penyiapan",
+    "title": "Anda telah diundang",
+    "subtitle": "Pilih ruang kerja yang ingin Anda ikuti. Anda selalu dapat menangani sisanya nanti dari sidebar.",
+    "submit_skip": "Lewati dan siapkan ruang kerja saya sendiri",
+    "submit_join_other": "Gabung {{count}} ruang kerja",
+    "joining": "Bergabung...",
+    "error_generic": "Gagal memproses undangan. Silakan coba lagi.",
+    "row_workspace_fallback": "Ruang Kerja",
+    "row_inviter_fallback": "Seseorang",
+    "row_invited_admin": "{{inviter}} mengundang Anda sebagai admin",
+    "row_invited_member": "{{inviter}} mengundang Anda sebagai anggota"
+  }
+}

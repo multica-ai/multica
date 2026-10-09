@@ -5,5 +5,6 @@ export function docsHrefForLocale(locale: SupportedLocale): string {
   if (locale === "ko") return "/docs/ko";
   if (locale === "ja") return "/docs/ja";
   if (locale === "fr") return "/docs/fr";
+  if (locale === "id") return "/docs/id";
   return "/docs";
 }

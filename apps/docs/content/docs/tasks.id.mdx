@@ -1,0 +1,175 @@
+---
+title: Eksekusi
+description: Bagaimana satu eksekusi agent diantrekan, dijalankan, dihentikan, dan dicoba ulang.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Setiap kali seorang agent mulai bekerja, Multica membuat sebuah **eksekusi**. Eksekusi ini mencatat apa yang memicu pekerjaan itu, agent mana yang menerimanya, seberapa jauh progresnya, dan apakah pada akhirnya berhasil.
+
+## Tugas dan eksekusi
+
+Sebuah tugas menyimpan tujuan, diskusi, penerima tugas, dan status akhir dari sebuah pekerjaan; sebuah eksekusi mencatat satu kali agent berjalan terhadap pekerjaan tersebut.
+
+| | Tugas | Eksekusi |
+| --- | --- | --- |
+| Apa yang dicatat | Sebuah pekerjaan yang terus berjalan | Satu kali agent berjalan |
+| Berapa lama berlangsung | Dapat didiskusikan, diubah, dan ditugaskan ulang berulang kali | Dari pemicu hingga selesai, gagal, atau dibatalkan |
+| Kardinalitas | Satu tugas dapat mencakup banyak eksekusi | Setiap eksekusi mendapat catatannya sendiri |
+
+Jadi, tugas yang sama dapat diserahkan ke agent yang berbeda secara bergantian, atau dijalankan lagi setelah gagal. Setiap eksekusi menghasilkan catatan eksekusi baru; catatan sebelumnya tidak pernah ditimpa.
+
+## Sumber pemicu
+
+Semua hal berikut dapat memicu sebuah eksekusi:
+
+- Menugaskan sebuah tugas ke agent atau Squad.
+- Mention seorang agent di komentar.
+- Mengirim pesan ke agent di obrolan.
+- Sebuah Autopilot yang berjalan terjadwal atau dari peristiwa eksternal.
+
+Titik masuk yang berbeda memberikan konteks yang berbeda, tetapi eksekusinya berjalan dengan cara yang sama: Multica membuat eksekusi, sebuah runtime mengklaimnya, dan runtime menjalankan alat pengkodean AI yang dikonfigurasikan pada agent tersebut.
+
+## Siklus hidup eksekusi
+
+Sebuah eksekusi biasanya melalui state berikut:
+
+| State | Arti |
+| --- | --- |
+| `deferred` | Dijadwalkan untuk berjalan nanti; masuk antrean pada waktu yang ditentukan |
+| `queued` | Menunggu sebuah runtime mengklaimnya |
+| `dispatched` | Sebuah runtime telah mengklaimnya dan sedang memulai alat pengkodean AI |
+| `waiting_local_directory` | Direktori lokal target sedang dipegang oleh eksekusi lain; menunggu kunci direktori dilepas |
+| `running` | Alat pengkodean AI sedang berjalan |
+| `completed` | Eksekusi selesai secara normal |
+| `failed` | Eksekusi mengalami error atau terinterupsi |
+| `cancelled` | Eksekusi dihentikan secara manual |
+
+Saat runtime online, eksekusi baru biasanya mulai dengan cepat; jika runtime menjadi offline setelah eksekusi masuk antrean, eksekusi itu tetap dalam antrean sampai runtime pulih. Pekerjaan yang diantrekan tidak kedaluwarsa karena menunggu terlalu lama — runtime yang terus mengirim heartbeat berarti sibuk, bukan hilang, sehingga antreannya dibiarkan terurai selama diperlukan. Sebuah eksekusi yang diantrekan hanya gagal ketika **kedua** kondisi terpenuhi: runtime-nya telah diam lebih lama dari masa tenggang reconnect, **dan** eksekusi itu sendiri sudah diantrekan selama itu juga. Kondisi kedua ini penting ketika Anda menugaskan pekerjaan ke komputer yang sudah tertidur — eksekusi tersebut masih mendapat masa tenggang penuh bagi Anda untuk menghidupkannya kembali, bukannya langsung gagal.
+
+<Callout type="info">
+Jika sistem sudah tahu runtime target sedang offline sebelum pemicu terjadi, beberapa tindakan langsung melaporkan bahwa eksekusi tidak dapat dimulai sekarang, alih-alih membuat eksekusi yang tidak dapat diklaim siapa pun.
+</Callout>
+
+Runtime dengan heartbeat yang sehat dapat menjalankan eksekusi yang lama; server tidak pernah memaksa mengakhiri sebuah eksekusi hanya karena sudah berjalan cukup lama. Runtime yang menentukan apakah prosesnya sudah macet berdasarkan aktivitas sebenarnya; lihat [Environment variables](/environment-variables#konfigurasi-daemon) untuk pengaturan terkait.
+
+## Melihat riwayat eksekusi
+
+Setiap eksekusi yang dihasilkan sebuah tugas terdaftar di bagian **Execution log** pada sidebar kanan tugas tersebut — bukan di halaman atau tab terpisah. Bagian ini terbuka secara default: eksekusi yang aktif tetap disematkan di atas, dan yang sudah selesai berada di balik **Show past runs (N)**. Setiap baris menunjukkan sumber pemicu, agent yang mengeksekusi, state, dan waktunya. Jika Anda tidak melihat bagian ini, buka sidebar dengan tombol panel di header tugas; pada layar sempit bagian ini dimulai dalam keadaan terlipat.
+
+Log ini memperbarui diri melalui koneksi realtime selama halaman tetap terbuka — eksekusi baru, perubahan status, dan komentar agent muncul tanpa perlu memuat ulang secara manual.
+
+Selama agent bekerja, header tugas juga menampilkan chip langsung seperti "Engineer is working". Mengarahkan kursor ke chip itu menunjukkan eksekusi aktif yang sama, sehingga Anda dapat memeriksa progres tanpa meninggalkan halaman.
+
+Dari sini Anda dapat:
+
+- Klik **View transcript** pada sebuah baris untuk melihat pesan agent, pemanggilan tool, dan output error. Untuk eksekusi yang masih berjalan, transcript tetap mengalir selama dialog terbuka, dan toggle **Newest first** membalik urutan peristiwa.
+- Menghentikan eksekusi yang berstatus deferred, queued, starting, menunggu direktori lokal, atau running.
+- Mencoba ulang eksekusi yang gagal atau dibatalkan.
+
+![Execution log di sidebar tugas: eksekusi aktif di atas eksekusi yang sudah lewat](/images/docs/quickstart-run-result.webp)
+
+![Catatan eksekusi: linimasa status, ringkasan agent, dan pemanggilan tool satu per satu](/images/docs/task-transcript.webp)
+
+<Callout type="warning">
+Mengubah penerima tugas atau status sebuah tugas tidak menghentikan eksekusi yang sudah berjalan. Untuk menghentikannya, hentikan eksekusi yang bersangkutan di execution log. Eksekusi aktif dibatalkan bersama sebuah tugas hanya ketika tugas tersebut dihapus.
+</Callout>
+
+## Kegagalan dan percobaan ulang otomatis
+
+Gangguan sementara — runtime yang sebentar offline, daemon yang restart, timeout eksekusi, atau gangguan jaringan pada alat pengkodean AI — dapat memicu percobaan ulang otomatis. Sebuah eksekusi reguler secara default berjalan paling banyak dua kali; gangguan jaringan tool mendapat hingga tiga kali percobaan.
+
+Error yang dikembalikan oleh agent itu sendiri biasanya tidak dicoba ulang secara otomatis. Kredensial yang kedaluwarsa, kuota yang habis, kesalahan konfigurasi, atau model yang tidak dapat menyelesaikan permintaan semuanya perlu diperbaiki penyebabnya dulu, diikuti dengan percobaan ulang manual.
+
+Mode **run only** pada sebuah Autopilot tidak mencoba ulang secara otomatis, untuk menghindari tumpang tindih dengan eksekusi terjadwal selanjutnya. Mode **create issue** menghasilkan eksekusi tugas biasa, sehingga kegagalan infrastruktur tetap mendapat percobaan ulang menurut aturan di atas. Kedua mode menampilkan hasil akhirnya di riwayat eksekusi Autopilot.
+
+Ketika sebuah tugas tidak memiliki eksekusi aktif lain dan tidak ada percobaan ulang baru yang menunggu, kegagalan memindahkan tugas berstatus `in_progress` kembali ke `todo`.
+
+## Referensi alasan kegagalan
+
+Alasan kegagalan yang ditampilkan di execution log dan statistik penggunaan terbagi dalam dua kelompok: kode alasan tanpa prefiks dicatat oleh platform; kode `agent_error.*` diklasifikasikan dari error alat pengkodean AI itu sendiri.
+
+**Sisi platform**
+
+| Alasan | Arti | Yang harus dilakukan |
+| --- | --- | --- |
+| `runtime_offline` | Runtime menjadi offline selama eksekusi berjalan | Pulihkan runtime lalu coba ulang; lihat [Daemon dan runtime](/daemon-runtimes) |
+| `queued_expired` | Runtime berhenti mengirim heartbeat lebih lama dari masa tenggang reconnect, dan eksekusi juga sudah diantrekan selama itu | Pastikan runtime online, lalu coba ulang |
+| `runtime_recovery` | Daemon mengklaim kembali eksekusi yang terinterupsi setelah restart | Coba ulang langsung |
+| `environment_prepare_failed` | Daemon tidak dapat menyiapkan lingkungan eksekusi untuk eksekusi ini — direktori kerjanya, atau konfigurasi runtime lokal yang ditulis ke dalamnya | Baca error mentah untuk melihat langkah mana yang gagal, lalu periksa komputer itu: ruang disk, izin, direktori yang masih digunakan, atau konfigurasi lokal alat pengkodean AI |
+| `cancelled` | Dihentikan secara manual, atau dibatalkan bersama pengarsipan atau penghapusan | Tidak ada yang perlu dilakukan |
+| `timeout` | Melebihi batas waktu eksekusi yang dikonfigurasi daemon | Persempit lingkup tugas, atau sesuaikan `agent_timeout` daemon |
+| `iteration_limit` | Mencapai batas iterasi untuk sebuah eksekusi | Persempit lingkup tugas |
+| `agent_blocked` | Agent melaporkan bahwa agent tidak dapat melanjutkan | Berikan apa yang diminta dalam komentarnya |
+| `api_invalid_request` | API platform menolak sebuah permintaan yang tidak valid | Coba ulang; laporkan masalahnya jika terjadi lagi |
+| `codex_semantic_inactivity` | Codex tidak menghasilkan output bermakna untuk waktu yang terlalu lama dan dinilai macet | Coba ulang, atau sesuaikan inactivity timeout Codex |
+
+**Sisi tool (`agent_error.*`, prefiks dihilangkan)**
+
+| Alasan | Arti | Yang harus dilakukan |
+| --- | --- | --- |
+| `provider_auth_or_access` | Autentikasi model provider gagal atau akses ditolak (401/403) | Masuk ulang di alat pengkodean AI tersebut, atau periksa API key |
+| `provider_quota_limit` | Kuota atau saldo habis (402) | Isi ulang saldo atau ganti akun |
+| `provider_capacity_or_rate_limit` | Terkena rate limit atau kapasitas penuh (429/529) | Coba ulang nanti |
+| `provider_server_error` | Error server model provider (5xx) | Coba ulang nanti |
+| `provider_network` | Kegagalan jaringan saat menghubungi model provider | Dicoba ulang otomatis; periksa jaringan komputer yang mengeksekusi jika terus terjadi |
+| `model_not_found_or_unavailable` | Model tidak ada atau sedang tidak tersedia | Pilih model yang tersedia di pengaturan agent |
+| `context_overflow` | Konteks melebihi jendela model | Persempit lingkup tugas atau kurangi input |
+| `missing_config` | Konfigurasi yang diperlukan seperti API key hilang | Isi environment variable agent atau konfigurasi tool |
+| `runtime_missing_executable` | Executable alat pengkodean AI tidak ditemukan | Instal ulang tool tersebut; lihat [Instal alat pengkodean AI](/install-agent-runtime) |
+| `runtime_version_unsupported` | Versi alat pengkodean AI terlalu lama | Perbarui tool tersebut |
+| `process_failure` | Proses tool keluar secara tidak normal | Periksa catatan eksekusi untuk menemukan penyebabnya, lalu coba ulang |
+| `empty_or_unparseable_output` | Tool tidak menghasilkan output, atau outputnya tidak dapat diurai | Coba ulang; periksa instalasi tool jika terus terjadi |
+| `agent_timeout` | Tool dihentikan setelah tidak merespons terlalu lama | Coba ulang atau persempit lingkup tugas |
+| `unknown` | Kegagalan yang tidak terklasifikasi | Periksa error mentah di catatan eksekusi |
+
+## Percobaan ulang manual
+
+Mengklik tombol retry pada sebuah baris di execution log memanggil **agent yang menangani eksekusi itu pada saat itu**. Bahkan jika tugas sudah ditugaskan ulang sejak itu, percobaan ulang tidak beralih ke penerima tugas yang baru.
+
+Sebuah percobaan ulang mempertahankan file yang sudah ditulis eksekusi sebelumnya ke direktori lokal sedapat mungkin. Jika sesi aslinya masih aman dan runtime yang sama mengklaim percobaan ulang itu, sesi sebelumnya juga dilanjutkan. Error yang merusak sesi, seperti context overflow atau permintaan yang tidak valid, memulai sesi baru di atas direktori kerja aslinya. Saat direktori aslinya sudah tidak ada lagi, direktori kerja baru digunakan.
+
+Anda juga dapat menjalankan ulang tugas saat ini dari CLI:
+
+```bash
+multica issue rerun <issue-id>
+```
+
+Bentuk ini tidak menunjuk ke eksekusi tertentu di masa lalu, sehingga menggunakan penerima tugas agent saat ini pada tugas tersebut dan dimulai dengan sesi serta direktori kerja yang baru.
+
+## Selesainya eksekusi dan selesainya tugas
+
+`completed` hanya berarti eksekusi tertentu ini berakhir secara normal — ini tidak memastikan bahwa tujuan tugas sudah tercapai. Anda masih dapat meninjau hasilnya, terus berdiskusi, menambah persyaratan, atau memicu agent itu lagi.
+
+Apakah sebuah tugas sudah selesai dinilai dari progres aktual pekerjaan dan status tugas tersebut.
+
+## Referensi cepat state dan timeout
+
+Angka-angka di bawah ini mencerminkan konfigurasi default server, untuk pengecekan cepat saat memecahkan masalah.
+
+| State | Arti | Timeout dan konsekuensi |
+| --- | --- | --- |
+| `deferred` | Dijadwalkan untuk berjalan nanti | Masuk `queued` pada waktu yang dijadwalkan, lalu aturan di bawah berlaku |
+| `queued` | Menunggu sebuah runtime mengklaimnya | Menunggu selama runtime-nya terus mengirim heartbeat, dan dalam setiap kasus setidaknya satu masa tenggang reconnect setelah diantrekan; hanya gagal ketika kedua jendela waktu sudah lewat, dan tidak dicoba ulang secara otomatis |
+| `dispatched` | Diklaim; tool sedang memulai | Dianggap gagal setelah lebih dari **5 menit** dalam state ini |
+| `waiting_local_directory` | Menunggu kunci direktori lokal dilepas | Tidak memiliki timeout sendiri; kembali ke alur startup setelah direktorinya dilepas |
+| `running` | Alat pengkodean AI sedang berjalan | Tidak ada batas durasi tetap; keberlangsungannya mengikuti heartbeat runtime — satu setiap 15 detik; runtime yang kehilangan heartbeat ditandai offline paling lambat sekitar 3 menit, dan eksekusinya ikut gagal |
+
+Percobaan ulang otomatis hanya mencakup gangguan sementara di bawah ini, dan hanya berlaku untuk eksekusi yang terikat pada sebuah tugas atau obrolan (tidak termasuk mode **run only** Autopilot):
+
+| Alasan kegagalan yang dapat dicoba ulang otomatis | Batas percobaan |
+| --- | --- |
+| Runtime offline | 2 secara default (eksekusi pertama + 1 percobaan ulang) |
+| Diklaim kembali setelah daemon restart | 2 secara default |
+| Timeout eksekusi yang dinilai platform | 2 secara default |
+| Codex macet tanpa output bermakna | 2 secara default |
+| Kegagalan unduhan paket skill | 2 secara default (proses agent belum dimulai pada titik ini; paket yang sudah terunduh berasal dari cache lokal) |
+| Gangguan jaringan tool | Hingga 3; percobaan terakhir dimulai setelah penundaan sekitar 5 detik |
+
+Semua alasan kegagalan lainnya (autentikasi, kuota, konfigurasi, model, dan sebagainya) tidak pernah dicoba ulang secara otomatis; perbaiki penyebabnya dulu, lalu coba ulang secara manual.
+
+## Langkah selanjutnya
+
+- [Daemon dan runtime](/daemon-runtimes) — komputer mana yang mengeksekusi sebuah eksekusi.
+- [Tugaskan tugas ke agent](/assigning-issues) — memicu eksekusi dari sebuah tugas.
+- [Mention agent](/mentioning-agents) — tambahkan persyaratan di komentar atau libatkan agent lain.

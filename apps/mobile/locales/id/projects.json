@@ -1,0 +1,76 @@
+{
+  "list": {
+    "title": "Proyek",
+    "empty": "Belum ada proyek",
+    "search_placeholder": "Cari proyek..."
+  },
+  "status": {
+    "planned": "Direncanakan",
+    "in_progress": "Sedang Berjalan",
+    "paused": "Dijeda",
+    "completed": "Selesai",
+    "cancelled": "Dibatalkan"
+  },
+  "priority": {
+    "urgent": "Mendesak",
+    "high": "Tinggi",
+    "medium": "Sedang",
+    "low": "Rendah",
+    "none": "Tanpa prioritas"
+  },
+  "detail": {
+    "properties": "Properti",
+    "related_issues": "Tugas terkait",
+    "resources": "Resource",
+    "lead": "Lead",
+    "no_resources": "Tidak ada resource yang dilampirkan.",
+    "add_resource": "Tambah resource"
+  },
+  "form": {
+    "icon_emoji": "Ikon (emoji)",
+    "title": "Judul",
+    "title_placeholder": "Judul proyek",
+    "description": "Deskripsi",
+    "description_placeholder": "Proyek ini tentang apa?",
+    "discard_title": "Buang proyek?",
+    "discard_message": "Draf Anda akan hilang.",
+    "keep_editing": "Lanjutkan edit",
+    "save_failed": "Gagal membuat proyek",
+    "save_failed_edit": "Gagal menyimpan"
+  },
+  "errors": {
+    "load_failed": "Gagal memuat proyek: {{message}}"
+  },
+  "actions": {
+    "creating": "Membuat...",
+    "saving": "Menyimpan..."
+  },
+  "menu": {
+    "pin": "Sematkan",
+    "unpin": "Lepas sematan",
+    "edit_details": "Edit detail",
+    "open_web": "Buka di web",
+    "project_actions": "Tindakan proyek"
+  },
+  "delete": {
+    "title": "Hapus proyek?",
+    "message": "Tindakan ini tidak dapat dibatalkan. Tugas dalam proyek ini akan kehilangan tautan proyeknya."
+  },
+  "properties": {
+    "status": "Status",
+    "priority": "Prioritas",
+    "lead": "Lead",
+    "unassigned": "Belum ditugaskan"
+  },
+  "resources": {
+    "title": "Resource",
+    "add": "Tambah",
+    "detach_title": "Lepaskan resource?",
+    "detach": "Lepaskan",
+    "empty": "Tidak ada resource yang dilampirkan."
+  },
+  "runs": {
+    "working": "Bekerja",
+    "count": "Eksekusi · {{count}}"
+  }
+}

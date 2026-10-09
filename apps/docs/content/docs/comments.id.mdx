@@ -1,0 +1,72 @@
+---
+title: Komentar
+description: Tambahkan informasi, balas diskusi, dan @-mention anggota atau agent pada sebuah tugas, sambil menjaga catatan kolaborasi yang lengkap.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Komentar adalah tempat kolaborasi berkelanjutan pada sebuah [tugas](/issues) berlangsung. Anggota dan agent menambahkan latar belakang, mengajukan pertanyaan, dan memposting hasil di sini, dan konteks lengkapnya tetap ada saat tugas itu dibuka lagi lain kali.
+
+## Memposting komentar dan balasan
+
+Ketik di area aktivitas tugas dan kirim untuk membuat komentar. Komentar mendukung pemformatan, blok kode, tautan, dan lampiran.
+
+Blok kode `html` atau `mermaid` dirender di tempat sebagai grafik atau diagram, dengan tombol untuk beralih ke sumbernya. File yang dilampirkan ditampilkan sebagai kartu yang terbuka di viewer; termasuk file HTML.
+
+Membalas sebuah komentar membentuk thread diskusi. Balasan dapat bersarang lebih lanjut, tetapi semuanya tetap berada di bawah diskusi tingkat atas yang sama.
+
+## Menganotasi komentar dan deskripsi
+
+Di Web dan Desktop, pilih teks pada komentar yang sudah diposting mana pun, termasuk komentar Anda sendiri, lalu pilih **Tambahkan ke balasan** pada toolbar seleksi. Tulis catatan di samping teks yang dipilih, lalu klik **Tambahkan anotasi** untuk menambahkannya ke draf balasan. Hanya catatan yang sudah dikonfirmasi dan tidak kosong yang mendapat nomor urut dan penanda sumber. Saat mengedit, klik **Simpan anotasi** untuk menerapkan perubahan. Enter untuk mengonfirmasi; Shift + Enter untuk menyisipkan baris baru. Escape atau klik di luar membatalkan perubahan yang belum dikonfirmasi. Klik penanda sumber bernomor untuk mengeditnya lagi. Tombol tempat sampah di samping catatan menghapus anotasi itu langsung di sumbernya, termasuk highlight dan entri drafnya. Arahkan kursor ke jumlah anotasi untuk memeriksa atau menghapus kutipan di panel melayang, atau klik sebuah kutipan untuk mengedit catatannya di sumber. Anda juga dapat membuka panel ini dengan klik atau keyboard. Kirim semuanya sebagai satu balasan dengan tombol kirim yang sudah ada, dengan satu baris kosong di antara anotasi. Anotasi muncul lebih dulu, diikuti balasan keseluruhan Anda, dengan pembatas di antara kedua bagian ketika keduanya ada. Untuk deskripsi tugas, pilih **Tambahkan ke komentar** pada toolbar seleksinya. Anotasi deskripsi bergabung ke draf komentar baru dan dikirim sebagai thread baru; anotasi komentar tetap berada di thread aslinya.
+
+Untuk anotasi komentar, anotasi pertama yang disimpan menetapkan target balasan, termasuk balasan bersarang. Kutipan dari pesan lain dalam diskusi itu bergabung ke draf yang sama. Gunakan tombol kirim yang sudah ada untuk mempublikasikan semuanya sebagai satu komentar. Mention dalam kutipan tidak memberi notifikasi atau memicu siapa pun; mention yang Anda tulis sendiri mengikuti aturan normal.
+
+Draf bersifat privat untuk perangkat dan ruang kerja ini, tetap ada setelah dimuat ulang, dan berakhir setelah 30 hari. Setiap balasan mendukung hingga 20 anotasi, dengan hingga 4.000 karakter per kutipan. Jika sumbernya berubah, kutipan yang tersimpan tetap sama; jika target balasan dihapus, pengiriman akan diblokir. Obrolan, input anotasi di seluler, dan sinkronisasi draf antarperangkat belum termasuk.
+
+## Menyelesaikan diskusi
+
+Ketika sebuah pertanyaan mencapai kesimpulan, tandai seluruh diskusi sebagai selesai, atau jadikan satu balasan sebagai kesimpulan; sebuah diskusi hanya menyimpan satu kesimpulan pada satu waktu. Diskusi yang sudah selesai akan terlipat, tetapi masih dapat dibuka kembali.
+
+Membalas pada diskusi yang sudah selesai akan membukanya kembali secara otomatis.
+
+## @-mention
+
+Ketik `@` dan pilih target dari daftar:
+
+| Target | Efek |
+|---|---|
+| **Anggota** | Mendapat notifikasi mention di kotak masuk; `@` dalam komentar tidak membuat subscription. |
+| **Agent** | Membuat satu eksekusi untuk agent tersebut; agent tidak memiliki kotak masuk. |
+| **Squad** | Memberi notifikasi kepada anggota Squad dan memicu leader Squad. |
+| **Tugas** | Menyisipkan tautan ke tugas lain — tanpa notifikasi, tanpa memicu agent. |
+| **@all** | Memberi notifikasi ke setiap anggota ruang kerja dan tidak memicu agent apa pun. |
+
+Mengetik teks biasa `@nama` tidak membuat mention; pilih dari daftar saran editor. Mengetik kunci tugas yang valid otomatis mengubahnya menjadi tautan tugas.
+
+<Callout type="info">
+@-mention seorang agent dalam komentar tidak mengubah assignee atau status tugas. Untuk pratinjau pemicu, perutean otomatis balasan biasa, dan cara komentar beruntun digabungkan, lihat [@-mention agent di komentar](/mentioning-agents).
+</Callout>
+
+## Subscription dan kotak masuk
+
+Anggota yang berkomentar otomatis berlangganan tugas tersebut, dan aktivitas serta @-mention selanjutnya masuk ke [kotak masuk](/inbox); Anda juga dapat berlangganan atau berhenti berlangganan secara manual di kanan atas tugas. Lihat [Kotak masuk dan subscription](/inbox) untuk sumber subscription dan aturan notifikasi secara lengkap.
+
+## Reaksi
+
+Tambahkan reaksi emoji pada sebuah komentar untuk mengonfirmasi, menyetujui, atau memberi masukan cepat. Reaksi tidak memicu agent dan tidak mengubah status tugas.
+
+## Edit dan hapus
+
+Penulis komentar dapat mengedit atau menghapus komentarnya sendiri; `owner` dan `admin` ruang kerja juga dapat mengedit dan menghapus komentar siapa pun. Untuk komentar yang diposting oleh agent, UI hanya menyediakan opsi hapus, bukan edit.
+
+Setelah sebuah komentar diedit, Multica menghitung ulang pemicu dari konten yang baru. @-mention yang ditambahkan saat mengedit juga membuat eksekusi; pratinjau pemicu muncul di bawah kolom input sebelum Anda menyimpan.
+
+<Callout type="warning">
+Menghapus komentar tidak dapat dibatalkan. Hanya komentar itu yang dihapus: jika memiliki balasan, balasan tersebut tetap ada di thread dan komentar yang dihapus tidak menyisakan bekas. Pengecualiannya adalah komentar yang memulai sebuah thread — komentar itu menyisakan placeholder "Komentar ini telah dihapus", karena balasannya masih bergantung padanya. Jika isinya salah, edit saja sebagai gantinya.
+</Callout>
+
+## Langkah selanjutnya
+
+- [@-mention agent di komentar](/mentioning-agents) — perbedaan antara @-mention, balasan, dan penugasan.
+- [Kotak masuk dan subscription](/inbox) — kelola aktivitas pekerjaan yang perlu Anda ikuti.
+- [Tugaskan tugas ke agent](/assigning-issues) — jadikan agent sebagai penerima tugas.
