@@ -329,6 +329,7 @@
       "setup_description": "该运行时用于创建对话，并默认用于新智能体。",
       "start": "开始对话",
       "connect_runtime": "连接运行时",
+      "draft_parse_failed": "本次回复未能填入表单。请让智能体重新生成草稿，或手动填写。",
       "start_failed": "无法启动智能体构建器。",
       "send_failed": "无法发送消息。",
       "stop_failed": "无法停止当前生成任务。",

@@ -18,6 +18,7 @@ import type {
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChatInput } from "../../chat/components/chat-input";
+import { CHAT_COLUMN, CHAT_GUTTER } from "../../chat/components/chat-column";
 import {
   ChatMessageList,
   ChatMessageSkeleton,
@@ -228,12 +229,17 @@ export function BuilderConversation({
       )}
 
       {error ? (
-        <div
-          role="alert"
-          aria-live="polite"
-          className="mx-5 mb-3 rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive"
-        >
-          {error}
+        <div className={cn("mb-3", CHAT_GUTTER)}>
+          <div
+            role="alert"
+            aria-live="polite"
+            className={cn(
+              CHAT_COLUMN,
+              "rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive",
+            )}
+          >
+            {error}
+          </div>
         </div>
       ) : null}
 
