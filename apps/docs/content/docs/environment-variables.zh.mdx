@@ -132,9 +132,11 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `AWS_ENDPOINT_URL` | 空 | MinIO 等 S3 兼容 endpoint |
 | `S3_USE_PATH_STYLE` | 自定义 endpoint 时为 `true` | 是否使用 path-style 地址 |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign` 或 `proxy` |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 签名下载地址的有效期 |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 预览和已认证下载回退路径所用存储签名地址的有效期 |
 
 内网 MinIO 等 endpoint 无法被浏览器直接访问时，使用 `ATTACHMENT_DOWNLOAD_MODE=proxy`。
+
+所有存储模式下，下载按钮均使用独立的、绑定用户的 60 秒 bearer 地址。每次请求都会复验该用户的工作区成员资格，并经 API 传输文件，因此 CDN/S3 下载会增加 API 带宽消耗，且 API 使用的存储凭据必须具有对象读取权限。移除成员后，后续请求（包括断点续传）会被拒绝，但不能中断已开始的响应或收回已下载的内容。有效期内，持有地址的人仍可使用它；直连存储的预览地址保留配置的有效期。`ATTACHMENT_DOWNLOAD_URL_TTL` 不改变 capability 的 60 秒有效期。
 
 ### 本地磁盘
 

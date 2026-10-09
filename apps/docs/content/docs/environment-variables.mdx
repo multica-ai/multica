@@ -132,9 +132,11 @@ When `S3_BUCKET` is unset, Multica uses local disk.
 | `AWS_ENDPOINT_URL` | empty | S3-compatible endpoint such as MinIO |
 | `S3_USE_PATH_STYLE` | `true` with a custom endpoint | Whether to use path-style addressing |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, or `proxy` |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed download URLs |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed storage URLs for previews and the authenticated download fallback |
 
 Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
+
+Download buttons use a separate 60-second, user-bound bearer URL in every storage mode. Each request rechecks that user's workspace membership and streams through the API, increasing API bandwidth for CDN/S3 downloads and requiring the API's storage credentials to allow object reads. Removing the member rejects subsequent requests, including resumed downloads, but cannot cancel an already-started response or recall downloaded bytes. These URLs remain usable by anyone who possesses them while valid; direct storage preview URLs keep their configured lifetime. `ATTACHMENT_DOWNLOAD_URL_TTL` does not change the 60-second capability lifetime.
 
 ### Local disk
 

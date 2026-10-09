@@ -132,9 +132,11 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 | `AWS_ENDPOINT_URL` | 비어 있음 | MinIO 같은 S3 호환 endpoint |
 | `S3_USE_PATH_STYLE` | 사용자 지정 endpoint에서는 `true` | path-style 주소 사용 여부 |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, `proxy` 중 하나 |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 서명된 다운로드 주소의 유효 기간 |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 미리보기와 인증된 다운로드 대체 경로에 사용하는 서명된 스토리지 URL의 유효 기간 |
 
 내부 네트워크의 MinIO처럼 브라우저에서 endpoint에 직접 접근할 수 없다면 `ATTACHMENT_DOWNLOAD_MODE=proxy`를 사용하세요.
+
+다운로드 버튼은 모든 스토리지 모드에서 사용자에 연결된 별도의 60초 bearer URL을 사용합니다. 요청마다 해당 사용자의 워크스페이스 멤버십을 다시 확인하고 API를 통해 파일을 전송하므로 CDN/S3 다운로드의 API 대역폭 사용량이 늘어나며, API의 스토리지 자격 증명에는 객체 읽기 권한이 필요합니다. 멤버를 제거하면 다운로드 재개를 포함한 후속 요청이 거부되지만, 이미 시작한 응답을 중단하거나 다운로드한 데이터를 회수할 수는 없습니다. 유효한 동안에는 URL을 가진 사람이 사용할 수 있으며, 스토리지에 직접 연결되는 미리보기 URL은 설정된 유효 기간을 유지합니다. `ATTACHMENT_DOWNLOAD_URL_TTL`은 capability의 60초 유효 기간을 변경하지 않습니다.
 
 ### 로컬 디스크
 

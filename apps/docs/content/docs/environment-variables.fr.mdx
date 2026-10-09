@@ -132,9 +132,11 @@ Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
 | `AWS_ENDPOINT_URL` | vide | Point de terminaison compatible S3, comme MinIO |
 | `S3_USE_PATH_STYLE` | `true` avec un point de terminaison personnalisé | Utiliser ou non l'adressage de type chemin (path-style) |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign` ou `proxy` |
-| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Durée de vie des URL de téléchargement signées |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Durée de vie des URL de stockage signées pour les aperçus et le téléchargement authentifié de secours |
 
 Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un MinIO interne, par exemple — n'est pas accessible depuis le navigateur.
+
+Dans tous les modes de stockage, les boutons de téléchargement utilisent une URL bearer distincte, liée à l'utilisateur et valable 60 secondes. Chaque requête revérifie son appartenance au workspace et transmet le fichier via l'API, ce qui augmente la bande passante de l'API pour les téléchargements CDN/S3 et exige que les identifiants de stockage de l'API autorisent la lecture des objets. Le retrait du membre bloque les requêtes suivantes, y compris les reprises, mais ne peut ni interrompre une réponse déjà commencée ni récupérer les données téléchargées. Toute personne possédant l'URL peut l'utiliser tant qu'elle est valide ; les URL d'aperçu directes du stockage conservent leur durée de vie configurée. `ATTACHMENT_DOWNLOAD_URL_TTL` ne modifie pas les 60 secondes de validité de cette capability.
 
 ### Disque local
 
