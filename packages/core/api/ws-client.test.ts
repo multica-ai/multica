@@ -8,6 +8,11 @@ import type { WSMessage } from "../types/events";
 class FakeWebSocket {
   static lastUrl: string | null = null;
   static lastInstance: FakeWebSocket | null = null;
+  // Constants of the real WebSocket class. WSClient branches on
+  // WebSocket.OPEN; heartbeat tests also need CLOSED to emulate the
+  // browser having completed a close so repeated probes stay no-ops.
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
@@ -474,6 +479,153 @@ describe("WSClient", () => {
       ws.connect();
       simulateDisconnect();
       expect(lastTimerDelay()).toBe(1000);
+    });
+  });
+
+  // ── Half-open heartbeat tests ───────────────────────────────────────
+  //
+  // A half-open socket is one where the browser still reports OPEN and
+  // onclose never fires, but nothing the server sends ever arrives. Only
+  // inbound frames prove the path alive, so every test below drives the
+  // fake clock frame-by-frame: 45s ticks send {"type":"ping"}, and a socket
+  // silent for 135s must be force-closed into the normal reconnect path.
+
+  describe("half-open heartbeat", () => {
+    interface OpenSocket {
+      client: WSClient;
+      ws: FakeWebSocket;
+    }
+
+    /** Connect and fully open the socket. With no token set, onopen
+     *  authenticates immediately, so startHeartbeat() is running. */
+    function openSocket(): OpenSocket {
+      const client = new WSClient("ws://localhost:8080/ws");
+      client.connect();
+      const ws = FakeWebSocket.lastInstance!;
+      ws.readyState = FakeWebSocket.OPEN;
+      ws.onopen?.();
+      return { client, ws };
+    }
+
+    /** Count app-level ping frames the client has sent. */
+    function pingCount(ws: FakeWebSocket): number {
+      return ws.sent.filter((frame) => frame === JSON.stringify({ type: "ping" }))
+        .length;
+    }
+
+    /** Spy on close() that also emulates the browser completing the close —
+     *  a real socket leaves OPEN synchronously, so a repeated checkHealth()
+     *  must not close twice. */
+    function spyClose(ws: FakeWebSocket) {
+      return vi
+        .spyOn(ws, "close")
+        .mockImplementation(() => (ws.readyState = FakeWebSocket.CLOSED));
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sends an app-level ping every 45s on an authenticated socket", () => {
+      const { ws } = openSocket();
+      expect(pingCount(ws)).toBe(0);
+      vi.advanceTimersByTime(45_000);
+      expect(pingCount(ws)).toBe(1);
+      vi.advanceTimersByTime(45_000);
+      expect(pingCount(ws)).toBe(2);
+    });
+
+    it("force-closes a silent socket after 135s and reconnects via the normal path", () => {
+      // Pin jitter so the first reconnect delay is exactly the 1000ms base
+      // (800–1200ms otherwise, see scheduleReconnect) — same approach as the
+      // pending-reconnect test above.
+      vi.stubGlobal(
+        "Math",
+        new Proxy(Math, {
+          get(target, prop) {
+            if (prop === "random") return () => 0.5;
+            return (target as any)[prop];
+          },
+        }),
+      );
+
+      const { ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      // Two heartbeat ticks pass with no inbound frames: still tolerated.
+      vi.advanceTimersByTime(90_000);
+      expect(closeSpy).not.toHaveBeenCalled();
+
+      // The 135s tick hits the silence window — force-close.
+      vi.advanceTimersByTime(45_000);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+
+      // The forced close must hand over to the standard recovery chain:
+      // onclose → backoff → connect. The reconnect creates a new socket.
+      ws.onclose?.();
+      vi.advanceTimersByTime(1_000);
+      expect(FakeWebSocket.lastInstance).not.toBe(ws);
+    });
+
+    it("keeps a healthy connection alive while business frames keep arriving", () => {
+      const { ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      // Busy socket: a frame every 40s keeps resetting the silence clock,
+      // well past the 135s wall-clock window with no forced close.
+      for (let i = 0; i < 4; i++) {
+        vi.advanceTimersByTime(40_000);
+        ws.onmessage?.({
+          data: JSON.stringify({ type: "issue:updated", payload: {} }),
+        });
+      }
+      expect(closeSpy).not.toHaveBeenCalled();
+    });
+
+    it("counts pong replies alone as proof of life on an otherwise idle socket", () => {
+      const { ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      // Idle socket: no business traffic, only the ping → pong round trips
+      // the heartbeat itself generates.
+      for (let i = 0; i < 4; i++) {
+        vi.advanceTimersByTime(45_000);
+        ws.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+      }
+      expect(closeSpy).not.toHaveBeenCalled();
+    });
+
+    it("stops probing once disconnect() has been called", () => {
+      const { client, ws } = openSocket();
+      client.disconnect();
+      const sentAfterDisconnect = ws.sent.slice();
+
+      // No pings, no forced close, no reconnect attempt: the interval is
+      // gone and the socket was already detached and closed.
+      vi.advanceTimersByTime(300_000);
+      expect(ws.sent).toEqual(sentAfterDisconnect);
+      expect(FakeWebSocket.lastInstance).toBe(ws);
+    });
+
+    it("checkHealth() is a safe manual probe: silent inside the window, closes past it", () => {
+      const { client, ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      vi.advanceTimersByTime(130_000);
+      client.checkHealth();
+      expect(closeSpy).not.toHaveBeenCalled();
+
+      // Cross the window: the t=135s tick fires it.
+      vi.advanceTimersByTime(6_000);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+
+      // Idempotent: once the socket has left OPEN, more probes are no-ops.
+      client.checkHealth();
+      expect(closeSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
