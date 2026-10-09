@@ -30,14 +30,19 @@ import (
 //	POST /v1/tasks/{id}/cancel -> {ok}
 //	GET  /v1/health            -> {protocol_version, version}
 //
-// Configuration comes from the environment so no CLI discovery is involved:
+// Configuration comes from the daemon's own process environment so no CLI
+// discovery is involved:
 //
 //	MUSE_ENDPOINT  base URL of the receptionist, e.g. http://127.0.0.1:8765
 //	MUSE_TOKEN     bearer token for the receptionist (optional; sent only when set)
 //	MUSE_MODEL     informational model label reported in the probe entry
 //
-// cfg.Env entries of the same names override the process environment, which
-// keeps per-task overrides working the way MULTICA_*_MODEL does for CLIs.
+// cfg.Env is deliberately NOT consulted. It carries the agent's custom_env,
+// which any member who can edit the agent controls; honouring MUSE_ENDPOINT
+// there would let them point this daemon at an arbitrary URL, and MUSE_TOKEN
+// (which they cannot see) would still ride along from the process environment.
+// The probe only ever reads the process environment, so reading anything else
+// here would also mean probing one receptionist and running tasks on another.
 type museBackend struct {
 	cfg Config
 }
@@ -70,8 +75,8 @@ type museEndpointConfig struct {
 	token    string
 }
 
-func resolveMuseConfig(cfg Config) (museEndpointConfig, error) {
-	endpoint := cfgEnvOrOS(cfg, museEnvEndpoint)
+func resolveMuseConfig() (museEndpointConfig, error) {
+	endpoint := strings.TrimSpace(os.Getenv(museEnvEndpoint))
 	if strings.TrimSpace(endpoint) == "" {
 		return museEndpointConfig{}, fmt.Errorf("muse backend: %s is not set; configure the receptionist URL to enable the muse runtime", museEnvEndpoint)
 	}
@@ -81,19 +86,8 @@ func resolveMuseConfig(cfg Config) (museEndpointConfig, error) {
 	}
 	return museEndpointConfig{
 		endpoint: endpoint,
-		token:    cfgEnvOrOS(cfg, museEnvToken),
+		token:    strings.TrimSpace(os.Getenv(museEnvToken)),
 	}, nil
-}
-
-// cfgEnvOrOS prefers an explicit per-task env override (cfg.Env, the
-// MULTICA_*_MODEL-style channel) over the process environment.
-func cfgEnvOrOS(cfg Config, key string) string {
-	if cfg.Env != nil {
-		if v, ok := cfg.Env[key]; ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return strings.TrimSpace(os.Getenv(key))
 }
 
 func (b *museBackend) authHeader(req *http.Request, token string) {
@@ -198,7 +192,7 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("muse prompt must not be empty")
 	}
-	mc, err := resolveMuseConfig(b.cfg)
+	mc, err := resolveMuseConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +245,38 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 		}
 
+		// applyEvents pulls the events after lastSeq and folds them into the
+		// transcript and the answer. It is best-effort and reports whether the
+		// fetch succeeded.
+		applyEvents := func() bool {
+			var eventsResp museEventsResponse
+			if err := b.getJSON(ctx, mc, museTaskPath(taskID, "/events?since="+strconv.FormatInt(lastSeq, 10)), &eventsResp); err != nil {
+				logger.Debug("muse events poll failed", "task_id", taskID, "error", err)
+				return false
+			}
+			for _, e := range eventsResp.Events {
+				// The receptionist may ignore ?since= and return the full log;
+				// seq is the dedup key (the contract guarantees it is
+				// monotonically increasing per task).
+				if e.Seq <= lastSeq {
+					continue
+				}
+				lastSeq = e.Seq
+				switch e.Type {
+				case "thinking":
+					trySend(msgCh, Message{Type: MessageThinking, Content: e.Content})
+				case "tool":
+					trySend(msgCh, Message{Type: MessageToolUse, Tool: e.Tool, Content: e.Content})
+				default:
+					if e.Content != "" {
+						output.WriteString(e.Content)
+						trySend(msgCh, Message{Type: MessageText, Content: e.Content})
+					}
+				}
+			}
+			return true
+		}
+
 		ticker := time.NewTicker(musePollInterval)
 		defer ticker.Stop()
 		for {
@@ -281,34 +307,10 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			// status poll below is the source of truth for completion, so a
 			// failing events endpoint degrades streaming without failing
 			// the run. Only status-poll failures count toward the budget.
-			var eventsResp museEventsResponse
-			if err := b.getJSON(ctx, mc, "/v1/tasks/"+taskID+"/events?since="+strconv.FormatInt(lastSeq, 10), &eventsResp); err != nil {
-				logger.Debug("muse events poll failed", "task_id", taskID, "error", err)
-			} else {
-				for _, e := range eventsResp.Events {
-					// The receptionist may ignore ?since= and return the full log;
-					// seq is the dedup key (the contract guarantees it is
-					// monotonically increasing per task).
-					if e.Seq <= lastSeq {
-						continue
-					}
-					lastSeq = e.Seq
-					switch e.Type {
-					case "thinking":
-						trySend(msgCh, Message{Type: MessageThinking, Content: e.Content})
-					case "tool":
-						trySend(msgCh, Message{Type: MessageToolUse, Tool: e.Tool, Content: e.Content})
-					default:
-						if e.Content != "" {
-							output.WriteString(e.Content)
-							trySend(msgCh, Message{Type: MessageText, Content: e.Content})
-						}
-					}
-				}
-			}
+			applyEvents()
 
 			var st museTaskStatus
-			if err := b.getJSON(ctx, mc, "/v1/tasks/"+taskID, &st); err != nil {
+			if err := b.getJSON(ctx, mc, museTaskPath(taskID, ""), &st); err != nil {
 				if musePollFailed(&pollErrs, err, logger, taskID) {
 					finalStatus = "failed"
 					finalError = fmt.Sprintf("muse backend: receptionist unreachable: %v", err)
@@ -320,6 +322,14 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 			switch st.Status {
 			case "completed", "failed", "cancelled":
+				// The events and status polls are two requests, so the
+				// receptionist can emit its last events (the tail of the
+				// answer) between them. Once the task is terminal nothing more
+				// will be written, so one more fetch is complete — without it
+				// a "completed" run silently ends short of its final text.
+				if !applyEvents() {
+					logger.Warn("muse final events fetch failed; the answer may be missing its tail", "task_id", taskID)
+				}
 				if st.Status == "completed" {
 					finalStatus = "completed"
 					if st.Result != "" && output.Len() == 0 {
@@ -361,6 +371,14 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+// museTaskPath builds a /v1/tasks/{id}[/suffix] path. The task id comes from
+// the receptionist's response, so it is escaped rather than trusted: an id such
+// as "../admin" must stay one path segment of a task URL, not become a request
+// to a different endpoint carrying the bearer token.
+func museTaskPath(taskID, suffix string) string {
+	return "/v1/tasks/" + url.PathEscape(taskID) + suffix
+}
+
 // musePollFailed records one failed poll round and reports whether the
 // consecutive-failure budget is exhausted.
 func musePollFailed(pollErrs *int, err error, logger *slog.Logger, taskID string) bool {
@@ -378,7 +396,7 @@ func (b *museBackend) getJSON(ctx context.Context, mc museEndpointConfig, path s
 }
 
 func (b *museBackend) postCancel(ctx context.Context, mc museEndpointConfig, taskID string) error {
-	return b.doJSONWithConfig(ctx, mc, http.MethodPost, "/v1/tasks/"+taskID+"/cancel", nil, nil)
+	return b.doJSONWithConfig(ctx, mc, http.MethodPost, museTaskPath(taskID, "/cancel"), nil, nil)
 }
 
 func (b *museBackend) doJSONWithConfig(ctx context.Context, mc museEndpointConfig, method, path string, body any, out any) error {

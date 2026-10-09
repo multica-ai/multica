@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -116,11 +117,14 @@ func fastMusePolls(t *testing.T) {
 	})
 }
 
-func museTestConfig(endpoint, token string) Config {
-	return Config{
-		Logger: slog.Default(),
-		Env:    map[string]string{museEnvEndpoint: endpoint, museEnvToken: token},
-	}
+// museTestConfig points the backend at endpoint through the process
+// environment, which is the only place the backend reads its endpoint and
+// token from.
+func museTestConfig(t *testing.T, endpoint, token string) Config {
+	t.Helper()
+	t.Setenv(museEnvEndpoint, endpoint)
+	t.Setenv(museEnvToken, token)
+	return Config{Logger: slog.Default()}
 }
 
 func drainMuseSession(t *testing.T, s *Session) (Result, []Message) {
@@ -151,7 +155,7 @@ func TestMuseExecuteSuccess(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, err := New("muse", museTestConfig(srv.URL, "sekret"))
+	b, err := New("muse", museTestConfig(t, srv.URL, "sekret"))
 	if err != nil {
 		t.Fatalf("New(muse) = %v", err)
 	}
@@ -242,7 +246,7 @@ func TestMuseExecuteEmptyPrompt(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	for _, prompt := range []string{"", "   ", "\n\t "} {
 		if _, err := b.Execute(context.Background(), prompt, ExecOptions{}); err == nil {
 			t.Errorf("Execute(%q) succeeded, want error", prompt)
@@ -256,7 +260,8 @@ func TestMuseExecuteEmptyPrompt(t *testing.T) {
 }
 
 func TestMuseExecuteMissingEndpoint(t *testing.T) {
-	b, err := New("muse", Config{Logger: slog.Default(), Env: map[string]string{}})
+	t.Setenv(museEnvEndpoint, "")
+	b, err := New("muse", Config{Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("New(muse) = %v", err)
 	}
@@ -269,7 +274,7 @@ func TestMuseExecuteMissingEndpoint(t *testing.T) {
 }
 
 func TestMuseExecuteInvalidEndpoint(t *testing.T) {
-	b, _ := New("muse", museTestConfig("://not-a-url", ""))
+	b, _ := New("muse", museTestConfig(t, "://not-a-url", ""))
 	if _, err := b.Execute(context.Background(), "hi", ExecOptions{}); err == nil {
 		t.Fatal("Execute succeeded with garbage endpoint, want error")
 	}
@@ -280,7 +285,7 @@ func TestMuseExecuteHTTPError(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	if _, err := b.Execute(context.Background(), "hi", ExecOptions{}); err == nil {
 		t.Fatal("Execute succeeded on HTTP 500, want error")
 	} else if !strings.Contains(err.Error(), "500") {
@@ -293,7 +298,7 @@ func TestMuseExecuteUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, "wrong"))
+	b, _ := New("muse", museTestConfig(t, srv.URL, "wrong"))
 	if _, err := b.Execute(context.Background(), "hi", ExecOptions{}); err == nil {
 		t.Fatal("Execute succeeded on HTTP 401, want error")
 	} else if !strings.Contains(err.Error(), museEnvToken) {
@@ -309,7 +314,7 @@ func TestMuseExecuteRemoteFailure(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
@@ -329,7 +334,7 @@ func TestMuseExecuteCancel(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	ctx, cancel := context.WithCancel(context.Background())
 	sess, err := b.Execute(ctx, "hi", ExecOptions{})
 	if err != nil {
@@ -354,7 +359,7 @@ func TestMuseExecuteTimeout(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	sess, err := b.Execute(ctx, "hi", ExecOptions{Timeout: 50 * time.Millisecond})
@@ -373,7 +378,7 @@ func TestMuseExecutePollBudgetExhausted(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
@@ -395,7 +400,7 @@ func TestMuseExecuteResumeSessionID(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	sess, err := b.Execute(context.Background(), "hi", ExecOptions{ResumeSessionID: "muse:task-9"})
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
@@ -415,30 +420,141 @@ func TestMuseExecuteResumeSessionID(t *testing.T) {
 	}
 }
 
-func TestMuseConfigPrecedence(t *testing.T) {
+// The agent's custom_env reaches the backend as cfg.Env. It must not be able to
+// redirect the backend: the receptionist is whatever the daemon's own
+// environment says, and the daemon's token must never be sent anywhere else.
+func TestMuseEndpointAndTokenIgnoreCfgEnv(t *testing.T) {
 	fastMusePolls(t)
-	fake := &fakeMuseReceptionist{
+	legit := &fakeMuseReceptionist{
 		statuses: []museTaskStatus{{Status: "completed", Result: "ok"}},
 	}
-	srv := httptest.NewServer(fake.handler())
-	defer srv.Close()
+	legitSrv := httptest.NewServer(legit.handler())
+	defer legitSrv.Close()
 
-	// Process env points elsewhere; cfg.Env must win.
-	t.Setenv(museEnvEndpoint, "http://127.0.0.1:1")
-	t.Setenv(museEnvToken, "env-token")
-	b, _ := New("muse", museTestConfig(srv.URL, "cfg-token"))
+	var mu sync.Mutex
+	var elsewhere []string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		elsewhere = append(elsewhere, r.URL.Path+" "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		http.NotFound(w, r)
+	}))
+	defer other.Close()
+
+	t.Setenv(museEnvEndpoint, legitSrv.URL)
+	t.Setenv(museEnvToken, "daemon-token")
+	b, _ := New("muse", Config{
+		Logger: slog.Default(),
+		Env:    map[string]string{museEnvEndpoint: other.URL, museEnvToken: "agent-token"},
+	})
 	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
 	}
 	res, _ := drainMuseSession(t, sess)
 	if res.Status != "completed" {
-		t.Errorf("Status = %q, want completed (cfg.Env endpoint must win)", res.Status)
+		t.Errorf("Status = %q, want completed (the process-env receptionist must serve the run)", res.Status)
 	}
-	fake.mu.Lock()
-	defer fake.mu.Unlock()
-	if len(fake.authHeaders) == 0 || fake.authHeaders[0] != "Bearer cfg-token" {
-		t.Errorf("auth headers = %v, want [Bearer cfg-token]", fake.authHeaders)
+	mu.Lock()
+	if len(elsewhere) != 0 {
+		t.Errorf("a cfg.Env endpoint received requests: %q", elsewhere)
+	}
+	mu.Unlock()
+	legit.mu.Lock()
+	defer legit.mu.Unlock()
+	if len(legit.authHeaders) == 0 || legit.authHeaders[0] != "Bearer daemon-token" {
+		t.Errorf("auth headers = %v, want [Bearer daemon-token]", legit.authHeaders)
+	}
+}
+
+// The task id is the receptionist's input. A hostile or buggy id must stay one
+// path segment of a task URL.
+func TestMuseTaskIDIsEscapedInRequestPaths(t *testing.T) {
+	fastMusePolls(t)
+	const hostileID = "../admin/x?y=1#"
+	var mu sync.Mutex
+	var escaped []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		escaped = append(escaped, r.URL.EscapedPath())
+		mu.Unlock()
+		if r.URL.EscapedPath() == "/v1/execute" {
+			_ = json.NewEncoder(w).Encode(museExecuteResponse{TaskID: hostileID})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(museTaskStatus{Status: "completed"})
+	}))
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, "tok"))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	drainMuseSession(t, sess)
+
+	mu.Lock()
+	defer mu.Unlock()
+	taskPath := "/v1/tasks/" + url.PathEscape(hostileID)
+	sawTaskPath := false
+	for _, p := range escaped[1:] { // [0] is /v1/execute
+		if p != taskPath && p != taskPath+"/events" {
+			t.Errorf("request path %q left the task URL; want %q or %q/events", p, taskPath, taskPath)
+		}
+		if p == taskPath {
+			sawTaskPath = true
+		}
+	}
+	if !sawTaskPath {
+		t.Errorf("no status poll reached %q; paths = %q", taskPath, escaped)
+	}
+}
+
+// The events and status polls are separate requests, so the receptionist can
+// write its last event between them. The answer must still contain it.
+func TestMuseFinalEventsDrainedAfterTerminalStatus(t *testing.T) {
+	fastMusePolls(t)
+	var mu sync.Mutex
+	events := []museEvent{{Seq: 1, Type: "text", Content: "head "}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/execute", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museExecuteResponse{TaskID: "task-1"})
+	})
+	mux.HandleFunc("/v1/tasks/task-1/events", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		_ = json.NewEncoder(w).Encode(museEventsResponse{Events: events})
+	})
+	mux.HandleFunc("/v1/tasks/task-1", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		// The task finishes after the backend's events poll: the tail is
+		// written and the status flips in the same step.
+		if len(events) == 1 {
+			events = append(events, museEvent{Seq: 2, Type: "text", Content: "tail"})
+		}
+		_ = json.NewEncoder(w).Encode(museTaskStatus{Status: "completed"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	res, msgs := drainMuseSession(t, sess)
+	if res.Output != "head tail" {
+		t.Errorf("Output = %q, want %q", res.Output, "head tail")
+	}
+	var texts []string
+	for _, m := range msgs {
+		if m.Type == MessageText {
+			texts = append(texts, m.Content)
+		}
+	}
+	if strings.Join(texts, "") != "head tail" {
+		t.Errorf("streamed text = %q, want %q", texts, "head tail")
 	}
 }
 
@@ -515,7 +631,7 @@ func TestMuseExecuteEmptyTaskID(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	if _, err := b.Execute(context.Background(), "hi", ExecOptions{}); err == nil {
 		t.Fatal("Execute succeeded on empty task id, want error")
 	} else if !strings.Contains(err.Error(), "empty task id") {
@@ -531,7 +647,7 @@ func TestMuseExecuteUnknownStatus(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	b, _ := New("muse", museTestConfig(srv.URL, ""))
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
 	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
