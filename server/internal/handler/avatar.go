@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/avatar"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -253,6 +254,13 @@ func (h *Handler) normalizeStoredAvatarURL(raw string) string {
 // value that is already persisted grants nothing new.
 func (h *Handler) acceptAvatarURL(w http.ResponseWriter, r *http.Request, raw, current string) (string, bool) {
 	value := h.normalizeStoredAvatarURL(strings.TrimSpace(raw))
+	// MAKE-291: `gen:<seed>` is a display projection, not stored identity. A
+	// client that round-trips a GET response back into PATCH must not be able
+	// to overwrite the stored image/emoji with the marker — ignore it and keep
+	// whatever is persisted.
+	if avatar.IsGenerated(value) {
+		return strings.TrimSpace(current), true
+	}
 	if h.Storage == nil || value == strings.TrimSpace(current) {
 		return value, true
 	}

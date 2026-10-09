@@ -11,6 +11,8 @@ import {
   formatAvatarEmoji,
   parseAvatarEmoji,
 } from "@multica/ui/lib/avatar-emoji";
+import { parseGeneratedSeed } from "@multica/ui/lib/avatar-seed";
+import { GeneratedAvatar } from "@multica/ui/components/common/generated-avatar";
 import {
   Popover,
   PopoverContent,
@@ -155,9 +157,14 @@ export function AvatarUploadControl({
   const [emojiSearchOpen, setEmojiSearchOpen] = useState(false);
 
   const emoji = parseAvatarEmoji(value);
-  const resolved = value && !emoji ? resolvePublicFileUrl(value) : null;
+  // `gen:<seed>` display marker (MAKE-291): preview the generated avatar
+  // rather than feeding the marker to <img> as if it were a URL. Server-side
+  // precedence only emits this marker when no stored image or valid emoji won,
+  // so the preview shows exactly what ActorAvatar will render.
+  const seed = parseGeneratedSeed(value);
+  const resolved = value && !emoji && !seed ? resolvePublicFileUrl(value) : null;
   const hasImage = !!resolved && !previewError;
-  const hasAvatar = !!emoji || hasImage;
+  const hasAvatar = !!emoji || !!seed || hasImage;
   const emojiEnabled = !!onEmojiSelected;
 
   const openFileDialog = () => fileInputRef.current?.click();
@@ -244,7 +251,9 @@ export function AvatarUploadControl({
       )}
       style={{ width: size, height: size }}
     >
-      {emoji ? (
+      {seed ? (
+        <GeneratedAvatar seed={seed} name={name} />
+      ) : emoji ? (
         <span
           role="img"
           aria-label={name}

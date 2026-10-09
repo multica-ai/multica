@@ -2683,6 +2683,7 @@ SELECT
   a.id,
   a.name,
   a.avatar_url,
+  a.avatar_seed,
   COUNT(*)::int AS running_task_count,
   COALESCE(
     ARRAY_AGG(DISTINCT atq.issue_id ORDER BY atq.issue_id)

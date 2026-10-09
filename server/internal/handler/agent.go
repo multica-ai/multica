@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/avatar"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -217,7 +218,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ConversationStarters:     conversationStarters,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
-		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
+		AvatarURL:                h.projectAvatarDisplay(a.AvatarUrl, a.AvatarSeed),
 		RuntimeMode:              a.RuntimeMode,
 		RuntimeConfig:            rc,
 		CustomArgs:               customArgs,
@@ -1935,11 +1936,18 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.ConversationStarters = encoded
 	}
 	if req.AvatarURL != nil {
-		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)
-		if !ok {
-			return
+		// A `gen:` display marker round-tripped from a GET response is not a
+		// stored value: leave avatar_url (and its NULL-ness) untouched so the
+		// seed cannot destroy the persisted image/emoji (MAKE-291).
+		if avatar.IsGenerated(strings.TrimSpace(*req.AvatarURL)) {
+			// display-only marker — no write
+		} else {
+			avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)
+			if !ok {
+				return
+			}
+			params.AvatarUrl = pgtype.Text{String: avatarURL, Valid: true}
 		}
-		params.AvatarUrl = pgtype.Text{String: avatarURL, Valid: true}
 	}
 	if req.RuntimeConfig != nil {
 		// Restore the persisted gateway token when the request submitted the
@@ -2914,7 +2922,7 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		resp = append(resp, WorkspaceWorkingAgent{
 			ID:               agentID,
 			Name:             row.Name,
-			AvatarURL:        h.resolveAvatarURLPtr(textToPtr(row.AvatarUrl)),
+			AvatarURL:        h.projectAvatarDisplay(row.AvatarUrl, row.AvatarSeed),
 			RunningTaskCount: row.RunningTaskCount,
 			IssueIDs:         uuidStringsOrEmpty(row.IssueIds),
 		})

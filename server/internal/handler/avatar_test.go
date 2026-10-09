@@ -510,6 +510,30 @@ func TestAcceptAvatarURL_PassesThroughForeignValues(t *testing.T) {
 	}
 }
 
+// TestAcceptAvatarURL_IgnoresGeneratedMarker — `gen:<seed>` is a display
+// projection (MAKE-291), never stored identity. A client that GETs an agent
+// and PATCHes the whole object back must not overwrite the persisted
+// image/emoji/NULL with the marker: the write side returns whatever is
+// already stored, so the seed can't be destroyed by an API round-trip.
+func TestAcceptAvatarURL_IgnoresGeneratedMarker(t *testing.T) {
+	withAvatarStorage(t, &mockStorageNoCdn{}, "")
+
+	marker := "gen:11111111-1111-1111-1111-111111111111"
+
+	// Round-trip over each stored state: legacy emoji stays emoji, an image
+	// stays the image, NULL stays NULL (empty current passes through as "").
+	for _, current := range []string{"emoji:🐙", "https://cdn.example.com/workspaces/x/avatars/a.png", ""} {
+		value, status := acceptAvatarURL(t, marker, current)
+		if status != http.StatusOK {
+			t.Errorf("acceptAvatarURL(%q, %q) status = %d, want 200", marker, current, status)
+			continue
+		}
+		if value != current {
+			t.Errorf("acceptAvatarURL(%q, %q) = %q, want the stored value back", marker, current, value)
+		}
+	}
+}
+
 // TestAvatarRedirectMaxAge_StaysBelowSignatureTTL — ATTACHMENT_DOWNLOAD_URL_TTL
 // takes any positive duration. A fixed 60s cache would let a browser replay a
 // redirect to an already-expired storage URL on a short-TTL deployment.
