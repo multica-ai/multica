@@ -150,6 +150,8 @@ type RerunIssueRequest struct {
 	// assignee — so clicking retry on row that belonged to a now-displaced
 	// agent re-fires that same agent, not the new assignee.
 	TaskID string `json:"task_id,omitempty"`
+	// Only 1 is accepted as an explicit retry budget.
+	MaxAttempts *int32 `json:"max_attempts,omitempty"`
 }
 
 // RerunIssue manually re-enqueues an agent run for the issue. By default it
@@ -177,6 +179,12 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+	}
+
+	// Reject unsupported budgets before enqueuing anything.
+	if req.MaxAttempts != nil && *req.MaxAttempts != 1 {
+		writeError(w, http.StatusBadRequest, "max_attempts must be 1 when provided")
+		return
 	}
 
 	var sourceTaskID pgtype.UUID
@@ -208,7 +216,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke, req.MaxAttempts != nil)
 	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
