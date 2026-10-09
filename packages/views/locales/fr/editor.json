@@ -168,5 +168,11 @@
     "export_png": "Télécharger en PNG",
     "export_svg": "Télécharger en SVG",
     "export_source": "Télécharger le .mmd"
+  },
+  "details_block": {
+    "summary_default": "Détails",
+    "summary_aria_label": "Résumé",
+    "body_placeholder": "Corps (Markdown)",
+    "body_aria_label": "Corps des détails (Markdown)"
   }
 }

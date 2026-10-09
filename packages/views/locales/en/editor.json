@@ -168,5 +168,11 @@
     "export_png": "Download PNG",
     "export_svg": "Download SVG",
     "export_source": "Download .mmd"
+  },
+  "details_block": {
+    "summary_default": "Details",
+    "summary_aria_label": "Summary",
+    "body_placeholder": "Body (Markdown)",
+    "body_aria_label": "Details body (Markdown)"
   }
 }
