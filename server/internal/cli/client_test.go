@@ -166,6 +166,71 @@ func TestPostJSON(t *testing.T) {
 	})
 }
 
+func TestPostJSONRaw(t *testing.T) {
+	t.Run("returns raw object body", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"token":"mul_xyz"}`)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		raw, err := client.PostJSONRaw(context.Background(), "/api/tokens", map[string]any{"name": "x"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(string(raw), "mul_xyz") {
+			t.Errorf("expected raw body to contain the token, got %q", raw)
+		}
+	})
+
+	t.Run("returns raw array body without failing", func(t *testing.T) {
+		// Reproduces #3177: a reverse proxy rewrites POST /api/tokens into a GET
+		// against the list endpoint, returning an array. PostJSONRaw must hand back
+		// the raw bytes so the caller can decode defensively — the previous
+		// PostJSON(path, body, &struct{Token string}) would have failed here with
+		// "json: cannot unmarshal array into Go value of type struct { Token string }".
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `[{"id":"1","name":"x"}]`)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		raw, err := client.PostJSONRaw(context.Background(), "/api/tokens", map[string]any{"name": "x"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		var arr []map[string]any
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			t.Fatalf("expected array body the caller can decode, got %q: %v", raw, err)
+		}
+		if len(arr) != 1 {
+			t.Errorf("expected 1 element, got %d", len(arr))
+		}
+	})
+
+	t.Run("error status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, "bad request")
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		_, err := client.PostJSONRaw(context.Background(), "/api/tokens", map[string]any{"name": "x"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got := err.Error(); got != "POST /api/tokens returned 400: bad request" {
+			t.Errorf("unexpected error message: %s", got)
+		}
+	})
+}
+
 func TestDeleteJSONResponse(t *testing.T) {
 	type respBody struct {
 		ID string `json:"id"`
