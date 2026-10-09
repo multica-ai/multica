@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -153,7 +154,7 @@ func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
 
 func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := writeAtomic(dest, bytes.NewReader(data)); err != nil {
+	if err := writeAtomic(ctx, dest, bytes.NewReader(data)); err != nil {
 		return "", err
 	}
 	// Best-effort sidecar so ServeFile can restore the original filename in
@@ -177,7 +178,7 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 
 func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := writeAtomic(dest, data); err != nil {
+	if err := writeAtomic(ctx, dest, data); err != nil {
 		return "", err
 	}
 	if filename != "" {
@@ -201,7 +202,12 @@ func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Rea
 // longer exists. With rename-into-place a failed write only discards its own
 // temp file and the existing object survives untouched. Both upload paths go
 // through here so neither can reintroduce the destructive shape.
-func writeAtomic(dest string, src io.Reader) error {
+func writeAtomic(ctx context.Context, dest string, src io.Reader) error {
+	// Checked before anything is created so an already-cancelled caller leaves
+	// no staging file behind, and again on every read below.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("local storage MkdirAll: %w", err)
 	}
@@ -212,9 +218,15 @@ func writeAtomic(dest string, src io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("local storage create temp: %w", err)
 	}
-	if _, err := io.Copy(f, src); err != nil {
+	if _, err := io.Copy(f, &contextReader{ctx: ctx, r: src}); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
+		// A cancellation must stay recognizable to errors.Is: callers above
+		// distinguish "the client went away" from a real storage failure, and
+		// the rename never ran, so the existing object at this key is intact.
+		if cause := ctx.Err(); cause != nil && errors.Is(err, cause) {
+			return err
+		}
 		return fmt.Errorf("local storage stream copy: %w", err)
 	}
 	if err := f.Close(); err != nil {
@@ -325,10 +337,34 @@ func readLocalMeta(filePath string) (localMeta, bool) {
 }
 
 func (s *LocalStorage) UploadFromReader(ctx context.Context, key string, reader io.Reader, contentType string, filename string) (string, error) {
-	data, err := io.ReadAll(reader)
+	// Read through the context so a cancelled caller stops this copy too.
+	// Buffering the whole source first and only then consulting ctx (inside
+	// Upload) would keep reading a stalled or endless reader long after the
+	// request it belongs to has gone away.
+	data, err := io.ReadAll(&contextReader{ctx: ctx, r: reader})
 	if err != nil {
+		if cause := ctx.Err(); cause != nil && errors.Is(err, cause) {
+			return "", err
+		}
 		return "", fmt.Errorf("local storage ReadAll: %w", err)
 	}
 
 	return s.Upload(ctx, key, data, contentType, filename)
+}
+
+// contextReader makes an io.Reader observe cancellation. io.Copy and
+// io.ReadAll have no context of their own, so without this a cancelled upload
+// runs to EOF: the goroutine and its filesystem writes outlive the caller.
+// The check sits before each Read, so an in-flight read still completes —
+// that is the granularity the caller gets, and it is bounded by the source.
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c *contextReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
