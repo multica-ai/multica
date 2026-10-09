@@ -8718,6 +8718,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ResumeExpected:         task.PriorSessionID != "",
 		ResumeContinuityNotice: backendResumeContinuityNotice(task),
 		TaskToken:              agentToken,
+		MulticaServerURL:       d.cfg.ServerBaseURL,
+		MulticaWorkspaceID:     task.WorkspaceID,
 		ExtraArgs:              extraArgs,
 		CustomArgs:             customArgs,
 		McpConfig:              mcpConfig,

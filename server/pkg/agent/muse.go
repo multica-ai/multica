@@ -121,6 +121,12 @@ type museExecuteRequest struct {
 	// API (read issues, post comments) with the same scoped identity a CLI
 	// backend gets via MULTICA_TOKEN. Omitted when the daemon has none.
 	TaskToken string `json:"task_token,omitempty"`
+	// ServerURL is the Multica API base URL. The worker needs it to know
+	// where to call; CLI backends get it as MULTICA_SERVER_URL.
+	ServerURL string `json:"server_url,omitempty"`
+	// WorkspaceID is the workspace UUID. The worker passes it as a query
+	// param on API calls; CLI backends get it as MULTICA_WORKSPACE_ID.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 type museExecuteResponse struct {
@@ -217,11 +223,13 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 	var execResp museExecuteResponse
 	if err := b.postExecute(ctx, mc, museExecuteRequest{
-		Prompt:    prompt,
-		SessionID: opts.ResumeSessionID,
-		TimeoutS:  timeoutS,
-		WorkDir:   opts.Cwd,
-		TaskToken: opts.TaskToken,
+		Prompt:      prompt,
+		SessionID:   opts.ResumeSessionID,
+		TimeoutS:    timeoutS,
+		WorkDir:     opts.Cwd,
+		TaskToken:   opts.TaskToken,
+		ServerURL:   opts.MulticaServerURL,
+		WorkspaceID: opts.MulticaWorkspaceID,
 	}, &execResp); err != nil {
 		return nil, err
 	}

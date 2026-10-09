@@ -100,6 +100,14 @@ type ExecOptions struct {
 	// it in their wire request so the remote worker can call the Multica API
 	// with the same scoped identity. Empty when the server did not provide one.
 	TaskToken string
+	// MulticaServerURL is the Multica API base URL (e.g.
+	// https://multica.example.com). Remote backends forward it so the worker
+	// knows where to call; CLI backends get it as MULTICA_SERVER_URL.
+	MulticaServerURL string
+	// MulticaWorkspaceID is the workspace UUID for this task. Remote backends
+	// forward it so the worker can pass it as a query param; CLI backends get
+	// it as MULTICA_WORKSPACE_ID.
+	MulticaWorkspaceID string
 	// ExtraArgs is honoured only by backends that opt in by reading it; the
 	// rest ignore it. Deliberately not enumerated here — the previous list
 	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS

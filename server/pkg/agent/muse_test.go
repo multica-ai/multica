@@ -258,8 +258,10 @@ func TestMuseExecuteForwardsTaskToken(t *testing.T) {
 		t.Fatalf("New(muse) = %v", err)
 	}
 	_, err = b.Execute(context.Background(), "do the thing", ExecOptions{
-		Cwd:       "/tmp/work-1",
-		TaskToken: "mat_abc123",
+		Cwd:              "/tmp/work-1",
+		TaskToken:        "mat_abc123",
+		MulticaServerURL: "https://multica.example.com",
+		MulticaWorkspaceID: "ws-123",
 	})
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
@@ -270,6 +272,12 @@ func TestMuseExecuteForwardsTaskToken(t *testing.T) {
 	}
 	if body.TaskToken != "mat_abc123" {
 		t.Errorf("task_token = %q, want %q", body.TaskToken, "mat_abc123")
+	}
+	if body.ServerURL != "https://multica.example.com" {
+		t.Errorf("server_url = %q", body.ServerURL)
+	}
+	if body.WorkspaceID != "ws-123" {
+		t.Errorf("workspace_id = %q", body.WorkspaceID)
 	}
 }
 
