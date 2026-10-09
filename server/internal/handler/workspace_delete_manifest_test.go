@@ -114,6 +114,9 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"plugin_package_file":                workspaceDelete,
 	"project":                            workspaceDelete,
 	"project_resource":                   workspaceDelete,
+	"provider_quota_pool":               workspaceDeleteKeep, // User-owned account pool may span workspaces.
+	"provider_quota_pool_agent":         workspaceDelete,
+	"provider_quota_pool_event":         workspaceDeleteKeep, // Global account audit history.
 	"quick_action":                       workspaceDelete,
 	"runtime_profile":                    workspaceDelete,
 	"schema_migrations":                  workspaceDeleteKeep,

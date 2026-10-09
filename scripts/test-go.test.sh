@@ -43,7 +43,7 @@ esac
 FAKE
 chmod 755 "$BIN_DIR/go"
 
-regular_call='test -race github.com/multica-ai/multica/server github.com/multica-ai/multica/server/internal/daemon'
+regular_call='test -race -p 1 github.com/multica-ai/multica/server github.com/multica-ai/multica/server/internal/daemon'
 agent_call='test -race -p 2 -parallel 2 ./pkg/agent/...'
 
 # $1: case label; $2: expected go calls, one per line. Clears the log after.

@@ -1313,6 +1313,21 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "lock provider quota pool agents",
+			run: func() error {
+				_, err := qtx.LockWorkspaceProviderQuotaPoolAgents(ctx, requester.WorkspaceID)
+				return err
+			},
+		},
+		{
+			name: "clear provider quota pool probe agents",
+			run:  func() error { return qtx.ClearWorkspaceProviderQuotaPoolProbeAgents(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete provider quota pool memberships",
+			run:  func() error { return qtx.DeleteWorkspaceProviderQuotaPoolMemberships(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete agents",
 			run:  func() error { return qtx.DeleteWorkspaceAgents(ctx, requester.WorkspaceID) },
 		},
