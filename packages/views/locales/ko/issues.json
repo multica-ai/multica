@@ -143,7 +143,8 @@
   },
   "stage": {
     "none": "단계 없음",
-    "value": "{{n}}단계"
+    "value": "{{n}}단계",
+    "add": "단계 추가"
   },
   "scope": {
     "all_label": "전체",

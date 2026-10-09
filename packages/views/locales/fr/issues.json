@@ -145,7 +145,8 @@
   },
   "stage": {
     "none": "Aucune étape",
-    "value": "Étape {{n}}"
+    "value": "Étape {{n}}",
+    "add": "Ajouter une étape"
   },
   "scope": {
     "all_label": "Toutes",

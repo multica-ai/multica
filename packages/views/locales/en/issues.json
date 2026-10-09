@@ -145,7 +145,8 @@
   },
   "stage": {
     "none": "No stage",
-    "value": "Stage {{n}}"
+    "value": "Stage {{n}}",
+    "add": "Add stage"
   },
   "scope": {
     "all_label": "All",
