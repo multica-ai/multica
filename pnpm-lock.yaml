@@ -659,7 +659,7 @@ importers:
         specifier: 'catalog:'
         version: 1.0.1(react@19.2.3)
       next:
-        specifier: ^16.3.6
+        specifier: ^16.3.8
         version: 16.3.8(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(@types/node@25.5.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react:
         specifier: 'catalog:'
