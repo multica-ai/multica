@@ -89,14 +89,16 @@ const zh = `欢迎来到 Multica。
 
 完整文档:https://multica.ai/docs/install-agent-runtime
 
-中文用户建议先装 Kimi Code CLI（旧版 Kimi CLI 已停止维护）:
+中文用户建议先装 Kimi Code CLI（旧版 Kimi CLI 已停止维护）。
 
-1. 安装 Kimi Code CLI:
-   # Linux / macOS
+Windows 用户请先安装 [Git for Windows](https://gitforwindows.org/)，Kimi Code CLI 需要其中的 Git Bash。若 Git Bash 安装在非标准路径，请将 KIMI_SHELL_PATH 设为 bash.exe 的绝对路径。
+
+1. 安装 Kimi Code CLI：
+   Linux / macOS：
    curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-   # Windows (PowerShell)
+   Windows PowerShell：
    irm https://code.kimi.com/kimi-code/install.ps1 | iex
-2. 确认终端能找到 Kimi:
+2. 重新打开终端，让安装时修改的 PATH 生效，再确认能找到 Kimi：
    kimi --version
 3. 在你想让 Kimi 工作的项目目录里启动一次:
    kimi
