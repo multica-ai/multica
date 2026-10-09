@@ -1,0 +1,57 @@
+---
+title: Ruang kerja
+description: Ruang kerja adalah batas yang membuat tim, pekerjaan, dan konfigurasi agent terisolasi satu sama lain.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Ruang kerja adalah batas tingkat tertinggi di Multica. Anggota, Tugas, proyek, agent, skill, dan riwayat Eksekusi semuanya berada dalam satu ruang kerja dan benar-benar terisolasi dari ruang kerja lainnya.
+
+## Apa yang terdapat dalam ruang kerja
+
+| Kategori | Isi |
+|---|---|
+| **Pekerjaan** | Tugas, proyek, komentar, attachment, riwayat Eksekusi |
+| **Tim** | Anggota, role, undangan |
+| **Agent** | Konfigurasi agent, skill, runtime, otomasi |
+| **Pengaturan bersama** | Context, label, custom properties, integrasi |
+
+**Context** diberikan ke setiap agent di ruang kerja — tempat untuk latar belakang tim, konvensi produk, dan requirement yang bersifat jangka panjang. Requirement yang hanya berlaku untuk satu Eksekusi sebaiknya diletakkan di Tugas yang bersangkutan.
+
+## Membuat ruang kerja
+
+Membuat ruang kerja membutuhkan tiga hal:
+
+- **Nama**: ditampilkan kepada anggota; dapat diubah nanti.
+- **URL ruang kerja**: slug dalam alamat — `my-team` dalam `multica.ai/my-team`. Hanya huruf kecil, digit, dan tanda strip; tidak boleh bertabrakan dengan ruang kerja yang sudah ada atau alamat yang reserved, dan tidak dapat diubah setelah dibuat.
+- **Prefix Tugas**: terisi otomatis dari URL ruang kerja dan dapat diedit sebelum Anda membuatnya — dengan prefix `MUL`, nomor Tugas akan tampil sebagai `MUL-1`, `MUL-2`, bertambah secara independen di dalam ruang kerja. Huruf kapital dan digit, maksimal 10 karakter; dapat diubah nanti di pengaturan.
+
+Pembuatnya secara otomatis menjadi `owner`.
+
+## Mengubah pengaturan
+
+`owner` dan `admin` dapat mengubah nama, ikon, deskripsi, context, dan prefix Tugas; `member` hanya dapat melihatnya.
+
+![Pengaturan ruang kerja: nama, context, slug, prefix Tugas, dan danger zone](/images/docs/workspace-settings.webp)
+
+<Callout type="warning">
+Setelah prefix Tugas diubah, setiap Tugas langsung berpindah ke nomor baru (`MUL-5` menjadi `NEW-5`), tetapi nomor lama di PR, nama branch, dan riwayat chat tidak ikut diperbarui.
+</Callout>
+
+## Beralih dan keluar
+
+Satu akun dapat bergabung ke beberapa ruang kerja. Beralih hanya mengubah apa yang sedang Anda lihat; tidak ada data yang berpindah.
+
+Setelah keluar dari ruang kerja, Anda membutuhkan undangan baru untuk kembali. Keluar juga menonaktifkan runtime yang Anda miliki, mengarsipkan agent yang terikat padanya, dan membatalkan Eksekusi mereka yang belum selesai.
+
+`owner` terakhir tidak dapat keluar; promosikan anggota lain menjadi `owner` terlebih dahulu.
+
+## Menghapus ruang kerja
+
+Hanya `owner` yang dapat menghapus ruang kerja. Penghapusan menghapus secara permanen semua pekerjaan, anggota, konfigurasi agent, dan riwayat Eksekusi di dalamnya, dan tidak dapat dibatalkan. Jika Anda hanya ingin pergi untuk sementara waktu, keluar saja daripada menghapus.
+
+## Langkah selanjutnya
+
+- [Anggota dan role](/members-roles) — mengundang anggota dan mengelola role.
+- [Tugas](/issues) — unit dasar pekerjaan dalam ruang kerja.
+- [Agent](/agents) — identitas dan konfigurasi agent.

@@ -1,0 +1,156 @@
+{
+  "tabs": {
+    "title": "Obrolan"
+  },
+  "composer": {
+    "no_agent": "Tidak ada agent yang dipilih",
+    "revoked": "Anda tidak lagi dapat menjalankan agent ini",
+    "no_agents": "Tidak ada agent di ruang kerja ini",
+    "archived": "Obrolan ini diarsipkan",
+    "runtime_required": "Agent memerlukan runtime",
+    "replying_to": "Membalas {{name}}",
+    "cancel_reply": "Batalkan balasan",
+    "mention": "Sebut seseorang atau tugas",
+    "upload_image": "Unggah gambar",
+    "upload_file": "Unggah file",
+    "send": "Kirim",
+    "default_placeholder": "Tulis pesan…",
+    "unavailable": "Obrolan tidak tersedia",
+    "stop_agent": "Hentikan agent",
+    "file_too_large_title": "File terlalu besar",
+    "file_too_large_message": "File harus lebih kecil dari 100 MB.",
+    "working": "Agent sedang bekerja…",
+    "message": "Pesan…"
+  },
+  "empty": {
+    "greeting": "Hai, saya {{name}}",
+    "no_agent_title": "Mengobrol dengan agent Anda",
+    "examples": "Contoh akan mengisi kolom pesan tanpa mengirimkannya.",
+    "starter_help_label": "Apa yang dapat kamu bantu?",
+    "starter_help_prompt": "Apa yang paling kamu kuasai untuk membantu? Berikan saya ringkasan singkat.",
+    "starter_task_label": "Sarankan tugas pertama",
+    "starter_task_prompt": "Sarankan tiga tugas berguna yang dapat saya delegasikan kepadamu.",
+    "starter_action_label": "Rekomendasikan tindakan",
+    "starter_action_prompt": "Tinjau apa yang kamu tahu tentang ruang kerja saya dan rekomendasikan tindakan pertama yang berguna."
+  },
+  "picker": {
+    "title": "Pilih agent",
+    "placeholder": "Cari agent...",
+    "empty": "Tidak ada agent yang tersedia.",
+    "needs_runtime": "Memerlukan runtime"
+  },
+  "banners": {
+    "no_agent": "Tidak ada agent yang tersedia",
+    "runtime_required": "Agent ini memerlukan runtime sebelum dapat berjalan.",
+    "offline": "{{name}} sedang offline. Pesan akan menunggu hingga runtime-nya kembali.",
+    "no_agent_action": "Tambah atau aktifkan agent di Lainnya → Agent untuk mulai mengobrol.",
+    "offline_unstable": "{{name}} mungkin baru saja terputus — pesan Anda akan masuk antrean.",
+    "runtime_required_name": "{{name}} memerlukan runtime sebelum dapat berjalan. Hubungkan satu di web atau desktop."
+  },
+  "status": {
+    "offline": "Offline",
+    "reconnecting": "Menyambung ulang",
+    "queued": "Dalam antrean",
+    "starting": "Memulai",
+    "thinking": "Berpikir",
+    "typing": "Mengetik",
+    "working": "Bekerja",
+    "running_command": "Menjalankan perintah",
+    "reading_files": "Membaca file",
+    "searching_code": "Mencari kode",
+    "making_edits": "Membuat perubahan",
+    "searching_web": "Mencari di web",
+    "retrying": "Mencoba ulang"
+  },
+  "alerts": {
+    "no_permission_title": "Tidak ada izin untuk menjalankan agent ini",
+    "no_permission_message": "Anda tidak lagi memiliki izin untuk menjalankan agent ini, sehingga pesan tidak terkirim. Minta akses kepada pemiliknya.",
+    "runtime_title": "Runtime diperlukan",
+    "runtime_message": "Hubungkan runtime ke agent ini di web atau desktop sebelum mengirim pesan.",
+    "not_sent": "Pesan tidak terkirim",
+    "delete_title": "Hapus obrolan ini?",
+    "delete_confirm": "Hapus"
+  },
+  "failure": {
+    "invocation_not_allowed": "Anda tidak lagi memiliki izin untuk menjalankan agent ini, sehingga pesan tidak terkirim.",
+    "agent_runtime_required": "Hubungkan runtime ke agent ini sebelum mengirim pesan.",
+    "runtime_access_denied": "Pesan tidak terkirim — {{detail}}",
+    "default": "Pesan Anda tidak dapat terkirim. Silakan coba lagi.",
+    "runtime_access_recovery": "Agent ini tidak dapat berjalan pada runtime privatnya. Jadikan runtime publik, atau hubungkan ulang/salin agent ke runtime yang dapat digunakan pemiliknya."
+  },
+  "a11y": {
+    "suggested_followups": "Pertanyaan lanjutan yang disarankan",
+    "show_error_details": "Tampilkan detail error",
+    "no_agents": "Tidak ada agent yang tersedia",
+    "session_actions": "Tindakan sesi obrolan",
+    "new_chat": "Obrolan baru",
+    "sessions_agent_picker": "Sesi obrolan dan pemilih agent"
+  },
+  "title": {
+    "fallback": "Obrolan",
+    "this_agent": "Agent ini"
+  },
+  "elapsed": {
+    "replied": "Membalas dalam {{time}}",
+    "finished": "Selesai dalam {{time}}",
+    "failed": "Gagal setelah {{time}}"
+  },
+  "details": {
+    "show": "Tampilkan detail"
+  },
+  "sessions": {
+    "title": "Obrolan",
+    "empty": "Belum ada obrolan.",
+    "archived": "diarsipkan",
+    "new_chat": "Obrolan baru"
+  },
+  "picker.title": "Pilih agent",
+  "no_response": "Agent menyelesaikan giliran ini tanpa balasan teks.",
+  "failure_reason": {
+    "default": "Eksekusi gagal",
+    "queued_expired": "Kedaluwarsa dalam antrean",
+    "runtime_offline": "Daemon offline",
+    "runtime_reconnect_timeout": "Daemon tidak tersambung ulang tepat waktu",
+    "runtime_recovery": "Daemon dimulai ulang",
+    "timeout": "Eksekusi melebihi batas waktu",
+    "iteration_limit": "Mencapai batas iterasi",
+    "agent_blocked": "Menunggu input manusia",
+    "api_invalid_request": "Ditolak oleh API model",
+    "skill_bundle_unavailable": "Skill agent tidak dapat diunduh",
+    "runtime_cli_timeout": "CLI runtime lokal melebihi batas waktu",
+    "environment_prepare_failed": "Lingkungan eksekusi tidak dapat disiapkan",
+    "runtime_access_denied": "Agent ini tidak dapat berjalan pada runtime privatnya, sehingga tidak dapat membalas. Jadikan runtime publik, atau hubungkan ulang/salin agent ke runtime yang dapat digunakan pemiliknya.",
+    "invalid_task_identity": "Identitas eksekusi tidak cocok",
+    "agent_error_provider_auth_or_access": "Autentikasi penyedia gagal",
+    "agent_error_provider_quota_limit": "Kuota penyedia habis",
+    "agent_error_provider_capacity_or_rate_limit": "Dibatasi oleh penyedia",
+    "agent_error_provider_server_error": "Error server penyedia",
+    "agent_error_provider_network": "Error jaringan saat menjangkau penyedia",
+    "agent_error_process_failure": "Proses agent mengalami crash",
+    "agent_error_empty_or_unparseable_output": "Agent tidak mengembalikan output yang dapat digunakan",
+    "agent_error_agent_timeout": "Agent melebihi batas waktu",
+    "agent_error_context_overflow": "Jendela konteks terlampaui",
+    "agent_error_missing_config": "API key atau konfigurasi tidak ada",
+    "agent_error_model_not_found_or_unavailable": "Model tidak tersedia",
+    "agent_error_runtime_version_unsupported": "Versi CLI runner tidak didukung",
+    "agent_error_runtime_missing_executable": "CLI runner tidak terpasang",
+    "agent_error_unknown": "Error eksekusi agent",
+    "agent_fallback_message": "Agent mengembalikan pesan fallback",
+    "codex_resume_oversized": "Sesi terlalu besar untuk dilanjutkan",
+    "idle_watchdog": "Agent berhenti setelah tidak aktif",
+    "local_directory_error": "Error direktori lokal",
+    "cancelled": "Dibatalkan oleh sistem",
+    "agent_error": "Error eksekusi agent",
+    "codex_semantic_inactivity": "Batas waktu inaktivitas semantik Codex",
+    "manual": "Dibatalkan oleh pengguna",
+    "user_cancelled": "Dibatalkan oleh pengguna"
+  },
+  "timeline": {
+    "steps_count_other": "{{count}} langkah",
+    "tool": "Tool",
+    "tool_result_named": "Hasil {{tool}}: ",
+    "tool_result_unnamed": "hasil: ",
+    "truncated": "…(dipotong)",
+    "error": "Error"
+  }
+}

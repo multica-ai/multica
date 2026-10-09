@@ -1,0 +1,78 @@
+---
+title: Kotak masuk dan subscription
+description: Satu tempat untuk penugasan, mention, komentar, dan kegagalan agent yang memerlukan tindak lanjut Anda.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Kotak masuk mengumpulkan aktivitas pekerjaan yang berkaitan dengan Anda. Ini bukan log aktivitas lengkap — kotak masuk menandai tempat terjadinya perubahan yang memerlukan perhatian Anda; konteks lengkapnya tetap ada di tugas yang bersangkutan.
+
+## Apa yang masuk ke kotak masuk
+
+Notifikasi yang umum meliputi:
+
+- sebuah tugas ditugaskan kepada Anda, atau dipindahkan dari Anda;
+- sebuah tugas yang Anda ikuti mendapat komentar baru, atau penerima tugas, status, prioritas, atau tanggalnya berubah;
+- seseorang @-mention Anda di deskripsi atau komentar sebuah tugas;
+- sebuah tugas atau komentar yang Anda buat mendapat reaksi;
+- sebuah eksekusi agent gagal pada tugas yang Anda ikuti;
+- membuat tugas lewat agent selesai atau gagal;
+- sebuah autopilot yang Anda ikuti membuat tugas baru, atau dihentikan sementara setelah gagal berturut-turut.
+
+Tindakan Anda sendiri tidak memberi notifikasi kepada Anda. Beberapa notifikasi pada tugas yang sama digabung menjadi satu entri; buka untuk melihat perubahan terbaru pada tugas tersebut.
+
+## Sumber subscription otomatis
+
+Partisipan berikut otomatis berlangganan sebuah tugas:
+
+- pembuat tugas tersebut;
+- penerima tugas yang baru;
+- siapa pun yang berkomentar;
+- siapa pun yang baru di-@-mention di deskripsi tugas;
+- subscriber yang sudah dikonfigurasi sebelumnya pada sebuah autopilot.
+
+Mengubah penerima tugas tidak menghapus subscription yang sudah ada. Berlangganan atau berhenti berlangganan kapan saja di halaman tugas; setelah berhenti berlangganan, update biasa tidak lagi masuk ke kotak masuk Anda, sementara @-mention langsung tetap memberi notifikasi kepada Anda secara individual.
+
+<Callout type="info">
+Saat status sebuah sub-tugas berubah, subscriber dari tugas induk juga diberi notifikasi. Komentar, prioritas, dan perubahan tanggal pada sub-tugas tidak menyebar ke tugas induk.
+</Callout>
+
+## Agent tidak menggunakan kotak masuk
+
+Kotak masuk hanya untuk anggota ruang kerja. Bahkan saat agent menjadi penerima tugas atau subscriber, agent tidak pernah membaca notifikasi kotak masuk.
+
+@-mention seorang agent di komentar, menugaskan sebuah tugas kepadanya, atau memicu sebuah autopilot langsung membuat eksekusi, bukan meninggalkan notifikasi untuk agent. `@all` hanya memberi notifikasi kepada anggota.
+
+## Menangani notifikasi
+
+Memilih sebuah notifikasi menandainya sebagai sudah dibaca. Arsipkan setelah selesai; mengarsipkan tidak mengubah atau menghapus tugas yang bersangkutan. Begitu sebuah tugas mencapai status yang mengembalikannya kepada seseorang — `in_review`, status kustom dalam kategori `started`, atau status apa pun dalam kategori `done` atau `closed` — notifikasi kegagalan eksekusinya otomatis diarsipkan. `blocked` menjadi pengecualian: status ini mengembalikan tugas, tetapi pekerjaannya masih terhambat, sehingga kegagalan sebelumnya masih layak dibaca.
+
+Klik kanan sebuah notifikasi untuk **Tandai sudah dibaca** / **Tandai belum dibaca** dan **Arsipkan** (**Batalkan pengarsipan** di tampilan Diarsipkan). Tandai belum dibaca adalah tindakan "saya sudah melihatnya, tetapi belum selesai dengan ini": notifikasi kembali ke belum dibaca dan menaikkan lagi hitungan belum dibaca, dan tetap belum dibaca bahkan saat Anda membukanya — membukanya lagi nanti akan menandainya sebagai sudah dibaca seperti biasa. Notifikasi yang diarsipkan mempertahankan status dibacanya, sehingga memulihkan satu notifikasi mengembalikannya tepat seperti saat Anda meninggalkannya.
+
+Dari menu kotak masuk Anda juga dapat:
+
+- menandai semua sebagai sudah dibaca;
+- mengarsipkan semua, atau mengarsipkan semua yang sudah dibaca;
+- mengarsipkan notifikasi untuk tugas berstatus `done` atau `cancelled`;
+- membuka Diarsipkan dan memulihkan sebuah notifikasi.
+
+Buka **Diarsipkan** di bagian bawah kotak masuk untuk menelusuri notifikasi lama. Lebih banyak data dimuat saat Anda menggulir. Filter berlaku untuk seluruh arsip, termasuk data yang belum dimuat.
+
+## Menyesuaikan jenis notifikasi
+
+Buka **Pengaturan → Notifikasi** untuk mengaktifkan atau menonaktifkan setiap grup secara terpisah:
+
+- penugasan;
+- perubahan status;
+- komentar;
+- mention;
+- prioritas dan tanggal;
+- aktivitas agent.
+
+Menonaktifkan sebuah grup tidak menghentikan perubahan itu tercatat pada tugas — hanya menghentikan notifikasi kotak masuknya. Beberapa jenis, seperti reaksi, hasil quick-create, dan penghentian sementara autopilot, berada di luar keenam grup ini dan selalu dikirimkan. Notifikasi sistem dan browser mengontrol banner desktop dan tidak mengubah kotak masuk itu sendiri.
+
+## Langkah selanjutnya
+
+- [Komentar](/comments) — balasan, mention, dan thread diskusi.
+- [@-mention agent di komentar](/mentioning-agents) — notifikasi anggota vs. eksekusi agent.
+- [Autopilots](/autopilots) — konfigurasikan pembuatan pekerjaan otomatis dan subscriber default.

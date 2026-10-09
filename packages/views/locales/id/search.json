@@ -1,0 +1,37 @@
+{
+  "title": "Cari",
+  "description": "Cari halaman, tugas, proyek, dan anggota",
+  "placeholder": "Ketik perintah atau cari...",
+  "groups": {
+    "pages": "Halaman",
+    "commands": "Perintah",
+    "members": "Anggota",
+    "projects": "Proyek",
+    "issues": "Tugas",
+    "cancelled": "Dibatalkan",
+    "recent": "Terbaru"
+  },
+  "commands": {
+    "current_theme_aria": "Tema saat ini",
+    "new_issue": "Tugas Baru",
+    "new_project": "Proyek Baru",
+    "copy_issue_link": "Salin Tautan Tugas",
+    "copy_identifier": "Salin Pengidentifikasi ({{identifier}})",
+    "fold_all_comments": "Lipat Semua Komentar",
+    "unfold_all_comments": "Buka Semua Komentar",
+    "switch_to_light": "Beralih ke Tema Terang",
+    "switch_to_dark": "Beralih ke Tema Gelap",
+    "use_system_theme": "Gunakan Tema Sistem"
+  },
+  "toast": {
+    "link_copied": "Tautan disalin",
+    "copied_identifier": "{{identifier}} disalin"
+  },
+  "empty": {
+    "no_results": "Tidak ada hasil ditemukan.",
+    "type_to_search": "Ketik untuk mencari tugas dan proyek"
+  },
+  "trigger": {
+    "label": "Cari..."
+  }
+}

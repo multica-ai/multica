@@ -1,0 +1,71 @@
+---
+title: Proyek
+description: Atur tugas-tugas yang berkaitan dengan proyek dan berikan tujuan, rencana, dan konteks eksekusi bersama.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Proyek mengatur pekerjaan yang membutuhkan beberapa [tugas](/issues) untuk diselesaikan — peluncuran produk, migrasi, atau fitur yang dikirim secara bertahap.
+
+Pekerjaan yang dapat dijelaskan oleh satu tugas saja tidak memerlukan proyek. Proyek cocok untuk sekelompok pekerjaan yang memiliki tujuan bersama, perlu progresnya dilacak bersama, atau memerlukan repositori dan direktori kerja bersama.
+
+## Bagian-bagian proyek
+
+| Bagian | Tujuan |
+|---|---|
+| **Nama, ikon, dan deskripsi** | Tujuan, lingkup, dan persyaratan jangka panjang; deskripsi ini masuk ke dalam konteks eksekusi agent yang bekerja di dalam proyek. |
+| **Status** | `planned`, `in_progress`, `paused`, `completed`, atau `cancelled`. |
+| **Prioritas** | `urgent`, `high`, `medium`, `low`, atau `none`. |
+| **Lead** | Anggota atau agent — yang mengoordinasikan proyek. |
+| **Tanggal mulai dan target** | Rentang waktu yang direncanakan untuk proyek. |
+| **Tugas dan progres** | Pekerjaan dalam proyek dan seberapa banyak yang telah selesai. |
+| **Resource** | Repositori GitHub atau direktori lokal pada komputer tertentu yang ditautkan. |
+
+![Detail proyek: tugas yang dikelompokkan berdasarkan status, progres, dan deskripsi proyek](/images/docs/project-detail.webp)
+
+## Proyek dan tugas
+
+Sebuah proyek dapat berisi tugas dalam jumlah berapa pun; satu tugas paling banyak termasuk dalam satu proyek. Buat tugas langsung di dalam proyek, atau pilih atau ubah proyeknya dari properti tugas tersebut.
+
+Progres proyek dihitung secara otomatis dari tugas-tugas yang tertaut:
+
+```text
+progress = issues in done or cancelled ÷ all issues in the project
+```
+
+`cancelled` berarti pekerjaan tersebut telah ditutup dari lingkup proyek, sehingga tetap dihitung dalam progres. Status proyek dan status tugas saling independen: menyelesaikan semua tugas tidak otomatis mengubah proyek menjadi `completed`, dan mengubah status proyek tidak mengubah status semua tugasnya secara massal.
+
+## Deskripsi proyek dan konteks eksekusi
+
+Saat seorang agent mengeksekusi tugas di dalam sebuah proyek, nama dan deskripsi proyek tersebut ditambahkan ke konteks eksekusi itu. Deskripsi adalah tempat untuk informasi yang dibutuhkan oleh setiap tugas terkait: tujuan, batasan teknis, konvensi pengiriman. Persyaratan yang hanya berlaku untuk satu tugas sebaiknya ditulis pada tugas itu sendiri.
+
+## Menambahkan resource
+
+Resource proyek memberi tahu agent kode dan direktori kerja mana yang harus digunakan:
+
+- **Repositori GitHub**: menyediakan repo yang dapat di-checkout oleh runtime, dengan ref opsional.
+- **Direktori lokal**: memungkinkan runtime pada komputer tertentu bekerja di direktori yang sudah ada, yang isinya dimodifikasi langsung oleh agent.
+
+Lihat [Resource proyek](/project-resources) untuk cara memilih dan batasan keamanannya.
+
+## Lead proyek
+
+Lead dapat berupa anggota atau agent, dan menandai siapa yang mengoordinasikan proyek. Ini bukan pengaturan izin: lead tidak otomatis menugaskan tugas-tugas proyek, dan menjadikan seorang agent sebagai lead tidak otomatis menjalankannya. Memulai sebuah eksekusi masih memerlukan penugasan tugas, @mention, atau pemicu otomatisasi.
+
+## Menyematkan ke sidebar
+
+Proyek yang disematkan akan muncul di sidebar Anda. Menyematkan adalah preferensi pribadi dan tidak memengaruhi anggota lain.
+
+## Membuat, mengedit, dan menghapus
+
+Setiap anggota ruang kerja dapat membuat dan mengedit proyek; hanya `owner` dan `admin` yang dapat menghapusnya.
+
+<Callout type="warning">
+Menghapus proyek tidak menghapus tugas-tugasnya: tugas-tugas tersebut akan terlepas dan tetap berada di ruang kerja. Deskripsi, status, dan resource proyek akan dihapus secara permanen.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Resource proyek](/project-resources) — menautkan repositori GitHub atau direktori lokal.
+- [Tugas](/issues) — membuat dan mengatur pekerjaan konkret dalam sebuah proyek.
+- [Agent](/agents) — pelajari tentang identitas, konfigurasi, dan Akses agent.

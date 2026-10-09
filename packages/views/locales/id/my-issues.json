@@ -1,0 +1,44 @@
+{
+  "page": {
+    "breadcrumb": "Tugas Saya",
+    "workspace_fallback": "Ruang Kerja",
+    "empty_title": "Tidak ada tugas yang diberikan kepada Anda",
+    "empty_description": "Tugas yang Anda buat atau yang diberikan kepada Anda akan muncul di sini."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Semua",
+      "all_description": "Diberikan kepada saya, dibuat oleh saya, atau melibatkan agent dan squad saya",
+      "assigned_label": "Ditugaskan",
+      "assigned_description": "Tugas yang diberikan kepada saya",
+      "created_label": "Dibuat",
+      "created_description": "Tugas yang saya buat",
+      "agents_label": "Agent dan Squad Saya",
+      "agents_description": "Tugas yang diberikan kepada agent saya"
+    },
+    "filter_button": "Filter",
+    "filter_status": "Status",
+    "filter_priority": "Prioritas",
+    "issue_count_other": "{{count}} tugas",
+    "reset_filters": "Atur ulang semua filter",
+    "display_settings": "Pengaturan tampilan",
+    "grouping": "Pengelompokan",
+    "group_status": "Status",
+    "group_assignee": "Penerima Tugas",
+    "ordering": "Urutan",
+    "ascending": "Menaik",
+    "descending": "Menurun",
+    "card_properties": "Properti kartu",
+    "view_board": "Tampilan papan",
+    "view_list": "Tampilan daftar",
+    "view_swimlane": "Tampilan swimlane",
+    "view_label": "Tampilan",
+    "view_board_short": "Papan",
+    "view_list_short": "Daftar",
+    "view_swimlane_short": "Swimlane",
+    "sort_manual": "Manual"
+  },
+  "errors": {
+    "move_failed": "Gagal memindahkan tugas"
+  }
+}

@@ -1,0 +1,213 @@
+---
+title: Kontribusi
+description: Siapkan environment development Multica lokal, jalankan test, dan kirimkan perubahan menggunakan konvensi repositori.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica adalah backend Go dan monorepo pnpm. Cara paling sederhana untuk memulai secara lokal adalah `make dev`; perintah ini menyiapkan environment, database, dan migrasi untuk checkout saat ini, lalu menjalankan Web dan API.
+
+## Persyaratan
+
+- Node.js 22
+- pnpm 10.28.2
+- Go 1.26.6
+- Docker Engine atau Docker Desktop
+- Git dan Make
+
+Anggap `package.json` di root, `server/go.mod`, dan CI workflow sebagai source of truth untuk versi.
+
+## Memulai pertama kali
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make dev
+```
+
+Checkout utama menggunakan `.env`. Jika berkas tersebut tidak ada, `make dev` akan membuatnya dari `.env.example`, lalu menjalankan instance PostgreSQL bersama, menginstall dependencies, menjalankan migrasi, dan menjalankan API serta Web.
+
+Alamat default:
+
+```text
+Web: http://localhost:3000
+API: http://localhost:8080
+```
+
+Kode verifikasi lokal yang tetap berasal dari konfigurasi development. Jangan gunakan `.env` lokal untuk deployment yang menghadap internet.
+
+## Mengembangkan di dalam worktree
+
+Repositori ini mendukung menjalankan checkout utama dan beberapa worktree secara bersamaan. Semuanya berbagi satu container PostgreSQL yang sama, tetapi menggunakan database dan port yang terpisah.
+
+```bash
+git worktree add ../multica-feature -b feat/my-change main
+cd ../multica-feature
+make setup-worktree
+make start-worktree
+```
+
+`make setup-worktree` menghasilkan `.env.worktree`; nama database dan port diturunkan dari path. Untuk menjalankannya kembali:
+
+```bash
+make start-worktree
+```
+
+Untuk menghentikan Web dan API pada worktree saat ini:
+
+```bash
+make stop-worktree
+```
+
+Anda juga dapat menjalankan `make dev` secara langsung. Script ini mendeteksi worktree melalui berkas `.git`-nya dan memilih `.env.worktree`.
+
+<Callout type="info">
+Worktree yang berbeda berbagi container PostgreSQL, bukan database-nya. Jangan menjalankan Compose project baru untuk setiap worktree. Periksa `POSTGRES_DB`, `PORT`, dan `FRONTEND_PORT` di `.env.worktree` terlebih dahulu.
+</Callout>
+
+## Perintah umum
+
+### Workflow lengkap
+
+```bash
+make up               # Start this checkout's environment (C=api,web,daemon,desktop)
+make status           # Show what is running and prove it is this environment
+make list             # List every environment on this machine
+make down             # Stop the processes, keep the database
+make destroy          # Stop, then drop the database and free the slot
+make gc               # Collect expired or directory-less environments
+make dev              # Prepare and start the current checkout in the foreground
+make check            # Run the complete local verification workflow
+make build            # Build the server, CLI, and migrate binaries
+```
+
+`make up` memperlakukan environment sebagai objek bernama: perintah ini mengalokasikan port API, Web, dan Desktop renderer,
+nama database, dan CLI profile di bawah lock, lalu mencatatnya di `~/.multica/dev/`,
+sehingga dua checkout tidak dapat mendarat di slot yang sama tanpa salah satunya diberi tahu.
+Perintah ini memverifikasi database melalui `DATABASE_URL` dan backend melalui
+`GET /health`, yang melaporkan `pid`, `commit`, dan `started_at` — respons 200 saja
+juga bisa berasal dari proses lama yang masih tersisa di port yang sama. `make destroy`
+menghapus database, CLI profile, daemon workspace, Desktop userData, dan
+entri registry; penghapusan yang gagal akan menyisakan entri registry untuk dicoba ulang. Environment
+sementara dikumpulkan secara best-effort pada `make up` berikutnya setelah TTL-nya berakhir.
+
+### Frontend
+
+```bash
+pnpm install
+pnpm dev:web
+pnpm dev:desktop
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+Perintah root secara default tidak mencakup Mobile. Mobile memiliki script dan CI yang terpisah; baca `apps/mobile/AGENTS.md` sebelum mengubahnya.
+
+### Backend
+
+```bash
+make server
+make daemon
+make test
+make migrate-up
+make migrate-down
+make sqlc
+```
+
+Untuk menjalankan perintah CLI dari source:
+
+```bash
+make cli ARGS="issue list"
+```
+
+## Mengubah fitur frontend
+
+Tempatkan fitur yang dibutuhkan oleh Web dan Desktop sesuai dengan tanggung jawabnya:
+
+1. Letakkan API types, queries, mutations, dan logika yang tidak bergantung pada platform di `packages/core/`.
+2. Letakkan UI fondasi di `packages/ui/`; UI ini tidak boleh bergantung pada kode bisnis.
+3. Letakkan halaman dan komponen bisnis di `packages/views/`.
+4. Simpan Next.js, Electron, dan routing adapter di app yang sesuai.
+5. Hubungkan (wire) halaman bersama ke Web dan Desktop.
+
+TanStack Query memiliki data server. Zustand memiliki state klien seperti filter, draft, dan layout. Lihat [Arsitektur proyek](/developers/architecture) dan `AGENTS.md` di root untuk boundary yang pasti.
+
+Saat menambah atau mengubah API, perbarui skema zod di `packages/core/api/` dan tambahkan test parsing untuk field yang hilang, nilai enum yang tidak dikenal, dan data yang malformed.
+
+## Mengubah database
+
+Migrasi berada di `server/migrations/`, dan query berada di `server/pkg/db/queries/`.
+
+1. Gunakan prefix numerik berikutnya yang belum terpakai dan buat `.up.sql` serta `.down.sql`.
+2. Jangan menambahkan foreign key database, cascade delete, atau cascade update. Terapkan relasi dan cleanup di lapisan aplikasi.
+3. Setiap index baru harus menggunakan `CREATE INDEX CONCURRENTLY` atau `CREATE UNIQUE INDEX CONCURRENTLY`.
+4. Letakkan setiap index concurrent dalam berkas migrasi yang hanya berisi statement tersebut.
+5. Jalankan `make sqlc` setelah mengubah query dan commit perubahan yang dihasilkan di `server/pkg/db/generated/`.
+6. Jangan mengedit berkas hasil generate sqlc secara langsung.
+
+Gunakan transaction aplikasi di lapisan service ketika beberapa write harus berhasil atau roll back bersamaan.
+
+## Lokasi test
+
+| Perubahan | Lokasi test |
+| --- | --- |
+| Logika bisnis, query, store bersama | `packages/core/*.test.ts` |
+| Halaman dan komponen bersama | `packages/views/*.test.tsx` |
+| Wiring platform Web atau Desktop | Direktori `apps/*` yang sesuai |
+| Workflow end-to-end | `e2e/*.spec.ts` |
+| Backend | `*_test.go` di package Go yang relevan |
+
+Jalankan pemeriksaan yang paling dekat dengan perubahan terlebih dahulu, lalu perluas scope-nya. Untuk perubahan yang hanya pada Docs:
+
+```bash
+pnpm --filter @multica/docs typecheck
+```
+
+Untuk perubahan frontend bersama:
+
+```bash
+pnpm typecheck
+pnpm test
+```
+
+Untuk perubahan backend:
+
+```bash
+make test
+```
+
+Sebelum submit:
+
+```bash
+make check
+```
+
+`make check` menjalankan TypeScript typechecking dan unit test, Go test, dan Playwright E2E. CI juga melakukan build dan lint sesuai scope yang berubah serta menjalankan test khusus platform atau installer.
+
+## Mereset database development saat ini
+
+Ketika Anda membutuhkan data yang bersih, reset database yang ditentukan oleh **berkas environment checkout saat ini**:
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+`make db-reset` menghapus dan membuat ulang `POSTGRES_DB` saat ini, dan menolak untuk terhubung ke database remote. Sebelum menjalankannya, periksa `.env` atau `.env.worktree` dan pastikan database tujuannya.
+
+## Sebelum submit
+
+- Baca `AGENTS.md` di root dan instruksi nested yang relevan.
+- Ubah hanya scope yang dibutuhkan oleh task tersebut.
+- Tulis komentar kode dalam bahasa Inggris.
+- Jangan commit `.env`, token, build artifact, atau path lokal.
+- Gunakan conventional commit seperti `feat(scope)`, `fix(scope)`, atau `docs`.
+- Jelaskan perubahan behavior dan perintah verifikasi yang benar-benar dijalankan di PR.
+
+## Langkah selanjutnya
+
+- [Konvensi pengembangan](/developers/conventions) — Kontrak repositori untuk naming, terminologi, dan copy bahasa Tionghoa.
+- [Arsitektur proyek](/developers/architecture) — Lapisan, paket bersama, dan jalur kode untuk satu eksekusi.

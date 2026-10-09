@@ -1,0 +1,110 @@
+---
+title: Bot DingTalk
+description: Hubungkan agent ke DingTalk dan berikan pekerjaan langsung di DM atau obrolan grup.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Setelah menghubungkan [agent](/agents) ke DingTalk, anggota ruang kerja agent tersebut dapat mengirim DM ke Bot, @-mention di grup, atau menggunakan perintah `/issue` untuk membuat [tugas](/issues) Multica secara langsung. Percakapan dan catatan eksekusi disimpan ke ruang kerja Multica.
+
+<Callout type="info">
+Integrasi DingTalk [dipelihara oleh komunitas](/community-maintained) dan tidak memiliki SLA dukungan resmi. Laporkan masalah di [GitHub issues](https://github.com/multica-ai/multica/issues).
+</Callout>
+
+
+## Hubungkan Bot
+
+Pembuat agent atau pemilik/admin ruang kerja dapat menghubungkan agent ke DingTalk. Agent dan Bot DingTalk memiliki koneksi satu-ke-satu.
+
+## 1. Buat robot Stream-mode
+
+1. Buat **enterprise internal app** di [DingTalk Open Platform](https://open-dev.dingtalk.com).
+2. Aktifkan kapabilitas robot dan atur **Message Receiving Mode** ke **Stream Mode**.
+
+## 2. Berikan izin pada robot
+
+Izin **Robot Message Sending** (`qyapi_robot_sendmsg`) ditambahkan secara default. Untuk menampilkan nama Bot di Multica, tambahkan secara manual izin **DingTalk Group Basic Information Management** (`qyapi_chat_manage`).
+
+## 3. Dapatkan kredensial aplikasi
+
+Buka halaman **Credentials & Basic Information** dan salin **Client ID (AppKey)** serta **Client Secret (AppSecret)**.
+
+## 4. Hubungkan agent ke DingTalk
+
+1. Kembali ke Multica dan buka **Agents → _agent Anda_ → Capabilities → Integrations**.
+2. Klik **Connect DingTalk**.
+3. Masukkan **AppKey** dan **AppSecret**, lalu kirim.
+
+## 5. Tautkan akun DingTalk dan Multica Anda
+
+Kirim DM ke Bot di DingTalk atau @-mention di grup untuk memicu permintaan penautan. Anda akan menerima tautan di DM dengan Bot; tautan berlaku sekitar 15 menit. Buka tautan tersebut. Saat pesan berhasil muncul, penautan akun selesai.
+
+
+## Berikan pekerjaan ke agent di DingTalk
+
+### Pesan langsung
+
+Kirim pesan ke Bot. Setelah agent menyelesaikan pekerjaannya, agent membalas dengan hasilnya di DM.
+
+### Obrolan grup
+
+Tambahkan Bot ke grup DingTalk, lalu kirim `@your-bot <message>`. Anda harus @-mention Bot lagi di setiap tindak lanjut. Bot hanya memproses pesan yang @-mention dirinya.
+
+### Kirim gambar
+
+Pesan langsung dan obrolan grup keduanya mendukung pesan yang berisi teks dan gambar. Format gambar yang didukung adalah PNG, JPEG, GIF, WebP, dan BMP. Setiap pesan dapat berisi hingga 4 gambar, dengan ukuran maksimum 10 MB per gambar. File dan pesan suara saat ini belum didukung.
+
+Pada pesan grup yang berisi teks dan gambar, @-mention Bot juga disertakan dalam pesan yang dikirim ke agent. Untuk menghapus nama Bot secara presisi, tambahkan izin **DingTalk Group Basic Information Management** (`qyapi_chat_manage`).
+
+### Tindak lanjut dengan pesan yang dikutip
+
+Gunakan aksi kutip DingTalk untuk memilih sebuah pesan, lalu masukkan input Anda saat ini. Di grup, Anda tetap harus @-mention Bot. Multica menambahkan konten kutipan yang didukung dari callback DingTalk di depan pesan Anda saat ini sebagai konteks agent. `/issue`, `/new`, atau `/clear` di dalam kutipan dianggap sebagai konten kutipan, bukan perintah untuk giliran saat ini.
+
+### Umpan balik pemrosesan pesan
+
+Setelah menerima pesan DingTalk, Multica mencoba menambahkan reaksi `RogerThat` milik DingTalk pada pesan pengguna asli untuk menunjukkan bahwa pesan tersebut sudah diteruskan ke agent untuk diproses. Setelah agent selesai memproses dan balasannya berhasil dikirim ke DingTalk, `RogerThat` diganti dengan `Done`. Jika pemrosesan dibatalkan, `RogerThat` dihapus.
+
+Reaksi bergantung pada API DingTalk dan mungkin tidak langsung terupdate. Periksa balasan Bot dan catatan eksekusi di Multica saat menilai hasilnya.
+
+### Buat tugas dengan `/issue`
+
+Kirim `/issue <title>` atau `/issue <title>{newline}<detailed description>` untuk membuat tugas Multica baru dan secara otomatis menugaskannya ke agent yang terhubung dengan Bot. Gambar dalam pesan yang sama juga ditambahkan ke tugas sebagai lampiran. Berbeda dari pesan obrolan biasa, perintah `/issue` tidak meninggalkan catatan di [Obrolan](/chat) Multica.
+
+### Mulai Obrolan baru dengan `/new`
+
+Kirim `/new` untuk membuat Obrolan Multica baru yang kosong dan merutekan pesan DingTalk berikutnya ke sana. Kirim `/new <message>` untuk membuat Obrolan dan menggunakan pesan tersebut sebagai giliran pertamanya. Obrolan sebelumnya tetap tersimpan dan dapat digunakan di Multica.
+
+### Hapus konteks saat ini dengan `/clear`
+
+Kirim `/clear` untuk mempertahankan Obrolan Multica saat ini sambil menerapkan konteks baru yang terlihat agent pada pesan berikutnya. Kirim `/clear <message>` untuk menggunakan pesan tersebut sebagai giliran pertama setelah batas tersebut. Riwayat Obrolan lengkap tetap terlihat di Multica.
+
+## Kelola koneksi
+
+- Pada **Agents → _agent Anda_ → Capabilities → Integrations**, pembuat agent dan pemilik/admin ruang kerja dapat menghubungkan agent ke DingTalk atau memutuskannya. Setelah terhubung, halaman ini menampilkan nama Bot, grup DingTalk tempat Bot berhasil memproses pesan, serta data status aktivitasnya di grup-grup tersebut. Setiap anggota ruang kerja dengan akses baca ke agent dapat melihat informasi ini. Grup yang tidak memiliki pesan berhasil diproses dalam 90 hari terakhir ditempatkan di bawah **Long inactive** dan dimuat saat diperluas.
+- **Settings → Messaging → DingTalk** menampilkan setiap agent yang terhubung ke DingTalk di ruang kerja saat ini yang dapat dibaca oleh peninjau, beserta data status aktivitas Bot di grup-grup DingTalk. Pemilik/admin ruang kerja juga dapat memutuskan agent mana pun yang terdaftar dari DingTalk. Setelah diputuskan, Bot berhenti menerima pesan, sementara catatan instalasinya dipertahankan untuk audit. Pemilik/admin ruang kerja juga dapat melupakan sebuah grup. Ini menghapus grup dari daftar tanpa menghapus percakapan atau pesan. Grup tersebut akan muncul kembali jika anggota ruang kerja dengan akun DingTalk tertaut kemudian @mention Bot di sana dan Multica menerima pesannya.
+
+
+## Pengaturan hosting mandiri
+
+Pengguna Multica Cloud dapat melewati bagian ini. Deployment yang dihosting sendiri harus terlebih dahulu mengatur kunci untuk mengenkripsi `AppSecret` DingTalk:
+
+```dotenv
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Buat kunci dengan:
+
+```bash
+openssl rand -base64 32
+```
+
+Restart layanan API, lalu hubungkan DingTalk. Simpan kunci ini secara permanen: jika diubah atau hilang, token yang ada tidak dapat lagi didekripsi dan koneksi harus diatur ulang.
+
+URL penautan akun menggunakan `MULTICA_APP_URL`, dengan fallback ke `FRONTEND_ORIGIN` jika tidak diset. URL tersebut harus mengarah ke alamat Multica yang dapat diakses anggota.
+
+
+## Selanjutnya
+
+- [Integrasi obrolan](/channels) — cara kerja Channel engine, sesi, dan otorisasi
+- [Agent](/agents) · [Obrolan](/chat) · [Tugas](/issues)
+- [Variabel lingkungan](/environment-variables) — referensi konfigurasi hosting mandiri lengkap

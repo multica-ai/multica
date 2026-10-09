@@ -1,0 +1,144 @@
+{
+  "page": {
+    "title": "Squad",
+    "new_button": "Squad Baru",
+    "empty_no_squads": "Belum ada squad.",
+    "empty_no_match": "Tidak ada squad yang cocok dengan filter Anda.",
+    "table": {
+      "name": "Squad",
+      "leader": "Leader",
+      "members": "Anggota",
+      "creator": "Dibuat oleh",
+      "created": "Dibuat"
+    },
+    "no_matches": "Tidak ada squad yang cocok",
+    "row_menu": "Aksi squad",
+    "archive_action": "Arsipkan"
+  },
+  "inspector": {
+    "details_section": "Detail",
+    "archive_button": "Arsipkan"
+  },
+  "member_type": {
+    "agent": "Agent",
+    "member": "Anggota"
+  },
+  "archive_dialog": {
+    "title": "Arsipkan squad ini?",
+    "description": "\"{{name}}\" akan diarsipkan. Tugas yang saat ini ditugaskan ke squad ini akan dipindahkan ke leader-nya. Ini tidak dapat dibatalkan — buat squad baru jika Anda memerlukan routing kembali.",
+    "cancel": "Batal",
+    "confirm": "Arsipkan",
+    "archiving": "Mengarsipkan…",
+    "success": "Squad diarsipkan"
+  },
+  "name_editor": {
+    "title": "Ubah nama squad",
+    "placeholder": "Nama squad",
+    "required": "Nama wajib diisi",
+    "cancel": "Batal",
+    "save": "Simpan",
+    "saved": "Tersimpan",
+    "save_failed": "Gagal menyimpan"
+  },
+  "add_member_dialog": {
+    "title": "Tambah Anggota",
+    "description": "Pilih anggota ruang kerja atau agent.",
+    "label_member": "Anggota",
+    "label_role": "Peran",
+    "label_optional": "(opsional)",
+    "cancel": "Batal",
+    "select_target": "Pilih anggota atau agent",
+    "search_placeholder": "Cari anggota atau agent...",
+    "members_section": "Anggota",
+    "agents_section": "Agent",
+    "role_placeholder": "misalnya Reviewer, Frontend Lead",
+    "add": "Tambah"
+  },
+  "role_editor": {
+    "empty": "Tambah peran…",
+    "placeholder": "Peran (misalnya Reviewer)"
+  },
+  "description_dialog": {
+    "title": "Edit deskripsi",
+    "placeholder_empty": "Tambahkan deskripsi",
+    "cancel": "Batal",
+    "responsibility_placeholder": "Apa yang menjadi tanggung jawab squad ini?",
+    "save": "Simpan"
+  },
+  "discard_changes_dialog": {
+    "title": "Buang perubahan yang belum disimpan?",
+    "description": "Anda memiliki perubahan yang belum disimpan pada tab ini. Beralih tab akan membuangnya.",
+    "keep_editing": "Lanjutkan mengedit",
+    "discard_button": "Buang"
+  },
+  "members_tab": {
+    "section_title": "Anggota",
+    "section_count_other": "{{count}} anggota dalam squad ini",
+    "add_member_button": "Tambah Anggota",
+    "create_agent_button": "Buat Agent",
+    "leader_chip": "Leader",
+    "view_agent_tooltip": "Buka detail agent",
+    "make_leader_tooltip": "Jadikan leader squad",
+    "remove_member_tooltip": "Hapus dari squad",
+    "status_working": "Bekerja",
+    "status_idle": "Idle",
+    "status_offline": "Offline",
+    "status_unstable": "Tidak stabil",
+    "status_archived": "Diarsipkan",
+    "issue_status_blocked": "terblokir",
+    "active_issue_more": "dan {{count}} lainnya",
+    "last_active_label": "terakhir aktif {{time}}"
+  },
+  "detail_tabs": {
+    "members": "Anggota",
+    "instructions": "Instruksi"
+  },
+  "details": {
+    "leader": "Leader",
+    "members": "Anggota",
+    "created_by": "Dibuat oleh",
+    "created": "Dibuat",
+    "updated": "Diperbarui"
+  },
+  "toasts": {
+    "member_added": "Anggota ditambahkan",
+    "member_add_failed": "Gagal menambahkan anggota",
+    "member_removed": "Anggota dihapus",
+    "member_remove_failed": "Gagal menghapus anggota",
+    "role_updated": "Peran diperbarui",
+    "role_update_failed": "Gagal memperbarui peran",
+    "leader_updated": "Leader diperbarui",
+    "leader_update_failed": "Gagal memperbarui leader",
+    "archive_failed": "Gagal mengarsipkan squad",
+    "instructions_saved": "Instruksi disimpan"
+  },
+  "profile_card": {
+    "unavailable": "Squad tidak tersedia",
+    "detail_link": "Detail →",
+    "archived": "Diarsipkan",
+    "member_count_other": "{{count}} anggota",
+    "members_section": "Anggota",
+    "more_members_other": "+{{count}} lainnya"
+  },
+  "instructions_tab": {
+    "description": "Leader membaca instruksi ini setiap kali mengerjakan tugas yang ditugaskan ke squad ini.",
+    "unsaved_changes": "Perubahan belum disimpan",
+    "save_button": "Simpan",
+    "placeholder": "misalnya Selalu mulai dengan menulis test yang gagal. Utamakan commit kecil dan atomik."
+  },
+  "scope": {
+    "mine": "Milik saya",
+    "all": "Semua"
+  },
+  "toolbar": {
+    "display": "Tampilan",
+    "sort_by": "Urutkan berdasarkan",
+    "direction_asc": "Menaik",
+    "direction_desc": "Menurun",
+    "section_columns": "Kolom",
+    "result_count_title": "Squad yang cocok / semua squad",
+    "filter_label": "Filter",
+    "filter_active_count_other": "{{count}} filter",
+    "clear_filters": "Hapus filter"
+  }
+}

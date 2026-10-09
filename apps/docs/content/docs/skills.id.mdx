@@ -1,0 +1,112 @@
+---
+title: Skills
+description: Kemas instruksi, langkah-langkah, dan materi referensi yang berulang ke dalam skill yang dapat digunakan kembali oleh beberapa agent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Skill adalah kumpulan metode kerja yang dapat digunakan kembali di dalam sebuah ruang kerja. File utamanya adalah `SKILL.md`, yang secara opsional dapat disertai dengan script, template, dan materi referensi.
+
+Tambahkan sebuah skill ke [agent](/agents) dan agent tersebut akan menggunakan panduannya saat mengerjakan pekerjaan yang terkait. Metode yang sama tidak perlu lagi disalin ke dalam instruksi setiap agent, dan pembaruannya cukup dikelola di satu tempat.
+
+## Skill dan instruksi agent
+
+| | Instruksi agent | Skill |
+|---|---|---|
+| **Paling cocok untuk** | Tanggung jawab, batasan, dan persyaratan pengiriman jangka panjang agent ini | Langkah, materi, dan tool yang dapat digunakan kembali untuk satu jenis pekerjaan |
+| **Lingkup** | Milik satu agent dan diberikan pada setiap eksekusi | Dapat ditambahkan ke beberapa agent dan diaktifkan atau dinonaktifkan secara individual |
+| **Contoh** | "Hanya meninjau kode frontend, jangan pernah mengubahnya secara langsung" | Checklist aksesibilitas dan template laporan |
+
+## Membuat atau mengimpor skill
+
+Pada halaman **Skills** ruang kerja, pilih "New skill". Empat opsi tersedia:
+
+| Opsi | Kapan cocok digunakan |
+|---|---|
+| **Create manually** | Mulai menulis dari `SKILL.md` yang kosong. |
+| **Import from local** | Pilih folder yang berisi `SKILL.md`, atau arsip `.skill` / `.zip` pada komputer ini. |
+| **Import from URL** | Mengimpor skill yang dipublikasikan dari GitHub, ClawHub, atau Skills.sh. |
+| **Copy from a runtime** | Memindai skill pada komputer yang terhubung dan menyalin yang dipilih ke dalam ruang kerja. |
+
+Menyalin dari sebuah runtime mengambil snapshot file pada saat itu. Perubahan selanjutnya pada file lokal tidak memperbarui versi ruang kerja secara otomatis; impor ulang atau edit langsung di Multica.
+
+Format arsip yang sama berfungsi dari CLI:
+
+```bash
+multica skill import --file ./review-helper.skill
+```
+
+Jika sebuah skill dengan nama yang sama sudah ada di ruang kerja, proses impor dapat dihentikan, menimpa konten yang sudah ada, menyimpan dengan nama baru, atau melewatinya. Menimpa melalui impor dibatasi hanya untuk pembuat skill tersebut; seorang `admin` ruang kerja yang dapat mengedit skill di aplikasi tetap tidak dapat menimpanya melalui impor. Untuk mengambil versi yang lebih baru dari skill yang sudah ada di ruang kerja, gunakan [Memperbarui skill yang diimpor](#memperbarui-skill-yang-diimpor) sebagai gantinya.
+
+## Memperbarui skill yang diimpor
+
+Skill yang diimpor dari GitHub, ClawHub, atau Skills.sh tetap menyimpan referensi ke sumbernya. Untuk mengambil versi terbaru, gunakan **Update** pada halaman skill (atau "Update from source" di menu baris pada daftar), atau CLI:
+
+```bash
+multica skill refresh <skill-id>
+```
+
+Skill tersebut diunduh ulang dari sumbernya dan diganti di tempat:
+
+- **Dipertahankan**: identitas skill tersebut — penugasan ke agent, label, pembuat, dan tanggal pembuatan. Agent tetap memiliki skill tersebut tanpa perlu menambahkannya kembali.
+- **Diganti**: nama (jika sumbernya mengganti namanya), deskripsi, `SKILL.md`, dan semua file pendukung. Edit lokal pada skill tersebut akan ditimpa.
+
+Pembuat skill dan `owner` / `admin` ruang kerja dapat memperbarui dari sumbernya. Skill yang dibuat secara manual, diimpor dari file arsip, atau disalin dari sebuah runtime tidak memiliki sumber yang di-hosting dan tidak dapat diperbarui dengan cara ini — impor ulang sebagai gantinya.
+
+Untuk memperbarui beberapa skill sekaligus, pilih skill-skill tersebut di daftar skill dan pilih **Update** pada toolbar pemilihan. Setiap skill yang dipilih dan memiliki sumber yang di-hosting akan diunduh ulang dari sumbernya; skill yang tidak memilikinya akan dilewati.
+
+## Konten skill
+
+Setiap skill berisi sebuah file utama, `SKILL.md`. Jelaskan secara rinci:
+
+- kapan skill tersebut berlaku;
+- apa yang harus diperiksa sebelum memulai;
+- langkah-langkah yang harus dijalankan;
+- bentuk hasil yang seharusnya;
+- kapan harus berhenti dan berkonsultasi dengan seorang anggota.
+
+Anda juga dapat menambahkan file pendukung, misalnya:
+
+```text
+SKILL.md
+references/api-conventions.md
+templates/review-report.md
+scripts/check.sh
+```
+
+`SKILL.md` adalah path yang dicadangkan; file pendukung tidak dapat menggunakan nama tersebut. File pendukung diserahkan ke agent bersama dengan file utamanya.
+
+## Melampirkan ke agent
+
+Setelah membuat atau mengimpor sebuah skill, skill tersebut masih perlu ditambahkan ke agent tertentu. Pilih agent pada halaman skill, atau kelola binding-nya dari tab **Skills** milik agent.
+
+- Satu agent dapat menggunakan beberapa skill;
+- satu skill dapat melayani beberapa agent;
+- saat sebuah skill untuk saat ini tidak dibutuhkan, nonaktifkan binding-nya daripada menghapus skill tersebut;
+- edit berlaku mulai dari eksekusi selanjutnya dan tidak mengubah eksekusi yang sudah berjalan.
+
+Hanya anggota yang dapat mengubah agent tersebut yang dapat menambah, menghapus, atau menonaktifkan skill-nya.
+
+## Skill ruang kerja dan skill repositori
+
+Skill ruang kerja disimpan di Multica — cocok untuk skill yang dikelola bersama oleh tim dan ditambahkan ke agent yang berbeda-beda.
+
+Beberapa AI coding tool juga membaca skill tingkat proyek langsung dari repositori kode, seperti `.claude/skills/` atau `.agents/skills/`. File-file tersebut tetap dikelola oleh repositori; Multica tidak secara otomatis mendaftarkannya sebagai skill ruang kerja. Dukungannya bergantung pada tool yang digunakan — lihat [Perbandingan AI coding tool](/providers).
+
+Skill lokal-runtime yang sudah terpasang pada komputer yang terhubung (Claude Code dan Codex) muncul di tab **Skills** milik agent dan dapat dinonaktifkan per agent. Menonaktifkannya juga membutuhkan izin untuk mengubah agent tersebut.
+
+## Izin edit
+
+Setiap anggota ruang kerja dapat membuat atau mengimpor sebuah skill. Pembuatnya serta `owner` dan `admin` ruang kerja dapat mengubah atau menghapusnya; anggota lain dapat melihat dan menggunakannya, tetapi tidak dapat menimpa kontennya.
+
+Penghapusan bersifat permanen dan menghapus skill tersebut dari semua agent secara bersamaan.
+
+<Callout type="warning">
+Skill yang diimpor dari sumber eksternal mungkin berisi script, command, atau instruksi yang tidak aman. Multica tidak meninjau, menandatangani, atau melakukan sandbox atas skill tersebut untuk Anda. Konten yang diimpor diberikan ke agent apa adanya, sehingga sumbernya harus dapat dipercaya.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Squads](/squads) — biarkan leader memilih anggota yang tepat untuk pekerjaan tersebut.
+- [Daemon dan runtime](/daemon-runtimes) — bagaimana skill mencapai environment eksekusi yang sebenarnya.
+- [Perbandingan AI coding tool](/providers) — bagaimana tool yang berbeda mendukung skill.

@@ -1,0 +1,271 @@
+---
+title: Pemecahan masalah
+description: Diagnosis masalah umum pada koneksi, eksekusi, update realtime, email, dan service yang dihosting mandiri.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Pertama, cari tahu di layer mana masalahnya berada: service Multica, daemon, runtime, atau alat coding AI. Command berikut biasanya cukup untuk memunculkan error pertama yang berarti:
+
+```bash
+multica version
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
+```
+
+Instance yang dihosting mandiri juga dapat memeriksa service secara langsung:
+
+```bash
+curl -i https://api.example.com/health
+curl -i https://api.example.com/readyz
+```
+
+`/health` hanya menyatakan bahwa proses API merespons; `/readyz` juga memeriksa database dan migration. Sertakan error, log yang relevan, versi CLI, dan sistem operasi saat melaporkan masalah; hapus token, alamat email, dan detail sensitif lain sebelum mengirimkannya.
+
+## Daemon gagal terhubung
+
+Jalankan ini dulu:
+
+```bash
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
+```
+
+Penyebab umumnya meliputi:
+
+- CLI belum sign in, atau token yang tersimpan di mesin ini sudah kedaluwarsa.
+- Daemon terhubung ke service Multica yang salah.
+- Komputer yang menjalankan eksekusi tidak dapat menjangkau API, atau DNS, TLS, atau firewall memblokir koneksi.
+- Akun saat ini tidak lagi menjadi anggota Ruang Kerja target.
+- Tidak ada alat coding AI yang didukung terinstal di mesin ini, sehingga daemon tidak dapat start.
+
+Sign in kembali dan restart daemon:
+
+```bash
+multica login
+multica daemon restart
+```
+
+Deployment yang dihosting mandiri juga sebaiknya meminta `/health` milik API dari **komputer yang menjalankan eksekusi** — menguji dari server itu sendiri tidak dapat mengungkap masalah DNS, TLS, atau firewall di sisi komputer yang menjalankan eksekusi tersebut. Untuk mengubah alamatnya, jalankan ulang `multica setup self-host`, atau periksa `server_url` dari profile saat ini:
+
+```bash
+multica config show
+```
+
+## Tugas tidak mulai dieksekusi
+
+Buka **log eksekusi** Tugas tersebut dan periksa status eksekusi saat ini serta apa yang sedang ditunggunya.
+
+### Status `queued`
+
+`queued` berarti eksekusi masih menunggu untuk diklaim oleh sebuah runtime. Periksa secara berurutan:
+
+1. Apakah runtime yang terikat dengan agent tersebut online?
+2. Apakah runtime mendeteksi alat coding AI yang dikonfigurasi pada agent tersebut?
+3. Apakah agent tersebut masih memiliki headroom konkurensi?
+4. Apakah daemon masih memiliki kapasitas eksekusi global?
+
+Secara default, satu agent mengeksekusi paling banyak 6 eksekusi secara konkuren; satu daemon mengeksekusi paling banyak 20. Pada batas tersebut, eksekusi baru tetap berada di queue hingga salah satu eksekusi aktif selesai. Eksekusi juga tetap mengantre selama runtime-nya offline; eksekusi hanya gagal setelah runtime tersebut berhenti mengirim heartbeat lebih lama dari reconnect grace, dan eksekusi itu sendiri sudah menunggu sejauh itu — sehingga queue yang panjang di belakang runtime yang sibuk tidak pernah dianggap kedaluwarsa hanya karena menunggu, dan menugaskan pekerjaan ke mesin yang sudah offline tetap menyisakan satu grace period penuh untuk membawanya kembali online.
+
+```bash
+multica daemon status --output json
+multica agent get <agent-id>
+multica issue runs <issue-id>
+```
+
+Jika daftar runtime tidak menampilkan alat yang diharapkan, pastikan dulu alat tersebut dapat berjalan dan sudah sign in di bawah akun sistem dan `PATH` yang sama, lalu jalankan `multica daemon restart`.
+
+### Status `waiting_local_directory`
+
+Ini berarti eksekusi lain yang sedang berjalan menggunakan direktori lokal yang sama. Multica menunggu lock direktori tersebut dilepaskan agar dua agent tidak pernah memodifikasi file yang sama secara bersamaan.
+
+Penantian ini hanya ada pada mode `in_place` ("Direct") dari direktori tersebut. Jika direktori itu adalah repository git, mengalihkan resource ke `worktree` ("Parallel") menghilangkan queue itu sepenuhnya: setiap eksekusi mendapatkan worktree-nya sendiri dan mengembalikan hasil kerjanya sebagai branch, sehingga tidak ada yang menunggu apa pun. Lihat [Project resources](/project-resources#bagaimana-eksekusi-membagikan-direktori).
+
+Jika bukan itu, Anda cukup menunggu eksekusi sebelumnya selesai. Jika eksekusi itu macet, hentikan dari log eksekusinya, atau pilih direktori lokal lain untuk agent saat ini. Mutex direktori ini disimpan di memori daemon — tidak ada lock file yang ditulis ke disk. Jika Anda mencurigai state lock yang basi (stale), `multica daemon restart` akan melepaskannya; tidak ada yang perlu dihapus secara manual.
+
+## Alat coding AI gagal start
+
+Daemon yang online tidak berarti alatnya sendiri berfungsi. Buka record detail eksekusi tersebut dan fokus pada:
+
+- Apakah alat tersebut sudah menyelesaikan sign in.
+- Apakah API key, quota, atau izin model tersedia.
+- Apakah model dan thinking level yang dipilih oleh agent didukung oleh alat tersebut.
+- Apakah direktori kerja lokal ada dan dapat ditulis.
+- Apakah argumen kustom atau environment variable milik agent valid.
+
+Jalankan dulu alat yang sama secara langsung di terminal pada komputer yang menjalankan eksekusi. Jika alat tersebut tidak dapat start sendiri, perbaiki sign in atau konfigurasinya, lalu coba ulang eksekusi dari log eksekusi.
+
+## Eksekusi hang di macOS setelah upgrade CLI
+
+Setelah CLI `multica` dari Homebrew di-upgrade — baik melalui `brew upgrade`, `multica update`, **Update** di halaman Runtimes, atau auto-update daemon — sebuah eksekusi yang membaca `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive, atau folder terlindungi lain dapat berhenti membuat progres: proses agent tidak menggunakan CPU, dan eksekusi tidak pernah selesai maupun gagal.
+
+Ini terjadi saat macOS mengaitkan izin privasi (TCC) ke daemon itu sendiri, seperti yang dilakukannya untuk daemon yang dimulai oleh launchd (misalnya sebuah LaunchAgent): dialog yang pending menyebut nama `multica`, dan setiap tool yang dijalankan oleh sebuah agent menggunakan izin milik daemon tersebut. Binary CLI dari Homebrew tidak ditandatangani dengan identitas yang stabil, sehingga macOS mengaitkan izin tersebut ke build yang spesifik itu pada path hasil resolusinya, seperti `/opt/homebrew/Cellar/multica/<version>/bin/multica`. Setelah upgrade, macOS memperlakukan binary baru sebagai aplikasi yang berbeda dan meminta izin lagi. Akses file akan terblokir hingga seseorang menjawab prompt tersebut, dan daemon tidak dapat mengetahui bahwa ada prompt yang pending.
+
+Untuk memulihkan akses:
+
+1. Di Mac tersebut, jawab dialog "would like to access" yang pending dengan **Allow**. Eksekusi yang macet akan berlanjut.
+2. Untuk Mac yang berjalan tanpa pengawasan (unattended), berikan Full Disk Access ke binary baru tersebut. Cetak path-nya dengan `realpath "$(command -v multica)"`, lalu di **System Settings → Privacy & Security → Full Disk Access** hapus entri `multica` yang lama dan tambahkan path tersebut (tekan ⌘⇧G di file picker untuk paste).
+3. Restart daemon dengan cara yang sama seperti Anda memulainya: `multica daemon restart`, atau `launchctl kickstart -k gui/$(id -u)/<label>` untuk LaunchAgent.
+
+Ulangi langkah ini setelah setiap upgrade CLI. Auto-update aktif secara default hanya untuk daemon yang terhubung ke Multica Cloud; mulai daemon dengan `--no-auto-update` agar upgrade hanya terjadi saat Anda menjalankannya sendiri. CLI yang dibundel dengan [Multica Desktop](/desktop-app) ditandatangani dengan Developer ID, sehingga izinnya tetap bertahan setelah upgrade.
+
+## Update realtime berhenti bekerja
+
+Jika eksekusi masih berjalan tetapi comment dan perubahan status tidak lagi muncul secara live, biasanya WebSocket tidak terhubung.
+
+Periksa koneksi `/ws` di **Network → WS** pada developer tools browser. Untuk deployment yang dihosting mandiri, fokus pada:
+
+- Apakah `FRONTEND_ORIGIN` cocok dengan alamat yang sebenarnya dibuka browser.
+- Apakah halaman HTTPS terhubung melalui `wss://`.
+- Apakah reverse proxy meneruskan request Upgrade WebSocket.
+- Apakah sign in browser sudah kedaluwarsa.
+
+`curl` biasa terhadap `/ws` yang mengembalikan HTTP 400 adalah hal yang wajar: endpoint tersebut membutuhkan query parameter yang di-scope ke workspace dan menolak handshake kosong sebelum upgrade WebSocket apa pun terjadi. Oleh karena itu, 400/401 yang tercatat di log backend hanya membuktikan bahwa routing HTTP biasa sudah mencapai backend — itu tidak membuktikan bahwa proxy mempertahankan header `Upgrade` WebSocket. Untuk memverifikasi koneksi yang sebenarnya, buka tab Network → WS pada browser DevTools (atau gunakan client yang mendukung WebSocket) dan cari handshake `101`.
+
+Catatan self-host: daemon melakukan dial ke `/api/daemon/ws` untuk koneksi panjangnya (bukan `/ws`) — arahkan itu ke backend dengan cara yang sama. Jika handshake WebSocket di sana gagal, daemon secara diam-diam fallback ke polling; baris `status=400` yang berulang pada path tersebut di log backend adalah gejalanya.
+
+Container hanya membaca `.env` saat dibuat; buat ulang setelah ada perubahan:
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+Untuk contoh reverse-proxy yang lengkap, lihat [panduan cepat hosting mandiri](/self-host-quickstart#3-pilih-cara-mengakses).
+
+## `multica setup` melaporkan server tidak dapat dijangkau
+
+Probe reachability milik CLI melakukan GET ke `<server-url>/health` dan membutuhkan 200. Backend menyediakan path ini. Rilis web saat ini meneruskan `/health` ke backend, tetapi rilis lama tidak — reverse proxy yang meneruskan semuanya ke frontend lama semacam itu mengembalikan 404, dan CLI menyimpulkan server down padahal stack-nya sehat.
+
+Mengarahkan `/health` secara eksplisit ke backend (port 8080) di proxy Anda berfungsi di semua rilis — kedua contoh Caddy di [panduan cepat hosting mandiri](/self-host-quickstart#3-pilih-cara-mengakses) melakukan ini. Konfirmasi dengan:
+
+```bash
+curl -fsS <server-url>/health
+```
+
+## `multica login` gagal dengan TLS handshake timeout
+
+`multica login` membuka browser dan sign in web berhasil selesai, tetapi CLI tetap gagal dengan "Sign-in did not complete" atau "TLS handshake timed out". `multica --debug login` menampilkan `net/http: TLS handshake timeout` pada `POST /api/tokens`, sementara `curl.exe -I https://api.multica.ai` atau browser di mesin yang sama terhubung dengan baik.
+
+Koneksi TCP terbuka, tetapi TLS handshake tidak pernah selesai. Client Go, termasuk Multica CLI dan daemon, mengirim post-quantum key share pada TLS ClientHello secara default, yang membuat ukurannya sekitar 1.5 KB dan membaginya menjadi dua paket. Beberapa software security, VPN, router, dan firewall men-drop handshake semacam ini; curl mengirim ClientHello yang jauh lebih kecil sehingga lolos.
+
+Konfirmasi penyebabnya dengan mencoba ulang setelah menonaktifkan post-quantum key share:
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+Jika itu berhasil, atur `GODEBUG=tlsmlkem=0` secara permanen untuk user yang menjalankan CLI dan daemon — di Windows, jalankan `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` lalu buka terminal baru — kemudian restart daemon atau desktop app. Menaikkan `MULTICA_HTTP_TIMEOUT` tidak membantu: itu tidak mengatur handshake. Perbaikan permanennya ada di sisi network: update atau konfigurasi ulang device atau software yang men-drop TLS handshake yang terpecah.
+
+## Email kode verifikasi dan undangan tidak terkirim
+
+Periksa dulu log startup backend. Log tersebut menyatakan apakah server menggunakan `SMTP relay`, `Resend API`, atau `DEV mode`:
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend \
+  | grep "EmailService:"
+```
+
+- **DEV mode**: tidak ada email yang dikirim; kode verifikasi dan tautan undangan hanya dituliskan ke log backend.
+- **Resend**: pastikan API key valid dan domain alamat pengirim sudah terverifikasi.
+- **SMTP**: pastikan host, port, kredensial, dan alamat pengirim, lalu gunakan log error untuk mengetahui apakah kegagalan terjadi pada tahap koneksi, TLS, autentikasi, atau pengiriman.
+
+Saat `SMTP_HOST` dan Resend sama-sama dikonfigurasi, Multica memprioritaskan SMTP. Untuk konfigurasi, lihat [Masuk dan pendaftaran](/auth-setup#kode-verifikasi-email).
+
+<Callout type="warning">
+Jangan mengandalkan kode di log pada produksi, dan jangan mengaktifkan kode test lokal yang fixed.
+</Callout>
+
+## Upload atau download attachment gagal
+
+Periksa dulu log backend dan status code respons. Penyebab umumnya:
+
+- Reverse proxy membatasi ukuran body request.
+- Direktori upload lokal tidak dapat ditulis atau tidak memiliki persistent volume yang terpasang.
+- Bucket, region, endpoint, atau kredensial S3 tidak cocok.
+- URL download menggunakan domain publik atau protokol yang salah setelah melewati proxy.
+
+Dengan Docker Compose, volume default `backend_uploads` menyimpan attachment lokal. Membuat ulang container tidak menghapusnya, tetapi `docker compose down -v` menghapus volume data tersebut. Untuk konfigurasi S3, lihat [Variabel lingkungan](/environment-variables#penyimpanan-lampiran).
+
+## Usage menampilkan nol
+
+Halaman Usage membaca rollup per jam, bukan usage mentah dari setiap eksekusi. Periksa dulu data mentah dan tabel rollup-nya:
+
+```sql
+SELECT count(*) FROM task_usage;
+SELECT count(*) FROM task_usage_hourly;
+
+SELECT plan_time, status, error_code, error_msg
+FROM sys_cron_executions
+WHERE job_name = 'rollup_task_usage_hourly'
+ORDER BY plan_time DESC
+LIMIT 20;
+```
+
+Jika `task_usage` memiliki baris data, tabel rollup-nya kosong, dan record scheduler menunjukkan kegagalan, pastikan dulu semua migration sudah diterapkan; jika migration 103 menolak upgrade, lihat bagian berikutnya. Anda juga dapat menjalankan satu rollup secara manual untuk memisahkan masalah SQL dari masalah scheduling:
+
+```sql
+SELECT rollup_task_usage_hourly();
+```
+
+Jika angkanya terlihat benar setelah dijalankan manual, berarti fungsi rollup-nya berfungsi dan masalahnya ada pada scheduling bawaan backend; SQL manual hanya mengisi satu rollup dan tidak mengembalikan scheduling. Rollup per jam dijalankan oleh scheduler bawaan backend — Anda tidak perlu mengonfigurasi pg_cron sendiri.
+
+## Migration 103 memblokir upgrade
+
+Upgrade normal tidak membutuhkan tindakan apa pun untuk 103: `migrate up` secara otomatis melakukan backfill data usage historis sebelum menerapkannya — database yang kosong langsung lolos, dan instance dengan riwayat data di-backfill per bulan sebelum melanjutkan.
+
+Jika backend masih gagal start dengan `refusing to drop legacy daily rollups`, berarti backfill otomatis tidak selesai (misalnya gagal di tengah jalan, atau SQL-nya diterapkan langsung tanpa melalui `migrate up`). Jalankan command backfill secara manual, lalu restart backend:
+
+```bash
+cd server
+DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
+```
+
+Flag yang bermanfaat: `--dry-run` melakukan preview tanpa menulis; `--sleep-between-slices` menambahkan jeda antar-slice untuk mengurangi tekanan baca pada instance yang sibuk. Command ini bekerja dalam slice bulanan dan idempotent — jalankan ulang langsung setelah terputus. Command ini memegang advisory lock dan saling eksklusif dengan rollup terjadwal milik server, sehingga tidak dapat menghasilkan data rollup yang duplikat atau tidak konsisten. Setelah selesai, restart backend dan konfirmasi `migrations` berstatus `ok` pada `/readyz`.
+
+## Port sudah digunakan
+
+Port lokal yang umum adalah `8080` untuk API, `3000` untuk web app, dan port health-check daemon. Temukan dulu proses yang memegang port tersebut:
+
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN   # macOS / Linux
+netstat -ano | findstr :8080       # Windows
+```
+
+Jika itu adalah checkout Multica lain, jalankan `make stop` di direktori tersebut terlebih dulu. Jika bukan, hentikan program yang bermasalah secara normal, atau ubah port service saat ini. Port publik 80/443 didengarkan oleh reverse proxy seperti Caddy atau Nginx.
+
+## Lokasi log
+
+| Komponen | Cara melihat |
+| --- | --- |
+| Daemon background | `multica daemon logs --lines 100` |
+| Mengikuti log daemon secara live | `multica daemon logs --follow` |
+| File log profile default | `~/.multica/daemon.log` |
+| Log startup atau crash profile default | `~/.multica/daemon.err.log` |
+| Profile bernama | log yang sesuai di bawah `~/.multica/profiles/<name>/` |
+| Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
+| Browser | Console dan Network di developer tools |
+
+File mana yang sedang aktif bergantung pada profile yang digunakan saat daemon dijalankan, dan log basi dari daemon sebelumnya tetap dapat dibaca dengan sempurna — inilah cara termudah untuk salah mendiagnosis file yang salah. Jangan membuka file berdasarkan tebakan: `multica daemon logs` mencetak path absolut yang di-resolve-nya sebelum melakukan streaming. Tambahkan `--profile <name>` untuk membaca log dari profile bernama.
+
+Untuk mengamati startup daemon secara langsung, jalankan di foreground sebagai gantinya:
+
+```bash
+multica daemon stop
+multica daemon start --foreground
+```
+
+Jika Anda masih belum dapat menemukannya, cari issue yang sudah ada atau buat yang baru di [GitHub Issues](https://github.com/multica-ai/multica/issues).
+
+## Langkah selanjutnya
+
+- [Daemon dan runtime](/daemon-runtimes) — cara runtime mendaftar dan melaporkan status online.
+- [Eksekusi](/tasks) — referensi status, timeout, dan kegagalan.
+- [Variabel lingkungan](/environment-variables) — referensi konfigurasi hosting mandiri yang lengkap.
+</content>

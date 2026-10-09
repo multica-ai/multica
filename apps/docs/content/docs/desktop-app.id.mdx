@@ -1,0 +1,182 @@
+---
+title: Aplikasi desktop
+description: Instal Multica Desktop, gunakan tab desktop dan daemon bawaan, serta hubungkan ke instance self-hosted.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica Desktop tersedia untuk macOS, Windows, dan Linux. Desktop menggunakan akun dan data ruang kerja yang sama dengan aplikasi web, tetapi mengelola daemon di komputer Anda secara otomatis dan menyimpan kumpulan tab yang terpisah untuk setiap ruang kerja.
+
+## Desktop dan web
+
+| | Web | Desktop |
+| --- | --- | --- |
+| Cara membuka | Browser | Instal aplikasi desktop |
+| Tab ruang kerja | Menggunakan tab browser | Setiap ruang kerja menyimpan kumpulan tabnya sendiri |
+| Daemon | Instal dan jalankan CLI secara terpisah | Dijalankan otomatis oleh aplikasi setelah masuk |
+| Pembaruan | Refresh halaman | Diperbarui melalui aplikasi desktop |
+
+Web lebih praktis untuk melihat sesuatu secara cepat atau digunakan di komputer bersama.
+
+Anda bisa masuk ke keduanya secara bersamaan. Selama keduanya terhubung ke layanan Multica yang sama, data yang ditampilkan juga sama.
+
+## Instalasi
+
+Pilih installer yang sesuai dengan OS dan arsitektur CPU Anda dari [halaman unduhan Multica](https://multica.ai/download):
+
+| Platform | Installer |
+| --- | --- |
+| macOS | `.dmg` |
+| Windows | `.exe` |
+| Linux | `.AppImage`, `.deb`, atau `.rpm` |
+
+Setelah instalasi, masuk dengan email yang sama seperti yang Anda gunakan di web. Setelah masuk, Desktop menjalankan CLI Multica bawaannya sendiri dan mendeteksi AI coding tool yang sudah terinstal di komputer tersebut.
+
+<Callout type="info">
+CLI yang dibundel dengan Desktop hanya melayani runtime terkelola milik aplikasi. Jika Anda juga ingin menjalankan command seperti `multica issue` di terminal, instal CLI secara terpisah dengan mengikuti [langkah 2 pada quickstart](/cloud-quickstart#2-hubungkan-sebuah-komputer).
+</Callout>
+
+## Tab Desktop
+
+Desktop menyimpan tab per ruang kerja. Misalnya, jika Anda membuka tiga tugas di ruang kerja A lalu beralih ke ruang kerja B, Anda akan melihat tab milik B sendiri; saat kembali ke A, tiga tab sebelumnya masih ada di sana.
+
+Satu resource yang sama hanya terbuka satu kali di ruang kerja yang sedang aktif. Tab dapat diurutkan ulang, disematkan (pin), dan ditutup, dan masing-masing menyimpan riwayat maju/mundur serta posisi scroll-nya sendiri. Mengklik atau menempelkan app link untuk deployment ini akan langsung membukanya di sebuah tab, bukan beralih ke browser.
+
+Keluar (logout) akan menghapus semua tab yang tersimpan di komputer tersebut, sehingga orang berikutnya yang masuk tidak akan melihat halaman yang ditinggalkan oleh akun sebelumnya.
+
+## Daemon bawaan
+
+Setelah masuk, Desktop membuat profil CLI khusus untuk layanan Multica yang sedang digunakan dan memakainya untuk menjalankan daemon. Profil ini berada di:
+
+```text
+~/.multica/profiles/desktop-<host>/
+```
+
+Desktop tidak pernah membaca atau menimpa profil default yang Anda gunakan di terminal. Jika Anda juga menjalankan daemon lain secara manual, Multica akan menampilkannya sebagai runtime yang terpisah.
+
+Anda dapat memeriksa status runtime dan log di pengaturan Desktop. Jika sebuah tool tidak terdeteksi, pastikan dulu tool tersebut berjalan di terminal biasa dan sudah login, lalu restart daemon Desktop.
+
+## Memperbarui Desktop
+
+Pembaruan otomatis aktif secara default. Aplikasi memeriksa dan mengunduh versi baru di latar belakang; setelah unduhan selesai, Anda bisa langsung restart untuk menginstalnya atau membiarkannya terinstal saat keluar berikutnya. Anda juga bisa mematikan pemeriksaan otomatis atau memeriksa versi baru secara manual di **Pengaturan → Updates**.
+
+Pembaruan didistribusikan berdasarkan OS dan arsitektur CPU:
+
+- Windows arm64 dan macOS x64 (Intel) masing-masing menggunakan feed update tersendiri;
+- arsitektur lainnya menggunakan feed default;
+- aplikasi otomatis mencocokkan feed update yang sesuai — tidak perlu dipilih secara manual;
+- di Linux, pembaruan otomatis hanya berfungsi untuk `.AppImage`; perbarui `.deb` dan `.rpm` dengan menginstal paket baru di atas yang lama;
+- jika pembaruan otomatis gagal, lakukan juga instalasi ulang menggunakan installer yang sesuai dari halaman unduhan.
+
+## Menghubungkan ke instance self-hosted
+
+Desktop terhubung ke Multica Cloud secara default. Untuk terhubung ke instance self-hosted, buat `desktop.json` di dalam direktori `.multica` pada direktori home Anda:
+
+| Platform | Path |
+| --- | --- |
+| macOS | `/Users/<Anda>/.multica/desktop.json` |
+| Linux | `/home/<Anda>/.multica/desktop.json` |
+| Windows | `C:\Users\<Anda>\.multica\desktop.json` |
+
+Ini adalah lokasi default — jika direktori home Anda telah dipindahkan atau dialihkan, gunakan path yang sesungguhnya.
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+```
+
+<Callout type="warning">
+Ini **bukan** `~/.multica/config.json` milik CLI, dan nama field-nya pun berbeda: CLI menggunakan `server_url`, Desktop menggunakan `apiUrl`. Desktop tidak pernah membaca konfigurasi CLI — Desktop mengelola profil daemon-nya sendiri secara terpisah di `~/.multica/profiles/desktop-<host>/`. Mengubah `config.json` tidak akan mengubah server mana yang dihubungi oleh Desktop.
+</Callout>
+
+`apiUrl` adalah alamat publik backend; field ini wajib diisi dan harus menggunakan `http` atau `https`. Dua URL lainnya bisa dikosongkan — Desktop menurunkannya secara otomatis:
+
+- `wsUrl`: mengganti skema `apiUrl` menjadi `ws` atau `wss` dan menambahkan `/ws` pada path-nya;
+- `appUrl`: menghapus prefix `api.` ketika host dimulai dengan `api.` dan memiliki setidaknya tiga label (`api.example.com` → `example.com`); jika tidak, nilainya tetap sama dengan `apiUrl`.
+
+Biasanya `apiUrl` saja sudah cukup. Timpa secara eksplisit hanya ketika hasil penurunan otomatis tidak sesuai dengan deployment Anda; tiga kasus umum berikut:
+
+- aplikasi web dan API berada di domain yang berbeda;
+- WebSocket di-deploy secara terpisah;
+- host tidak sesuai dengan konvensi penghapusan prefix (host dua label seperti `api.local` tetap mempertahankan prefix-nya).
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com",
+  "appUrl": "https://app.example.com",
+  "wsUrl": "wss://ws.example.com/socket"
+}
+```
+
+Restart Desktop setelah menyimpan — file ini hanya dibaca sekali saat startup. Dua mode kegagalan ini terlihat berbeda, yang menjadi cara tercepat untuk membedakannya:
+
+- **File tidak ditemukan** (direktori salah, atau nama file bukan persis `desktop.json`) — Desktop menggunakan konfigurasi Cloud default dan tidak menampilkan error. Jadi jika Desktop masih menunjukkan alamat Cloud dan tidak ada error konfigurasi, berarti file tidak berada di lokasi yang dicari Desktop.
+- **File ditemukan tetapi tidak valid** — JSON, versi, atau URL bermasalah — Desktop menampilkan error konfigurasi dan tidak kembali ke Cloud secara otomatis.
+
+Hapus file tersebut dan restart untuk kembali ke konfigurasi Cloud default.
+
+<Callout type="warning">
+Desktop hanya dapat terhubung ke alamat yang dapat dijangkau baik dari browser maupun dari komputer yang menjalankannya. Jika instance self-hosted jarak jauh tidak menggunakan HTTPS atau tidak mem-proxy WebSocket, Desktop tidak dapat membuat koneksi; lihat [quickstart self-host](/self-host-quickstart#3-pilih-cara-mengakses) untuk konfigurasi lengkapnya.
+</Callout>
+
+### Windows: periksa nama file dan encoding
+
+Dua perilaku default editor di Windows secara diam-diam menghasilkan file yang tidak bisa digunakan Desktop:
+
+- **Notepad menambahkan `.txt`.** Menyimpan sebagai `desktop.json` bisa menghasilkan `desktop.json.txt`, yang akan dianggap Desktop sebagai tidak ditemukan. Aktifkan tampilan ekstensi nama file di Explorer, atau pilih *All files* pada dialog simpan. Untuk melihat nama file yang sebenarnya, jalankan `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` di PowerShell — kolom `Name` harus terbaca persis `desktop.json`.
+- **Redirection PowerShell menulis UTF-16 atau BOM.** `> desktop.json` dan `Out-File` dapat menghasilkan encoding yang gagal di-parse, yang muncul sebagai error konfigurasi.
+
+Untuk menghindari keduanya, buat file tersebut dari PowerShell dalam satu langkah:
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
+
+## Windows Defender menandai Multica sebagai virus
+
+**Gejala**: Windows Security melaporkan ancaman seperti `Trojan:Script/Wacatac.B!ml` dan mengkarantina sebuah file di dalam instalasi Desktop. Item yang terdampak biasanya adalah CLI bawaan, bukan executable aplikasi utama:
+
+```text
+C:\Users\<Anda>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
+```
+
+**Ini adalah false positive.** Suffix `!ml` menunjukkan bahwa keputusan ini berasal dari heuristik machine learning Defender, bukan dari signature malware. Build Windows Multica belum ditandatangani dengan Authenticode code-signing, dan sebuah binary yang baru dipublikasikan, tidak ditandatangani, serta menjalankan proses latar belakang dan membuka koneksi jaringan, persis merupakan profil yang dinilai mencurigakan oleh heuristik semacam itu. Setiap artefak Windows dibangun oleh GitHub Actions dari source code publik di repository ini.
+
+**Verifikasi sendiri** — setiap GitHub release menerbitkan `checksums.txt` yang mencakup seluruh arsip CLI:
+
+```powershell
+Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
+```
+
+Bandingkan hash tersebut dengan baris yang sesuai pada `checksums.txt` di [release terbaru](https://github.com/multica-ai/multica/releases/latest).
+
+**Cara memperbaiki**:
+
+1. **Kembalikan file yang dikarantina** — Windows Security → *Virus & threat protection* → *Protection history* → pilih item Multica → *Actions* → *Restore*.
+2. **Tambahkan exclusion** agar tidak dikarantina lagi — *Virus & threat protection* → *Manage settings* → *Exclusions* → *Add an exclusion* → *Folder*, lalu tambahkan keduanya:
+   - `%LOCALAPPDATA%\Programs\@multicadesktop`
+   - `%APPDATA%\Multica`
+
+   Kedua path ini penting: ketika CLI bawaan hilang, Desktop akan mengunduh penggantinya ke `%APPDATA%\Multica\bin`, sehingga mengecualikan hanya folder instalasi akan membuat Anda terjebak dalam loop karena penggantinya juga akan dikarantina.
+3. **Laporkan false positive ini ke Microsoft** di [Microsoft Security Intelligence — submit a file](https://www.microsoft.com/en-us/wdsi/filesubmission), pilih *Software developer* dan *Incorrectly detected as malware*. Itulah yang membuat deteksi ini ditarik untuk semua pengguna, biasanya dalam beberapa hari.
+
+<Callout type="warning">
+Tambahkan exclusion ini hanya jika Anda menginstal Multica dari [halaman unduhan](https://multica.ai/download) atau [GitHub releases](https://github.com/multica-ai/multica/releases) dan checksum-nya sesuai. Exclusion menonaktifkan real-time protection untuk seluruh isi folder tersebut.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Quickstart](/cloud-quickstart) — alur koneksi pertama.
+- [Daemon dan runtime](/daemon-runtimes) — cara kerja daemon bawaan.
+- [Pemecahan masalah](/troubleshooting) — mendiagnosis masalah koneksi.

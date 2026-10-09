@@ -1,0 +1,65 @@
+{
+  "nav": {
+    "inbox": "Kotak Masuk",
+    "chat": "Obrolan",
+    "my_issues": "Tugas Saya",
+    "issues": "Tugas",
+    "projects": "Proyek",
+    "autopilots": "Otomatisasi",
+    "agents": "Agent",
+    "squads": "Squad",
+    "usage": "Analitik",
+    "runtimes": "Runtime",
+    "skills": "Skill",
+    "settings": "Pengaturan"
+  },
+  "tab": {
+    "issue": "Tugas",
+    "project": "Proyek",
+    "autopilot": "Otomatisasi",
+    "agent": "Agent",
+    "member": "Anggota",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Mesin",
+    "runtime": "Runtime",
+    "attachment": "Lampiran",
+    "create_agent": "Buat Agent",
+    "unknown": "Halaman tidak dikenal"
+  },
+  "help": {
+    "trigger": "Bantuan",
+    "download_desktop": "Aplikasi desktop",
+    "docs": "Dokumentasi",
+    "changelog": "Catatan perubahan",
+    "discord": "Discord",
+    "feedback": "Masukan",
+    "server_version": "Versi server {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Memuat ruang kerja…",
+    "loading_named_prefix": "Memuat"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Lepas sematan",
+    "workspaces_label": "Ruang Kerja",
+    "create_workspace": "Buat ruang kerja",
+    "pending_invitations_label": "Undangan tertunda",
+    "invitation_workspace_fallback": "Ruang Kerja",
+    "invitation_join": "Gabung",
+    "invitation_decline": "Tolak",
+    "log_out": "Keluar",
+    "new_issue": "Tugas Baru",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Disematkan",
+    "work_group": "Pekerjaan",
+    "ai_team_group": "Tim AI",
+    "show_more_pins": "Tampilkan {{count}} lainnya…",
+    "show_fewer_pins": "Tampilkan lebih sedikit",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Gabung Discord kami",
+      "dismiss": "Tutup"
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "title": "Kotak Masuk",
+  "empty": {
+    "title": "Semua sudah ditangani",
+    "body": "Notifikasi dan pembaruan agent akan muncul di sini."
+  },
+  "actions": {
+    "mark_read": "Tandai dibaca",
+    "mark_unread": "Tandai belum dibaca",
+    "mark_all_read": "Tandai semua dibaca",
+    "archive": "Arsipkan",
+    "archive_all": "Arsipkan semua",
+    "archive_all_read": "Arsipkan semua yang sudah dibaca",
+    "archive_completed": "Arsipkan yang selesai",
+    "inbox_actions": "Tindakan kotak masuk"
+  },
+  "filters": {
+    "all": "Semua",
+    "unread": "Belum dibaca"
+  },
+  "archive": {
+    "confirm_title": "Arsipkan semua?",
+    "confirm_body": "Ini akan mengarsipkan setiap item kotak masuk, baik yang sudah maupun belum dibaca. Anda tetap dapat menemukannya melalui halaman tugas."
+  },
+  "errors": {
+    "load_failed": "Gagal memuat kotak masuk: {{message}}"
+  },
+  "detail": {
+    "priority_none": "Tanpa prioritas",
+    "priority_low": "Rendah",
+    "priority_medium": "Sedang",
+    "priority_high": "Tinggi",
+    "priority_urgent": "Mendesak",
+    "status_todo": "Todo",
+    "status_in_progress": "In Progress",
+    "status_done": "Done",
+    "status_blocked": "Blocked",
+    "notification": "Notifikasi",
+    "close": "Tutup notifikasi",
+    "unavailable": "Notifikasi ini tidak lagi tersedia.",
+    "billing_disabled": "Perubahan penagihan tidak tersedia untuk ruang kerja ini. Hubungi administrator ruang kerja Anda untuk bantuan.",
+    "contact_admin": "Minta owner atau admin ruang kerja untuk meninjau opsi penagihan.",
+    "review_billing": "Tinjau opsi penagihan",
+    "review_billing_web": "Buka Multica di web untuk meninjau opsi penagihan."
+  },
+  "type": {
+    "assigned": "Ditugaskan",
+    "subscribed": "Berlangganan",
+    "unassigned": "Penugasan dibatalkan",
+    "reassigned": "Ditugaskan ulang",
+    "status_changed": "Status berubah",
+    "priority_changed": "Prioritas berubah",
+    "start_date_changed": "Tanggal mulai berubah",
+    "due_date_changed": "Tanggal tenggat berubah",
+    "new_comment": "Komentar baru",
+    "mentioned": "Disebut",
+    "review_requested": "Peninjauan diminta",
+    "task_completed": "Eksekusi selesai",
+    "task_failed": "Eksekusi gagal",
+    "agent_blocked": "Agent terblokir",
+    "agent_completed": "Agent selesai",
+    "reaction_added": "Reaksi ditambahkan",
+    "quick_create_done": "Pembuatan cepat selesai",
+    "quick_create_failed": "Pembuatan cepat gagal",
+    "quick_create_unconfirmed": "Pembuatan cepat perlu diperiksa",
+    "autopilot_paused": "Autopilot dijeda",
+    "children_done": "Sub-tugas selesai",
+    "autopilot_quota_exceeded": "Batas eksekusi autopilot tercapai",
+    "set_status": "Setel status ke",
+    "set_priority": "Setel prioritas ke",
+    "assigned_to": "Ditugaskan ke {{name}}",
+    "removed_assignee": "Penerima tugas dihapus",
+    "set_due_date": "Setel tanggal tenggat ke {{date}}",
+    "removed_due_date": "Tanggal tenggat dihapus",
+    "reacted_with": "Memberi reaksi {{emoji}}",
+    "created_with_agent": "Dibuat dengan agent: {{identifier}}",
+    "failed_with_detail": "Gagal: {{detail}}",
+    "run_limit_blocked": "Eksekusi diblokir karena batas telah tercapai"
+  },
+  "body": {
+    "autopilot_title_limit": "Autopilot \"{{title}}\" tidak dimulai karena ruang kerja ini telah mencapai batas {{limit}} eksekusi untuk periode saat ini. Kuota akan diatur ulang pada {{resetAt}}.",
+    "autopilot_limit": "Ruang kerja ini telah mencapai batas {{limit}} eksekusi autopilot untuk periode saat ini. Eksekusi ini tidak dimulai. Kuota akan diatur ulang pada {{resetAt}}."
+  }
+}

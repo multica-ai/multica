@@ -1,0 +1,60 @@
+---
+title: Model keamanan
+description: Apa yang dapat dijangkau oleh eksekusi Multica pada mesin yang menjalankannya, dan di mana batas isolasi yang sesungguhnya berada.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Saat sebuah agent mengambil eksekusi, daemon menjalankan alat coding AI (Codex, Claude Code, dan sejenisnya) sebagai child process. Memahami apa yang dapat disentuh oleh proses tersebut adalah keseluruhan model keamanan.
+
+## Batasnya adalah pengguna daemon
+
+Secara default, sebuah eksekusi berjalan dengan **izin penuh dari pengguna sistem operasi yang menjalankan daemon**. Eksekusi tersebut dapat membaca dan menulis setiap file yang dapat diakses pengguna itu, menggunakan kredensial pengguna tersebut, dan menjangkau jaringan tanpa batasan.
+
+Multica tidak memberikan garansi sandbox filesystem. Saat ini hanya ada satu pengecualian sempit — Windows, saat Anda secara eksplisit mengaktifkan sandbox native milik Codex — tetapi kombinasi platform dan konfigurasi mana yang benar-benar melakukan sandboxing adalah detail kompatibilitas yang berubah mengikuti versi alat. Anggap setiap eksekusi tidak di-sandbox, dan letakkan batasnya di luar daemon.
+
+<Callout type="warning">
+Multica tidak melakukan sandbox filesystem untuk Anda. Jika daemon berjalan sebagai akun pengguna pribadi Anda, sebuah eksekusi dapat membaca SSH key Anda, mengedit profil shell Anda, dan menghapus dokumen Anda. Isolasi harus datang dari batas yang Anda tempatkan di sekeliling daemon.
+</Callout>
+
+Ini disengaja. Agent diminta untuk menginstal dependency, menjalankan build, menggunakan cloud CLI Anda, dan mengoperasikan tooling yang mengharapkan direktori home yang normal. Sandbox filesystem yang hanya sebagian merusak pekerjaan tersebut dengan cara yang sulit didiagnosis — alatnya melaporkan "not logged in" atau diam-diam menggunakan akun yang salah — sementara tetap tidak melindungi hal yang paling penting, karena sandbox itu tidak dapat mencegah sebuah eksekusi membaca kredensial dan mengirimkannya lewat jaringan.
+
+Jadi Multica tidak berpura-pura menjadi batas itu. Tempatkan satu batas di sekelilingnya.
+
+## Konfigurasi yang direkomendasikan
+
+Pilih yang paling sesuai dengan infrastruktur Anda — opsi ini diurutkan dari yang paling ringan hingga paling kuat:
+
+1. **Pengguna Unix khusus.** Buat pengguna `multica`, berikan hanya repository dan kredensial yang dibutuhkan oleh agent, dan jalankan daemon sebagai pengguna tersebut. Akun Anda sendiri tetap tidak tersentuh.
+2. **Container.** Jalankan daemon di dalam container dengan hanya mount dan secret yang dibutuhkan oleh agent.
+3. **Virtual machine.** Isolasi penuh, dengan konsekuensi harus menyediakan sebuah mesin.
+
+Apa pun yang Anda pilih, perlakukan kredensial yang dapat dijangkau dari lingkungan tersebut sebagai kredensial yang mungkin digunakan oleh agent: batasi scope token secermat mungkin, lebih baik gunakan deploy key khusus per tujuan daripada SSH key pribadi Anda, dan hindari menyimpan kredensial produksi yang tidak terkait di direktori home pengguna tersebut.
+
+## Apa yang benar-benar diisolasi oleh Multica
+
+Hal-hal ini nyata, tetapi sifatnya adalah kenyamanan dan pengurangan blast radius — bukan batas keamanan terhadap eksekusi yang secara aktif mencoba keluar (escape):
+
+- **Direktori kerja per eksekusi.** Setiap eksekusi mendapatkan workdir-nya sendiri di bawah `~/multica_workspaces/`, sehingga eksekusi yang berjalan bersamaan tidak saling bertabrakan pada checkout yang sama.
+- **State agent per eksekusi.** Eksekusi Codex mendapatkan `CODEX_HOME` yang di-scope per eksekusi, menyimpan config, session, dan skill, sehingga pengaturan per eksekusi tidak mencemari `~/.codex/` milik Anda.
+- **Token API yang di-scope per eksekusi.** `MULTICA_TOKEN` yang diberikan ke sebuah eksekusi terikat pada agent dan eksekusi tersebut oleh server, sehingga sebuah eksekusi tidak dapat bertindak sebagai Anda atau sebagai agent lain melalui API Multica.
+
+## Apa yang bukan merupakan batas
+
+- **Sandbox dan pengaturan approval milik alat coding itu sendiri.** Multica menjalankan agent tanpa pengawasan (unattended), sehingga prompt approval dijawab secara otomatis. Pada jalur default, sandbox filesystem juga dimatikan: Codex berjalan dengan `sandbox_mode = "danger-full-access"` dan Claude Code dengan `--permission-mode bypassPermissions`. Pengecualiannya adalah Windows — jika Anda secara eksplisit mengonfigurasi sandbox native Codex (`windows.sandbox = "unelevated"` atau `"elevated"`), Multica menghormati opt-in tersebut dan tetap menggunakan `workspace-write` untuk eksekusi tersebut. Layak dilakukan jika sesuai, tetapi ini hanya satu alat pada satu platform dan tidak mengubah cara Anda seharusnya membatasi pengguna daemon.
+- **Struktur direktori `HOME` Anda.** Eksekusi mewarisi `HOME` dan variabel `XDG_*` asli milik pengguna daemon, yang membuat CLI host (`gh`, `aws`, `kubectl`, `gcloud`, `glab`) berfungsi di dalam eksekusi persis seperti di shell Anda. Ini juga berarti segala sesuatu di bawah home tersebut dapat dijangkau.
+
+<Callout>
+Di Linux, eksekusi Codex sebelumnya berjalan di bawah sandbox `workspace-write` dengan `HOME` yang dialihkan per eksekusi. Mekanisme itu telah dihapus: hal itu membuat CLI host tidak terkonfigurasi di dalam eksekusi, dan karena hanya membatasi penulisan, mekanisme itu tidak pernah mencegah sebuah eksekusi membaca dan mengeksfiltrasi kredensial. Linux kini mengikuti default yang sama dengan macOS dan Windows.
+</Callout>
+
+## Memeriksa mode yang sebenarnya digunakan oleh sebuah eksekusi
+
+Daemon mencatat mode sandbox efektif pada level warn saat sebuah eksekusi mulai tanpa sandbox:
+
+```bash
+multica daemon logs --lines 200 | grep "codex sandbox"
+```
+
+Untuk memastikan konfigurasi Codex yang sebenarnya berlaku, baca blok yang dikelola (managed block) di `config.toml` milik eksekusi tersebut, di bawah `CODEX_HOME` eksekusi itu — bagian antara marker `# BEGIN multica-managed` dan `# END multica-managed` ditulis oleh daemon pada setiap eksekusi.
+</content>

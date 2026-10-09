@@ -1,0 +1,25 @@
+---
+title: Memulai pekerjaan agent
+description: Empat cara memicu agent, dan di mana memeriksa progresnya setelahnya.
+---
+
+Di Multica, agent tidak memulai pekerjaan dengan sendirinya. Setiap eksekusi dipicu oleh tindakan yang eksplisit. Ada empat cara:
+
+| Metode | Paling cocok untuk | Caranya |
+| --- | --- | --- |
+| **Tugaskan tugas** | Agent memiliki pekerjaan ini dari awal sampai akhir | [Tugaskan tugas ke agent](/assigning-issues); dimulai langsung saat tugas berstatus `todo` atau status setelahnya |
+| **@mention di komentar** | Meminta agent menangani satu permintaan spesifik tanpa mengubah assignee tugas | [@mention di komentar](/mentioning-agents), atau balas komentar agent untuk melanjutkan percakapan |
+| **Obrolan langsung** | Pertanyaan atau percobaan cepat yang tidak memerlukan tugas | [Mulai obrolan dengan agent](/chat); setiap pesan memicu satu eksekusi |
+| **Autopilot** | Pekerjaan berulang yang harus berjalan terjadwal atau dari peristiwa eksternal | [Buat autopilot](/autopilots), dipicu oleh jadwal, webhook, atau manual |
+
+Keempat metode ini mengikuti aturan yang sama:
+
+- Anda hanya dapat memicu agent yang **Anda miliki izin untuk menjalankannya**, ditentukan oleh pengaturan Access agent — bukan oleh peran Anda di ruang kerja.
+- Sebelum Anda memicu dari sebuah tugas, **pratinjau pemicu** di bawah kolom input menunjukkan dengan tepat siapa yang akan dibangkitkan oleh konten ini; gunakan `/note` untuk meninggalkan pesan tanpa memicu agent apa pun.
+- Tugas dengan status `backlog` tidak memicu eksekusi; pindahkan tugas ke `todo` dan agent yang ditugaskan akan mulai.
+
+## Memantau progres
+
+Setiap pemicu membuat satu [eksekusi](/tasks). Progres mengalir balik ke tempat Anda memicunya — linimasa tugas atau jendela obrolan; log eksekusi menunjukkan eksekusi secara lengkap dan memungkinkan Anda menghentikan atau mencoba ulang.
+
+Saat eksekusi butuh waktu lama untuk dimulai, biasanya runtime sedang offline — periksa bagian tentang eksekusi yang tidak dimulai di [Pemecahan masalah](/troubleshooting).

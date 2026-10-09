@@ -1,0 +1,124 @@
+---
+title: Instal alat pengkodean AI
+description: Instal dan masuk ke sebuah alat pengkodean AI yang didukung agar Multica dapat mengeksekusi di komputer Anda.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Sebuah runtime lokal terdiri dari dua bagian: daemon Multica, dan satu alat pengkodean AI yang dapat dijalankannya. Instal hanya tool yang ingin Anda gunakan — Anda tidak perlu menginstal semuanya.
+
+## 1. Pilih sebuah tool
+
+Tool yang sudah terinstal dan sudah masuk tidak memerlukan pengaturan tambahan. Tool-tool berbeda dalam model, MCP, resumpsi sesi, dan dukungan skill; detailnya ada di [Perbandingan alat pengkodean AI](/providers).
+
+Multica saat ini mendeteksi perintah-perintah berikut:
+
+| Tool | Perintah yang dideteksi | Panduan instalasi resmi |
+| --- | --- | --- |
+| Antigravity CLI | `agy` | [Instalasi dan masuk Antigravity](https://antigravity.google/docs/cli-install) |
+| Claude Code | `claude` | [Mulai cepat Claude Code](https://code.claude.com/docs/en/quickstart) |
+| CodeBuddy Code | `codebuddy` | [Mulai cepat CodeBuddy](https://www.codebuddy.ai/docs/cli/quickstart) |
+| CodeArts | `codearts` | [Mulai cepat CodeArts CLI](https://support.huaweicloud.com/qs-codeartssnap/codeartsagent_qs_0004.html) |
+| Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
+| GitHub Copilot CLI | `copilot` | [Instal Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
+| Cursor Agent | `cursor-agent` | [Instal Cursor CLI](https://docs.cursor.com/en/cli/installation) |
+| DeepSeek Harness | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) |
+| DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
+| Grok Build | `grok` | [Mulai cepat Grok Build](https://docs.x.ai/build/overview) |
+| Hermes Agent | `hermes` | [Mulai cepat Hermes](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
+| Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
+| Kiro CLI | `kiro-cli` | [Instal Kiro CLI](https://kiro.dev/docs/cli/installation/) |
+| MiniMax Code | `mcode` | [Instal MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
+| OpenClaw | `openclaw` | [Instal OpenClaw](https://docs.openclaw.ai/install) |
+| OpenCode | `opencode` | [Mulai cepat OpenCode](https://opencode.ai/en/docs) |
+| Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Oh-My-Pi | `omp` | [Instalasi Oh-My-Pi](https://omp.sh) |
+| Qoder CLI | `qodercli` | [Mulai cepat Qoder CLI](https://docs.qoder.com/en/cli/quick-start) |
+| Qoder CN CLI | `qoderclicn` | [Mulai cepat Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
+| Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
+| QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
+| TRAE CLI | `traecli` | [Situs resmi TRAE](https://www.trae.cn/) |
+| Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+
+"Didukung" berarti Multica dapat menjalankan CLI tersebut. Ini tidak berarti Multica menyediakan akun, subscription, atau kuota model dari tool itu untuk Anda.
+
+## 2. Masuk di komputer Anda
+
+Setelah instalasi, jalankan tool itu sekali di terminal secara terpisah dan selesaikan proses masuk atau pengaturan model provider-nya. Jika tool tidak dapat menyelesaikan permintaan di terminal, pemanggilan oleh daemon akan gagal dengan cara yang sama.
+
+Untuk CodeArts, verifikasi jalur non-interaktif dengan `codearts run --model provider/model "Reply OK"`, bukan hanya TUI-nya. CodeArts CLI saat ini dapat membuat sebuah provider kustom berfungsi di TUI sementara `run`, `models`, dan `serve` masih memerlukan [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica dapat menemukan model kustom dari `~/.codeartsdoer/codearts_cli.json` atau `.jsonc`, tetapi eksekusi agent menggunakan `codearts run` dan karenanya mengikuti persyaratan otorisasinya.
+
+Untuk Reasonix, jalankan `reasonix setup` dan konfigurasikan provider dan model default sebelum memulai daemon.
+
+Untuk QwenPaw, pilih provider dan model di konfigurasi QwenPaw sendiri. Multica tidak dapat menimpa model QwenPaw saat eksekusi berjalan.
+
+Untuk MiniMax Code, instal rilis Node.js yang didukung (`>=22.19 <23` atau `>=24 <27`) dan jalankan `npm install --global @minimax-ai/code@latest`. Instalasi npm global menempatkan `mcode` pada path binary global npm; jika `command -v mcode` atau `Get-Command mcode` tidak dapat menemukannya, tambahkan path tersebut ke `PATH`. Lalu jalankan `mcode login`. MiniMax Code memiliki kendali atas pemilihan model; Multica tidak dapat menimpanya lewat ACP.
+
+Untuk DeepSeek Harness, instal Node.js 20+ dan jalankan `npm install -g @deepseek-ai/dsh`, lalu berikan profil runtime Multica — bundle yang mengimplementasikan protokol `--stdio` yang dijalankan Multica, dan alasan mengapa `dsh` saja tidak dapat digunakan sendirian. Setel `MULTICA_DSH_PROFILE_BUNDLE` ke bundle yang akan diinstal dan daemon akan menambahkannya untuk Anda, atau tambahkan sendiri dengan `dsh plugin --profile multica add <bundle>`. `<bundle>` dapat berupa apa pun yang diterima `dsh plugin` — nama paket npm, sebuah direktori, atau tarball yang sudah dipaket — dan bridge milik Multica sendiri ada di [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime). Bridge ini belum ada di registry npm publik ([multica#6936](https://github.com/multica-ai/multica/issues/6936)), sehingga saat ini tim yang self-hosted membangunnya dari repositori tersebut dan mengarahkan variabelnya ke direktori build, atau ke tarball yang dihasilkan `npm pack` — yang terakhir ini jika komputer yang menjalankan daemon bukan komputer yang membuatnya. Nama paket menjadi pilihan paling sederhana setelah bridge-nya dipublikasikan. Apa pun yang Anda pilih, prioritaskan sesuatu yang dipublikasikan atau dibangun oleh tim Anda sendiri: nilai ini diinstal ke dalam DSH home setiap host daemon tanpa konfirmasi lebih lanjut, sehingga sebuah paket pihak ketiga yang tidak diperiksa adalah keputusan supply-chain, bukan sekadar kenyamanan. Jika Anda menginstal DeepSeek Harness Desktop sebagai gantinya alih-alih paket npm, daemon juga mencari shim CLI yang dihasilkan aplikasi tersebut, di bawah direktori data per-pengguna miliknya sendiri — `~/Library/Application Support/DSH Desktop` di macOS, `%APPDATA%\DSH Desktop` di Windows. Di Windows itu adalah roaming application data, bukan direktori instalasi: aplikasi itu terinstal ke Program Files atau `%LOCALAPPDATA%\Programs`, tetapi CLI yang dijalankannya berada bersama state per-pengguna lainnya. Segmen versi dalam path tersebut adalah id yang dihasilkan, sehingga daemon mengenumerasi dan memilih yang terbaru. Tidak ada hal lain yang diperlukan di `PATH` — sebuah shim yang dihasilkan menjalankan runtime milik aplikasi Desktop itu sendiri lewat path absolut. Jika DSH Desktop terinstal di lokasi non-default, arahkan `MULTICA_DSH_PATH` ke shim tersebut. Daemon mendaftarkan DeepSeek Harness hanya setelah `dsh --profile multica --probe` berhasil, dan melaporkan profil yang hilang di `/health` saat tidak berhasil. Setel `DEEPSEEK_API_KEY` (atau simpan di pengaturan dsh sendiri) sebelum memulai daemon.
+
+Kredensial login tersebut disimpan secara lokal oleh tool itu sendiri. Multica tidak pernah menerima token login dari Claude, Codex, Cursor, atau CLI lain apa pun.
+
+<Callout type="info">
+Antigravity memerlukan 1.1.10 atau lebih baru, Claude Code memerlukan 2.0.0 atau lebih baru, Codex 0.100.0 atau lebih baru, Copilot 1.0.0 atau lebih baru, Grok 0.2.89 atau lebih baru, Qwen Code 0.20.0 atau lebih baru, MiniMax Code 0.1.2 atau lebih baru, dan OpenCode 1.1.54 atau lebih baru. Di bawah versi minimum, daemon tidak mendaftarkan runtime yang bersangkutan.
+</Callout>
+
+## 3. Pastikan daemon dapat menemukan perintahnya
+
+Di macOS, Linux, atau WSL, jalankan:
+
+```bash
+command -v <command>
+<command> --version
+```
+
+Di Windows PowerShell, jalankan:
+
+```powershell
+Get-Command <command>
+<command> --version
+```
+
+Ganti `<command>` dengan sebuah perintah dari tabel, seperti `claude`, `codex`, atau `cursor-agent`. Perintah pertama mencetak path executable-nya.
+
+Jika terminal menemukan tool tersebut tetapi Desktop atau daemon latar belakang tidak, biasanya keduanya menggunakan nilai `PATH` yang berbeda. Restart aplikasinya, atau tetapkan path absolut melalui environment variable `MULTICA_<PROVIDER>_PATH` yang sesuai; konfigurasi lengkapnya ada di [Environment variables](/environment-variables#konfigurasi-daemon).
+
+## 4. Deteksi ulang dan pastikan runtime online
+
+Mulai daemon dengan CLI:
+
+```bash
+multica daemon start
+```
+
+Jika daemon sudah berjalan, restart setelah menginstal tool baru:
+
+```bash
+multica daemon restart
+```
+
+Dengan Multica Desktop, keluar dan buka ulang aplikasinya.
+
+Lalu buka halaman **Runtimes** Multica. Tool tersebut muncul di bawah komputer target dan tampil online. Anda sekarang dapat memilih runtime ini saat membuat atau mengedit sebuah agent.
+
+<Callout type="warning">
+Daemon harus mendeteksi setidaknya satu CLI bawaan yang didukung sebelum dapat dimulai. Profil runtime kustom disinkronkan setelah daemon aktif, sehingga tidak dapat menjadi satu-satunya kondisi startup pada komputer yang masih kosong. Ada satu pengecualian: ketika daemon baru saja mulai menginstal profil runtime DSH itu sendiri (`MULTICA_DSH_PROFILE_BUNDLE`), daemon dimulai tanpa runtime apa pun dan mendaftarkan DeepSeek Harness begitu instalasi itu selesai. Tanpa pengecualian ini, sebuah host yang satu-satunya tool-nya adalah DSH yang memerlukan profil tersebut tidak akan pernah menyelesaikan instalasi — daemon akan keluar sebelum selesai dan ikut mematikannya.
+</Callout>
+
+## Tidak ada tool yang terdeteksi
+
+Periksa secara berurutan:
+
+1. Jalankan tool itu sendiri di terminal untuk memastikan instalasi dan proses masuk sudah selesai.
+2. Periksa nama dan path perintah sebenarnya dengan `command -v` atau `Get-Command`.
+3. Jalankan `multica daemon logs -f` dan cari error versi, path, atau autentikasi.
+4. Restart daemon agar membaca ulang environment saat ini.
+5. Kembali ke halaman **Runtimes** dan pastikan komputer dan tool-nya online.
+
+Jika tool tampil online tetapi eksekusi tetap gagal, buka catatan eksekusi pada tugas tersebut untuk melihat error pasti yang dikembalikan CLI, atau lanjutkan ke [Pemecahan masalah](/troubleshooting).
+
+## Langkah selanjutnya
+
+- [Buat dan konfigurasikan agent](/agents-create) — pilih runtime yang baru Anda hubungkan.
+- [Daemon dan runtime](/daemon-runtimes) — status online, konkurensi, dan runtime kustom.
+- [Perbandingan alat pengkodean AI](/providers) — bandingkan kemampuan setiap tool di Multica.

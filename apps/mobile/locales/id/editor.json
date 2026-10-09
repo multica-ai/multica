@@ -1,0 +1,21 @@
+{
+  "a11y": {
+    "mention_someone": "Sebut seseorang",
+    "bullet_list": "Daftar bullet",
+    "checklist": "Checklist",
+    "code_block": "Blok kode",
+    "quote": "Kutipan",
+    "attach_image": "Lampirkan gambar",
+    "attach_file": "Lampirkan file"
+  },
+  "code": {
+    "copied": "Kode disalin",
+    "copy": "Salin kode"
+  },
+  "upload": {
+    "file_too_large_title": "File terlalu besar",
+    "file_too_large_message": "File harus lebih kecil dari 100 MB.",
+    "failed": "Unggahan gagal",
+    "error": "Error tidak diketahui"
+  }
+}

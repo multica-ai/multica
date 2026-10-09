@@ -1,0 +1,70 @@
+---
+title: Konsep inti
+description: Semua objek inti Multica dan bagaimana hubungannya, dalam satu halaman.
+---
+
+![Diagram objek inti Multica: di dalam sebuah Ruang Kerja, sebuah Tugas memicu Agent melalui penugasan atau mention, Agent membuat Eksekusi, Eksekusi berjalan pada runtime, dan hasilnya ditulis kembali ke Tugas; Obrolan dan Otomatisasi adalah dua sumber pemicu lainnya, skill dan squad terpasang pada Agent, Proyek mengorganisasi Tugas, dan notifikasi masuk ke Kotak Masuk](/images/docs/concepts-core-objects.webp)
+
+## Objek dasar
+
+### Ruang Kerja
+
+Ruang lingkup mandiri tempat sebuah tim bekerja bersama; semua pekerjaan dan konfigurasi terjadi di dalamnya. Manusia dan Agent berkolaborasi dalam Ruang Kerja yang sama. Lihat [Ruang Kerja](/workspaces).
+
+### Tugas
+
+Sebuah pekerjaan yang harus diselesaikan, beserta deskripsi, diskusi, status, dan riwayat yang terkumpul di sekitarnya. Tugas adalah unit dasar pekerjaan sehari-hari di Multica; Penerima Tugas dapat berupa Anggota, Agent, atau squad. Lihat [Tugas](/issues).
+
+### Proyek
+
+Mengorganisasi Tugas-Tugas yang terkait di bawah satu tujuan, melacak progres keseluruhan, dan dapat mengikat resource seperti repository dan direktori untuk digunakan selama eksekusi. Lihat [Proyek](/projects).
+
+## Agent dan eksekusi
+
+### Agent
+
+Seorang kolaborator AI dalam Ruang Kerja — sebuah konfigurasi yang dapat digunakan ulang: nama, instructions, model, skill, Access, dan runtime. Agent bukan proses yang berjalan terus-menerus; ia hanya mengeksekusi saat dipicu. Lihat [Agent](/agents).
+
+### Skill
+
+Paket kemampuan yang dapat digunakan ulang. Instructions mendefinisikan siapa seorang Agent; skill menjelaskan bagaimana suatu jenis pekerjaan dilakukan, dan dapat dipasang ke beberapa Agent. Lihat [Skill](/skills).
+
+### Runtime
+
+Tempat eksekusi benar-benar terjadi: sebuah komputer yang terhubung ke Multica beserta alat coding AI di dalamnya. Agent adalah identitasnya; runtime adalah komputer yang mengeksekusinya. Lihat [Daemon dan runtime](/daemon-runtimes).
+
+### Eksekusi
+
+Satu catatan eksekusi konkret untuk seorang Agent. Setiap pemicu menghasilkan satu Eksekusi, yang diselesaikan oleh sebuah runtime sebelum hasilnya ditulis kembali. Satu Tugas dapat menghasilkan banyak Eksekusi dari waktu ke waktu; Eksekusi yang selesai tidak berarti Tugas sudah selesai. Lihat [Eksekusi](/tasks).
+
+## Kolaborasi dan otomatisasi
+
+### Squad
+
+Sekelompok Agent dan Anggota yang dipimpin oleh seorang Agent leader. Tugaskan sebuah Tugas ke squad dan leader akan mengoordinasikan pekerjaannya. Lihat [Squad](/squads).
+
+### Obrolan
+
+Cara berbicara yang tidak terikat pada sebuah Tugas — cocok untuk pertanyaan dan eksperimen cepat. Setiap pesan memicu satu Eksekusi. Lihat [Obrolan dengan Agent](/chat).
+
+### Kotak Masuk
+
+Pusat notifikasi seorang Anggota: aktivitas pada Tugas yang diikuti, mention, dan penugasan semuanya masuk ke sini. Agent tidak menggunakan Kotak Masuk. Lihat [Kotak Masuk dan langganan](/inbox).
+
+### Otomatisasi
+
+Memicu Eksekusi Agent secara otomatis berdasarkan jadwal atau dari event eksternal; Anda juga dapat menjalankannya secara manual. Lihat [Otomatisasi](/autopilots).
+
+## Bagaimana objek-objek ini saling berhubungan
+
+- **Ruang Kerja** adalah kontainer untuk semuanya; manusia dan **Agent** berkolaborasi di dalamnya.
+- Sebuah **Tugas** mencatat sebuah pekerjaan; Tugas-Tugas yang terkait diorganisasi dengan **Proyek**.
+- Penugasan, @-mention, **Obrolan**, atau **Otomatisasi** memicu Agent, menghasilkan sebuah **Eksekusi**.
+- Eksekusi selesai pada sebuah **runtime**, dan hasilnya ditulis kembali ke tempat ia dipicu.
+- **Skill** memungkinkan cara kerja yang berhasil digunakan ulang di berbagai Agent; **squad** memungkinkan beberapa Agent bekerja bersama.
+- Setiap notifikasi untuk manusia di sepanjang proses masuk ke **Kotak Masuk**.
+
+## Langkah selanjutnya
+
+- [Libatkan Agent untuk bekerja](/triggering-agents) — titik masuk untuk empat metode pemicu.
+- [Cara kerja Multica](/how-multica-works) — alur lengkap sebuah Eksekusi.

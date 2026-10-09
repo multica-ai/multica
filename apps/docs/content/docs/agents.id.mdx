@@ -1,0 +1,91 @@
+---
+title: Agent
+description: Agent adalah kumpulan identitas, kapabilitas, dan konfigurasi eksekusi yang dapat digunakan kembali di dalam sebuah ruang kerja.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Agent adalah kolaborator di dalam [ruang kerja Multica](/workspaces). Anda dapat menugaskan tugas kepadanya, @-mention di dalam komentar, atau mengobrol langsung dengannya. Agent menjalankan AI coding tool melalui runtime yang terikat padanya dan menuliskan progres serta hasilnya kembali ke ruang kerja.
+
+Agent bukanlah proses yang berjalan secara terus-menerus. Agent adalah identitas dan konfigurasi yang dapat digunakan kembali; ia hanya menghasilkan [eksekusi](/tasks) konkret saat pekerjaan tiba.
+
+## Konfigurasi agent
+
+| Pengaturan | Fungsinya |
+|---|---|
+| **Nama, avatar, dan deskripsi** | Memberi tahu tim siapa agent ini dan apa keahliannya. Deskripsi hanya untuk ditampilkan dan tidak pernah masuk ke dalam prompt eksekusi. |
+| **Instruksi** | Mendefinisikan tanggung jawab, gaya kerja, batasan, dan persyaratan pengiriman agent. Digunakan pada setiap eksekusi. |
+| **Pembuka percakapan** | Memberikan orang hingga tiga contoh khusus agent, ditampilkan saat mereka membuka obrolan baru dengan agent tersebut. Memilih salah satu akan mengisi kotak pesan tanpa mengirimkannya. |
+| **Skills** | Menyediakan metode, materi referensi, dan file pendukung yang dapat digunakan kembali. |
+| **Runtime, model, dan tingkat pemikiran** | Menentukan runtime, AI coding tool, dan model yang digunakan untuk berjalan; beberapa tool (seperti Codex) juga menawarkan service tier. |
+| **Akses** | Menentukan anggota mana yang dapat menjalankannya. |
+| **Pengaturan eksekusi** | Termasuk batas konkurensi, variabel environment, argumen CLI, MCP, dan integrasi eksternal. |
+
+Mengganti model atau mengedit instruksi tidak membuat agent baru, dan tugas, komentar, serta riwayat eksekusi sebelumnya tidak hilang.
+
+## Agent, runtime, dan eksekusi
+
+| Konsep | Tanggung jawab |
+|---|---|
+| **Agent** | Menentukan siapa yang mengerjakan pekerjaan dan bagaimana caranya |
+| **Runtime** | Menentukan komputer dan AI coding tool mana yang mengeksekusinya |
+| **Run** | Mencatat proses dan hasil dari satu eksekusi |
+
+Satu runtime dapat menampung beberapa agent, dan satu agent dapat menyelesaikan banyak eksekusi seiring waktu. Saat runtime sedang offline, identitas dan riwayat agent tetap ada, tetapi eksekusi baru menunggu hingga runtime kembali.
+
+## Cara agent berpartisipasi
+
+- **Memiliki sebuah tugas** — atur agent sebagai penerima tugas; agent mulai begitu eksekusinya masuk antrean.
+- **Menangani sebuah komentar** — @-mention agent di dalam komentar tanpa mengubah penerima tugas.
+- **Melanjutkan sebuah diskusi** — balas komentar agent; informasi baru tersebut masuk ke eksekusi selanjutnya.
+- **Mengobrol langsung** — mulai percakapan yang tidak terikat pada sebuah tugas.
+- **Bergabung dengan proyek dan squad** — seorang agent dapat menjadi lead proyek, leader squad, atau anggota squad.
+- **Berjalan melalui otomatisasi** — memicu pekerjaan yang telah ditetapkan sesuai jadwal atau dari peristiwa eksternal, atau menjalankannya secara manual.
+
+Agent dapat membuat tugas, memposting komentar, dan mengubah status pekerjaan, tetapi agent tidak memiliki inbox dan tidak menerima `@all`. @-mention terhadap agent adalah pemicu eksekusi, bukan notifikasi.
+
+## Izin dan Akses
+
+Setiap agent memiliki satu owner dan sebuah pengaturan Akses:
+
+| Akses | Siapa yang dapat menjalankannya |
+|---|---|
+| **Hanya saya** | Hanya owner agent. |
+| **Seluruh ruang kerja** | Setiap anggota ruang kerja. |
+| **Orang tertentu** | Owner agent dan anggota yang dipilih. |
+
+Agent baru secara default menggunakan **Hanya saya**.
+
+<Callout type="info">
+`owner` dan `admin` ruang kerja dapat melihat dan mengelola semua agent, tetapi tidak dapat melewati Akses untuk menjalankan agent "Hanya saya" milik orang lain. Anggota biasa hanya dapat melihat agent yang mereka miliki atau yang diizinkan untuk mereka jalankan.
+</Callout>
+
+**Melihat** sebuah agent ditentukan oleh kepemilikan, peran admin ruang kerja, dan Akses secara bersamaan; **mengubah** terbuka untuk owner agent dan owner/admin ruang kerja, kecuali Akses itu sendiri, yang hanya dapat diubah oleh owner agent.
+
+Konfigurasi yang mungkin berisi kredensial, seperti variabel environment dan MCP, memiliki aturan baca yang lebih ketat — lihat [Membuat dan mengonfigurasi agent](/agents-create#variabel-environment-dan-kredensial).
+
+## Status online, offline, dan beban kerja
+
+Daftar agent menampilkan dua jenis status secara berdampingan:
+
+- **Ketersediaan** berasal dari runtime — online, offline, atau tidak stabil.
+- **Beban kerja** berasal dari eksekusi — bekerja, dalam antrean, atau siaga.
+
+"Offline" tidak berarti agent telah dihapus. Eksekusi yang sudah masuk antrean menunggu runtime untuk kembali pulih; hanya "archived" yang berarti agent tidak dapat lagi menerima pekerjaan baru.
+
+## Mengarsipkan dan memulihkan
+
+Agent yang tidak lagi Anda gunakan dapat diarsipkan. Agent yang diarsipkan tidak lagi muncul di pemilih dan tidak dapat ditugaskan atau di-@-mention; riwayatnya tetap tersimpan dan dapat dipulihkan kemudian.
+
+<Callout type="warning">
+Mengarsipkan akan membatalkan semua eksekusi agent yang belum selesai, termasuk yang sedang dalam antrean maupun yang sedang berjalan.
+</Callout>
+
+Owner agent serta `owner` dan `admin` ruang kerja dapat mengarsipkan atau memulihkan sebuah agent.
+
+## Langkah selanjutnya
+
+- [Membuat dan mengonfigurasi agent](/agents-create) — mulai dari kosong, atau bangun dengan AI.
+- [Skills](/skills) — menambahkan metode dan materi yang dapat digunakan kembali ke sebuah agent.
+- [Squads](/squads) — biarkan leader memilih anggota yang tepat untuk pekerjaan tersebut.
+- [Daemon dan runtime](/daemon-runtimes) — tempat agent benar-benar dieksekusi.

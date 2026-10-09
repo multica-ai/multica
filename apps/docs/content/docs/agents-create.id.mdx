@@ -1,0 +1,169 @@
+---
+title: Membuat dan mengonfigurasi agent
+description: Pilih titik awal, lalu tentukan tanggung jawab, kapabilitas, pengaturan eksekusi, dan Akses agent.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Membuat agent membutuhkan [runtime](/daemon-runtimes) yang berfungsi terlebih dahulu. Runtime menentukan komputer dan AI coding tool mana yang digunakan agent; agent menyimpan identitas, instruksi, dan kapabilitas yang bersifat jangka panjang.
+
+Pada halaman **Agents** ruang kerja, klik **New agent**.
+
+## Titik awal
+
+Halaman pembuatan menawarkan dua opsi:
+
+| Opsi | Kapan cocok digunakan |
+|---|---|
+| **Start blank** | Anda sudah tahu tanggung jawab agent dan ingin mengisi setiap kolom sendiri. |
+| **Build with AI** | Jelaskan tujuannya terlebih dahulu dan biarkan Agent Builder mengajukan pertanyaan-pertanyaan kunci dan menghasilkan draf. |
+
+Build with AI membutuhkan runtime yang online untuk percakapan dengan Builder. Apa pun pilihannya, Anda dapat meninjau dan mengedit konfigurasi akhir sebelum membuatnya.
+
+![Titik awal pembuatan agent: Start blank dan Build with AI](/images/docs/quickstart-new-agent.webp)
+
+## Kolom wajib
+
+Membuat agent hanya membutuhkan dua hal:
+
+- **Name** — harus unik di dalam ruang kerja.
+- **Runtime** — environment yang benar-benar mengeksekusi eksekusi.
+
+Setiap kolom lainnya dapat dimulai dengan nilai default dan disesuaikan setelah pembuatan. Secara default, hanya pembuatnya yang dapat menjalankan agent baru.
+
+## Deskripsi dan instruksi
+
+**Deskripsi** adalah pengantar singkat untuk tim. Deskripsi hanya muncul di daftar agent dan halaman detail, dan tidak pernah masuk ke dalam prompt AI coding tool.
+
+**Instruksi** diberikan kepada agent pada setiap eksekusi dan biasanya mencakup:
+
+- apa yang menjadi dan bukan tanggung jawabnya;
+- apa yang harus diperiksa pertama kali saat pekerjaan tiba;
+- apa yang diperbolehkan untuk diubah;
+- cara menyerahkan hasil;
+- kapan harus berkonsultasi dengan seorang anggota sebelum melanjutkan.
+
+Contohnya:
+
+```text
+You review frontend pull requests.
+
+Read the diff and related tests first, and check only:
+- React and TypeScript correctness
+- Accessibility
+- Consistency with existing component patterns
+
+Do not modify code directly. Post findings in an issue comment,
+ordered by severity; when nothing blocks, state clearly that the change can merge.
+```
+
+## Menambahkan skill
+
+Saat pembuatan, Anda dapat memilih satu atau lebih [skill](/skills) dari ruang kerja.
+
+Skill cocok untuk metode dan materi yang digunakan kembali di berbagai agent; persyaratan jangka panjang yang hanya berlaku untuk agent ini ditulis di dalam instruksi.
+
+## Pembuka percakapan
+
+Tambahkan hingga tiga **pembuka percakapan** untuk menunjukkan kepada orang-orang apa keahlian agent ini sebelum mereka mengirim pesan obrolan pertama. Pembuka percakapan muncul saat seseorang membuka obrolan baru dengan agent tersebut, di atas kotak pesan. Setiap pembuka memiliki label singkat dan prompt lengkap. Memilih salah satu akan mengisi kotak pesan sehingga pengguna dapat meninjau atau mengeditnya; pembuka percakapan tidak pernah memulai eksekusi secara otomatis.
+
+Editor menampilkan pratinjau yang sama persis dengan apa yang akan ditunjukkan oleh obrolan baru, dan siapa pun yang dapat mengedit agent akan mendapatkan tautan **Customize starters** pada state kosong tersebut yang mengarah langsung ke sini.
+
+Jika Anda membiarkan daftarnya kosong, Obrolan akan menampilkan default umum yang sudah dilokalkan. Contoh khusus agent biasanya lebih bermanfaat karena dapat mencerminkan peran dan batasan yang ada di dalam instruksi.
+
+Dari CLI, atur dengan `--conversation-starters` pada `agent create` dan `agent update` (array JSON dari objek `{ "label", "prompt" }`; berikan `'[]'` pada update untuk mengosongkannya). `agent copy` tetap menyalin nilai sumbernya dan tidak memiliki flag override.
+
+## Runtime, model, dan tingkat pemikiran
+
+Setiap runtime sudah terpetakan ke satu AI coding tool. Setelah memilih runtime, Anda dapat memilih model dan tingkat pemikiran yang didukung oleh tool tersebut; beberapa tool (seperti Codex) juga menawarkan service tier:
+
+- Jika dibiarkan kosong, default dari runtime atau CLI lokal yang berlaku.
+- Dengan model yang diatur, agent menggunakan override tersebut untuk eksekusi yang diambilnya setelah itu.
+- Beberapa runtime mengelola modelnya sendiri, sehingga pemilih model tidak ditampilkan.
+
+Tool berbeda-beda dalam model yang didukung, resume sesi, skill, dan kapabilitas MCP — lihat [Perbandingan AI coding tool](/providers).
+
+## Akses
+
+Akses menentukan anggota mana yang dapat menjalankan agent ini (menugaskan, @-mention, atau mengobrol):
+
+| Akses | Makna |
+|---|---|
+| **Hanya saya** | Hanya Anda yang dapat menjalankannya. Default. |
+| **Seluruh ruang kerja** | Setiap anggota ruang kerja dapat menjalankannya. |
+| **Orang tertentu** | Hanya Anda dan anggota yang dipilih yang dapat menjalankannya. |
+
+![Pengaturan Akses: Hanya saya, Seluruh ruang kerja, Orang tertentu](/images/docs/agent-access-settings.webp)
+
+Hanya owner agent yang dapat mengubah Akses — admin ruang kerja tidak dapat melakukannya. `owner` dan `admin` ruang kerja dapat mengelola konfigurasi lainnya, tetapi tidak dapat menggunakan peran admin mereka untuk menjalankan agent yang tidak diberikan kepada mereka.
+
+## Konfigurasi setelah pembuatan
+
+Pada halaman detail agent, Anda dapat terus menyesuaikan:
+
+| Pengaturan | Fungsinya |
+|---|---|
+| **Batas konkurensi** | Berapa banyak eksekusi yang dapat dijalankan agent secara bersamaan. Defaultnya adalah 6; eksekusi di atas batas tersebut tetap mengantre. |
+| **Variabel environment** | Menyuntikkan variabel saat AI coding tool dimulai. |
+| **Argumen khusus** | Ditambahkan satu per satu ke argumen CLI milik AI coding tool. |
+| **MCP** | Menyediakan konfigurasi server MCP untuk AI coding tool yang mendukungnya. |
+| **Integrations** | Menghubungkan layanan eksternal yang dapat digunakan oleh agent ini. |
+
+Daemon yang menjadi host runtime tersebut juga memiliki batas konkurensi global (default 20); konkurensi efektifnya adalah yang terkecil dari keduanya.
+
+Mengedit konfigurasi tidak mengubah eksekusi yang sudah berjalan. Eksekusi berikutnya menggunakan konfigurasi agent yang tersimpan pada saat runtime mengambilnya.
+
+## Variabel environment dan kredensial
+
+Variabel environment cocok untuk kredensial berprivilese terbatas yang dibutuhkan agent pada saat eksekusi, seperti API key read-only atau token dengan satu scope saja.
+
+<Callout type="warning">
+**Nilai `custom_env` disimpan dalam bentuk plaintext di basis data server Multica** — nilai tersebut bukan data yang "tetap berada di mesin ini". Endpoint daftar dan detail agent tidak lagi mengembalikan nilai env apa pun, hanya hitungan yang opaque; hanya `owner` dan `admin` ruang kerja yang dapat membuka kunci dan mengubah nilainya, dan setiap pembacaan atau perubahan meninggalkan catatan audit. Agent yang sedang berjalan tidak dapat memanggil endpoint admin untuk membaca variabel milik agent lain.
+</Callout>
+
+Jangan gunakan password admin basis data produksi atau kredensial jangka panjang bernilai tinggi lainnya.
+
+Variabel runtime yang krusial seperti `PATH`, `HOME`, dan `MULTICA_*` tidak dapat ditimpa di sini.
+
+## Argumen khusus dan MCP
+
+Argumen khusus diteruskan ke AI coding tool sebagai sebuah array, satu per satu, tanpa shell expansion. Apakah sebuah argumen valid atau tidak bergantung pada tool tersebut; konfigurasi model yang sudah memiliki kolom khusus tidak perlu diulang di sini.
+
+<Callout type="warning">
+Jangan menaruh kredensial atau rahasia lainnya di argumen khusus. Nilai tersebut tetap ada di argv proses anak dan dapat terlihat oleh proses lokal lain melalui `ps` atau `/proc`; gunakan variabel environment (`custom_env`) sebagai gantinya. Log daemon menyamarkan (redact) nilai argumen, tetapi itu tidak melindungi daftar proses sistem operasi.
+</Callout>
+
+Konfigurasi MCP mungkin berisi token; aturan penyimpanan dan tampilannya sama dengan variabel environment. Hanya runtime yang mendukung konfigurasi MCP terkelola yang menampilkan bagian ini; tool tanpa dukungan MCP tidak akan mendapatkannya hanya karena sebuah konfigurasi disimpan.
+
+## Menduplikasi agent
+
+Menduplikasi membawa sebagian besar konfigurasi yang berfungsi kecuali nama, termasuk instruksi, pembuka percakapan, skill, argumen khusus, avatar, batas konkurensi, dan pengaturan Akses. Model, tingkat pemikiran, dan service tier juga ikut terbawa; jika runtime aslinya tidak tersedia dan duplikatnya dipaksa ke runtime lain, ketiga hal tersebut akan dikosongkan dan harus dipilih ulang.
+
+Nilai variabel environment dan konfigurasi MCP tidak pernah disalin dan harus diatur ulang pada agent baru. Duplikasi mempertahankan binding runtime dan pengaturan Akses milik agent aslinya.
+
+## Membuat dengan CLI
+
+```bash
+multica agent create \
+  --name "Frontend Reviewer" \
+  --runtime-id <runtime-id> \
+  --description "Reviews frontend pull requests" \
+  --instructions "Read the diff and tests first; post review conclusions only as issue comments." \
+  --conversation-starters '[{"label":"Review a PR","prompt":"Review the most relevant open pull request."}]'
+```
+
+Plaintext di argumen command-line akan tersimpan di shell history; stdin dan file dengan izin terbatas tidak.
+
+Saat sebuah agent dengan konfigurasi serupa sudah ada, salin langsung:
+
+```bash
+multica agent copy <agent-id>
+```
+
+Secara default, duplikatnya tetap berada pada runtime yang sama; tambahkan `--runtime-id` untuk memindahkannya ke runtime lain, yang juga membutuhkan `--model`. Variabel environment, konfigurasi MCP, dan `runtime_config` tidak pernah disalin; binding runtime-nya sendiri tetap dipertahankan. Flag lengkap ada di [Menggunakan CLI](/cli).
+
+## Langkah selanjutnya
+
+- [Menugaskan tugas ke agent](/assigning-issues) — memvalidasi konfigurasi dengan pekerjaan nyata.
+- [Skills](/skills) — membuat, mengimpor, dan menggunakan kembali metode tim.
+- [Daemon dan runtime](/daemon-runtimes) — memecahkan masalah status online dan tempat eksekusi berjalan.

@@ -1,0 +1,41 @@
+---
+title: Area yang dikelola komunitas
+description: Bagian mana dari Multica yang dikelola oleh kontributor komunitas, apa artinya bagi dukungan, dan cara melaporkan masalah di salah satu area tersebut.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Sebagian besar Multica dibangun dan didukung oleh tim inti (core team). Beberapa area dikontribusikan oleh volunteer yang kemudian tetap bertahan sebagai maintainer-nya. Area-area tersebut tetap dirilis di setiap release, tetapi tidak membawa SLA dukungan resmi.
+
+Halaman ini adalah daftar otoritatif. Halaman ini ada agar Anda tahu apa yang Anda andalkan sebelum membangun workflow di atasnya, dan agar orang-orang yang mengontribusikan pekerjaan itu dikreditkan dengan nama mereka.
+
+## Apa arti dikelola komunitas
+
+**Apa yang kami komitmenkan.** Area tersebut dirilis di setiap release. Tim inti menjaga agar area itu tetap dapat di-compile dan test-nya tetap hijau melewati refactor shared-layer, dan mengarahkan issue di area tersebut ke maintainer-nya.
+
+**Apa yang tidak dapat kami jamin.** Kami tidak menggunakan platform-platform ini sehari-hari, sehingga kami tidak dapat memverifikasi perilakunya terhadap platform yang sesungguhnya. Bug yang membutuhkan akses platform yang sesungguhnya bergantung pada ketersediaan seorang volunteer, yang berarti tidak ada garansi response-time.
+
+**Bagaimana sebuah area di-retire.** Jika sebuah area rusak dengan cara yang tidak dapat kami perbaiki tanpa akses yang sesungguhnya, dan tidak ada perbaikan yang muncul selama beberapa release, kami mungkin akan men-deprecate area itu daripada membiarkannya rusak secara diam-diam. Aturan itu melindungi maintainer sama seperti melindungi Anda: seorang volunteer yang menjadi sibuk atau pindah fokus tidak berutang perbaikan kepada siapa pun.
+
+## Daftar area
+
+| Area | Code | Maintainer | Sejak | Status |
+| --- | --- | --- | --- | --- |
+| [Integrasi chat DingTalk](/dingtalk-bot-integration) | `server/internal/integrations/dingtalk` | [@yyclaw](https://github.com/yyclaw) | 2026-08 | Aktif |
+| [Integrasi chat WeCom](/channels) | `server/internal/integrations/wecom` | [@leroy-chen](https://github.com/leroy-chen), [@seacen](https://github.com/seacen) | 2026-08 | Aktif |
+| [Integrasi chat Telegram](/telegram-bot-integration) | `server/internal/integrations/telegram` | [@leonzone](https://github.com/leonzone) | 2026-08 | Aktif |
+
+Daftar ini hanya berubah saat kepemilikan sebuah area berubah. Semua yang tidak tercantum di sini dikelola oleh tim inti.
+
+## Melaporkan masalah di salah satu area ini
+
+<Callout type="warning">
+Ajukan [GitHub issue](https://github.com/multica-ai/multica/issues). Tolong jangan DM atau @-mention seorang maintainer secara langsung — mereka setuju untuk menjadi kontak pertama bagi pertanyaan yang **kami** arahkan ke mereka, bukan sebagai meja dukungan yang siapa pun bisa panggil kapan saja.
+</Callout>
+
+Form issue memiliki field **Area**. Mengisinya adalah yang memungkinkan kami mengarahkan laporan ke maintainer yang tepat, jadi ini sepadan dengan klik tambahannya.
+
+## Menjadi seorang maintainer
+
+Jika Anda mengontribusikan integrasi baru atau area substansial lainnya, kami akan membahas hal ini dengan Anda sebelum melakukan merge: apa yang kami komitmenkan, apa yang akan kami minta dari Anda, dan aturan retirement di atas. Menolak pun tidak masalah — itu mengubah bagaimana area tersebut diberi label, bukan apakah pekerjaan itu di-merge.
+</content>

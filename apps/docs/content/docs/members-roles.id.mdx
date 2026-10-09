@@ -1,0 +1,55 @@
+---
+title: Anggota dan role
+description: Undang anggota dan kelola izin ruang kerja dengan role owner, admin, dan member.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Setiap orang yang bergabung ke sebuah [ruang kerja](/workspaces) adalah seorang anggota, dan setiap anggota memiliki satu role: `owner`, `admin`, atau `member`. Role hanya mengatur pengaturan ruang kerja dan manajemen tim; kolaborasi sehari-hari — membuat Tugas, menulis komentar — terbuka untuk semua anggota.
+
+## Tiga role
+
+| Tindakan | owner | admin | member |
+|---|:---:|:---:|:---:|
+| Melihat ruang kerja dan berkolaborasi sehari-hari | ✓ | ✓ | ✓ |
+| Mengubah pengaturan ruang kerja | ✓ | ✓ | — |
+| Mengundang `admin` atau `member` | ✓ | ✓ | — |
+| Mengubah atau menghapus `admin` atau `member` | ✓ | ✓ | — |
+| Memberikan, mencabut, atau menghapus `owner` | ✓ | — | — |
+| Menghapus ruang kerja | ✓ | — | — |
+
+Sebuah ruang kerja harus selalu memiliki setidaknya satu `owner`: `owner` terakhir tidak dapat diturunkan role-nya, dihapus, atau keluar.
+
+<Callout type="info">
+Role tidak menentukan siapa yang dapat menjalankan sebuah agent. Setiap agent memiliki Access scope-nya sendiri, dan `owner` maupun `admin` tidak dapat melewatinya untuk menjalankan agent yang tidak diberikan kepada mereka. Lihat [Agent](/agents#izin-dan-akses).
+</Callout>
+
+## Mengundang anggota
+
+`owner` dan `admin` mengirim undangan dari Settings → Members dengan memasukkan email dan memilih role. Undangan hanya dapat memberikan role `admin` atau `member`; seorang `owner` harus bergabung ke ruang kerja terlebih dahulu lalu dipromosikan oleh `owner` yang sudah ada.
+
+![Manajemen anggota: formulir undangan dan daftar anggota dengan role](/images/docs/members-roster.webp)
+
+Pihak yang diundang menerima undangan dengan login menggunakan email tersebut — tidak perlu signup terlebih dahulu. Undangan berlaku selama 7 hari; kirim ulang setelah kedaluwarsa. Pada instance self-hosted yang membatasi signup, undangan yang masih pending (live) memungkinkan email tersebut untuk membuat akun tanpa entri allowlist yang terpisah — lihat [Pengaturan Auth](/auth-setup#undangan-dan-pembatasan-pendaftaran).
+
+Link undangan hanya muncul di email; tidak ada tempat di produk untuk melihat atau menyalinnya. Jika email gagal terkirim, record undangan tetap ada — cabut undangan tersebut dan kirim yang baru.
+
+## Mengubah role
+
+Seorang `admin` dapat memindahkan role antara `admin` dan `member`, serta dapat menghapus anggota yang memegang kedua role tersebut. Setiap perubahan yang melibatkan `owner` — mempromosikan, mengubah, atau menghapus — hanya dapat dilakukan oleh seorang `owner`.
+
+Perubahan role berlaku langsung.
+
+## Menghapus anggota
+
+Anggota yang dihapus langsung kehilangan akses ke ruang kerja. Tugas, komentar, dan record kolaborasi lain yang mereka buat tetap berada di ruang kerja.
+
+<Callout type="warning">
+Menghapus anggota juga menonaktifkan runtime yang mereka miliki, mengarsipkan agent yang terikat padanya, dan membatalkan Eksekusi yang belum selesai. Grant yang diterima anggota tersebut dalam Access scope agent juga akan dihapus, dan tidak akan dipulihkan secara otomatis jika mereka bergabung kembali.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Tugas](/issues) — pekerjaan yang ditangani bersama oleh anggota dan agent.
+- [Agent](/agents) — bagaimana role ruang kerja berbeda dari Access agent.
+- [Daemon dan runtime](/daemon-runtimes) — siapa yang memiliki runtime dan di mana mereka berjalan.

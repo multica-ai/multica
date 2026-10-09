@@ -1,0 +1,264 @@
+{
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "Langkah onboarding",
+    "about_you": {
+      "label": "Tentang Anda"
+    },
+    "workspace": {
+      "label": "Ruang Kerja"
+    },
+    "runtime": {
+      "label": "Kenalan dengan Mika"
+    }
+  },
+  "welcome": {
+    "wordmark": "Selamat datang di Multica",
+    "headline_line1": "Rekan tim AI Anda,",
+    "headline_line2": "dalam",
+    "headline_emphasis": "satu ruang kerja.",
+    "lede": "Tugaskan pekerjaan kepada mereka seperti menugaskan rekan kerja — mereka akan mengerjakannya, memperbarui status, dan berkomentar saat selesai.",
+    "lede_web": "Desktop sudah menyertakan runtime — tidak perlu instalasi apa pun. Lanjutkan di web untuk menghubungkan CLI Anda sendiri.",
+    "download_desktop": "Unduh Desktop",
+    "continue_on_web": "Lanjutkan di web",
+    "start_exploring": "Mulai menjelajah",
+    "skip_existing": "Saya sudah pernah melakukan ini",
+    "illustration": {
+      "card1_actor_name": "Anda",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": ", bisakah kamu buat draf postingan peluncuran singkat? Ambil dari temuan wawancara ",
+      "card1_body_suffix": ".",
+      "card1_mention_content": "@Content Agent",
+      "card1_mention_research": "@Research Agent",
+      "card2_actor_name": "Content Agent",
+      "card2_body": "Siap. Mengambil kutipan dari Research, menyusun draf dengan sudut pandang \"waktu yang dihemat\"…",
+      "card3_actor_name": "Research Agent",
+      "card3_body": "Wawancara pengguna minggu ini telah diringkas — 12 panggilan, 4 tema yang berulang, 3 kutipan utama.",
+      "card3_timestamp": "15 menit lalu",
+      "card4_actor_name": "Review Agent",
+      "card4_body": "Meninjau draf hari Senin — meninggalkan 4 catatan soal nada tulisan. Menunggu draf baru.",
+      "card5_actor_name": "Coding Agent",
+      "card5_body_prefix": "Fitur ekspor yang ditandai ",
+      "card5_body_suffix": " sudah dirilis. Tautan pratinjau ada di PR.",
+      "card5_mention_you": "@kamu",
+      "card5_timestamp": "baru saja"
+    }
+  },
+  "common": {
+    "back": "Kembali",
+    "continue": "Lanjutkan",
+    "skip": "Lewati",
+    "cancel": "Batal",
+    "close": "Tutup",
+    "log_out": "Keluar"
+  },
+  "source_backfill": {
+    "eyebrow": "Pertanyaan singkat",
+    "lede": "Bantu kami memahami bagaimana Anda menemukan Multica.",
+    "submit": "Kirim",
+    "save_failed_toast": "Gagal menyimpan"
+  },
+  "questions": {
+    "about_you": {
+      "question": "Ceritakan sedikit tentang Anda."
+    },
+    "source": {
+      "question": "Bagaimana Anda mengetahui tentang Multica?",
+      "friends_colleagues": "Teman atau kolega",
+      "search": "Google / pencarian",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "Media sosial lainnya",
+      "blog_newsletter": "Blog / newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "Di tempat kerja",
+      "event_conference": "Konferensi / meetup",
+      "dont_remember": "Tidak ingat",
+      "other": "Lainnya",
+      "other_placeholder": "misalnya podcast yang saya dengarkan"
+    },
+    "role": {
+      "question": "Mana yang paling menggambarkan Anda?",
+      "engineer": "Engineer / developer",
+      "product": "Product manager",
+      "designer": "Desainer",
+      "founder": "Founder / eksekutif",
+      "marketing": "Marketing / growth",
+      "writer": "Penulis / konten",
+      "research": "Peneliti / analis",
+      "ops": "Operasional / manajemen proyek",
+      "student": "Pelajar / penggunaan pribadi",
+      "other": "Lainnya",
+      "other_placeholder": "misalnya guru, support lead"
+    },
+    "use_case": {
+      "question": "Untuk apa Anda ingin menggunakan Multica?",
+      "ship_code": "Merilis kode dengan agent AI",
+      "manage_team": "Mengelola tugas untuk tim saya",
+      "personal_tasks": "Mengatur tugas pribadi saya",
+      "plan_research": "Merencanakan, brainstorming, riset",
+      "write_publish": "Menulis, mengedit, mempublikasikan",
+      "automate_ops": "Mengotomatisasi operasional & workflow",
+      "evaluate": "Sekadar menjelajah",
+      "other": "Lainnya",
+      "other_placeholder": "misalnya koordinasi kelompok belajar"
+    }
+  },
+  "option_card": {
+    "other_label": "Lainnya",
+    "other_aria": "Jelaskan hal lain"
+  },
+  "step_question": {
+    "hint_pick": "Anda dapat melewati ini."
+  },
+  "cli_install": {
+    "copy_aria": "Salin",
+    "intro": "Anda memerlukan agent runtime di komputer ini (Claude Code, Codex, Cursor, …) agar dapat menjalankan agent Anda. Juga berfungsi di server dan dev box jarak jauh.",
+    "step1_label": "Instal Multica CLI",
+    "platform_group": "Pilih platform Anda",
+    "platform_macos_linux": "macOS / Linux",
+    "platform_windows": "Windows",
+    "step2_label": "Mulai daemon"
+  },
+  "cloud_waitlist": {
+    "intro_main": "Cloud runtime belum tersedia. Tinggalkan email Anda dan kami akan menghubungi Anda saat sudah tersedia.",
+    "intro_warning": "Perhatian: agent tidak dapat memulai eksekusi tanpa runtime — jika Anda memilih Lewati sekarang, tidak akan ada yang berjalan sampai Anda kembali dan memasang satu.",
+    "email_label": "Email",
+    "email_placeholder": "anda@kerja.com",
+    "reason_label": "Mengapa cloud?",
+    "optional": "Opsional",
+    "reason_placeholder": "misalnya kami ingin agent berjalan 24/7, atau tim saya bekerja di berbagai perangkat.",
+    "join": "Gabung daftar tunggu",
+    "on_list": "Anda sudah masuk daftar",
+    "success_toast": "Anda sudah masuk daftar. Kami akan mengirim email saat cloud runtime sudah tersedia.",
+    "failed_toast": "Gagal bergabung dengan daftar tunggu"
+  },
+  "welcome_after_onboarding": {
+    "skip": {
+      "loading": "Menyiapkan ruang kerja Anda…",
+      "title": "Selamat datang di Multica!",
+      "subtitle": "Kami telah menambahkan satu tugas untuk membantu Anda menghubungkan runtime. Setelah siap, mulai dengan Mika dari Runtimes.",
+      "got_it": "Mengerti",
+      "status_in_progress": "Sedang berlangsung",
+      "error_title": "Kami tidak dapat menyiapkan itu",
+      "error_body": "Panduan runtime gagal dibuat. Anda dapat mencoba lagi, atau menghubungkan runtime dari halaman Runtimes kapan pun Anda siap.",
+      "retry": "Coba lagi",
+      "dismiss": "Nanti saja",
+      "cards": {
+        "install_runtime": {
+          "title": "Hubungkan runtime",
+          "subtitle": "Instal Codex atau Kimi, lalu mulai chat Mika yang terarah dari Runtimes."
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "Ruang kerja pertama Anda",
+    "eyebrow_resume": "Lanjutkan atau mulai baru",
+    "headline_first": "Beri nama ruang kerja Anda.",
+    "headline_resume": "Lanjutkan dengan {{name}}, atau buat yang lain.",
+    "lede_first": "Ruang kerja adalah tempat tugas, agent, dan proyek Anda berada. Anda dapat mengundang rekan tim atau membuat lebih banyak ruang kerja nanti.",
+    "lede_resume": "Lanjutkan penyiapan dengan ruang kerja yang sudah Anda miliki, atau buat yang baru di sampingnya — Anda dapat tergabung dalam berapa pun jumlah ruang kerja.",
+    "name_label": "Nama ruang kerja",
+    "name_placeholder": "Acme Inc, Lab Saya, Proyek Sampingan…",
+    "random_name": "Acak",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "Prefiks tugas",
+    "issue_prefix_prefix": "Tugas akan terlihat seperti ",
+    "issue_prefix_suffix": ". Anda dapat mengubahnya nanti di pengaturan.",
+    "issue_prefix_pending": "Atur URL di atas dan nomor tugas akan mengikutinya — atau ketik prefiks di sini.",
+    "create_new_title": "Buat ruang kerja baru",
+    "hint_opening": "Membuka {{name}}.",
+    "hint_creating": "Membuat {{name}}.",
+    "hint_creating_pending": "Membuat {{name}}…",
+    "hint_creating_fallback": "ruang kerja Anda",
+    "hint_name_first": "Beri nama ruang kerja Anda untuk membuatnya.",
+    "hint_pick": "Pilih ruang kerja Anda atau buat yang baru.",
+    "cta_open": "Buka {{name}}",
+    "cta_create_named": "Buat {{name}}",
+    "cta_create_workspace": "Buat ruang kerja",
+    "cta_creating": "Membuat…",
+    "slug_format_error": "Hanya huruf kecil, angka, dan tanda hubung",
+    "slug_taken_error": "URL ruang kerja itu sudah digunakan.",
+    "slug_reserved_error": "URL ruang kerja itu dicadangkan dan tidak dapat digunakan.",
+    "slug_conflict_toast": "Pilih URL ruang kerja lain",
+    "create_failed_toast": "Gagal membuat ruang kerja",
+    "creation_disabled_eyebrow": "Pembuatan ruang kerja dinonaktifkan",
+    "creation_disabled_headline": "Minta undangan dari administrator Anda.",
+    "creation_disabled_lede": "Instans Multica ini tidak mengizinkan pembuatan ruang kerja baru. Setelah seorang administrator mengundang Anda ke sebuah ruang kerja, terima undangannya dan muat ulang untuk melanjutkan.",
+    "creation_disabled_logout": "Keluar",
+    "creation_disabled_eyebrow_resume": "Ruang kerja Anda",
+    "creation_disabled_headline_resume": "Lanjutkan dengan {{name}}.",
+    "creation_disabled_lede_resume": "Pembuatan ruang kerja dinonaktifkan pada instans ini, sehingga Anda akan melanjutkan ke ruang kerja yang sudah ada."
+  },
+  "step_runtime": {
+    "scanning_headline": "Menghubungkan komputer ini…",
+    "scanning_lede_prefix": "Agent Anda bekerja melalui alat coding AI yang sudah Anda miliki — seperti ",
+    "scanning_lede_suffix": ", dan lainnya. Kami sedang memeriksa komputer ini untuk mencari yang sudah terpasang.",
+    "found_headline": "Di mana Mika harus berjalan?",
+    "runtime_count_other": "{{count}} agent runtime",
+    "status_all_online": "semua online",
+    "status_none_online": "tidak ada yang online",
+    "status_n_online": "{{count}} online",
+    "online_label": "online",
+    "offline_label": "offline",
+    "empty_headline": "Belum ada agent runtime yang ditemukan di komputer ini.",
+    "empty_lede_prefix": "Agent runtime adalah alat coding AI yang kami hubungkan — seperti ",
+    "empty_lede_suffix": ". Instal salah satu dan muat ulang, atau pilih jalur di bawah.",
+    "empty_skip_title": "Lewati untuk sekarang",
+    "empty_skip_subtitle": "Agent tidak dapat berjalan sampai sebuah runtime terhubung.",
+    "empty_skip_action": "Lewati",
+    "empty_waitlist_title": "Gunakan komputer cloud",
+    "empty_waitlist_subtitle": "Kami akan menjalankan komputer untuk Anda di cloud. Belum tersedia.",
+    "empty_waitlist_action": "Segera hadir",
+    "skip": "Lewati untuk sekarang",
+    "refresh": "Segarkan",
+    "refreshing": "Menyegarkan…",
+    "hint_selected": "Terpilih: {{name}}",
+    "hint_pick": "Pilih agent runtime di atas untuk mulai dengan Mika.",
+    "hint_waiting": "Menunggu hasil pertama…",
+    "continue": "Mulai dengan Mika"
+  },
+  "step_platform": {
+    "eyebrow": "Hubungkan komputer",
+    "headline": "Hubungkan komputer untuk menjalankan agent Anda.",
+    "lede": "Hubungkan komputer agar Mika dapat mulai bekerja.",
+    "hint_default": "Anda dapat menghubungkannya nanti.",
+    "download_title": "Gunakan komputer ini",
+    "download_subtitle": "Instal Desktop untuk menghubungkan komputer ini.",
+    "download_button": "Unduh",
+    "cli_title": "Hubungkan dari terminal",
+    "cli_subtitle": "Hubungkan server, dev box jarak jauh, atau komputer headless apa pun. Terminal diperlukan.",
+    "cli_action": "Tampilkan langkah-langkah",
+    "cloud_title": "Gunakan komputer cloud",
+    "cloud_subtitle": "Kami akan menjalankan komputer untuk Anda di cloud. Belum tersedia.",
+    "cloud_action": "Segera hadir",
+    "cli_dialog_title": "Hubungkan dari terminal",
+    "cli_dialog_pick_hint": "Pilih komputer di atas.",
+    "cli_dialog_connect": "Hubungkan & lanjutkan",
+    "runtimes_connected_other": "{{count}} komputer terhubung",
+    "live_listening": "Live · Menunggu komputer Anda",
+    "stage_normal_prefix": "Jalankan perintah di atas. Segera setelah ",
+    "stage_normal_suffix": " menyelesaikan proses masuk lewat browser, komputer Anda akan muncul di sini secara otomatis (biasanya 10–30 detik).",
+    "stage_midway_prefix": "Masih menunggu. Pastikan Anda telah menyelesaikan tab browser yang dibuka ",
+    "stage_midway_suffix": " — tab itu memerlukan persetujuan Anda untuk masuk sebelum komputer Anda dapat terhubung.",
+    "stage_slow_prefix": "Membutuhkan waktu lebih lama dari biasanya. Periksa terminal tempat Anda menjalankan ",
+    "stage_slow_suffix": " untuk mencari error.",
+    "stage_stalled_prefix": "Belum ada yang masuk. Jika Anda kurang nyaman dengan terminal, ",
+    "stage_stalled_term": "Desktop",
+    "stage_stalled_suffix": " adalah jalur yang lebih mudah — satu klik dan komputer ini terhubung. Tutup dialog ini dan pilih Desktop, atau tekan Lewati untuk melanjutkan."
+  },
+  "errors": {
+    "skip_failed": "Gagal menyelesaikan onboarding",
+    "mika_setup_failed": "Tidak dapat memulai ruang kerja Mika Anda"
+  },
+  "mika_intro": {
+    "headline": "Kenalan dengan Mika, rekan tim agent pertama Anda.",
+    "name": "Mika",
+    "role": "Chief of Staff",
+    "blurb": "Katakan pada Mika apa yang Anda ingin selesaikan. Itu akan menjadi tugas, dengan agent yang tepat menanganinya."
+  }
+}

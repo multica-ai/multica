@@ -166,6 +166,7 @@
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "indonesian": "Bahasa Indonesia",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."
     },
     "timezone": {

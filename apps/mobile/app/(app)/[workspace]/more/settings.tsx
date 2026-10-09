@@ -34,7 +34,7 @@ import { useLocalePreference, useT, type LocalePreference } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
-const LANGUAGE_OPTIONS: LocalePreference[] = ["system", "en", "zh-Hans"];
+const LANGUAGE_OPTIONS: LocalePreference[] = ["system", "en", "zh-Hans", "id"];
 
 function initialsOf(name: string | undefined): string {
   if (!name) return "?";
@@ -66,6 +66,7 @@ export default function SettingsPage() {
     system: t("language.system"),
     en: t("language.english"),
     "zh-Hans": t("language.chinese_simplified"),
+    id: t("language.indonesian"),
   };
 
   const onSwitch = async (ws: Workspace) => {
