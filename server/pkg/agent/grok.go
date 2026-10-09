@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -376,23 +377,68 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// documented preference is the API key when XAI_API_KEY is set and
 		// offered, otherwise the cached login token.
 		// Ref: https://docs.x.ai/build/cli/headless-scripting
-		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+		methodIDs, err := selectGrokAuthMethods(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
-		if _, err := c.request(runCtx, "authenticate", map[string]any{
-			"methodId": methodID,
-			"_meta":    map[string]any{"headless": true},
-		}); err != nil {
+		// Try each advertised method in preference order. A credential that is
+		// present is not necessarily a credential that works — an expired or
+		// revoked XAI_API_KEY selects `xai.api_key` and fails there, while the
+		// cached login token beside it would have succeeded. Only give up once
+		// every method has refused, and report the last refusal.
+		//
+		// ⚠ Only a JSON-RPC error is a refusal. Everything else `c.request`
+		// can return — a write failure, the reader clearing pending requests
+		// on stdout EOF, a cancelled or expired context — means the transport
+		// is gone, and the next `authenticate` would wait on a reader that has
+		// already exited until the run timeout fires, replacing the real cause
+		// with `context deadline exceeded`. Retry the credential, never the
+		// connection.
+		authenticated := ""
+		refused := 0
+		var authErr error
+		for _, methodID := range methodIDs {
+			_, err := c.request(runCtx, "authenticate", map[string]any{
+				"methodId": methodID,
+				"_meta":    map[string]any{"headless": true},
+			})
+			if err == nil {
+				authenticated = methodID
+				break
+			}
+			var rpcErr *acpRPCError
+			if !errors.As(err, &rpcErr) {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			refused++
+			authErr = fmt.Errorf("grok authenticate (%s) failed: %w", methodID, err)
+			b.cfg.Logger.Warn("grok authenticate failed; trying the next advertised method",
+				"method", methodID, "error", err)
+		}
+		if authenticated == "" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
+			finalError = authErr.Error()
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
-		b.cfg.Logger.Info("grok authenticated", "method", methodID)
+		// A refusal the fallback recovered from is not a run failure. The
+		// stderr sniffer has been reading since process start, so a rejected
+		// key that also logged `[ERROR] AuthenticationError [HTTP 401]` left a
+		// terminal diagnostic behind; left in place, promoteACPResultOnProviderError
+		// would flip this run to `failed` after the next method authenticated
+		// and the prompt answered. Drop what the handshake recorded — and only
+		// that: the sniffer keeps watching, so a genuine execution failure
+		// still promotes.
+		if refused > 0 {
+			providerErr.discardRecovered()
+		}
+		b.cfg.Logger.Info("grok authenticated", "method", authenticated)
 
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
 		// See hermes.go for why sending an unsupported transport tanks session/new.
@@ -642,21 +688,32 @@ const (
 // fall back to the cached login token. Grok requires an explicit authenticate
 // step: an empty or unknown method list is a protocol/authentication failure,
 // not permission to continue directly to session/new.
-func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
+//
+// It returns every usable method, most-preferred first, rather than a single
+// choice. Presence of a credential is not proof it works: an XAI_API_KEY that
+// is expired, revoked or out of credit still selects `xai.api_key`, and
+// returning only that would fail the run while a perfectly good cached login
+// token sat unused next to it. The caller walks the list and keeps the last
+// error only once every method has been refused.
+func selectGrokAuthMethods(methods []string, haveAPIKey bool) ([]string, error) {
 	offered := make(map[string]bool, len(methods))
 	for _, m := range methods {
 		if m = strings.TrimSpace(m); m != "" {
 			offered[m] = true
 		}
 	}
+	ordered := make([]string, 0, 2)
 	if haveAPIKey && offered[grokAuthMethodAPIKey] {
-		return grokAuthMethodAPIKey, nil
+		ordered = append(ordered, grokAuthMethodAPIKey)
 	}
 	if offered[grokAuthMethodCachedToken] {
-		return grokAuthMethodCachedToken, nil
+		ordered = append(ordered, grokAuthMethodCachedToken)
+	}
+	if len(ordered) > 0 {
+		return ordered, nil
 	}
 	if offered[grokAuthMethodAPIKey] {
-		return "", fmt.Errorf("Grok advertised only API-key authentication, but XAI_API_KEY is not set")
+		return nil, fmt.Errorf("Grok advertised only API-key authentication, but XAI_API_KEY is not set")
 	}
 	advertised := make([]string, 0, len(offered))
 	for method := range offered {
@@ -664,9 +721,9 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 	}
 	sort.Strings(advertised)
 	if len(advertised) == 0 {
-		return "", fmt.Errorf("Grok advertised no usable authentication methods; set XAI_API_KEY or run `grok login`")
+		return nil, fmt.Errorf("Grok advertised no usable authentication methods; set XAI_API_KEY or run `grok login`")
 	}
-	return "", fmt.Errorf("Grok advertised unsupported authentication methods %q; update Multica or authenticate with XAI_API_KEY / `grok login`", advertised)
+	return nil, fmt.Errorf("Grok advertised unsupported authentication methods %q; update Multica or authenticate with XAI_API_KEY / `grok login`", advertised)
 }
 
 // waitForGrokNotificationQuiescence gives the ACP stdout reader a bounded
