@@ -32,6 +32,24 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+// The bulk runtime dialog embeds the controlled RuntimePicker. Its own unit
+// tests cover the picker interaction (machine grouping, per-runtime locking);
+// here a minimal fake lets us exercise the batch flow: clicking the fake
+// fires onChange(target), exactly how the real picker reports a choice.
+vi.mock("./inspector/runtime-picker", () => ({
+  RuntimePicker: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (id: string) => void;
+  }) => (
+    <button type="button" onClick={() => onChange("rt-2")}>
+      mock-runtime-{value || "none"}
+    </button>
+  ),
+}));
+
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
 import type { AgentListRow } from "./agents-page";
 
@@ -88,6 +106,30 @@ function makeRow(
   };
 }
 
+function makeRuntime(
+  id: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id,
+    workspace_id: "ws-1",
+    daemon_id: "daemon-1",
+    name: `Runtime ${id}`,
+    runtime_mode: "local" as const,
+    provider: "claude",
+    launch_header: "claude",
+    status: "online" as const,
+    device_info: "MacBook",
+    metadata: {},
+    owner_id: "user-1",
+    visibility: "private" as const,
+    last_seen_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
 function renderToolbar(rows: AgentListRow[]) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (nextRows: AgentListRow[]) => (
@@ -95,6 +137,7 @@ function renderToolbar(rows: AgentListRow[]) {
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <AgentBatchToolbar
           rows={nextRows}
+          runtimes={[makeRuntime("rt-1"), makeRuntime("rt-2", { provider: "codex", name: "Runtime rt-2" })]}
           members={[]}
           currentUserId="user-1"
           onClear={() => {}}
@@ -116,7 +159,7 @@ beforeEach(() => {
 
 describe("AgentBatchToolbar — action order", () => {
   it("renders Archive last, after the other batch actions", () => {
-    // One archived + one active owned row surfaces all three actions at once.
+    // One archived + one active owned row surfaces all four actions at once.
     renderToolbar([
       makeRow("a", "user-1", { archived_at: "2026-01-01T00:00:00Z" }),
       makeRow("b", "user-1"),
@@ -128,7 +171,25 @@ describe("AgentBatchToolbar — action order", () => {
       .map((b) => b.textContent?.trim())
       .filter((text): text is string => !!text);
 
-    expect(actions).toEqual(["Restore", "Set access scope", "Archive"]);
+    expect(actions).toEqual([
+      "Restore",
+      "Set access scope",
+      "Change runtime",
+      "Archive",
+    ]);
+  });
+
+  it("hides Change runtime when no selected row is manageable", () => {
+    // All selected rows belong to someone else → none manageable → the
+    // manage-gated Change runtime action must not render.
+    renderToolbar([
+      makeRow("a", "user-2"),
+      makeRow("b", "user-2"),
+    ]);
+
+    expect(
+      screen.queryByRole("button", { name: "Change runtime" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -266,6 +327,94 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
     expect(
       screen.getByRole("radio", { name: /Entire workspace/ }),
     ).not.toBeChecked();
+    expect(updateAgentSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentBatchToolbar — bulk Change runtime", () => {
+  it("renders Applies to N with skip count in the dialog", async () => {
+    renderToolbar([
+      makeRow("a", "user-1"),
+      makeRow("b", "user-1"),
+      makeRow("c", "user-2"), // not manageable → skipped
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Change runtime" }));
+
+    await screen.findByText(/Applies to 2 agents/);
+    expect(
+      screen.getByText(/1 skipped/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Change disabled until a runtime is picked", async () => {
+    renderToolbar([makeRow("a", "user-1")]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Change runtime" }));
+    await screen.findByText(/Applies to 1 agents/);
+
+    // No runtime picked yet — Change must be disabled.
+    expect(screen.getByRole("button", { name: "Change" })).toBeDisabled();
+  });
+
+  it("applies the picked runtime to each manageable agent with model/tier cleared", async () => {
+    renderToolbar([
+      makeRow("a", "user-1"),
+      makeRow("b", "user-1"),
+      makeRow("c", "user-2"), // not manageable → must be skipped
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Change runtime" }));
+    await screen.findByText(/Applies to 2 agents/);
+
+    // The mocked picker reports its choice by firing onChange("rt-2") on click.
+    fireEvent.click(screen.getByRole("button", { name: /mock-runtime/ }));
+
+    const change = screen.getByRole("button", { name: "Change" });
+    await waitFor(() => expect(change).toBeEnabled());
+
+    fireEvent.click(change);
+
+    await waitFor(() => expect(updateAgentSpy).toHaveBeenCalledTimes(2));
+    expect(updateAgentSpy.mock.calls.map((call) => call[0]).sort()).toEqual([
+      "a",
+      "b",
+    ]);
+    for (const call of updateAgentSpy.mock.calls) {
+      expect(call[1]).toEqual({
+        runtime_id: "rt-2",
+        model: "",
+        thinking_level: "",
+        service_tier: "",
+      });
+    }
+
+    // One click, one write per manageable agent — nothing re-fires afterwards.
+    await act(async () => {});
+    expect(updateAgentSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retain the previous runtime after close and reopen", async () => {
+    renderToolbar([makeRow("a", "user-1")]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Change runtime" }));
+    await screen.findByText(/Applies to 1 agents/);
+    fireEvent.click(screen.getByRole("button", { name: /mock-runtime/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Change" })).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Change" }),
+      ).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Change runtime" }));
+    await screen.findByText(/Applies to 1 agents/);
+
+    expect(screen.getByRole("button", { name: "Change" })).toBeDisabled();
     expect(updateAgentSpy).not.toHaveBeenCalled();
   });
 });
