@@ -591,11 +591,26 @@ INSERT INTO channel_media_pending_object (
 )
 VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/tenant-isolation')
 `, fixture.mediaKey, fixture.workspaceID)
+		dbfx.Insert(t, "personal_access_token", testutil.Cols{
+			"user_id":      testUserID,
+			"workspace_id": fixture.workspaceID,
+			"name":         "Workspace delete tenant isolation",
+			"token_hash":   "workspace-delete-" + fixture.workspaceID,
+			"token_prefix": "mul_delete",
+		})
 	}
 
 	request := newRequest(http.MethodDelete, "/api/workspaces/"+targetWorkspaceID, nil)
 	request = withURLParam(request, "id", targetWorkspaceID)
 	testutil.Call(t, testHandler.DeleteWorkspace, request).Want(http.StatusNoContent)
+
+	var targetPATCount int
+	dbfx.QueryRow(t, `
+SELECT COUNT(*) FROM personal_access_token WHERE workspace_id = $1
+`, targetWorkspaceID).Scan(&targetPATCount)
+	if targetPATCount != 0 {
+		t.Fatalf("target personal_access_token rows = %d, want 0", targetPATCount)
+	}
 
 	for table, predicate := range map[string]string{
 		"workspace":                    "id",
@@ -605,6 +620,7 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/tenant-isolation')
 		"runtime_profile":              "workspace_id",
 		"task_usage_hourly_dirty":      "workspace_id",
 		"channel_media_pending_object": "workspace_id",
+		"personal_access_token":        "workspace_id",
 	} {
 		var count int
 		dbfx.QueryRow(t, `
