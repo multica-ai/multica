@@ -158,3 +158,36 @@ func TestIssueCountLimitSerializesConcurrentCreatesAndDeleteFreesCapacity(t *tes
 		t.Fatalf("create after delete: %v", err)
 	}
 }
+
+func TestAllocateIssueNumberHealsCounterDrift(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	queries := db.New(pool)
+	workspaceIDString, _, _, _ := seedAttributionFixture(t, pool)
+	workspaceID := util.MustParseUUID(workspaceIDString)
+
+	var maxNumber int32
+	if err := pool.QueryRow(ctx, `SELECT MAX(number) FROM issue WHERE workspace_id = $1`, workspaceID).Scan(&maxNumber); err != nil {
+		t.Fatalf("read max issue number: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE workspace SET issue_counter = $2 WHERE id = $1`, workspaceID, maxNumber-1); err != nil {
+		t.Fatalf("seed counter drift: %v", err)
+	}
+
+	policy := ResolveIssueCountPolicy(ctx, nil, workspaceID)
+	number, err := AllocateIssueNumber(ctx, queries, workspaceID, policy)
+	if err != nil {
+		t.Fatalf("allocate issue number after drift: %v", err)
+	}
+	if number != maxNumber+1 {
+		t.Fatalf("allocated number = %d, want %d", number, maxNumber+1)
+	}
+
+	var persistedCounter int32
+	if err := pool.QueryRow(ctx, `SELECT issue_counter FROM workspace WHERE id = $1`, workspaceID).Scan(&persistedCounter); err != nil {
+		t.Fatalf("read persisted counter: %v", err)
+	}
+	if persistedCounter != maxNumber+1 {
+		t.Fatalf("persisted counter = %d, want %d", persistedCounter, maxNumber+1)
+	}
+}
