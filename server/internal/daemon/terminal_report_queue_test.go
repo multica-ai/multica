@@ -75,6 +75,29 @@ func TestTerminalReportStoreRoundTripAndPermissions(t *testing.T) {
 	}
 }
 
+func TestTerminalReportPersistsQuotaResetHint(t *testing.T) {
+	reset := time.Date(2026, 10, 1, 2, 3, 4, 0, time.UTC)
+	record, err := persistedTerminalReport(terminalTaskReport{
+		kind: terminalTaskReportFail, taskID: "quota-failure",
+		failureReason: "agent_error.provider_quota_limit", quotaResetAt: &reset,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded persistedTerminalTaskReport
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := decoded.terminalReport()
+	if err != nil || replayed.quotaResetAt == nil || !replayed.quotaResetAt.Equal(reset) {
+		t.Fatalf("replayed quota reset = %v, err=%v; want %s", replayed.quotaResetAt, err, reset)
+	}
+}
+
 func TestTerminalReportStoreRecoversFlushedTempFileAfterCrash(t *testing.T) {
 	store := newTerminalReportStore(Config{
 		WorkspacesRoot: t.TempDir(),

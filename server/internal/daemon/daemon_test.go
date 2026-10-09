@@ -5205,6 +5205,52 @@ func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T)
 	}
 }
 
+func TestReportTaskResultSendsLocalQuotaResetHint(t *testing.T) {
+	reset := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+	var received struct {
+		FailureReason string    `json:"failure_reason"`
+		QuotaResetAt  time.Time `json:"quota_reset_at"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if err := json.NewDecoder(req.Body).Decode(&received); err != nil {
+			t.Errorf("decode fail callback: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-quota", TaskResult{
+		Status:         "failed",
+		Comment:        fmt.Sprintf("API Error: 429: 已达到 5 小时的使用上限。您的限额将在 %s 重置。", reset.In(time.Local).Format("2006-01-02 15:04:05")),
+		SessionID:      "resumable-session",
+		FailureReason:  "agent_error.provider_capacity_or_rate_limit",
+		QuotaResetZone: time.Local,
+	}, slog.Default())
+	if received.FailureReason != taskfailure.ReasonAgentProviderQuotaLimit.String() || !received.QuotaResetAt.Equal(reset) {
+		t.Errorf("callback = %+v, want quota reason and reset %s", received, reset)
+	}
+}
+
+func TestQuotaResetZoneForAgentRequiresExplicitOptInAndTimezone(t *testing.T) {
+	for _, tc := range []struct {
+		name, config string
+		want         bool
+	}{
+		{"no config", `{}`, false},
+		{"opt-in without timezone", `{"quota_auto_resume":true}`, false},
+		{"timezone without opt-in", `{"quota_reset_timezone":"Asia/Shanghai"}`, false},
+		{"invalid timezone", `{"quota_auto_resume":true,"quota_reset_timezone":"invalid/zone"}`, false},
+		{"explicit timezone", `{"quota_auto_resume":true,"quota_reset_timezone":"Asia/Shanghai"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			zone := quotaResetZoneForAgent(&AgentData{RuntimeConfig: json.RawMessage(tc.config)})
+			if (zone != nil) != tc.want {
+				t.Errorf("zone = %v, want valid=%v", zone, tc.want)
+			}
+		})
+	}
+}
+
 // Pins the GitHub multica#1952 fail-closed behaviour: a task whose
 // agent run never produced a real result (blocked, cancelled, or any
 // future status we forget to enumerate) MUST go through FailTask, so
