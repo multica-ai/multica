@@ -89,18 +89,19 @@ const zh = `欢迎来到 Multica。
 
 完整文档:https://multica.ai/docs/install-agent-runtime
 
-中文用户建议先装 Kimi CLI:
+中文用户建议先装 Kimi Code CLI（旧版 Kimi CLI 已停止维护）:
 
-1. 在 macOS / Linux 终端安装 Kimi CLI:
-   curl -LsSf https://code.kimi.com/install.sh | bash
-   Windows PowerShell:
-   Invoke-RestMethod https://code.kimi.com/install.ps1 | Invoke-Expression
+1. 安装 Kimi Code CLI:
+   # Linux / macOS
+   curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+   # Windows (PowerShell)
+   irm https://code.kimi.com/kimi-code/install.ps1 | iex
 2. 确认终端能找到 Kimi:
    kimi --version
 3. 在你想让 Kimi 工作的项目目录里启动一次:
    kimi
-4. 首次启动后输入 /login,按提示完成 Kimi Code 或 API key 配置。
-5. 等 Multica 识别到它。运行中的守护进程每隔几分钟会重新检查一次新装的 CLI,通常不需要重启。
+4. 首次启动后输入 /login，按提示完成 Kimi Code 或 API key 配置。
+5. 等 Multica 识别到它。运行中的守护进程每隔几分钟会重新检查一次新装的 CLI，通常不需要重启。
    想立刻生效:
    multica daemon restart
    桌面端请打开任意一个本机 runtime 并点 Restart。退出再打开 app 是不够的 —— 守护进程会继续在后台运行。
