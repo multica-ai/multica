@@ -30,7 +30,7 @@
 # read it back with `docker compose port`, so the health check and the printed
 # URL always match what was actually published.
 
-name: multica
+name: ${COMPOSE_PROJECT_NAME:-multica}
 
 services:
   postgres:
