@@ -3,18 +3,27 @@
 -- can enumerate every input, independently of the one delivery trigger.
 INSERT INTO channel_typing_reaction (
  id, workspace_id, chat_session_id, chat_message_id, installation_id,
- channel_message_id, installation_snapshot, cleanup_required
+ channel_message_id, installation_snapshot, cleanup_required, quota_slot
 )
 SELECT @id, @workspace_id, @chat_session_id, @chat_message_id, @installation_id,
- @channel_message_id, @installation_snapshot, message.channel_typing_settled
+ @channel_message_id, @installation_snapshot, message.channel_typing_settled, slot.value
 FROM chat_message AS message
 JOIN chat_session AS session ON session.id = message.chat_session_id
 JOIN channel_installation AS installation ON installation.id = @installation_id
+CROSS JOIN LATERAL (
+ SELECT value FROM generate_series(1, 1000) AS value
+ WHERE NOT EXISTS (SELECT 1 FROM channel_typing_reaction r
+  WHERE r.workspace_id = @workspace_id AND r.quota_slot = value
+   AND r.cleaned_at IS NULL AND r.abandoned_at IS NULL)
+ ORDER BY value LIMIT 1
+) slot
 WHERE message.id = @chat_message_id
  AND session.id = @chat_session_id AND session.workspace_id = @workspace_id
  AND installation.workspace_id = @workspace_id AND installation.channel_type = 'feishu'
  AND message.channel_ingested AND message.role = 'user'
-RETURNING *;
+-- A concurrent registration can take the same slot. Fail closed: a cosmetic
+-- badge may be skipped, but an untracked Add or a quota overrun is never safe.
+ON CONFLICT DO NOTHING RETURNING *;
 
 -- name: FinishChannelTypingReactionAdd :one
 -- cleanup_required is monotonic. A stale active read cannot undo another
@@ -22,7 +31,7 @@ RETURNING *;
 UPDATE channel_typing_reaction SET reaction_id = @reaction_id, add_finished = true,
  cleanup_required = cleanup_required OR @cleanup_required::boolean,
  cleaned_at = NULL, retry_after = now()
-WHERE id = @id
+WHERE id = @id AND abandoned_at IS NULL AND created_at > now() - interval '7 days'
 RETURNING *;
 
 -- name: AcknowledgeChannelTypingReactionCleanup :exec
@@ -30,15 +39,17 @@ RETURNING *;
 -- its anchor; only a known successful Add response can close cleanup forever.
 UPDATE channel_typing_reaction
 SET cleaned_at = CASE WHEN add_finished AND reaction_id <> '' THEN now() ELSE NULL END,
- retry_after = GREATEST(retry_after, now() + interval '30 seconds')
-WHERE id = @id AND reaction_id = @reaction_id AND cleanup_required;
+ retry_after = GREATEST(retry_after, now() + interval '30 seconds'),
+ installation_snapshot = CASE WHEN add_finished AND reaction_id <> '' THEN '{}'::jsonb ELSE installation_snapshot END
+WHERE id = @id AND reaction_id = @reaction_id AND cleanup_required AND abandoned_at IS NULL;
 
 -- name: ClaimChannelTypingReactionCleanup :many
 -- The DB is the shared source of eligibility. Missing source rows after a
 -- committed deletion are terminal too. No transaction takes remote I/O locks.
 WITH candidates AS (
  SELECT r.id FROM channel_typing_reaction r
- WHERE r.cleaned_at IS NULL AND r.retry_after <= now()
+ WHERE r.cleaned_at IS NULL AND r.abandoned_at IS NULL AND r.retry_after <= now()
+ AND r.created_at > now() - interval '7 days'
  AND (sqlc.narg('chat_session_id')::uuid IS NULL OR r.chat_session_id = sqlc.narg('chat_session_id'))
  AND (r.cleanup_required OR (NOT r.add_finished AND r.created_at < now() - interval '1 minute') OR NOT EXISTS (
   SELECT 1 FROM chat_message m
@@ -52,7 +63,9 @@ WITH candidates AS (
    AND i.channel_type = 'feishu' AND b.channel_type = 'feishu'
    AND s.status = 'active' AND i.status = 'active' AND b.retired_at IS NULL
    AND m.channel_ingested AND m.role = 'user' AND NOT m.channel_typing_settled
-   AND (m.task_id IS NULL OR (t.chat_session_id = s.id AND a.workspace_id = r.workspace_id
+   -- A taskless badge has a bounded visual lifetime even if a crashed
+   -- debouncer never flushes. Do not settle the input or cancel a future run.
+   AND ((m.task_id IS NULL AND r.created_at > now() - interval '2 minutes') OR (t.chat_session_id = s.id AND a.workspace_id = r.workspace_id
      AND t.status IN ('queued','dispatched','running','waiting_local_directory','deferred')))
  ))
  ORDER BY r.retry_after, r.id LIMIT 100
@@ -80,14 +93,31 @@ WHERE cutoff.id = @through_message_id AND cutoff.chat_session_id = @chat_session
  AND (message.created_at, message.id) <= (cutoff.created_at, cutoff.id);
 
 -- name: PruneChannelTypingReactionCleanup :exec
--- Pending/failed/uncertain Adds are never discarded. Completed tombstones are
--- retained for seven days; all remote I/O has a much shorter bounded context.
-DELETE FROM channel_typing_reaction WHERE cleaned_at < now() - interval '7 days';
+-- Each terminal outcome remains inspectable for seven days without credentials.
+WITH candidates AS (
+ SELECT id FROM channel_typing_reaction
+ WHERE cleaned_at < now() - interval '7 days' OR abandoned_at < now() - interval '7 days'
+ LIMIT 1000 FOR UPDATE SKIP LOCKED
+)
+DELETE FROM channel_typing_reaction r USING candidates c WHERE r.id = c.id;
+
+-- name: ExpireChannelTypingReactionCleanup :many
+-- Independent maintenance, including active/uncertain Adds: the cosmetic badge
+-- has a seven-day maximum lifetime. Remote failure is NOT reported as success.
+WITH candidates AS (
+ SELECT id FROM channel_typing_reaction
+ WHERE cleaned_at IS NULL AND abandoned_at IS NULL AND created_at <= now() - interval '7 days'
+ ORDER BY created_at, id LIMIT 1000 FOR UPDATE SKIP LOCKED
+)
+UPDATE channel_typing_reaction r SET abandoned_at = now(), cleanup_required = true,
+ installation_snapshot = '{}'::jsonb
+FROM candidates c WHERE r.id = c.id
+RETURNING r.id, r.workspace_id;
 
 -- name: SkipChannelTypingReactionAdd :exec
 -- No HTTP Add was issued for an already-settled input.
 UPDATE channel_typing_reaction SET add_finished = true, cleanup_required = true,
- cleaned_at = now() WHERE id = $1;
+ cleaned_at = now(), installation_snapshot = '{}'::jsonb WHERE id = $1 AND abandoned_at IS NULL;
 
 -- name: ListRequestedChannelTypingReactions :many
 SELECT id FROM channel_typing_reaction WHERE id = ANY(@ids::uuid[]) AND cleanup_required;

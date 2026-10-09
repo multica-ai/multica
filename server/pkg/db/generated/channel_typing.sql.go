@@ -14,8 +14,9 @@ import (
 const acknowledgeChannelTypingReactionCleanup = `-- name: AcknowledgeChannelTypingReactionCleanup :exec
 UPDATE channel_typing_reaction
 SET cleaned_at = CASE WHEN add_finished AND reaction_id <> '' THEN now() ELSE NULL END,
- retry_after = GREATEST(retry_after, now() + interval '30 seconds')
-WHERE id = $1 AND reaction_id = $2 AND cleanup_required
+ retry_after = GREATEST(retry_after, now() + interval '30 seconds'),
+ installation_snapshot = CASE WHEN add_finished AND reaction_id <> '' THEN '{}'::jsonb ELSE installation_snapshot END
+WHERE id = $1 AND reaction_id = $2 AND cleanup_required AND abandoned_at IS NULL
 `
 
 type AcknowledgeChannelTypingReactionCleanupParams struct {
@@ -33,7 +34,8 @@ func (q *Queries) AcknowledgeChannelTypingReactionCleanup(ctx context.Context, a
 const claimChannelTypingReactionCleanup = `-- name: ClaimChannelTypingReactionCleanup :many
 WITH candidates AS (
  SELECT r.id FROM channel_typing_reaction r
- WHERE r.cleaned_at IS NULL AND r.retry_after <= now()
+ WHERE r.cleaned_at IS NULL AND r.abandoned_at IS NULL AND r.retry_after <= now()
+ AND r.created_at > now() - interval '7 days'
  AND ($1::uuid IS NULL OR r.chat_session_id = $1)
  AND (r.cleanup_required OR (NOT r.add_finished AND r.created_at < now() - interval '1 minute') OR NOT EXISTS (
   SELECT 1 FROM chat_message m
@@ -47,7 +49,9 @@ WITH candidates AS (
    AND i.channel_type = 'feishu' AND b.channel_type = 'feishu'
    AND s.status = 'active' AND i.status = 'active' AND b.retired_at IS NULL
    AND m.channel_ingested AND m.role = 'user' AND NOT m.channel_typing_settled
-   AND (m.task_id IS NULL OR (t.chat_session_id = s.id AND a.workspace_id = r.workspace_id
+   -- A taskless badge has a bounded visual lifetime even if a crashed
+   -- debouncer never flushes. Do not settle the input or cancel a future run.
+   AND ((m.task_id IS NULL AND r.created_at > now() - interval '2 minutes') OR (t.chat_session_id = s.id AND a.workspace_id = r.workspace_id
      AND t.status IN ('queued','dispatched','running','waiting_local_directory','deferred')))
  ))
  ORDER BY r.retry_after, r.id LIMIT 100
@@ -56,7 +60,7 @@ WITH candidates AS (
 UPDATE channel_typing_reaction r SET cleanup_required = true,
  attempts = attempts + 1,
  retry_after = now() + LEAST(3600, 30 * power(2, LEAST(r.attempts, 7))) * interval '1 second'
-FROM candidates c WHERE r.id = c.id RETURNING r.id, r.workspace_id, r.chat_session_id, r.chat_message_id, r.installation_id, r.channel_message_id, r.installation_snapshot, r.reaction_id, r.add_finished, r.cleanup_required, r.cleaned_at, r.retry_after, r.attempts, r.created_at
+FROM candidates c WHERE r.id = c.id RETURNING r.id, r.workspace_id, r.chat_session_id, r.chat_message_id, r.installation_id, r.channel_message_id, r.installation_snapshot, r.reaction_id, r.add_finished, r.cleanup_required, r.cleaned_at, r.retry_after, r.attempts, r.created_at, r.abandoned_at, r.quota_slot
 `
 
 // The DB is the shared source of eligibility. Missing source rows after a
@@ -85,7 +89,48 @@ func (q *Queries) ClaimChannelTypingReactionCleanup(ctx context.Context, chatSes
 			&i.RetryAfter,
 			&i.Attempts,
 			&i.CreatedAt,
+			&i.AbandonedAt,
+			&i.QuotaSlot,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const expireChannelTypingReactionCleanup = `-- name: ExpireChannelTypingReactionCleanup :many
+WITH candidates AS (
+ SELECT id FROM channel_typing_reaction
+ WHERE cleaned_at IS NULL AND abandoned_at IS NULL AND created_at <= now() - interval '7 days'
+ ORDER BY created_at, id LIMIT 1000 FOR UPDATE SKIP LOCKED
+)
+UPDATE channel_typing_reaction r SET abandoned_at = now(), cleanup_required = true,
+ installation_snapshot = '{}'::jsonb
+FROM candidates c WHERE r.id = c.id
+RETURNING r.id, r.workspace_id
+`
+
+type ExpireChannelTypingReactionCleanupRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Independent maintenance, including active/uncertain Adds: the cosmetic badge
+// has a seven-day maximum lifetime. Remote failure is NOT reported as success.
+func (q *Queries) ExpireChannelTypingReactionCleanup(ctx context.Context) ([]ExpireChannelTypingReactionCleanupRow, error) {
+	rows, err := q.db.Query(ctx, expireChannelTypingReactionCleanup)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExpireChannelTypingReactionCleanupRow{}
+	for rows.Next() {
+		var i ExpireChannelTypingReactionCleanupRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -100,8 +145,8 @@ const finishChannelTypingReactionAdd = `-- name: FinishChannelTypingReactionAdd 
 UPDATE channel_typing_reaction SET reaction_id = $1, add_finished = true,
  cleanup_required = cleanup_required OR $2::boolean,
  cleaned_at = NULL, retry_after = now()
-WHERE id = $3
-RETURNING id, workspace_id, chat_session_id, chat_message_id, installation_id, channel_message_id, installation_snapshot, reaction_id, add_finished, cleanup_required, cleaned_at, retry_after, attempts, created_at
+WHERE id = $3 AND abandoned_at IS NULL AND created_at > now() - interval '7 days'
+RETURNING id, workspace_id, chat_session_id, chat_message_id, installation_id, channel_message_id, installation_snapshot, reaction_id, add_finished, cleanup_required, cleaned_at, retry_after, attempts, created_at, abandoned_at, quota_slot
 `
 
 type FinishChannelTypingReactionAddParams struct {
@@ -130,6 +175,8 @@ func (q *Queries) FinishChannelTypingReactionAdd(ctx context.Context, arg Finish
 		&i.RetryAfter,
 		&i.Attempts,
 		&i.CreatedAt,
+		&i.AbandonedAt,
+		&i.QuotaSlot,
 	)
 	return i, err
 }
@@ -159,11 +206,15 @@ func (q *Queries) ListRequestedChannelTypingReactions(ctx context.Context, ids [
 }
 
 const pruneChannelTypingReactionCleanup = `-- name: PruneChannelTypingReactionCleanup :exec
-DELETE FROM channel_typing_reaction WHERE cleaned_at < now() - interval '7 days'
+WITH candidates AS (
+ SELECT id FROM channel_typing_reaction
+ WHERE cleaned_at < now() - interval '7 days' OR abandoned_at < now() - interval '7 days'
+ LIMIT 1000 FOR UPDATE SKIP LOCKED
+)
+DELETE FROM channel_typing_reaction r USING candidates c WHERE r.id = c.id
 `
 
-// Pending/failed/uncertain Adds are never discarded. Completed tombstones are
-// retained for seven days; all remote I/O has a much shorter bounded context.
+// Each terminal outcome remains inspectable for seven days without credentials.
 func (q *Queries) PruneChannelTypingReactionCleanup(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, pruneChannelTypingReactionCleanup)
 	return err
@@ -172,18 +223,25 @@ func (q *Queries) PruneChannelTypingReactionCleanup(ctx context.Context) error {
 const registerChannelTypingReaction = `-- name: RegisterChannelTypingReaction :one
 INSERT INTO channel_typing_reaction (
  id, workspace_id, chat_session_id, chat_message_id, installation_id,
- channel_message_id, installation_snapshot, cleanup_required
+ channel_message_id, installation_snapshot, cleanup_required, quota_slot
 )
 SELECT $1, $2, $3, $4, $5,
- $6, $7, message.channel_typing_settled
+ $6, $7, message.channel_typing_settled, slot.value
 FROM chat_message AS message
 JOIN chat_session AS session ON session.id = message.chat_session_id
 JOIN channel_installation AS installation ON installation.id = $5
+CROSS JOIN LATERAL (
+ SELECT value FROM generate_series(1, 1000) AS value
+ WHERE NOT EXISTS (SELECT 1 FROM channel_typing_reaction r
+  WHERE r.workspace_id = $2 AND r.quota_slot = value
+   AND r.cleaned_at IS NULL AND r.abandoned_at IS NULL)
+ ORDER BY value LIMIT 1
+) slot
 WHERE message.id = $4
  AND session.id = $3 AND session.workspace_id = $2
  AND installation.workspace_id = $2 AND installation.channel_type = 'feishu'
  AND message.channel_ingested AND message.role = 'user'
-RETURNING id, workspace_id, chat_session_id, chat_message_id, installation_id, channel_message_id, installation_snapshot, reaction_id, add_finished, cleanup_required, cleaned_at, retry_after, attempts, created_at
+ON CONFLICT DO NOTHING RETURNING id, workspace_id, chat_session_id, chat_message_id, installation_id, channel_message_id, installation_snapshot, reaction_id, add_finished, cleanup_required, cleaned_at, retry_after, attempts, created_at, abandoned_at, quota_slot
 `
 
 type RegisterChannelTypingReactionParams struct {
@@ -198,6 +256,8 @@ type RegisterChannelTypingReactionParams struct {
 
 // Commit the complete external anchor BEFORE issuing Add. A terminal observer
 // can enumerate every input, independently of the one delivery trigger.
+// A concurrent registration can take the same slot. Fail closed: a cosmetic
+// badge may be skipped, but an untracked Add or a quota overrun is never safe.
 func (q *Queries) RegisterChannelTypingReaction(ctx context.Context, arg RegisterChannelTypingReactionParams) (ChannelTypingReaction, error) {
 	row := q.db.QueryRow(ctx, registerChannelTypingReaction,
 		arg.ID,
@@ -224,6 +284,8 @@ func (q *Queries) RegisterChannelTypingReaction(ctx context.Context, arg Registe
 		&i.RetryAfter,
 		&i.Attempts,
 		&i.CreatedAt,
+		&i.AbandonedAt,
+		&i.QuotaSlot,
 	)
 	return i, err
 }
@@ -266,7 +328,7 @@ func (q *Queries) SettleChannelTypingInputs(ctx context.Context, arg SettleChann
 
 const skipChannelTypingReactionAdd = `-- name: SkipChannelTypingReactionAdd :exec
 UPDATE channel_typing_reaction SET add_finished = true, cleanup_required = true,
- cleaned_at = now() WHERE id = $1
+ cleaned_at = now(), installation_snapshot = '{}'::jsonb WHERE id = $1 AND abandoned_at IS NULL
 `
 
 // No HTTP Add was issued for an already-settled input.

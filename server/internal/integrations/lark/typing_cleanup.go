@@ -20,6 +20,7 @@ type typingLedgerQueries interface {
 	SettleChannelTypingInputs(context.Context, db.SettleChannelTypingInputsParams) error
 	SkipChannelTypingReactionAdd(context.Context, pgtype.UUID) error
 	PruneChannelTypingReactionCleanup(context.Context) error
+	ExpireChannelTypingReactionCleanup(context.Context) ([]db.ExpireChannelTypingReactionCleanupRow, error)
 	ListRequestedChannelTypingReactions(context.Context, []pgtype.UUID) ([]pgtype.UUID, error)
 }
 
@@ -137,26 +138,42 @@ func (m *TypingIndicatorManager) sweepForCleanup(ctx context.Context, creds Inst
 
 // Run retries durable cleanup after transient errors, lost bus events and
 // process restarts. Claims use a 30s-1h capped backoff and SKIP LOCKED; each
-// pass is bounded. Pending/uncertain Add anchors have no automatic expiry.
+// pass is bounded. Expiration and GC have a separate budget, so slow remote
+// calls cannot indefinitely retain credential snapshots or terminal records.
 func (m *TypingIndicatorManager) Run(ctx context.Context) {
-	nextPrune := time.Time{}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
+		m.maintainCleanup(ctx)
 		passCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		m.Reconcile(passCtx, pgtype.UUID{})
-		if time.Now().After(nextPrune) {
-			if err := m.queries.PruneChannelTypingReactionCleanup(passCtx); err != nil && ctx.Err() == nil {
-				m.log.Warn("lark typing: prune completed cleanup", "err", err)
-			}
-			nextPrune = time.Now().Add(time.Hour)
-		}
 		cancel()
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (m *TypingIndicatorManager) maintainCleanup(ctx context.Context) {
+	expireCtx, cancel := context.WithTimeout(ctx, typingCleanupTimeout)
+	rows, err := m.queries.ExpireChannelTypingReactionCleanup(expireCtx)
+	cancel()
+	if err != nil && ctx.Err() == nil {
+		m.log.Error("lark typing: credential expiry maintenance failed", "err", err)
+	}
+	counts := make(map[pgtype.UUID]int)
+	for _, row := range rows {
+		counts[row.WorkspaceID]++
+	}
+	for workspaceID, count := range counts {
+		m.log.Warn("lark typing: cleanup abandoned at retention deadline; credentials erased", "workspace_id", uuidString(workspaceID), "count", count)
+	}
+	pruneCtx, pruneCancel := context.WithTimeout(ctx, typingCleanupTimeout)
+	defer pruneCancel()
+	if err := m.queries.PruneChannelTypingReactionCleanup(pruneCtx); err != nil && ctx.Err() == nil {
+		m.log.Warn("lark typing: prune terminal cleanup", "err", err)
 	}
 }
 

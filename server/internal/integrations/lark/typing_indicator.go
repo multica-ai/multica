@@ -123,6 +123,10 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 	})
 	registrationCancel()
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			m.log.Warn("lark typing: Add skipped; input unavailable or workspace quota occupied", "workspace_id", uuidString(inst.WorkspaceID))
+			return
+		}
 		m.log.Warn("lark typing: register cleanup anchor", "message_id", messageID, "err", err)
 		return
 	}
@@ -141,11 +145,13 @@ func (m *TypingIndicatorManager) Add(ctx context.Context, inst Installation, cha
 	m.states[key] = append(m.states[key], state)
 	m.mu.Unlock()
 
-	reactionID, err := m.client.AddMessageReaction(ctx, AddReactionParams{
+	addCtx, addCancel := context.WithTimeout(ctx, typingCleanupTimeout)
+	reactionID, err := m.client.AddMessageReaction(addCtx, AddReactionParams{
 		InstallationID: creds,
 		MessageID:      messageID,
 		EmojiType:      typingEmoji,
 	})
+	addCancel()
 	if err != nil {
 		m.mu.Lock()
 		m.removeState(key, state)

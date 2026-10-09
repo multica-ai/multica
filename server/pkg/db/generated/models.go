@@ -490,6 +490,8 @@ type ChannelTypingReaction struct {
 	RetryAfter           pgtype.Timestamptz `json:"retry_after"`
 	Attempts             int32              `json:"attempts"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	AbandonedAt          pgtype.Timestamptz `json:"abandoned_at"`
+	QuotaSlot            pgtype.Int4        `json:"quota_slot"`
 }
 
 type ChannelUserBinding struct {

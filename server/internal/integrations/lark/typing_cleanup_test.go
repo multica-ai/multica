@@ -78,3 +78,7 @@ func (f *fakeTypingQueries) ListRequestedChannelTypingReactions(_ context.Contex
 	}
 	return closed, nil
 }
+
+func (f *fakeTypingQueries) ExpireChannelTypingReactionCleanup(context.Context) ([]db.ExpireChannelTypingReactionCleanupRow, error) {
+	return nil, nil
+}

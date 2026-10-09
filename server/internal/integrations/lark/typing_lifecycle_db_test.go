@@ -39,7 +39,7 @@ func newTypingDBFixture(t *testing.T) *typingDBFixture {
 	agentID := fx.Agent(t, "Typing agent", runtimeID)
 	instID := fx.Insert(t, "channel_installation", dbfx.Cols{
 		"workspace_id": fx.WorkspaceID, "agent_id": agentID, "channel_type": "feishu",
-		"installer_user_id": fx.UserID, "config": dbfx.Raw(`'{"app_id":"typing-app","region":"feishu"}'::jsonb`),
+		"installer_user_id": fx.UserID, "config": dbfx.Raw(`'{"app_id":"typing-app-` + suffix + `","region":"feishu"}'::jsonb`),
 	})
 	sid := fx.ChatSession(t, agentID)
 	fx.Insert(t, "channel_chat_session_binding", dbfx.Cols{

@@ -22,6 +22,10 @@ func TestTypingCleanupRepairsInterruptedIndexes(t *testing.T) {
 		"566_channel_typing_reaction_id_idx",
 		"567_channel_typing_reaction_retry_idx",
 		"568_channel_typing_reaction_gc_idx",
+		"569_channel_typing_limits",
+		"570_channel_typing_quota_idx",
+		"571_channel_typing_expiry_idx",
+		"572_channel_typing_abandoned_idx",
 	}
 	files := make([]string, len(versions))
 	for i, version := range versions {
@@ -31,8 +35,15 @@ func TestTypingCleanupRepairsInterruptedIndexes(t *testing.T) {
 		"channel_typing_reaction_id_idx",
 		"channel_typing_reaction_retry_idx",
 		"channel_typing_reaction_gc_idx",
+		"channel_typing_reaction_quota_idx",
+		"channel_typing_reaction_expiry_idx",
+		"channel_typing_reaction_abandoned_idx",
 	} {
 		t.Run(index, func(t *testing.T) {
+			buildPosition := i + 1
+			if i >= 3 {
+				buildPosition++
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			admin := openTestPool(t)
@@ -61,7 +72,14 @@ func TestTypingCleanupRepairsInterruptedIndexes(t *testing.T) {
 			if _, err := pool.Exec(ctx, string(tableSQL)); err != nil {
 				t.Fatal(err)
 			}
-			buildSQL, err := os.ReadFile(files[i+1])
+			limitsSQL, err := os.ReadFile(files[4])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(ctx, string(limitsSQL)); err != nil {
+				t.Fatal(err)
+			}
+			buildSQL, err := os.ReadFile(files[buildPosition])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,11 +137,11 @@ func TestTypingCleanupRepairsInterruptedIndexes(t *testing.T) {
 			}
 			var applied int
 			if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations WHERE version = ANY($1)", versions).Scan(&applied); err != nil || applied != len(versions) {
-				t.Fatalf("want all four migrations recorded, got %d: %v", applied, err)
+				t.Fatalf("want all migrations recorded, got %d: %v", applied, err)
 			}
 			// Cover a completed build whose migration stamp was interrupted:
 			// the hook must preserve the valid index on retry.
-			if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version = $1", versions[i+1]); err != nil {
+			if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE version = $1", versions[buildPosition]); err != nil {
 				t.Fatal(err)
 			}
 			if err := runMigrations(ctx, pool, opts); err != nil {
