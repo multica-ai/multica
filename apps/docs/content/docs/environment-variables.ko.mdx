@@ -44,6 +44,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |
 | `AUTH_TOKEN_TTL` | `720h`(30일) | 브라우저 JWT와 cookie 유효 기간. Go duration 또는 양의 정수 초 허용. 세션은 유효 기간의 절반이 지나면 슬라이딩 갱신되어, 계속 사용하는 동안에는 만료되지 않습니다. `60s` 미만은 `60s`로 조정됩니다 |
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
+| `LOG_COLOR` | 미설정 | 로그 ANSI 색상 강제: `true` 또는 `false`. 미설정 시 stderr가 대화형 터미널일 때만 색상을 적용합니다. 컨테이너가 TTY를 할당해 수집된 로그에 이스케이프 시퀀스가 남는 경우 `false`로 설정하십시오 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 실행을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
 
