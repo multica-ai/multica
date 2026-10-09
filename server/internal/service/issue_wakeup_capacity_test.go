@@ -53,7 +53,7 @@ func TestIssueWakeupBusyRuleDoesNotBlockOtherWorkspace(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			if err = s.Tick(ctx); err == nil {
+			if err = s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID), parseTestUUID(t, other.WorkspaceID)); err == nil {
 				t.Fatal("expected busy-rule diagnostic")
 			}
 			if ctx.Err() != nil {

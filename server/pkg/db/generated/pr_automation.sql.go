@@ -11,95 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const completeIssueFromPullRequests = `-- name: CompleteIssueFromPullRequests :one
-UPDATE issue AS i SET
-    status = 'done',
-    duplicate_of_issue_id = NULL,
-    position = (
-        SELECT COALESCE(MIN(target.position), 0) - 1
-        FROM issue AS target
-        WHERE target.workspace_id = i.workspace_id
-          AND target.status = 'done'
-    ),
-    revision = i.revision + 1,
-    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
-    updated_at = now()
-WHERE i.id = $1
-  AND i.workspace_id = $2
-  AND i.status = $3::text
-  AND i.status <> 'done'
-  AND EXISTS (
-      SELECT 1 FROM issue_pull_request ipr WHERE ipr.issue_id = i.id
-      UNION ALL
-      SELECT 1 FROM issue_vcs_pull_request ipr WHERE ipr.issue_id = i.id
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM issue_pull_request ipr
-      JOIN github_pull_request pr ON pr.id = ipr.pull_request_id
-      WHERE ipr.issue_id = i.id AND pr.state <> 'merged'
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM issue_vcs_pull_request ipr
-      JOIN vcs_pull_request pr ON pr.id = ipr.pull_request_id
-      WHERE ipr.issue_id = i.id AND pr.state <> 'merged'
-  )
-  AND EXISTS (
-      SELECT 1 FROM issue_pull_request ipr WHERE ipr.issue_id = i.id AND ipr.close_intent
-      UNION ALL
-      SELECT 1 FROM issue_vcs_pull_request ipr WHERE ipr.issue_id = i.id AND ipr.close_intent
-  )
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id
-`
-
-type CompleteIssueFromPullRequestsParams struct {
-	ID             pgtype.UUID `json:"id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	ExpectedStatus string      `json:"expected_status"`
-}
-
-// Conditional status write for PR auto-complete. It lands only if the issue is
-// still in the status the decision saw (two merges racing complete it once),
-// the linked PRs are still all merged when the write runs (a PR linked between
-// the decision and this statement keeps the issue open), and one of them still
-// closes the issue with a keyword. Repositions like UpdateIssueStatus does.
-func (q *Queries) CompleteIssueFromPullRequests(ctx context.Context, arg CompleteIssueFromPullRequestsParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, completeIssueFromPullRequests, arg.ID, arg.WorkspaceID, arg.ExpectedStatus)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
-		&i.Revision,
-		&i.LastActivityAt,
-		&i.TriageState,
-		&i.DuplicateOfIssueID,
-	)
-	return i, err
-}
-
 const deletePullRequestExclusion = `-- name: DeletePullRequestExclusion :exec
 DELETE FROM issue_pull_request_exclusion
 WHERE issue_id = $1 AND pull_request_id = $2
@@ -184,12 +95,12 @@ func (q *Queries) IsPullRequestExcludedFromIssue(ctx context.Context, arg IsPull
 }
 
 const listIssueLinkedPullRequestStates = `-- name: ListIssueLinkedPullRequestStates :many
-SELECT pr.id, 'github'::text AS provider, pr.pr_number, pr.state, ipr.close_intent
+SELECT pr.id, 'github'::text AS provider, pr.pr_number, pr.state
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
 UNION ALL
-SELECT pr.id, pr.provider AS provider, pr.pr_number, pr.state, ipr.close_intent
+SELECT pr.id, pr.provider AS provider, pr.pr_number, pr.state
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1
@@ -197,15 +108,14 @@ ORDER BY pr_number
 `
 
 type ListIssueLinkedPullRequestStatesRow struct {
-	ID          pgtype.UUID `json:"id"`
-	Provider    string      `json:"provider"`
-	PrNumber    int32       `json:"pr_number"`
-	State       string      `json:"state"`
-	CloseIntent bool        `json:"close_intent"`
+	ID       pgtype.UUID `json:"id"`
+	Provider string      `json:"provider"`
+	PrNumber int32       `json:"pr_number"`
+	State    string      `json:"state"`
 }
 
 // Every PR linked to the issue across GitHub and self-hosted providers, for
-// the auto-complete decision. Ordered by number so reasons read stably.
+// the merge decision. Ordered by number so reasons read stably.
 func (q *Queries) ListIssueLinkedPullRequestStates(ctx context.Context, issueID pgtype.UUID) ([]ListIssueLinkedPullRequestStatesRow, error) {
 	rows, err := q.db.Query(ctx, listIssueLinkedPullRequestStates, issueID)
 	if err != nil {
@@ -220,7 +130,6 @@ func (q *Queries) ListIssueLinkedPullRequestStates(ctx context.Context, issueID 
 			&i.Provider,
 			&i.PrNumber,
 			&i.State,
-			&i.CloseIntent,
 		); err != nil {
 			return nil, err
 		}
@@ -230,6 +139,97 @@ func (q *Queries) ListIssueLinkedPullRequestStates(ctx context.Context, issueID 
 		return nil, err
 	}
 	return items, nil
+}
+
+const moveIssueFromPullRequests = `-- name: MoveIssueFromPullRequests :one
+UPDATE issue AS i SET
+    status = $3::text,
+    duplicate_of_issue_id = NULL,
+    position = (
+        SELECT COALESCE(MIN(target.position), 0) - 1
+        FROM issue AS target
+        WHERE target.workspace_id = i.workspace_id
+          AND target.status = $3::text
+    ),
+    revision = i.revision + 1,
+    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
+    updated_at = now()
+WHERE i.id = $1
+  AND i.workspace_id = $2
+  AND i.status = $4::text
+  AND i.status <> $3::text
+  AND EXISTS (
+      SELECT 1 FROM issue_pull_request ipr WHERE ipr.issue_id = i.id
+      UNION ALL
+      SELECT 1 FROM issue_vcs_pull_request ipr WHERE ipr.issue_id = i.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM issue_pull_request ipr
+      JOIN github_pull_request pr ON pr.id = ipr.pull_request_id
+      WHERE ipr.issue_id = i.id AND pr.state <> 'merged'
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM issue_vcs_pull_request ipr
+      JOIN vcs_pull_request pr ON pr.id = ipr.pull_request_id
+      WHERE ipr.issue_id = i.id AND pr.state <> 'merged'
+  )
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id
+`
+
+type MoveIssueFromPullRequestsParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	TargetStatus   string      `json:"target_status"`
+	ExpectedStatus string      `json:"expected_status"`
+}
+
+// Conditional status write for the PR merge automation. It lands only if the
+// issue is still in the status the decision saw (two merges racing move it
+// once), is not already in the target, and the linked PRs are still all merged
+// when the write runs (a PR linked between the decision and this statement
+// keeps the issue where it is). Repositions and clears a duplicate mark like
+// UpdateIssueStatus does; the target is never cancelled.
+func (q *Queries) MoveIssueFromPullRequests(ctx context.Context, arg MoveIssueFromPullRequestsParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, moveIssueFromPullRequests,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.TargetStatus,
+		arg.ExpectedStatus,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.TriageState,
+		&i.DuplicateOfIssueID,
+	)
+	return i, err
 }
 
 const setIssuePRAutoCompleteDisabled = `-- name: SetIssuePRAutoCompleteDisabled :exec

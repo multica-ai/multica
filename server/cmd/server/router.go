@@ -98,6 +98,7 @@ var corsExposedHeaders = []string{
 	handler.HeaderCommentsTruncated,
 	handler.HeaderTimelineTruncated,
 	handler.HeaderActiveRunsTruncated,
+	handler.HeaderAgentTasksNextCursor,
 }
 
 func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
@@ -615,10 +616,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher.Register(bus)
 
 				// Typing indicator: shows a "processing" reaction on the user's
-				// message while the agent is working, then removes it before the
-				// reply is sent. Best-effort; failures are logged only.
+				// message while the agent is working. Terminal cleanup has its own
+				// budget, with a durable retry worker for failed or missed cleanup.
 				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, cs, slog.Default())
 				patcher.SetTypingIndicatorManager(typingIndicator)
+				h.LarkTyping = typingIndicator
 
 				// Inbound pipeline seams: lark_inbound_audit logger and the
 				// shared channel-agnostic chat-session service. They back the
@@ -978,7 +980,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Binding: wecomBinding,
 					Senders: wecomSenders,
 					AppURL:  appURLFromEnv(),
-					Logger:  slog.Default(),
+					// Without this the replier has no way to read a reader's
+					// profile language and every notice falls back to the
+					// deployment's, which is the whole of what this is for.
+					Languages: queries,
+					Logger:    slog.Default(),
 				})
 
 				// Wecom shares the engine.ChatSession (channel_type-keyed) so
@@ -995,7 +1001,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Credentials: credsResolver,
 					Senders:     wecomSenders,
 					Metrics:     wecomMetricsOrNil(opts.WecomMetrics),
-					Logger:      slog.Default(),
+					// Same store the Router claims on, so the receipt this
+					// adapter sends before the Router sees the message cannot
+					// also be answered there.
+					Dedup:  wecom.NewDeduper(wecomStore),
+					Logger: slog.Default(),
 				})
 				// Streaming replies: WeCom's smart-bot protocol has no
 				// typing indicator, no reaction and no read receipt, so the
@@ -2033,6 +2043,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Local search index sync for Web/Desktop (MUL-7754). Human clients
+			// only: agents search through /api/issues/search.
+			r.Route("/api/search-index", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Use(h.RequireLocalSearchIndex)
+				r.Get("/manifest", h.GetSearchIndexManifest)
+				r.Get("/snapshot", h.GetSearchIndexSnapshot)
+				r.Post("/changes", h.ListSearchIndexChanges)
+			})
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/limit-usage", h.GetIssueLimitUsage)
@@ -2071,6 +2091,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/wakeups/{wakeupID}/disable", h.DisableIssueWakeup)
 					r.Post("/wakeups/{wakeupID}/enable", h.EnableIssueWakeup)
 					r.Patch("/wakeups/{wakeupID}/instruction", h.EditIssueWakeupInstruction)
+					r.Delete("/wakeups/{wakeupID}", h.DeleteIssueWakeup)
+					r.Post("/wakeups/{wakeupID}/trigger", h.TriggerIssueWakeup)
+					r.Post("/wakeups/{wakeupID}/checkin", h.CheckInIssueWakeup)
+					r.Get("/wakeups/{wakeupID}/runs", h.ListIssueWakeupRuns)
+					r.Get("/system-wakeups", h.ListIssueSystemWakeups)
+					r.Put("/system-wakeups/{rule}", h.UpdateIssueSystemWakeup)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements", h.CreateTaskSupplement)
@@ -2406,6 +2432,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
 			r.Get("/api/issue-wakeup-summaries", h.ListWorkspaceWakeupSummaries)
 			r.Get("/api/issue-wakeups", h.ListWorkspaceWakeups)
+			r.Get("/api/issue-wakeup-paused", h.ListPausedWakeups)
+			r.Get("/api/system-wakeups", h.ListWorkspaceSystemWakeups)
+			r.Put("/api/system-wakeups/{rule}", h.UpdateWorkspaceSystemWakeup)
 
 			// Independent workspace-level list backing the issues-header
 			// "agents working" chip and its assignee-id Table filter.

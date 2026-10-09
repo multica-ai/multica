@@ -37,6 +37,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
     autopilot_paused: t(($) => $.types.autopilot_paused),
     autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
+    children_done: t(($) => $.types.children_done),
   };
 }
 
@@ -136,6 +137,12 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "autopilot_quota_exceeded":
       return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
+    case "children_done": {
+      // The stage arrives as a JSON number; details are typed as strings.
+      const stage = details.stage != null ? String(details.stage) : "";
+      if (stage) return <span>{t(($) => $.labels.children_done_stage, { stage })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }

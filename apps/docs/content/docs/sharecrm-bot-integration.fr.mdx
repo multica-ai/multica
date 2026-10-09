@@ -1,0 +1,130 @@
+---
+title: Bot ShareCRM
+description: Connectez un agent Multica à votre bot ShareCRM avec son App ID et son App Secret, puis utilisez-le en message direct, dans un groupe ou avec la commande /issue.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connectez un [agent](/agents) à un bot ShareCRM pour lui écrire en message direct, le @mentionner dans un groupe ou créer une [tâche Multica](/issues) avec `/issue` sans ouvrir l'application.
+
+L'intégration ShareCRM est [maintenue par la communauté](/community-maintained) : elle est incluse dans chaque version, sans SLA de support officiel. Signalez les problèmes dans les [issues GitHub](https://github.com/multica-ai/multica/issues).
+
+ShareCRM utilise un modèle **bring-your-own-app (BYO)** : un administrateur de l'espace de travail crée les identifiants du bot sur la plateforme ouverte ShareCRM, puis les colle dans Multica. Chaque agent dispose de **son propre bot**, que l'on peut @mentionner séparément. Contrairement à [Lark](/lark-bot-integration), l'installation ne passe pas par un QR code.
+
+Vous aurez besoin de deux identifiants :
+
+- **App ID** : l'identifiant client de l'application du bot ;
+- **App Secret** : le secret client de cette application.
+
+Les déploiements en cloud privé peuvent aussi définir une **URL de base de l'API** personnalisée. La valeur par défaut est `https://open.fxiaoke.com`.
+
+## Configurer votre bot ShareCRM
+
+### 1. Créer les identifiants du bot
+
+1. Ouvrez la [plateforme ouverte ShareCRM](https://open.fxiaoke.com), ou votre console de cloud privé, avec un compte administrateur.
+2. Créez ou ouvrez l'application du bot que Multica utilisera.
+3. Copiez son **App ID** et son **App Secret**.
+4. Vérifiez que le bot peut recevoir les messages directs et les @mentions de groupe, puis envoyer des réponses. Multica établit une connexion SSE **sortante** : aucune URL de webhook publique n'est nécessaire pour la messagerie.
+
+| Paramètre | Utilité |
+|---|---|
+| **Application du bot** | Fournit l'App ID et l'App Secret utilisés pour l'authentification. |
+| **Réception des messages** | Permet de recevoir les messages directs et les @mentions. ShareCRM filtre les messages de groupe avant de les transmettre à Multica. |
+| **Envoi des messages** | Permet de publier les réponses de l'agent et les notifications dans la même conversation. |
+| **Connexion longue SSE** | Multica ouvre et maintient la connexion ; aucune URL de webhook publique n'est nécessaire. |
+
+Il n'y a ni URL de webhook Multica ni URL de redirection OAuth à configurer : BYO n'utilise pas OAuth.
+
+<Callout type="info">
+ShareCRM ne dispose pas d'indicateur de saisie natif. Le bot publie un bref accusé de réception lorsqu'il commence à travailler, puis la réponse complète lorsque l'agent a terminé. Plusieurs messages rapprochés partagent un seul accusé de réception.
+</Callout>
+
+### 2. Connecter le bot dans Multica
+
+1. Ouvrez **Agents → _votre agent_ → Capacités → Intégrations**.
+2. Cliquez sur **Connecter ShareCRM**.
+3. Collez l'**App ID** et l'**App Secret**. Laissez l'**URL de base de l'API** vide pour le cloud public, ou indiquez l'hôte de votre cloud privé.
+4. Cliquez sur **Connecter**. Multica vérifie les identifiants en demandant un jeton à cette API.
+5. L'agent affiche **Connecté à ShareCRM**. Le bot écoute désormais sur sa propre connexion SSE.
+
+<Callout type="warning">
+Les deux identifiants doivent appartenir à la **même** application ShareCRM, associée à **un seul** agent. Un App ID déjà connecté à un autre agent ou espace de travail est refusé. Pour déplacer un bot, déconnectez-le d'abord. Reconnecter un agent avec un **nouvel** App ID remplace son installation ; les membres doivent alors associer de nouveau leur compte.
+</Callout>
+
+Pour connecter plusieurs agents, répétez cette procédure pour chacun avec une paire App ID / App Secret distincte.
+
+## Fonctionnement de l'intégration
+
+| Emplacement | Comportement |
+|---|---|
+| **Agent → Intégrations** | Les propriétaires et administrateurs voient **Connecter ShareCRM**, puis **Connecté à ShareCRM** et une action **Déconnecter**. |
+| **Message direct au bot** | Chaque message d'un membre associé rejoint une [discussion](/chat) Multica avec l'agent. |
+| **@mention dans un groupe** | Seuls les messages transmis au bot par ShareCRM sont traités. Le bot ne lit pas tout le groupe. |
+| **Images** | Les messages directs et de groupe acceptent PNG, JPEG, GIF, WebP et BMP. Les fichiers et messages vocaux ne sont pas transmis à l'agent. |
+| **Commande `/issue`** | `/issue <titre>` crée directement une tâche à votre nom et renvoie son identifiant et son titre. Ajoutez la description sur les lignes suivantes. Les images du même message deviennent des pièces jointes de la tâche. La commande n'apparaît pas dans les discussions Multica. |
+| **Commande `/new`** | Crée une discussion Multica vide et y achemine les messages suivants. `/new <message>` utilise ce message comme premier tour. La discussion précédente reste disponible. |
+| **Commande `/clear`** | Conserve la discussion, mais applique un nouveau contexte visible par l'agent au prochain message. `/clear <message>` utilise ce message comme premier tour après cette limite. L'historique complet reste visible dans Multica. |
+| **Réponse** | L'agent répond dans la même conversation privée ou le même groupe, en texte brut ; le formatage Markdown est retiré. |
+
+## Utiliser le bot
+
+### Premier message : associer votre compte
+
+Lors de votre premier **message direct**, le bot envoie un lien vers **/sharecrm/bind**. Ouvrez-le et connectez-vous à Multica pour associer votre identité ShareCRM à votre compte dans l'espace de travail. L'agent peut alors agir en votre nom, par exemple pour créer une tâche avec `/issue`.
+
+Le lien est à usage unique et expire après environ 15 minutes. Si vous renvoyez un message dans la minute qui suit, le bot vous renvoie vers le lien déjà envoyé. Après ce délai, envoyez un nouveau message pour obtenir un nouveau lien.
+
+Si vous @mentionnez le bot dans un **groupe** avant d'avoir associé votre compte, il vous demande d'ouvrir une conversation privée. Les liens d'association ne sont jamais publiés dans les groupes : ce sont des identifiants d'accès réservés à la conversation privée.
+
+<Callout type="warning">
+Seuls les **membres de l'espace de travail** dont le compte ShareCRM est associé peuvent utiliser le bot. Les autres messages ne déclenchent pas l'agent. Seul le motif du rejet est conservé pour audit, jamais le contenu du message.
+</Callout>
+
+### Discussion et commandes
+
+- **Dans un groupe** : ajoutez le bot, puis envoyez `@your-bot <message>`. Répétez la @mention à chaque relance.
+- **En message direct** : écrivez au bot sans @mention ; chaque message est traité.
+- **Images** : joignez jusqu'à 8 images PNG, JPEG, GIF, WebP ou BMP, de 10 Mo maximum chacune. Les fichiers et messages vocaux ne sont pas pris en charge. Les réponses restent en texte brut.
+- **Créer une tâche** : envoyez `/issue la redirection de connexion ne fonctionne pas dans Safari`, puis une description sur les lignes suivantes si nécessaire. Les images du même message sont jointes à la tâche. Multica crée la tâche et renvoie son identifiant et son titre.
+- **Nouvelle discussion** : `/new` crée une discussion vide ; `/new <message>` y ajoute le premier tour. La discussion précédente est conservée.
+- **Effacer le contexte** : `/clear` conserve la discussion et renouvelle le contexte visible par l'agent au prochain message ; `/clear <message>` ajoute immédiatement le premier tour. L'historique complet reste visible.
+
+## Gérer et déconnecter les bots
+
+La gestion de l'espace de travail se trouve dans **Paramètres → Messagerie → ShareCRM** :
+
+- **Bots connectés** affiche les bots et leurs agents associés à tous les membres.
+- **Déconnecter** est réservé aux rôles **owner / admin**. Cette action ferme la connexion et arrête la réception des messages. L'installation est conservée pour audit et peut être reconnectée plus tard.
+
+## Permissions
+
+- La connexion et la déconnexion nécessitent le rôle **owner** ou **admin** de l'espace de travail.
+- L'utilisation du bot nécessite d'être membre de cet espace, d'avoir associé son identité ShareCRM et de disposer de la permission d'exécuter l'agent cible. Les messages qui ne remplissent pas ces conditions sont refusés.
+- Le contenu des messages rejetés n'est jamais stocké ; seul le motif du rejet est conservé pour audit.
+
+## Configuration en auto-hébergement
+
+Sur Multica Cloud, l'intégration est déjà disponible.
+
+En auto-hébergement, ShareCRM reste **désactivé tant que la clé de chiffrement au repos n'est pas définie**. Elle chiffre l'App Secret avant son stockage en base. L'App ID reste l'identifiant de routage non secret de l'installation. Aucun identifiant client OAuth n'est nécessaire au niveau du déploiement : chaque installation utilise les identifiants saisis par l'administrateur.
+
+1. Générez une clé de 32 octets avec `openssl rand -base64 32`, puis définissez-la sur le serveur API :
+
+   ```dotenv
+   MULTICA_SHARECRM_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+2. Redémarrez l'API. Sans cette clé, **Paramètres → Messagerie → ShareCRM** affiche un avis indiquant que l'intégration est désactivée et masque les actions de connexion.
+
+<Callout type="info">
+La clé doit contenir exactement 32 octets après décodage. Conservez-la comme un secret durable : sa perte ou sa rotation rend les identifiants stockés indéchiffrables et impose de reconnecter chaque bot. Les liens d'association utilisent l'URL de votre application Web (`MULTICA_APP_URL`, ou `FRONTEND_ORIGIN` à défaut). Les membres doivent pouvoir ouvrir cette URL dans leur navigateur.
+</Callout>
+
+Un App ID ne peut avoir qu'**une seule connexion SSE active**. Le superviseur de canaux attribue un bail par installation ; dans un déploiement à plusieurs répliques, seule celle qui détient le bail maintient cette connexion.
+
+## Étapes suivantes
+
+- [Intégrations de messagerie](/channels) — sessions, identité et autorisation.
+- [Agents](/agents) · [Discussion](/chat) · [Tâches](/issues).
+- [Variables d'environnement](/environment-variables) — référence de configuration.

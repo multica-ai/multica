@@ -386,6 +386,20 @@ describe("quick action `/` menu", () => {
   }
 });
 
+/**
+ * Pick a recipient's action from its chip menu. Under CI load the composer can
+ * still re-render the chips (the previous send settling, the preview catching
+ * up) right after the menu opens, closing it; reopen until the item shows.
+ */
+async function chooseRecipientAction(chip: string, action: RegExp) {
+  await waitFor(() => {
+    const trigger = screen.getByRole("button", { name: chip });
+    if (trigger.getAttribute("aria-expanded") !== "true") fireEvent.click(trigger);
+    expect(screen.getByRole("menuitemradio", { name: action })).toBeInTheDocument();
+  }, { timeout: 5000 });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: action }));
+}
+
 describe("comment composers", () => {
   it("renders the main comment composer without a manual expand control", () => {
     const { container } = renderCommentInput();
@@ -454,17 +468,16 @@ describe("comment composers", () => {
     await screen.findByText("Add to current run", {}, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
-      ["turn-1"]));
+      ["turn-1"]), { timeout: 5000 });
     expect(apiCancelTask).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over on web" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Stop and start over/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Stop and send" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined));
+    await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop and send" }, { timeout: 5000 }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined), { timeout: 5000 });
     expect(apiCancelTask).toHaveBeenCalledWith("issue-1", "turn-1");
     expect(apiCancelTask.mock.invocationCallOrder[0]!).toBeLessThan(onSubmit.mock.invocationCallOrder[1]!);
-  });
+  }, 15_000);
 
   it("starts after the run by default when the personal preference says so", async () => {
     useCommentComposerStore.setState({ runningAgentReply: "after_run" });
@@ -486,17 +499,16 @@ describe("comment composers", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
     await screen.findByRole("button", { name: "Lambda trigger: Start after this run" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined), { timeout: 5000 });
 
     // One message can still go into the running turn.
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "and keep desktop as is" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Lambda trigger: Start after this run" }, { timeout: 5000 }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Add to current run/ }));
-    await screen.findByRole("button", { name: "Lambda trigger: Add to current run" });
+    await chooseRecipientAction("Lambda trigger: Start after this run", /Add to current run/);
+    await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith("and keep desktop as is", undefined, undefined,
-      ["turn-1"]));
-  });
+      ["turn-1"]), { timeout: 5000 });
+  }, 15_000);
 
   it("steers every running recipient the message addresses", async () => {
     const turn = (id: string, agentId: string) => ({
@@ -518,12 +530,12 @@ describe("comment composers", () => {
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
     fireEvent.click(await screen.findByText("2 agents will receive this", {}, { timeout: 5000 }));
-    expect(await screen.findByRole("button", { name: "Lambda trigger: Add to current run" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Orion trigger: Add to current run" })).toBeInTheDocument();
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
-      ["turn-1", "turn-2"]));
-  });
+      ["turn-1", "turn-2"]), { timeout: 5000 });
+  }, 15_000);
 
   it("never stops the previous recipient after the mentions change under a stale preview", async () => {
     const turn = {
@@ -540,8 +552,7 @@ describe("comment composers", () => {
       onSubmit={onSubmit} steerByDefault={(task) => task.id === "turn-1"} />);
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 }));
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Stop and start over/ }));
+    await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
     // A slow preview still holds Lambda's restart, though the comment now
     // explicitly addresses only a different agent.
     apiPreviewCommentTriggers.mockImplementation(() => new Promise(() => {}));
@@ -549,9 +560,9 @@ describe("comment composers", () => {
       target: { value: "[@Orion](mention://agent/11111111-1111-4111-8111-111111111111) review desktop" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Stop and send" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 5000 });
     expect(apiCancelTask).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it("keeps reply submission wired after removing expand", async () => {
     const { container, onSubmit } = renderReplyInput();

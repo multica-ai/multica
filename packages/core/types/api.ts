@@ -148,7 +148,8 @@ export interface ListIssuesParams {
   /**
    * Filter by lifecycle category rather than by exact key, so one bucket holds
    * all concrete and custom statuses in that phase. Task views use exact
-   * status keys for their columns instead.
+   * status keys for their columns instead. The web client's
+   * `ApiClient.listIssues` does not send it.
    */
   status_category?: IssueStatusCategory;
   /** Multi-value form of `status_category`. OR within the field. */
@@ -512,16 +513,16 @@ export interface WorkingAgentSummary {
   running_task_count: number;
 }
 
-/** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
+/** Per-category bucket in the issue list cache. The list's fetch sets `total` to the bucket's row count. */
 export interface IssueStatusBucket {
   issues: Issue[];
   total: number;
 }
 
 /**
- * Frontend cache shape for the issue list. Data is bucketed by status so
- * each column can paginate independently. Assembled from per-status
- * `api.listIssues` responses by the query functions in `issues/queries.ts`.
+ * Frontend cache shape for the issue list. Data is bucketed by status
+ * category. Assembled from one `api.listIssues` response by the query
+ * functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
   /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */
@@ -546,6 +547,60 @@ export interface SearchProjectResult extends Project {
 
 export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
+}
+
+// Local search index sync (MUL-7754): GET /api/search-index/manifest,
+// GET /api/search-index/snapshot, POST /api/search-index/changes.
+
+/** Issue as the local search index stores it: a search row without match fields. */
+export interface SearchIndexIssue extends Issue {
+  /** Sub-second `updated_at`, which server search breaks ranking ties with. */
+  search_updated_at: string;
+}
+
+/** Project as the local index stores it. Issue and resource counts are not synced. */
+export interface SearchIndexProject extends Project {
+  search_updated_at: string;
+}
+
+export interface SearchIndexComment {
+  id: string;
+  issue_id: string;
+  content: string;
+  /** Sub-second RFC 3339 timestamp. */
+  created_at: string;
+}
+
+export interface SearchIndexManifest {
+  /** Opaque catch-up cursor for the snapshot the new copy starts from. */
+  cursor: string;
+  issue_count: number;
+  comment_count: number;
+  project_count: number;
+  /** UTF-8 bytes of every title, description, and live comment. */
+  text_bytes: number;
+}
+
+export interface SearchIndexSnapshotPage {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  /** Every project, on the first page only. */
+  projects: SearchIndexProject[];
+  next_after_number: number;
+  done: boolean;
+}
+
+export interface SearchIndexChanges {
+  issues: SearchIndexIssue[];
+  comments: SearchIndexComment[];
+  projects: SearchIndexProject[];
+  deleted: {
+    issues: string[];
+    comments: string[];
+    projects: string[];
+  };
+  cursor: string;
+  has_more: boolean;
 }
 
 export interface UpdateMeRequest {

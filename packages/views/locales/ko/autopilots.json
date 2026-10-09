@@ -476,7 +476,6 @@
     "scope": "범위",
     "issue": "작업",
     "trigger": "트리거",
-    "next": "깨우기 상태",
     "enabled": "활성화",
     "all_triggers": "모든 트리거",
     "event": "이벤트",
@@ -484,7 +483,6 @@
     "recurring": "반복",
     "all_agents": "모든 에이전트",
     "search": "작업 또는 에이전트 검색",
-    "search_action": "검색",
     "running": "실행 중",
     "active_runs": "진행 중인 실행 {{count}}개",
     "issue_closed": "종료된 작업",
@@ -510,13 +508,31 @@
       "active": "깨우기 대기 또는 실행 중",
       "all": "전체",
       "disabled": "꺼짐",
-      "ended": "종료됨"
+      "ended": "종료됨",
+      "paused": "일시중지됨"
     },
     "target_agent": "깨울 에이전트",
-    "wakeup_run": "깨운 후 실행",
     "empty_filtered": "일치하는 깨우기가 없습니다",
     "clear_filters": "필터 지우기",
     "batch_success": "깨우기 규칙 {{count}}개를 껐습니다",
-    "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다."
+    "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다.",
+    "source": "만든 곳",
+    "sources": {
+      "all": "만든 곳: 전체",
+      "member": "멤버",
+      "agent": "에이전트",
+      "system": "시스템"
+    },
+    "runs_7d": "최근 7일 실행",
+    "ends": "종료",
+    "until_issue_ends": "태스크 종료 시까지",
+    "fires_once": "한 번 실행",
+    "assignee_target": "담당자 · {{name}}",
+    "no_target": "에이전트 담당자 없음",
+    "banner_other": "깨우기 {{count}}개가 자동으로 일시중지됨: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_view": "보기",
+    "create": "깨우기 추가",
+    "create_pick_issue": "깨우기를 추가할 태스크 선택",
+    "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다."
   }
 }

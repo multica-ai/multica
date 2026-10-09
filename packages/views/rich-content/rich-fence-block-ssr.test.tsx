@@ -42,9 +42,13 @@ import { resetMountedBlocks } from "./mounted-block-registry";
 
 const CHART = "flowchart LR\n  A --> B";
 const CACHED_HEIGHT = 412;
-const SKELETON_HEIGHT = 280;
+// What the shell reserves for the whole block: the title bar (38px) plus the
+// body — the 280px skeleton, or the cached drawn height plus the diagram's
+// 32px of padding.
+const SKELETON_BLOCK_HEIGHT = 38 + 280;
+const CACHED_BLOCK_HEIGHT = 38 + CACHED_HEIGHT + 32;
 
-/** Mirrors the DJB2 key derivation in editor/mermaid-diagram.tsx. */
+/** Mirrors the layout-cache key: editor/mermaid-diagram.tsx + utils/source-hash.ts. */
 function cacheKey(chart: string): string {
   let hash = 5381;
   for (let i = 0; i < chart.length; i++) {
@@ -90,8 +94,8 @@ describe("RichFenceBlock reserved height", () => {
   it("reserves the skeleton height on the server, not the cached height", () => {
     const html = serverRender(block());
 
-    expect(html).toContain(`min-height:${SKELETON_HEIGHT}px`);
-    expect(html).not.toContain(`min-height:${CACHED_HEIGHT}px`);
+    expect(html).toContain(`min-height:${SKELETON_BLOCK_HEIGHT}px`);
+    expect(html).not.toContain(`min-height:${CACHED_BLOCK_HEIGHT}px`);
   });
 
   it("uses the skeleton height on the client's first frame despite a warm cache", () => {
@@ -104,7 +108,7 @@ describe("RichFenceBlock reserved height", () => {
     flushSync(() => root.render(block()));
 
     const shell = container.querySelector("[data-rich-block-shell]") as HTMLElement;
-    expect(shell.style.minHeight).toBe(`${SKELETON_HEIGHT}px`);
+    expect(shell.style.minHeight).toBe(`${SKELETON_BLOCK_HEIGHT}px`);
 
     act(() => root.unmount());
     container.remove();
@@ -146,7 +150,7 @@ describe("RichFenceBlock reserved height", () => {
     const shell = container.querySelector("[data-rich-block-shell]") as HTMLElement;
     // The point of the cache is preserved: after hydration the block reserves
     // the real height rather than a generic skeleton.
-    expect(shell.style.minHeight).toBe(`${CACHED_HEIGHT}px`);
+    expect(shell.style.minHeight).toBe(`${CACHED_BLOCK_HEIGHT}px`);
 
     await act(async () => root.unmount());
     container.remove();
@@ -164,7 +168,7 @@ describe("RichFenceBlock reserved height", () => {
     });
 
     const shell = container.querySelector("[data-rich-block-shell]") as HTMLElement;
-    expect(shell.style.minHeight).toBe(`${SKELETON_HEIGHT}px`);
+    expect(shell.style.minHeight).toBe(`${SKELETON_BLOCK_HEIGHT}px`);
 
     await act(async () => root.unmount());
     container.remove();

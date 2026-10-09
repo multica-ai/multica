@@ -1637,7 +1637,8 @@ func TestGetAttachmentContent_NotFound(t *testing.T) {
 
 // isTextPreviewable is the whitelist linkpin between the proxy and the
 // client-side dispatcher. Regress against the most common content types so
-// drifting one of the lists alone fails loud.
+// drifting one of the lists alone fails loud. The same table runs against the
+// client in packages/views/editor/utils/preview.test.ts — change both.
 func TestIsTextPreviewable(t *testing.T) {
 	t.Helper()
 	cases := []struct {
@@ -1651,6 +1652,12 @@ func TestIsTextPreviewable(t *testing.T) {
 		{"plain text", "text/plain", "log.txt", true},
 		{"json by mime", "application/json", "data.json", true},
 		{"yaml by ext", "application/octet-stream", "config.yml", true},
+		{"csv by ext", "application/octet-stream", "report.csv", true},
+		{"tsv by ext", "application/octet-stream", "export.tsv", true},
+		{"json lines by ext", "application/octet-stream", "events.jsonl", true},
+		{"ndjson by ext", "application/octet-stream", "events.ndjson", true},
+		{"ndjson by mime", "application/x-ndjson", "events", true},
+		{"log by ext", "application/octet-stream", "server.log", true},
 		{"go source", "text/plain", "main.go", true},
 		{"typescript", "application/octet-stream", "index.ts", true},
 		{"html", "text/html", "page.html", true},

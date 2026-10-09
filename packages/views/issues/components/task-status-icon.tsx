@@ -2,7 +2,7 @@ import { Ban, CheckCircle2, XCircle } from "lucide-react";
 import type { AgentTask } from "@multica/core/types";
 
 // Terminal-status glyph for one agent run. Shared by the execution log rows
-// and the usage-detail dialog so a failed run carries the same mark wherever
+// and the Runs dialog so a failed run carries the same mark wherever
 // it is listed. Non-terminal statuses render nothing: those rows carry a live
 // timer or a status word instead, and a glyph next to either reads as a
 // second, contradictory status.

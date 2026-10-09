@@ -525,9 +525,9 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 			return attribution.Result{Source: attribution.SourceUnattributed}
 		}
 		// A member/agent trigger comment resolves the human (direct_human / delegation
-		// / comment_source). A SYSTEM-authored comment — today the Stage-completion
-		// child-done comment (issue_child_done.go), which wakes the parent assignee
-		// and threads no actor — carries no human and is not part of any delegation
+		// / comment_source). A SYSTEM-authored comment — historically the
+		// Stage-completion child-done comment, which woke the parent assignee
+		// and threaded no actor — carries no human and is not part of any delegation
 		// chain. Classifying it would degrade straight to owner_fallback (the agent's
 		// own owner), which is wrong for a Stage cascade: the woken run should be
 		// accountable to whoever caused the PARENT issue to exist. So for a system
@@ -1844,6 +1844,29 @@ type PreparedChatTaskEnqueue struct {
 	runtimeOverlay   runtimeMCPOverlayData
 }
 
+// MemberMayInvokeAgent reports whether userID may trigger runs for agentID.
+//
+// CanMemberInvokeAgent keyed by id rather than by row: channel inbound has the
+// installation's agent id and no reason to load the agent itself. It asks this
+// before storing a sender's message, so a member the web chat would refuse
+// cannot reach the agent through a bot either.
+//
+// An agent that no longer exists admits nobody — that is a verdict, not a
+// failure. Every other query failure comes back as an error, so an unreachable
+// database is never read as a denial: the caller releases its dedup claim and
+// the platform's redelivery is still the message's chance. CanMemberInvokeAgent
+// is the fail-closed wrapper the scheduled triggers use instead.
+func (s *TaskService) MemberMayInvokeAgent(ctx context.Context, agentID, userID pgtype.UUID) (bool, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load agent: %w", err)
+	}
+	return memberMayInvokeAgent(ctx, s.Queries, agent, userID, agent.WorkspaceID)
+}
+
 // PrepareChatTaskEnqueue performs reads and optional external integration work
 // before the caller opens a transaction. BuildTaskOverlay may perform network
 // I/O and must never run while /new holds route-rotation locks.
@@ -2720,11 +2743,20 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 // showing a run that no longer exists. Each caller already knows the workspace
 // — it is the one whose session, member or runtime is being torn down — so the
 // lookup is not needed and cannot fail.
-func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, workspaceID string, cancelled []db.AgentTaskQueue) {
+//
+// reactionTargets optionally carries anchors captured before deleting the
+// channel delivery rows. They stay on the internal event, outside its payload.
+func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, workspaceID string, cancelled []db.AgentTaskQueue, reactionTargets ...map[string]*events.ChannelReactionTarget) {
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
 		s.ReconcileAgentStatus(ctx, t.AgentID)
-		s.publishTaskEvent(protocol.EventTaskCancelled, workspaceID, t)
+		if workspaceID != "" {
+			e := taskEvent(protocol.EventTaskCancelled, workspaceID, t)
+			if len(reactionTargets) > 0 {
+				e.ChannelReactionTarget = reactionTargets[0][util.UUIDToString(t.ID)]
+			}
+			s.Bus.Publish(e)
+		}
 	}
 	s.notifyTasksFinished(cancelled)
 }
@@ -4507,7 +4539,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			AuthorID: task.AgentID,
 			Since:    task.StartedAt,
 		})
-		if !suppressNoActionComment && !agentCommented {
+		// A scheduled wakeup check that found nothing new ends with a check-in
+		// instead of a comment (see IssueWakeupService.CheckIn).
+		if !suppressNoActionComment && !agentCommented && !HasWakeupCheckin(task) {
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
@@ -6881,12 +6915,12 @@ func (s *TaskService) skillsWithFiles(ctx context.Context, skills []db.Skill) ([
 // It fails closed on a workspace-skill read error for the reason in
 // LoadAgentSkills: a bundle set built from a partial read is indistinguishable
 // from a correct one.
-func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID, agentSystemKey string, legacyRedirects bool) ([]AgentSkillData, []AgentSkillRefData, error) {
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID, agentSystemKey string) ([]AgentSkillData, []AgentSkillRefData, error) {
 	skills, err := s.LoadAgentSkills(ctx, agentID)
 	if err != nil {
 		return nil, nil, err
 	}
-	skills = append(skills, s.BuiltinSkills(agentSystemKey, legacyRedirects)...)
+	skills = append(skills, s.BuiltinSkills(agentSystemKey)...)
 	bundles, refs := BuildAgentSkillBundles(skills)
 	return bundles, refs, nil
 }

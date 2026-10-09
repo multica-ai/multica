@@ -36,6 +36,8 @@ func freshAgentEnvSetCmd() *cobra.Command {
 func newAgentTasksTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "tasks"}
 	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Int("limit", 200, "")
+	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("profile", "", "")
 	return cmd
 }
@@ -68,6 +70,38 @@ func TestRunAgentTasksRequestsUsageForJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `"input_tokens": 12`) {
 		t.Fatalf("JSON output missing usage: %s", out)
+	}
+}
+
+func TestRunAgentTasksPagination(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	cursor := "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "7" || r.URL.Query().Get("before") != cursor {
+			t.Errorf("pagination query = %s", r.URL.RawQuery)
+		}
+		w.Header().Set("X-Agent-Tasks-Next-Cursor", cursor)
+		_, _ = w.Write([]byte(`[{"id":"task-1"}]`))
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newAgentTasksTestCmd()
+	_ = cmd.Flags().Set("limit", "7")
+	_ = cmd.Flags().Set("before", cursor)
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	output, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "--before") || !strings.Contains(stderr.String(), cursor) {
+		t.Fatalf("missing continuation: %s", stderr.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		t.Fatalf("stdout must remain JSON: %s", output)
 	}
 }
 

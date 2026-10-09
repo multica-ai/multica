@@ -54,9 +54,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          # Deliberately independent from the minimum patch in server/go.mod:
-          # releases follow the newest 1.26 patch available to setup-go.
-          go-version: "1.26.x"
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.26.
+          go-version: "~1.26.9"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -98,9 +98,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          # Deliberately independent from the minimum patch in server/go.mod:
-          # releases follow the newest 1.26 patch available to setup-go.
-          go-version: "1.26.x"
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.26.
+          go-version: "~1.26.9"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -424,9 +424,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          # Deliberately independent from the minimum patch in server/go.mod:
-          # releases follow the newest 1.26 patch available to setup-go.
-          go-version: "1.26.x"
+          # Keep the security floor even when the setup-go manifest lags;
+          # continue accepting newer patches within Go 1.26.
+          go-version: "~1.26.9"
           check-latest: true
           cache-dependency-path: server/go.sum
 

@@ -25,7 +25,16 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: { updateWorkspace },
 }));
-vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: navigatePush }) }));
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    push: navigatePush,
+    pathname: "/acme/settings",
+    searchParams: new URLSearchParams("tab=issue-statuses"),
+  }),
+  AppLink: ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) => (
+    <a href={href} className={className}>{children}</a>
+  ),
+}));
 vi.mock("../../issues/surface/issue-surface", () => ({
   IssueSurfaceWithStore: ({ store, scope }: { store: { getState: () => { statusFilters: string[] } }; scope: { actorKind: string } }) =>
     <div data-testid="inspection-list">{scope.actorKind}:{store.getState().statusFilters.join(",")}</div>,
@@ -103,7 +112,6 @@ const BUILT_IN_IN_REVIEW = entry({
   position: 0,
 });
 
-// Two switches now render (show archived, PR auto-complete); name the one meant.
 const archivedToggle = () =>
   screen.queryByRole("switch", { name: new RegExp(`^${en.issue_statuses.show_archived.split(" (")[0]}`) });
 
@@ -121,38 +129,28 @@ afterEach(() => {
 });
 
 describe("IssueStatusesTab", () => {
-  describe("PR auto-complete (MUL-7429)", () => {
+  describe("PR merge status badge (MUL-7726)", () => {
     const BUILT_IN_DONE = entry({ id: "done", key: "done", name: "Done", category: "done", is_system: true, position: 0 });
+    const QA = entry({ key: "qa", name: "QA" });
+    const badgeLink = () => screen.getByText(en.issue_statuses.pr_auto_complete_badge).closest("a");
 
-    it("saves the workspace setting as soon as the switch changes", async () => {
-      workspaceSettings = { github_enabled: true };
-      updateWorkspace.mockResolvedValue({ id: "ws-1", settings: {} });
+    it("badges Done by default and links to the rule on the Code page", () => {
+      catalog = [BUILT_IN_DONE, QA];
       render(<IssueStatusesTab />);
-      const toggle = screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label });
-      expect(toggle).toHaveAttribute("aria-checked", "true");
-      fireEvent.click(toggle);
-      await waitFor(() =>
-        expect(updateWorkspace).toHaveBeenCalledWith("ws-1", {
-          settings: { github_enabled: true, pr_auto_complete_enabled: false },
-        }),
-      );
+      expect(screen.getAllByText(en.issue_statuses.pr_auto_complete_badge)).toHaveLength(1);
+      expect(badgeLink()?.getAttribute("href")).toBe("/acme/settings?tab=code&section=pr-merge-status");
+      expect(badgeLink()?.closest(".group\\/row")).toHaveTextContent(en.issue_statuses.built_in_descriptions.done);
     });
 
-    it("badges the built-in Done row only while the setting is on", () => {
-      catalog = [BUILT_IN_DONE];
+    it("moves the badge to the chosen status and drops it for no change", () => {
+      catalog = [BUILT_IN_DONE, QA];
+      workspaceSettings = { pr_merge_status: "qa" };
       render(<IssueStatusesTab />);
-      expect(screen.getByText(en.issue_statuses.pr_auto_complete_badge)).toBeInTheDocument();
+      expect(badgeLink()?.closest(".group\\/row")).toHaveTextContent("QA");
       cleanup();
-      workspaceSettings = { pr_auto_complete_enabled: false };
+      workspaceSettings = { pr_merge_status: "none" };
       render(<IssueStatusesTab />);
       expect(screen.queryByText(en.issue_statuses.pr_auto_complete_badge)).toBeNull();
-      expect(screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label })).toHaveAttribute("aria-checked", "false");
-    });
-
-    it("shows the setting read-only to a member", () => {
-      role = "member";
-      render(<IssueStatusesTab />);
-      expect(screen.getByRole("switch", { name: en.issue_statuses.pr_auto_complete_label })).toHaveAttribute("aria-disabled", "true");
     });
   });
 
@@ -444,34 +442,27 @@ describe("IssueStatusesTab", () => {
     ]);
   });
 
-  it.each([
-    ["edit", "click"], ["archive", "click"],
-    ["edit", "enter"], ["archive", "enter"],
-    ["edit", "escape"], ["archive", "escape"],
-  ] as const)("dismisses the built-in %s notice using %s", async (action, dismiss) => {
+  it("locks the definition of built-in statuses where the actions are", async () => {
     const user = userEvent.setup();
-    catalog = [BUILT_IN_IN_REVIEW];
+    catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA", position: 1 })];
     render(<IssueStatusesTab />);
     const trigger = screen.getByLabelText(
       en.issue_statuses.actions.open.replace("{{name}}", "in_review"),
     );
     expect(trigger.className).toContain("group-focus-within/row:opacity-100");
     expect(trigger.className).toContain("data-popup-open:opacity-100");
-    fireEvent.click(trigger);
-    fireEvent.click(await screen.findByRole("menuitem", { name: en.issue_statuses.actions[action] }));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(en.issue_statuses.built_in_dialog.description)).toBeInTheDocument();
-    expect(screen.queryByLabelText(en.issue_statuses.editor.name)).toBeNull();
-    const close = within(dialog).getByRole("button", { name: en.issue_statuses.built_in_dialog.confirm });
-    if (dismiss === "click") {
-      await user.click(close);
-    } else {
-      close.focus();
-      await user.keyboard(dismiss === "enter" ? "{Enter}" : "{Escape}");
-    }
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    // Closing must release the modal layer, not leave Settings inaccessible.
-    await user.click(screen.getByLabelText(`${en.issue_statuses.add}: ${en.issue_statuses.category_labels.started}`));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.click(trigger);
+    const edit = await screen.findByRole("menuitem", { name: en.issue_statuses.actions.edit });
+    const archive = screen.getByRole("menuitem", { name: en.issue_statuses.actions.archive });
+    expect(edit).toHaveAttribute("aria-disabled", "true");
+    expect(archive).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(en.issue_statuses.built_in_locked)).toBeInTheDocument();
+    // Reordering stays available for built-ins.
+    expect(
+      screen.getByRole("menuitem", { name: en.issue_statuses.actions.move_down }),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(edit);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });

@@ -430,6 +430,8 @@ func normalizeCodexModelLabel(id, label string) string {
 	switch id {
 	case "gpt-6-astra":
 		return "GPT-6 Astra"
+	case "gpt-6.1-sol":
+		return "GPT-6.1 Sol"
 	case "gpt-6-sol":
 		return "GPT-6 Sol"
 	case "gpt-6-luna":

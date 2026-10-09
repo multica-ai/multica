@@ -1,8 +1,8 @@
 /**
  * @vitest-environment jsdom
  */
-import { QueryClient, QueryClientProvider, type InvalidateQueryFilters } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, QueryObserver, type InvalidateQueryFilters, type QueryKey } from "@tanstack/react-query";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
@@ -17,10 +17,19 @@ import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
 } from "../workspace/pending-delete";
+import { setApiInstance } from "../api";
+import type { ApiClient } from "../api/client";
+import type { IssueTableQuerySpec } from "../types";
+import { getCurrentWsId } from "../platform/workspace-storage";
+import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 
+vi.mock("../search-index/instance", () => ({
+  forgetLocalSearchIndex: vi.fn(async () => undefined),
+}));
+
 vi.mock("../platform/workspace-storage", () => ({
-  getCurrentWsId: () => "ws-1",
+  getCurrentWsId: vi.fn(() => "ws-1"),
   getCurrentSlug: () => "test-ws",
   // Draft stores are now loaded transitively (storage-cleanup → register-all-drafts)
   // so their persist wiring must resolve against this mock.
@@ -372,33 +381,158 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
   let stores: RealtimeSyncStores;
 
   beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     stores = createStores();
   });
 
   afterEach(() => {
+    cleanup();
+    qc.clear();
+    vi.mocked(getCurrentWsId).mockReturnValue("ws-1");
     vi.useRealTimers();
   });
 
-  it("invalidates Table queries after a task lifecycle event", () => {
+  const spec: IssueTableQuerySpec = {
+    scope: { kind: "workspace" },
+    filters: {},
+    sort: { field: "position", direction: "asc" },
+  };
+  const workingFacet = (wsId = "ws-1") => issueKeys.tableFacets(wsId, {
+    query: spec, facets: [{ kind: "working_agents" }],
+  });
+
+  function mountRealtime() {
     vi.useFakeTimers();
     const ws = createMockWs();
-    const invalidate = vi.spyOn(qc, "invalidateQueries");
-    renderHook(() => useRealtimeSync(ws, stores), {
+    const hook = renderHook(() => useRealtimeSync(ws, stores), {
       wrapper: createWrapper(qc),
     });
-    const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
-    expect(onAny).toBeDefined();
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
+    return { ...hook, emit: (type: string) => onAny({ type, payload: {} } as never) };
+  }
 
-    onAny!({ type: "task:completed", payload: {} } as never);
-    vi.advanceTimersByTime(100);
+  it("only invalidates working facets and queries whose membership depends on working state", async () => {
+    const { emit } = mountRealtime();
+    const untouched: QueryKey[] = [workingFacet("ws-2")];
+    const affected: QueryKey[] = [workingFacet(), workspaceWorkingAgentsKeys.list("ws-1", "issue")];
+    // Test both server membership forms, including an explicit empty id set,
+    // across rows, descriptors and ordinary facets such as status counts.
+    const filterCases: IssueTableQuerySpec["filters"][] = [{}, { working_only: false }, { working_only: true }, { working_issue_ids: [] }, { working_issue_ids: ["i1"] }];
+    for (const filters of filterCases) {
+      const query = { ...spec, filters };
+      const keys = [
+        issueKeys.tableRows("ws-1", query, { kind: "none" }, null, false, null),
+        issueKeys.tableGroups("ws-1", query, { kind: "status" }),
+        issueKeys.tableFacets("ws-1", { query, facets: [{ kind: "status" }] }),
+      ];
+      (filters.working_only || filters.working_issue_ids ? affected : untouched).push(...keys);
+    }
+    for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);
+    emit("task:completed");
+    await vi.advanceTimersByTimeAsync(1_000);
+    for (const key of affected) expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    for (const key of untouched) expect(qc.getQueryState(key)?.isInvalidated).toBe(false);
+  });
 
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: issueKeys.tableAll("ws-1"),
-    });
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: workspaceWorkingAgentsKeys.all("ws-1"),
-    });
+  it("coalesces a continuous lifecycle stream and eventually clears the final completed run", async () => {
+    const { emit } = mountRealtime();
+    let count = 1;
+    const queryFn = vi.fn(async () => count);
+    qc.setQueryData(workingFacet(), count);
+    const observer = new QueryObserver(qc, { queryKey: workingFacet(), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+    for (let i = 0; i < 20; i++) {
+      emit(i % 2 ? "agent:updated" : "task:started");
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    expect(queryFn).toHaveBeenCalledTimes(4);
+    count = 0;
+    emit("task:completed");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queryFn).toHaveBeenCalledTimes(5);
+    expect(observer.getCurrentResult().data).toBe(0);
+    unsubscribe();
+  });
+
+  it.each(["facet", "projection"])("restarts an in-flight first %s request after completion instead of accepting its stale response", async (kind) => {
+    const { emit } = mountRealtime();
+    const queryKey = kind === "facet" ? workingFacet() : workspaceWorkingAgentsKeys.list("ws-1", "issue");
+    let finishFirst!: (value: number) => void;
+    const queryFn = vi.fn(async () => 0).mockImplementationOnce(() => new Promise<number>((resolve) => { finishFirst = resolve; }));
+    const observer = new QueryObserver(qc, { queryKey, queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+    emit("task:completed");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(observer.getCurrentResult().data).toBe(0);
+    finishFirst(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(observer.getCurrentResult().data).toBe(0);
+    unsubscribe();
+  });
+
+  it("lets slow refreshes finish and performs a trailing refresh for events received in flight", async () => {
+    const { emit } = mountRealtime();
+    let finishSlow!: (value: number) => void;
+    const queryFn = vi.fn(async () => 0).mockImplementationOnce(() => new Promise<number>((resolve) => { finishSlow = resolve; }));
+    qc.setQueryData(workingFacet(), 1);
+    const observer = new QueryObserver(qc, { queryKey: workingFacet(), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+    emit("task:started");
+    await vi.advanceTimersByTimeAsync(1_000);
+    for (let i = 0; i < 10; i++) {
+      emit("task:completed");
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    finishSlow(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(observer.getCurrentResult().data).toBe(0);
+    unsubscribe();
+  });
+
+  it("ignores progress/messages and discards a queued refresh on unmount", async () => {
+    const { emit, unmount } = mountRealtime();
+    qc.setQueryData(workingFacet(), []);
+    qc.setQueryData(workspaceWorkingAgentsKeys.list("ws-1", "issue"), []);
+    emit("task:progress");
+    emit("task:message");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(qc.getQueryState(workingFacet())?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(workspaceWorkingAgentsKeys.list("ws-1", "issue"))?.isInvalidated).toBe(false);
+    emit("task:completed");
+    unmount();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(qc.getQueryState(workingFacet())?.isInvalidated).toBe(false);
+  });
+
+  it("keeps a queued refresh scoped to the workspace that received it", async () => {
+    const { emit } = mountRealtime();
+    qc.setQueryData(workingFacet(), []);
+    qc.setQueryData(workingFacet("ws-2"), []);
+    emit("task:completed");
+    vi.mocked(getCurrentWsId).mockReturnValue("ws-2");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(qc.getQueryState(workingFacet())?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(workingFacet("ws-2"))?.isInvalidated).toBe(false);
+  });
+
+  it("does not schedule a trailing refresh after unmounting during a slow request", async () => {
+    const { emit, unmount } = mountRealtime();
+    let finish!: (value: number) => void;
+    const queryFn = vi.fn(() => new Promise<number>((resolve) => { finish = resolve; }));
+    qc.setQueryData(workingFacet(), 1);
+    const observer = new QueryObserver(qc, { queryKey: workingFacet(), queryFn });
+    const unsubscribe = observer.subscribe(() => {});
+    emit("task:started");
+    await vi.advanceTimersByTimeAsync(1_000);
+    emit("task:completed");
+    unmount();
+    finish(0);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 
   it("invalidates Table queries after a property definition changes", () => {
@@ -432,6 +566,7 @@ describe("useRealtimeSync — workspace:deleted self-initiated suppression", () 
   afterEach(() => {
     unmarkWorkspaceDeletePending("ws-2");
     localStorage.clear();
+    vi.mocked(forgetLocalSearchIndex).mockClear();
   });
 
   // getCurrentWsId is mocked to "ws-1" at module level, so deleting "ws-2"
@@ -460,6 +595,7 @@ describe("useRealtimeSync — workspace:deleted self-initiated suppression", () 
     // useDeleteWorkspace.onSuccess owns cleanup for self-initiated deletes;
     // the handler must not have touched storage.
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBe("draft");
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
   });
 
   it("still cleans up for a delete initiated elsewhere", () => {
@@ -473,5 +609,34 @@ describe("useRealtimeSync — workspace:deleted self-initiated suppression", () 
     dispatchWorkspaceDeleted(ws, "ws-2");
 
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBeNull();
+    // Not the current workspace, but its local search copy must still go.
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-2");
+  });
+});
+
+describe("useRealtimeSync — member:removed", () => {
+  afterEach(() => {
+    vi.mocked(forgetLocalSearchIndex).mockClear();
+  });
+
+  const dispatchMemberRemoved = (ws: WSClient, payload: Record<string, string>) => {
+    const call = vi.mocked(ws.on).mock.calls.find(([event]) => event === "member:removed");
+    expect(call).toBeDefined();
+    (call![1] as (p: unknown) => void)(payload);
+  };
+
+  it("destroys the local search copy when this user is removed", async () => {
+    setApiInstance({ listWorkspaces: vi.fn().mockResolvedValue([]) } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+
+    dispatchMemberRemoved(ws, { member_id: "m2", user_id: "someone-else", workspace_id: "ws-1" });
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
+
+    dispatchMemberRemoved(ws, { member_id: "m1", user_id: "u1", workspace_id: "ws-1" });
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-1");
+    // Let the relocate lookup settle before the test tears down.
+    await waitFor(() => expect(qc.getQueryData(workspaceKeys.list())).toEqual([]));
   });
 });

@@ -7,6 +7,8 @@ import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
+import frCommon from "../../locales/fr/common.json";
+import frSettings from "../../locales/fr/settings.json";
 
 type MemberRole = "owner" | "admin" | "member" | "guest";
 
@@ -92,13 +94,16 @@ vi.mock("../../platform", () => ({ openExternal: mockOpenExternal }));
 
 import { ShareCRMAgentBindButton, ShareCRMTab } from "./sharecrm-tab";
 
-const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, settings: enSettings },
+  fr: { common: frCommon, settings: frSettings },
+};
 
 afterEach(cleanup);
 
-function renderUI(children: ReactNode) {
+function renderUI(children: ReactNode, locale = "en") {
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+    <I18nProvider locale={locale} resources={TEST_RESOURCES}>
       {children}
     </I18nProvider>,
   );
@@ -112,6 +117,15 @@ function resetFixtures() {
 
 describe("ShareCRMAgentBindButton", () => {
   beforeEach(resetFixtures);
+
+  it("links French viewers to the French setup guide", async () => {
+    renderUI(<ShareCRMAgentBindButton agentId="agent-1" />, "fr");
+    await userEvent.click(screen.getByTestId("sharecrm-agent-connect"));
+    await userEvent.click(screen.getByTestId("sharecrm-byo-docs-link"));
+    expect(mockOpenExternal).toHaveBeenCalledWith(
+      "https://multica.ai/docs/fr/sharecrm-bot-integration",
+    );
+  });
 
   it("opens the BYO dialog and submits the pasted App ID + App Secret", async () => {
     mockRegisterBYO.mockResolvedValue({ id: "i1", agent_id: "agent-1", status: "active" });

@@ -2458,13 +2458,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
-	// A daemon older than the multica-platform merge assembles a brief that
-	// still names the built-ins this server stopped shipping. It cannot be
-	// fixed from here — the brief lives in the daemon binary — so the missing
-	// capability buys that daemon a redirect stub under the old name instead of
-	// a dangling pointer. Capability, not version: the version string is only
-	// ever shown to humans.
-	legacySkillRedirects := !requestHasClientCapability(r, protocol.DaemonCapabilityPlatformSkillV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {
 		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -2550,7 +2543,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
 	if useSkillRefs {
-		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
+		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String)
 		if err != nil {
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
@@ -2562,7 +2555,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
 		agentSkillCount = len(skills)
-		builtinSkills := h.TaskService.BuiltinSkills(agent.SystemKey.String, legacySkillRedirects)
+		builtinSkills := h.TaskService.BuiltinSkills(agent.SystemKey.String)
 		builtinSkillCount = len(builtinSkills)
 		skills = append(skills, builtinSkills...)
 		resp.Agent.Skills = skills
@@ -3638,6 +3631,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			outcome: "error_worktree_daemon_version",
 			status:  http.StatusUnprocessableEntity,
 			message: reason,
+		}
+	}
+
+	// Wakeup rules that waited for this run hand it their inputs now, after
+	// every gate passed, and only for a daemon that renders them; otherwise
+	// they keep their inputs and start their own run.
+	if requestHasClientCapability(r, protocol.DaemonCapabilityJoinedWakeupsV1) {
+		joined, err := (&service.IssueWakeupService{Tasks: h.TaskService}).JoinWaitingWakeups(r.Context(), *task)
+		if err != nil {
+			slog.Warn("daemon claim: waiting wakeups keep their inputs", "task_id", uuidToString(task.ID), "error", err)
+		} else {
+			task.Context = joined
+			resp.WakeupJoined = service.JoinedWakeupNotes(joined)
 		}
 	}
 

@@ -8,7 +8,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { renderWithI18n } from "../../test/i18n";
-import { DraftDefinitionFields } from "./save-view-dialog";
+import { DraftDefinitionFields, SaveViewDialog } from "./save-view-dialog";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -17,6 +17,11 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/core/issue-views/mutations", () => ({
+  useCreateIssueView: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateIssueView: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("./issues-header", () => ({
@@ -60,5 +65,40 @@ describe("DraftDefinitionFields ordering", () => {
     expect(
       screen.queryByRole("button", { name: "Reverse workflow order" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("SaveViewDialog draft lifecycle", () => {
+  const liveStore = createStore<IssueViewState>()(viewStoreSlice);
+  // Hosts build `scope` inline, so every host render passes a new object.
+  const dialog = (open: boolean) => (
+    <ViewStoreProvider store={liveStore}>
+      <SaveViewDialog
+        open={open}
+        onOpenChange={() => {}}
+        scope={{ kind: "my", variant: "assigned" }}
+      />
+    </ViewStoreProvider>
+  );
+
+  it("keeps a half-typed name when the host re-renders", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithI18n(dialog(true));
+
+    await user.type(screen.getByLabelText("Name"), "Ongoing");
+    rerender(dialog(true));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Ongoing");
+  });
+
+  it("starts from a blank name on the next open", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithI18n(dialog(true));
+
+    await user.type(screen.getByLabelText("Name"), "Ongoing");
+    rerender(dialog(false));
+    rerender(dialog(true));
+
+    expect(screen.getByLabelText("Name")).toHaveValue("");
   });
 });

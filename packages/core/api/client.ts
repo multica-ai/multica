@@ -1,6 +1,7 @@
-import type { IssueWakeup, IssueWakeupSummaryRow } from "../types/issue-wakeup";
+import type { ZodType } from "zod";
+import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema } from "./schemas";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
@@ -15,6 +16,9 @@ import type {
   ListIssuesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  SearchIndexManifest,
+  SearchIndexSnapshotPage,
+  SearchIndexChanges,
   UpdateMeRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
@@ -251,6 +255,7 @@ import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
+  AgentTaskPageSchema,
   AgentActivityBucketListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
@@ -335,6 +340,9 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
+  SearchIndexManifestSchema,
+  SearchIndexSnapshotPageSchema,
+  SearchIndexChangesSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
@@ -527,6 +535,12 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
+  const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
+  if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
+  return parsed;
 }
 
 export class ApiError extends Error {
@@ -1245,6 +1259,48 @@ export class ApiClient {
     });
   }
 
+  // Local search index sync (MUL-7754). Each call names its workspace so a
+  // request issued for one workspace cannot be answered for whichever one the
+  // tab has switched to since. A body that fails its schema rejects rather
+  // than degrading: an empty page would be applied to the local copy as truth.
+  async getSearchIndexManifest(params: { workspaceSlug: string; signal?: AbortSignal }): Promise<SearchIndexManifest> {
+    const raw = await this.fetch<unknown>("/api/search-index/manifest", {
+      headers: { "X-Workspace-Slug": params.workspaceSlug },
+      signal: params.signal,
+    });
+    return parseSearchIndexResponse<SearchIndexManifest>(raw, SearchIndexManifestSchema, "GET /api/search-index/manifest");
+  }
+
+  async getSearchIndexSnapshot(params: {
+    workspaceSlug: string;
+    afterNumber: number;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<SearchIndexSnapshotPage> {
+    const search = new URLSearchParams({ after_number: String(params.afterNumber) });
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    const raw = await this.fetch<unknown>(`/api/search-index/snapshot?${search}`, {
+      headers: { "X-Workspace-Slug": params.workspaceSlug },
+      signal: params.signal,
+    });
+    return parseSearchIndexResponse<SearchIndexSnapshotPage>(raw, SearchIndexSnapshotPageSchema, "GET /api/search-index/snapshot");
+  }
+
+  async getSearchIndexChanges(params: {
+    workspaceSlug: string;
+    cursor: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<SearchIndexChanges> {
+    const raw = await this.fetch<unknown>("/api/search-index/changes", {
+      method: "POST",
+      headers: { "X-Workspace-Slug": params.workspaceSlug },
+      body: JSON.stringify({ cursor: params.cursor, limit: params.limit }),
+      signal: params.signal,
+    });
+    return parseSearchIndexResponse<SearchIndexChanges>(raw, SearchIndexChangesSchema, "POST /api/search-index/changes");
+  }
+
   /**
    * Fetch one issue by UUID **or** by bare identifier ("MUL-123"): the server
    * resolves `PREFIX-NUMBER` against the workspace's own prefix through the
@@ -1290,6 +1346,52 @@ export class ApiClient {
 
   async editIssueWakeupInstruction(issueId: string, wakeupId: string, input: { instruction: string; expected_instruction: string; revision: number }): Promise<void> {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/instruction`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  async createIssueWakeup(issueId: string, input: IssueWakeupInput): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async listIssueSystemWakeups(issueId: string): Promise<SystemWakeup[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/system-wakeups`);
+    const parsed = parseWithFallback<SystemWakeup[] | null>(raw, SystemWakeupSchema.array(), null, { endpoint: "GET /api/issues/:id/system-wakeups" });
+    if (!parsed) throw new Error("Could not load system wakeups");
+    return parsed;
+  }
+
+  async listIssueWakeupRuns(issueId: string, wakeupId: string): Promise<WakeupRun[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/runs`);
+    const parsed = parseWithFallback<WakeupRun[] | null>(raw, WakeupRunSchema.array(), null, { endpoint: "GET /api/issues/:id/wakeups/:wakeupId/runs" });
+    if (!parsed) throw new Error("Could not load wakeup runs");
+    return parsed;
+  }
+
+  async listPausedWakeups(): Promise<PausedWakeup[]> {
+    const raw = await this.fetch<unknown>("/api/issue-wakeup-paused");
+    return parseWithFallback<PausedWakeup[]>(raw, PausedWakeupSchema.array(), [], { endpoint: "GET /api/issue-wakeup-paused" });
+  }
+
+  async triggerIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/trigger`, { method: "POST" });
+  }
+
+  async deleteIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}`, { method: "DELETE" });
+  }
+
+  async updateIssueSystemWakeup(issueId: string, rule: SystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  async listWorkspaceSystemWakeups(): Promise<WorkspaceSystemWakeup[]> {
+    const raw = await this.fetch<unknown>("/api/system-wakeups");
+    const parsed = parseWithFallback<WorkspaceSystemWakeup[] | null>(raw, WorkspaceSystemWakeupSchema.array(), null, { endpoint: "GET /api/system-wakeups" });
+    if (!parsed) throw new Error("Could not load system wakeups");
+    return parsed;
+  }
+
+  async updateWorkspaceSystemWakeup(rule: WorkspaceSystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
+    await this.fetch(`/api/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
   }
 
   async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
@@ -2629,11 +2731,22 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
-  async listAgentTasks(agentId: string): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/tasks`);
-    return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
-      endpoint: "GET /api/agents/:id/tasks",
+  async listAgentTasksPage(
+    agentId: string,
+    options: { limit?: number; before?: string; signal?: AbortSignal } = {},
+  ): Promise<{ tasks: AgentTask[]; nextCursor: string | null }> {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 200) });
+    if (options.before) search.set("before", options.before);
+    const response = await this.fetchRaw(`/api/agents/${agentId}/tasks?${search}`, {
+      signal: options.signal,
     });
+    const tasks: unknown = await response.json();
+    return parseWithFallback(
+      { tasks, nextCursor: response.headers.get("X-Agent-Tasks-Next-Cursor") },
+      AgentTaskPageSchema,
+      { tasks: [], nextCursor: null },
+      { endpoint: "GET /api/agents/:id/tasks" },
+    );
   }
 
   // Workspace-scoped agent task snapshot: every active task

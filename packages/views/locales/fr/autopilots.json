@@ -479,7 +479,6 @@
     "scope": "Périmètre",
     "issue": "Tâche",
     "trigger": "Déclencheur",
-    "next": "État du réveil",
     "enabled": "Activé",
     "all_triggers": "Tous les déclencheurs",
     "event": "Événement",
@@ -487,7 +486,6 @@
     "recurring": "Récurrent",
     "all_agents": "Tous les agents",
     "search": "Rechercher des tâches ou agents",
-    "search_action": "Rechercher",
     "running": "En cours",
     "active_runs": "{{count}} exécutions actives",
     "issue_closed": "Tâche fermée",
@@ -513,13 +511,32 @@
       "active": "En attente ou en cours",
       "all": "Tous",
       "disabled": "Désactivés",
-      "ended": "Terminés"
+      "ended": "Terminés",
+      "paused": "En pause"
     },
     "target_agent": "Agent à réveiller",
-    "wakeup_run": "Exécutions du réveil",
     "empty_filtered": "Aucun réveil correspondant",
     "clear_filters": "Effacer les filtres",
     "batch_success": "{{count}} règles désactivées",
-    "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer."
+    "batch_partial": "{{succeeded}} désactivées ; {{failed}} échecs. Les éléments en échec restent sélectionnés pour réessayer.",
+    "source": "Source",
+    "sources": {
+      "all": "Source : toutes",
+      "member": "Membres",
+      "agent": "Agents",
+      "system": "Système"
+    },
+    "runs_7d": "Exécutions (7 jours)",
+    "ends": "Fin",
+    "until_issue_ends": "Jusqu’à la fin de la tâche",
+    "fires_once": "Se déclenche une fois",
+    "assignee_target": "Responsable · {{name}}",
+    "no_target": "Aucun agent responsable",
+    "banner_one": "{{count}} réveil mis en pause automatiquement : {{issue}} « {{condition}} » — {{reason}}",
+    "banner_other": "{{count}} réveils mis en pause automatiquement. Dernier : {{issue}} « {{condition}} » — {{reason}}",
+    "banner_view": "Voir",
+    "create": "Nouveau réveil",
+    "create_pick_issue": "Choisissez la tâche où ajouter un réveil",
+    "create_pick_issue_description": "Le réveil appartient à cette tâche et s’arrête avec elle."
   }
 }

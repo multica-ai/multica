@@ -182,6 +182,7 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Lark | `MULTICA_LARK_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
+| ShareCRM | `MULTICA_SHARECRM_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 ; une valeur vide désactive ShareCRM |
 | Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |
@@ -192,9 +193,9 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
 
-Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et déclenchent normalement le passage à `done` lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
+Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
 
-Pour les étapes de configuration, consultez [Intégration GitHub](/github-integration#configuration-en-auto-hébergement), [Bot Lark](/lark-bot-integration#configuration-en-auto-hébergement), [Bot Slack](/slack-bot-integration#configuration-en-auto-hébergement) et [Bot Telegram](/telegram-bot-integration#configuration-en-auto-hébergement).
+Pour les étapes de configuration, consultez [Intégration GitHub](/github-integration#configuration-en-auto-hébergement), [Bot Lark](/lark-bot-integration#configuration-en-auto-hébergement), [Bot Slack](/slack-bot-integration#configuration-en-auto-hébergement), [Bot Telegram](/telegram-bot-integration#configuration-en-auto-hébergement) et [Bot ShareCRM](/sharecrm-bot-integration#configuration-en-auto-hébergement).
 
 ## LLM côté serveur
 

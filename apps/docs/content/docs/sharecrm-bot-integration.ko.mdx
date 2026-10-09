@@ -94,7 +94,7 @@ ShareCRM에는 네이티브 입력 중 표시가 없으므로 — DingTalk와 �
 
 ## 관리와 연결 해제
 
-워크스페이스 전체 관리는 **Settings → Integrations**에 있습니다.
+워크스페이스 전체 관리는 **설정 → 메신저 → ShareCRM**에 있습니다.
 
 - **Connected bots**는 워크스페이스의 모든 봇과 각각 연결된 에이전트를 나열합니다(모든 멤버가 볼 수 있음).
 - **Disconnect**는 **owner / admin만** 가능합니다. 봇은 ShareCRM 메시지 수신을 멈추고 연결을 해제합니다. 설치 기록은 감사용으로 남으며 나중에 다시 연결할 수 있습니다.
@@ -102,7 +102,7 @@ ShareCRM에는 네이티브 입력 중 표시가 없으므로 — DingTalk와 �
 ## 권한
 
 - **연결 / 연결 해제**에는 워크스페이스 **owner** 또는 **admin**이 필요합니다.
-- **봇과 대화**하려면 ShareCRM 신원이 연결된 워크스페이스 멤버여야 합니다. 그 외는 모두 버려집니다.
+- **봇과 대화**하려면 ShareCRM 신원이 연결된 워크스페이스 멤버이며 대상 에이전트의 실행 권한이 있어야 합니다. 이 조건을 충족하지 않는 메시지는 거부됩니다.
 - 버려진 메시지의 본문은 저장되지 않습니다 — 감사용 드롭 사유만 기록됩니다.
 
 ## 자체 호스팅 설정
@@ -119,7 +119,7 @@ Multica Cloud에서는 이 연동이 이미 사용 가능합니다 — 이 섹�
 
    예: `openssl rand -base64 32`.
 
-2. API를 재시작합니다. 키가 설정되기 전까지 **Settings → Integrations**에 "ShareCRM integration not enabled" 안내가 표시되고 **Connect ShareCRM** 진입점도 숨겨진 상태로 남습니다.
+2. API를 재시작합니다. 키가 설정되기 전까지 **설정 → 메신저 → ShareCRM**에 "ShareCRM integration not enabled" 안내가 표시되고 **Connect ShareCRM** 진입점도 숨겨진 상태로 남습니다.
 
 <Callout type="info">
 키는 정확히 32바이트로 디코딩되어야 합니다 — `openssl rand -base64 32`로 가능합니다. 장기 시크릿으로 취급하세요. 교체하거나 분실하면 저장된 자격 증명을 복호화할 수 없어 모든 봇을 다시 연결해야 합니다. "계정 연결" 링크는 웹 앱 URL(`MULTICA_APP_URL`, 미설정 시 `FRONTEND_ORIGIN`)로 만들어집니다 — 일반 배포에는 이미 있으므로 채팅 쪽 추가 설정은 없습니다. 멤버가 바인드 링크를 열 때 브라우저에서 해당 URL에 접근할 수 있어야 합니다.

@@ -7,16 +7,50 @@ import (
 	"path/filepath"
 )
 
-// ErrUnresolvablePath is returned by ResolveSymlinksBestEffort when the
-// operating system's own resolution of the path cannot be determined well
-// enough to compare against a root: an unknown redirecting reparse point whose
-// final location even a handle query cannot name, or a Windows drive-relative
-// path on a drive whose current directory this process cannot observe. A
-// caller that uses the result as a containment check must treat the error as
-// OUTSIDE — "cannot say where this opens" is not "opens where the string
-// says". A caller that only wants a canonical form should fall back to the
-// input unchanged.
+// ErrUnresolvablePath is returned by ResolveSymlinks and
+// ResolveSymlinksBestEffort when the operating system's own resolution of the
+// path cannot be determined well enough to compare against a root: an unknown
+// redirecting reparse point whose final location even a handle query cannot
+// name, or a Windows drive-relative path on a drive whose current directory
+// this process cannot observe. A caller that uses the result as a containment
+// check must treat the error as OUTSIDE — "cannot say where this opens" is not
+// "opens where the string says". A caller that only wants a canonical form
+// should fall back to the input unchanged.
 var ErrUnresolvablePath = errors.New("path resolution cannot be determined")
+
+// ResolveSymlinks is the strict counterpart of ResolveSymlinksBestEffort: it
+// resolves p the way the operating system opens it — every symlink followed,
+// and on Windows every directory junction too — and fails when any component
+// is missing, unreadable, or cannot be resolved. It is for callers that must
+// prove a path lies inside a root before trusting it, where
+// filepath.EvalSymlinks cannot serve on Windows: under the winsymlink
+// semantics this module's go directive selects, it fails with ENOTDIR on any
+// path that passes THROUGH a junction (a workspaces root moved to another
+// drive and left behind as a junction, #8946), and returns a junction at the
+// END of a path unfollowed, so a link out of the root reads as inside it.
+//
+// Every location it returns was walked component by component. On Windows a
+// path that can only be spelled in the device namespace — a volume GUID, a raw
+// device, or a link into one — is ErrUnresolvablePath rather than a lexical
+// answer, because two such strings can compare as nested while a junction
+// between them leads somewhere else entirely (see evalPathStrict).
+//
+// On Unix this is filepath.EvalSymlinks. On Windows a path with no junction in
+// it keeps the spelling filepath.EvalSymlinks gives it (see canonicalSpelling),
+// so switching a caller over changes nothing for such paths.
+//
+// This mirrors Python's Path.resolve(strict=True).
+func ResolveSymlinks(p string) (string, error) {
+	abs := absNoClean(p)
+	if !filepath.IsAbs(abs) {
+		return "", fmt.Errorf("%w: %q has no observable base to resolve against", ErrUnresolvablePath, p)
+	}
+	resolved, err := evalPathStrict(abs)
+	if err != nil {
+		return "", err
+	}
+	return canonicalSpelling(resolved), nil
+}
 
 // ResolveSymlinksBestEffort canonicalizes p the way the operating system would
 // open it, as far as the filesystem allows: it follows every symlink in the

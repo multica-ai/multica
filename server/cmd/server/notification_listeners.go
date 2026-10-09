@@ -570,6 +570,9 @@ func notifyMentionedMembers(
 			continue
 		}
 		if m.Type == "member" {
+			if _, err := util.ParseUUID(m.ID); err != nil {
+				continue
+			}
 			recipientIDs[m.ID] = true
 		}
 		if m.Type == "squad" {

@@ -34,6 +34,7 @@ import { sharecrmInstallationsOptions, sharecrmKeys } from "@multica/core/sharec
 import { api } from "@multica/core/api";
 import type { ShareCRMInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useLocale, useT } from "../../i18n";
 
@@ -231,14 +232,7 @@ function InstallationRow({
 // prefixes (English has none), matching the convention used elsewhere in the
 // app for doc links.
 function sharecrmDocsUrl(lang: string | undefined): string {
-  const prefix = lang?.startsWith("zh")
-    ? "/zh"
-    : lang?.startsWith("ja")
-      ? "/ja"
-      : lang?.startsWith("ko")
-        ? "/ko"
-        : "";
-  return `https://multica.ai/docs${prefix}/sharecrm-bot-integration`;
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/sharecrm-bot-integration`;
 }
 
 // ShareCRMAgentBindButton is the per-agent CTA exposed from the agent detail

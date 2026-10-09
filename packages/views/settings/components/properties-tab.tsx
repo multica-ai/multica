@@ -77,7 +77,7 @@ import {
   PropertyIconPicker,
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
-import { SettingsTab } from "./settings-layout";
+import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -141,7 +141,9 @@ export function PropertiesTab() {
     <SettingsTab
       title={t(($) => $.properties.title)}
       description={t(($) => $.properties.description)}
+      scope="workspace"
     >
+      {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-sm">
@@ -351,6 +353,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.actor)}</>;
     case "multi_actor":
       return <>{t(($) => $.properties.types.multi_actor)}</>;
+    case "multi_text":
+      return <>{t(($) => $.properties.types.multi_text)}</>;
+    case "multi_url":
+      return <>{t(($) => $.properties.types.multi_url)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;

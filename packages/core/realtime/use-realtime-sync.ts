@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { forgetLocalSearchIndex } from "../search-index/instance";
+import { useQueryClient, type InfiniteData, type QueryClient, type QueryFilters } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
@@ -73,6 +74,8 @@ import {
 } from "../chat/pending";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
+  IssueTableFacetsRequest,
+  IssueTableQuerySpec,
   MemberAddedPayload,
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
@@ -698,6 +701,36 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
+  const filters: QueryFilters[] = [
+    { queryKey: workspaceWorkingAgentsKeys.all(wsId) },
+    {
+      queryKey: issueKeys.tableAll(wsId),
+      predicate: ({ queryKey }) => {
+        const kind = queryKey[3];
+        let spec: IssueTableQuerySpec | undefined;
+        if (kind === "facets") {
+          const request = queryKey[4] as IssueTableFacetsRequest;
+          if (request.facets.some((facet) => facet.kind === "working_agents")) return true;
+          spec = request.query;
+        } else if (kind === "rows" || kind === "groups") {
+          spec = queryKey[4] as IssueTableQuerySpec;
+        }
+        // An explicit empty id list is still a working filter: its next
+        // projection may contain newly started work. Other facets also
+        // depend on this membership, not only rows and group descriptors.
+        return spec?.filters.working_only === true ||
+          spec?.filters.working_issue_ids !== undefined;
+      },
+    },
+  ];
+  // A lifecycle event during the FIRST fetch must not dedupe onto a response
+  // captured before that event. With staleTime=Infinity it could otherwise
+  // leave a completed run visible until another event happens to arrive.
+  await Promise.all(filters.map((filter) => qc.cancelQueries(filter)));
+  await Promise.all(filters.map((filter) => qc.invalidateQueries(filter)));
+}
+
 function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
   qc.invalidateQueries({
     predicate: (query) => {
@@ -768,7 +801,6 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
           // change (status flip, archive, runtime swap) needs to refresh the
           // per-squad members-status cache without refetching the static squad
@@ -920,12 +952,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
-        // The Table working-agent shortcut derives an assignee set from the
-        // projection above. Refresh its server-owned graph alongside that set
-        // so rows/groups/facets cannot remain on an old task transition while
-        // the projection refetches (global staleTime is Infinity).
-        qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+        // Working-agent projections have their own bounded refresh below.
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
         // doesn't change a completed_at-anchored series, but invalidating
@@ -967,6 +994,33 @@ export function useRealtimeSync(
         // visible flicker, so the preview now refetches only on input change
         // (signature), mirroring its query design (MUL-3375).
       },
+    };
+
+    const workingAgentTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const workingAgentInFlight = new Set<string>();
+    const workingAgentDirty = new Set<string>();
+    let disposed = false;
+    const scheduleWorkingAgentRefresh = (wsId: string) => {
+      // Flush one second after the FIRST event in a batch. Later events do
+      // not postpone it, so continuous activity cannot starve the projection.
+      // Capture the workspace now: navigation must not redirect a queued
+      // refresh into a different workspace's cache.
+      workingAgentDirty.add(wsId);
+      if (workingAgentTimers.has(wsId) || workingAgentInFlight.has(wsId)) return;
+      workingAgentTimers.set(wsId, setTimeout(async () => {
+        workingAgentTimers.delete(wsId);
+        workingAgentDirty.delete(wsId);
+        workingAgentInFlight.add(wsId);
+        try {
+          await refreshWorkingAgentQueries(qc, wsId);
+        } finally {
+          workingAgentInFlight.delete(wsId);
+          // Serialize slow requests: cancelling our own refresh every second
+          // would starve it under a continuous stream. Events received while
+          // it runs still get one trailing refresh, including the final stop.
+          if (!disposed && workingAgentDirty.has(wsId)) scheduleWorkingAgentRefresh(wsId);
+        }
+      }, 1_000));
     };
 
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1011,6 +1065,10 @@ export function useRealtimeSync(
     const unsubAny = ws.onAny((msg) => {
       if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
+      if (prefix === "agent" || (prefix === "task" && msg.type !== "task:progress")) {
+        const wsId = getCurrentWsId();
+        if (wsId) scheduleWorkingAgentRefresh(wsId);
+      }
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);
     });
@@ -1283,6 +1341,9 @@ export function useRealtimeSync(
       // CancelledError + reload combo this guard exists to prevent. This
       // handler only serves deletes initiated elsewhere (other user/device).
       if (isWorkspaceDeletePending(workspace_id)) return;
+      // Any deleted workspace, not only the current one: its local search
+      // copy must not outlive it.
+      void forgetLocalSearchIndex(workspace_id);
       // Event payload has UUID; look up slug from cached workspace list
       // since clearWorkspaceStorage keys are namespaced by slug.
       const wsList = qc.getQueryData<{ id: string; slug: string }[]>(workspaceKeys.list()) ?? [];
@@ -1296,9 +1357,11 @@ export function useRealtimeSync(
     });
 
     const unsubMemberRemoved = ws.on("member:removed", (p) => {
-      const { user_id } = p as MemberRemovedPayload;
+      const { user_id, workspace_id } = p as MemberRemovedPayload;
       const myUserId = authStore.getState().user?.id;
       if (user_id === myUserId) {
+        const lostWsId = workspace_id || getCurrentWsId();
+        if (lostWsId) void forgetLocalSearchIndex(lostWsId);
         const slug = getCurrentSlug();
         const wsId = getCurrentWsId();
         if (slug && wsId) {
@@ -1801,6 +1864,10 @@ export function useRealtimeSync(
       if (aggregateRefreshTimer) clearTimeout(aggregateRefreshTimer);
       timers.forEach(clearTimeout);
       timers.clear();
+      disposed = true;
+      workingAgentTimers.forEach(clearTimeout);
+      workingAgentTimers.clear();
+      workingAgentDirty.clear();
     };
   }, [ws, qc, authStore, onToast]);
 

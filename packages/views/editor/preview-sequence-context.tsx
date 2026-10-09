@@ -27,6 +27,11 @@
  * Attachments outside the sequence (an in-flight upload in a composer, a file
  * in a surface with no provider) are not an error: `openAt` reports false and
  * the caller falls back to its own single-file preview.
+ *
+ * A surface that knows more about its files than the sequence does (the issue
+ * page: which comment a file came from, its earlier versions) supplies
+ * `describeItem`, and `onOpenOverview` for a grid of everything (MUL-7649).
+ * The viewer stays generic — it only renders the slots it is handed.
  */
 
 import {
@@ -49,6 +54,7 @@ import { useT } from "../i18n";
 import {
   AttachmentPreviewModal,
   PreviewImagePrefetch,
+  type PreviewLocateAction,
   type PreviewSource,
 } from "./attachment-preview-modal";
 import { canOpenPreview, getPreviewKind } from "./utils/preview";
@@ -63,6 +69,32 @@ export function collectPreviewSequence(
   return collectAttachmentSequence(blocks, ({ contentType, filename, hasRecord }) =>
     canOpenPreview(getPreviewKind(contentType, filename), hasRecord),
   );
+}
+
+/**
+ * What the host surface adds to the viewer for the file on screen. Every
+ * field is optional; the viewer renders the matching control only when set.
+ */
+export interface PreviewItemDetails {
+  /** Rendered after the file name, e.g. a version switcher. */
+  titleAccessory?: ReactNode;
+  /** Body of the info panel, toggled with the top-bar button or `I`. */
+  info?: ReactNode;
+  /** Take the reader to where the file was posted. The viewer closes first. */
+  locate?: PreviewLocateAction;
+}
+
+/** Handed to `describeItem` so its controls can move within the session. */
+export interface PreviewSequenceControls {
+  /** The frozen sequence this session pages through. */
+  items: ReadonlyArray<ImageSequenceItem>;
+  /** Move to `key`; false when it is not part of this session. */
+  goTo: (key: string) => boolean;
+  /**
+   * Close the viewer. For controls in the info panel that take the reader
+   * elsewhere on the page, which the viewer would otherwise cover.
+   */
+  close: () => void;
 }
 
 interface PreviewSequenceApi {
@@ -116,9 +148,20 @@ interface Session {
 
 export function PreviewSequenceProvider({
   items,
+  describeItem,
+  onOpenOverview,
   children,
 }: {
   items: ReadonlyArray<ImageSequenceItem>;
+  describeItem?: (
+    item: ImageSequenceItem,
+    controls: PreviewSequenceControls,
+  ) => PreviewItemDetails | undefined;
+  /**
+   * Show every file at once. The viewer closes and hands over the key it was
+   * showing, so the overview can offer a way back to it.
+   */
+  onOpenOverview?: (currentKey: string) => void;
   children: ReactNode;
 }) {
   const { t } = useT("editor");
@@ -129,6 +172,9 @@ export function PreviewSequenceProvider({
 
   const [session, setSession] = useState<Session | null>(null);
   const [open, setOpen] = useState(false);
+  // Outlives a session: a reader who wants the info panel wants it on the
+  // next file they open too.
+  const [infoOpen, setInfoOpen] = useState(false);
   // Images that failed to load this session. Kept out of navigation so a
   // deleted image can't trap the reader on a broken frame, and so the
   // auto-skip below can't bounce between two dead images forever. The ref is
@@ -204,6 +250,26 @@ export function PreviewSequenceProvider({
   const prevIndex = session ? step(session, session.index, -1, broken) : -1;
   const nextIndex = session ? step(session, session.index, 1, broken) : -1;
 
+  const goTo = useCallback(
+    (key: string) => {
+      if (!session) return false;
+      const index = indexOfImageKey(session.items, key);
+      if (index < 0) return false;
+      if (index !== session.index) {
+        directionRef.current = index > session.index ? 1 : -1;
+        setSession({ ...session, index });
+      }
+      return true;
+    },
+    [session],
+  );
+
+  const details =
+    session && current && describeItem
+      ? describeItem(current, { items: session.items, goTo, close: () => setOpen(false) })
+      : undefined;
+  const locate = details?.locate;
+
   const modal =
     session && current ? (
       <AttachmentPreviewModal
@@ -212,6 +278,31 @@ export function PreviewSequenceProvider({
         onClose={() => setOpen(false)}
         onExitComplete={() => setSession(null)}
         onImageError={handleImageError}
+        titleAccessory={details?.titleAccessory}
+        info={
+          details?.info
+            ? { content: details.info, open: infoOpen, onToggle: () => setInfoOpen((v) => !v) }
+            : undefined
+        }
+        locate={
+          locate
+            ? {
+                label: locate.label,
+                onSelect: () => {
+                  setOpen(false);
+                  locate.onSelect();
+                },
+              }
+            : undefined
+        }
+        onOpenOverview={
+          onOpenOverview
+            ? () => {
+                setOpen(false);
+                onOpenOverview(current.key);
+              }
+            : undefined
+        }
         sequence={
           session.items.length > 1
             ? {

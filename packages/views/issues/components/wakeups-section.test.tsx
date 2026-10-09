@@ -1,26 +1,49 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
-import type { IssueWakeup } from "@multica/core/types";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { IssueWakeup, SystemWakeup } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { WakeupsSection } from "./wakeups-section";
 const mutate = vi.fn();
 const enable = vi.fn();
+const updateSystem = vi.fn();
+const trigger = vi.fn();
+const remove = vi.fn();
+let runs: unknown[] = [];
+let systemRules: SystemWakeup[] = [];
 let pending = false;
 let wakeup: IssueWakeup;
 let status = "queued";
 let viewTZ = "UTC";
+vi.mock("./wakeup-condition-names", () => ({
+  useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
+}));
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws" }),
 }));
 vi.mock("@multica/core/issues", () => ({
   issueWakeupsOptions: () => ({ queryKey: ["wakeups"] }),
   issueTasksOptions: () => ({ queryKey: ["tasks"] }),
+  issueSystemWakeupsOptions: () => ({ queryKey: ["system"] }),
   useDisableIssueWakeup: () => ({ mutate, isPending: false }),
   useEnableIssueWakeup: () => ({ mutateAsync: enable, isPending: pending }),
+  useCreateIssueWakeup: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateIssueSystemWakeup: () => ({ mutateAsync: updateSystem, isPending: false }),
+  useTriggerIssueWakeup: () => ({ mutate: trigger, isPending: false }),
+  useDeleteIssueWakeup: () => ({ mutate: remove, isPending: false }),
+  issueWakeupRunsOptions: () => ({ queryKey: ["runs"] }),
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
-    data: queryKey[0] === "wakeups" ? [wakeup] : [{ id: "task", status }],
+    data:
+      queryKey[0] === "wakeups"
+        ? [wakeup]
+        : queryKey[0] === "system"
+          ? systemRules
+          : queryKey[0] === "tasks"
+            ? [{ id: "task", status }]
+            : queryKey[0] === "runs"
+              ? runs
+              : [],
   }),
 }));
 vi.mock("../../common/use-viewing-timezone", () => ({
@@ -34,6 +57,11 @@ vi.mock("./wakeup-instruction-editor", () => ({
 }));
 beforeEach(() => {
   mutate.mockReset();
+  trigger.mockReset();
+  remove.mockReset();
+  runs = [];
+  updateSystem.mockReset().mockResolvedValue(undefined);
+  systemRules = [];
   enable.mockReset().mockResolvedValue(undefined);
   pending = false;
   status = "queued";
@@ -300,4 +328,151 @@ it("keeps a redacted actor restriction visible without exposing an ID", () => {
   wakeup.filter_actor_name = null;
   renderWithI18n(<WakeupsSection issueId="issue" />);
   expect(screen.getByRole("button", { name: /triggered by Selected agent/ })).toBeInTheDocument();
+});
+
+describe("v2 sidebar", () => {
+  it("offers a new-wakeup button on open issues only", () => {
+    const { unmount } = renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "New wakeup" })).toBeVisible();
+    unmount();
+    renderWithI18n(<WakeupsSection issueId="issue" closed />);
+    expect(screen.queryByRole("button", { name: "New wakeup" })).toBeNull();
+  });
+
+  it("describes a wait's deadline in the row and who created it in details", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T08:00:00Z"));
+    try {
+      Object.assign(wakeup, {
+        kind: "event", mode: "once", event_types: ["comment.created"], interval_seconds: null,
+        filter_actor_type: "member", filter_actor_id: "u", filter_actor_name: "Jiayuan",
+        expires_at: "2026-09-27T06:00:00Z", expiry_seconds: 259200, on_timeout: "wake",
+        created_by_agent: true, created_by_name: "Jiayuan", source_agent_name: "Emacs",
+      });
+      renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+      const row = screen.getByRole("button", { name: /由 Jiayuan 触发/ });
+      expect(row).toHaveTextContent("唤醒 Emacs · 仅触发一次 · 还剩 2 天 22 小时");
+      fireEvent.click(row);
+      await waitFor(() => expect(screen.getByText(/来源/)).toHaveTextContent("Emacs 创建（代表 Jiayuan）"));
+      expect(screen.getByText(/有效期/)).toHaveTextContent("超时后唤醒 Emacs 处理");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks a rule ended by its deadline as timed out", () => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "once", event_types: ["comment.created"], enabled: false,
+      expires_at: "2020-01-01T00:00:00Z", timed_out_at: "2020-01-01T00:00:30Z",
+    });
+    status = "completed";
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+    expect(screen.getByRole("button", { name: /Wake Emacs/ })).toHaveTextContent("Timed out");
+  });
+
+  it("shows the child-done system rule and turns it off for this issue", async () => {
+    systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: true, stage: 1, total: 2, remaining: 1,
+      waiting: ["MUL-7704"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
+    }];
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    const row = screen.getByRole("button", { name: /当第 1 阶段的子任务全部结束时/ });
+    expect(row).toHaveTextContent("系统");
+    expect(row).toHaveTextContent("唤醒负责人 Emacs · 还差 1 个");
+    expect(screen.getByRole("button", { name: /唤醒 2/ })).toBeVisible();
+    fireEvent.click(screen.getAllByRole("switch", { name: "子任务结束时唤醒负责人" })[0]!);
+    await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: false, instruction: "" }));
+  });
+
+  it("says a member assignee is notified instead of woken", () => {
+    systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: false, stage: null, total: 3, remaining: 2,
+      waiting: [], target: { type: "member", id: "u", name: "Jiayuan" }, blocked: "member_assignee",
+    }];
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: /When all sub-issues finish/ })).toHaveTextContent("Notify Jiayuan in their inbox · 2 to go");
+  });
+
+  it("shows the default instruction and saves one for this issue", async () => {
+    systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: false, stage: null, total: 1, remaining: 1,
+      waiting: ["MUL-2"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
+    }];
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: /When all sub-issues finish/ }));
+    expect(await screen.findByText("Advance the next stage.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Edit instruction" }));
+    const input = screen.getByLabelText("What to do when woken");
+    expect(input).toHaveAttribute("placeholder", "Advance the next stage.");
+    fireEvent.change(input, { target: { value: "Ask Jiayuan first" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: true, instruction: "Ask Jiayuan first" }));
+  });
+});
+
+describe("conditions, limits and history", () => {
+  it("reads a platform condition as its own sentence, without the hint events", async () => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "once", event_types: ["issue.status_changed"], interval_seconds: null,
+      condition: { type: "issue_field", field: "status", value: "in_review" },
+    });
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    const row = screen.getByRole("button", { name: /当状态变为in_review时/ });
+    fireEvent.click(row);
+    await screen.findByRole("dialog");
+    expect(screen.queryByText(/以下任一事件发生时/)).toBeNull();
+  });
+
+  it("says why the platform paused a rule and how many times it fired", async () => {
+    Object.assign(wakeup, {
+      kind: "event", mode: "continuous", event_types: ["comment.created"], interval_seconds: null,
+      enabled: false, paused_reason: "max_fires", max_fires: 5, fire_count: 5,
+    });
+    status = "completed";
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history 1" }));
+    const row = screen.getByRole("button", { name: /Wake Emacs/ });
+    expect(row).toHaveTextContent("Paused automatically");
+    expect(row).toHaveTextContent("Stopped after reaching 5 runs");
+    fireEvent.click(row);
+    expect(await screen.findByText("Triggered 5 of at most 5 times")).toBeVisible();
+    expect(screen.getByText(/Turn it back on to resume/)).toBeVisible();
+  });
+
+  it("lists the rule's runs, with a silent check's note", async () => {
+    runs = [
+      { id: "r2", status: "completed", created_at: "2026-09-24T01:00:00Z", started_at: null, completed_at: null, checkin_note: "Progress 38%", triggers: ["time.due"], commented: false },
+      { id: "r1", status: "completed", created_at: "2026-09-23T01:00:00Z", started_at: null, completed_at: null, checkin_note: "", triggers: ["time.due"], commented: true },
+    ];
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    fireEvent.click(screen.getByRole("button", { name: /每小时唤醒/ }));
+    expect(await screen.findByText("触发记录")).toBeVisible();
+    expect(screen.getByText("静默检查")).toBeVisible();
+    expect(screen.getByText(/Progress 38%/)).toBeVisible();
+    expect(screen.getByText("运行成功 · 发表了评论")).toBeVisible();
+  });
+
+  it("wakes the agent now and deletes the rule after confirmation", async () => {
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    fireEvent.click(screen.getByRole("button", { name: /Wake every hour/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Wake now" }));
+    expect(trigger).toHaveBeenCalledWith("wake", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(confirm).toHaveTextContent("Emacs is no longer woken by it");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+    expect(remove).toHaveBeenCalledWith("wake", expect.anything());
+  });
+
+  it("offers neither action on an ended issue", async () => {
+    renderWithI18n(<WakeupsSection issueId="issue" closed />);
+    fireEvent.click(screen.getByRole("button", { name: /Wake every hour/ }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("button", { name: "Wake now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
 });

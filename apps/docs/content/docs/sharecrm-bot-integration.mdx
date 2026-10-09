@@ -94,7 +94,7 @@ Only **members of the workspace** can use the bot. If you aren't a member, or yo
 
 ## Manage and disconnect
 
-Workspace-wide management lives in **Settings → Integrations**:
+Workspace-wide management lives in **Settings → Messaging → ShareCRM**:
 
 - **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
 - **Disconnect** is **owner / admin only**. It stops the bot from receiving ShareCRM messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
@@ -102,7 +102,7 @@ Workspace-wide management lives in **Settings → Integrations**:
 ## Permissions
 
 - **Connect / disconnect** require workspace **owner** or **admin**.
-- **Talking to the bot** requires being a workspace member with a linked ShareCRM identity. Everyone else is dropped.
+- **Talking to the bot** requires being a workspace member with a linked ShareCRM identity and permission to run the target agent. Messages that fail these checks are rejected.
 - Message bodies for dropped messages are never stored — only a drop reason, for audit.
 
 ## Self-host setup
@@ -119,7 +119,7 @@ For self-host, ShareCRM is **off until you set an at-rest encryption key**. The 
 
    For example: `openssl rand -base64 32`.
 
-2. Restart the API. Until the key is set, **Settings → Integrations** shows a "ShareCRM integration not enabled" notice and the **Connect ShareCRM** entry points stay hidden.
+2. Restart the API. Until the key is set, **Settings → Messaging → ShareCRM** shows a "ShareCRM integration not enabled" notice and the **Connect ShareCRM** entry points stay hidden.
 
 <Callout type="info">
 The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored credentials undecryptable, forcing every bot to reconnect. The "link your account" link is built from your web app URL (`MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`) — a normal deployment already sets this, so there's nothing extra to configure for chat. Members must be able to open that URL from their browser when redeeming the bind link.

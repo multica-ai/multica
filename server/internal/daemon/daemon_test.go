@@ -2038,6 +2038,106 @@ func TestGateResumeToReachableSession(t *testing.T) {
 	}
 }
 
+// Hermes resumes from HERMES_HOME, independently of the task's cwd (#9062).
+func TestGateHermesResumeToSessionHome(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name        string
+		sameWorkdir bool
+		history     bool
+		envReused   bool
+		noStore     bool
+		want        bool
+	}{
+		{name: "changed worktree with history", history: true, want: true},
+		{name: "in place with history", sameWorkdir: true, history: true, want: true},
+		{name: "changed worktree with unavailable history"},
+		{name: "in place with unavailable history", sameWorkdir: true},
+		{name: "empty store despite reused environment", sameWorkdir: true, envReused: true},
+		{name: "unmounted store in fresh environment", noStore: true},
+		{name: "task local history in reused environment", sameWorkdir: true, noStore: true, envReused: true, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			priorDir, workDir := t.TempDir(), t.TempDir()
+			if tt.sameWorkdir {
+				workDir = priorDir
+			}
+			env := &execenv.Environment{HermesSessionStore: "conversation-store", HermesSessionHistoryPresent: tt.history}
+			if tt.noStore {
+				env.HermesSessionStore = ""
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
+				sessionHomeReachable("hermes", env, tt.envReused), false, slog.Default())
+			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
+				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
+			}
+			if task.PriorSessionResumeUnavailable != !tt.want || taskCtx.PriorSessionResumeUnavailable != !tt.want {
+				t.Fatal("session continuity notice does not match reachability")
+			}
+		})
+	}
+}
+
+func TestHermesPreparedSessionReachability(t *testing.T) {
+	// Keep profile/store resolution inside synthetic homes, never the user's.
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	sourceHome, root := t.TempDir(), t.TempDir()
+	taskNumber := 0
+	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
+		t.Helper()
+		taskCtx := execenv.TaskContextForEnv{AgentID: agentID, IssueID: issueID,
+			AgentSkills: []execenv.SkillContextForEnv{{Name: "fixture", Content: "synthetic skill"}},
+		}
+		taskNumber++
+		env, err := execenv.Prepare(execenv.PrepareParams{
+			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
+			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
+			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
+		}, slog.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = env.Cleanup(true) })
+		return env
+	}
+	first := prepare(t, "agent-1", "issue-1")
+	if first.HermesSessionStore == "" {
+		if runtime.GOOS == "windows" {
+			t.Skip("host cannot mount Hermes session stores")
+		}
+		t.Fatal("Hermes session store was not mounted")
+	}
+	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, agentID, issueID string
+		want                   bool
+	}{
+		{"same conversation in fresh workdir", "agent-1", "issue-1", true},
+		{"different issue", "agent-1", "issue-2", false},
+		{"different agent", "agent-2", "issue-1", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := prepare(t, tt.agentID, tt.issueID)
+			if sameExistingDir(first.WorkDir, env.WorkDir) {
+				t.Fatal("fixture must prepare a different task workdir")
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
+				sessionHomeReachable("hermes", env, false), false, slog.Default()); got != tt.want {
+				t.Fatalf("reachable = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGatePiResumeToSessionFile(t *testing.T) {
 	t.Parallel()
 
@@ -6560,7 +6660,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 // TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
 // Hermes regression. A custom runtime profile's fixed_args are no longer folded
 // into custom_args — they become the launch prefix and reach hermes ahead of
-// custom_args, with the backend's own `acp` token between the two.
+// custom_args, which in turn precede the backend's own `acp` token.
 //
 // Both halves of the profile chain therefore have to run against the argv the
 // backend really assembles. Resolving or stripping against a hand-built
@@ -6569,10 +6669,10 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 	t.Parallel()
 
-	// A prefix ending in a value-taking flag: the `acp` token decides which
-	// selection hermes sees, so it must be present when the daemon resolves.
-	launchPrefix := []string{"--model"}
-	customArgs := []string{"-p", "research", "--yolo"}
+	// A prefix ending in a bare `-p`: the selection straddles the two regions,
+	// so only the assembled argv shows which profile hermes sees.
+	launchPrefix := []string{"-p"}
+	customArgs := []string{"research", "--yolo"}
 
 	sel := agent.ParseHermesProfileArgs(
 		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
@@ -6588,10 +6688,10 @@ func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
 		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
 	}
-	if strings.Join(strippedPrefix, "\x00") != "--model" {
-		t.Errorf("prefix = %v, want the non-selector token kept", strippedPrefix)
+	if len(strippedPrefix) != 0 {
+		t.Errorf("prefix = %v, want the straddling `-p` removed", strippedPrefix)
 	}
 	if strings.Join(strippedCustom, "\x00") != "--yolo" {
-		t.Errorf("custom = %v, want only the selector removed", strippedCustom)
+		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }

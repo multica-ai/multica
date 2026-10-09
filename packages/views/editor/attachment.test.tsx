@@ -789,21 +789,20 @@ describe("Attachment — image dispatch", () => {
 });
 
 describe("Attachment — html dispatch", () => {
-  it("record html with attachmentId renders HtmlAttachmentPreview (no file-card chrome)", () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>chart</p>",
-      originalContentType: "text/html",
-    });
+  // An HTML file is a file (MUL-7649): the row opens it in the viewer, and
+  // nothing is fetched to embed it inline.
+  it("record html renders the file-card row, not an embedded preview", () => {
     const att = makeRecord({
       filename: "report.html",
       content_type: "text/html",
       url: "https://cdn.example.test/report.html",
     });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-    // HtmlAttachmentPreview hides the filename row.
-    expect(screen.queryByText("report.html")).toBeNull();
+    expect(screen.getByText("report.html")).toBeTruthy();
     expect(screen.getByTitle("Preview")).toBeTruthy();
     expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
 
   it("url-only html (no resolver match) falls back to AttachmentCard chrome", () => {

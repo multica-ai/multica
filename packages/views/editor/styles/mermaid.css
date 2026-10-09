@@ -14,13 +14,13 @@
   position: relative;
 }
 
+/* Fitted, the diagram fits this box and nothing scrolls. Zoomed in, it
+   scrolls both ways inside it; the height cap (inline style, from
+   MERMAID_PREVIEW_MAX_HEIGHT_PX) keeps a zoomed diagram from pushing the
+   rest of the page down. */
 .rich-text-editor .mermaid-diagram-scroll {
   display: flex;
-  /* Small diagrams sit centered at natural size; only oversized ones scroll.
-     Upscaling a small diagram to fill the column would just coarsen it. */
-  justify-content: center;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
   cursor: zoom-in;
   /* Dragging a diagram would otherwise start a native text selection: the
      iframe is a replaced element, so the whole diagram box gets painted with
@@ -33,11 +33,17 @@
 .rich-text-editor .mermaid-diagram-frame {
   border: 0;
   display: block;
-  /* Natural width, never shrunk to the column: a wide diagram must keep a
-     readable font size and scroll sideways instead of being squashed until the
-     labels are unreadable. `flex: none` stops the flex parent from shrinking
-     it; a `max-width` here would defeat the scroll entirely. */
+  /* The size is the zoom (MUL-7766): the component sets it, and the flex
+     parent must not shrink it back to the column, or zooming in would squash
+     the diagram instead of scrolling it. */
   flex: none;
+  /* Diagrams narrower than the column sit centered; the fit never upscales
+     past natural size, which would only coarsen a small diagram.
+     Centered with auto margins, not `justify-content: center` on the
+     scroller: that pushes an oversized diagram's left part past the scroll
+     origin, where it is cut off and cannot be scrolled to (MUL-7733). Auto
+     margins never go negative, so a wide diagram starts at its left edge. */
+  margin-inline: auto;
   /* The iframe cannot forward clicks to this document, so it would swallow
      the click-to-open gesture. Disabling pointer events hands wheel, click,
      and drag to the scroll container instead. */
@@ -73,6 +79,23 @@
 .rich-text-editor .mermaid-diagram[data-overflow-start]::before,
 .rich-text-editor .mermaid-diagram[data-overflow-end]::after {
   opacity: 1;
+}
+
+/* Inside a DynamicBlock (MUL-7649) the frame draws the border, background and
+   chrome; the diagram sits directly on the frame's surface. */
+.rich-text-editor .mermaid-diagram[data-framed] {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+
+.rich-text-editor .mermaid-diagram[data-framed]::before {
+  background: linear-gradient(to right, var(--surface), transparent);
+}
+
+.rich-text-editor .mermaid-diagram[data-framed]::after {
+  background: linear-gradient(to left, var(--surface), transparent);
 }
 
 .rich-text-editor .mermaid-diagram-loading,
@@ -161,6 +184,92 @@
 }
 
 .rich-text-editor .mermaid-diagram-toolbar button:hover {
+  background: color-mix(in srgb, white 15%, transparent);
+}
+
+/* Zoom pill — bottom-right, over a framed diagram, in the frame's light
+   chrome. The standalone preview puts the same controls in its dark toolbar
+   instead (below). */
+.rich-text-editor .mermaid-diagram-zoom {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0.125rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--surface-shadow);
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+/* Same reveal rule as the toolbar: on hover where hovering exists, always on
+   touch, and whenever a button inside holds focus. */
+@media (hover: hover) {
+  .rich-text-editor .mermaid-diagram-zoom {
+    opacity: 0;
+  }
+
+  .rich-text-editor .mermaid-diagram:hover .mermaid-diagram-zoom,
+  .rich-text-editor .mermaid-diagram-zoom:focus-within {
+    opacity: 1;
+  }
+}
+
+.rich-text-editor .mermaid-diagram-zoom button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  transition: background 0.15s, color 0.15s;
+}
+
+.rich-text-editor .mermaid-diagram-zoom button:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.rich-text-editor .mermaid-diagram-zoom button:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Fixed width so the pill doesn't jitter as the digits change. */
+.rich-text-editor .mermaid-diagram-zoom span {
+  width: 2.75rem;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  user-select: none;
+}
+
+/* Inside the standalone toolbar: a plain group, separated from copy/expand
+   by a hairline. The toolbar owns the pill, the reveal and the hover. */
+.rich-text-editor .mermaid-diagram-toolbar .mermaid-diagram-zoom {
+  position: static;
+  padding: 0 0.25rem 0 0;
+  margin-right: 0.25rem;
+  background: none;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, white 20%, transparent);
+  border-radius: 0;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.rich-text-editor .mermaid-diagram-toolbar .mermaid-diagram-zoom button,
+.rich-text-editor .mermaid-diagram-toolbar .mermaid-diagram-zoom span {
+  color: white;
+}
+
+.rich-text-editor .mermaid-diagram-toolbar .mermaid-diagram-zoom button:hover {
   background: color-mix(in srgb, white 15%, transparent);
 }
 

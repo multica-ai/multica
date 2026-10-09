@@ -47,7 +47,7 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger) *ack
 	}
 }
 
-func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, _ pgtype.UUID) {
 	if n.suppress(sessionID) {
 		return
 	}
@@ -61,7 +61,7 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 	}
 }
 
-func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
+func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID, _ engine.TypingSettlement) {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
 		return

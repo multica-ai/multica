@@ -43,6 +43,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
+import { plainTriggerSummary } from "../../issues/components/task-run-labels";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
@@ -808,7 +809,9 @@ export function AgentTranscriptDialog({
   // up front than the runtime/provider diagnostics, which live in the ⓘ popover.
   const triggerLabel = task.parent_task_id
     ? t(($) => $.transcript.trigger_retry)
-    : task.kind === "comment" || task.trigger_comment_id
+    : task.wakeup_id
+      ? t(($) => $.transcript.trigger_wakeup)
+      : task.kind === "comment" || task.trigger_comment_id
       ? t(($) => $.transcript.trigger_comment)
       : task.kind === "autopilot" || task.autopilot_run_id
         ? t(($) => $.transcript.trigger_autopilot)
@@ -1082,6 +1085,9 @@ export function AgentTranscriptDialog({
           </div>
         </div>
 
+        {/* ── What was asked ─────────────────────────────────────────── */}
+        <RunTriggerRow task={task} />
+
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
 
@@ -1316,6 +1322,32 @@ function FactDot() {
  * Renders nothing when the run produced nothing nameable; a row of zeroes
  * would read as "it did nothing" rather than "we have nothing to summarize".
  */
+/**
+ * What the person asked for, in full. The header names only how the run was
+ * triggered ("Comment"), and the lists that open this dialog show the ask on
+ * one truncated line — so this is where a long request is read whole. The
+ * snapshot itself is capped at ~200 runes by the server; it is shown as it
+ * was captured, wrapping rather than truncating.
+ */
+function RunTriggerRow({ task }: { task: AgentTask }) {
+  const { t } = useT("agents");
+  const { t: tIssues } = useT("issues");
+  if (!task.trigger_summary) return null;
+  const text = plainTriggerSummary(
+    task.trigger_summary,
+    tIssues(($) => $.execution_log.trigger_image),
+  );
+  if (!text) return null;
+  return (
+    <div className="flex shrink-0 items-baseline gap-2 border-b px-4 py-2">
+      <span className="shrink-0 text-micro text-muted-foreground">
+        {t(($) => $.transcript.trigger_text)}
+      </span>
+      <p className="min-w-0 whitespace-pre-wrap break-words text-caption text-foreground">{text}</p>
+    </div>
+  );
+}
+
 function RunOutcomeRow({
   outcome,
   branch,

@@ -97,6 +97,20 @@ multica issue runs <issue-id>
 
 先在执行电脑的终端中直接运行同一款工具。工具自身也无法开始时，先修复工具登录或配置，再从执行日志重试运行。
 
+## 升级 CLI 后 macOS 上的运行卡住
+
+通过 Homebrew 安装的 `multica` CLI 升级后（无论是 `brew upgrade`、`multica update`、**运行时**页面上的**更新**，还是守护进程自动更新），读取 `~/Desktop`、`~/Documents`、`~/Downloads`、iCloud 云盘或其他受保护文件夹的运行可能停滞：智能体进程不占用 CPU，运行既不结束也不失败。
+
+这种情况出现在 macOS 把隐私权限（TCC）记在守护进程本身名下时，由 launchd 启动的守护进程（例如 LaunchAgent）就是如此：等待中的弹窗显示的是 `multica`，智能体启动的所有工具都沿用守护进程的授权。Homebrew 版 CLI 没有使用固定身份签名，macOS 只能把授权绑定到这一次构建及其解析后的路径，例如 `/opt/homebrew/Cellar/multica/<version>/bin/multica`。升级后，macOS 把新二进制当作另一个应用，重新请求授权；在有人处理之前文件访问会一直阻塞，守护进程也无法感知有授权弹窗在等待。
+
+恢复访问：
+
+1. 在这台 Mac 上找到等待中的"想要访问"弹窗，点击**允许**，卡住的运行会继续。
+2. 无人值守的 Mac 请给新二进制授予完全磁盘访问权限。用 `realpath "$(command -v multica)"` 打印路径，然后在**系统设置 → 隐私与安全性 → 完全磁盘访问权限**中删除旧的 `multica` 条目并添加该路径（在文件选择器中按 ⌘⇧G 粘贴路径）。
+3. 按启动守护进程时的方式重启它：`multica daemon restart`；LaunchAgent 则用 `launchctl kickstart -k gui/$(id -u)/<label>`。
+
+每次升级 CLI 后都需要重复这些步骤。只有连接 Multica Cloud 的守护进程默认开启自动更新；用 `--no-auto-update` 启动守护进程后，只在你手动升级时更新。[桌面应用](/desktop-app)内置的 CLI 使用 Developer ID 签名，授权在升级后依然有效。
+
 ## 实时更新失效
 
 运行仍能执行、但评论和状态不能实时出现，通常是 WebSocket 没有连通。

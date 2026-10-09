@@ -5,6 +5,8 @@ import {
   statusColumnKeys,
 } from "@multica/core/issues";
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { cn } from "@multica/ui/lib/utils";
+import { useIssuePeekActions } from "../surface/peek-context";
 import {
   DndContext,
   DragOverlay,
@@ -1032,6 +1034,21 @@ function SwimLaneViewImpl({
     return () => cancelAnimationFrame(id);
   }, [localCells]);
 
+  // Side peek: a status column runs down through every expanded lane, so J / K
+  // cross lane boundaries the way the eye reads the grid, and H / L change
+  // status.
+  const peek = useIssuePeekActions();
+  useEffect(() => {
+    peek?.publishColumns(
+      sortedStatuses.map((status) =>
+        laneGroups.flatMap((lane) =>
+          collapsedLanes.has(lane.key) ? [] : (localCells[lane.key]?.[status] ?? []),
+        ),
+      ),
+    );
+  }, [peek, sortedStatuses, laneGroups, collapsedLanes, localCells]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
+
   const collisionDetection = useMemo(
     () => makeSwimLaneCollision(cellSet),
     [cellSet],
@@ -1410,7 +1427,16 @@ function SwimLaneViewImpl({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div ref={attachScroller} data-tab-scroll-root="swimlane" className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
+      <div
+        ref={attachScroller}
+        data-tab-scroll-root="swimlane"
+        data-board-scroller=""
+        className={cn(
+          "flex flex-1 min-h-0 gap-4 overflow-auto p-4",
+          // Room to scroll the last status clear of an open side peek (see BoardView).
+          "group-data-[peek-open]/peek:after:w-(--issue-peek-width) group-data-[peek-open]/peek:after:shrink-0 group-data-[peek-open]/peek:after:content-['']",
+        )}
+      >
         <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>
         {groupBranches?.isError && laneGroups.length === 0 && (
           <button

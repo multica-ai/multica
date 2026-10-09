@@ -677,3 +677,41 @@ func TestExpandCategories(t *testing.T) {
 		}
 	})
 }
+
+// WritableCategory answers Resolve's question for background writers: a
+// built-in without I/O, a live custom status from the shared catalog read,
+// and "" for an archived, unknown or unreadable one.
+func TestResolverWritableCategory(t *testing.T) {
+	archived := custom("retired", InProgress)
+	archived.ArchivedAt = pgtype.Timestamptz{Valid: true}
+	q := newFakeQuerier(custom("awaiting_regression", InReview), archived)
+	r := NewResolver(testWorkspace)
+	ctx := context.Background()
+
+	if got := r.WritableCategory(ctx, q, Done); got != CategoryDone {
+		t.Errorf("WritableCategory(done) = %q, want %q", got, CategoryDone)
+	}
+	if got := r.WritableCategory(ctx, q, InReview); got != CategoryStarted {
+		t.Errorf("WritableCategory(in_review) = %q, want %q", got, CategoryStarted)
+	}
+	if q.lists != 0 || q.lookups != 0 {
+		t.Errorf("built-ins touched the catalog: %d list(s), %d lookup(s)", q.lists, q.lookups)
+	}
+	if got := r.WritableCategory(ctx, q, "awaiting_regression"); got != CategoryStarted {
+		t.Errorf("WritableCategory(awaiting_regression) = %q, want %q", got, CategoryStarted)
+	}
+	for _, key := range []string{"retired", "ghost"} {
+		if got := r.WritableCategory(ctx, q, key); got != "" {
+			t.Errorf("WritableCategory(%q) = %q, want empty", key, got)
+		}
+	}
+	if q.lists != 1 || q.lookups != 0 {
+		t.Errorf("catalog reads = %d list(s), %d lookup(s); want 1 and 0", q.lists, q.lookups)
+	}
+
+	failing := newFakeQuerier(custom("awaiting_regression", InReview))
+	failing.err = errors.New("connection refused")
+	if got := NewResolver(testWorkspace).WritableCategory(ctx, failing, "awaiting_regression"); got != "" {
+		t.Errorf("WritableCategory on a failed read = %q, want empty", got)
+	}
+}

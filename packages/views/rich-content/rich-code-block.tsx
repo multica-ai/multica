@@ -16,8 +16,10 @@
  * Mermaid never parses a partial diagram and no iframe is created for HTML that
  * is still arriving.
  *
- * Leaf components (MermaidDiagram / HtmlBlockPreview / lowlight static code)
- * are surface-agnostic and shared with the Tiptap editor's NodeViews. They are
+ * Upgraded fences render as dynamic blocks (MermaidBlock / HtmlBlockPreview):
+ * one frame with an always-visible title bar, content height and in-place
+ * loading and error states (MUL-7649). The frame and its leaves live in
+ * `editor/` next to the Tiptap NodeViews that share the leaves. They are
  * imported by direct path — never through the `editor` barrel — so this module
  * does not pull the editor's Tiptap graph into Chat.
  */
@@ -29,13 +31,14 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
 import {
-  MermaidDiagram,
-  MERMAID_SKELETON_HEIGHT_PX,
-  reservedMermaidHeightPx,
-} from "../editor/mermaid-diagram";
+  MermaidBlock,
+  MERMAID_BLOCK_DEFAULT_RESERVED_PX,
+  reservedMermaidBlockHeightPx,
+} from "../editor/mermaid-block";
 import {
   HtmlBlockPreview,
-  HTML_BLOCK_PREVIEW_HEIGHT_PX,
+  HTML_BLOCK_DEFAULT_RESERVED_PX,
+  reservedHtmlBlockHeightPx,
 } from "../editor/html-block-preview";
 import { highlightCode } from "../editor/syntax-highlight";
 import { LazyRichBlock } from "./lazy-rich-block";
@@ -67,7 +70,7 @@ export function shouldUpgradeFence(
 // not re-run Mermaid's async render or reload an already-mounted iframe. React
 // reconciliation keeps the instance mounted (same element type, same position);
 // memo additionally keeps it from re-rendering.
-const MemoMermaidDiagram = memo(MermaidDiagram);
+const MemoMermaidBlock = memo(MermaidBlock);
 const MemoHtmlBlockPreview = memo(HtmlBlockPreview);
 
 /**
@@ -175,50 +178,51 @@ export function CodeBlockShell({
 export function RichFenceBlock({
   language,
   body,
+  title,
 }: {
   language: RichFenceLanguage;
   body: string;
+  /** From the fence info string: ```html title="…". */
+  title?: string | null;
 }) {
-  // Split into two components so the Mermaid-only height hook is never called
-  // conditionally.
-  if (language === "mermaid") return <MermaidFenceBlock chart={body} />;
-  return <HtmlFenceBlock html={body} />;
+  const reservedHeightPx = useReservedHeightPx(language, body);
+  return (
+    <LazyRichBlock reservedHeightPx={reservedHeightPx} sourceKey={body}>
+      {language === "mermaid" ? (
+        <MemoMermaidBlock chart={body} title={title} />
+      ) : (
+        <MemoHtmlBlockPreview html={body} title={title} />
+      )}
+    </LazyRichBlock>
+  );
 }
+
+const DEFAULT_RESERVED_PX: Record<RichFenceLanguage, number> = {
+  mermaid: MERMAID_BLOCK_DEFAULT_RESERVED_PX,
+  html: HTML_BLOCK_DEFAULT_RESERVED_PX,
+};
+
+const cachedReservedPx: Record<RichFenceLanguage, (body: string) => number> = {
+  mermaid: reservedMermaidBlockHeightPx,
+  html: reservedHtmlBlockHeightPx,
+};
 
 /**
- * Reserved height for a diagram: the skeleton default on the first frame, then
- * the session-cached real height once mounted.
+ * Reserved height for a block: the default on the first frame, then the
+ * session-cached real height once mounted.
  *
  * The cache lives in sessionStorage, which the server does not have. Reading it
- * during render therefore produces 280px on the server and the cached height in
- * a browser with a warm cache — different `style="min-height:…"` on the very
- * frame React hydrates, which React reports as an attribute mismatch and does
- * NOT repair. Deferring the read to an effect keeps the first frame identical
- * everywhere and still gets the zero-shift benefit immediately after.
+ * during render therefore produces the default on the server and the cached
+ * height in a browser with a warm cache — different `style="min-height:…"` on
+ * the very frame React hydrates, which React reports as an attribute mismatch
+ * and does NOT repair. Deferring the read to an effect keeps the first frame
+ * identical everywhere and still gets the zero-shift benefit immediately after.
  */
-function useReservedMermaidHeightPx(chart: string): number {
-  const [height, setHeight] = useState(MERMAID_SKELETON_HEIGHT_PX);
+function useReservedHeightPx(language: RichFenceLanguage, body: string): number {
+  const [height, setHeight] = useState(DEFAULT_RESERVED_PX[language]);
   useEffect(() => {
-    const cached = reservedMermaidHeightPx(chart);
+    const cached = cachedReservedPx[language](body);
     setHeight((current) => (current === cached ? current : cached));
-  }, [chart]);
+  }, [language, body]);
   return height;
-}
-
-function MermaidFenceBlock({ chart }: { chart: string }) {
-  return (
-    <LazyRichBlock reservedHeightPx={useReservedMermaidHeightPx(chart)} sourceKey={chart}>
-      <MemoMermaidDiagram chart={chart} />
-    </LazyRichBlock>
-  );
-}
-
-function HtmlFenceBlock({ html }: { html: string }) {
-  // The preview iframe is a fixed height, so this needs no cache and is already
-  // identical on server and client.
-  return (
-    <LazyRichBlock reservedHeightPx={HTML_BLOCK_PREVIEW_HEIGHT_PX} sourceKey={html}>
-      <MemoHtmlBlockPreview html={html} />
-    </LazyRichBlock>
-  );
 }
