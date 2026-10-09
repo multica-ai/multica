@@ -144,6 +144,19 @@ type CLIConfig struct {
 	// field, default (enabled).
 	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
 
+	// DisableRuntimeMcpInherit, when true, stops the daemon from folding this
+	// host's own MCP servers (~/.claude.json, ~/.cursor/mcp.json,
+	// CODEX_HOME/config.toml, ...) into the task-local config of agents that
+	// carry a managed mcp_config. Those agents then see exactly the servers
+	// their configuration declares.
+	//
+	// Single-direction like the two above. Resolution precedence:
+	// --no-runtime-mcp flag, MULTICA_DAEMON_RUNTIME_MCP=false env, this field,
+	// default (inheritance enabled). Host-scoped rather than per-agent because
+	// that is the scope of what it withholds: these servers come from the
+	// machine, not from any workspace (GH #6283).
+	DisableRuntimeMcpInherit bool `json:"disable_runtime_mcp_inherit,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same
