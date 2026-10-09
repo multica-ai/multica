@@ -28,6 +28,7 @@ export function useSingleRowFit({
   count,
   gap,
   reserve,
+  contentKey = "",
 }: {
   /** Number of candidate items (mirror children must match). */
   count: number;
@@ -35,6 +36,8 @@ export function useSingleRowFit({
   gap: number;
   /** Width in px to hold back for the overflow trigger. */
   reserve: number;
+  /** Changes when the labels or ordered candidates in the mirror change. */
+  contentKey?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measureRef = useRef<HTMLDivElement | null>(null);
@@ -60,11 +63,14 @@ export function useSingleRowFit({
     setFitCount((current) => (current === next ? current : next));
   }, [gap, reserve]);
 
-  // After every commit: the mirror just re-rendered with current labels.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberate every-commit measure; the setState inside is change-guarded
+  // Measure after the mirror changes. Running this after every commit caused a
+  // synchronous layout-effect update on every table render; when the view bar
+  // width was settling, React reported error #185 before the guarded setter
+  // could converge. ResizeObserver covers geometry changes; this key covers
+  // labels/order changes without creating a render-to-measure feedback loop.
   useLayoutEffect(() => {
     recompute();
-  });
+  }, [contentKey, count, recompute]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
