@@ -2205,10 +2205,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!el || !container) return;
 
     didHighlightRef.current = highlightCommentId;
-    // Record the landing in the memento so a remount that merely restores
-    // this view (tab switch back) skips the jump instead of replaying it
-    // over the restored scroll position.
-    writeViewState(issueHighlightMementoKey(id), highlightCommentId);
+
+    let rafId = 0;
+    let frames = 0;
+    let last: number | null = null;
+    let settled = false;
+
+    const markSettled = () => {
+      if (settled) return;
+      settled = true;
+      // Record the landing in the memento so a remount that merely restores
+      // this view (tab switch back) skips the jump instead of replaying it
+      // over the restored scroll position.
+      writeViewState(issueHighlightMementoKey(id), highlightCommentId);
+    };
 
     // Center the target comment WITHIN its own scroll container by driving the
     // container's scrollTop directly — never native scrollIntoView. Native
@@ -2221,9 +2231,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // keeps it contained; re-centering across frames lands the comment
     // precisely once async heights (markdown, code highlight, streamed replies)
     // settle, instead of leaning on the ancestor scroll the way native did.
-    let rafId = 0;
-    let frames = 0;
-    let last = -1;
     const center = () => {
       const c = container.getBoundingClientRect();
       const e = el.getBoundingClientRect();
@@ -2234,18 +2241,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       container.scrollTop = target;
       // Content is still laying out → the centered offset keeps shifting; keep
       // re-centering until it stabilizes (within 1px) or we hit ~0.5s of frames.
-      if (Math.abs(target - last) > 1 && ++frames < 30) {
+      if ((last === null || Math.abs(target - last) > 1) && ++frames < 30) {
         last = target;
         rafId = requestAnimationFrame(center);
+      } else {
+        markSettled();
       }
     };
-    rafId = requestAnimationFrame(center);
+    center();
 
     setHighlightedId(landingId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
     return () => {
       cancelAnimationFrame(rafId);
       clearTimeout(fade);
+      if (!settled) {
+        didHighlightRef.current = null;
+      }
     };
   }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
