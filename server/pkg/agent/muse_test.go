@@ -168,8 +168,9 @@ func TestMuseExecuteSuccess(t *testing.T) {
 	if res.Status != "completed" {
 		t.Errorf("Status = %q, want completed", res.Status)
 	}
-	if res.Output != "hello world" {
-		t.Errorf("Output = %q, want %q", res.Output, "hello world")
+	// The receptionist's result is the answer; the text events were commentary.
+	if res.Output != "all done" {
+		t.Errorf("Output = %q, want %q", res.Output, "all done")
 	}
 	if res.SessionID != "muse:task-1" {
 		t.Errorf("SessionID = %q, want muse:task-1", res.SessionID)
@@ -555,6 +556,72 @@ func TestMuseFinalEventsDrainedAfterTerminalStatus(t *testing.T) {
 	}
 	if strings.Join(texts, "") != "head tail" {
 		t.Errorf("streamed text = %q, want %q", texts, "head tail")
+	}
+}
+
+// "result" is the receptionist's final answer; the text events are commentary
+// on the way there. The answer must be the result, and the commentary must
+// still reach the transcript.
+func TestMuseResultIsTheAnswerNotTheEventText(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{{Status: "completed", Result: "The final answer."}},
+		events: []museEvent{
+			{Seq: 1, Type: "text", Content: "Looking that up... "},
+			{Seq: 2, Type: "text", Content: "Almost there."},
+		},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	res, msgs := drainMuseSession(t, sess)
+	if res.Output != "The final answer." {
+		t.Errorf("Output = %q, want the receptionist's result", res.Output)
+	}
+	var streamed []string
+	for _, m := range msgs {
+		if m.Type == MessageText {
+			streamed = append(streamed, m.Content)
+		}
+	}
+	if strings.Join(streamed, "") != "Looking that up... Almost there." {
+		t.Errorf("streamed text = %q, want the commentary events", streamed)
+	}
+}
+
+// The protocol has three event types. Anything else is not words for the user.
+func TestMuseUnknownEventTypesAreIgnored(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{{Status: "completed"}},
+		events: []museEvent{
+			{Seq: 1, Type: "text", Content: "answer"},
+			{Seq: 2, Type: "status", Content: "INTERNAL-STATUS"},
+			{Seq: 3, Type: "", Content: "UNTYPED"},
+			{Seq: 4, Type: "error", Content: "SOME-ERROR"},
+		},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	res, msgs := drainMuseSession(t, sess)
+	if res.Output != "answer" {
+		t.Errorf("Output = %q, want only the text event", res.Output)
+	}
+	for _, m := range msgs {
+		if strings.Contains(m.Content, "INTERNAL-STATUS") || strings.Contains(m.Content, "UNTYPED") || strings.Contains(m.Content, "SOME-ERROR") {
+			t.Errorf("an unknown event type reached the transcript: %+v", m)
+		}
 	}
 }
 

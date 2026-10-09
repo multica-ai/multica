@@ -30,6 +30,11 @@ import (
 //	POST /v1/tasks/{id}/cancel -> {ok}
 //	GET  /v1/health            -> {protocol_version, version}
 //
+// "result" on a completed task is the final answer. Event types are exactly
+// text, thinking and tool; text events are running commentary streamed into
+// Messages and are used as the answer only when "result" is empty. Once a task
+// is terminal no further events are written.
+//
 // Configuration comes from the daemon's own process environment so no CLI
 // discovery is involved:
 //
@@ -227,7 +232,12 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer close(msgCh)
 		defer close(resCh)
 		startTime := time.Now()
+		// output is what the text events add up to: running commentary
+		// ("looking that up…"), not the answer. It is the answer only when
+		// the receptionist reports none. answer is the receptionist's own
+		// final result and wins whenever it is set.
 		var output strings.Builder
+		var answer string
 		lastSeq := int64(0)
 		finalStatus := "completed"
 		var finalError string
@@ -236,9 +246,13 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
 		finish := func() {
+			out := output.String()
+			if answer != "" {
+				out = answer
+			}
 			resCh <- Result{
 				Status:     finalStatus,
-				Output:     output.String(),
+				Output:     out,
 				Error:      finalError,
 				DurationMs: time.Since(startTime).Milliseconds(),
 				SessionID:  "muse:" + taskID,
@@ -267,11 +281,17 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					trySend(msgCh, Message{Type: MessageThinking, Content: e.Content})
 				case "tool":
 					trySend(msgCh, Message{Type: MessageToolUse, Tool: e.Tool, Content: e.Content})
-				default:
+				case "text":
 					if e.Content != "" {
 						output.WriteString(e.Content)
 						trySend(msgCh, Message{Type: MessageText, Content: e.Content})
 					}
+				default:
+					// The wire protocol defines exactly text, thinking and
+					// tool. Anything else is not the receptionist's words to
+					// the user, so it never reaches the transcript or the
+					// answer.
+					logger.Debug("muse ignoring event of unknown type", "task_id", taskID, "seq", e.Seq, "type", e.Type)
 				}
 			}
 			return true
@@ -332,9 +352,7 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				}
 				if st.Status == "completed" {
 					finalStatus = "completed"
-					if st.Result != "" && output.Len() == 0 {
-						output.WriteString(st.Result)
-					}
+					answer = st.Result
 				} else if st.Status == "cancelled" {
 					finalStatus = "cancelled"
 					finalError = "muse task cancelled remotely"
