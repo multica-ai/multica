@@ -21,9 +21,14 @@ import {
   dashboardUsageByAgentOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
+  dashboardUsageByModelOptions,
+  dashboardRuntimeDurationOptions,
+  dashboardModelRunTimeOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
+  dashboardUsageByRuntimeOptions,
 } from "@multica/core/dashboard";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PAGE_GUTTER } from "../../layout/page-header";
@@ -65,7 +70,7 @@ import {
 } from "./dashboard-shared";
 import { ProjectFilter, TimeRangeFilter } from "./dashboard-filters";
 import { UsageTrendCard } from "./usage-trend-card";
-import { Leaderboard } from "./leaderboard";
+import { Leaderboard, type LeaderboardScope } from "./leaderboard";
 import { ErrorsTab } from "./errors-tab";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -74,8 +79,12 @@ import { cn } from "@multica/ui/lib/utils";
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
+const EMPTY_BY_MODEL: import("@multica/core/types").DashboardUsageByModel[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+const EMPTY_RUNTIME_DURATION: import("@multica/core/types").DashboardRuntimeDuration[] = [];
+const EMPTY_MODEL_RUN_TIME: import("@multica/core/types").DashboardModelRunTime[] = [];
+const EMPTY_USAGE_BY_RUNTIME: import("@multica/core/types").DashboardUsageByRuntime[] = [];
 const EMPTY_FAILURE_DAILY: import("@multica/core/types").DashboardFailureDaily[] = [];
 const EMPTY_FAILURE_BY_AGENT: import("@multica/core/types").DashboardFailureByAgent[] =
   [];
@@ -178,6 +187,9 @@ export function DashboardPage() {
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
   const agents = agentsQuery.data ?? EMPTY_AGENTS;
+  // Runtime names for the Leaderboard's Runtime scope. The dashboard has never
+  // needed the runtime catalog before, so this fetch is new work on the page.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -230,11 +242,44 @@ export function DashboardPage() {
   const failuresByAgentQuery = useQuery(
     dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ),
   );
+  // Leaderboard Model / Runtime scopes. Same `days` window as the other
+  // per-agent rollups, so a scope switch never widens or narrows the ranking.
+  //
+  // Each pair is fetched only while its scope is open. The scope defaults to
+  // agent, and these four requests were previously issued unconditionally and
+  // folded into `usageLoading` — so the default view waited on a full skeleton
+  // for four queries it never read, and one of them 500ing held the whole Usage
+  // tab in that skeleton through TanStack's retry backoff. The scope lives up
+  // here rather than inside Leaderboard precisely so this gate is possible.
+  const [leaderboardScope, setLeaderboardScope] =
+    useState<LeaderboardScope>("agent");
+  const wantModelScope = leaderboardScope === "model";
+  const wantRuntimeScope = leaderboardScope === "runtime";
+  const byModelQuery = useQuery({
+    ...dashboardUsageByModelOptions(wsId, days, projectId, viewTZ),
+    enabled: wantModelScope,
+  });
+  const modelRunTimeQuery = useQuery({
+    ...dashboardModelRunTimeOptions(wsId, days, projectId, viewTZ),
+    enabled: wantModelScope,
+  });
+  const runtimeDurationQuery = useQuery({
+    ...dashboardRuntimeDurationOptions(wsId, days, projectId, viewTZ),
+    enabled: wantRuntimeScope,
+  });
+  const usageByRuntimeQuery = useQuery({
+    ...dashboardUsageByRuntimeOptions(wsId, days, projectId, viewTZ),
+    enabled: wantRuntimeScope,
+  });
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const byModelUsage = byModelQuery.data ?? EMPTY_BY_MODEL;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
+  const runtimeDuration = runtimeDurationQuery.data ?? EMPTY_RUNTIME_DURATION;
+  const modelRunTime = modelRunTimeQuery.data ?? EMPTY_MODEL_RUN_TIME;
+  const usageByRuntime = usageByRuntimeQuery.data ?? EMPTY_USAGE_BY_RUNTIME;
   const failureDailyRows = failuresDailyQuery.data ?? EMPTY_FAILURE_DAILY;
   const failureByAgentRows = failuresByAgentQuery.data ?? EMPTY_FAILURE_BY_AGENT;
 
@@ -247,6 +292,10 @@ export function DashboardPage() {
     byAgentQuery.isFetching ||
     runTimeQuery.isFetching ||
     runTimeDailyQuery.isFetching ||
+    byModelQuery.isFetching ||
+    runtimeDurationQuery.isFetching ||
+    modelRunTimeQuery.isFetching ||
+    usageByRuntimeQuery.isFetching ||
     failuresDailyQuery.isFetching ||
     failuresByAgentQuery.isFetching;
   const handleRefresh = () => {
@@ -259,6 +308,10 @@ export function DashboardPage() {
       byAgentQuery.dataUpdatedAt,
       runTimeQuery.dataUpdatedAt,
       runTimeDailyQuery.dataUpdatedAt,
+      byModelQuery.dataUpdatedAt,
+      runtimeDurationQuery.dataUpdatedAt,
+      modelRunTimeQuery.dataUpdatedAt,
+      usageByRuntimeQuery.dataUpdatedAt,
       failuresDailyQuery.dataUpdatedAt,
       failuresByAgentQuery.dataUpdatedAt,
     ],
@@ -292,6 +345,9 @@ export function DashboardPage() {
   // Loading and empty are per tab: the Usage tab has no reason to wait on the
   // two failure rollups, and a workspace with spend but no failures is not an
   // empty dashboard.
+  // The Model/Runtime rollups only gate the leaderboard, never the KPI tiles
+  // above it, so a scope still fetching must not swap the whole Usage tab for
+  // a skeleton — it renders the agent rows and fills the new scope in.
   const usageLoading =
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
@@ -304,8 +360,12 @@ export function DashboardPage() {
     !usageLoading &&
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
+    byModelUsage.length === 0 &&
     runTimeRows.length === 0 &&
-    runTimeDailyRows.length === 0;
+    runTimeDailyRows.length === 0 &&
+    runtimeDuration.length === 0 &&
+    modelRunTime.length === 0 &&
+    usageByRuntime.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(
@@ -455,6 +515,7 @@ export function DashboardPage() {
 
   const allowedDims = dimsForDays(days);
   const lessThanMinuteLabel = t(($) => $.duration.less_than_minute);
+  const noRuntimeLabel = t(($) => $.leaderboard.no_runtime);
 
   return (
     <Tabs
@@ -607,10 +668,18 @@ export function DashboardPage() {
                 />
 
                 <Leaderboard
-                  rows={visibleAgentRows}
+                  agentRows={visibleAgentRows}
                   agents={agents}
                   deletedAgentCount={deletedAgentCount}
+                  byModelUsage={byModelUsage}
+                  modelRunTime={modelRunTime}
+                  runtimeDuration={runtimeDuration}
+                  usageByRuntime={usageByRuntime}
+                  runtimes={runtimes}
                   lessThanMinuteLabel={lessThanMinuteLabel}
+                  noRuntimeLabel={noRuntimeLabel}
+                  scope={leaderboardScope}
+                  onScopeChange={setLeaderboardScope}
                 />
               </>
             )}

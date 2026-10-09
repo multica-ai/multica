@@ -1114,6 +1114,68 @@ export interface DashboardFailureByAgent {
   task_count: number;
 }
 
+// Per-model token totals for the workspace dashboard's Model scope.
+// No agent dimension — model is the key. The cost split matches
+// DashboardUsageByAgent: cost_usd_ticks is what the provider charged, the
+// uncosted_* counts are what the client still has to price from its table.
+export interface DashboardUsageByModel {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+  task_count: number;
+}
+
+// Per-runtime total terminal-task run-time + counts. Powers the Runtime
+// scope on the workspace dashboard leaderboard. `metered_task_count` and
+// `cancelled_count` are disjoint subsets of `task_count`, exactly as on
+// DashboardAgentRunTime, so the two scopes split a task count the same way.
+// `metered_task_count` is optional because an older backend omits it.
+export interface DashboardRuntimeDuration {
+  runtime_id: string;
+  total_seconds: number;
+  task_count: number;
+  metered_task_count?: number;
+  failed_count: number;
+  cancelled_count: number;
+}
+
+// Per-model task run time and counts. Complements DashboardUsageByModel
+// (tokens) so the Model scope can show all four metrics. `cancelled_count` is
+// a disjoint subset of `task_count`, as on the Agent rollup.
+export interface DashboardModelRunTime {
+  model: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+  cancelled_count: number;
+}
+
+// Per-(runtime_id, model) token aggregates from the same hourly rollup the
+// agent and model scopes read, so all three add up to the Cost KPI. Model
+// dimension preserved so the client can compute per-model cost and sum
+// per-runtime. Carries the same cost split as the other usage rollups —
+// without it an unpriced model would read $0.00 in this scope only.
+export interface DashboardUsageByRuntime {
+  runtime_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"
