@@ -891,16 +891,16 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			Files:         files,
 		})
 		if oerr != nil {
-			failMsg := oerr.Error()
 			switch {
 			case errors.Is(oerr, errSkillOverwriteNotFound):
-				failMsg = "target skill no longer exists"
+				h.failLocalSkillImport(w, r, requestID, "target skill no longer exists")
 			case errors.Is(oerr, errSkillOverwriteForbidden):
-				failMsg = "you no longer have permission to overwrite this skill"
+				h.failLocalSkillImport(w, r, requestID, "you no longer have permission to overwrite this skill")
 			case errors.Is(oerr, errSkillOverwriteNameMismatch):
-				failMsg = "target skill name no longer matches the imported skill"
+				h.failLocalSkillImport(w, r, requestID, "target skill name no longer matches the imported skill")
+			default:
+				h.failLocalSkillImportInternal(w, r, requestID, "failed to overwrite skill", oerr)
 			}
-			h.failLocalSkillImport(w, r, requestID, failMsg)
 			return
 		}
 		if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
@@ -924,7 +924,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	// can offer overwrite / rename / skip; older clients keep the legacy
 	// `failed` behavior (see resolveLocalSkillConflict).
 	if existing, found, lerr := h.lookupSkillByName(r.Context(), rt.WorkspaceID, sanitizeNullBytes(name)); lerr != nil {
-		h.failLocalSkillImport(w, r, requestID, "failed to check for existing skill: "+lerr.Error())
+		h.failLocalSkillImportInternal(w, r, requestID, "failed to check for existing skill", lerr)
 		return
 	} else if found {
 		h.resolveLocalSkillConflict(w, r, req, existing)
@@ -953,7 +953,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			h.failLocalSkillImport(w, r, requestID, "a skill with this name already exists")
 			return
 		}
-		h.failLocalSkillImport(w, r, requestID, err.Error())
+		h.failLocalSkillImportInternal(w, r, requestID, "failed to create skill", err)
 		return
 	}
 
@@ -989,6 +989,14 @@ func (h *Handler) failLocalSkillImport(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// failLocalSkillImportInternal keeps infrastructure details in server logs and
+// stores only stable copy in the user-polled import result.
+func (h *Handler) failLocalSkillImportInternal(w http.ResponseWriter, r *http.Request, requestID, publicMsg string, cause error) {
+	slog.Warn("runtime local skill import failed", append(logger.RequestAttrs(r),
+		"error", cause, "import_request_id", requestID, "public_message", publicMsg)...)
+	h.failLocalSkillImport(w, r, requestID, publicMsg)
 }
 
 // resolveLocalSkillConflict terminates a same-name create import. Clients that
