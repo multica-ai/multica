@@ -12,6 +12,7 @@ import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
+import { daemonCommands } from "@multica/core/runtimes";
 import { useWSEvent } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
@@ -36,35 +37,6 @@ import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
-
-const CLOUD_SERVER_URL = "https://api.multica.ai";
-const CLOUD_APP_URL = "https://multica.ai";
-
-function normalizeCommandURL(url: string | undefined) {
-  return url?.trim().replace(/\/+$/, "") ?? "";
-}
-
-function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
-  const normalizedServerUrl = normalizeCommandURL(serverUrl);
-  const normalizedAppUrl = normalizeCommandURL(appUrl);
-  if (normalizedServerUrl && normalizedAppUrl) {
-    return {
-      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
-      tokenCmd: `multica config set server_url ${normalizedServerUrl}
-multica config set app_url ${normalizedAppUrl}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-    };
-  }
-
-  return {
-    setupCmd: "multica setup",
-    tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
-multica config set app_url ${CLOUD_APP_URL}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-  };
-}
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<Step>("instructions");
