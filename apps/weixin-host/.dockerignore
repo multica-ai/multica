@@ -1,0 +1,4 @@
+node_modules
+.state
+.env
+src/**/*.test.ts

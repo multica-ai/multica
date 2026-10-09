@@ -34,6 +34,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -1237,6 +1238,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
 	}
 
+	// Weixin (WeChat) integration: a separate host process runs the official
+	// openclaw-weixin plugin; the backend only fronts it with access control.
+	weixinHostURL := strings.TrimSpace(os.Getenv("MULTICA_WEIXIN_HOST_URL"))
+	weixinHostSecret := strings.TrimSpace(os.Getenv("MULTICA_WEIXIN_HOST_SECRET"))
+	if weixinHostURL != "" && weixinHostSecret != "" {
+		h.WeixinHost = weixin.NewHostClient(weixinHostURL, weixinHostSecret)
+		slog.Info("weixin integration enabled", "host", weixinHostURL)
+	} else {
+		slog.Info("weixin integration disabled (MULTICA_WEIXIN_HOST_URL / MULTICA_WEIXIN_HOST_SECRET not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1866,6 +1878,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
+				})
+
+				// Weixin integration. Members connect their own Weixin to
+				// an agent they can chat with; the handler enforces the
+				// agent-invoke and installer-or-admin checks.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/weixin/installations", h.ListWeixinInstallations)
+					r.Delete("/weixin/installations/{installationId}", h.RevokeWeixinInstallation)
+					r.Post("/weixin/logins", h.StartWeixinLogin)
+					r.Get("/weixin/logins/{loginId}", h.GetWeixinLogin)
+					r.Post("/weixin/logins/{loginId}/verify-code", h.SubmitWeixinVerifyCode)
+					r.Post("/weixin/logins/{loginId}/complete", h.CompleteWeixinLogin)
 				})
 			})
 		})

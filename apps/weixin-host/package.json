@@ -1,0 +1,24 @@
+{
+  "name": "@multica/weixin-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs the official @tencent-weixin/openclaw-weixin plugin and relays Weixin chats to a Multica agent.",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tencent-weixin/openclaw-weixin": "2.4.9",
+    "openclaw": "link:./openclaw-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
