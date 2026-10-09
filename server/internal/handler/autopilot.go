@@ -178,6 +178,15 @@ type AutopilotRunResponse struct {
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
 	CreatedAt      string  `json:"created_at"`
+	// TaskStatus is the agent_task_queue status of the run's task (run_only
+	// runs). A run is marked "running" as soon as its task is enqueued, so a
+	// "queued" task here means the run is still waiting for a free agent slot.
+	// Additive: omitted when the run has no task or the server did not load it.
+	TaskStatus *string `json:"task_status,omitempty"`
+	// WorkIssueID is the issue the run's agent declared it is working on via
+	// PUT /api/autopilot-runs/{runId}/work-issue. Display-only; it drives no
+	// run lifecycle (issue_id does that for create_issue runs).
+	WorkIssueID *string `json:"work_issue_id"`
 }
 
 // ── Converters ──────────────────────────────────────────────────────────────
@@ -340,6 +349,7 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
+		WorkIssueID:    uuidToPtr(r.WorkIssueID),
 	}
 }
 
@@ -2288,6 +2298,7 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	taskStatuses := h.autopilotRunTaskStatuses(r.Context(), runs)
 	resp := make([]AutopilotRunResponse, len(runs))
 	for i, run := range runs {
 		// Omit trigger_payload in the list response — a webhook envelope
@@ -2295,6 +2306,9 @@ func (h *Handler) ListAutopilotRuns(w http.ResponseWriter, r *http.Request) {
 		// list would be a ~5 MB worst case. Detail dialog fetches the
 		// full payload from GetAutopilotRun.
 		resp[i] = runToResponseSlim(run)
+		if status, ok := taskStatuses[uuidToString(run.TaskID)]; ok {
+			resp[i].TaskStatus = &status
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": resp, "total": len(resp)})
 }
@@ -2331,7 +2345,123 @@ func (h *Handler) GetAutopilotRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, runToResponse(run))
+	writeJSON(w, http.StatusOK, h.runToResponseWithTaskStatus(r.Context(), run))
+}
+
+// autopilotRunTaskStatuses loads the task status of every run that has a task,
+// keyed by task id, in one query. A lookup failure degrades to no statuses:
+// the runs still render, just without the queued/running distinction.
+func (h *Handler) autopilotRunTaskStatuses(ctx context.Context, runs []db.AutopilotRun) map[string]string {
+	taskIDs := make([]pgtype.UUID, 0, len(runs))
+	for _, run := range runs {
+		if run.TaskID.Valid {
+			taskIDs = append(taskIDs, run.TaskID)
+		}
+	}
+	statuses := make(map[string]string, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return statuses
+	}
+	rows, err := h.Queries.ListAgentTaskStatusesByIDs(ctx, taskIDs)
+	if err != nil {
+		slog.Warn("failed to load autopilot run task statuses", "error", err)
+		return statuses
+	}
+	for _, row := range rows {
+		statuses[uuidToString(row.ID)] = row.Status
+	}
+	return statuses
+}
+
+func (h *Handler) runToResponseWithTaskStatus(ctx context.Context, run db.AutopilotRun) AutopilotRunResponse {
+	resp := runToResponse(run)
+	if status, ok := h.autopilotRunTaskStatuses(ctx, []db.AutopilotRun{run})[uuidToString(run.TaskID)]; ok {
+		resp.TaskStatus = &status
+	}
+	return resp
+}
+
+type SetAutopilotRunWorkIssueRequest struct {
+	IssueID string `json:"issue_id"`
+}
+
+// SetAutopilotRunWorkIssue records which issue an autopilot run is working on.
+// run_only runs start with no issue — their agent picks one — so without this
+// the run history cannot say what a run is doing. The run's own agent may set
+// it (its task token's task must belong to the run and still be live); a
+// member may set it with write access to the autopilot. Runs that already own
+// an issue (create_issue) and finished runs are refused.
+func (h *Handler) SetAutopilotRunWorkIssue(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	runUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "runId"), "run id")
+	if !ok {
+		return
+	}
+	run, err := h.Queries.GetAutopilotRun(r.Context(), runUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	ap, ok := h.loadAutopilotInWorkspace(w, r, uuidToString(run.AutopilotID), workspaceID)
+	if !ok {
+		return
+	}
+
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType == "agent" {
+		task, ok := h.taskFromRequestHeader(r)
+		if !ok || uuidToString(task.AgentID) != actorID ||
+			uuidToString(task.AutopilotRunID) != uuidToString(run.ID) ||
+			isTerminalTaskStatus(task.Status) {
+			writeError(w, http.StatusForbidden, "only the run's own live task can set its work issue")
+			return
+		}
+	} else if _, ok := h.requireAutopilotWrite(w, r, ap, workspaceID); !ok {
+		return
+	}
+
+	switch run.Status {
+	case "completed", "failed", "skipped":
+		writeError(w, http.StatusConflict, "run has already finished")
+		return
+	}
+	if run.IssueID.Valid {
+		writeError(w, http.StatusConflict, "run already has an issue")
+		return
+	}
+
+	var req SetAutopilotRunWorkIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.IssueID) == "" {
+		writeError(w, http.StatusBadRequest, "issue_id is required")
+		return
+	}
+	issue, ok := h.loadIssueForUser(w, r, strings.TrimSpace(req.IssueID))
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.SetAutopilotRunWorkIssue(r.Context(), db.SetAutopilotRunWorkIssueParams{
+		ID:          run.ID,
+		WorkIssueID: issue.ID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set work issue")
+		return
+	}
+
+	h.publish(protocol.EventAutopilotUpdated, workspaceID, actorType, actorID, map[string]any{
+		"autopilot_id": uuidToString(ap.ID),
+		"run_id":       uuidToString(updated.ID),
+	})
+	writeJSON(w, http.StatusOK, h.runToResponseWithTaskStatus(r.Context(), updated))
 }
 
 // ── Manual trigger ──────────────────────────────────────────────────────────

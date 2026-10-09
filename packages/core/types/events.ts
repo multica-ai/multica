@@ -329,6 +329,9 @@ export interface TaskDispatchPayload {
   issue_id: string;
   runtime_id: string;
   chat_session_id?: string;
+  // Set when the task belongs to an autopilot run (run_only), so the run
+  // history can flip that run from Queued to Running.
+  autopilot_run_id?: string;
 }
 
 export interface TaskRunningPayload {

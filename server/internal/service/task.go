@@ -7241,6 +7241,11 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	// autopilot_run_id lets the autopilot run history flip a run from
+	// "Queued" to "Running" the moment its task is claimed.
+	if task.AutopilotRunID.Valid {
+		payload["autopilot_run_id"] = util.UUIDToString(task.AutopilotRunID)
+	}
 
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {

@@ -69,6 +69,8 @@ import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { IssueChip } from "../../issues/components/issue-chip";
+import { runDisplayStatus, type RunStatus } from "./run-display-status";
 import { useT } from "../../i18n";
 import { PageHeader } from "../../layout/page-header";
 
@@ -76,10 +78,13 @@ import { PageHeader } from "../../layout/page-header";
 // the reader's zone (no timeZone passed). A run that is still to come belongs to
 // the schedule that will fire it — see the trigger row, which passes the
 // trigger's own timezone.
-type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
   issue_created: { color: "text-blue-500", icon: Clock },
+  // A run_only run is stored as running once its task is enqueued; until the
+  // task is claimed (it may wait behind the agent's concurrency cap) it shows
+  // as queued, derived from the task's own status.
+  queued: { color: "text-muted-foreground", icon: Clock },
   running: { color: "text-blue-500", icon: Loader2, spin: true },
   // `skipped` (admission check found the assignee runtime offline,
   // MUL-1899) is muted so it doesn't read as a failure-ratio inflator.
@@ -107,10 +112,10 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
   return <WebhookPayloadPreview payload={data.trigger_payload} />;
 }
 
-function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
+export function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
-  const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
+  const status: RunStatus = runDisplayStatus(run);
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
 
@@ -123,6 +128,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
         runtime_id: "",
         issue_id: "",
         status:
+          status === "queued" ? "queued" :
           run.status === "running" ? "running" :
           run.status === "completed" ? "completed" :
           run.status === "failed" ? "failed" :
@@ -149,6 +155,13 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       <span className="flex-1 min-w-0 text-caption text-muted-foreground truncate">
         {run.issue_id ? (
           t(($) => $.run.issue_linked)
+        ) : run.work_issue_id ? (
+          <span className="inline-flex min-w-0 items-center gap-1">
+            <span className="shrink-0">{t(($) => $.run.working_on)}</span>
+            <AppLink href={wsPaths.issueDetail(run.work_issue_id)} className="min-w-0">
+              <IssueChip issueId={run.work_issue_id} className="hover:bg-accent cursor-pointer" />
+            </AppLink>
+          </span>
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
@@ -160,7 +173,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
         <TranscriptButton
           task={syntheticTask}
           agentName={agentName}
-          isLive={run.status === "running"}
+          isLive={status === "running"}
           title={t(($) => $.run.view_log)}
           headerSlot={
             run.source === "webhook" ? (

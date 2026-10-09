@@ -18,7 +18,14 @@ Execution modes:
 
 - `create_issue` creates a Multica issue, making the run visible as issue state.
 - `run_only` creates an agent task directly. No issue is created; any durable
-  report location has to come from other task context or instructions.
+  report location has to come from other task context or instructions. When a
+  `run_only` run goes on to work an issue it picked itself, record it with
+  `multica autopilot link-issue <issue>` (the run id defaults to
+  `$MULTICA_AUTOPILOT_RUN_ID`) so the run history shows what the run is doing.
+
+A `running` run whose `task_status` is `queued` has not started yet: its task is
+waiting for a free slot on the agent. `multica autopilot runs` shows it as
+`queued`.
 
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`,
 `{{branch}}`, or other variables.
@@ -31,6 +38,7 @@ multica autopilot get <autopilot-id> --output json
 multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
 multica autopilot runs <autopilot-id> --output json
+multica autopilot link-issue <issue-identifier-or-id> [--run <run-id>] --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
 multica autopilot trigger <autopilot-id> --output json

@@ -130,6 +130,7 @@
   },
   "run_status": {
     "issue_created": "Tâche créée",
+    "queued": "En attente",
     "running": "En cours",
     "skipped": "Ignorée",
     "completed": "Terminée",
@@ -143,6 +144,7 @@
   },
   "run": {
     "issue_linked": "Tâche liée",
+    "working_on": "En cours sur",
     "view_log": "Voir le journal d'exécution",
     "skipped_group": {
       "label": "Ignorées",
