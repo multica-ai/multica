@@ -70,6 +70,28 @@ describe("surface bridge", () => {
     })));
   });
 
+  it("forwards /tasks and /agents, the new dispatch-health endpoints", async () => {
+    const { port } = connectedBridge({ installationId: "installation-1", bridgeToken: TOKEN });
+    port.postMessage({ id: "task-list", kind: "action", method: "GET", path: "/tasks" });
+    port.postMessage({ id: "agent-list", kind: "action", method: "GET", path: "/agents" });
+
+    await vi.waitFor(() =>
+      expect(mockCall).toHaveBeenCalledWith("installation-1", expect.objectContaining({ method: "GET", path: "/tasks" })),
+    );
+    await vi.waitFor(() =>
+      expect(mockCall).toHaveBeenCalledWith("installation-1", expect.objectContaining({ method: "GET", path: "/agents" })),
+    );
+  });
+
+  it("still refuses a path that only prefixes a new allowlist entry", async () => {
+    const { port, posted } = connectedBridge();
+    port.postMessage({ id: "subroute", kind: "action", method: "GET", path: "/tasks/xyz" });
+    await answered(port, posted);
+
+    expect(mockCall).not.toHaveBeenCalled();
+    expect(posted).toContainEqual(expect.objectContaining({ id: "subroute", ok: false, status: 400 }));
+  });
+
   it("refuses paths and methods outside the Action API before fetch", async () => {
     const { port, posted } = connectedBridge();
     port.postMessage({ id: "bad-path", kind: "action", method: "GET", path: "/me" });
