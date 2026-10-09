@@ -2942,18 +2942,6 @@ func writeAgentUnavailable(w http.ResponseWriter, reason string, reasonCode disp
 	})
 }
 
-// isRuntimeOnline returns true when the given runtime is currently
-// reachable (status == "online"). Quick-create rejects submissions whose
-// agent's runtime is offline so the user gets immediate feedback in the
-// modal instead of an inbox failure twenty seconds later.
-func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bool {
-	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceIssue, runtimeID)
-	if err != nil {
-		return false
-	}
-	return rt.Status == "online"
-}
-
 // checkQuickCreateDaemonVersion enforces MinQuickCreateCLIVersion against the
 // CLI version the daemon reported at registration time (stored on the runtime
 // row's metadata.cli_version). Returns (0, nil) when the version is
