@@ -185,7 +185,7 @@ func NewTypingIndicator(cfg TypingIndicatorConfig) *TypingIndicatorManager {
 // nothing here needs to be quick for the ACK's sake — but everything here is
 // best-effort: a bubble that fails to open costs the user a few seconds of
 // uncertainty, and the answer still arrives as a plain message.
-func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID) {
 	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
@@ -294,7 +294,7 @@ func (m *TypingIndicatorManager) OnIngested(ctx context.Context, inst engine.Res
 //
 // No bubble, nothing to say: the replier's notice is the whole of what the
 // user is told, and there is no round left to address a second line to.
-func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+func (m *TypingIndicatorManager) OnSettled(ctx context.Context, sessionID pgtype.UUID, scope engine.TypingSettlement) {
 	if m.senders == nil || m.streams == nil || !sessionID.Valid {
 		return
 	}
