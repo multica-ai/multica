@@ -274,11 +274,8 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 	if res.IssueDuplicate {
 		text = issueDuplicateText(res, r.appURL)
 	}
-	// Share the Patcher's classified fallback: a thread reply that
-	// fails because the topic cannot receive it (recalled trigger,
-	// topics disabled, aggregated message) falls back to a chat-level
-	// send so the product result is not lost; transport/5xx/rate-limit
-	// failures stay failures rather than leaking into the group chat.
+	// Share the Patcher's reply policy: classified errors may fall back
+	// for ordinary message replies, but topic replies stay in their thread.
 	return sendWithReplyFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
@@ -371,9 +368,8 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 	if err != nil {
 		return fmt.Errorf("render notice card: %w", err)
 	}
-	// Same classified fallback as sendIssueOutcome: only thread-reply
-	// failures that mean the topic cannot receive the message fall back
-	// to a chat-level send; ambiguous/transport failures stay failures.
+	// Use the same reply policy as sendIssueOutcome: topic notices never
+	// fall back to a top-level group card.
 	return sendWithReplyFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendInteractiveCard(ctx, SendCardParams{
 			InstallationID: creds,
