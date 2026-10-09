@@ -255,85 +255,6 @@ func TestPlatformSkillRoutingTableMatchesItsReferences(t *testing.T) {
 	}
 }
 
-// TestLegacyRedirectsFollowTheDaemonsBrief pins the compatibility contract for
-// the merge (MUL-6986).
-//
-// The runtime brief is assembled by the DAEMON, so deploying a backend does not
-// rewrite an installed daemon's copy of it. A daemon released before the merge
-// still tells its agent to "read the `multica-working-on-issues` skill" — a
-// name this server no longer ships — and backend upgrades do not force a daemon
-// upgrade, so that window is open-ended. Such a daemon gets a redirect stub;
-// a current one gets nothing extra, which is what lets the stub retire itself.
-//
-// The stub must stay a signpost: if it ever grows contracts of its own they
-// will rot against references/issues.md, silently, on exactly the installs that
-// cannot be updated from here.
-func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
-	const legacy = "multica-working-on-issues"
-	svc := &TaskService{}
-
-	current := svc.BuiltinSkills("", false)
-	if named(current, legacy) {
-		t.Errorf("a current daemon still receives %q; the stub only exists for briefs that name it", legacy)
-	}
-	if !named(current, PlatformSkillName) {
-		t.Fatalf("a current daemon does not receive %q", PlatformSkillName)
-	}
-
-	old := svc.BuiltinSkills("", true)
-	if !named(old, legacy) {
-		t.Errorf("a pre-merge daemon does not receive %q, so its brief points at a skill that is not installed", legacy)
-	}
-	if !named(old, PlatformSkillName) {
-		t.Errorf("a pre-merge daemon lost %q; the redirect adds to the set, it does not replace it", PlatformSkillName)
-	}
-
-	// Mika's scoping is orthogonal to the redirect: both dimensions compose.
-	if !named(svc.BuiltinSkills(MikaSystemKey, true), "multica-onboarding") {
-		t.Errorf("Mika on a pre-merge daemon lost multica-onboarding")
-	}
-	if named(svc.BuiltinSkills("", true), "multica-onboarding") {
-		t.Errorf("the redirect path leaked multica-onboarding to an ordinary agent")
-	}
-
-	var stub AgentSkillData
-	for _, s := range old {
-		if s.Name == legacy {
-			stub = s
-		}
-	}
-	if len(stub.Files) != 0 {
-		t.Errorf("redirect stub ships %d supporting files; it should carry nothing but the new location", len(stub.Files))
-	}
-	_, body, ok := splitFrontmatter(stub.Content)
-	if !ok {
-		t.Fatal("redirect stub has no frontmatter")
-	}
-	if !strings.Contains(body, PlatformSkillName) || !strings.Contains(body, "references/issues.md") {
-		t.Errorf("redirect stub does not name where the contracts went:\n%s", body)
-	}
-	// MUL-6966: the stub used to promise "Nothing was dropped in the move".
-	// The metadata guidance since was dropped, and the daemons that reach
-	// this stub are exactly the ones whose frozen brief still sends them
-	// here for it — so the one place the claim is read is the one place it
-	// is false. It has to state the replacement rule instead.
-	if strings.Contains(body, "Nothing was dropped") {
-		t.Errorf("redirect stub still promises nothing was dropped:\n%s", body)
-	}
-	if !strings.Contains(body, "goes in the result comment") {
-		t.Errorf("redirect stub does not say where the retired state now belongs:\n%s", body)
-	}
-	if n := strings.Count(body, "\n") + 1; n > 40 {
-		t.Errorf("redirect stub is %d lines; a signpost that grows contracts will rot against the real reference", n)
-	}
-
-	// Bundle resolution must still serve it: the stub reaches the daemon as a
-	// ref like any other built-in, and the resolve path is name-blind.
-	if !named(svc.AllBuiltinSkills(), legacy) {
-		t.Errorf("the unscoped set is missing %q; bundle resolution would 404 for a pre-merge daemon", legacy)
-	}
-}
-
 // TestPlatformSkillDescriptionNamesEveryDomain is the recall guard for the
 // nine-into-one merge (MUL-6986).
 //
@@ -790,7 +711,8 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 	const onboarding = "multica-onboarding"
 
-	ordinary := loadBuiltinSkills("")
+	svc := &TaskService{}
+	ordinary := svc.BuiltinSkills("")
 	if named(ordinary, onboarding) {
 		t.Errorf("an ordinary agent still receives %q", onboarding)
 	}
@@ -798,7 +720,7 @@ func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 		t.Errorf("an ordinary agent does not receive %q, which every agent needs", PlatformSkillName)
 	}
 
-	mika := loadBuiltinSkills(MikaSystemKey)
+	mika := svc.BuiltinSkills(MikaSystemKey)
 	if !named(mika, onboarding) {
 		t.Errorf("Mika does not receive %q, which only Mika can use", onboarding)
 	}
@@ -841,11 +763,9 @@ func named(skills []AgentSkillData, name string) bool {
 	return false
 }
 
-// allBuiltinSkillsForTest includes the legacy redirect stubs. They are shipped
-// payload like any other built-in, so the template, frontmatter and
-// source-leak suites must hold for them as well.
+// allBuiltinSkillsForTest includes every built-in regardless of agent scope.
 func allBuiltinSkillsForTest() []AgentSkillData {
-	return append(loadBuiltinSkillDirs(func(string) bool { return true }), legacyRedirectSkills()...)
+	return (&TaskService{}).AllBuiltinSkills()
 }
 
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {

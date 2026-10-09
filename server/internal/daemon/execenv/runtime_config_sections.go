@@ -811,13 +811,6 @@ func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 // import; the brief's rendered-output tests pin the two together.
 const platformSkillName = "multica-platform"
 
-// legacyIssueSkillName is what that skill was called before the platform
-// merge (MUL-6986). A daemon can outlive the backend it talks to in either
-// direction — a backend deploy does not update installed apps, and an app
-// update does not wait for a deploy — so the brief resolves the name it points
-// at from the skills this task actually received instead of hardcoding one.
-const legacyIssueSkillName = "multica-working-on-issues"
-
 // issueContractsSkill returns how the brief should refer to the skill carrying
 // the issue contracts, and whether any such skill is installed at all.
 //
@@ -827,9 +820,6 @@ const legacyIssueSkillName = "multica-working-on-issues"
 func issueContractsSkill(skills []SkillContextForEnv) (string, bool) {
 	if slug, ok := builtinSlug(skills, platformSkillName); ok {
 		return "`references/issues.md` in the `" + slug + "` skill", true
-	}
-	if slug, ok := builtinSlug(skills, legacyIssueSkillName); ok {
-		return "the `" + slug + "` skill", true
 	}
 	return "", false
 }

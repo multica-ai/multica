@@ -115,7 +115,7 @@ func testOutboundSealedInput(t *testing.T, scenario string, restart bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ack.OnIngested(ctx, inst, first, sid)
+	ack.OnIngested(ctx, inst, first, sid, sid)
 	const firstBody = "> **Quoted author:**\n>\n> [quoted content unavailable]\n\nfirst question"
 	var persisted string
 	if err := pool.QueryRow(ctx, "SELECT content FROM chat_message WHERE id = $1", appended.MessageID).Scan(&persisted); err != nil || persisted != firstBody {
@@ -147,7 +147,7 @@ func testOutboundSealedInput(t *testing.T, scenario string, restart bool) {
 	if _, err := set.Session.AppendMessage(ctx, engine.AppendParams{SessionID: sid, Sender: userID, InstallationID: inst.ID, Message: second}); err != nil {
 		t.Fatal(err)
 	}
-	ack.OnIngested(ctx, inst, second, sid)
+	ack.OnIngested(ctx, inst, second, sid, sid)
 	wantReceipts := 2
 	if scenario == "merged" {
 		wantReceipts = 1

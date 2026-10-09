@@ -144,16 +144,25 @@ describe("SearchIndexEngine.searchIssues ranking", () => {
     ]);
   });
 
-  it("puts an exact identifier or bare number first, even without a text match", () => {
-    const target = issue({ title: "no text overlap", number: 4242, identifier: "MUL-4242" });
+  it.each(["MUL", "V2", "A1"])("puts a %s identifier or bare number first, even without a text match", (prefix) => {
+    const target = issue({ title: "no text overlap", number: 4242, identifier: `${prefix}-4242` });
     const textHit = issue({ title: "mentions 4242 in the title" });
     const engine = engineWith([textHit, target]);
 
-    const byIdentifier = engine.searchIssues({ q: "mul-4242" });
+    const byIdentifier = engine.searchIssues({ q: `  ${prefix.toLowerCase()}-4242  ` });
     expect(byIdentifier.map((h) => h.id)).toEqual([target.id]);
     expect(byIdentifier[0]!.matchSource).toBe("comment");
 
     expect(engine.searchIssues({ q: "4242" }).map((h) => h.id)).toEqual([target.id, textHit.id]);
+  });
+
+  it("keeps a cancelled digit-prefix identifier ahead of text hits before limiting", () => {
+    const target = issue({ title: "no text overlap", number: 12, identifier: "V2-12", status: "cancelled" });
+    const textHit = issue({ title: "notes about V2-12" });
+    const engine = engineWith([textHit, target]);
+
+    expect(engine.searchIssues({ q: "V2-12", include_closed: true, limit: 1 }).map((h) => h.id)).toEqual([target.id]);
+    expect(engine.searchIssues({ q: "V2-12", limit: 1 }).map((h) => h.id)).toEqual([textHit.id]);
   });
 
   it("demotes cancelled issues unless the query targets them directly", () => {

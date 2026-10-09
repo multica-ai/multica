@@ -307,7 +307,10 @@ function SortableTabItem({
       title={tab.pinned ? `${title} (pinned)` : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
-        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
+        // The 36px frame contains a centered 32px content row and a 4px
+        // bottom connector. Keep the connector clickable without letting it
+        // shift the icon, title, or hover actions below the toolbar center.
+        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 pb-1 text-caption transition-colors",
         "select-none cursor-default",
         isActive
           ? "font-medium text-foreground"
@@ -392,7 +395,7 @@ function SortableTabItem({
         ) : (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-sidebar-accent opacity-0 transition-opacity group-hover/tab:opacity-100"
+            className="pointer-events-none absolute inset-x-0.5 top-0 bottom-1 rounded-lg bg-sidebar-accent opacity-0 transition-opacity group-hover/tab:opacity-100"
           />
         )}
         {showSeparator && (
@@ -401,7 +404,7 @@ function SortableTabItem({
           // arrives rather than lingering 2px off its rounded edge.
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
+            className="pointer-events-none absolute left-0 top-2 h-4 w-px bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
           />
         )}
         <ContextMenu>
@@ -451,7 +454,7 @@ function SortableTabItem({
         {showAddedHighlight && (
           <motion.span
             aria-hidden
-            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
+            className="pointer-events-none absolute inset-x-0.5 top-0 bottom-1 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
             initial={{ opacity: shouldReduceMotion ? 0.25 : 0.65 }}
             animate={{ opacity: 0 }}
             transition={{ duration: shouldReduceMotion ? 0.16 : 0.42 }}
@@ -497,7 +500,7 @@ function NewTabEdgeFeedback({
       key={`${signal.tabId}-${signal.sequence}`}
       aria-hidden
       data-new-tab-edge-feedback="true"
-      className="pointer-events-none absolute top-4 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
+      className="pointer-events-none absolute top-1 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
       initial={{
         opacity: shouldReduceMotion ? 0.45 : 0,
         x: shouldReduceMotion ? 0 : 4,
@@ -547,7 +550,7 @@ function NewTabButton() {
       aria-label="New tab"
       title="New tab"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-      className="mb-1 flex size-7 shrink-0 items-center justify-center self-end rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
+      className="flex size-7 shrink-0 items-center justify-center self-center rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
     >
       <Plus className="size-3.5" />
     </button>
@@ -693,7 +696,7 @@ export function TabBar() {
                       unpinnedCount > 0 && (
                         <div
                           aria-hidden
-                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-surface-border"
+                          className="mx-1 mb-3 h-4 w-px shrink-0 self-end bg-surface-border"
                         />
                       )}
                   </Fragment>

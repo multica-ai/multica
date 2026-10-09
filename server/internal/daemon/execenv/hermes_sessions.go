@@ -210,10 +210,27 @@ func mountHermesSessionDB(hermesHome, storeDir string, logger *slog.Logger) (her
 const hermesSessionLinkStagingEntry = ".multica-session-link"
 
 // hermesStoreHasSessionDB reports whether storeDir holds a session database
-// with content. A zero-length file is what SQLite leaves after an `open` that
-// never wrote a page, and resuming against it is the same amnesia as an absent
-// one — so it counts as no history, not as history.
+// with readable content. A zero-length file is what SQLite leaves after an
+// `open` that never wrote a page; resuming against it is the same as an absent
+// database, so it counts as no history.
 func hermesStoreHasSessionDB(storeDir string) bool {
+	path := filepath.Join(storeDir, hermesSessionDBEntry)
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {
+		return false
+	}
+	db, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	return true
+}
+
+// hermesStoreContainsSessionDB protects existing history during migration,
+// even when it cannot currently be opened for resume. Read permissions do not
+// prevent unlinking a database from a writable directory.
+func hermesStoreContainsSessionDB(storeDir string) bool {
 	fi, err := os.Stat(filepath.Join(storeDir, hermesSessionDBEntry))
 	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
 }
@@ -234,7 +251,7 @@ func hermesStoreHasSessionDB(storeDir string) bool {
 // Only an empty store is migrated into — a store that already holds a database
 // is this conversation's real history and must never be overwritten.
 func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger) error {
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return nil // store already holds this conversation — never overwrite it
 	}
 
@@ -306,7 +323,7 @@ func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger
 func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	hermesSessionPublishMu.Lock()
 	defer hermesSessionPublishMu.Unlock()
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return false, nil // a competitor published a real transcript first
 	}
 	if hermesSessionPublishBarrier != nil {
@@ -315,7 +332,7 @@ func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	if err := removeHermesSessionDBFamily(storeDir); err != nil {
 		return false, err
 	}
-	return promoteHermesStoreStaging(staging, storeDir, hermesStoreHasSessionDB)
+	return promoteHermesStoreStaging(staging, storeDir, hermesStoreContainsSessionDB)
 }
 
 // hermesSessionPublishMu serializes every session-store publish in this

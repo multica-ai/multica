@@ -320,19 +320,19 @@ func dispatchResultFromEngine(res engine.Result) DispatchResult {
 
 type feishuTypingNotifier struct{ mgr *TypingIndicatorManager }
 
-func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID) {
 	larkInst, ok := inst.Platform.(Installation)
 	if !ok {
 		return
 	}
 	lm, _ := larkMsgFromRaw(msg)
-	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime)
+	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime, chatMessageID)
 }
 
 // OnSettled clears the reaction when the run trigger enqueued no task (agent
 // offline / archived, or an enqueue failure) — the Patcher's bus-driven clear on
 // chat-done / task-failed never fires for those, so without this the Typing
 // reaction sticks.
-func (r *feishuTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
-	r.mgr.Clear(ctx, sessionID)
+func (r *feishuTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID, scope engine.TypingSettlement) {
+	r.mgr.Settle(ctx, sessionID, scope)
 }
