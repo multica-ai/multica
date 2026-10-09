@@ -3,6 +3,10 @@ import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
+  CloseBehavior,
+  DesktopPreferences,
+} from "../shared/desktop-preferences";
+import type {
   ManualUpdateCheckResult,
   UpdaterPreferences,
 } from "../shared/updater-types";
@@ -329,11 +333,24 @@ const updaterAPI = {
     ipcRenderer.invoke("updater:check"),
 };
 
+const desktopPreferencesAPI = {
+  get: (): Promise<DesktopPreferences> =>
+    ipcRenderer.invoke("desktop-preferences:get"),
+  setCloseBehavior: (
+    closeBehavior: CloseBehavior,
+  ): Promise<DesktopPreferences> =>
+    ipcRenderer.invoke("desktop-preferences:set-close-behavior", closeBehavior),
+};
+
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
+  contextBridge.exposeInMainWorld(
+    "desktopPreferences",
+    desktopPreferencesAPI,
+  );
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
@@ -343,4 +360,6 @@ if (process.contextIsolated) {
   window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.desktopPreferences = desktopPreferencesAPI;
 }
