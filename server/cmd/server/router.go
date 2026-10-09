@@ -613,6 +613,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				cs := lark.NewChannelStore(queries)
 				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
+				registerFeishuInboxOutboundListener(bus, cs, installSvc, larkClient, appURLFromEnv())
 
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working. Terminal cleanup has its own
