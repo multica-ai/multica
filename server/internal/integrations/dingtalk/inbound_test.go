@@ -32,7 +32,7 @@ func TestInboundFromCallback_P2PAddressedAndTrimmed(t *testing.T) {
 		t.Errorf("text/command = %q/%q", msg.Text, msg.CommandText)
 	}
 	raw, err := decodeDingTalkRaw(msg)
-	if err != nil || raw.AppID != "appkey-A" {
+	if err != nil || raw.AppID != "appkey-A" || strings.Contains(string(msg.Raw), "session_webhook") {
 		t.Fatalf("raw routing context = %+v, err=%v", raw, err)
 	}
 }
@@ -69,6 +69,44 @@ func TestInboundFromCallback_BareFreshStaysForSharedPendingPath(t *testing.T) {
 	msg, ok := inboundFromCallback(cb, "appkey-A")
 	if !ok || msg.Text != "/clear" || msg.CommandText != "/clear" || msg.ForceFresh {
 		t.Fatalf("bare /clear must remain visible to the shared Router: ok=%v msg=%+v", ok, msg)
+	}
+}
+
+func TestInboundFromCallback_CommandQuoteSnapshotSurvivesRouterRewrites(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		rewrite func(*channel.InboundMessage)
+	}{
+		{name: "issue", command: "/issue calculate 0.1 + 0.2"},
+		{name: "clear", command: "/clear", rewrite: func(msg *channel.InboundMessage) {
+			msg.Text = ""
+			msg.ForceFresh = true
+		}},
+		{name: "new", command: "/new", rewrite: func(msg *channel.InboundMessage) {
+			msg.Text = ""
+			msg.CommandText = ""
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cb := textCallback(convTypeGroup, true)
+			cb.Text.Content = tt.command
+			msg, ok := inboundFromCallback(cb, "appkey-A")
+			if !ok {
+				t.Fatal("expected command message")
+			}
+			raw, err := decodeDingTalkRaw(msg)
+			if err != nil || raw.CurrentText != tt.command {
+				t.Fatalf("raw current text = %q, want %q, err=%v", raw.CurrentText, tt.command, err)
+			}
+			if tt.rewrite != nil {
+				tt.rewrite(&msg)
+			}
+			if got := dingtalkVisibleQuoteText(msg); got != tt.command {
+				t.Fatalf("visible quote after Router rewrite = %q, want %q", got, tt.command)
+			}
+		})
 	}
 }
 
@@ -474,7 +512,7 @@ func TestInboundFromCallback_QuotedRichTextDoesNotInferSummaryLayout(t *testing.
 	}
 }
 
-func TestInboundFromCallback_QuotedRichTextDegradesStructuredTextNodes(t *testing.T) {
+func TestInboundFromCallback_QuotedRichTextPreservesStructuredTextNodes(t *testing.T) {
 	var cb botCallbackData
 	err := json.Unmarshal([]byte(`{
 		"msgId":"current-message",
@@ -510,7 +548,7 @@ func TestInboundFromCallback_QuotedRichTextDegradesStructuredTextNodes(t *testin
 	if !ok || msg.CommandText != "Current text" || msg.Type != channel.MsgTypeImage {
 		t.Fatalf("structured RichText message = %+v, ok=%v", msg, ok)
 	}
-	want := "> **Alice:**\n>\n> [rich-text content unavailable]\n> [Image]\n\nCurrent text\n[Image]"
+	want := "> **Alice:**\n>\n> Quoted text\n> [Image]\n\nCurrent text\n[Image]"
 	if msg.Text != want {
 		t.Fatalf("structured RichText body = %q, want %q", msg.Text, want)
 	}
@@ -524,7 +562,7 @@ func TestInboundFromCallback_QuotedRichTextDegradesStructuredTextNodes(t *testin
 	}
 }
 
-func TestInboundFromCallback_QuotedRichTextDegradesUnknownNodeNames(t *testing.T) {
+func TestInboundFromCallback_QuotedRichTextPreservesReplySnapshotNodes(t *testing.T) {
 	var cb botCallbackData
 	err := json.Unmarshal([]byte(`{
 		"msgId":"current-message",
@@ -535,19 +573,19 @@ func TestInboundFromCallback_QuotedRichTextDegradesUnknownNodeNames(t *testing.T
 		"senderStaffId":"staff-9",
 		"content":{
 			"richText":[
-				{"text":"Current text"},
-				{"type":"picture","downloadCode":"current-picture"}
+				{"text":"222\n"},
+				{"type":"picture","downloadCode":"current-picture"},
+				{"text":"\n333 @YYClaw"}
 			],
 			"isReplyMsg":true,
 			"repliedMsg":{
 				"msgType":"richText",
 				"msgId":"quoted-rich",
-				"senderNick":"Alice",
 				"content":{
 					"richText":[
-						{"msgType":"text","content":"Quoted heading"},
+						{"msgType":"text","content":"111"},
 						{"msgType":"picture","downloadCode":"quoted-picture"},
-						{"msgType":"text","content":"Quoted caption"}
+						{"msgType":"text","content":"结合这两张图，你能联想到什么？"}
 					]
 				}
 			}
@@ -558,10 +596,10 @@ func TestInboundFromCallback_QuotedRichTextDegradesUnknownNodeNames(t *testing.T
 	}
 
 	msg, ok := inboundFromCallback(&cb, "appkey-A")
-	if !ok || msg.CommandText != "Current text" || msg.Type != channel.MsgTypeImage {
+	if !ok || msg.CommandText != "222\n\n333 @YYClaw" || msg.Type != channel.MsgTypeImage || msg.ForceFresh {
 		t.Fatalf("reply snapshot message = %+v, ok=%v", msg, ok)
 	}
-	want := "> **Alice:**\n>\n> [rich-text content unavailable]\n> [Image]\n> [rich-text content unavailable]\n\nCurrent text\n[Image]"
+	want := "> 111\n> [Image]\n> 结合这两张图，你能联想到什么？\n\n222\n\n[Image]\n\n333 @YYClaw"
 	if msg.Text != want {
 		t.Fatalf("reply snapshot body = %q, want %q", msg.Text, want)
 	}
@@ -572,6 +610,9 @@ func TestInboundFromCallback_QuotedRichTextDegradesUnknownNodeNames(t *testing.T
 	if raw.Media[0].Ref != "quoted-picture" || raw.Media[0].InlineIndex != 0 ||
 		raw.Media[1].Ref != "current-picture" || raw.Media[1].InlineIndex != 1 {
 		t.Fatalf("reply snapshot media order = %+v", raw.Media)
+	}
+	if raw.CurrentText != "222\n\n[Image]\n\n333 @YYClaw" {
+		t.Fatalf("reply snapshot changed the current-message preview: %q", raw.CurrentText)
 	}
 }
 
@@ -955,9 +996,9 @@ func TestInboundFromCallback_NonTextReplyKindsKeepQuotedContext(t *testing.T) {
 			if msg.Text != want || msg.CommandText != tt.currentText {
 				t.Fatalf("message text/command = %q / %q, want %q / %q", msg.Text, msg.CommandText, want, tt.currentText)
 			}
-			_, err := decodeDingTalkRaw(msg)
-			if err != nil {
-				t.Fatal(err)
+			raw, err := decodeDingTalkRaw(msg)
+			if err != nil || raw.CurrentText != tt.currentText {
+				t.Fatalf("raw current text = %q, err=%v", raw.CurrentText, err)
 			}
 		})
 	}
@@ -997,7 +1038,7 @@ func TestInboundFromCallback_UnreadableCurrentMediaKeepsQuotedContext(t *testing
 				t.Fatalf("unreadable quoted reply text/command = %q / %q", msg.Text, msg.CommandText)
 			}
 			raw, err := decodeDingTalkRaw(msg)
-			if err != nil || len(raw.Media) != 0 {
+			if err != nil || raw.CurrentText != fallback || len(raw.Media) != 0 {
 				t.Fatalf("raw unreadable quoted reply = %+v, err=%v", raw, err)
 			}
 		})

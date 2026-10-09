@@ -3,9 +3,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { TaskMessagePayload } from "@multica/core/types";
+import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
+import zhHansAgents from "../../locales/zh-Hans/agents.json";
+import zhHansChat from "../../locales/zh-Hans/chat.json";
 
 // The live timeline is a real list row rather than Virtuoso chrome (MUL-4922),
 // so it shares one identity with the persisted assistant row and keeps its
@@ -57,6 +59,26 @@ function taskMsg(
   extra: Partial<TaskMessagePayload> = {},
 ): TaskMessagePayload {
   return { task_id: TASK_ID, seq, type, ...extra } as TaskMessagePayload;
+}
+
+function pdfAttachment(id: string): Attachment {
+  return {
+    id,
+    workspace_id: "workspace-1",
+    issue_id: null,
+    comment_id: null,
+    chat_session_id: "session-1",
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "member-1",
+    filename: "report.pdf",
+    url: "/uploads/report.pdf",
+    download_url: `/api/attachments/${id}/download`,
+    markdown_url: `/api/attachments/${id}/download`,
+    content_type: "application/pdf",
+    size_bytes: 1024,
+    created_at: "2026-09-17T00:00:00Z",
+  };
 }
 
 // A streaming timeline whose middle (tool steps) is non-empty, so the live
@@ -233,6 +255,227 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
 
     expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
     expect(screen.queryByText(/Hidden suggestion/)).not.toBeInTheDocument();
+  });
+
+  it("keeps attachments visible when a settled content transform removes their inline reference", async () => {
+    const attachmentId = "11111111-2222-3333-4444-555555555555";
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "transformed-attachment",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content:
+                `<agent_draft>!file[report.pdf](/api/attachments/${attachmentId}/download)</agent_draft>` +
+                "Visible answer",
+              task_id: null,
+              created_at: "2026-09-17T00:00:00Z",
+              attachments: [pdfAttachment(attachmentId)],
+            }]}
+            pendingTask={null}
+            availability="online"
+            transformContent={(content) =>
+              content.replace(/<agent_draft>[\s\S]*<\/agent_draft>/, "")
+            }
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Visible answer")).toBeInTheDocument();
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+  });
+
+  it("does not offer Copy for an attachment-only reply", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[{
+              id: "attachment-only",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "",
+              task_id: null,
+              created_at: "2026-09-17T00:00:00Z",
+              attachments: [
+                pdfAttachment("11111111-2222-3333-4444-555555555555"),
+              ],
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("report.pdf")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+  });
+
+  it("renders the canonical settled answer while retaining process narration", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", { content: "first timeline fragment" }),
+      taskMsg(1, "thinking", { content: "checking" }),
+      taskMsg(2, "text", { content: "second timeline fragment" }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "settled-answer",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "Complete canonical answer",
+              task_id: TASK_ID,
+              created_at: "2026-09-17T00:00:00Z",
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Complete canonical answer")).toBeInTheDocument();
+    expect(screen.getAllByText("Complete canonical answer")).toHaveLength(1);
+    const foldTrigger = screen.getByText("1 step");
+    expect(screen.queryByText("first timeline fragment")).not.toBeInTheDocument();
+    expect(screen.queryByText("second timeline fragment")).not.toBeInTheDocument();
+
+    fireEvent.click(foldTrigger);
+    expect(screen.getByText("first timeline fragment")).toBeInTheDocument();
+    expect(screen.queryByText("second timeline fragment")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Complete canonical answer")).toHaveLength(1);
+  });
+
+  it("keeps the answer node mounted across the live-to-settled handoff", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
+      taskMsg(1, "text", { content: "Intermediate narration" }),
+      taskMsg(2, "thinking", { content: "Checking the result" }),
+      taskMsg(3, "text", { content: "Stable final answer" }),
+    ]);
+
+    const view = (
+      messages: Parameters<typeof ChatMessageList>[0]["messages"],
+      pendingTask: Parameters<typeof ChatMessageList>[0]["pendingTask"],
+    ) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={messages}
+            pendingTask={pendingTask}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+
+    const { rerender } = render(
+      view([], { task_id: TASK_ID, status: "running" }),
+    );
+    const answerBefore = await screen.findByText("Stable final answer");
+    expect(screen.getByText("3 steps")).toBeInTheDocument();
+
+    rerender(view([{
+      id: "persisted-answer",
+      chat_session_id: "session-1",
+      role: "assistant",
+      content: "Stable final answer",
+      task_id: TASK_ID,
+      created_at: "2026-09-17T00:00:00Z",
+    }], null));
+
+    expect(await screen.findByText("Stable final answer")).toBe(answerBefore);
+    expect(screen.getByText("3 steps")).toBeInTheDocument();
+    expect(screen.queryByText("Intermediate narration")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList tool rows (#8835 regression)", () => {
+  // An HTTP-proxy MCP tool (treg's `call`) passes `query` as an object of URL
+  // parameters. The row summary returned it as-is, React threw on an object
+  // child, and expanding the settled fold took down the whole chat.
+  it("expands a settled fold whose tool input carries non-string summary fields", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "mcp__treg__call",
+        input: {
+          endpoint_id: "zerobounce.people.email.verify",
+          query: { email: "a@example.com" },
+        },
+      }),
+      taskMsg(1, "tool_result", {
+        tool: "mcp__treg__call",
+        output: "{\"status\": 200, \"body\": {\"email_status\": \"Verified\"}}",
+      }),
+      taskMsg(2, "tool_use", { tool: "Read", input: { path: { dir: "/tmp" } } }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "settled-answer",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "The email is verified.",
+              task_id: TASK_ID,
+              created_at: "2026-09-25T00:00:00Z",
+            }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByText("3 steps"));
+
+    expect(screen.getByText("mcp__treg__call")).toBeInTheDocument();
+    expect(screen.getByText("zerobounce.people.email.verify")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+  });
+
+  it("localizes the multi-file patch summary", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "apply_patch",
+        input: {
+          changes: [
+            { path: "src/a.go", kind: "update", diff: "@@\n+x" },
+            { path: "src/b.go", kind: "add", content: "y" },
+          ],
+        },
+      }),
+    ]);
+
+    render(
+      <I18nProvider
+        locale="zh-Hans"
+        resources={{ "zh-Hans": { chat: zhHansChat, agents: zhHansAgents } }}
+      >
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("src/a.go，另有 1 个文件")).toBeInTheDocument();
   });
 });
 
@@ -581,6 +824,14 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
       await screen.findByText(
         enChat.message_list.failure.environment_prepare_failed,
       ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("renders dedicated recovery copy for persisted runtime access denial", async () => {
+    renderFailure("runtime_access_denied");
+    expect(
+      await screen.findByText(enChat.message_list.failure.runtime_access_denied),
     ).toBeInTheDocument();
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });

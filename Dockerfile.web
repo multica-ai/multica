@@ -54,6 +54,11 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
+# Alpine openssl security fixes (CVE-2026-63073, CVE-2026-75803).
+# Floor pins the fix so the build fails instead of silently shipping the CVEs.
+# Remove once node:22-alpine includes libssl3 >= 3.5.8-r0.
+RUN apk add --no-cache "libcrypto3>=3.5.8-r0" "libssl3>=3.5.8-r0"
+
 ENV NODE_ENV=production
 ENV REMOTE_API_URL=http://backend:8080
 

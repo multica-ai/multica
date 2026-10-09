@@ -13,7 +13,6 @@
   "delete_issue": {
     "title": "Delete issue",
     "description": "This will permanently delete this issue and all its comments. This action cannot be undone.",
-    "hint": "Any workspace member can delete issues.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "deleting": "Deleting...",
@@ -29,14 +28,16 @@
     "toast_failed": "Failed to send feedback",
     "send": "Send feedback",
     "sending": "Sending…",
-    "github_hint_prefix": "Want faster handling and open discussion? Head to ",
+    "github_hint_prefix": "You can also send feedback on ",
     "github_hint_link": "GitHub"
   },
   "issue_picker": {
     "search_placeholder": "Search issues...",
     "searching": "Searching...",
     "no_results": "No issues found.",
-    "prompt_to_search": "Type to search issues"
+    "prompt_to_search": "Type to search issues",
+    "suggested_similar": "Similar titles",
+    "suggested_recent": "Recently viewed"
   },
   "set_parent": {
     "title": "Set parent issue",
@@ -76,7 +77,7 @@
     "leader_placeholder": "Select a leader agent",
     "members_label": "Additional Members",
     "members_optional": "(optional)",
-    "members_hint": "Members the leader can delegate sub-issues to. Can be added later.",
+    "members_hint": "The leader can delegate sub-issues to these members.",
     "members_placeholder": "Add agents or workspace members",
     "members_selected_count_one": "{{count}} selected",
     "members_selected_count_other": "{{count}} selected",
@@ -138,7 +139,8 @@
     "local_clear": "Clear",
     "local_pick_failed": "Could not open the directory picker.",
     "local_invalid_dir": "This directory can't be used. Pick another.",
-    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work."
+    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work.",
+    "repos_ref_default": "Default branch"
   },
   "create_issue": {
     "sr_manual": "New Issue",
@@ -186,6 +188,7 @@
     "toast_link_subissues_partial": "Failed to link {{failed}} of {{total}} sub-issues",
     "toast_link_labels_failed": "Failed to attach labels",
     "toast_set_properties_failed": "Could not set {{count}} custom property values",
+    "unavailable_property_removed": "An unavailable custom property was removed from the draft. Review it before submitting again.",
     "switch_to_agent": "Switch to Agent",
     "switch_to_agent_tooltip": "Switch to create with agent — describe in one line and let the agent file it",
     "switch_to_manual": "Switch to Manual",
@@ -245,5 +248,13 @@
       "error_unknown": "Failed to submit. Try again.",
       "sub_issue_of": "Sub-issue of {{identifier}}"
     }
+  },
+  "mark_duplicate": {
+    "title": "Mark as duplicate",
+    "description": "Search for the original issue. This issue will be cancelled and linked to it.",
+    "toast_success": "Marked as a duplicate of {{identifier}}",
+    "toast_failed": "Failed to mark as duplicate",
+    "error_target_is_duplicate": "{{identifier}} is itself a duplicate. Pick its original instead.",
+    "error_has_duplicates": "Other issues are marked as duplicates of this one. Remove those marks first."
   }
 }

@@ -105,17 +105,23 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 	// primary content — keeping every accepted entry zip-slip-safe.
 	var skillMd *zip.File
 	rootPrefix := ""
+	skillMdEntries := make(map[string]string)
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
+		// Compress-Archive directory markers may have no directory attributes.
+		if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 			continue
 		}
-		clean := path.Clean(f.Name)
+		clean := cleanArchiveEntryName(f.Name)
 		if !strings.EqualFold(path.Base(clean), skillpkg.ContentFilename) {
 			continue
 		}
-		if !validateFilePath(clean) {
+		if !validateArchiveFilePath(clean) {
 			continue
 		}
+		if previous, exists := skillMdEntries[clean]; exists {
+			return nil, fmt.Errorf("archive entries %q and %q resolve to the same path %q", previous, f.Name, clean)
+		}
+		skillMdEntries[clean] = f.Name
 		prefix := archiveEntryPrefix(clean)
 		if skillMd == nil || len(prefix) < len(rootPrefix) {
 			skillMd = f
@@ -145,11 +151,13 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 		content:     content,
 	}
 
+	seenFiles := make(map[string]string)
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
+		// Compress-Archive directory markers may have no directory attributes.
+		if f.FileInfo().IsDir() || strings.HasSuffix(f.Name, `\`) {
 			continue
 		}
-		clean := path.Clean(f.Name)
+		clean := cleanArchiveEntryName(f.Name)
 		// Only files under the resolved skill root belong to this skill.
 		if rootPrefix != "" && !strings.HasPrefix(clean, rootPrefix) {
 			continue
@@ -168,9 +176,13 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 			continue
 		}
 		// zip-slip / absolute-path guard.
-		if !validateFilePath(rel) {
+		if !validateArchiveFilePath(rel) {
 			continue
 		}
+		if previous, exists := seenFiles[rel]; exists {
+			return nil, fmt.Errorf("archive entries %q and %q resolve to the same path %q", previous, f.Name, rel)
+		}
+		seenFiles[rel] = f.Name
 		fileContent, ferr := readZipFile(f, maxImportFileSize)
 		if ferr != nil {
 			// An oversize or unreadable individual asset is skipped rather than
@@ -188,6 +200,32 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 		return imported.files[i].path < imported.files[j].path
 	})
 	return imported, nil
+}
+
+// cleanArchiveEntryName canonicalizes the non-standard backslash separators
+// emitted by Windows PowerShell's Compress-Archive before applying ZIP path
+// semantics. Validation still runs on the cleaned result, so backslash-based
+// absolute and traversal entries cannot bypass the zip-slip guards.
+func cleanArchiveEntryName(name string) string {
+	return path.Clean(strings.ReplaceAll(name, "\\", "/"))
+}
+
+// validateArchiveFilePath extends the existing import validation with portable
+// archive constraints. Windows drive syntax is not recognized by filepath.IsAbs
+// on a Unix server, and NUL bytes would be removed before persistence. Neither
+// can safely be passed to the daemon as a bundle path.
+func validateArchiveFilePath(p string) bool {
+	if strings.ContainsRune(p, '\x00') {
+		return false
+	}
+	if len(p) >= 2 && isASCIIAlpha(p[0]) && p[1] == ':' {
+		return false
+	}
+	return validateFilePath(p)
+}
+
+func isASCIIAlpha(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 // archiveEntryPrefix returns the directory prefix (with trailing slash) of a

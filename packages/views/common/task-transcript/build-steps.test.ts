@@ -10,7 +10,7 @@ import {
   toolKindTotals,
   type TraceCallStep,
 } from "./build-steps";
-import type { TimelineItem } from "./build-timeline";
+import { buildTimeline, type TimelineItem } from "./build-timeline";
 
 const T0 = "2026-08-15T10:00:00.000Z";
 function at(seconds: number): string {
@@ -29,6 +29,28 @@ function text(seconds: number, content = "done"): TimelineItem {
 }
 
 describe("buildSteps", () => {
+  it("pairs parallel same-tool results by call ID after timeline projection", () => {
+    const messages = [
+      { ...call("Bash", 0, { command: "slow-A" }), call_id: "attempt-1:A" },
+      { ...call("Bash", 1, { command: "fast-B" }), call_id: "attempt-1:B" },
+      { ...result("Bash", 3, "B finished"), call_id: "attempt-1:B" },
+      { ...result("Bash", 10, "A finished"), call_id: "attempt-1:A" },
+    ].map((item) => ({ ...item, task_id: "task-1", issue_id: "issue-1" }));
+    // Live snapshots and a fresh history response must use the same pairing.
+    for (const rows of [messages.slice(0, 3), messages, structuredClone(messages)]) {
+      const steps = buildSteps(buildTimeline(rows)) as TraceCallStep[];
+      expect(steps).toHaveLength(2);
+      expect(steps[1]!.result?.output).toBe("B finished");
+      expect(steps[1]!.durationMs).toBe(2000);
+      if (rows.length === 4) {
+        expect(steps[0]!.result?.output).toBe("A finished");
+        expect(steps[0]!.durationMs).toBe(10000);
+      } else {
+        expect(steps[0]!.result).toBeUndefined();
+      }
+    }
+  });
+
   it("folds a call and its result into one step", () => {
     const steps = buildSteps([call("Bash", 0), result("Bash", 4)]);
 
@@ -55,6 +77,55 @@ describe("buildSteps", () => {
     expect(steps[0]!.call?.input).toEqual({ command: "one" });
     expect(steps[0]!.result?.output).toBe("first done");
     expect(steps[1]!.result?.output).toBe("second done");
+  });
+
+  it("uses identity when a result omits its tool name", () => {
+    const steps = buildSteps([
+      { ...call("Bash", 0), callId: "A" },
+      { ...result("", 2), callId: "A" },
+    ]) as TraceCallStep[];
+    expect(steps).toHaveLength(1);
+    expect(steps[0]!.tool).toBe("Bash");
+    expect(steps[0]!.durationMs).toBe(2000);
+  });
+
+  it("keeps unmatched identified results separate from other IDs and legacy calls", () => {
+    const steps = buildSteps([
+      { ...call("Bash", 0), callId: "previous:A" },
+      call("Bash", 1),
+      { ...result("Bash", 2, "orphan"), callId: "retry:A" },
+      result("Bash", 3, "legacy"),
+      { ...result("Bash", 4, "previous"), callId: "previous:A" },
+    ]) as TraceCallStep[];
+    expect(steps).toHaveLength(3);
+    expect(steps[0]!.result?.output).toBe("previous");
+    expect(steps[1]!.result?.output).toBe("legacy");
+    expect(steps[2]!.call).toBeUndefined();
+    expect(steps[2]!.result?.output).toBe("orphan");
+    expect(steps[2]!.durationMs).toBeUndefined();
+  });
+
+  it("does not attach a result without identity to an identified call", () => {
+    const steps = buildSteps([
+      { ...call("Bash", 0), callId: "A" },
+      result("Bash", 1),
+    ]) as TraceCallStep[];
+    expect(steps).toHaveLength(2);
+    expect(steps[0]!.result).toBeUndefined();
+    expect(steps[1]!.call).toBeUndefined();
+  });
+
+  it("keeps duplicate results as orphans once their identified call is closed", () => {
+    const steps = buildSteps([
+      { ...call("Bash", 0), callId: "A" },
+      { ...call("Bash", 1), callId: "B" },
+      { ...result("Bash", 2), callId: "A" },
+      { ...result("Bash", 3), callId: "A" },
+    ]) as TraceCallStep[];
+    expect(steps).toHaveLength(3);
+    expect(steps[0]!.durationMs).toBe(2000);
+    expect(steps[1]!.result).toBeUndefined();
+    expect(steps[2]!.call).toBeUndefined();
   });
 
   it("does not pair across different tools", () => {
@@ -95,6 +166,24 @@ describe("buildSteps", () => {
 });
 
 describe("groupSteps", () => {
+  it("spans until the last completion when parallel calls finish out of order", () => {
+    const items = [
+      { ...call("Read", 0), callId: "A" },
+      { ...call("Read", 1), callId: "B" },
+      { ...call("Read", 2), callId: "C" },
+      { ...result("Read", 3), callId: "B" },
+      { ...result("Read", 4), callId: "C" },
+      { ...result("Read", 10), callId: "A" },
+    ];
+    const [group] = groupSteps(buildSteps(items));
+    expect(group?.kind).toBe("group");
+    if (group?.kind !== "group") throw new Error("expected a group");
+    expect(group.endedAt).toBe(at(10));
+    expect(group.durationMs).toBe(10000);
+    const [pending] = groupSteps(buildSteps(items.slice(0, -1)));
+    expect(pending?.kind === "group" && pending.durationMs).toBeUndefined();
+  });
+
   it("folds three or more consecutive same-tool calls", () => {
     const steps = buildSteps([
       call("Read", 0),

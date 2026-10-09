@@ -40,10 +40,10 @@
     "delete": "削除",
     "link_copied": "リンクをコピーしました",
     "copy_link_failed": "リンクをコピーできませんでした",
+    "copy_image": "画像をコピー",
+    "image_copied": "画像をコピーしました",
+    "copy_image_failed": "画像をコピーできませんでした",
     "canvas_label": "画像キャンバス。ドラッグで移動、スクロールで拡大縮小、ダブルクリックで実際のサイズに切り替えできます。",
-    "previous": "前の画像",
-    "next": "次の画像",
-    "sequence_position": "{{index}} / {{total}}",
     "unavailable": "この画像は表示できないためスキップしました。"
   },
   "canvas": {
@@ -61,7 +61,33 @@
     "preview_unsupported": "このファイル形式はプレビューできません。",
     "close": "閉じる",
     "open_in_new_tab": "新しいタブで開く",
-    "remove": "添付ファイルを削除"
+    "remove": "添付ファイルを削除",
+    "previous": "前へ",
+    "next": "次へ",
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "すべての成果物",
+    "info": "情報",
+    "wrap_lines": "折り返し",
+    "viewport": "ビューポート幅",
+    "viewport_fill": "フィット",
+    "viewport_desktop": "デスクトップ",
+    "viewport_tablet": "タブレット",
+    "viewport_phone": "スマートフォン",
+    "viewport_scale": "{{percent}}% に縮小",
+    "view_source": "ソースを表示",
+    "view_mode": "表示",
+    "view_tree": "ツリー",
+    "view_raw": "原文",
+    "structured_parse_failed": "このファイルを解析できなかったため、テキストとして表示しています。",
+    "tree_show_more": "さらに表示（残り {{count}} 件）",
+    "tree_items_other": "{{count}} 件",
+    "tree_keys_other": "{{count}} 個のキー",
+    "table_empty": "行がありません",
+    "table_rows_other": "{{count}} 行",
+    "table_columns_other": "{{count}} 列",
+    "address": "アドレス",
+    "address_hint": "?パラメータ",
+    "reload": "再読み込み"
   },
   "link_hover": {
     "copy_link": "リンクをコピー",
@@ -88,6 +114,19 @@
     "show_preview": "プレビューを表示",
     "show_source": "ソースを表示",
     "fullscreen": "全画面"
+  },
+  "dynamic_block": {
+    "preview": "プレビュー",
+    "source": "ソース",
+    "view": "表示",
+    "copy_source": "ソースをコピー",
+    "show_all": "すべて表示",
+    "rendering": "レンダリング中...",
+    "error_html": "プレビューでスクリプトエラーが発生しました",
+    "error_mermaid": "この図を描画できませんでした",
+    "error_at_line": "{{message}}（{{line}} 行目）",
+    "view_source": "ソースを表示",
+    "copy_error": "エラーをコピー"
   },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/events"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -584,6 +585,7 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 	// request unarchives and nil for a web-only chat; BroadcastCancelledTasks
 	// is a no-op on an empty slice.
 	var cancelled []db.AgentTaskQueue
+	var reactionTargets map[string]*events.ChannelReactionTarget
 
 	if req.Archived {
 		// Read the binding BEFORE the delete below, which is what erases the
@@ -613,8 +615,8 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 				writeError(w, http.StatusInternalServerError, "failed to cancel queued tasks for the archived session")
 				return
 			}
-			if err = service.SettleDeliveredDelegatedFailureRecoveries(r.Context(), qtx, cancelled...); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to settle delegated failure recoveries")
+			if err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to settle terminal task state")
 				return
 			}
 		case errors.Is(bindingErr, pgx.ErrNoRows):
@@ -636,6 +638,11 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to read chat session channel binding")
 			return
 		}
+		reactionTargets, err = service.CaptureChannelReactionTargets(r.Context(), qtx, cancelled)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to capture channel reaction targets")
+			return
+		}
 		if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clear chat session channel binding")
 			return
@@ -655,7 +662,7 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 	// clients drop the row instead of showing it queued until the next
 	// refresh, and wakes the runtime so a queued successor is claimed now
 	// rather than at the daemon's next poll.
-	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled, reactionTargets)
 
 	resolvedSessionID := uuidToString(updated.ID)
 	status := updated.Status
@@ -722,8 +729,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to cancel chat session tasks")
 		return
 	}
-	if err := service.SettleDeliveredDelegatedFailureRecoveries(r.Context(), qtx, cancelled...); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to settle delegated failure recoveries")
+	if err := service.SettleTerminalTaskState(r.Context(), qtx, cancelled...); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to settle terminal task state")
+		return
+	}
+
+	reactionTargets, err := service.CaptureChannelReactionTargets(r.Context(), qtx, cancelled)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to capture channel reaction targets")
 		return
 	}
 
@@ -787,7 +800,7 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// The workspace has to come from the session we just deleted: the tasks were
 	// cancelled and returned before the delete, so they still carry its id, but
 	// the row they would be resolved through is gone by now.
-	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled, reactionTargets)
 
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
@@ -939,9 +952,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// batch the instant it exists), attachment bindings, and the session touch
 	// all commit together, and the daemon is only notified after the commit. For
 	// web chat the sender is the authenticated request user (sessions are
-	// creator-only), so they are the task initiator — surfaced to the agent
-	// under `## Task Initiator`. actorType/actorID were resolved above for the
-	// invoke gate.
+	// creator-only), so they are the task initiator and the run's originator —
+	// surfaced to the agent under `## On Behalf Of`. actorType/actorID were
+	// resolved above for the invoke gate.
 	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
 	if err != nil {
 		switch {
@@ -1157,7 +1170,7 @@ func (h *Handler) RegenerateChatQuickActions(w http.ResponseWriter, r *http.Requ
 		case errors.Is(err, service.ErrChatQuickActionsNoTurn):
 			writeError(w, http.StatusConflict, "no assistant reply to refresh yet")
 		case errors.Is(err, service.ErrChatQuickActionsUnavailable):
-			writeError(w, http.StatusServiceUnavailable, "suggestions are not available on this deployment")
+			writeFeatureDisabled(w, "suggestions_not_available", "suggestions are not available on this deployment")
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to regenerate quick actions")
 		}
@@ -1801,6 +1814,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	var (
 		queuedOnly      bool
@@ -1857,7 +1871,6 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 			writeError(w, http.StatusForbidden, "you do not have access to this agent")
 			return
@@ -1869,6 +1882,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		QueuedOnly:                 queuedOnly,
 		ExpectedChatSession:        expectedSession,
 		QueueAction:                queueAction,
+		CancelledBy:                h.taskCancellationActor(r.Context(), actorType, actorID),
 		UserInitiated:              true,
 	})
 	if errors.Is(err, service.ErrTaskNoLongerQueued) {

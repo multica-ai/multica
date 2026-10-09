@@ -72,6 +72,14 @@ type downloadedMedia struct {
 // oversize body, stalled server) because the caller turns them into something
 // a person reads.
 func downloadMedia(ctx context.Context, hc *http.Client, rawURL string) (downloadedMedia, error) {
+	return downloadMediaCapped(ctx, hc, rawURL, maxMediaBytes)
+}
+
+// downloadMediaCapped is downloadMedia with its ceiling as a parameter, and
+// only tests pass anything but maxMediaBytes: refusing a body that turns out
+// too large mid-read is the same code at any ceiling, and proving it at the
+// real one means buffering 100 MB under the race detector.
+func downloadMediaCapped(ctx context.Context, hc *http.Client, rawURL string, limit int64) (downloadedMedia, error) {
 	if err := checkMediaURL(rawURL); err != nil {
 		return downloadedMedia{}, err
 	}
@@ -95,7 +103,7 @@ func downloadMedia(ctx context.Context, hc *http.Client, rawURL string) (downloa
 	}
 	defer resp.Body.Close()
 
-	if resp.ContentLength > maxMediaBytes {
+	if resp.ContentLength > limit {
 		return downloadedMedia{}, errMediaTooLarge
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -109,11 +117,11 @@ func downloadMedia(ctx context.Context, hc *http.Client, rawURL string) (downloa
 
 	// LimitReader with one byte of headroom: reading exactly the cap cannot
 	// tell "the file is exactly at the limit" from "there is more coming".
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxMediaBytes+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return downloadedMedia{}, fmt.Errorf("wecom: media download: read body: %w", err)
 	}
-	if len(body) > maxMediaBytes {
+	if int64(len(body)) > limit {
 		return downloadedMedia{}, errMediaTooLarge
 	}
 	return downloadedMedia{

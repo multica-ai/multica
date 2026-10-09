@@ -232,6 +232,13 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 
 	conflict, ok := runtimeDeleteConflict(err)
 	if !ok {
+		// Any other 409 is a deliberate, already-explained refusal — most often
+		// a profile-backed instance that cannot be deleted on its own. Show the
+		// server's guidance instead of a raw HTTP wrapper; --cascade cannot get
+		// past these, so there is nothing more for this command to try.
+		if _, msg, isConflict := serverConflictMessage(err); isConflict {
+			return errors.New(msg)
+		}
 		return fmt.Errorf("delete runtime: %w", err)
 	}
 
@@ -348,6 +355,38 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+}
+
+// serverConflictMessage pulls the server's own sentence out of a 409 body.
+//
+// The refusals behind runtime and profile deletion are written to be read by
+// the person who ran the command — they name the machine, the profile and what
+// to do instead. HTTPError.Error() would bury that sentence inside a raw JSON
+// dump of the whole response, which is what a blocked user used to see.
+func serverConflictMessage(err error) (code string, message string, ok bool) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return "", "", false
+	}
+	body := strings.TrimSpace(httpErr.Body)
+	if body == "" {
+		return "", "", false
+	}
+	var payload struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &payload) != nil {
+		// Not JSON. An older or proxied server can still put a readable
+		// sentence here, and swallowing it would be worse than passing it
+		// through — there is nothing to leak when the body was never
+		// structured in the first place.
+		return "", body, true
+	}
+	if strings.TrimSpace(payload.Error) == "" {
+		return payload.Code, "", false
+	}
+	return payload.Code, payload.Error, true
 }
 
 type runtimeDeleteConflictPayload struct {

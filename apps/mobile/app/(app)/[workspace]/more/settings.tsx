@@ -30,13 +30,11 @@ import {
   type ThemePreference,
 } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { useLocalePreference, useT, type LocalePreference } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "system", label: "System" },
-];
+const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
+const LANGUAGE_OPTIONS: LocalePreference[] = ["system", "en", "zh-Hans"];
 
 function initialsOf(name: string | undefined): string {
   if (!name) return "?";
@@ -57,7 +55,18 @@ export default function SettingsPage() {
   const clearWorkspace = useWorkspaceStore((s) => s.clear);
   const { data, isLoading, error } = useQuery(workspaceListOptions());
   const { preference, setPreference, colorScheme } = useColorScheme();
+  const {
+    preference: localePreference,
+    setPreference: setLocalePreference,
+  } = useLocalePreference();
+  const { t } = useT("settings");
+  const { t: tCommon } = useT();
   const mutedFg = THEME[colorScheme].mutedForeground;
+  const localeLabels = {
+    system: t("language.system"),
+    en: t("language.english"),
+    "zh-Hans": t("language.chinese_simplified"),
+  };
 
   const onSwitch = async (ws: Workspace) => {
     if (ws.slug === currentSlug) return;
@@ -67,12 +76,12 @@ export default function SettingsPage() {
 
   const onSignOut = () => {
     Alert.alert(
-      "Sign out",
-      "You'll need to sign in again to use Multica on this device.",
+      t("account.sign_out"),
+      t("account.sign_out_message"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: tCommon("actions.cancel"), style: "cancel" },
         {
-          text: "Sign out",
+          text: t("account.sign_out"),
           style: "destructive",
           onPress: async () => {
             await clearWorkspace();
@@ -92,12 +101,12 @@ export default function SettingsPage() {
       className="flex-1 bg-background"
       contentContainerClassName="px-4 py-4 gap-6"
     >
-      <SectionGroup title="Account">
+      <SectionGroup title={t("account.title")}>
         <NavRow
           onPress={goProfile}
           chevronColor={mutedFg}
           leading={
-            <Avatar alt={user?.name ?? "User avatar"} className="size-10">
+            <Avatar alt={user?.name ?? t("profile.name")} className="size-10">
               {user?.avatar_url ? (
                 <AvatarImage source={{ uri: user.avatar_url }} />
               ) : null}
@@ -115,12 +124,12 @@ export default function SettingsPage() {
         <NavRow
           onPress={goNotifications}
           chevronColor={mutedFg}
-          title="Notifications"
-          subtitle="Inbox and system alerts"
+          title={t("notifications.title")}
+          subtitle={t("account.notifications_subtitle")}
         />
       </SectionGroup>
 
-      <SectionGroup title="Workspaces">
+      <SectionGroup title={t("account.workspaces")}>
         {isLoading ? (
           <View className="py-4 items-center">
             <ActivityIndicator />
@@ -128,7 +137,7 @@ export default function SettingsPage() {
         ) : error ? (
           <View className="p-4">
             <Text className="text-sm text-destructive">
-              Failed to load workspaces
+              {t("account.load_failed")}
             </Text>
           </View>
         ) : (
@@ -151,7 +160,7 @@ export default function SettingsPage() {
         )}
       </SectionGroup>
 
-      <SectionGroup title="Appearance">
+      <SectionGroup title={t("appearance.title")}>
         {/* Two converging entry points by design, NOT a double-fire:
               - Tap on small radio circle  → RadioGroupItem (Pressable, inner) consumes → onValueChange fires
               - Tap on text / row padding  → outer Pressable.onPress fires
@@ -167,14 +176,40 @@ export default function SettingsPage() {
           {THEME_OPTIONS.map((opt, idx) => {
             const isLast = idx === THEME_OPTIONS.length - 1;
             return (
-              <View key={opt.value}>
+              <View key={opt}>
                 <Pressable
-                  onPress={() => setPreference(opt.value)}
+                  onPress={() => setPreference(opt)}
                   className="flex-row items-center px-4 py-3.5 active:bg-secondary gap-3"
                 >
-                  <RadioGroupItem value={opt.value} />
+                  <RadioGroupItem value={opt} />
                   <Text className="flex-1 text-base font-medium text-foreground">
-                    {opt.label}
+                    {t(`appearance.${opt}`)}
+                  </Text>
+                </Pressable>
+                {!isLast ? <Separator /> : null}
+              </View>
+            );
+          })}
+        </RadioGroup>
+      </SectionGroup>
+
+      <SectionGroup title={t("language.title")}>
+        <RadioGroup
+          value={localePreference}
+          onValueChange={(v) => setLocalePreference(v as LocalePreference)}
+          className="gap-0"
+        >
+          {LANGUAGE_OPTIONS.map((opt, idx) => {
+            const isLast = idx === LANGUAGE_OPTIONS.length - 1;
+            return (
+              <View key={opt}>
+                <Pressable
+                  onPress={() => setLocalePreference(opt)}
+                  className="flex-row items-center px-4 py-3.5 active:bg-secondary gap-3"
+                >
+                  <RadioGroupItem value={opt} />
+                  <Text className="flex-1 text-base font-medium text-foreground">
+                    {localeLabels[opt]}
                   </Text>
                 </Pressable>
                 {!isLast ? <Separator /> : null}
@@ -186,7 +221,7 @@ export default function SettingsPage() {
 
       <View className="pt-2">
         <Button variant="destructive" onPress={onSignOut}>
-          <Text>Sign out</Text>
+          <Text>{t("account.sign_out")}</Text>
         </Button>
       </View>
     </ScrollView>

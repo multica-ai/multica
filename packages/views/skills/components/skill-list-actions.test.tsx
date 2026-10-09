@@ -8,7 +8,7 @@ import type { SkillSummary } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSkills from "../../locales/en/skills.json";
-import type { SkillRow } from "./skills-page";
+import type { SkillRow } from "./skill-list-filter";
 import type { SkillActionsContext } from "./skill-list-actions";
 
 const TEST_RESOURCES = { en: { common: enCommon, skills: enSkills } };

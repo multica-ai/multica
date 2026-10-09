@@ -20,6 +20,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path (Split-Path $PSCommandPath -Parent) -Parent
 $InstallerPath = Join-Path $RepoRoot "scripts/install.ps1"
+$PowerShellPath = (Get-Process -Id $PID).Path
 
 # install.ps1 resolves its default install directory from USERPROFILE at load
 # time. Provide one so these tests also run on a non-Windows agent.
@@ -49,6 +50,8 @@ function Get-InstallerDefinitions {
 # 1. install.ps1 must parse, and must no longer derive ports from .env
 # ---------------------------------------------------------------------------
 $parseErrors = $null
+# Parse the file directly: Windows PowerShell 5.1 reads BOM-less files as ANSI,
+# unlike PowerShell 7. Decoding as UTF-8 first would hide regressions like #8660.
 [System.Management.Automation.Language.Parser]::ParseFile($InstallerPath, [ref]$null, [ref]$parseErrors) | Out-Null
 if ($parseErrors) {
     $parseErrors | ForEach-Object { Write-Host "  $($_.Message) (line $($_.Extent.StartLineNumber))" }
@@ -135,7 +138,9 @@ $cases = @(
 
 $runnerScript = Join-Path ([System.IO.Path]::GetTempPath()) "multica-install-ps1-case.ps1"
 
-# Each case runs in its own pwsh process: install.ps1 uses `exit` on failure, and
+# Each case runs in its own process using the current PowerShell host, so the
+# Windows PowerShell 5.1 suite cannot silently delegate its cases to PowerShell 7.
+# install.ps1 uses `exit` on failure, and
 # a child process is also the only way to control the ambient environment
 # cleanly rather than inheriting a CI runner's PORT.
 @'
@@ -269,7 +274,7 @@ foreach ($case in $cases) {
     }
 
     try {
-        $output = & pwsh -NoProfile -File $runnerScript -InstallerPath $InstallerPath -WorkDir $workDir -ProbeLog $probeLog 2>&1
+        $output = & $PowerShellPath -NoProfile -File $runnerScript -InstallerPath $InstallerPath -WorkDir $workDir -ProbeLog $probeLog 2>&1
         $exitCode = $LASTEXITCODE
     } finally {
         foreach ($key in $portVars) {

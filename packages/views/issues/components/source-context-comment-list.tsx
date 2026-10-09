@@ -75,14 +75,18 @@ export function SourceContextCommentList({
                     : getAuthorLabel?.(comment) ?? comment.author.name}
                 </span>
                 {comment.id === anchorCommentId && (
-                  <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-info">
+                  <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-info">
                     {t(($) => $.source_context.source_comment)}
                   </span>
                 )}
                 {changeLabel && <span className="sr-only">{changeLabel}</span>}
               </div>
               <div className="mt-1.5 break-words">
-                <ReadonlyContent content={comment.content} />
+                {comment.deleted === true ? (
+                  <p className="italic text-muted-foreground">{t(($) => $.comment.deleted_placeholder)}</p>
+                ) : (
+                  <ReadonlyContent content={comment.content} />
+                )}
               </div>
             </div>
           </li>

@@ -63,6 +63,16 @@ func TextToPtr(t pgtype.Text) *string {
 	return &t.String
 }
 
+// BoolToPtr keeps a nullable boolean column tri-state on the way out. NULL
+// becomes nil, not false: callers that render "complete" on false must not be
+// handed a value the row never contained.
+func BoolToPtr(b pgtype.Bool) *bool {
+	if !b.Valid {
+		return nil
+	}
+	return &b.Bool
+}
+
 func PtrToText(s *string) pgtype.Text {
 	if s == nil {
 		return pgtype.Text{}

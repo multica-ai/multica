@@ -140,6 +140,27 @@ export function formatTokens(n: number): string {
   return `${Number(scaled.toFixed(1))}${unit.suffix}`;
 }
 
+/**
+ * Whole-number prompt-cache hit rate across mutually exclusive input buckets.
+ * Callers must sum each bucket before calling so the result is a ratio of sums,
+ * never an average of per-row percentages. Output tokens are not input-side
+ * traffic and therefore do not belong in the denominator.
+ *
+ * Returns null when no input-side usage was reported. Round ordinary values to
+ * the nearest percent, but reserve 100% for a genuinely complete cache hit.
+ */
+export function cacheHitRatePercent(
+  inputTokens: number,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+): number | null {
+  const inputSideTokens = inputTokens + cacheReadTokens + cacheWriteTokens;
+  if (inputSideTokens <= 0) return null;
+
+  const percent = (cacheReadTokens / inputSideTokens) * 100;
+  return percent === 100 ? 100 : Math.min(Math.round(percent), 99);
+}
+
 // Cents below $100, whole dollars above — two decimals on a four-figure spend
 // is noise, and dropping them below $100 would round most single runs to $0.
 export function formatUsd(n: number): string {
@@ -168,9 +189,10 @@ export function formatUsd(n: number): string {
 // Moonshot, Zhipu and xAI do not bill cache writes separately (cached input
 // is just discounted on subsequent reads), so cacheWrite mirrors input there.
 // OpenAI historically did the same, but its GPT-5.6+ generation bills cache
-// writes at 1.25× input (cache reads still get the 90% cached-input
-// discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
-// yet stream cache-write tokens, so that rate isn't exercised today.
+// writes at 1.25× input (cache reads generally get the 90% cached-input
+// discount; GPT-6.1 Sol gets 95%), so those rows carry a distinct cacheWrite.
+// Codex usage doesn't yet stream cache-write tokens, so that rate isn't
+// exercised today.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -197,10 +219,12 @@ const MODEL_PRICING: Record<
   //    no future-dated pricing support yet, so update the row when the
   //    post-intro $3 / $15 rate takes effect. Fable 5 and 5.1 are Mythos-class
   //    SKUs at 10/50 (5.1 prices cache reads at 0.025x input, a quarter of the
-  //    usual 0.1x); Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier. --
+  //    usual 0.1x); Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier,
+  //    and Opus 5.5 drops to 4/20 (cache reads at 0.05x input). --
   "claude-sonnet-5":     { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
   "claude-fable-5-1":   { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
+  "claude-opus-5-5":    { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5.00 },
   "claude-opus-5":      { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
@@ -223,12 +247,18 @@ const MODEL_PRICING: Record<
   // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
-  //    gpt-5.6 (sol/terra/luna) uses OpenAI's official announcement rates.
+  //    gpt-6-astra and gpt-5.6 (sol/terra/luna) use OpenAI's official rates.
   //    5.6+ is the first OpenAI generation to bill cache writes separately:
-  //    cacheRead = 0.1x input (90% cached-input discount), cacheWrite = 1.25x
+  //    cacheRead generally = 0.1x input, cacheWrite = 1.25x
   //    input (see the header note above). Codex usage doesn't yet report
   //    cache-write tokens, so cacheWrite isn't exercised today, but the rate
   //    is kept correct for when it is.
+  "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
+  // Standard short-context rates: developers.openai.com/api/docs/models/.
+  // GPT-6.1 Sol's cached input is 0.05x input; GPT-6 Sol's is 0.1x.
+  "gpt-6.1-sol":        { input: 2,    output: 10,   cacheRead: 0.10,  cacheWrite: 2.50 },
+  "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2.50 },
+  "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.125 },
   "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
   "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 3.125 },
   "gpt-5.6-luna":       { input: 1,    output: 6,    cacheRead: 0.10,  cacheWrite: 1.25 },

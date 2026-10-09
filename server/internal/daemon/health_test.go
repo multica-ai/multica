@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -93,6 +95,38 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if resp.ResourceWaitTaskCount != 1 {
 		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+}
+
+func TestHealthHandlerReportsTerminalReportQueueCountsAndBytes(t *testing.T) {
+	d := New(Config{
+		WorkspacesRoot: t.TempDir(),
+		ServerBaseURL:  "https://api.example.test",
+		DaemonID:       "health-terminal-reports",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d.ready.Store(true)
+	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "pending", output: "private output"}
+	if err := d.terminalReports.enqueue(report); err != nil {
+		t.Fatalf("enqueue pending report: %v", err)
+	}
+	if err := os.MkdirAll(d.terminalReports.failedDir(), 0o700); err != nil {
+		t.Fatalf("create failed queue: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(d.terminalReports.failedDir(), "failed.json"), []byte("failed payload"), 0o600); err != nil {
+		t.Fatalf("write failed report: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if resp.PendingTerminalReportCount != 1 || resp.PendingTerminalReportBytes == 0 ||
+		resp.FailedTerminalReportCount != 1 || resp.FailedTerminalReportBytes != int64(len("failed payload")) {
+		t.Fatalf("terminal report health = pending:%d/%d failed:%d/%d",
+			resp.PendingTerminalReportCount, resp.PendingTerminalReportBytes,
+			resp.FailedTerminalReportCount, resp.FailedTerminalReportBytes)
 	}
 }
 
@@ -489,6 +523,8 @@ func TestRepoCheckoutRejectsAnotherTaskWorkdir(t *testing.T) {
 	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
 	workDir := t.TempDir()
 	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	var logs bytes.Buffer
+	d.logger = captureLogger(&logs)
 	otherWorkDir := t.TempDir()
 
 	rec := httptest.NewRecorder()
@@ -500,6 +536,44 @@ func TestRepoCheckoutRejectsAnotherTaskWorkdir(t *testing.T) {
 	}
 	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
 		t.Fatalf("cross-task workdir checkout reached repo cache: %+v", got)
+	}
+	// #8946: a bare "not owned" with nothing in daemon.log hid that the real
+	// failure was resolving a junctioned path. The agent and the log both get
+	// the reason now.
+	if !strings.Contains(rec.Body.String(), "outside the active task workdir") {
+		t.Fatalf("rejection body should say why the workdir was refused: %s", rec.Body.String())
+	}
+	for _, want := range []string{"repo checkout rejected", "workdir_not_owned", "level=WARN"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("rejection log missing %q, got: %s", want, logs.String())
+		}
+	}
+}
+
+// A workdir that cannot be resolved at all is refused, and the refusal names
+// the resolution failure instead of reading as an ownership question.
+func TestRepoCheckoutRejectsUnresolvableWorkdirWithTheReason(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	missing := filepath.Join(workDir, "does-not-exist")
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + missing + `","task_id":"task-1"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
+		t.Fatalf("unresolvable workdir checkout reached repo cache: %+v", got)
+	}
+	if !strings.Contains(rec.Body.String(), "resolve requested workdir") {
+		t.Fatalf("rejection body should name the resolution failure: %s", rec.Body.String())
 	}
 }
 
@@ -543,6 +617,33 @@ func TestRepoCheckoutForwardsIsolatedMode(t *testing.T) {
 	}
 	if !cache.lastCreateParams().IsolatedGitMetadata {
 		t.Fatal("isolated checkout_mode was not forwarded to repo cache")
+	}
+}
+
+func TestRepoCheckoutForwardsFresh(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{body: `{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1"}`, want: false},
+		{body: `{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","fresh":true}`, want: true},
+	} {
+		rec := httptest.NewRecorder()
+		d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(strings.NewReader(tc.body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if got := cache.lastCreateParams().Fresh; got != tc.want {
+			t.Fatalf("CreateWorktree Fresh = %v, want %v for %s", got, tc.want, tc.body)
+		}
 	}
 }
 

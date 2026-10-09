@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -124,8 +125,12 @@ func TestPlannedButUndeliveredRecoveryStaysPending(t *testing.T) {
 	ctx := context.Background()
 	recoveryTaskID, recoveryCommentID := f.seedRecoverySignal(t, svc)
 
-	if _, err := svc.CancelTask(ctx, recoveryTaskID); err != nil {
+	cancelled, err := svc.CancelTask(ctx, recoveryTaskID)
+	if err != nil {
 		t.Fatalf("CancelTask: %v", err)
+	}
+	if !cancelled.CancelledByType.Valid || cancelled.CancelledByType.String != "system" {
+		t.Fatalf("automatic cancellation actor = %#v, want system", cancelled.CancelledByType)
 	}
 	if f.settled(t, recoveryCommentID) {
 		t.Fatal("automatic cancellation settled a recovery it never delivered")
@@ -147,14 +152,50 @@ func TestUserCancelledRecoveryIsSettled(t *testing.T) {
 	ctx := context.Background()
 	recoveryTaskID, recoveryCommentID := f.seedRecoverySignal(t, svc)
 
-	if _, err := svc.CancelTaskByUser(ctx, recoveryTaskID); err != nil {
+	if _, err := svc.CancelTaskByUser(ctx, recoveryTaskID, TaskCancellationActor{
+		Type: "member",
+		ID:   util.MustParseUUID(f.userID),
+		Name: "Recovery owner",
+	}); err != nil {
 		t.Fatalf("CancelTaskByUser: %v", err)
 	}
 	if !f.settled(t, recoveryCommentID) {
 		t.Fatal("user cancellation did not settle the recovery signal")
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("sweep after user cancel = %+v, %v; want zero result, nil", result, err)
+	// Other packages share DATABASE_URL and can leave another workspace's
+	// recovery pending while this test runs the global sweep.
+	other, otherSvc := seedDelegatedFailureFixture(t)
+	otherTaskID, otherCommentID := other.seedRecoverySignal(t, otherSvc)
+	if _, err := otherSvc.CancelTask(ctx, otherTaskID); err != nil {
+		t.Fatalf("cancel other workspace recovery: %v", err)
+	}
+	if other.settled(t, otherCommentID) {
+		t.Fatal("undelivered system cancellation settled the other recovery")
+	}
+	if _, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+		t.Fatalf("sweep after user cancel: %v", err)
+	}
+	if !f.settled(t, recoveryCommentID) {
+		t.Fatal("sweep reopened the user-cancelled recovery")
+	}
+	// Assert on each signal, not the sweep's totals across all workspaces.
+	dbfx := testutil.New(f.pool, f.workspaceID, f.userID)
+	for _, tc := range []struct {
+		name      string
+		commentID pgtype.UUID
+		wantTasks int
+	}{
+		{"user_cancelled", recoveryCommentID, 1},
+		{"other_workspace_pending", otherCommentID, 2},
+	} {
+		var taskCount int
+		dbfx.QueryRow(t, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE trigger_comment_id = $1 OR $1::uuid = ANY(coalesced_comment_ids)
+		`, tc.commentID).Scan(&taskCount)
+		if taskCount != tc.wantTasks {
+			t.Errorf("%s recovery tasks = %d, want %d", tc.name, taskCount, tc.wantTasks)
+		}
 	}
 }
 

@@ -259,6 +259,6 @@ describe("InlineTitle", () => {
 
     const badge = screen.getByTestId("issue-agent-activity");
     expect(badge.getAttribute("data-child-progress")).toBe("1/3");
-    expect(badge.getAttribute("data-status-category")).toBe("in_progress");
+    expect(badge.getAttribute("data-status-category")).toBe("started");
   });
 });

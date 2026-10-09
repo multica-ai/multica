@@ -85,6 +85,16 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$QWEN_MODE" in
+  usage-resume)
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-qwen-1","model":"qwen-test"}'
+    printf '%s\n' '{"type":"assistant","session_id":"sess-qwen-1","message":{"id":"current-message","model":"qwen-test","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":100,"output_tokens":10}}}'
+    printf '%s\n' '{"type":"result","subtype":"success","session_id":"sess-qwen-1","result":"done","usage":{"input_tokens":1100,"output_tokens":110}}'
+    ;;
+  usage-fallback)
+    printf '%s\n' '{"type":"assistant","message":{"id":"message-1","model":"qwen-test","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":50}}}'
+    printf '%s\n' '{"type":"assistant","message":{"id":"message-2","model":"qwen-test","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20}}}'
+    exit 7
+    ;;
   error)
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-error","model":"qwen-test"}'
     printf '%s\n' '{"type":"result","subtype":"error_during_execution","session_id":"sess-error","is_error":true,"error":{"type":"authentication_error","message":"synthetic Qwen authentication failure"}}'
@@ -152,7 +162,7 @@ func TestQwenBackendStreamsNativeEvents(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	usage := result.Usage["qwen-test"]
-	if usage.InputTokens != 20 || usage.OutputTokens != 4 || usage.CacheReadTokens != 6 {
+	if usage.InputTokens != 14 || usage.OutputTokens != 4 || usage.CacheReadTokens != 6 {
 		t.Fatalf("unexpected final usage: %+v", usage)
 	}
 	var thinking, toolUse, toolResult, text bool
@@ -334,7 +344,7 @@ func TestQwenCode020FixtureParses(t *testing.T) {
 	if !state.sawResult || state.resultIsError || state.sessionID != "session-redacted" || state.finalResultText != "DONE" {
 		t.Fatalf("unexpected fixture state: %+v", state)
 	}
-	if state.usage["qwen3.8-max-preview"].InputTokens != 46539 {
+	if state.usage["qwen3.8-max-preview"] != (TokenUsage{InputTokens: 4639, OutputTokens: 159, CacheReadTokens: 41900}) {
 		t.Fatalf("fixture usage = %+v", state.usage)
 	}
 }

@@ -71,6 +71,8 @@ Skill 适合保存可以跨智能体复用的方法和资料；只属于这名�
 
 留空时，对话页会显示本地化的通用默认值。针对智能体职责和边界编写的示例通常更有帮助。
 
+CLI 可用 `agent create` / `agent update` 的 `--conversation-starters` 设置（`{"label","prompt"}` 对象的 JSON 数组；更新时传 `'[]'` 清空）。`agent copy` 仍只搬运源值，没有覆盖 flag。
+
 ## 选择运行时、模型和思考强度
 
 运行时已经对应一款 AI 编程工具。选择运行时后，可以继续选择该工具支持的模型和思考强度；部分工具（如 Codex）还可选择速度档：
@@ -146,7 +148,8 @@ multica agent create \
  --name "Frontend Reviewer" \
  --runtime-id <runtime-id> \
  --description "审查前端 Pull Request" \
- --instructions "先阅读改动和测试，只在 issue 评论中提交审查结论。"
+ --instructions "先阅读改动和测试，只在 issue 评论中提交审查结论。" \
+ --conversation-starters '[{"label":"审查 PR","prompt":"审查当前最相关的未合并 Pull Request。"}]'
 ```
 
 命令行参数中的明文会进入 shell 历史；stdin 和权限受限的文件不会。

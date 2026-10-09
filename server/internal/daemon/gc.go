@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 )
 
 // reposDirName is the bare-repo cache directory inside the workspaces root.
@@ -572,6 +573,7 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 		ID:        meta.IssueID,
 		Found:     true,
 		Status:    status.Status,
+		Category:  status.Category,
 		UpdatedAt: status.UpdatedAt,
 	})
 }
@@ -581,11 +583,9 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		return d.orphanByMTime(taskDir, "issue not accessible")
 	}
 
-	// result.Status is a CATEGORY, normalized server-side, so this literal
-	// comparison covers custom statuses too — an issue on a `done`-category
-	// custom status is terminal here. (MUL-6243)
-	if (result.Status == "done" || result.Status == "cancelled") &&
-		time.Since(result.UpdatedAt) > d.cfg.GCTTL {
+	terminal, recognized := issueGCLifecycle(result)
+
+	if terminal && time.Since(result.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),
 			"kind", "issue",
@@ -607,7 +607,7 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	if d.cfg.GCCompletedTaskTTL > 0 &&
 		!meta.LocalDirectory &&
 		!meta.CompletedAt.IsZero() &&
-		isKnownIssueStatus(result.Status) &&
+		recognized &&
 		time.Since(meta.CompletedAt) > d.cfg.GCCompletedTaskTTL {
 		d.logger.Info("gc: completed task eligible for full cleanup",
 			"dir", filepath.Base(taskDir),
@@ -652,17 +652,39 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	return gcActionSkip
 }
 
-// isKnownIssueStatus mirrors the issue status constraint enforced by the
-// server. Full task cleanup must fail closed when an older daemon receives a
-// future status or a malformed response from the GC check endpoint.
+// issueGCLifecycle answers the only two questions GC asks about a parent issue:
+// is it terminal, and was the answer well-formed? Everything else about a
+// status — parked, in review, blocked — is execution policy the daemon has no
+// business reading.
 //
-// The 7 names below stay correct after custom statuses (MUL-6243) because the
-// gc-check endpoints answer with the status's CATEGORY, not the stored key —
-// see BatchIssueGCCheck / GetIssueGCCheck, which resolve through
-// issuestatus.Effective. Do not teach this function about custom statuses: an
-// installed daemon has no catalog to resolve them against, and daemons
-// predating the feature must keep making correct decisions against an upgraded
-// server. Pinned by TestIssueGCChecksReportCategoryNotRawCustomStatus.
+// `category` is the real answer and wins whenever it is one of the four: those
+// values cover a workspace's custom statuses too, so a `closed`-category custom
+// status is terminal here without this binary knowing the key exists.
+//
+// A missing or unrecognized category — a server predating MUL-7364, a
+// malformed response, a lifecycle value newer than this daemon — falls back to
+// the legacy seven-value `status` enum, which the server keeps populated for
+// exactly this reason and which fails closed on its own. Full cleanup is
+// irreversible, so a lookup that did not really answer must not read as one.
+func issueGCLifecycle(result IssueGCCheckResult) (terminal, recognized bool) {
+	if issuestatus.IsCategory(result.Category) {
+		return result.Category == issuestatus.CategoryDone || result.Category == issuestatus.CategoryClosed, true
+	}
+	return result.Status == issuestatus.Done || result.Status == issuestatus.Cancelled,
+		isKnownIssueStatus(result.Status)
+}
+
+// isKnownIssueStatus is the pre-MUL-7364 fallback vocabulary: the seven
+// built-in status keys, which is all the `status` field of a gc-check response
+// may ever contain.
+//
+// Do not teach it about custom statuses or about the four lifecycle categories.
+// An installed daemon has no catalog to resolve a custom key against, so the
+// server projects every status back onto these seven for this field
+// (issueGCWire in handler/daemon.go) precisely so daemons predating custom
+// statuses keep making correct decisions against an upgraded server. A daemon
+// that wants the lifecycle reads `category` instead — see issueGCLifecycle.
+// Pinned by TestIssueGCChecksReportWireStatusNotRawCustomStatus.
 func isKnownIssueStatus(status string) bool {
 	switch status {
 	case "backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled":

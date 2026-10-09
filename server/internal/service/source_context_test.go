@@ -579,18 +579,7 @@ func TestCleanupSourceContextObjectIntentsDeletesOnlyUnreferencedObjects(t *test
 	// concurrently against the same integration database, so serialize their
 	// cleanup-oracle sections to prevent either fake object store from claiming
 	// the other package's intent rows.
-	cleanupLockConn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire source-context cleanup test lock connection: %v", err)
-	}
-	if _, err := cleanupLockConn.Exec(ctx, `SELECT pg_advisory_lock($1)`, int64(0x53434f4e54455854)); err != nil {
-		cleanupLockConn.Release()
-		t.Fatalf("lock source-context cleanup tests: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = cleanupLockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, int64(0x53434f4e54455854))
-		cleanupLockConn.Release()
-	})
+	lockSourceContextCleanupTests(t, pool)
 	q := db.New(pool)
 	workspaceID, userID, _, sourceIssueID := seedAttributionFixture(t, pool)
 	workspaceUUID := util.MustParseUUID(workspaceID)
@@ -1016,21 +1005,44 @@ func TestBuildSourceContextRejectsCyclesAndEveryLimitWithoutTruncation(t *testin
 		t.Fatalf("break test cycle: %v", err)
 	}
 
+	// The deep chain and the wide thread are each seeded in one statement:
+	// hundreds of single-row round trips were most of this test's runtime.
+	// created_at still increases in insertion order, and the returned id is
+	// the last comment inserted.
 	var deepSelected string
-	var parent any
-	for i := 0; i < SourceContextMaxComments+1; i++ {
-		deepSelected = insertComment("deep", parent)
-		parent = deepSelected
+	if err := pool.QueryRow(ctx, `
+		WITH ids AS (
+			SELECT g, gen_random_uuid() AS id FROM generate_series(1, $4::int) AS g
+		), inserted AS (
+			INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, parent_id, created_at)
+			SELECT id, $1, $2, 'member', $3, 'deep', lag(id) OVER (ORDER BY g), now() + g * interval '1 microsecond'
+			FROM ids
+		)
+		SELECT id FROM ids ORDER BY g DESC LIMIT 1
+	`, sourceIssueID, workspaceID, userID, SourceContextMaxComments+1).Scan(&deepSelected); err != nil {
+		t.Fatalf("insert deep chain: %v", err)
 	}
 	deep, err := BuildSourceContext(ctx, q, workspaceUUID, util.MustParseUUID(deepSelected))
 	if !errors.Is(err, ErrSourceContextTooLarge) || deep.Limits.CommentCount != SourceContextMaxComments+1 {
 		t.Fatalf("deep thread = limits %+v err %v, want %d-comment rejection", deep.Limits, err, SourceContextMaxComments+1)
 	}
 
-	wideRoot := insertComment("wide root", nil)
+	// One root (g = 0) and SourceContextMaxComments replies to it.
 	var wideSelected string
-	for i := 0; i < SourceContextMaxComments; i++ {
-		wideSelected = insertComment("wide reply", wideRoot)
+	if err := pool.QueryRow(ctx, `
+		WITH ids AS (
+			SELECT g, gen_random_uuid() AS id FROM generate_series(0, $4::int) AS g
+		), inserted AS (
+			INSERT INTO comment (id, issue_id, workspace_id, author_type, author_id, content, parent_id, created_at)
+			SELECT id, $1, $2, 'member', $3,
+			       CASE WHEN g = 0 THEN 'wide root' ELSE 'wide reply' END,
+			       CASE WHEN g = 0 THEN NULL ELSE (SELECT root.id FROM ids AS root WHERE root.g = 0) END,
+			       now() + g * interval '1 microsecond'
+			FROM ids
+		)
+		SELECT id FROM ids ORDER BY g DESC LIMIT 1
+	`, sourceIssueID, workspaceID, userID, SourceContextMaxComments).Scan(&wideSelected); err != nil {
+		t.Fatalf("insert wide thread: %v", err)
 	}
 	wide, err := BuildSourceContext(ctx, q, workspaceUUID, util.MustParseUUID(wideSelected))
 	if !errors.Is(err, ErrSourceContextTooLarge) || wide.Limits.CommentCount != SourceContextMaxComments+1 {
@@ -1044,13 +1056,12 @@ func TestBuildSourceContextRejectsCyclesAndEveryLimitWithoutTruncation(t *testin
 	}
 
 	attachmentCommentID := insertComment("attachment limits", nil)
-	for i := 0; i < SourceContextMaxAttachments+1; i++ {
-		if _, err := pool.Exec(ctx, `
-			INSERT INTO attachment (workspace_id, issue_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
-			VALUES ($1, $2, 'member', $3, $4, $5, 'text/plain', 1)
-		`, workspaceID, sourceIssueID, userID, fmt.Sprintf("count-%03d.txt", i), fmt.Sprintf("local://count-%03d", i)); err != nil {
-			t.Fatalf("insert count attachment %d: %v", i, err)
-		}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO attachment (workspace_id, issue_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		SELECT $1, $2, 'member', $3, format('count-%s.txt', lpad(g::text, 3, '0')), format('local://count-%s', lpad(g::text, 3, '0')), 'text/plain', 1
+		FROM generate_series(0, $4::int - 1) AS g
+	`, workspaceID, sourceIssueID, userID, SourceContextMaxAttachments+1); err != nil {
+		t.Fatalf("insert count attachments: %v", err)
 	}
 	tooManyAttachments, err := BuildSourceContext(ctx, q, workspaceUUID, util.MustParseUUID(attachmentCommentID))
 	if !errors.Is(err, ErrSourceContextTooLarge) || tooManyAttachments.Limits.AttachmentCount != SourceContextMaxAttachments+1 {

@@ -1,16 +1,22 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import { STATUS_CONFIG, STATUS_ORDER } from "../issues/config";
-import type { IssueStatusCategory, IssueStatusEntry } from "../types";
+import {
+  BUILT_IN_STATUS_CATEGORY,
+  BUILT_IN_STATUS_LABEL,
+  BUILT_IN_STATUS_ORDER,
+  STATUS_CONFIG,
+  STATUS_ORDER,
+} from "../issues/config";
+import { normalizeIssueStatusCategory } from "../issues/config/status";
+import type { BuiltInIssueStatus, IssueStatusCategory, IssueStatusEntry } from "../types";
 
 /**
  * The workspace issue status catalog (MUL-6243).
  *
- * A workspace always has the 7 built-in statuses and may define custom ones.
- * Every status — built-in or custom — belongs to exactly one of the 7
- * CATEGORIES, and the category is what determines platform behavior, board
- * column and presentation. So this catalog answers one question for the UI:
- * given a status key stored on an issue, what is its label, color and category?
+ * A workspace always has seven built-in statuses and may define custom ones.
+ * Every status belongs to one of four lifecycle categories used for grouping
+ * and presentation. Concrete status behavior remains keyed by status on the
+ * server and is deliberately not inferred from the category.
  */
 
 export const issueStatusKeys = {
@@ -50,7 +56,7 @@ export interface IssueStatusCatalog {
   statuses: IssueStatusEntry[];
   /** Assignable statuses — `statuses` minus archived ones. */
   activeStatuses: IssueStatusEntry[];
-  /** Category for a status key; falls back to the key when it is a built-in, else "todo". */
+  /** Category for a status key; falls back to the built-in map, else "unstarted". */
   categoryOf: (statusKey: string) => IssueStatusCategory;
   /** Human label for a status key; falls back to the category label, then the raw key. */
   labelOf: (statusKey: string) => string;
@@ -60,7 +66,7 @@ export interface IssueStatusCatalog {
    * The `#rrggbb` a surface must paint a status with, or null when it keeps
    * its category's semantic token.
    *
-   * ALWAYS null for a built-in. The 7 built-ins carry a seeded hex in the
+   * ALWAYS null for a built-in. The seven built-ins carry a seeded hex in the
    * catalog, but they are not recolorable (the server rejects any edit to a
    * system row) and every surface renders them from the token — `text-success`
    * and friends, which is what makes them follow the theme into dark mode. A
@@ -68,6 +74,8 @@ export interface IssueStatusCatalog {
    * and drifts from the same status two pixels away. (MUL-6440)
    */
   colorOf: (statusKey: string) => string | null;
+  /** Custom visual geometry; null keeps the default. Never drives behavior. */
+  iconOf: (statusKey: string) => string | null;
   /** ACTIVE statuses belonging to one category, in display order. */
   inCategory: (category: IssueStatusCategory) => IssueStatusEntry[];
   /** True once the catalog has loaded; false while it is still in flight. */
@@ -105,39 +113,55 @@ export interface IssueStatusCatalog {
    *   custom status once the creation flag was on, which means the fleet was
    *   already serving this version.
    * - Cold load. Until the catalog lands, `categoryOf` cannot tell a custom key
-   *   from an unknown one and falls back to `todo`. Routing on that guess sends
-   *   a saved `qa` filter to the todo column and renders an empty board.
+   *   from an unknown one and falls back to `unstarted`. Routing on that guess
+   *   sends a saved `qa` filter to the wrong column and renders an empty board.
    *
-   * A workspace with no custom statuses therefore keeps the exact request it
-   * made before this feature — which is also what keeps its board off the extra
-   * catalog reads the category contract needs. (MUL-6243)
+   * Retained for callers that need to distinguish whether a workspace has
+   * extended its status vocabulary. (MUL-6243)
    */
   hasCustomStatuses: boolean;
 }
 
-const BUILT_IN = new Set<string>(STATUS_ORDER);
+const BUILT_IN = new Set<string>(BUILT_IN_STATUS_ORDER);
+const CATEGORY = new Set<string>(STATUS_ORDER);
 
 const CATEGORY_RANK = new Map<string, number>(STATUS_ORDER.map((c, i) => [c, i]));
+const BUILT_IN_RANK = new Map<string, number>(
+  BUILT_IN_STATUS_ORDER.map((status, index) => [status, index]),
+);
 
 /**
  * The server's catalog ordering, mirrored for client-side re-sorts.
- * Category rank, then intra-category position, then key as a stable tiebreak —
+ * Category rank, then intra-category position, then built-in rank/key to break ties —
  * see `ListIssueStatusEntries` in `issue_status.sql`. An optimistic reorder has
  * to re-sort with this or the new positions land in the cache while the list
  * still renders in the old order.
  */
 export function compareIssueStatusEntries(a: IssueStatusEntry, b: IssueStatusEntry): number {
   const rank =
-    (CATEGORY_RANK.get(a.category) ?? STATUS_ORDER.length) -
-    (CATEGORY_RANK.get(b.category) ?? STATUS_ORDER.length);
+    (CATEGORY_RANK.get(normalizeIssueStatusCategory(a.category) ?? "") ?? STATUS_ORDER.length) -
+    (CATEGORY_RANK.get(normalizeIssueStatusCategory(b.category) ?? "") ?? STATUS_ORDER.length);
   if (rank !== 0) return rank;
   if (a.position !== b.position) return a.position - b.position;
+  if (a.is_system !== b.is_system) return a.is_system ? -1 : 1;
+  if (a.is_system && b.is_system) {
+    const builtInRank =
+      (BUILT_IN_RANK.get(a.key) ?? BUILT_IN_STATUS_ORDER.length) -
+      (BUILT_IN_RANK.get(b.key) ?? BUILT_IN_STATUS_ORDER.length);
+    if (builtInRank !== 0) return builtInRank;
+  }
   return a.key.localeCompare(b.key);
 }
 
 export function isIssueStatusCategory(value: string): value is IssueStatusCategory {
+  return CATEGORY.has(value);
+}
+
+export function isBuiltInIssueStatus(value: string): value is BuiltInIssueStatus {
   return BUILT_IN.has(value);
 }
+
+export { normalizeIssueStatusCategory } from "../issues/config/status";
 
 /**
  * The color to paint one catalog entry with — its own hex for a custom status,
@@ -164,13 +188,11 @@ export function buildIssueStatusCatalog(
 
   const categoryOf = (statusKey: string): IssueStatusCategory => {
     const category = byKey.get(statusKey)?.category;
-    if (category && isIssueStatusCategory(category)) return category;
-    // A built-in key IS its own category, so an unloaded catalog still resolves
-    // all 7 correctly — which is what keeps the default workspace rendering
-    // identically before the fetch lands.
-    if (isIssueStatusCategory(statusKey)) return statusKey;
+    const normalized = category ? normalizeIssueStatusCategory(category) : null;
+    if (normalized) return normalized;
+    if (isBuiltInIssueStatus(statusKey)) return BUILT_IN_STATUS_CATEGORY[statusKey];
     // An unknown custom key: render it somewhere sane rather than dropping it.
-    return "todo";
+    return "unstarted";
   };
 
   return {
@@ -179,13 +201,21 @@ export function buildIssueStatusCatalog(
     categoryOf,
     entryOf: (statusKey) => byKey.get(statusKey),
     colorOf: (statusKey) => issueStatusColor(byKey.get(statusKey)),
+    iconOf: (statusKey) => {
+      const entry = byKey.get(statusKey);
+      return entry && !entry.is_system ? entry.icon || null : null;
+    },
     labelOf: (statusKey) => {
       const entry = byKey.get(statusKey);
       if (entry) return entry.name;
-      if (isIssueStatusCategory(statusKey)) return STATUS_CONFIG[statusKey]?.label ?? statusKey;
+      if (isBuiltInIssueStatus(statusKey)) return BUILT_IN_STATUS_LABEL[statusKey];
+      if (isIssueStatusCategory(statusKey)) return STATUS_CONFIG[statusKey].label;
       return statusKey;
     },
-    inCategory: (category) => list.filter((e) => e.category === category && !e.archived_at),
+    inCategory: (category) =>
+      list.filter(
+        (e) => normalizeIssueStatusCategory(e.category) === category && !e.archived_at,
+      ),
     isLoaded: entries !== undefined,
     // Defaults describe a non-React caller holding a list it already has:
     // resolved when entries are present, still pending when they are not.

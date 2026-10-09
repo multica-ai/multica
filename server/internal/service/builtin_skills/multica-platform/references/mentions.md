@@ -150,6 +150,10 @@ not injected into an already running prompt. Different threads queue independent
   `editing_comment_id` ignores pending tasks from the same comment being edited,
   because save cancels those old tasks before it re-computes triggers. It is
   still comment-scoped, not an agent-wide bypass.
+- **A hand-off to the issue assignee because your target is busy.** A reply
+  already routed to an agent stays with that agent; an offline or queued target
+  is waited for, never swapped for the issue assignee. Mention whoever else you
+  need by hand.
 - **An archived agent, or one with no runtime bound** (likewise a squad whose
   leader is): blocked with `target_unavailable` and `runtime_offline`
   respectively. Both are checked only AFTER the invoke gate, so a caller who may
@@ -197,6 +201,14 @@ re-evaluates surviving inputs. These cancelled runs expose
 `cancelled_by_comment_change: true` in task responses. Unstarted runs without
 replies remain in execution history but do not create cancelled comment blocks;
 manual cancellations and runs that already executed remain visible.
+
+Deleting removes only that comment, never its replies. A deleted comment that
+still has replies stays in `comment list` output as a placeholder — `deleted_at`
+set, `content` empty, no attachments — so the replies keep their `parent_id`.
+It carries no input: it never triggers a run, and there is nothing in it to
+answer. It can still be the `--parent` of a reply that continues its thread.
+Against a server that predates this, `comment delete` refuses instead of
+deleting the replies too.
 
 An edit is treated as a fresh action — it re-derives the comment's lineage from
 the editing action. Only the agent author editing its OWN comment re-stamps the

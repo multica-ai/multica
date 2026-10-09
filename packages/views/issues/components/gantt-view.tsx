@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Issue, IssueStatusCategory } from "@multica/core/types";
-import { issueStatusCategory } from "@multica/core/issues";
+import { issueStatusCategory, statusColumnKeys } from "@multica/core/issues";
 import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -18,6 +19,12 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { AppLink } from "../../navigation";
+import {
+  PEEK_TARGET_ATTR,
+  useIsIssuePeeked,
+  useIssuePeekActions,
+  useIssuePeekLinkProps,
+} from "../surface/peek-context";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { StatusIcon } from "./status-icon";
@@ -296,13 +303,10 @@ function BackgroundLayer({
 // lookup `undefined` for every custom key, so the bar lost its color entirely.
 // (MUL-6243)
 const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
-  backlog: "bg-muted-foreground/60",
-  todo: "bg-muted-foreground/70",
-  in_progress: "bg-warning",
-  in_review: "bg-success",
+  unstarted: "bg-muted-foreground/70",
+  started: "bg-warning",
   done: "bg-info",
-  blocked: "bg-destructive",
-  cancelled: "bg-muted-foreground/40",
+  closed: "bg-muted-foreground/40",
 };
 
 // ---------------------------------------------------------------------------
@@ -324,11 +328,14 @@ function ScheduledRow({
   const locale = useLocale();
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const { colorOf, iconOf } = useIssueStatuses(wsId);
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const peeked = useIsIssuePeeked(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue.id);
 
   const start = parseDay(issue.start_date);
   const due = parseDay(issue.due_date);
@@ -366,18 +373,27 @@ function ScheduledRow({
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
+        {...{ [PEEK_TARGET_ATTR]: issue.id }}
         className="flex border-b border-foreground/5 hover:bg-accent/30 transition-colors"
         style={{ height: ROW_HEIGHT }}
       >
-        {/* Sticky label cell */}
+        {/* Sticky label cell — it also carries the peeked mark, since its
+            opaque background covers the row's own. */}
         <AppLink
           href={p.issueDetail(issue.id)}
           newTabTitle={issue.identifier}
-          className="sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0"
+          className={cn(
+            "sticky left-0 z-[1] flex shrink-0 items-center gap-2 border-r bg-background px-3 text-body min-w-0",
+            peeked &&
+              "bg-[color-mix(in_oklab,var(--brand)_6%,var(--background))] shadow-[inset_2px_0_0_var(--brand)]",
+          )}
           style={{ width: LEFT_COL_WIDTH }}
+          {...peekLinkProps}
         >
           <StatusIcon
             status={issue.status}
+            color={colorOf(issue.status)}
+            icon={iconOf(issue.status)}
             category={issueStatusCategory(issue) ?? undefined}
             className="h-3.5 w-3.5"
           />
@@ -408,12 +424,13 @@ function ScheduledRow({
                   <AppLink
                     href={p.issueDetail(issue.id)}
                     newTabTitle={issue.identifier}
+                    {...peekLinkProps}
                     className={cn(
                       "absolute top-1/2 -translate-y-1/2 transition-opacity hover:opacity-90",
                       bar.isMarker
                         ? "h-3 w-3 rotate-45 rounded-[2px]"
                         : "h-5 rounded-md",
-                      STATUS_BAR_BG[issueStatusCategory(issue) ?? "todo"],
+                      STATUS_BAR_BG[issueStatusCategory(issue) ?? "unstarted"],
                       inverted && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
                     )}
                     style={{ left: bar.left, width: bar.width }}
@@ -458,6 +475,10 @@ export function GanttView({ issues }: { issues: Issue[] }) {
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const act = useViewStoreApi().getState();
+  // Board order for `sort=status`, archived included: an issue can still sit on
+  // an archived status and has to rank with the rest (MUL-7379).
+  const statusCatalog = useIssueStatuses(useWorkspaceId());
+  const statusOrder = useMemo(() => statusColumnKeys(statusCatalog, true), [statusCatalog]);
 
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const dayPx = DAY_PX_BY_ZOOM[zoom];
@@ -472,8 +493,15 @@ export function GanttView({ issues }: { issues: Issue[] }) {
     // "position" makes no sense on a gantt — default to start_date asc when
     // the user hasn't picked a more specific sort.
     const sortField = sortBy === "position" ? "start_date" : sortBy;
-    return sortIssues(issues, sortField, sortDirection);
-  }, [issues, sortBy, sortDirection]);
+    return sortIssues(issues, sortField, sortDirection, statusOrder);
+  }, [issues, sortBy, sortDirection, statusOrder]);
+
+  // Side peek steps through the rows top to bottom.
+  const peek = useIssuePeekActions();
+  useEffect(() => {
+    peek?.publishColumns([scheduled.map((issue) => issue.id)]);
+  }, [peek, scheduled]);
+  useEffect(() => () => peek?.publishColumns(null), [peek]);
 
   const range = useMemo(
     () => computeRange(scheduled, today, zoom),

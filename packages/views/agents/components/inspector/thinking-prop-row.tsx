@@ -125,6 +125,13 @@ function pickModelEntry(
   // support. Fail closed (no preview): the row hides unless a stale level is
   // persisted, in which case it still renders so the orphan can be cleared.
   // Mirrors the backend ValidateThinkingLevel. (MUL-4347)
-  if (provider === "codex") return undefined;
+  //
+  // omp is fenced off for the same reason with a different cause: its
+  // `omp models --json` catalog marks no default at all and sorts by
+  // provider/id, so `models[0]` is arbitrary — and at task time omp resolves
+  // its own default role model, then clamps the level to what that model
+  // supports. Previewing any entry here would offer a level the real model may
+  // silently lower. (MUL-7412)
+  if (provider === "codex" || provider === "omp") return undefined;
   return models.find((m) => m.default) ?? models[0];
 }

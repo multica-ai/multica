@@ -7,7 +7,6 @@ import {
   FolderGit,
   FolderOpen,
   GitBranch,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -19,6 +18,7 @@ import {
   useDeleteProjectResource,
   useUpdateProjectResource,
 } from "@multica/core/projects";
+import { splitGithubUrlRef } from "@multica/core/github";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
@@ -55,6 +55,8 @@ import {
   LocalDirectoryModeDialog,
   type WorktreeUnavailableReason,
 } from "./local-directory-mode-dialog";
+import { GithubRefDialog } from "./github-ref-dialog";
+import { GithubRefField, githubRefHasError } from "./github-ref-field";
 import { localDirectoryLabel } from "./local-directory-label";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
@@ -102,6 +104,10 @@ type ModeDialogState = {
   label?: string;
 };
 
+type RefDialogState = {
+  resource: ProjectResource & { resource_ref: GithubRepoResourceRef };
+};
+
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -114,6 +120,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const [modeDialog, setModeDialog] = useState<ModeDialogState | null>(null);
   const [modeSaving, setModeSaving] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
+  const [refDialog, setRefDialog] = useState<RefDialogState | null>(null);
+  const [refSaving, setRefSaving] = useState(false);
+  const [refError, setRefError] = useState<string | null>(null);
 
   const { data: resources = [] } = useQuery(
     projectResourcesOptions(wsId, projectId),
@@ -173,11 +182,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const filteredRepos =
     workspace?.repos?.filter((repo) => repo.url.toLowerCase().includes(repoQuery)) ?? [];
 
-  const handleAttach = async (url: string) => {
+  const handleAttach = async (url: string, ref?: string) => {
     try {
       await createResource.mutateAsync({
         resource_type: "github_repo",
-        resource_ref: { url },
+        // Omit the key entirely when empty rather than sending "": an absent
+        // ref is what "use the default branch" looks like on the wire.
+        resource_ref: ref ? { url, ref } : { url },
       });
       toast.success(t(($) => $.resources.toast_attached));
     } catch (err) {
@@ -311,6 +322,45 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
+  const handleSaveRef = async (nextRef: string) => {
+    if (!refDialog || refSaving) return;
+    const ref = refDialog.resource.resource_ref;
+    if ((ref.ref ?? "") === nextRef) {
+      setRefDialog(null);
+      return;
+    }
+    setRefSaving(true);
+    setRefError(null);
+    try {
+      await updateResource.mutateAsync({
+        resourceId: refDialog.resource.id,
+        data: {
+          // Spread first so the url and any other ref field survive the edit —
+          // the server replaces the whole ref, it does not deep-merge. Clearing
+          // drops the key, which is how the default branch is restored.
+          resource_ref: nextRef
+            ? { ...ref, ref: nextRef }
+            : { ...ref, ref: undefined },
+        },
+      });
+      toast.success(
+        nextRef
+          ? t(($) => $.resources.toast_ref_updated)
+          : t(($) => $.resources.toast_ref_cleared),
+      );
+      setRefDialog(null);
+    } catch (err) {
+      // Keep the dialog open so the rejected value is still there to fix.
+      setRefError(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.resources.toast_ref_update_failed),
+      );
+    } finally {
+      setRefSaving(false);
+    }
+  };
+
   const handleRemove = async (resource: ProjectResource) => {
     try {
       await deleteResource.mutateAsync(resource.id);
@@ -321,37 +371,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           ? err.message
           : t(($) => $.resources.toast_remove_failed),
       );
-    }
-  };
-
-  const handleRenameLocalDirectory = async (
-    resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
-    nextLabel: string,
-  ) => {
-    const trimmed = nextLabel.trim();
-    if (trimmed === localDirectoryLabel(resource)) return;
-    try {
-      // Top-level label ONLY — renaming must not resend resource_ref.
-      //
-      // The server replaces the ref wholesale with whatever it can parse, so a
-      // server that predates a ref field drops it and answers 200. On a backend
-      // rolled back below v0.4.25 (documented as supported while the runtimes
-      // stay current) that turned "rename this folder" into "silently forget
-      // this folder was isolated", and the next task edited the working copy
-      // (#7113). Omitting the ref keeps the stored one untouched on every
-      // server version — the same reason it must not be resent for any other
-      // unrelated edit either.
-      await updateResource.mutateAsync({
-        resourceId: resource.id,
-        data: { label: trimmed },
-      });
-      toast.success(t(($) => $.resources.toast_local_renamed));
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : t(($) => $.resources.toast_local_rename_failed);
-      toast.error(msg);
     }
   };
 
@@ -380,10 +399,18 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 <ResourceRow
                   key={resource.id}
                   resource={resource}
+                  githubRepoDescription={
+                    isGithubRef(resource)
+                      ? workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
+                          ?.description
+                      : undefined
+                  }
                   localDaemonId={localDaemonId}
-                  canEdit={desktopMode}
                   onRemove={() => handleRemove(resource)}
-                  onRenameLocalDirectory={handleRenameLocalDirectory}
+                  onEditGithubRef={(target) => {
+                    setRefError(null);
+                    setRefDialog({ resource: target });
+                  }}
                   onEditLocalDirectoryMode={(target) => {
                     setModeError(null);
                     setModeDialog({
@@ -463,14 +490,23 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
                         >
                           <FolderGit className="size-3.5" />
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span className="truncate flex-1">{githubShortLabel(repo.url)}</span>
-                              }
-                            />
-                            <TooltipContent side="top">{repo.url}</TooltipContent>
-                          </Tooltip>
+                          <span className="min-w-0 flex-1">
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="block truncate">
+                                    {githubShortLabel(repo.url)}
+                                  </span>
+                                }
+                              />
+                              <TooltipContent side="top">{repo.url}</TooltipContent>
+                            </Tooltip>
+                            {repo.description?.trim() && (
+                              <span className="block truncate text-micro text-muted-foreground">
+                                {repo.description.trim()}
+                              </span>
+                            )}
+                          </span>
                           {isAttached && (
                             <span className="text-micro text-muted-foreground">
                               {t(($) => $.resources.attached_badge)}
@@ -483,8 +519,8 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 </>
               )}
               <CustomRepoForm
-                onSubmit={async (url) => {
-                  await handleAttach(url);
+                onSubmit={async (url, ref) => {
+                  await handleAttach(url, ref);
                   setAddOpen(false);
                 }}
               />
@@ -522,6 +558,22 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             </div>
           )}
         </div>
+      )}
+      {refDialog && (
+        <GithubRefDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) {
+              setRefDialog(null);
+              setRefError(null);
+            }
+          }}
+          url={refDialog.resource.resource_ref.url}
+          value={refDialog.resource.resource_ref.ref ?? ""}
+          errorMessage={refError ?? undefined}
+          saving={refSaving}
+          onConfirm={(next) => void handleSaveRef(next)}
+        />
       )}
       {modeDialog && (
         <LocalDirectoryModeDialog
@@ -577,13 +629,12 @@ function worktreeUnavailableReason(
 
 interface ResourceRowProps {
   resource: ProjectResource;
+  githubRepoDescription?: string;
   localDaemonId: string | null;
-  canEdit: boolean;
   onRemove: () => void;
-  onRenameLocalDirectory: (
-    resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
-    nextLabel: string,
-  ) => Promise<void>;
+  onEditGithubRef: (
+    resource: ProjectResource & { resource_ref: GithubRepoResourceRef },
+  ) => void;
   onEditLocalDirectoryMode: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
   ) => void;
@@ -591,43 +642,91 @@ interface ResourceRowProps {
 
 function ResourceRow({
   resource,
+  githubRepoDescription,
   localDaemonId,
-  canEdit,
   onRemove,
-  onRenameLocalDirectory,
+  onEditGithubRef,
   onEditLocalDirectoryMode,
 }: ResourceRowProps) {
   const { t } = useT("projects");
   if (isGithubRef(resource)) {
     const ref = resource.resource_ref;
-    const display = resource.label || (ref.ref ? `${githubShortLabel(ref.url)} @ ${ref.ref}` : githubShortLabel(ref.url));
+    const display = resource.label || githubShortLabel(ref.url);
+    // Workspace repository descriptions are source-of-truth metadata. They stay
+    // live here rather than being copied into the resource label, while an
+    // explicit resource label remains the user's preferred primary text.
+    const description = resource.label ? undefined : githubRepoDescription?.trim();
     const tooltip = ref.ref ? `${ref.url}\nref: ${ref.ref}` : ref.url;
     return (
-      <div className="flex items-center gap-2 text-caption group">
-        <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
+      <div className="text-caption group">
+        <div className="flex items-center gap-2">
+          <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
+          <div className="min-w-0 flex-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <a
+                    href={ref.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block truncate hover:underline"
+                  >
+                    {display}
+                  </a>
+                }
+              />
+              <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>
+            </Tooltip>
+            {description && (
+              <span className="block truncate text-micro text-muted-foreground">
+                {description}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => onEditGithubRef(resource)}
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+            title={t(($) => $.resources.ref_edit_tooltip)}
+          >
+            <GitBranch className="size-3 text-muted-foreground" />
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+            title={t(($) => $.resources.remove_tooltip)}
+          >
+            <Trash2 className="size-3 text-muted-foreground" />
+          </button>
+        </div>
+        {/* Its own line rather than appended to the link text: a custom label
+            takes that slot, and this panel is narrow enough that an inline
+            badge truncates the repository name away — which is exactly when
+            someone needs to read both.
+            
+            Rendered even when nothing is pinned, showing "Default branch".
+            Without it, clearing a branch makes the line vanish, which reads
+            the same as the setting never having existed — there is no way to
+            confirm from the panel that the repo is deliberately on its
+            default, or that this row has a branch setting at all. */}
         <Tooltip>
           <TooltipTrigger
             render={
-              <a
-                href={ref.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="truncate flex-1 hover:underline"
-              >
-                {display}
-              </a>
+              <div className="flex items-center gap-1 pl-[1.375rem] text-micro text-muted-foreground">
+                <GitBranch className="size-3 shrink-0" />
+                <span className="truncate">
+                  {ref.ref || t(($) => $.resources.ref_default_label)}
+                </span>
+              </div>
             }
           />
-          <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>
+          <TooltipContent side="top">
+            {ref.ref
+              ? t(($) => $.resources.ref_badge_tooltip, { ref: ref.ref })
+              : t(($) => $.resources.ref_default_tooltip)}
+          </TooltipContent>
         </Tooltip>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-          title={t(($) => $.resources.remove_tooltip)}
-        >
-          <Trash2 className="size-3 text-muted-foreground" />
-        </button>
       </div>
     );
   }
@@ -637,9 +736,7 @@ function ResourceRow({
       <LocalDirectoryRow
         resource={resource}
         localDaemonId={localDaemonId}
-        canEdit={canEdit}
         onRemove={onRemove}
-        onRename={onRenameLocalDirectory}
         onEditMode={onEditLocalDirectoryMode}
       />
     );
@@ -665,12 +762,7 @@ function ResourceRow({
 interface LocalDirectoryRowProps {
   resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
   localDaemonId: string | null;
-  canEdit: boolean;
   onRemove: () => void;
-  onRename: (
-    resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
-    nextLabel: string,
-  ) => Promise<void>;
   onEditMode: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
   ) => void;
@@ -679,9 +771,7 @@ interface LocalDirectoryRowProps {
 function LocalDirectoryRow({
   resource,
   localDaemonId,
-  canEdit,
   onRemove,
-  onRename,
   onEditMode,
 }: LocalDirectoryRowProps) {
   const { t } = useT("projects");
@@ -691,27 +781,10 @@ function LocalDirectoryRow({
   const isForeignDaemon =
     localDaemonId !== null && ref.daemon_id !== localDaemonId;
   const isLocalUnknown = localDaemonId === null;
-  // "disabled" in the spec sense — visual de-emphasis + no chat hint, and
-  // rename is hidden on foreign / unknown-daemon rows because the label
-  // belongs to the owning device. Delete stays available so the user can
-  // drop a stale registration from any device.
+  // "disabled" in the spec sense — visual de-emphasis + no chat hint. Both
+  // actions stay available so the user can drop or reconfigure a stale
+  // registration from any device.
   const mismatch = isForeignDaemon || isLocalUnknown;
-
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(display);
-
-  const startEdit = () => {
-    setDraft(display);
-    setEditing(true);
-  };
-  const commit = async () => {
-    setEditing(false);
-    await onRename(resource, draft);
-  };
-  const cancel = () => {
-    setEditing(false);
-    setDraft(display);
-  };
 
   return (
     <div
@@ -720,50 +793,32 @@ function LocalDirectoryRow({
       }`}
     >
       <FolderOpen className="size-3.5 text-muted-foreground shrink-0" />
-      {editing ? (
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => void commit()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void commit();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              cancel();
-            }
-          }}
-          className="flex-1 min-w-0 rounded-sm border bg-transparent px-1 py-0.5 text-caption outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          aria-label={t(($) => $.resources.local_rename_label)}
+      {/* The name is the folder's own (or whatever a label update stored);
+          there is deliberately no rename here. A folder is identified by its
+          path, and a pencil that only retitled the row read as a broken edit
+          action beside the branch and remove controls (MUL-7525). */}
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="truncate flex-1">{display}</span>}
         />
-      ) : (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="truncate flex-1">{display}</span>
-            }
-          />
-          <TooltipContent side="top">
-            <div className="space-y-0.5 text-micro">
-              <div className="font-mono">{ref.local_path}</div>
-              {mismatch && (
-                <div className="text-muted-foreground">
-                  {isLocalUnknown
-                    ? t(($) => $.resources.local_no_daemon_tooltip)
-                    : t(($) => $.resources.local_other_machine_tooltip)}
-                </div>
-              )}
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      )}
+        <TooltipContent side="top">
+          <div className="space-y-0.5 text-micro">
+            <div className="font-mono">{ref.local_path}</div>
+            {mismatch && (
+              <div className="text-muted-foreground">
+                {isLocalUnknown
+                  ? t(($) => $.resources.local_no_daemon_tooltip)
+                  : t(($) => $.resources.local_other_machine_tooltip)}
+              </div>
+            )}
+          </div>
+        </TooltipContent>
+      </Tooltip>
       {/* Always visible, unlike the hover-only actions: without it there is no
           way to tell whether tasks on this folder edit it directly or hand back
           a branch, which is the first thing someone asks when a task queues (or
           does not). */}
-      {mode === "worktree" && !editing && (
+      {mode === "worktree" && (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -779,28 +834,16 @@ function LocalDirectoryRow({
         </Tooltip>
       )}
       {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
-          it works from the web app or another device, unlike rename (whose
-          label belongs to the owning machine) or the folder picker. */}
-      {!editing && (
-        <button
-          type="button"
-          onClick={() => onEditMode(resource)}
-          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-          title={t(($) => $.resources.mode_edit_tooltip)}
-        >
-          <GitBranch className="size-3 text-muted-foreground" />
-        </button>
-      )}
-      {canEdit && !mismatch && !editing && (
-        <button
-          type="button"
-          onClick={startEdit}
-          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-          title={t(($) => $.resources.local_rename_tooltip)}
-        >
-          <Pencil className="size-3 text-muted-foreground" />
-        </button>
-      )}
+          it works from the web app or another device, unlike the folder
+          picker. */}
+      <button
+        type="button"
+        onClick={() => onEditMode(resource)}
+        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+        title={t(($) => $.resources.mode_edit_tooltip)}
+      >
+        <GitBranch className="size-3 text-muted-foreground" />
+      </button>
       <button
         type="button"
         onClick={onRemove}
@@ -816,41 +859,71 @@ function LocalDirectoryRow({
 function CustomRepoForm({
   onSubmit,
 }: {
-  onSubmit: (url: string) => Promise<void> | void;
+  onSubmit: (url: string, ref?: string) => Promise<void> | void;
 }) {
   const { t } = useT("projects");
   const [url, setUrl] = useState("");
+  const [ref, setRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const refInvalid = githubRefHasError(ref);
+
+  // Someone who wants a branch copies it out of the address bar, so a pasted
+  // .../tree/<branch> URL is split into its two halves here rather than stored
+  // whole as a clone URL that does not exist. The result lands in the visible
+  // fields, so a wrong guess is obvious before anything is saved.
+  //
+  // Normalising the URL is unconditional. Gating it on the branch field being
+  // empty meant a second pasted browse URL was stored whole. Whether to
+  // overwrite the BRANCH is the separate question, and the pasted pair wins:
+  // the branch field only appears once a URL is present, so a value sitting in
+  // it came from the previous URL rather than from something typed ahead.
+  const handleUrlChange = (next: string) => {
+    const split = splitGithubUrlRef(next);
+    setUrl(split.url);
+    if (split.ref) setRef(split.ref);
+  };
+
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = url.trim();
-    if (!trimmed) return;
+    const trimmedUrl = url.trim();
+    const trimmedRef = ref.trim();
+    if (!trimmedUrl || refInvalid) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmedUrl, trimmedRef || undefined);
       setUrl("");
+      setRef("");
     } finally {
       setSubmitting(false);
     }
   };
   return (
-    <form onSubmit={handle} className="flex items-center gap-1.5 pt-1 border-t">
-      <input
-        type="text"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder={t(($) => $.resources.url_placeholder)}
-        className="flex-1 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
-      />
-      <Button
-        type="submit"
-        size="sm"
-        variant="ghost"
-        className="h-6 px-2 text-caption"
-        disabled={!url.trim() || submitting}
-      >
-        {t(($) => $.resources.url_submit)}
-      </Button>
+    <form onSubmit={handle} className="space-y-1.5 pt-1 border-t">
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => handleUrlChange(e.target.value)}
+          aria-label={t(($) => $.resources.popover_title)}
+          placeholder={t(($) => $.resources.url_placeholder)}
+          className="flex-1 min-w-0 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-caption"
+          disabled={!url.trim() || refInvalid || submitting}
+        >
+          {t(($) => $.resources.url_submit)}
+        </Button>
+      </div>
+      {/* Only after a URL is entered: an empty attach form should still read as
+          one field, and the default branch is the right answer often enough
+          that this must not look like a second required step. */}
+      {url.trim() && (
+        <GithubRefField id="attach-repo-ref" value={ref} onChange={setRef} />
+      )}
     </form>
   );
 }

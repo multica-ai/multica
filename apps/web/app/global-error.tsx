@@ -51,6 +51,9 @@ export default function GlobalError({
           <button
             type="button"
             onClick={reset}
+            // This boundary replaces the root layout, so neither design
+            // tokens nor utility classes are available here. Keep this 6px
+            // fallback aligned with the resolved product `radius-md`.
             style={{
               marginTop: 16,
               padding: "8px 16px",
@@ -90,5 +93,10 @@ const EMERGENCY_COPY = {
     title: "문제가 발생했습니다",
     description: "페이지에서 예기치 않은 오류가 발생했습니다. 다시 불러오세요.",
     reload: "다시 불러오기",
+  },
+  fr: {
+    title: "Une erreur s'est produite",
+    description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
+    reload: "Recharger",
   },
 } as const;

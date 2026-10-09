@@ -220,7 +220,7 @@ function FancyView({
         ? t(($) => $.step_runtime.hint_pick)
         : phase === "scanning"
           ? t(($) => $.step_runtime.hint_waiting)
-          : t(($) => $.step_runtime.hint_skip_or_refresh);
+          : undefined;
 
   return (
     <>
@@ -357,9 +357,6 @@ function FoundView({
       <h2 className="text-title-sm font-medium tracking-tight text-foreground">
         {t(($) => $.step_runtime.found_headline)}
       </h2>
-      <p className="mt-2 text-body text-muted-foreground">
-        {t(($) => $.step_runtime.found_lede)}
-      </p>
 
       <div className="mt-8 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-muted/60 px-4 py-2.5 text-caption">
         <span className="font-semibold text-foreground">
@@ -566,8 +563,8 @@ function SkeletonRuntimeCard() {
     >
       <div className="h-7 w-7 shrink-0 rounded-md bg-muted" />
       <div className="flex-1 space-y-2">
-        <div className="h-3 w-28 rounded bg-muted" />
-        <div className="h-2.5 w-16 rounded bg-muted/70" />
+        <div className="h-3 w-28 rounded-xs bg-muted" />
+        <div className="h-2.5 w-16 rounded-xs bg-muted/70" />
       </div>
       <div className="h-4 w-4 shrink-0 rounded-full border-[1.5px] border-muted" />
     </div>

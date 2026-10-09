@@ -69,7 +69,7 @@ export function ExpandableDescription({
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          className="mt-0.5 rounded text-caption text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+          className="mt-0.5 rounded-xs text-caption text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
         >
           {expanded
             ? t(($) => $.expandable_description.collapse)

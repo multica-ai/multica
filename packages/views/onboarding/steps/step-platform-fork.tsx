@@ -6,7 +6,6 @@ import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -298,9 +297,6 @@ function CliInstallDialog({
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{t(($) => $.step_platform.cli_dialog_title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.step_platform.cli_dialog_description)}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-2">

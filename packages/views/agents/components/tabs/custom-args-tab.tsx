@@ -202,9 +202,6 @@ export function CustomArgsTab({
                 <p className="mt-3 text-body font-medium">
                   {t(($) => $.tab_body.custom_args.empty_title)}
                 </p>
-                <p className="mt-1 max-w-sm text-caption leading-5 text-muted-foreground">
-                  {t(($) => $.tab_body.custom_args.empty_hint)}
-                </p>
               </div>
             ) : null}
 

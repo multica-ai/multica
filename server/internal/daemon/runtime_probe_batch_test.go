@@ -309,6 +309,10 @@ func newBatchFixture(t *testing.T) *batchFixture {
 		online:       make(map[string]bool),
 	}
 
+	// The stubbed probe answers instantly, so the real spacing before a failed
+	// probe's retry would only make every test whose probe fails wait it out.
+	// The retry window is left as it is.
+	stubProbeRetry(t, time.Millisecond, runtimeVersionProbeRetryWindow)
 	origDetect := detectAgentVersion
 	origCheck := checkAgentMinVersion
 	t.Cleanup(func() {

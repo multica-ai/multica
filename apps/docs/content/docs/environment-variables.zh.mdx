@@ -42,7 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
-| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
+| `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数。会话会滑动续期：剩余有效期过半后，持续使用的会话会被续期而不是到期。低于 `60s` 的取值会按 `60s` 处理 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途运行的宽限时间；低于 `150s` 时按 `150s` 处理 |
@@ -156,7 +156,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 用于共享限流、实时事件和 token cache；未设置时实时事件和邀请限流回退到进程内存，认证限流不生效 |
+| `REDIS_URL` | 空 | 所有 Redis 功能共用的唯一连接地址，包括共享限流、实时事件、频道 WebSocket 租约和 token cache |
+| `REDIS_CLUSTER_MODE` | `false` | 设为 `true` 后强制使用 Redis Cluster 客户端，单配置地址也适用；集群模式只能使用数据库 0，且要求 `REALTIME_RELAY_MODE=sharded` |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 托管 Redis 禁止 `CLIENT SETNAME` 时设为 `true` |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码或发起 Google 登录的次数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟验证验证码的次数 |
@@ -191,7 +192,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
 | 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 
-不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
+不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像，并在合并后改状态，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 
 配置步骤见 [GitHub 集成](/github-integration#自托管配置)、[飞书 Bot](/lark-bot-integration#自托管配置)、[Slack Bot](/slack-bot-integration#自托管配置)和 [Telegram Bot](/telegram-bot-integration#自托管配置)。
 
@@ -205,8 +206,11 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 兼容 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 请求未指定模型时使用 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 单次调用的重试上限；`0` 表示禁用重试，`1`–`5` 表示最多重试 N 次 |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | 在每个请求中附带 `chat_template_kwargs: {"enable_thinking": false}`，供支持该字段的网关关闭模型思考 |
 
 `MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
+
+`MULTICA_LLM_DISABLE_THINKING` 面向"模型会先跑一段推理（thinking）并吃掉辅助调用延迟预算"的网关。设为 `true`（或 `1`）时，服务端会在每个请求体中附带 `chat_template_kwargs: {"enable_thinking": false}`；支持透传该字段的网关（vLLM/sglang 类部署、部分 GLM/Qwen 系的 LiteLLM 路由）会因此跳过思考阶段。标准 OpenAI 端点会拒绝未知的请求体字段，所以仅在上游接受时启用。GPT-5.6 系模型在后续提问建议请求中已由服务端附带 `reasoning_effort: none`。会话自动命名不发送推理字段；只有当所配置的上游接受 `chat_template_kwargs` 时，此项才会影响它。可接受的取值为 `true`/`false` 和 `1`/`0`（不区分大小写）；其它取值会让服务启动失败。启动日志会在重试策略旁打印生效状态。
 
 有两个功能会使用这一层，它们都会把聊天内容发送到你配置的 endpoint：
 
@@ -249,7 +253,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 
 守护进程注入智能体 task 的内部上下文见 [Task 运行时环境](/daemon-runtimes#task-运行时环境)。
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。 DeepSeek Harness 另外支持 `MULTICA_DSH_PROFILE_BUNDLE`：当 `multica` profile 缺失时，用它指定要安装的 bundle，多个候选用逗号分隔、按序尝试，每项可以是 npm 包名、目录或打包好的 tarball。该变量默认不设置；Multica 驱动的 `--stdio` 协议正是由这个 profile 提供，所以不设置时不会改动 DSH 的安装，守护进程会报告缺少 profile，而不是注册一个不可用的运行时。Multica 自己的桥接还没有发布到公共 npm registry，如何选取值见[安装智能体运行时](/install-agent-runtime)；这里填的东西会在没有二次确认的情况下装进每一台守护进程宿主的 DSH 家目录，请当作供应链决策来对待。`MULTICA_DSH_PROFILE_BUNDLE` 开启的安装被刻意限制了范围：每个守护进程生命周期最多执行一次，只在探测确认 profile 确实缺失时执行；失败时会把包管理器自身的输出记入日志，且只有重启守护进程后才会重试。探测超时、或返回本守护进程不支持的协议版本时，只做报告，绝不覆盖安装——守护进程不会覆盖一个明显是刻意装上去的 profile。排查时在守护进程日志中搜索 `DSH runtime profile`；要撤销安装，删除 `$DSH_HOME/profiles/multica`（默认 `~/.dsh/profiles/multica`）。`MULTICA_DSH_PLUGIN_PATH` 用于覆盖安装时解析 pnpm 的目录。`dsh plugin` 转发到的那个 pnpm 由 DSH Desktop 放在它私有的 runtime-commands 目录里，macOS 和 Windows 都是如此，守护进程会自动找到并加到 PATH 最前——包括较新版 Desktop 采用的带版本号目录结构。所以只有守护进程找不到的安装位置、或者你想让安装使用自己的 pnpm 时，才需要这个变量。一旦设置就完全取代自动查找：目录不存在时，安装会退回使用守护进程 `PATH` 上的 pnpm，而不是内置的那个。Linux 上没有 DSH Desktop，安装始终使用 `PATH`。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -303,11 +307,16 @@ multica config show
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| `DO_NOT_TRACK` | 空（默认开启遥测） | 设为 `1` 或 `true`（不区分大小写）后，停止首方匿名自托管遥测的采集与发送 |
 | `ANALYTICS_DISABLED` | `false` | 设为 `true` 关闭 PostHog 上报 |
 | `POSTHOG_API_KEY` | 空 | 不设置时统计上报关闭；接入自己的 PostHog 项目时填写 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog 地址 |
 | `METRICS_ADDR` | 空 | Prometheus metrics 监听地址；空表示不启动 |
 | `REALTIME_METRICS_TOKEN` | 空 | 保护 `/health/realtime` 的 bearer token |
+
+首方自托管遥测每天按 UTC 发送一份部署级快照，固定且不可配置的地址为 `https://telemetry.multica.ai/v1/telemetry/events`。快照只包含正式发布版本、工作区数/去重成员数/活跃智能体数/过去 24 小时活跃守护进程数的分桶，以及过去 24 小时运行的开始、完成、失败和取消总数。不会发送名称、邮箱或域名、IP、业务标识符、主机或设备信息、代码仓库、模型或 plugin、prompt/output、评论或聊天、文件路径、token/费用、凭据、错误文本、stack 或日志。此数据只用于了解自托管版本采用、部署规模区间与聚合使用量，不用于计费、授权、认证或安全决策。
+
+`DO_NOT_TRACK` 与 `ANALYTICS_DISABLED` 相互独立：前者控制这份首方匿名快照，后者控制可选的 PostHog 集成。
 
 ## 接下来
 

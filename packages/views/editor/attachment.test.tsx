@@ -698,6 +698,26 @@ describe("Attachment — image dispatch", () => {
     expect(screen.queryByText("Uploading")).toBeNull();
   });
 
+  it("View opens the image preview when the caption is prose, not a filename (MUL-7518)", () => {
+    // Outside an image sequence the dispatcher falls back to its own
+    // single-image preview. It must carry the kind it already resolved over
+    // to the modal — re-reading "报告图表" as a filename finds no extension
+    // and used to leave the reader on "can't be previewed".
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "https://external.example/chart.png",
+          filename: "报告图表",
+          forceKind: "image",
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("View"));
+    expect(screen.queryByText("This file type can't be previewed.")).toBeNull();
+    expect(screen.getByRole("dialog").querySelector("img")).toBeTruthy();
+  });
+
   it("external image (no resolver match) renders <img> and falls back to openByUrl on Download", () => {
     renderWithQuery(
       <Attachment
@@ -769,21 +789,20 @@ describe("Attachment — image dispatch", () => {
 });
 
 describe("Attachment — html dispatch", () => {
-  it("record html with attachmentId renders HtmlAttachmentPreview (no file-card chrome)", () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>chart</p>",
-      originalContentType: "text/html",
-    });
+  // An HTML file is a file (MUL-7649): the row opens it in the viewer, and
+  // nothing is fetched to embed it inline.
+  it("record html renders the file-card row, not an embedded preview", () => {
     const att = makeRecord({
       filename: "report.html",
       content_type: "text/html",
       url: "https://cdn.example.test/report.html",
     });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-    // HtmlAttachmentPreview hides the filename row.
-    expect(screen.queryByText("report.html")).toBeNull();
+    expect(screen.getByText("report.html")).toBeTruthy();
     expect(screen.getByTitle("Preview")).toBeTruthy();
     expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(getAttachmentTextContentMock).not.toHaveBeenCalled();
   });
 
   it("url-only html (no resolver match) falls back to AttachmentCard chrome", () => {

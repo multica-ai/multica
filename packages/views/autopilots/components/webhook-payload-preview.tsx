@@ -113,7 +113,7 @@ export function WebhookPayloadPreview({
               type="button"
               onClick={handleCopy}
               className={cn(
-                "flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors",
+                "flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors",
               )}
             >
               {copied ? (

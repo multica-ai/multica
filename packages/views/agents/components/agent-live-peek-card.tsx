@@ -230,7 +230,7 @@ function LastActivityRow({
             // matching the project's deliberate split between current and
             // historical state.
             <span
-              className="inline-flex items-center gap-0.5 rounded bg-warning/10 px-1 py-0.5 text-micro font-medium text-warning"
+              className="inline-flex items-center gap-0.5 rounded-xs bg-warning/10 px-1 py-0.5 text-micro font-medium text-warning"
               title={failedLabel}
             >
               <AlertTriangle className="h-2.5 w-2.5" />

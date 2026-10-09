@@ -19,22 +19,13 @@ import { View } from "react-native";
 import type { Agent, AgentConversationStarter } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/lib/i18n";
 
-const FALLBACK_CONVERSATION_STARTERS: AgentConversationStarter[] = [
-  {
-    label: "What can you help with?",
-    prompt: "What are you best at helping with? Give me a concise overview.",
-  },
-  {
-    label: "Suggest a first task",
-    prompt: "Suggest three useful tasks I could delegate to you.",
-  },
-  {
-    label: "Recommend an action",
-    prompt:
-      "Review what you know about my workspace and recommend a useful first action.",
-  },
-];
+const FALLBACK_CONVERSATION_STARTER_KEYS = [
+  { labelKey: "empty.starter_help_label", promptKey: "empty.starter_help_prompt" },
+  { labelKey: "empty.starter_task_label", promptKey: "empty.starter_task_prompt" },
+  { labelKey: "empty.starter_action_label", promptKey: "empty.starter_action_prompt" },
+] as const;
 
 interface Props {
   hasSessions: boolean;
@@ -43,11 +34,20 @@ interface Props {
 }
 
 export function ChatEmptyState({ hasSessions, agent, onPickPrompt }: Props) {
-  const title = agent ? `Hi, I'm ${agent.name}` : "Chat with your agents";
+  const { t } = useT("chat");
+  const title = agent
+    ? t("empty.greeting", { name: agent.name })
+    : t("empty.no_agent_title");
   const configured = (agent?.conversation_starters ?? []).filter(
     (item) => item.label.trim() && item.prompt.trim(),
   );
-  const starters = configured.length > 0 ? configured : FALLBACK_CONVERSATION_STARTERS;
+  const fallbackStarters: AgentConversationStarter[] = FALLBACK_CONVERSATION_STARTER_KEYS.map(
+    (starter) => ({
+      label: t(starter.labelKey),
+      prompt: t(starter.promptKey),
+    }),
+  );
+  const starters = configured.length > 0 ? configured : fallbackStarters;
   return (
     <View className="flex-1 items-center justify-center px-6 py-8 gap-5">
       <View className="items-center gap-1">
@@ -61,7 +61,7 @@ export function ChatEmptyState({ hasSessions, agent, onPickPrompt }: Props) {
         ) : null}
         {!hasSessions ? (
           <Text className="text-sm text-muted-foreground text-center">
-            Pick an example to start, then edit it before sending.
+            {t("empty.examples")}
           </Text>
         ) : null}
       </View>

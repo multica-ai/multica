@@ -72,9 +72,6 @@ export function CreateMethodChooser({
         <h2 className="mt-2 text-balance text-display-sm font-semibold tracking-tight sm:text-display">
           {t(($) => $.creation_studio.choose_title)}
         </h2>
-        <p className="mt-3 text-pretty text-body text-muted-foreground">
-          {t(($) => $.creation_studio.choose_description)}
-        </p>
       </div>
       <div className="mx-auto mt-9 grid max-w-3xl gap-4 md:grid-cols-2">
           {modes.map(

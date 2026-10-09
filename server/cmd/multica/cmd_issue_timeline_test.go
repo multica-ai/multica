@@ -304,12 +304,14 @@ func TestRunIssueTimelineReportsTruncationOnStderr(t *testing.T) {
 	errR, errW, _ := os.Pipe()
 	oldOut, oldErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = outW, errW
+	outCh, errCh := make(chan []byte, 1), make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(outR); outCh <- b }()
+	go func() { b, _ := io.ReadAll(errR); errCh <- b }()
 	err := runIssueTimeline(cmd, []string{"MUL-6253"})
 	_ = outW.Close()
 	_ = errW.Close()
 	os.Stdout, os.Stderr = oldOut, oldErr
-	stdout, _ := io.ReadAll(outR)
-	stderr, _ := io.ReadAll(errR)
+	stdout, stderr := <-outCh, <-errCh
 	if err != nil {
 		t.Fatalf("runIssueTimeline: %v", err)
 	}
@@ -351,12 +353,15 @@ func TestRunIssueTimelineSilentWhenNotTruncated(t *testing.T) {
 	errR, errW, _ := os.Pipe()
 	oldOut, oldErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = outW, errW
+	outCh, errCh := make(chan []byte, 1), make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(outR); outCh <- b }()
+	go func() { b, _ := io.ReadAll(errR); errCh <- b }()
 	err := runIssueTimeline(cmd, []string{"MUL-6253"})
 	_ = outW.Close()
 	_ = errW.Close()
 	os.Stdout, os.Stderr = oldOut, oldErr
-	_, _ = io.ReadAll(outR)
-	stderr, _ := io.ReadAll(errR)
+	<-outCh
+	stderr := <-errCh
 	if err != nil {
 		t.Fatalf("runIssueTimeline: %v", err)
 	}
@@ -410,10 +415,12 @@ func TestRunIssueTimelineRequestsFlatShapeAndFilters(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssueTimeline(cmd, []string{"MUL-6253"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssueTimeline: %v", err)
 	}
@@ -458,10 +465,12 @@ func TestRunIssueTimelineEmptyResultPrintsEmptyJSONArray(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	drainCh := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(r); drainCh <- b }()
 	err := runIssueTimeline(cmd, []string{"MUL-6253"})
 	_ = w.Close()
 	os.Stdout = old
-	out, _ := io.ReadAll(r)
+	out := <-drainCh
 	if err != nil {
 		t.Fatalf("runIssueTimeline: %v", err)
 	}

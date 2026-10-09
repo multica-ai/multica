@@ -39,11 +39,13 @@ import { issueDetailOptions } from "@/data/queries/issues";
 import { useUpdateIssue } from "@/data/mutations/issues";
 import { buildIssueTextUpdate } from "@/data/issue-edit";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 import { useMentionInput } from "@/lib/use-mention-input";
 
 export default function EditIssue() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT("issues");
   const detail = useQuery(issueDetailOptions(wsId, id));
   const update = useUpdateIssue(id);
 
@@ -89,18 +91,18 @@ export default function EditIssue() {
       return;
     }
     Alert.alert(
-      "Discard changes?",
-      "Your edits to this issue will be lost.",
+      t("form.discard_title"),
+      t("form.discard_message_issue"),
       [
-        { text: "Keep editing", style: "cancel" },
+        { text: t("form.keep_editing"), style: "cancel" },
         {
-          text: "Discard",
+          text: t("common:actions.discard"),
           style: "destructive",
           onPress: () => router.back(),
         },
       ],
     );
-  }, [dirty]);
+  }, [dirty, t]);
 
   const onSave = useCallback(() => {
     if (!canSave) return;
@@ -115,20 +117,20 @@ export default function EditIssue() {
       onSuccess: () => router.back(),
       onError: (err) => {
         Alert.alert(
-          "Failed to save",
-          err instanceof Error ? err.message : "Unknown error",
+          t("form.save_failed"),
+          err instanceof Error ? err.message : t("common:states.error"),
         );
       },
     });
-  }, [canSave, title, currentDescription, update]);
+  }, [canSave, title, currentDescription, update, t]);
 
   const headerLeft = useCallback(
     () => (
       <Pressable onPress={onCancel} className="px-1 py-1">
-        <Text className="text-base text-brand">Cancel</Text>
+      <Text className="text-base text-brand">{t("common:actions.cancel")}</Text>
       </Pressable>
     ),
-    [onCancel],
+    [onCancel, t],
   );
 
   const headerRight = useCallback(
@@ -139,11 +141,11 @@ export default function EditIssue() {
         className={canSave ? "px-1 py-1" : "px-1 py-1 opacity-40"}
       >
         <Text className="text-base text-brand font-semibold">
-          {update.isPending ? "Saving…" : "Save"}
+          {update.isPending ? t("edit.saving") : t("edit.save")}
         </Text>
       </Pressable>
     ),
-    [canSave, onSave, update.isPending],
+    [canSave, onSave, update.isPending, t],
   );
 
   return (
@@ -159,14 +161,16 @@ export default function EditIssue() {
           keyboardShouldPersistTaps="handled"
         >
           {!detail.data ? (
-            <Text className="text-sm text-muted-foreground">Loading…</Text>
+            <Text className="text-sm text-muted-foreground">
+              {t("common:states.loading")}
+            </Text>
           ) : (
             <>
-              <Field label="Title">
+              <Field label={t("common:fields.title")}>
                 <TextInput
                   value={title}
                   onChangeText={setTitle}
-                  placeholder="Issue title"
+                  placeholder={t("new.title_placeholder")}
                   placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
                   className="text-base text-foreground bg-secondary/50 rounded-md px-3 py-2"
                   returnKeyType="next"
@@ -174,7 +178,7 @@ export default function EditIssue() {
                 />
               </Field>
 
-              <Field label="Description">
+              <Field label={t("common:fields.description")}>
                 <DescriptionField
                   description={description}
                   disabled={update.isPending}

@@ -356,9 +356,7 @@ function SourceBackfillDialogBody({
           aria-live="polite"
           className="mr-auto text-caption text-muted-foreground"
         >
-          {canSubmit
-            ? t(($) => $.source_backfill.hint_ready)
-            : t(($) => $.step_question.hint_pick)}
+          {t(($) => $.step_question.hint_pick)}
         </span>
         <div className="flex items-center gap-2">
           <Button variant="secondary" disabled={busy} onClick={skip}>

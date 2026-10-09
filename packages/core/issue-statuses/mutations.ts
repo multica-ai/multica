@@ -172,9 +172,8 @@ export function useArchiveIssueStatus() {
  * Sent as a single request, not a PATCH per row: a sequence of writes is not
  * atomic, so a row rejected part-way (an archived status, a concurrent archive)
  * would leave the rows before it already reordered while the caller is told the
- * whole operation failed. `ordered` is that category's ACTIVE custom statuses;
- * the server assigns positions from 1 because the category's built-in is seeded
- * at 0 and never moves.
+ * whole operation failed. `ordered` includes ALL active statuses in the category,
+ * both built-in and custom. Positions describe display order, not automation.
  */
 export function useReorderIssueStatuses() {
   const { qc, listKey, invalidate } = useCatalogCache();
@@ -185,7 +184,7 @@ export function useReorderIssueStatuses() {
     }: {
       category: IssueStatusCategory;
       ordered: IssueStatusEntry[];
-    }) => api.reorderIssueStatuses(category, ordered.map((entry) => entry.id)),
+    }) => api.reorderIssueStatuses(category, ordered.map((entry) => entry.id), true),
     onMutate: async ({ ordered }) => {
       await qc.cancelQueries({ queryKey: listKey });
       const previous = qc.getQueryData<ListIssueStatusesResponse>(listKey);

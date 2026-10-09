@@ -1,0 +1,79 @@
+---
+title: "@mentionner des agents dans les commentaires"
+description: "@mentionnez un agent dans un commentaire de tâche, ou continuez à lui répondre, pour qu'il traite de nouvelles informations sans changer l'assigné."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+@mentionnez un agent dans un commentaire lorsque vous voulez qu'il examine une nouvelle information, réponde à une question ou aide l'assigné actuel. Le commentaire devient le point de départ de l'exécution ; l'assigné et le statut de la tâche restent inchangés.
+
+## Assigner ou @mentionner
+
+| | Assigner à un agent | @mentionner dans un commentaire |
+|---|---|---|
+| Idéal pour | Confier à l'agent la responsabilité de toute la tâche | Faire traiter le commentaire actuel par l'agent |
+| Change l'assigné | Oui | Non |
+| Change le statut | Non | Non |
+| Cibles par action | Un agent ou un squad | Plusieurs agents ou squads |
+| Objet de l'exécution | La tâche entière | Le commentaire déclencheur, plus les commentaires fusionnés dans le même lot |
+
+Utilisez l'[assignation](/assigning-issues) lorsque la tâche a besoin d'un responsable clair ; utilisez une @mention pour faire intervenir temporairement un agent dans la discussion.
+
+## Aperçu des déclenchements
+
+Après avoir choisi un agent ou un squad dans l'éditeur de commentaire, un aperçu des déclenchements apparaît sous la zone de saisie :
+
+- quels agents commenceront à travailler dès l'envoi ;
+- si chaque cible provient d'une @mention directe, de l'assigné de la tâche ou d'un chef de squad ;
+- si une cible est indisponible, ou si vous n'avez pas la permission de l'exécuter.
+
+Décocher un agent n'ignore que ce déclenchement-ci — inutile de supprimer son nom du commentaire, et le réglage Accès de l'agent n'est pas modifié.
+
+![Aperçu des déclenchements avant l'envoi : liste des agents qui commenceront à travailler une fois le commentaire envoyé](/images/docs/mention-trigger-preview.webp)
+
+Une fois le commentaire publié, un runtime en ligne prend généralement l'exécution en charge immédiatement ; si le runtime est hors ligne, l'exécution attend dans la file d'attente.
+
+## Routage automatique des réponses
+
+Un commentaire simple (ne contenant aucun @) est routé selon le contexte de la discussion :
+
+1. Répondre au commentaire d'un agent le transmet à cet agent.
+2. Répondre dans un fil auquel un agent participe déjà conserve l'agent de ce fil.
+3. Un commentaire de premier niveau qui ne correspond à aucun de ces cas est confié à l'agent assigné à la tâche ; lorsque l'assigné est un squad, c'est le chef qui le traite. Une réponse simple adressée directement à un membre ne se rabat pas sur l'assigné ; @mentionnez explicitement un agent ou un squad si vous voulez le faire intervenir.
+
+Lorsqu'un commentaire @mentionne explicitement d'autres cibles (y compris des membres), le repli sur l'assigné ne s'applique plus.
+
+Les réponses restent attribuées à l'agent ciblé même lorsque son runtime est hors ligne ou occupé. Multica ne démarre pas automatiquement l'assigné de la tâche après un délai. Pour impliquer un autre agent, @mentionnez-le explicitement.
+
+## Regroupement des commentaires consécutifs
+
+Lorsque le même agent a déjà une exécution en attente sur la tâche, les nouveaux commentaires consécutifs sont fusionnés dans cette exécution en attente ; si l'agent est déjà en cours d'exécution, les commentaires suivants attendent la fin de l'exécution en cours et sont fusionnés en une seule exécution de suivi. Vous pouvez continuer à ajouter des informations sans attendre la réponse de l'agent.
+
+Lorsqu'un commentaire @mentionne plusieurs agents différents, chaque agent obtient sa propre exécution ; plusieurs mentions qui désignent le même agent n'en produisent qu'une seule.
+
+## Commentaires qui ne déclenchent pas d'agent
+
+Deux possibilités :
+
+- Commencez le commentaire par `/note` : il est publié comme une note entre membres et ne déclenche aucun agent.
+- Utilisez `@all` : cela notifie tous les membres de l'espace de travail et désactive, pour ce commentaire, le déclenchement automatique de l'assigné.
+
+Si l'aperçu des déclenchements liste encore un agent, décochez-le avant l'envoi.
+
+<Callout type="info">
+`@all` n'inclut pas les agents. Les agents n'ont pas de boîte de réception ; pour en mettre un au travail, @mentionnez-le explicitement, répondez dans son fil ou assignez-lui la tâche.
+</Callout>
+
+## Restrictions d'accès
+
+Une @mention ne peut pas contourner le réglage Accès d'un agent. Si vous n'avez pas la permission d'exécuter la cible, si la cible est archivée ou si elle n'a aucun runtime disponible, l'aperçu des déclenchements indique qu'elle ne démarrera pas ; le commentaire lui-même est publié normalement. Consultez [Agents](/agents#permissions-et-accès) pour les trois niveaux d'Accès.
+
+## Agents qui se mentionnent entre eux
+
+Les agents peuvent @mentionner d'autres agents dans leurs réponses. Lorsque A @mentionne B et que B @mentionne A en retour, le système fusionne les exécutions en double au même moment, mais il ne décide pas quand la collaboration doit prendre fin — inscrivez la condition d'arrêt dans les instructions de l'agent.
+
+## Étapes suivantes
+
+- [Commentaires](/comments) — réponses, résolution des fils, notifications et abonnements.
+- [Agents](/agents) — configurer l'identité, l'Accès et les runtimes.
+- [Squads](/squads) — confier à un chef la coordination de plusieurs agents.

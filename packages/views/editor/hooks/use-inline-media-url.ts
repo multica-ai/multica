@@ -73,11 +73,16 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // URL. `blobFallback` gates that on the caller actually rendering a native
 // `<img>`: a file card only needs a link, and downloading a 100 MB archive
 // into renderer memory to draw a chip would be a bad trade.
-export function useResignedInlineMediaURL(
+//
+// `pending` is true while that upgrade is still in flight — `url` is then the
+// picked URL, which this client may be unable to load. A caller that treats a
+// load failure as meaningful (the viewer skips broken images) waits it out
+// instead of rendering it.
+export function useResignedInlineMedia(
   attachmentId: string | undefined,
   pickedUrl: string,
   blobFallback: boolean,
-): string {
+): { url: string; pending: boolean } {
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
   const isCrossOriginWebURL = (() => {
@@ -97,7 +102,7 @@ export function useResignedInlineMediaURL(
     idFromPickedUrl !== undefined &&
     ((api.getBaseUrl?.() ?? "") !== "" || isCrossOriginWebURL);
 
-  const { data: fresh } = useQuery({
+  const { data: fresh, isError: freshFailed } = useQuery({
     queryKey: ["attachment-inline-resign", resignAttachmentId],
     queryFn: () => api.getAttachment(resignAttachmentId as string),
     enabled: needsResign,
@@ -117,7 +122,7 @@ export function useResignedInlineMediaURL(
   // Only after `fresh` has landed do we know this deployment has nothing
   // signed to give — firing the byte fetch earlier would double-download on
   // every CloudFront / presign client.
-  const { data: blob } = useQuery({
+  const { data: blob, isError: blobFailed } = useQuery({
     queryKey: ["attachment-inline-blob", resignAttachmentId],
     queryFn: () => api.getAttachmentBlob(resignAttachmentId as string),
     enabled: needsResign && blobFallback && !!fresh && signedUrl === "",
@@ -127,8 +132,8 @@ export function useResignedInlineMediaURL(
   const isAuthenticated = !!fresh;
   const blobUrl = useObjectURL(resignAttachmentId, blob, isAuthenticated);
 
-  if (!needsResign) return pickedUrl;
-  if (signedUrl) return signedUrl;
+  if (!needsResign) return { url: pickedUrl, pending: false };
+  if (signedUrl) return { url: signedUrl, pending: false };
   // Only return the cached blob URL when it belongs to the current id and
   // the current QueryClient has authenticated metadata for it. This keeps
   // the 5-min re-entry cache for the same session but prevents a logged-out
@@ -140,10 +145,16 @@ export function useResignedInlineMediaURL(
     isAuthenticated &&
     blobUrlCache.get(resignAttachmentId) === blobUrl
   ) {
-    return blobUrl;
+    return { url: blobUrl, pending: false };
   }
-  if (blobUrl && !resignAttachmentId && isAuthenticated) return blobUrl;
-  return pickedUrl;
+  if (blobUrl && !resignAttachmentId && isAuthenticated) {
+    return { url: blobUrl, pending: false };
+  }
+  // Still upgrading while the metadata is in flight, and — for a caller that
+  // renders the bytes — while they are. A failure at either step ends the
+  // wait on the picked URL.
+  const pending = !freshFailed && (!fresh || (blobFallback && !blobFailed));
+  return { url: pickedUrl, pending };
 }
 
 // useObjectURL turns a Blob into a `blob:` URL. The module cache keeps the

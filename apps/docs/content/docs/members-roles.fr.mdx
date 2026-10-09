@@ -1,0 +1,55 @@
+---
+title: Membres et rôles
+description: Invitez des membres et gérez les permissions de l'espace de travail avec les rôles owner, admin et member.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Toute personne qui rejoint un [espace de travail](/workspaces) en est membre, et chaque membre a un rôle : `owner`, `admin` ou `member`. Les rôles ne contrôlent que les paramètres de l'espace de travail et la gestion de l'équipe ; la collaboration au quotidien — créer des tâches, écrire des commentaires — est ouverte à tous les membres.
+
+## Les trois rôles
+
+| Action | owner (Propriétaire) | admin (Administrateur) | member (Membre) |
+|---|:---:|:---:|:---:|
+| Consulter l'espace de travail et collaborer au quotidien | ✓ | ✓ | ✓ |
+| Modifier les paramètres de l'espace de travail | ✓ | ✓ | — |
+| Inviter un `admin` ou un `member` | ✓ | ✓ | — |
+| Modifier ou retirer un `admin` ou un `member` | ✓ | ✓ | — |
+| Accorder ou révoquer le rôle `owner`, retirer un `owner` | ✓ | — | — |
+| Supprimer l'espace de travail | ✓ | — | — |
+
+Un espace de travail doit toujours conserver au moins un `owner` : le dernier `owner` ne peut être ni rétrogradé, ni retiré, ni quitter l'espace de travail.
+
+<Callout type="info">
+Les rôles ne déterminent pas qui peut exécuter un agent. Chaque agent a son propre périmètre d'accès (**Accès**), et `owner` comme `admin` ne peuvent pas le contourner pour exécuter des agents auxquels l'accès ne leur a pas été accordé. Consultez [Agents](/agents#permissions-et-accès).
+</Callout>
+
+## Inviter des membres
+
+`owner` et `admin` envoient les invitations depuis Paramètres → Membres, en saisissant une adresse e-mail et en choisissant un rôle. Les invitations ne peuvent accorder que `admin` ou `member` ; un `owner` doit d'abord rejoindre l'espace de travail, puis être promu par un `owner` existant.
+
+![Gestion des membres : le formulaire d'invitation et la liste des membres avec leurs rôles](/images/docs/members-roster.webp)
+
+La personne invitée accepte en se connectant avec cette adresse e-mail — aucune inscription préalable n'est nécessaire. Les invitations sont valables 7 jours ; renvoyez-en une après expiration. Sur les instances auto-hébergées qui restreignent l'inscription, une invitation en attente et encore valide permet à cette adresse e-mail de créer un compte sans entrée distincte dans la liste d'autorisation — consultez [Configuration de l'authentification](/auth-setup#invitations-et-restrictions-dinscription).
+
+Le lien d'invitation n'apparaît que dans l'e-mail ; il n'existe aucun endroit dans le produit pour le consulter ou le copier. Si l'envoi de l'e-mail échoue, l'invitation existe tout de même — révoquez-la et envoyez-en une nouvelle.
+
+## Changer de rôle
+
+Un `admin` peut faire passer un membre de `admin` à `member` et inversement, et peut retirer les membres qui ont l'un de ces deux rôles. Tout changement impliquant `owner` — promotion, modification ou retrait — ne peut être effectué que par un `owner`.
+
+Les changements de rôle prennent effet immédiatement.
+
+## Retirer un membre
+
+Un membre retiré perd immédiatement l'accès à l'espace de travail. Les tâches, commentaires et autres traces de collaboration qu'il a créés restent dans l'espace de travail.
+
+<Callout type="warning">
+Retirer un membre désactive aussi les runtimes dont il est propriétaire, archive les agents qui y sont liés et annule les exécutions non terminées. Les autorisations que le membre avait reçues dans les périmètres d'accès des agents sont également supprimées, et ne sont pas rétablies automatiquement s'il rejoint de nouveau l'espace de travail.
+</Callout>
+
+## Étapes suivantes
+
+- [Tâches](/issues) — le travail que membres et agents traitent ensemble.
+- [Agents](/agents) — en quoi les rôles de l'espace de travail diffèrent de l'accès aux agents.
+- [Daemon et runtimes](/daemon-runtimes) — à qui appartiennent les runtimes et où ils tournent.

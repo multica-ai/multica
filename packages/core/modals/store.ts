@@ -9,6 +9,7 @@ type ModalType =
   | "create-squad"
   | "feedback"
   | "issue-set-parent"
+  | "issue-mark-duplicate"
   | "issue-add-child"
   | "issue-delete-confirm"
   | "issue-run-confirm"

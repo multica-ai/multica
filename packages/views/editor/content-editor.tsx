@@ -171,6 +171,8 @@ interface ContentEditorBaseProps {
   onUploadingChange?: (uploading: boolean) => void;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
+  /** Additional non-editing action for the current text selection. */
+  selectionAction?: { label: string; onSelect: () => boolean | void };
   /**
    * ID of the issue this editor belongs to. When set, the bubble menu exposes
    * a "Create sub-issue from selection" action that parents the new issue
@@ -369,6 +371,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       pasteAsFileThreshold,
       onUploadingChange,
       showBubbleMenu = true,
+      selectionAction,
       currentIssueId,
       disableMentions = false,
       mentionMode = "default",
@@ -901,7 +904,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // than scrubbing it back out afterwards.
       getMarkdown: () => editor?.getMarkdown() ?? "",
       clearContent: () => {
-        editor?.commands.clearContent();
+        if (!editor) return;
+        editor.commands.clearContent();
+        // Clearing maps the selection across the replace, and an
+        // `AllSelection` (a send right after Cmd+A) maps onto itself. A
+        // composer that refocuses after sending would then paint it over the
+        // emptied line as a lone selected space, so park the caret at the
+        // start (0 clamps to the first text position).
+        editor.commands.setTextSelection(0);
       },
       focus: () => {
         if (editor) editor.commands.focus();
@@ -999,7 +1009,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
-            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+            <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}
           <LinkHoverCard {...hover} />
         </div>

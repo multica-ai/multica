@@ -1,0 +1,71 @@
+---
+title: Projets
+description: Organisez les tâches liées en projets et donnez-leur un objectif, un plan et un contexte d'exécution communs.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Les projets organisent un travail qui nécessite plusieurs [tâches](/issues) — un lancement de produit, une migration ou une fonctionnalité livrée par étapes.
+
+Un travail qu'une seule tâche suffit à décrire n'a pas besoin de projet. Les projets conviennent à un ensemble de travaux qui partagent un objectif, dont l'avancement doit être suivi globalement, ou qui ont besoin de dépôts et de répertoires de travail partagés.
+
+## Composantes d'un projet
+
+| Élément | Rôle |
+|---|---|
+| **Nom, icône et description** | Objectif, périmètre et exigences durables ; la description entre dans le contexte d'exécution des agents qui travaillent dans le projet. |
+| **Statut** | `planned` (Planifié), `in_progress` (En cours), `paused` (En pause), `completed` (Terminé) ou `cancelled` (Annulé). |
+| **Priorité** | `urgent` (Urgente), `high` (Haute), `medium` (Moyenne), `low` (Basse) ou `none` (Aucune priorité). |
+| **Responsable** | Un membre ou un agent — la personne ou l'agent qui coordonne le projet. |
+| **Dates de début et d'échéance** | La période prévue du projet. |
+| **Tâches et avancement** | Le travail du projet et la part déjà terminée. |
+| **Ressources** | Dépôts GitHub rattachés ou répertoires locaux sur des ordinateurs précis. |
+
+![Détail d'un projet : tâches regroupées par statut, avancement et description du projet](/images/docs/project-detail.webp)
+
+## Projets et tâches
+
+Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient à un projet au plus. Créez des tâches directement dans le projet, ou choisissez ou changez le projet depuis les propriétés de la tâche.
+
+L'avancement du projet est calculé automatiquement à partir des tâches liées :
+
+```text
+avancement = tâches en done ou cancelled ÷ toutes les tâches du projet
+```
+
+`cancelled` signifie que ce travail a été retiré du périmètre du projet ; il compte donc dans l'avancement. Le statut du projet et celui des tâches sont indépendants : terminer toutes les tâches ne fait pas passer automatiquement le projet à `completed`, et modifier le statut du projet ne modifie pas ses tâches en masse.
+
+## Description du projet et contexte d'exécution
+
+Lorsqu'un agent traite une tâche d'un projet, le nom et la description du projet sont ajoutés au contexte de cette exécution. La description est l'endroit où placer les informations dont toutes les tâches liées ont besoin : l'objectif, les limites techniques, les conventions de livraison. Les exigences propres à une seule tâche ont leur place dans cette tâche.
+
+## Ajouter des ressources
+
+Les ressources du projet indiquent aux agents quel code et quels répertoires de travail utiliser :
+
+- **Dépôts GitHub** : fournissez un dépôt que le runtime peut récupérer (checkout), avec une ref facultative.
+- **Répertoires locaux** : permettez au runtime d'un ordinateur précis de travailler dans un répertoire existant, dont l'agent modifie directement le contenu.
+
+Voir [Ressources de projet](/project-resources) pour savoir comment choisir et connaître les limites de sécurité.
+
+## Responsable du projet
+
+Le responsable peut être un membre ou un agent, et indique qui coordonne le projet. Ce n'est pas un paramètre de permission : il n'assigne pas automatiquement les tâches du projet, et désigner un agent comme responsable ne le lance pas automatiquement. Démarrer une exécution nécessite toujours l'assignation d'une tâche, une @mention ou un déclencheur d'automatisation.
+
+## Épingler à la barre latérale
+
+Un projet épinglé apparaît dans votre barre latérale. L'épinglage est une préférence personnelle et n'affecte pas les autres membres.
+
+## Créer, modifier et supprimer
+
+Tout membre de l'espace de travail peut créer et modifier des projets ; seuls les rôles `owner` et `admin` peuvent les supprimer.
+
+<Callout type="warning">
+Supprimer un projet ne supprime pas ses tâches : elles sont détachées et restent dans l'espace de travail. La description, le statut et les ressources du projet sont définitivement supprimés.
+</Callout>
+
+## Étapes suivantes
+
+- [Ressources de projet](/project-resources) — rattachez des dépôts GitHub ou des répertoires locaux.
+- [Tâches](/issues) — créez et organisez le travail concret d'un projet.
+- [Agents](/agents) — découvrez l'identité, la configuration et l'Accès des agents.

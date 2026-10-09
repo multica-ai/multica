@@ -44,6 +44,28 @@ var opencodeBlockedArgs = map[string]blockedArgMode{
 // and reading streaming JSON events from stdout — the same pattern as Claude.
 type opencodeBackend struct {
 	cfg Config
+	// session is per-run state, set by Execute on the copy it scans with, so
+	// the cancellation handler can interrupt the session server-side. It is nil
+	// on the Backend New returns and on any backend built directly by a test.
+	session *opencodeSessionTracker
+}
+
+// opencodeSeparatesReasoning recognizes the released OpenCode 1.x wire contract.
+// v1.3.15 included reasoning in output; v1.3.16 separated it in upstream #21047:
+// https://github.com/anomalyco/opencode/pull/21047
+// Use the daemon's already-resolved version, never an extra per-run probe.
+// Unknown/dev versions and custom commands keep the existing output count:
+// their version string does not establish which usage convention they speak.
+func opencodeSeparatesReasoning(cfg Config) bool {
+	if !cfg.BuiltinRuntime {
+		return false
+	}
+	raw := strings.TrimSpace(cfg.CLIVersion)
+	if raw == "" || versionRe.FindString(raw) != raw {
+		return false
+	}
+	version, err := parseSemver(raw)
+	return err == nil && version.Major == 1 && !version.lessThan(semver{Major: 1, Minor: 3, Patch: 16})
 }
 
 func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -66,6 +88,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
+	// See opencode_v2.go for what 2.x changed and why the differences are
+	// handled together rather than one flag at a time.
+	usesV2 := opencodeUsesV2Contract(b.cfg)
+
 	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
@@ -76,13 +102,28 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// PWD is also overridden below because OpenCode prefers PWD over cwd when
 	// `--dir` is absent and uses it as the starting point for any further
 	// path resolution.
-	if opts.Cwd != "" {
+	//
+	// 2.x removed `--dir` outright and anchors on the process cwd instead, which
+	// cmd.Dir and the PWD override below already provide. Passing it there is
+	// not a no-op: the CLI rejects the unknown flag and the run dies before it
+	// starts (GH #8586).
+	if opts.Cwd != "" && !usesV2 {
 		args = append(args, "--dir", opts.Cwd)
 	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
+	model := opts.Model
+	if usesV2 {
+		// 2.x dropped `--variant` and reads the variant off the model string.
+		folded, ok := opencodeModelArg(model, opts.ThinkingLevel)
+		if !ok {
+			b.cfg.Logger.Warn("opencode: thinking level needs an explicit model on OpenCode 2.x; ignoring",
+				"thinkingLevel", opts.ThinkingLevel)
+		}
+		model = folded
 	}
-	if opts.ThinkingLevel != "" {
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if opts.ThinkingLevel != "" && !usesV2 {
 		args = append(args, "--variant", opts.ThinkingLevel)
 	}
 	// OpenCode's `run` subcommand has no --prompt flag — passing one makes the
@@ -110,7 +151,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// out of OS process listings; the shared command logger separately redacts
 	// argv values.
 
-	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
+	runtimeCmd := b.cfg.commandAt(execPath)
+	// run carries this invocation's session id. Execute scans with it instead of
+	// b so two runs sharing a Backend value cannot observe each other's session.
+	run := &opencodeBackend{cfg: b.cfg, session: &opencodeSessionTracker{}}
+	cmd := runtimeCmd.exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Take over context cancellation. The default kills the whole group the
 	// instant runCtx is done; we instead drive a graceful, group-wide
@@ -142,29 +187,55 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
 	}
-	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
-	// OpenCode's general inline-config injection mechanism that merges at
-	// "local" scope (after the project-config loop, before remote / managed
-	// configs). MCP is the only field we currently project there; if a
-	// future Multica field needs the same channel it would assemble a
-	// combined OpenCode config slice before the env append.
+	// Project agent.mcp_config into OpenCode. The channel differs by major:
 	//
-	// This deliberately leaves <workdir>/opencode.json untouched — the
-	// workdir is reused across turns for the same (agent, issue), and any
-	// agent- or user-written model / tools / permission settings in it must
-	// survive across runs.
-	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if mcpContent != "" {
-		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
-			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+	// On 1.x, OPENCODE_CONFIG_CONTENT — OpenCode's general inline-config
+	// injection mechanism that merges at "local" scope (after the
+	// project-config loop, before remote / managed configs). MCP is the only
+	// field we currently project there; if a future Multica field needs the
+	// same channel it would assemble a combined OpenCode config slice before
+	// the env append. That path deliberately leaves <workdir>/opencode.json
+	// untouched — the workdir is reused across turns for the same
+	// (agent, issue), and any agent- or user-written model / tools /
+	// permission settings in it must survive across runs.
+	//
+	// 2.x stopped honouring that env var, and the only channel it left puts the
+	// credentials in the agent's own working tree, where the agent can commit
+	// them. Such runs are refused rather than started without their servers —
+	// see ErrOpenCodeV2MCPUnsupported.
+	if usesV2 {
+		if err := opencodeCheckMCPSupport(opts.McpConfig); err != nil {
+			cancel()
+			return nil, err
 		}
-		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+	} else {
+		mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		if mcpContent != "" {
+			if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+				b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+			}
+			env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+		}
 	}
 	cmd.Env = env
+
+	// Capture how this run reaches its OpenCode service, so a later interrupt
+	// talks to the same one. `--server` can arrive through agent.custom_args, and
+	// the default background service is resolved from the process environment and
+	// working directory — an interrupt missing any of that would report success
+	// against a different service while this session kept running.
+	interruptServer, interruptStandalone := opencodeConnectionFromArgs(args)
+	interruptConn := opencodeRunConnection{
+		cmd:        runtimeCmd,
+		server:     interruptServer,
+		standalone: interruptStandalone,
+		env:        env,
+		dir:        opts.Cwd,
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -228,6 +299,15 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// OpenCode that stopped reading before draining it would otherwise
 		// strand that goroutine for the lifetime of the daemon.
 		closeStdin()
+		// On 2.x the process below is only a client; the run itself belongs to a
+		// background service that survives every signal sent here. Ask the
+		// service to stop the session first, otherwise the agent keeps working —
+		// calling tools and writing to the workdir — after this task is already
+		// recorded as cancelled. Best effort: the signalling below is unchanged
+		// and still runs whether or not this succeeds.
+		if usesV2 {
+			opencodeInterruptSession(interruptConn, run.session.get(), b.cfg.Logger)
+		}
 		if cmd.Process != nil {
 			signalProcessGroup(cmd, syscall.SIGTERM)
 			select {
@@ -245,7 +325,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processEvents(stdout, msgCh)
+		scanResult := run.processEvents(stdout, msgCh)
 
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
@@ -345,6 +425,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var output strings.Builder
 	var sessionID string
 	var usage TokenUsage
+	separateReasoning := opencodeSeparatesReasoning(b.cfg)
 	finalStatus := "completed"
 	var finalError string
 
@@ -401,6 +482,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 
 		if event.SessionID != "" {
 			sessionID = event.SessionID
+			// Publish it for the cancellation handler, which needs a session id
+			// to interrupt a 2.x run server-side. No-op when b has no tracker.
+			b.session.set(event.SessionID)
 		}
 
 		switch event.Type {
@@ -436,6 +520,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
+				if separateReasoning && t.Reasoning > 0 {
+					usage.OutputTokens += t.Reasoning
+				}
 				if t.Cache != nil {
 					usage.CacheReadTokens += t.Cache.Read
 					usage.CacheWriteTokens += t.Cache.Write
@@ -503,10 +590,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 // the protocol reports counts. Only an across-the-board zero means no model
 // call happened.
 //
-// The reasoning and total counters are read as evidence only, deliberately not
-// folded into TokenUsage: total is derived (adding it would double-count) and
-// TokenUsage has no reasoning bucket, so recording either here would change
-// billing figures rather than fix this bug.
+// This predicate only checks for evidence of a provider round-trip.
+// processEvents separately normalizes reasoning into output for releases whose
+// output excludes it; the aggregate total is never added to the usage buckets.
 func stepReportedUsage(part *opencodeEventPart) bool {
 	if part.Cost > 0 {
 		return true
@@ -704,10 +790,9 @@ type opencodePartMetadata struct {
 	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
 
-// opencodeTokens represents token usage in a step_finish event. Reasoning and
-// Total are separate counters in the protocol, not components of Input/Output,
-// so a step can report either while both of those are zero; they are parsed so
-// stepReportedUsage can see them.
+// opencodeTokens represents token usage in a step_finish event. OpenCode 1.x
+// since v1.3.16 separates Reasoning from Output; older releases include it.
+// Total is an aggregate, and both fields also provide step-liveness evidence.
 type opencodeTokens struct {
 	Input     int64                `json:"input"`
 	Output    int64                `json:"output"`

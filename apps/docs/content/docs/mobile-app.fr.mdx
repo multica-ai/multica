@@ -1,0 +1,94 @@
+---
+title: Application mobile (iOS)
+description: Installez Multica sur votre iPhone à partir des sources, et connectez-vous à Cloud ou à une instance auto-hébergée.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Le client iOS de Multica n'est pas encore disponible sur l'App Store. Vous pouvez compiler une version Release à partir du dépôt de code source public sur un Mac et l'installer sur votre propre iPhone. Il n'existe pas encore de client Android.
+
+L'application installée se connecte par défaut à Multica Cloud ; connectez-vous avec votre compte existant. Les espaces de travail, les tâches, les commentaires et l'historique des exécutions sont tous stockés sur le serveur — rien n'a besoin d'être synchronisé manuellement depuis le web ou Desktop.
+
+## Prérequis
+
+Il vous faut :
+
+- un Mac sur lequel Xcode est installé ;
+- un identifiant Apple connecté dans **Xcode → Settings → Accounts** ;
+- un iPhone connecté en USB ;
+- le mode développeur activé sur l'iPhone dans **Réglages → Confidentialité et sécurité** ;
+- Node.js, pnpm et Git.
+
+Si Xcode ou l'environnement de développement sur appareil n'est pas encore configuré, suivez d'abord la [configuration de l'environnement pour appareil iOS](https://docs.expo.dev/get-started/set-up-your-environment/) d'Expo.
+
+## Installer sur votre iPhone
+
+Clonez le dépôt et installez les dépendances :
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+
+Puis exécutez depuis la racine du dépôt :
+
+```bash
+pnpm ios:mobile:device:prod:release
+```
+
+Cette commande compile une version Release sans dépendance à Metro et l'installe sur l'iPhone connecté. La première compilation télécharge les dépendances iOS et compile React Native ; les suivantes réutilisent le cache de Xcode.
+
+Si l'iPhone empêche l'ouverture de l'application, faites confiance au certificat de développeur dans **Réglages → Général → VPN et gestion de l'appareil**.
+
+## Limite de 7 jours de la signature gratuite
+
+Les applications signées avec un identifiant Apple gratuit ne fonctionnent que 7 jours. À l'expiration, reconnectez l'iPhone à votre Mac et relancez la même commande de compilation pour signer l'application à nouveau.
+
+Les builds signées avec un compte Apple Developer Program restent valides plus longtemps et peuvent aussi servir pour TestFlight et la distribution habituelle. Quel que soit le type de signature, réinstaller ou signer à nouveau l'application ne fait jamais perdre les données stockées côté serveur.
+
+## Échecs de signature
+
+Si Xcode signale `No matching provisioning profiles found`, il est possible que l'identifiant de bundle par défaut n'appartienne pas à votre identifiant Apple. Passez à un nom de domaine inversé que vous contrôlez, puis recompilez :
+
+```bash
+export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
+pnpm ios:mobile:device:prod:release
+```
+
+La valeur doit seulement être disponible dans votre équipe Apple Developer ; elle n'a aucun effet sur votre compte ni sur vos espaces de travail Multica.
+
+## Mettre à jour
+
+La build iOS installée par vos soins ne se met pas à jour automatiquement. Récupérez le code le plus récent, mettez à jour les dépendances et recompilez :
+
+```bash
+git pull --ff-only
+pnpm install
+pnpm ios:mobile:device:prod:release
+```
+
+## Se connecter à une instance auto-hébergée
+
+Les builds Release intègrent l'adresse de l'API dans l'application. Pour vous connecter à une instance auto-hébergée, modifiez d'abord `apps/mobile/.env.production` :
+
+```dotenv
+EXPO_PUBLIC_API_URL=https://api.example.com
+EXPO_PUBLIC_WEB_URL=https://app.example.com
+```
+
+`EXPO_PUBLIC_API_URL` est obligatoire. `EXPO_PUBLIC_WEB_URL` est facultative et alimente des entrées comme « Copier le lien » et « Ouvrir sur le web » ; lorsqu'elle n'est pas définie, ces éléments de menu sont masqués.
+
+Relancez la commande de compilation après la modification. L'iPhone doit pouvoir joindre l'adresse de l'API ; si vous utilisez une adresse du réseau local, n'écrivez pas `localhost` — sur l'iPhone, cette adresse désigne le téléphone lui-même.
+
+<Callout type="warning">
+Modifier `.env.production` change la configuration de production de la copie de travail actuelle. Commiter cette modification inscrit votre adresse d'API personnelle dans la configuration de production du dépôt.
+</Callout>
+
+Pour le développement mobile, l'utilisation du Simulateur ou la connexion à l'environnement de staging, consultez [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) dans le dépôt.
+
+## Étapes suivantes
+
+- [Démarrage rapide](/cloud-quickstart) — effectuer votre première exécution.
+- [Application de bureau](/desktop-app) — les onglets de Desktop et le daemon intégré.
+- [Dépannage](/troubleshooting) — diagnostiquer les problèmes de connexion et d'exécution.

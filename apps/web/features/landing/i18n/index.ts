@@ -6,4 +6,9 @@ export {
   localeLabels,
   toLandingDictionaryLocale,
 } from "./types";
-export type { LandingDict, LandingDictionaryLocale, Locale } from "./types";
+export type {
+  DocumentSection,
+  LandingDict,
+  LandingDictionaryLocale,
+  Locale,
+} from "./types";

@@ -115,6 +115,7 @@ export function KeyboardShortcutsTab() {
     <SettingsTab
       title={t(($) => $.shortcuts.title)}
       description={t(($) => $.shortcuts.description)}
+      scope="device"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
@@ -263,7 +264,10 @@ function ShortcutRow({
 }) {
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
-  const description = t(($) => $.shortcuts.actions[action.id].description);
+  // Keep descriptions in the search index, but only show non-obvious behavior.
+  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "send"].includes(action.id)
+    ? t(($) => $.shortcuts.actions[action.id].description)
+    : undefined;
   const errorText = error?.kind === "reserved"
     ? t(($) => $.shortcuts.reserved_error)
     : error?.kind === "send"

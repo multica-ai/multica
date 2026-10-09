@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -58,9 +59,16 @@ type HealthResponse struct {
 	// Repo maintenance stays a liveness-safe background activity, so health
 	// remains HTTP 200/running. These additive counters explain degraded repo
 	// checkout capacity to operators without exposing local cache paths.
-	RepoMaintenanceActive int      `json:"repo_maintenance_active,omitempty"`
-	RepoCheckoutWaiters   int      `json:"repo_checkout_waiters,omitempty"`
-	Agents                []string `json:"agents"`
+	RepoMaintenanceActive int `json:"repo_maintenance_active,omitempty"`
+	RepoCheckoutWaiters   int `json:"repo_checkout_waiters,omitempty"`
+	// Terminal report queue diagnostics are additive and expose only counts and
+	// bytes, never payloads or local paths. Failed records require operator
+	// attention; pending records are still being replayed automatically.
+	PendingTerminalReportCount int      `json:"pending_terminal_report_count"`
+	PendingTerminalReportBytes int64    `json:"pending_terminal_report_bytes"`
+	FailedTerminalReportCount  int      `json:"failed_terminal_report_count"`
+	FailedTerminalReportBytes  int64    `json:"failed_terminal_report_bytes"`
+	Agents                     []string `json:"agents"`
 	// SkippedAgents maps a provider that WAS discovered on this machine to the
 	// reason the last registration round dropped it (version undetectable,
 	// below the minimum supported version). Purely diagnostic, and omitted when
@@ -106,6 +114,11 @@ type repoCheckoutRequest struct {
 	// RetryBusy is sent by clients that understand 503 + Retry-After. Older
 	// clients omit it and retain their historical unbounded lock-wait behavior.
 	RetryBusy bool `json:"retry_busy,omitempty"`
+	// Fresh asks to discard an existing checkout's uncommitted changes and
+	// untracked files and start over on a new branch (`multica repo checkout
+	// --fresh`). Without it an existing checkout that holds work is kept; older
+	// daemons ignore the field and always start over.
+	Fresh bool `json:"fresh,omitempty"`
 }
 
 type activeRepoCheckoutTask struct {
@@ -262,26 +275,32 @@ func (d *Daemon) writeRepoCheckoutAuthError(w http.ResponseWriter, result repoCh
 	http.Error(w, message, http.StatusUnauthorized)
 }
 
+// authorizeRepoCheckoutWorkDir proves the requested checkout directory lies
+// inside the active task's workdir and returns its resolved form. Both sides
+// are resolved the way the kernel opens them — util.ResolveSymlinks, not
+// filepath.EvalSymlinks, which on Windows cannot pass through a directory
+// junction: a workspaces root moved to another drive and left behind as a
+// junction made every checkout fail here (#8946). Any path that cannot be
+// resolved is refused; the error says which side and why, because the caller
+// surfaces it instead of a bare "not owned".
 func authorizeRepoCheckoutWorkDir(activeRoot, requested string) (string, error) {
 	root, err := filepath.Abs(activeRoot)
-	if err != nil {
-		return "", err
+	if err == nil {
+		root, err = util.ResolveSymlinks(root)
 	}
-	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve active task workdir: %w", err)
 	}
 	workdir, err := filepath.Abs(requested)
-	if err != nil {
-		return "", err
+	if err == nil {
+		workdir, err = util.ResolveSymlinks(workdir)
 	}
-	workdir, err = filepath.EvalSymlinks(workdir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve requested workdir: %w", err)
 	}
 	rel, err := filepath.Rel(root, workdir)
 	if err != nil || !filepath.IsLocal(rel) {
-		return "", errors.New("workdir is outside the active task workdir")
+		return "", fmt.Errorf("%s is outside the active task workdir %s", workdir, root)
 	}
 	return workdir, nil
 }
@@ -347,6 +366,14 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			activity := reporter.Activity()
 			resp.RepoMaintenanceActive = activity.MaintenanceActive
 			resp.RepoCheckoutWaiters = activity.ForegroundWaiters
+		}
+		if stats, err := d.terminalReports.stats(); err != nil {
+			d.logger.Warn("health: scan terminal report queue", "error", err)
+		} else {
+			resp.PendingTerminalReportCount = stats.PendingCount
+			resp.PendingTerminalReportBytes = stats.PendingBytes
+			resp.FailedTerminalReportCount = stats.FailedCount
+			resp.FailedTerminalReportBytes = stats.FailedBytes
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -437,7 +464,17 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		}
 		authorizedWorkDir, authErr := authorizeRepoCheckoutWorkDir(activeTask.WorkDir, req.WorkDir)
 		if authErr != nil {
-			http.Error(w, "repo checkout workdir is not owned by the active task", http.StatusForbidden)
+			// The reason goes to both the agent and daemon.log: a refusal that
+			// says only "not owned" sent #8946 looking at ownership when the
+			// real failure was resolving a junctioned path. Both paths come from
+			// the requesting task — its own workdir and the path it sent — so
+			// the message tells it nothing it could not read for itself.
+			d.logger.Warn("repo checkout rejected",
+				"reason", "workdir_not_owned",
+				"task_id", activeTask.TaskID,
+				"error", authErr,
+			)
+			http.Error(w, "repo checkout workdir is not owned by the active task: "+authErr.Error(), http.StatusForbidden)
 			return
 		}
 		// Identity is derived from the token-bound active task. AgentName and the
@@ -481,6 +518,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			TaskID:              req.TaskID,
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 			IsolatedGitMetadata: req.CheckoutMode == repoCheckoutModeIsolated,
+			Fresh:               req.Fresh,
 		}
 		if req.RetryBusy {
 			params.LockWaitTimeout = repoCheckoutLockWaitTimeout

@@ -1,0 +1,99 @@
+---
+title: "Comparatif des outils de codage IA"
+description: "Comparez les outils de codage IA pris en charge par Multica, et leurs différences en matière de modèles, de MCP, de sessions et de skills."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica ne remplace pas l'outil de codage IA que vous utilisez. Un runtime invoque l'outil déjà installé et connecté sur l'ordinateur, puis renvoie la progression et les résultats dans la tâche.
+
+Si vous utilisez déjà l'un de ces outils, vous pouvez généralement le conserver tel quel. Quatre points à prendre en compte pour choisir :
+
+- s'il est déjà installé sur l'ordinateur ;
+- quels modèles votre compte peut utiliser ;
+- si Multica doit configurer MCP pour lui ;
+- quels skills l'équipe souhaite réutiliser.
+
+Les étapes d'installation se trouvent dans [Installer les outils de codage IA](/install-agent-runtime).
+
+## Outils pris en charge
+
+| Outil | Commande détectée | Reprise de session | MCP géré par Multica | Chemin d'injection des skills |
+|---|---|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | `HERMES_HOME/skills/` propre à chaque exécution |
+| Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | `skills/` de l'espace de travail propre à chaque exécution |
+| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | — |
+
+« MCP géré par Multica » signifie que vous pouvez définir des serveurs MCP dans la configuration de l'agent et que Multica les transmet à l'outil avant une exécution. Cela ne signifie pas que l'outil n'a pas d'autre moyen de configurer MCP.
+
+## Sources des modèles
+
+Lorsque vous créez un agent, la liste des modèles provient du runtime correspondant. Certains outils exposent un ensemble fixe de noms de modèles ; d'autres renvoient les modèles disponibles selon la configuration locale, le compte connecté et les droits de l'abonnement.
+
+Si vous ne choisissez pas de modèle, Multica utilise le modèle par défaut de l'outil. Si la liste est vide, vérifiez que le runtime est en ligne et que l'outil est connecté, puis actualisez la liste des modèles.
+
+QwenPaw et MiniMax Code font exception : ils n'acceptent pas de modèle choisi depuis Multica, donc le sélecteur est inactif et affiche « Géré par le runtime ». Choisissez plutôt le modèle dans la configuration propre à l'outil. Une liste de modèles vide y est normale et n'indique pas que le runtime est hors ligne.
+
+DeepSeek Harness publie son catalogue de modèles depuis le runtime lui-même (`dsh --profile multica --list-models`). Ses identifiants de modèle utilisent la forme `provider/model` (par exemple `deepseek-official/deepseek-chat`) ; sélectionnez donc l'identifiant complet dans la liste.
+
+<Callout type="info">
+Les noms de modèles peuvent différer d'un outil à l'autre. Après un changement d'outil de codage IA, la valeur de modèle précédente n'est plus valide dans le nouvel outil et doit être sélectionnée à nouveau.
+</Callout>
+
+## Reprise de session
+
+Tous les outils marqués ✓ permettent de poursuivre une session existante lors d'une exécution ultérieure. Les prérequis : la session d'origine existe toujours et l'exécution est effectuée par un runtime qui peut y accéder. MiniMax Code 0.1.2 n'annonce aucune capacité de chargement de session via ACP, donc Multica démarre une nouvelle session MCode pour une exécution ultérieure.
+
+Multica stocke l'identifiant de session renvoyé par l'outil. La prochaine fois que le travail se poursuit sur la même tâche, le runtime tente de reprendre cette session ; s'il n'y parvient pas, il crée une nouvelle session et continue. Pi stocke le chemin d'un fichier de session local ; il dépend donc davantage de l'ordinateur et du fichier d'origine.
+
+Les règles de relance et de reprise de session se trouvent dans [Exécutions](/tasks#relance-manuelle).
+
+## Configuration MCP
+
+Antigravity, GitHub Copilot CLI, DevEco Code et Pi ne lisent pas encore la configuration MCP d'un agent ; le champ n'est donc pas affiché lors de la création d'agents pour ces outils.
+
+<Callout type="warning">
+Les commandes, arguments et variables d'environnement des serveurs MCP sont enregistrés côté serveur avec la configuration de l'agent. N'écrivez pas dans la configuration des identifiants locaux que vous n'avez pas besoin de partager.
+</Callout>
+
+## Injection des skills
+
+Avant le démarrage d'une exécution, Multica écrit les skills rattachés à l'agent dans les chemins du tableau ci-dessus, afin que chaque outil les découvre par son propre mécanisme natif.
+
+Les skills qui existent déjà dans le dépôt ne sont jamais écrasés. En cas de conflit de nom, Multica utilise un autre nom de répertoire pour la copie injectée ; après l'exécution, il ne nettoie que les fichiers qu'il a créés.
+
+Codex, Hermes et OpenClaw sont traités un peu différemment :
+
+- Codex utilise un `CODEX_HOME` propre à chaque exécution ; les skills ne sont donc jamais écrits dans le répertoire Codex au niveau du système.
+- Hermes utilise un `HERMES_HOME` propre à chaque exécution. La configuration locale existante reste lisible, mais les skills rattachés et les données de session sont isolés par exécution. Cette isolation ne s'applique que lorsque des skills sont rattachés à l'agent ; les exécutions sans skill rattaché utilisent le répertoire Hermes d'origine de la machine.
+- OpenClaw utilise `skills/` sous le répertoire de travail de l'exécution en cours, et la configuration propre à l'exécution définit ce répertoire comme espace de travail.
+
+Pour créer et rattacher des skills, consultez [Skills](/skills).
+
+## Étapes suivantes
+
+- [Créer et configurer un agent](/agents-create) — réglages du modèle et du niveau de réflexion.
+- [Installer les outils de codage IA](/install-agent-runtime) — étapes d'installation et de détection.
+- [Daemon et runtimes](/daemon-runtimes) — enregistrement des runtimes et parallélisme.

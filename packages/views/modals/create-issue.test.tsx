@@ -7,7 +7,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -474,10 +474,11 @@ vi.mock("../issues/components", () => ({
 }));
 
 vi.mock("../issues/components/pickers/custom-property-picker", () => ({
-  CustomPropertyValueInput: ({ property, onChange }: any) => (
+  CustomPropertyValueInput: ({ property, onChange, open }: any) => (
     <button
       type="button"
       aria-label={`Edit ${property.name}`}
+      data-open={open ? "true" : "false"}
       onClick={() => onChange("option-enterprise")}
     >
       {property.name}
@@ -874,7 +875,7 @@ describe("CreateIssueModal", () => {
     });
   });
 
-  it("sets configured custom property values after the issue is created", async () => {
+  it("includes configured custom properties in the atomic create request", async () => {
     const user = userEvent.setup();
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
@@ -885,14 +886,260 @@ describe("CreateIssueModal", () => {
     await user.type(screen.getByPlaceholderText("Issue title"), "Enterprise follow-up");
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
 
-    await waitFor(() => {
-      expect(mockSetIssueProperty).toHaveBeenCalledWith(
-        "issue-123",
-        "property-tier",
-        "option-enterprise",
-      );
-    });
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Enterprise follow-up",
+        properties: { "property-tier": "option-enterprise" },
+      }),
+    ));
+    expect(mockSetIssueProperty).not.toHaveBeenCalled();
     expect(mockClearDraft).toHaveBeenCalled();
+  });
+
+  it("keeps the draft open and highlights the rejected custom property", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockDraftStore.draft.manual.propertyValues = {
+      "property-tier": "option-enterprise",
+    };
+    mockCreateIssue.mockRejectedValueOnce(
+      new ApiError("Customer tier is invalid", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-tier",
+        error: "Customer tier is invalid",
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Keep this draft");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Customer tier is invalid"));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mockClearDraft).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Keep this draft");
+    expect(document.querySelector('[data-property-error="true"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Edit Customer tier" })).toHaveAttribute(
+      "data-open",
+      "true",
+    );
+    expect(mockDraftStore.draft.manual.propertyValues).toEqual({
+      "property-tier": "option-enterprise",
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(mockSetManual).not.toHaveBeenCalledWith(
+      expect.objectContaining({ propertyValues: expect.anything() }),
+    );
+    expect(mockSetIssueProperty).not.toHaveBeenCalled();
+  });
+
+  it.each(["ordinary", "comment-source"] as const)(
+    "removes only the rejected unavailable property from the %s draft before a manual retry",
+    async (path) => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      mockDraftStore.draft.manual = {
+        ...mockDraftStore.draft.manual,
+        title: "Keep this draft",
+        description: "Keep this body",
+        assigneeType: "member",
+        assigneeId: "user-1",
+        propertyValues: {
+          "property-stale": "old value",
+          "property-tier": "option-enterprise",
+        },
+      };
+      mockDraftStore.draft.shared.priority = "high";
+      const originalDraft = structuredClone(mockDraftStore.draft);
+      if (path === "ordinary") {
+        // Forward the modal's draft writes to the real persisted store, so
+        // this regression also checks the workspace storage boundary.
+        const { useIssueDraftStore: persistedStore } = await vi.importActual<
+          typeof import("@multica/core/issues/stores/draft-store")
+        >("@multica/core/issues/stores/draft-store");
+        const { setCurrentWorkspace } = await import("@multica/core/platform");
+        setCurrentWorkspace("property-recovery", "ws-test");
+        onTestFinished(() => {
+          setCurrentWorkspace(null, null);
+          localStorage.removeItem("multica_issue_draft:property-recovery");
+        });
+        await Promise.resolve();
+        persistedStore.setState({
+          draft: { ...structuredClone(originalDraft), shared: { ...originalDraft.shared, attachments: [] } },
+          isolatedDraftBackup: undefined,
+        });
+        mockSetManual.mockImplementation((patch: Partial<typeof mockDraftStore.draft.manual>) => {
+          persistedStore.getState().setManual(patch);
+          mockDraftStore.draft.manual = { ...mockDraftStore.draft.manual, ...patch };
+        });
+      }
+      const create = path === "ordinary" ? mockCreateIssue : mockCreateCommentSubIssue;
+      create.mockRejectedValueOnce(
+        new ApiError("Property is unavailable", 400, "Bad Request", {
+          code: "invalid_issue_property",
+          property_id: "property-stale",
+        }),
+      );
+      const panel = (
+        <ManualCreatePanel
+          data={path === "comment-source" ? sourceContextPanelData() : undefined}
+          onClose={onClose}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />
+      );
+      const view = renderModal(panel);
+      await screen.findByRole("button", { name: "Edit Customer tier" });
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "An unavailable custom property was removed from the draft. Review it before submitting again.",
+      );
+      const submittedIssue = (index: number) => path === "ordinary"
+        ? create.mock.calls[index]?.[0]
+        : create.mock.calls[index]?.[1].issue;
+      // Nothing is filtered before the server identifies the invalid field.
+      expect(submittedIssue(0).properties).toEqual(originalDraft.manual.propertyValues);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(mockClearDraft).not.toHaveBeenCalled();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Keep this draft");
+      expect(screen.getByPlaceholderText("Add description...")).toHaveValue("Keep this body");
+      const remainingProperties = { "property-tier": "option-enterprise" };
+      expect(mockSetManual).toHaveBeenCalledWith({ propertyValues: remainingProperties });
+      expect(mockDraftStore.draft).toEqual({
+        ...originalDraft,
+        manual: { ...originalDraft.manual, propertyValues: remainingProperties },
+      });
+      if (path === "ordinary") {
+        const persisted = JSON.parse(localStorage.getItem("multica_issue_draft:property-recovery")!);
+        expect(persisted.state.draft).toEqual(mockDraftStore.draft);
+      }
+
+      // A user-initiated retry reads the updated local selection, not the
+      // rejected payload. Keep this retry open so reopening can check the store.
+      create.mockRejectedValueOnce(new Error("Try again later"));
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+      expect(submittedIssue(1)).toMatchObject({
+        title: "Keep this draft",
+        description: "Keep this body",
+        assignee_type: "member",
+        assignee_id: "user-1",
+        status: "todo",
+        priority: "high",
+        properties: remainingProperties,
+      });
+      view.unmount();
+      renderModal(panel);
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
+      expect(submittedIssue(2).properties).toEqual(remainingProperties);
+      expect(mockSetIssueProperty).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, "", 42, "property-not-submitted", "toString"])(
+    "does not change the draft for an unlocatable property error (%s)",
+    async (propertyId) => {
+      const user = userEvent.setup();
+      mockDraftStore.draft.manual.title = "Keep this draft";
+      mockDraftStore.draft.manual.propertyValues = { "property-stale": "old value" };
+      const originalDraft = structuredClone(mockDraftStore.draft);
+      mockCreateIssue.mockRejectedValueOnce(
+        new ApiError("Invalid property", 400, "Bad Request", {
+          code: "invalid_issue_property",
+          property_id: propertyId,
+        }),
+      );
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+      await screen.findByText("Customer tier");
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Invalid property"));
+      expect(mockDraftStore.draft).toEqual(originalDraft);
+      expect(mockSetManual).not.toHaveBeenCalledWith(
+        expect.objectContaining({ propertyValues: expect.anything() }),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(document.querySelector('[data-property-error="true"]')).toBeNull();
+    },
+  );
+
+  it("does not treat an unloaded property catalog as an unavailable property", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Keep this draft";
+    mockDraftStore.draft.manual.propertyValues = { "property-tier": "option-enterprise" };
+    mockListProperties.mockReturnValueOnce(new Promise(() => {}));
+    mockCreateIssue.mockRejectedValueOnce(
+      new ApiError("Invalid property", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-tier",
+      }),
+    );
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Invalid property"));
+    expect(mockDraftStore.draft.manual.propertyValues).toEqual({ "property-tier": "option-enterprise" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("preserves edits made while the unavailable-property error is pending", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Draft before submit";
+    mockDraftStore.draft.manual.propertyValues = {
+      "property-stale": "old value",
+      "property-tier": "option-old",
+    };
+    let rejectCreate!: (error: Error) => void;
+    mockCreateIssue.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await screen.findByRole("button", { name: "Edit Customer tier" });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), " with new edits");
+    await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
+    await act(async () => {
+      rejectCreate(new ApiError("Property is unavailable", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-stale",
+      }));
+    });
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(mockDraftStore.draft.manual.title).toBe("Draft before submit with new edits");
+    expect(mockDraftStore.draft.manual.propertyValues).toEqual({ "property-tier": "option-enterprise" });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      title: "Draft before submit with new edits",
+      properties: { "property-tier": "option-enterprise" },
+    }));
+  });
+
+  it("does not remove a property from a reopened draft after a late rejection", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Draft before submit";
+    mockDraftStore.draft.manual.propertyValues = { "property-stale": "old value" };
+    let rejectCreate!: (error: Error) => void;
+    mockCreateIssue.mockImplementationOnce(() => new Promise((_, reject) => { rejectCreate = reject; }));
+    const view = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await screen.findByText("Customer tier");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    view.unmount();
+    mockDraftStore.draft.manual.title = "Reopened draft";
+    const reopenedDraft = structuredClone(mockDraftStore.draft);
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await act(async () => {
+      rejectCreate(new ApiError("Property is unavailable", 400, "Bad Request", {
+        code: "invalid_issue_property",
+        property_id: "property-stale",
+      }));
+    });
+
+    expect(mockDraftStore.draft).toEqual(reopenedDraft);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("persists manual-mode uploads in the issue draft", async () => {
@@ -1352,6 +1599,9 @@ describe("CreateIssueModal", () => {
 
   it("submits source-context manual create through the dedicated endpoint", async () => {
     const user = userEvent.setup();
+    mockDraftStore.draft.manual.propertyValues = {
+      "property-tier": "option-enterprise",
+    };
     renderModal(
       <ManualCreatePanel
         onClose={vi.fn()}
@@ -1370,10 +1620,14 @@ describe("CreateIssueModal", () => {
       {
         mode: "manual",
         capture_token: "sha256:preview-token",
-        issue: expect.objectContaining({ title: "Create from source comment" }),
+        issue: expect.objectContaining({
+          title: "Create from source comment",
+          properties: { "property-tier": "option-enterprise" },
+        }),
       },
     ));
     expect(mockCreateIssue).not.toHaveBeenCalled();
+    expect(mockSetIssueProperty).not.toHaveBeenCalled();
   });
 
   // Start date is a low-frequency field — by default it lives behind the

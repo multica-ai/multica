@@ -20,6 +20,7 @@
  * code incident.
  */
 import { useMemo } from "react";
+import { MOBILE_RADIUS } from "@/lib/radius";
 import { THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
 
@@ -249,7 +250,7 @@ export function useMarkdownStyle() {
         backgroundColor: t.surface2,
         borderColor: t.border,
         padding: 12,
-        borderRadius: 8,
+        borderRadius: MOBILE_RADIUS.md,
         marginBottom: MD_GAP.paragraph,
       },
       // Blockquote — `color` is REQUIRED: enriched's default is a hardcoded
@@ -285,7 +286,7 @@ export function useMarkdownStyle() {
         marginLeft: 16,
       },
       image: {
-        borderRadius: 8,
+        borderRadius: MOBILE_RADIUS.md,
         marginBottom: MD_GAP.paragraph,
       },
       // Task lists. `checkedTextColor` REQUIRED: enriched default is `#000000`,
@@ -308,9 +309,8 @@ export function useMarkdownStyle() {
         fontSize: MD_FONT.body,
         lineHeight: MD_LINE.body,
         borderColor: t.border,
-        // borderRadius: 8 (was 6) — aligns with codeBlock and image (both 8).
-        // No reason for table to be the odd one out.
-        borderRadius: 8,
+        // Match the compact medium radius used by codeBlock and image.
+        borderRadius: MOBILE_RADIUS.md,
         headerBackgroundColor: t.surface2,
         headerTextColor: t.foreground,
         // Transparent rows let the page background show through — works in

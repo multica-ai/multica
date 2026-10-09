@@ -224,7 +224,6 @@ func TestShardedStreamRelayMaintenanceTrimsExactlyAndRepairsTTL(t *testing.T) {
 	mock.ExpectPTTL(stream).SetVal(-1)
 	mock.ExpectPExpire(stream, 15*time.Minute).SetVal(true)
 	mock.ExpectXLen(stream).SetVal(23)
-	mock.ExpectMemoryUsage(stream).SetVal(4096)
 	mock.ExpectInfo("memory").SetVal("used_memory:8192\r\nmaxmemory:65536\r\n")
 	mock.ExpectInfo("stats").SetVal("evicted_keys:3\r\n")
 
@@ -234,8 +233,11 @@ func TestShardedStreamRelayMaintenanceTrimsExactlyAndRepairsTTL(t *testing.T) {
 		t.Fatalf("trimmed total = %d, want 17", got)
 	}
 	observation := M.RedisStreamObservations()[stream]
-	if observation.Entries != 23 || observation.MemoryBytes != 4096 || observation.PTTLMillis != (15*time.Minute).Milliseconds() {
+	if observation.Entries != 23 || observation.PTTLMillis != (15*time.Minute).Milliseconds() {
 		t.Fatalf("unexpected observation: %+v", observation)
+	}
+	if got := M.RedisRelayRetentionErrors.Load(); got != 0 {
+		t.Fatalf("retention errors = %d, want 0", got)
 	}
 	if got := M.RedisUsedMemoryBytes.Load(); got != 8192 {
 		t.Fatalf("used memory = %d, want 8192", got)
@@ -271,7 +273,6 @@ func TestShardedStreamRelayMaintenanceCountsTTLRepairFailure(t *testing.T) {
 	mock.ExpectPTTL(stream).SetVal(-1)
 	mock.ExpectPExpire(stream, relay.config.StreamTTL).SetErr(errors.New("PEXPIRE denied"))
 	mock.ExpectXLen(stream).SetVal(1)
-	mock.ExpectMemoryUsage(stream).SetVal(1024)
 	mock.ExpectInfo("memory").SetVal("used_memory:1024\r\nmaxmemory:2048\r\n")
 	mock.ExpectInfo("stats").SetVal("evicted_keys:0\r\n")
 

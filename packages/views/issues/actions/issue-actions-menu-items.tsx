@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  CircleEqual,
   ExternalLink,
   FolderOpen,
   Link2,
@@ -108,7 +109,7 @@ export function IssueActionsMenuItems({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const statusOptions = useStatusOptions(wsId);
-  const { categoryOf, colorOf } = useIssueStatuses(wsId);
+  const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const {
     isPinned,
     updateField,
@@ -119,6 +120,7 @@ export function IssueActionsMenuItems({
     openSetParent,
     removeParent,
     openAddChild,
+    openMarkDuplicate,
     openDeleteConfirm,
   } = actions;
 
@@ -178,6 +180,7 @@ export function IssueActionsMenuItems({
             status={issue.status}
             category={categoryOf(issue.status)}
             color={colorOf(issue.status)}
+            icon={iconOf(issue.status)}
             className="h-3.5 w-3.5"
           />
           {t(($) => $.actions.status)}
@@ -196,6 +199,7 @@ export function IssueActionsMenuItems({
                 status={option.key}
                 category={option.category}
                 color={option.color}
+                icon={option.icon}
                 className="h-3.5 w-3.5"
               />
               {option.label}
@@ -217,7 +221,7 @@ export function IssueActionsMenuItems({
           {PRIORITY_DISPLAY_ORDER.map((p) => (
             <P.Item key={p} onClick={() => updateField({ priority: p })}>
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
+                className={`inline-flex items-center gap-1 rounded-xs px-1.5 py-0.5 text-caption font-medium ${PRIORITY_CONFIG[p].badgeBg} ${PRIORITY_CONFIG[p].badgeText}`}
               >
                 <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
                 {t(($) => $.priority[p])}
@@ -351,6 +355,10 @@ export function IssueActionsMenuItems({
           <P.Item onClick={openAddChild}>
             <ArrowDown className="h-3.5 w-3.5" />
             {t(($) => $.actions.add_sub_issue)}
+          </P.Item>
+          <P.Item onClick={openMarkDuplicate}>
+            <CircleEqual className="h-3.5 w-3.5" />
+            {t(($) => $.actions.mark_duplicate)}
           </P.Item>
         </P.SubContent>
       </P.Sub>

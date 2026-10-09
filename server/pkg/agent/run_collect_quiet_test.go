@@ -44,25 +44,28 @@ echo $! > "` + helperPidFile + `"
 # The defining behaviour: answer delivered, process refuses to exit.
 sleep 300
 `
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake cli: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	return script
 }
 
 func writeCLI(t *testing.T, body string) string {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "fake-cli")
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake cli: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	return script
 }
 
 // TestRunCollectQuietReturnsOnceOutputGoesIdle is the core contract: a complete
 // answer plus silence is enough, and returning must not depend on the deadline.
+//
+// The idle shortcut must still clean up, too: this path runs per task, so a
+// helper left behind each time is how a host accumulates orphan
+// `openclaw-config` processes.
 func TestRunCollectQuietReturnsOnceOutputGoesIdle(t *testing.T) {
-	cli := writePrintThenHangCLI(t, quietTestJSON, "")
+	t.Parallel()
+
+	pidFile := filepath.Join(t.TempDir(), "helper.pid")
+	cli := writePrintThenHangCLI(t, quietTestJSON, pidFile)
 
 	// A long ctx on purpose.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -90,6 +93,20 @@ func TestRunCollectQuietReturnsOnceOutputGoesIdle(t *testing.T) {
 		t.Errorf("took %v — it waited for an exit that never comes instead of "+
 			"accepting the flushed output", elapsed)
 	}
+
+	data, readErr := os.ReadFile(pidFile)
+	if readErr != nil {
+		t.Fatalf("helper pid file unreadable: %v", readErr)
+	}
+	pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+	if convErr != nil {
+		t.Fatalf("bad pid %q: %v", data, convErr)
+	}
+	if !waitForProcessGone(pid, 5*time.Second) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("helper pid %d survived the idle-path return — the orphan "+
+			"leak is back on this code path", pid)
+	}
 }
 
 // TestRunCollectQuietDoesNotSalvagePartialOutputAtDeadline is the regression for
@@ -98,6 +115,8 @@ func TestRunCollectQuietReturnsOnceOutputGoesIdle(t *testing.T) {
 // the deadline arrived had its truncated output reported as success — measured
 // 9 runs in 10. The deadline is never success.
 func TestRunCollectQuietDoesNotSalvagePartialOutputAtDeadline(t *testing.T) {
+	t.Parallel()
+
 	// Emits a JSON document forever: always non-empty, never complete.
 	// 120ms between writes, not 30ms: the stub forks a `sleep` per iteration and
 	// this package also holds timing-tight tests, so a tighter loop steals CPU
@@ -132,10 +151,13 @@ func TestRunCollectQuietDoesNotSalvagePartialOutputAtDeadline(t *testing.T) {
 // does exactly this — it prints Doctor warning UI first (MUL-3136) — and cutting
 // off there would return the banner as the answer.
 func TestRunCollectQuietWaitsForTheAnswerAfterAPrompt(t *testing.T) {
+	t.Parallel()
+
 	// Banner, a pause well past the idle grace, then the real answer, then hang.
+	const idleGrace = 100 * time.Millisecond
 	cli := writeCLI(t, "#!/bin/sh\n"+
 		"echo 'warning: run openclaw doctor to inspect config'\n"+
-		"sleep 1\n"+
+		"sleep 0.4\n"+
 		"printf '%s\\n' '"+quietTestJSON+"'\n"+
 		"sleep 300\n")
 
@@ -149,7 +171,7 @@ func TestRunCollectQuietWaitsForTheAnswerAfterAPrompt(t *testing.T) {
 		return strings.TrimSpace(lines[len(lines)-1]) == quietTestJSON
 	}
 
-	out, _, quiet, err := RunCollectQuiet(ctx, nil, 0, lastLineIsAnswer, cli)
+	out, _, quiet, err := RunCollectQuiet(ctx, nil, idleGrace, lastLineIsAnswer, cli)
 	if err != nil {
 		t.Fatalf("RunCollectQuiet: %v", err)
 	}
@@ -165,10 +187,10 @@ func TestRunCollectQuietWaitsForTheAnswerAfterAPrompt(t *testing.T) {
 // TestRunCollectQuietReportsLateNonZeroExit is the third regression the review
 // asked for. A CLI that prints a complete answer and then fails must be reported
 // as the failure it is, as long as it fails within the idle grace — which is
-// exactly what the grace is for. The stub exits at 150ms against a 400ms grace.
+// exactly what the grace is for. The stub exits at 50ms before the test grace.
 func TestRunCollectQuietReportsLateNonZeroExit(t *testing.T) {
 	cli := writeCLI(t, "#!/bin/sh\nprintf '%s\\n' '"+quietTestJSON+"'\n"+
-		"echo 'openclaw doctor found a problem' >&2\nsleep 0.15\nexit 5\n")
+		"echo 'openclaw doctor found a problem' >&2\nsleep 0.05\nexit 5\n")
 
 	out, stderr, quiet, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli)
 	if err == nil {
@@ -195,6 +217,8 @@ func TestRunCollectQuietReportsLateNonZeroExit(t *testing.T) {
 // proves the runner was still blocked at a moment when the answer was fully
 // available to it.
 func TestRunCollectQuietWithoutCompletenessRuleWaitsForExit(t *testing.T) {
+	t.Parallel()
+
 	marker := filepath.Join(t.TempDir(), "answer-delivered")
 	cli := writeCLI(t, "#!/bin/sh\n"+
 		`printf '%s\n' '`+quietTestJSON+"'\n"+
@@ -205,13 +229,14 @@ func TestRunCollectQuietWithoutCompletenessRuleWaitsForExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	const idleGrace = 100 * time.Millisecond
 	type collected struct {
 		out []byte
 		err error
 	}
 	done := make(chan collected, 1)
 	go func() {
-		out, _, _, err := RunCollectQuiet(ctx, nil, 0, nil, cli)
+		out, _, _, err := RunCollectQuiet(ctx, nil, idleGrace, nil, cli)
 		done <- collected{out: out, err: err}
 	}()
 
@@ -223,7 +248,7 @@ func TestRunCollectQuietWithoutCompletenessRuleWaitsForExit(t *testing.T) {
 		t.Fatalf("returned while the process was still running (err=%v, out=%q) — "+
 			"without a rule the runner must not decide the answer is finished",
 			got.err, truncateForLog(got.out))
-	case <-time.After(3 * DefaultQuietIdleGrace):
+	case <-time.After(3 * idleGrace):
 	}
 
 	cancel()
@@ -277,40 +302,15 @@ func TestRunCollectQuietPropagatesExitFailure(t *testing.T) {
 	}
 }
 
-// TestRunCollectQuietReapsHelperOnIdleReturn pins that the idle shortcut still
-// cleans up: this path runs per task, so a helper left behind each time is how a
-// host accumulates orphan `openclaw-config` processes.
-func TestRunCollectQuietReapsHelperOnIdleReturn(t *testing.T) {
-	pidFile := filepath.Join(t.TempDir(), "helper.pid")
-	cli := writePrintThenHangCLI(t, quietTestJSON, pidFile)
-
-	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli); err != nil {
-		t.Fatalf("RunCollectQuiet: %v", err)
-	}
-
-	data, readErr := os.ReadFile(pidFile)
-	if readErr != nil {
-		t.Fatalf("helper pid file unreadable: %v", readErr)
-	}
-	pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
-	if convErr != nil {
-		t.Fatalf("bad pid %q: %v", data, convErr)
-	}
-
-	if !waitForProcessGone(pid, 5*time.Second) {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-		t.Fatalf("helper pid %d survived the idle-path return — the orphan "+
-			"leak is back on this code path", pid)
-	}
-}
-
 // TestRunCollectQuietWithNoOutputHonorsContext pins that the idle shortcut cannot
 // mask a CLI that produces nothing: with no output there is nothing to judge, so
 // the deadline must still govern and the call must still fail.
 func TestRunCollectQuietWithNoOutputHonorsContext(t *testing.T) {
+	t.Parallel()
+
 	cli := writeCLI(t, "#!/bin/sh\nsleep 300\n")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()

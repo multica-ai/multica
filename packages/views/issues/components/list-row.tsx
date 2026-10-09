@@ -23,9 +23,16 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
+import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import { issueStatusCategory } from "@multica/core/issues";
+import {
+  PEEKED_ROW_CLASS,
+  PEEK_TARGET_ATTR,
+  useIsIssuePeeked,
+  useIssuePeekLinkProps,
+} from "../surface/peek-context";
 import { useLocale } from "../../i18n";
 
 export interface ChildProgress {
@@ -58,6 +65,8 @@ function ListRowContent({
 }) {
   const locale = useLocale();
   const selection = useIssueSurfaceSelection();
+  const peeked = useIsIssuePeeked(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue.id);
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
   const p = useWorkspacePaths();
@@ -81,22 +90,27 @@ function ListRowContent({
     <IssueActionsContextMenu issue={issue}>
       <div
         ref={containerRef}
+        data-slot="issue-list-row"
+        {...{ [PEEK_TARGET_ATTR]: issue.id }}
+        data-peeked={peeked ? "" : undefined}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-body transition-colors ${
+        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-4 text-body transition-colors ${
           selected
             ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
             : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"
-        } ${isDragging ? "opacity-30" : ""}`}
+        } ${PEEKED_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
       >
         <div
           className="relative flex shrink-0 items-center justify-center w-4 h-4"
           {...checkboxProps}
         >
-          <PriorityIcon
-            priority={issue.priority}
-            className={selected ? "hidden" : "group-hover/row:hidden"}
-          />
+          {storeProperties.priority && issue.priority !== "none" && (
+            <PriorityIcon
+              priority={issue.priority}
+              className={selected ? "hidden" : "group-hover/row:hidden"}
+            />
+          )}
           <input
             type="checkbox"
             checked={selected}
@@ -110,6 +124,7 @@ function ListRowContent({
           href={p.issueDetail(issue.id)}
           newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
+          {...peekLinkProps}
         >
           <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
@@ -122,9 +137,9 @@ function ListRowContent({
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
-            {/* List sections are categories, so a custom status needs to name
-                itself on the row. Silent for built-ins. (MUL-6243) */}
+            {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
+            <IssueDuplicateOfMarker issue={issue} insideLink />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />

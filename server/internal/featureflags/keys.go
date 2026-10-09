@@ -23,6 +23,18 @@ const (
 	// gate pinned Task/Run execution: disabling discovery and management must not
 	// mutate an immutable execution manifest that is already in flight.
 	PluginsV1 = "plugins_v1"
+	// TriageV1 gates the Triage inbox (MUL-7189): creating issues into Triage,
+	// triage runs, and the Triage page. It is a GLOBAL switch — per-workspace
+	// targeting has no production wiring — which is enough because a
+	// workspace with no triager configured and no Triage issues sees nothing
+	// either way. Turning it off stops new intake and triage runs but leaves
+	// existing Triage issues workable.
+	TriageV1 = "triage_v1"
+	// LocalSearchIndex gates the sync endpoints behind Web/Desktop local search
+	// (MUL-7754). On by default. Turning it off (FF_LOCAL_SEARCH_INDEX=off)
+	// makes those endpoints answer 404, so clients stop syncing and search
+	// through the server again without a client release.
+	LocalSearchIndex = "local_search_index"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -56,6 +68,14 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
+}
+
+func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, TriageV1, false)
+}
+
+func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, LocalSearchIndex, true)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

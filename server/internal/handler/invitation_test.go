@@ -19,6 +19,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 const invitationTestEmail = "invitation-test@multica.ai"
@@ -766,5 +767,94 @@ func TestCreateInvitation_RouteRequiresAdminRole(t *testing.T) {
 	}
 	if rec := call(testUserID, fmt.Sprintf("invitation-route-owner-%s@multica.ai", testWorkspaceID)); rec.Code != http.StatusCreated {
 		t.Errorf("owner status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// An installed client can still show a pending-invitation row the user
+// already accepted from another surface (web invite page, another device).
+// Re-accept must be idempotent for the membership the first accept created,
+// so the client's refetch drops the stale row instead of sticking forever.
+func TestAcceptInvitation_AlreadyAcceptedIsIdempotentForExistingMember(t *testing.T) {
+	email := "idempotent-accept-" + uuid.NewString() + "@multica.ai"
+	userID := dbfx.User(t, "Idempotent Accept Invitee", email)
+	invitationID := dbfx.Insert(t, "workspace_invitation", testutil.Cols{
+		"workspace_id":    testWorkspaceID,
+		"inviter_id":      testUserID,
+		"invitee_email":   email,
+		"invitee_user_id": userID,
+		"role":            "member",
+		"status":          "accepted",
+		"expires_at":      testutil.Raw("now() + interval '1 day'"),
+	})
+	memberID := dbfx.Member(t, testWorkspaceID, userID, "member")
+
+	req := newRequest("POST", "/api/invitations/"+invitationID+"/accept", nil)
+	req.Header.Set("X-User-ID", userID)
+	req = withURLParam(req, "id", invitationID)
+	var member MemberWithUserResponse
+	testutil.Call(t, testHandler.AcceptInvitation, req).Want(http.StatusOK).JSON(&member)
+	if member.ID != memberID {
+		t.Fatalf("member id = %q, want %q", member.ID, memberID)
+	}
+	if members := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID)); members != 1 {
+		t.Fatalf("member count = %d, want 1", members)
+	}
+}
+
+// A concluded invitation whose membership is gone (the user left the
+// workspace afterwards) must not be re-acceptable: leaving was explicit.
+func TestAcceptInvitation_AlreadyAcceptedWithoutMembershipStillFails(t *testing.T) {
+	email := "stale-accept-no-member-" + uuid.NewString() + "@multica.ai"
+	userID := dbfx.User(t, "Stale Accept Invitee", email)
+	invitationID := dbfx.Insert(t, "workspace_invitation", testutil.Cols{
+		"workspace_id":    testWorkspaceID,
+		"inviter_id":      testUserID,
+		"invitee_email":   email,
+		"invitee_user_id": userID,
+		"role":            "member",
+		"status":          "accepted",
+		"expires_at":      testutil.Raw("now() + interval '1 day'"),
+	})
+
+	req := newRequest("POST", "/api/invitations/"+invitationID+"/accept", nil)
+	req.Header.Set("X-User-ID", userID)
+	req = withURLParam(req, "id", invitationID)
+	testutil.Call(t, testHandler.AcceptInvitation, req).Want(http.StatusBadRequest)
+	if members := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID)); members != 0 {
+		t.Fatalf("member count = %d, want 0", members)
+	}
+}
+
+// Declining a concluded invitation is a no-op: the row only lingers in
+// clients that concluded the same invitation elsewhere, and a 204 lets their
+// refetch drop it.
+func TestDeclineInvitation_AlreadyAcceptedIsNoOp(t *testing.T) {
+	email := "idempotent-decline-" + uuid.NewString() + "@multica.ai"
+	userID := dbfx.User(t, "Idempotent Decline Invitee", email)
+	invitationID := dbfx.Insert(t, "workspace_invitation", testutil.Cols{
+		"workspace_id":    testWorkspaceID,
+		"inviter_id":      testUserID,
+		"invitee_email":   email,
+		"invitee_user_id": userID,
+		"role":            "member",
+		"status":          "accepted",
+		"expires_at":      testutil.Raw("now() + interval '1 day'"),
+	})
+	dbfx.Member(t, testWorkspaceID, userID, "member")
+
+	req := newRequest("POST", "/api/invitations/"+invitationID+"/decline", nil)
+	req.Header.Set("X-User-ID", userID)
+	req = withURLParam(req, "id", invitationID)
+	testutil.Call(t, testHandler.DeclineInvitation, req).Want(http.StatusNoContent)
+
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM workspace_invitation WHERE id = $1`, parseUUID(invitationID)).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "accepted" {
+		t.Fatalf("invitation status = %q, want accepted", status)
+	}
+	if members := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID)); members != 1 {
+		t.Fatalf("member count = %d, want 1", members)
 	}
 }

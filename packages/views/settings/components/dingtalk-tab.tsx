@@ -51,6 +51,7 @@ import type {
   DingTalkInstallation,
 } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useT, useTimeAgo } from "../../i18n";
 
@@ -189,7 +190,7 @@ export function DingTalkConnectionLabel({
                     <span className="leading-relaxed">
                       {permissionTooltipPrefix}{" "}
                       <code
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground ring-1 ring-border"
+                        className="rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground ring-1 ring-border"
                         translate="no"
                       >
                         {dingTalkChatManagePermission}
@@ -587,7 +588,7 @@ export function DingTalkTab() {
             <p className="text-body font-medium">{t(($) => $.dingtalk.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.dingtalk.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_DINGTALK_SECRET_KEY
               </code>{" "}
               {t(($) => $.dingtalk.not_enabled_description_suffix)}{" "}
@@ -601,13 +602,6 @@ export function DingTalkTab() {
             <h2 className="text-body font-semibold">
               {t(($) => $.dingtalk.connections_title)}
             </h2>
-            {!isLoading &&
-              displayedInstallations.length > 0 &&
-              groupDiscoverySupported && (
-              <p className="max-w-3xl text-caption leading-relaxed text-muted-foreground">
-                {t(($) => $.dingtalk.groups_overview_description)}
-              </p>
-            )}
           </div>
           {isLoading || (!canManage && agentsLoading) ? (
             <Card>
@@ -739,7 +733,7 @@ function InstallationRow({
             <h3 className="truncate text-title-sm font-medium text-pretty">
               {agentName}
               {!isActive && (
-                <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                   {t(($) => $.dingtalk.revoked_badge)}
                 </span>
               )}
@@ -805,14 +799,7 @@ function InstallationRow({
 // prefixes (English has none), matching the convention used elsewhere in the
 // app for doc links.
 function dingtalkDocsUrl(lang: string | undefined): string {
-  const prefix = lang?.startsWith("zh")
-    ? "/zh"
-    : lang?.startsWith("ja")
-      ? "/ja"
-      : lang?.startsWith("ko")
-        ? "/ko"
-        : "";
-  return `https://multica.ai/docs${prefix}/dingtalk-bot-integration`;
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/dingtalk-bot-integration`;
 }
 
 // DingTalkAgentBindButton is the per-agent CTA exposed from the agent detail

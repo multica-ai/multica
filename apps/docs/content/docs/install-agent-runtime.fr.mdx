@@ -1,0 +1,124 @@
+---
+title: Installer les outils de codage IA
+description: Installez un outil de codage IA pris en charge et connectez-vous-y pour que Multica puisse lancer des exécutions sur votre machine.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Un runtime local comporte deux éléments : le daemon Multica et un outil de codage IA qu'il peut invoquer. N'installez que l'outil que vous comptez utiliser — inutile de tous les installer.
+
+## 1. Choisir un outil
+
+Un outil déjà installé et connecté ne nécessite aucune configuration supplémentaire. Les outils diffèrent par leurs modèles, MCP, la reprise de session et la prise en charge des skills ; les détails figurent dans [Comparatif des outils de codage IA](/providers).
+
+Multica détecte actuellement ces commandes :
+
+| Outil | Commande détectée | Guide d'installation officiel |
+| --- | --- | --- |
+| Antigravity CLI | `agy` | [Installation et connexion d'Antigravity](https://antigravity.google/docs/cli-install) |
+| Claude Code | `claude` | [Démarrage rapide de Claude Code](https://code.claude.com/docs/en/quickstart) |
+| CodeBuddy Code | `codebuddy` | [Démarrage rapide de CodeBuddy](https://www.codebuddy.ai/docs/cli/quickstart) |
+| CodeArts | `codearts` | [Démarrage rapide du CLI CodeArts](https://support.huaweicloud.com/qs-codeartssnap/codeartsagent_qs_0004.html) |
+| Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
+| GitHub Copilot CLI | `copilot` | [Installer Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
+| Cursor Agent | `cursor-agent` | [Installer Cursor CLI](https://docs.cursor.com/en/cli/installation) |
+| DeepSeek Harness | `dsh` | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) |
+| DevEco Code | `deveco` | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) |
+| Grok Build | `grok` | [Démarrage rapide de Grok Build](https://docs.x.ai/build/overview) |
+| Hermes Agent | `hermes` | [Démarrage rapide de Hermes](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
+| Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
+| Kiro CLI | `kiro-cli` | [Installer Kiro CLI](https://kiro.dev/docs/cli/installation/) |
+| MiniMax Code | `mcode` | [Installer MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
+| OpenClaw | `openclaw` | [Installer OpenClaw](https://docs.openclaw.ai/install) |
+| OpenCode | `opencode` | [Démarrage rapide d'OpenCode](https://opencode.ai/en/docs) |
+| Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Oh-My-Pi | `omp` | [Installation d'Oh-My-Pi](https://omp.sh) |
+| Qoder CLI | `qodercli` | [Démarrage rapide de Qoder CLI](https://docs.qoder.com/en/cli/quick-start) |
+| Qoder CN CLI | `qoderclicn` | [Démarrage rapide de Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
+| Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
+| QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
+| TRAE CLI | `traecli` | [Site officiel de TRAE](https://www.trae.cn/) |
+| Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+
+« Pris en charge » signifie que Multica peut invoquer ce CLI. Cela ne signifie pas que Multica vous fournit le compte, l'abonnement ou le quota de modèle de l'outil.
+
+## 2. Se connecter sur votre machine
+
+Après l'installation, lancez une première fois l'outil seul dans un terminal et terminez sa connexion ou la configuration de son fournisseur de modèles. Si l'outil ne parvient pas à traiter des requêtes dans le terminal, les invocations du daemon échoueront de la même manière.
+
+Pour CodeArts, vérifiez le chemin non interactif avec `codearts run --model provider/model "Reply OK"`, et pas seulement la TUI. Le CLI CodeArts actuel peut laisser un fournisseur personnalisé fonctionner dans la TUI alors que `run`, `models` et `serve` exigent toujours [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica peut découvrir des modèles personnalisés depuis `~/.codeartsdoer/codearts_cli.json` ou `.jsonc`, mais les exécutions d'agent utilisent `codearts run` et suivent donc ses exigences d'autorisation.
+
+Pour Reasonix, exécutez `reasonix setup` et configurez un fournisseur et un modèle par défaut avant de démarrer le daemon.
+
+Pour QwenPaw, choisissez le fournisseur et le modèle dans la configuration propre de QwenPaw. Multica ne peut pas remplacer le modèle de QwenPaw au moment de l'exécution.
+
+Pour MiniMax Code, installez une version de Node.js prise en charge (`>=22.19 <23` ou `>=24 <27`) et exécutez `npm install --global @minimax-ai/code@latest`. Une installation npm globale place `mcode` dans le chemin des binaires globaux de npm ; si `command -v mcode` ou `Get-Command mcode` ne le trouve pas, ajoutez ce chemin au `PATH`. Exécutez ensuite `mcode login`. C'est MiniMax Code qui gère le choix du modèle ; Multica ne peut pas le remplacer via ACP.
+
+Pour DeepSeek Harness, installez Node.js 20+ et exécutez `npm install -g @deepseek-ai/dsh`, puis fournissez-lui le profil de runtime Multica — le bundle qui implémente le protocole `--stdio` piloté par Multica, et la raison pour laquelle un `dsh` nu n'est pas utilisable seul. Définissez `MULTICA_DSH_PROFILE_BUNDLE` sur le bundle à installer et le daemon l'ajoute pour vous, ou ajoutez-le vous-même avec `dsh plugin --profile multica add <bundle>`. `<bundle>` peut être tout ce que `dsh plugin` accepte — un nom de paquet npm, un répertoire ou une archive tarball empaquetée — et le pont de Multica se trouve dans [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime). Il n'est pas encore publié sur un registre npm public ([multica#6936](https://github.com/multica-ai/multica/issues/6936)) : aujourd'hui, une équipe auto-hébergée le compile donc depuis ce dépôt et fait pointer la variable vers le répertoire de build, ou vers la tarball produite par `npm pack` — cette seconde option si la machine qui exécute le daemon n'est pas celle qui l'a compilé. Un nom de paquet deviendra l'option la plus simple une fois le pont publié. Quel que soit votre choix, privilégiez quelque chose que votre propre équipe publie ou compile : cette valeur est installée dans le répertoire personnel DSH de chaque hôte du daemon sans autre confirmation, si bien qu'un paquet tiers non vérifié relève d'une décision de chaîne d'approvisionnement, et non d'une simple commodité. Si vous avez installé DeepSeek Harness Desktop plutôt que le paquet npm, le daemon recherche aussi les shims CLI que génère cette application, dans son propre répertoire de données par utilisateur — `~/Library/Application Support/DSH Desktop` sur macOS, `%APPDATA%\DSH Desktop` sur Windows. Sous Windows, il s'agit des données d'application itinérantes (roaming), pas du répertoire d'installation : l'application s'installe dans Program Files ou dans `%LOCALAPPDATA%\Programs`, mais le CLI qu'elle pilote se trouve à côté de ses autres données par utilisateur. Le segment de version de ces chemins est un identifiant généré ; le daemon les énumère donc et privilégie le plus récent. Rien d'autre n'est nécessaire dans le `PATH` — un shim généré exécute le runtime propre de l'application Desktop par chemin absolu. Si DSH Desktop est installé à un emplacement non standard, faites pointer `MULTICA_DSH_PATH` vers le shim. Le daemon n'enregistre DeepSeek Harness qu'après la réussite de `dsh --profile multica --probe`, et signale le profil manquant sur `/health` en cas d'échec. Définissez `DEEPSEEK_API_KEY` (ou enregistrez-la dans les paramètres propres de dsh) avant de démarrer le daemon.
+
+Ces identifiants de connexion sont stockés localement par l'outil lui-même. Multica ne reçoit jamais les jetons de connexion de Claude, Codex, Cursor ni d'aucun autre CLI.
+
+<Callout type="info">
+Antigravity nécessite la version 1.1.10 ou ultérieure, Claude Code la 2.0.0 ou ultérieure, Codex la 0.100.0 ou ultérieure, Copilot la 1.0.0 ou ultérieure, Grok la 0.2.89 ou ultérieure, Qwen Code la 0.20.0 ou ultérieure, MiniMax Code la 0.1.2 ou ultérieure et OpenCode la 1.1.54 ou ultérieure. En dessous de la version minimale, le daemon n'enregistre pas le runtime correspondant.
+</Callout>
+
+## 3. Vérifier que le daemon trouve la commande
+
+Sous macOS, Linux ou WSL, exécutez :
+
+```bash
+command -v <command>
+<command> --version
+```
+
+Dans Windows PowerShell, exécutez :
+
+```powershell
+Get-Command <command>
+<command> --version
+```
+
+Remplacez `<command>` par une commande du tableau, comme `claude`, `codex` ou `cursor-agent`. La première commande affiche le chemin de l'exécutable.
+
+Si le terminal trouve l'outil mais que Desktop ou le daemon en arrière-plan ne le trouve pas, c'est généralement qu'ils utilisent des valeurs de `PATH` différentes. Redémarrez l'application, ou définissez un chemin absolu via la variable d'environnement `MULTICA_<PROVIDER>_PATH` correspondante ; la configuration complète figure dans [Variables d'environnement](/environment-variables#configuration-du-daemon).
+
+## 4. Relancer la détection et vérifier que le runtime est en ligne
+
+Démarrez le daemon avec le CLI :
+
+```bash
+multica daemon start
+```
+
+Si le daemon tourne déjà, redémarrez-le après avoir installé un nouvel outil :
+
+```bash
+multica daemon restart
+```
+
+Avec Multica Desktop, quittez puis rouvrez l'application.
+
+Ouvrez ensuite la page **Runtimes** de Multica. L'outil apparaît sous l'ordinateur cible et s'affiche comme en ligne. Vous pouvez désormais sélectionner ce runtime lors de la création ou de la modification d'un agent.
+
+<Callout type="warning">
+Pour démarrer, le daemon doit détecter au moins un CLI intégré pris en charge. Les profils de runtime personnalisés se synchronisent une fois le daemon lancé ; ils ne peuvent donc pas être l'unique condition de démarrage sur une machine vierge. Il existe une exception : lorsque le daemon vient lui-même de commencer à installer le profil de runtime DSH (`MULTICA_DSH_PROFILE_BUNDLE`), il démarre sans aucun runtime et enregistre DeepSeek Harness une fois cette installation terminée. Sans cela, un hôte dont le seul outil est un DSH ayant besoin du profil ne pourrait jamais terminer l'installation — le daemon s'arrêterait avant la fin et l'interromprait avec lui.
+</Callout>
+
+## Aucun outil détecté
+
+Vérifiez dans l'ordre :
+
+1. Exécutez l'outil lui-même dans un terminal pour confirmer que l'installation et la connexion sont terminées.
+2. Vérifiez le nom réel de la commande et son chemin avec `command -v` ou `Get-Command`.
+3. Exécutez `multica daemon logs -f` et recherchez des erreurs de version, de chemin ou d'authentification.
+4. Redémarrez le daemon pour qu'il relise l'environnement actuel.
+5. Revenez à la page **Runtimes** et vérifiez que l'ordinateur et l'outil sont en ligne.
+
+Si l'outil apparaît en ligne mais que les exécutions échouent toujours, ouvrez l'enregistrement d'exécution de la tâche pour voir l'erreur exacte renvoyée par le CLI, ou poursuivez avec [Dépannage](/troubleshooting).
+
+## Étapes suivantes
+
+- [Créer et configurer un agent](/agents-create) — sélectionner le runtime que vous venez de connecter.
+- [Daemon et runtimes](/daemon-runtimes) — statut en ligne, parallélisme et runtimes personnalisés.
+- [Comparatif des outils de codage IA](/providers) — comparer ce que chaque outil peut faire dans Multica.

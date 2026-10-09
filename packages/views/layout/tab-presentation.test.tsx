@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 import { render, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
   inboxListOptions,
-  archivedInboxListOptions,
+  archivedInboxPagesOptions,
+  archivedInboxLookupOptions,
 } from "@multica/core/inbox/queries";
+import { EMPTY_INBOX_FILTERS } from "@multica/core/inbox/filter-store";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 
@@ -72,11 +75,22 @@ function seed(qc: QueryClient) {
     { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
     { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },
   ] as never);
+  const archiveRow = {
+    workspace_id: "ws1", recipient_type: "member" as const, recipient_id: "user",
+    actor_type: null, actor_id: null, severity: "info" as const, body: null,
+    issue_status: null, read: true, archived: true, created_at: "2026-09-01T00:00:00Z", details: null,
+  };
   // Archived list is a distinct cache; these items are NOT in the main list.
-  qc.setQueryData(archivedInboxListOptions("ws1").queryKey, [
-    { id: "a1", issue_id: "i1", title: "Old assignment", type: "issue_assigned" },
-    { id: "a2", issue_id: null, title: "Archived note", type: "quick_create_failed" },
-  ] as never);
+  qc.setQueryData(archivedInboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey, {
+    pages: [{ items: [
+      { ...archiveRow, id: "a1", issue_id: "i1", title: "Old assignment", type: "issue_assigned" },
+      { ...archiveRow, id: "a2", issue_id: null, title: "Archived note", type: "quick_create_failed" },
+    ], hasMore: false, nextCursor: null }], pageParams: [null],
+  });
+  qc.setQueryData(archivedInboxLookupOptions("ws1", "a3").queryKey, {
+    items: [{ ...archiveRow, id: "a3", issue_id: null, title: "Deep archived note", type: "quick_create_failed" }],
+    hasMore: false, nextCursor: null,
+  });
   qc.setQueryData(agentListOptions("ws1").queryKey, [
     { id: "ag1", name: "Robby", avatar_url: null },
   ] as never);
@@ -99,6 +113,28 @@ beforeEach(() => {
   ws.current = { id: "ws1", slug: "acme" };
 });
 
+it("updates a tab's custom icon from the shared catalog cache without fetching", () => {
+  const qc = makeClient();
+  seed(qc);
+  qc.setQueryData(issueDetailOptions("ws1", "i1").queryKey, {
+    id: "i1", identifier: "MUL-1", title: "QA", status: "qa", status_category: "started",
+  } as never);
+  qc.setQueryData(issueStatusListOptions("ws1").queryKey, {
+    statuses: [{
+      id: "qa", workspace_id: "ws1", key: "qa", name: "QA", description: "",
+      category: "started", color: "#123456", icon: "slash", is_system: false,
+      position: 0, archived_at: null, created_at: "", updated_at: "",
+    }],
+    categories: ["unstarted", "started", "done", "closed"],
+    total: 1,
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  const { result } = renderHook(() => useTabPresentation("/acme/issues/i1"), { wrapper });
+  expect(result.current.visual).toMatchObject({ kind: "issue-status", status: "qa", icon: "slash", color: "#123456" });
+  const { container } = render(<ResourceLeadingVisual visual={result.current.visual} />);
+  expect(container.querySelector("svg line")).not.toBeNull();
+});
+
 describe("useTabPresentation — live from cache", () => {
   it("page: page icon + localized page name", () => {
     expect(presentationOf("/acme/issues")).toEqual({
@@ -111,7 +147,7 @@ describe("useTabPresentation — live from cache", () => {
     expect(presentationOf("/acme/issues/i1")).toEqual({
       // `category` travels with the visual so the tab strip never resolves a
       // custom status key itself. (MUL-6243)
-      visual: { kind: "issue-status", status: "in_progress", category: "in_progress" },
+      visual: { kind: "issue-status", status: "in_progress", category: "started" },
       title: "MUL-1: Fix login",
     });
   });
@@ -170,20 +206,79 @@ describe("useTabPresentation — live from cache", () => {
     });
   });
 
-  it("archived inbox: selected issue resolves against the archived list", () => {
-    // a1 lives only in the archived list; without ?view=archived it must NOT
-    // resolve (title stays Inbox), and with it, it resolves to i1's title.
-    expect(presentationOf("/acme/inbox?issue=i1").title).toBe("Inbox");
+  it("issue-backed selection resolves by object, in either view", () => {
+    // The selection key IS the group key (`issue_id ?? id`), so an
+    // issue-backed selection names the issue directly and is answered by the
+    // issue cache — no inbox list involved. That holds in both views on
+    // purpose: i1's notification lives only in the ARCHIVED list, yet the main
+    // view still titles the tab by the object the URL names. Treating "not in
+    // the list I loaded" as "does not exist" is what this must not do — the
+    // page itself resolves such a link to the issue rather than dropping it
+    // (see the deep-link fallback in inbox-page).
+    expect(presentationOf("/acme/inbox?issue=i1")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" },
+      title: "MUL-1: Fix login",
+    });
     expect(presentationOf("/acme/inbox?view=archived&issue=i1")).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
       title: "MUL-1: Fix login",
     });
   });
 
+  it("issue-backed selection survives a cold inbox list", () => {
+    // Regression (MUL-6967): the badge no longer pre-warms the inbox list at
+    // app start, so a restored tab may have the issue cached but no list. It
+    // must still show the issue, not collapse to the container label.
+    const qc = makeClient();
+    seed(qc);
+    qc.removeQueries({ queryKey: inboxListOptions("ws1").queryKey });
+    qc.removeQueries({ queryKey: archivedInboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/inbox?issue=i9", "MUL-9: Crash"),
+      { wrapper },
+    );
+
+    expect(result.current.title).toBe("MUL-9: Crash");
+  });
+
+  it("falls back to the persisted title while a selection is unresolved", () => {
+    // Nothing cached for this key yet — an issue-less notification whose row
+    // has not loaded. The persisted title is a better first frame than
+    // "Inbox"; without it the tab loses its identity until the page loads.
+    const qc = makeClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/inbox?issue=n7", "Autopilot paused"),
+      { wrapper },
+    );
+
+    expect(result.current.title).toBe("Autopilot paused");
+  });
+
+  it("uses the container label when nothing is selected, persisted title or not", () => {
+    // The fallback is for a PENDING identity only. An Inbox tab with no
+    // selection is fully resolved — it really is just "Inbox", and a stale
+    // persisted title must not override it.
+    expect(presentationOf("/acme/inbox", "MUL-9: Crash").title).toBe("Inbox");
+  });
+
   it("archived inbox: selected non-issue resolves against the archived list", () => {
     expect(presentationOf("/acme/inbox?view=archived&issue=a2")).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
       title: "Archived note",
+    });
+  });
+
+  it("archived inbox: a deep-link lookup supplies the title outside loaded pages", () => {
+    expect(presentationOf("/acme/inbox?view=archived&issue=a3")).toEqual({
+      visual: { kind: "icon", icon: "Inbox" }, title: "Deep archived note",
     });
   });
 

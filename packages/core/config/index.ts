@@ -36,6 +36,13 @@ interface ConfigState {
   // Older handlers accepted the unknown field and returned success while
   // dropping it, so absent must fail closed.
   agentConversationStartersSupported: boolean;
+  // Whether POST /api/issues atomically persists custom-property values.
+  // Older servers silently drop the field, so absent must fail closed.
+  issueCreatePropertiesSupported: boolean;
+  // Whether deleting a comment keeps its replies (#8296). Older servers
+  // deleted the replies too, so absent must fail closed: the client then
+  // promises nothing about replies and uses the legacy delete route.
+  commentDeleteKeepRepliesSupported: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
@@ -51,6 +58,8 @@ interface ConfigState {
   setServerVersion: (version?: string) => void;
   setLocalWorktreeSupported: (supported?: boolean) => void;
   setAgentConversationStartersSupported: (supported?: boolean) => void;
+  setIssueCreatePropertiesSupported: (supported?: boolean) => void;
+  setCommentDeleteKeepRepliesSupported: (supported?: boolean) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
@@ -66,6 +75,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   serverVersion: "",
   localWorktreeSupported: false,
   agentConversationStartersSupported: false,
+  issueCreatePropertiesSupported: false,
+  commentDeleteKeepRepliesSupported: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAuthConfig: ({
     allowSignup,
@@ -81,6 +92,10 @@ export const configStore = createStore<ConfigState>((set) => ({
     set({ localWorktreeSupported: supported === true }),
   setAgentConversationStartersSupported: (supported = false) =>
     set({ agentConversationStartersSupported: supported === true }),
+  setIssueCreatePropertiesSupported: (supported = false) =>
+    set({ issueCreatePropertiesSupported: supported === true }),
+  setCommentDeleteKeepRepliesSupported: (supported = false) =>
+    set({ commentDeleteKeepRepliesSupported: supported === true }),
 }));
 
 export function useConfigStore(): ConfigState;

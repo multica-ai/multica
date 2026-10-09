@@ -2,6 +2,12 @@ version: 2
 
 project_name: multica
 
+release:
+  # GitHub rejects duplicate asset names with 422. On a same-tag rerun,
+  # replace only the matching CLI artifact and retry the upload; unrelated
+  # release assets (for example manually published macOS builds) stay intact.
+  replace_existing_artifacts: true
+
 builds:
   - id: multica
     main: ./cmd/multica

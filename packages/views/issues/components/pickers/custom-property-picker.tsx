@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CalendarDays, Check, ExternalLink } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { CalendarDays, Check, ExternalLink, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Issue, IssueProperty, IssuePropertyValue } from "@multica/core/types";
-import { hasUnknownActorRef } from "@multica/core/types";
+import { hasUnknownActorRef, isListPropertyType } from "@multica/core/types";
 import {
   useSetIssueProperty,
   useUnsetIssueProperty,
@@ -36,6 +36,8 @@ const EDITABLE_PROPERTY_TYPES = [
   "url",
   "actor",
   "multi_actor",
+  "multi_text",
+  "multi_url",
 ];
 
 /**
@@ -71,6 +73,7 @@ export function isCustomPropertyReadOnly(
  *   actor         → member picker (commits and closes)
  *   multi_actor   → member picker with toggling items (stays open)
  *   text/number/url → popover with an input, Enter commits
+ *   multi_text/multi_url → popover with removable rows + an appending input
  *
  * Archived definitions render read-only: the popover only offers Clear
  * (the server rejects new values on archived properties but always allows
@@ -97,20 +100,28 @@ export function CustomPropertyValueEditor({
 
   return (
     <CustomPropertyValueInput
+      key={`${issue.id}:${property.id}`}
       property={property}
       value={value}
       defaultOpen={defaultOpen}
       open={open}
       onOpenChange={onOpenChange}
       onChange={(next) => {
+        // List editors await the write and show failures beside the draft.
+        if (isListPropertyType(property.type) && !isCustomPropertyReadOnly(property, value)) {
+          const variables = { issueId: issue.id, propertyId: property.id };
+          return (next === undefined
+            ? unsetProperty.mutateAsync(variables)
+            : setProperty.mutateAsync({ ...variables, value: next })
+          ).then(() => {});
+        }
         if (next === undefined) {
-          unsetProperty.mutate(
+          return unsetProperty.mutate(
             { issueId: issue.id, propertyId: property.id },
             { onError },
           );
-          return;
         }
-        setProperty.mutate(
+        return setProperty.mutate(
           { issueId: issue.id, propertyId: property.id, value: next },
           { onError },
         );
@@ -122,7 +133,7 @@ export function CustomPropertyValueEditor({
 /**
  * Mutation-free custom-property editor. Create flows use this while an issue
  * still exists only as a draft; issue detail wraps it above with the normal
- * optimistic mutations.
+ * optimistic mutations. List editors await onChange before clearing the draft.
  */
 export function CustomPropertyValueInput({
   property,
@@ -136,7 +147,7 @@ export function CustomPropertyValueInput({
 }: {
   property: IssueProperty;
   value: IssuePropertyValue | undefined;
-  onChange: (value: IssuePropertyValue | undefined) => void;
+  onChange: (value: IssuePropertyValue | undefined) => void | Promise<void>;
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -274,12 +285,26 @@ export function CustomPropertyValueInput({
           emptyRow={emptyRow}
         />
       );
+    case "multi_text":
+    case "multi_url":
+      return (
+        <ListPropertyEditor
+          property={property}
+          value={value}
+          open={open}
+          onOpenChange={setOpen}
+          onCommit={commit}
+          onClear={clear}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
+        />
+      );
     case "date": {
       const date = typeof value === "string" ? dateOnlyToLocalDate(value) : undefined;
       return (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
-            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+            className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
             render={triggerRender}
           >
             {valueTrigger}
@@ -415,7 +440,7 @@ function TextishPropertyEditor({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
         render={triggerRender}
       >
         {trigger ?? (value === undefined ? (
@@ -454,6 +479,153 @@ function TextishPropertyEditor({
             </Button>
           )}
         </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * List editor for multi_text / multi_url: current entries as removable rows
+ * above an input that appends on Enter. The popover stays open across
+ * additions (multi-select interaction); each add/remove commits the whole
+ * array, and removing the last entry clears the property.
+ */
+function ListPropertyEditor({
+  property,
+  value,
+  open,
+  onOpenChange,
+  onCommit,
+  onClear,
+  trigger,
+  triggerRender,
+}: {
+  property: IssueProperty;
+  value: IssuePropertyValue | undefined;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCommit: (next: IssuePropertyValue) => void | Promise<void>;
+  onClear: () => void | Promise<void>;
+  trigger?: React.ReactNode;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
+}) {
+  const { t } = useT("issues");
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const errorId = useId();
+
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+
+  const items = Array.isArray(value) ? value : [];
+  const placeholder =
+    property.type === "multi_url"
+      ? t(($) => $.pickers.custom_property.url_placeholder)
+      : t(($) => $.pickers.custom_property.value_placeholder);
+
+  const save = async (next: string[], clearDraft = false) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      if (next.length === 0) await onClear();
+      else await onCommit(next);
+      if (clearDraft) setDraft("");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  const add = () => {
+    if (savingRef.current) return;
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if (property.type === "multi_url" && !/^https?:\/\//i.test(trimmed)) {
+      setError(t(($) => $.pickers.custom_property.url_scheme_required));
+      return;
+    }
+    if (items.includes(trimmed)) {
+      setDraft("");
+      setError(null);
+      return;
+    }
+    void save([...items, trimmed], true);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+        render={triggerRender}
+      >
+        {trigger}
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-2" align="start">
+        {items.length > 0 && (
+          <ul className="mb-2 max-h-48 overflow-y-auto">
+            {items.map((item) => (
+              <li key={item} className="flex min-w-0 items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-accent/40">
+                <span className="min-w-0 flex-1 truncate text-body">{item}</span>
+                {property.type === "multi_url" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t(($) => $.pickers.custom_property.open_link)}
+                    onClick={() => window.open(item, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(($) => $.pickers.custom_property.remove_item, { value: item })}
+                  disabled={saving}
+                  onClick={() => void save(items.filter((entry) => entry !== item))}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            add();
+          }}
+          className="flex items-center gap-2"
+          aria-busy={saving}
+        >
+          <Input
+            autoFocus
+            value={draft}
+            readOnly={saving}
+            aria-label={property.name}
+            aria-invalid={error !== null}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setError(null);
+            }}
+            placeholder={placeholder}
+            className="h-8"
+          />
+        </form>
+        {error && (
+          <p id={errorId} role="alert" className="text-caption text-destructive">
+            {error}
+          </p>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -535,6 +707,32 @@ export function CustomPropertyValueDisplay({
           }
         />
       );
+    case "multi_text":
+    case "multi_url": {
+      const items = Array.isArray(value) ? value : [];
+      if (items.length === 0) {
+        return (
+          <span className="text-muted-foreground">
+            {t(($) => $.pickers.custom_property.empty)}
+          </span>
+        );
+      }
+      return (
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          {items.map((item) => (
+            <span
+              key={item}
+              className="inline-flex max-w-48 items-center gap-1 rounded-full border border-surface-border px-1.5 py-px text-micro"
+            >
+              {property.type === "multi_url" && (
+                <ExternalLink className="size-2.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate">{item}</span>
+            </span>
+          ))}
+        </span>
+      );
+    }
     case "date":
       return (
         <span className="flex items-center gap-1.5">

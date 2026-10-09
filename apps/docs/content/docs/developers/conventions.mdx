@@ -62,7 +62,7 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 - Standard `gofmt` + `go vet`. No exceptions.
 - Handler files mirror domain: `agent.go`, `auth.go`, `runtime.go`
 - Tests: `<file>_test.go` colocated
-- For UUID parsing in handlers, follow the rule in the root `CLAUDE.md` — `parseUUIDOrBadRequest` for boundary input, `parseUUID` (panicking) for trusted round-trips, never `util.ParseUUID` directly without checking the error.
+- For UUID parsing in handlers, follow the rule in the root `AGENTS.md` — `parseUUIDOrBadRequest` for boundary input, `parseUUID` (panicking) for trusted round-trips, never `util.ParseUUID` directly without checking the error.
 
 ### TypeScript
 
@@ -120,10 +120,10 @@ The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice
 
 `issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
 
-| Entity | en | zh-Hans | ja | ko |
-| --- | --- | --- | --- | --- |
-| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** |
-| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** |
+| Entity | en | zh-Hans | ja | ko | fr |
+| --- | --- | --- | --- | --- | --- |
+| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
+| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** |
 
 Both concepts are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word. `Task` is no longer a user-facing product noun for an agent run; it remains only as the established internal identifier.
 
@@ -202,6 +202,7 @@ These are schema-level identifiers; render as lowercase English even in Chinese 
 
 - Roles: `owner` / `admin` / `member`
 - Issue status: `backlog` / `todo` / `in_progress` / `in_review` / `done` / `blocked` / `cancelled`
+- Issue status category: `unstarted` / `started` / `done` / `closed`
 
 In UI, surface them in English (optionally `code-style` wrapped):
 
@@ -303,6 +304,19 @@ See `auth.json` for the canonical example (the `web` section contains `prefer_de
 - **Tooltips**: full short sentence. "复制链接到剪贴板".
 - **Placeholders**: example-style. "输入任务标题...".
 
+### UI descriptions
+
+Descriptions are optional and omitted by default. Before adding one, ask: **What would the user misunderstand or do incorrectly without this sentence?** If the title, label, control, value, or button already answers it, omit the sentence.
+
+- State a fact once, next to the relevant control. Do not repeat it across page, section, row, empty state, and dialog descriptions.
+- Prefer a precise label or example to a paragraph explaining an obvious action. Avoid generic instructions such as "Create one to get started", "Click below", or "You can change this later" unless they resolve a real ambiguity.
+- Keep permissions, cost, destructive consequences, execution prerequisites, input constraints, and error recovery visible when relevant. Do not hide them in hover-only help.
+- Show introductory guidance only where it is needed. Put advanced usage and diagnostics in explicit, accessible help rather than the default page body.
+- Preserve input labels, accessible names, and necessary description associations. Do not move redundant visible prose wholesale into screen-reader-only text.
+- Review English and translated copy together, including mobile's independent strings. In PR review, check the added information, same-screen repetition, display conditions, and preserved constraints. Length is a review signal, not an automatic deletion rule.
+
+Shared settings components already accept optional descriptions. Examples and new call sites should omit them unless justified; do not add required description props or a separate copy policy.
+
 ### Where to look when in doubt
 
 When the glossary doesn't cover a term, look at:
@@ -318,7 +332,7 @@ When the glossary doesn't cover a term, look at:
 
 If you change a rule here, also:
 
-1. Apply it in the relevant locale JSONs / CLAUDE.md / docs page
+1. Apply it in the relevant locale JSONs / AGENTS.md / docs page
 2. Note the change in the PR description so reviewers know to look for downstream sweep
 
 This page is the contract; nothing else overrides it.

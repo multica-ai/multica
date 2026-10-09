@@ -21,13 +21,20 @@ type ModelPrice struct {
 }
 
 var modelPrices = map[string]ModelPrice{
-	// GPT-5.6 series (Codex `codex` provider). Official rates from OpenAI's
-	// GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol). For 5.6+
-	// cache read is the 90%-off cached-input rate (0.1x input) and cache write
-	// is billed at 1.25x the uncached input rate — unlike earlier OpenAI SKUs,
-	// which don't bill cache writes separately. Codex app-server v0.147 reports
-	// cache-write input separately while including it in the raw input total;
-	// the collector normalizes those into mutually exclusive billing buckets.
+	// GPT-5.6 series and GPT-6 Astra (Codex `codex` provider). Official rates
+	// from OpenAI's GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol)
+	// and Astra's published $10 / $50. For 5.6+ (including Astra) cache read is
+	// generally the 90%-off cached-input rate (0.1x input). Cache write is billed
+	// at 1.25x the uncached input rate — unlike earlier OpenAI SKUs, which don't
+	// bill cache writes separately. Codex app-server v0.147 reports cache-write
+	// input separately while including it in the raw input total; the collector
+	// normalizes those into mutually exclusive billing buckets.
+	"openai:gpt-6-astra": {Provider: "openai", Model: "gpt-6-astra", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
+	// Standard short-context rates from developers.openai.com/api/docs/models/.
+	// GPT-6.1 Sol caches at 0.05x input, not GPT-6 Sol's 0.1x.
+	"openai:gpt-6.1-sol":   {Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2.00, CacheReadPerM: 0.10, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	"openai:gpt-6-sol":     {Provider: "openai", Model: "gpt-6-sol", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	"openai:gpt-6-luna":    {Provider: "openai", Model: "gpt-6-luna", InputPerM: 0.10, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.50},
 	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
 	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15.00},
 	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
@@ -42,6 +49,7 @@ var modelPrices = map[string]ModelPrice{
 	"anthropic:claude-sonnet-5":   {Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
 	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
+	"anthropic:claude-opus-5-5":   {Provider: "anthropic", Model: "claude-opus-5-5", InputPerM: 4.00, CacheReadPerM: 0.20, CacheWritePerM: 5.00, OutputPerM: 20.00},
 	"anthropic:claude-opus-5":     {Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
 	"anthropic:claude-opus-4.8":   {Provider: "anthropic", Model: "claude-opus-4.8", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
 	"anthropic:claude-opus-4.7":   {Provider: "anthropic", Model: "claude-opus-4.7", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
@@ -140,6 +148,10 @@ var modelAliasRules = []struct {
 	// slug is always dotted (`gpt-5.6-luna`), and the frontend resolver in
 	// utils.ts does NOT dash-normalize, so a dashed `gpt-5-6-luna` must surface
 	// as unmapped on both sides rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)gpt-6-astra$`), "openai:gpt-6-astra"},
+	{regexp.MustCompile(`(^|/|:)gpt-6\.1-sol$`), "openai:gpt-6.1-sol"},
+	{regexp.MustCompile(`(^|/|:)gpt-6-sol$`), "openai:gpt-6-sol"},
+	{regexp.MustCompile(`(^|/|:)gpt-6-luna$`), "openai:gpt-6-luna"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-sol$`), "openai:gpt-5.6-sol"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-terra$`), "openai:gpt-5.6-terra"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-luna$`), "openai:gpt-5.6-luna"},
@@ -155,7 +167,12 @@ var modelAliasRules = []struct {
 	// (claudeVersionEnd) so neither can swallow the other's ids.
 	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
 	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
-	{regexp.MustCompile(`claude-opus-5`), "anthropic:claude-opus-5"},
+	// Opus 5.5 is cheaper than Opus 5 ($4 / $20) and prices cache reads at
+	// 0.05x input, so the two need separate rows. Both rules end at their own
+	// version (claudeVersionEnd), the same as the Fable pair above, so the
+	// Opus 5 rule cannot swallow 5.5 ids and bill them at Opus 5 rates.
+	{regexp.MustCompile(`claude-opus-5[-.]5` + claudeVersionEnd), "anthropic:claude-opus-5-5"},
+	{regexp.MustCompile(`claude-opus-5` + claudeVersionEnd), "anthropic:claude-opus-5"},
 	{regexp.MustCompile(`claude-opus-4[-.]8`), "anthropic:claude-opus-4.8"},
 	{regexp.MustCompile(`claude-opus-4[-.]7`), "anthropic:claude-opus-4.7"},
 	{regexp.MustCompile(`claude-opus-4[-.]6`), "anthropic:claude-opus-4.6"},

@@ -17,12 +17,14 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/issueproperty"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // multica property {list|get|create|update|archive|unarchive} — workspace
 // custom property definitions, and multica issue property {list|set|unset} —
 // typed values on a single issue. See server/internal/handler/property.go
-// for the validation contract (9 types, 20 active definitions/workspace,
+// for the validation contract (11 types, 20 active definitions/workspace,
 // owner/admin-only definition management, agents rejected on definition
 // writes).
 //
@@ -75,14 +77,23 @@ var propertyCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a property definition (workspace owner/admin only)",
 	Long: `Create a property definition. Types: text, number, select, multi_select,
-date, checkbox, url, actor, multi_actor. Select types take repeatable --option
-flags:
+date, checkbox, url, actor, multi_actor, multi_text, multi_url. Select types
+take repeatable --option flags:
   multica property create --name Severity --type select \
       --option "Critical:#ef4444" --option "Major:#f59e0b" --option "Minor:#6b7280"
 The ":#rrggbb" color suffix is optional.
 
 The actor types hold workspace members; they take no options:
-  multica property create --name Reviewer --type actor`,
+  multica property create --name Reviewer --type actor
+
+multi_text / multi_url hold free-form lists without options:
+  multica property create --name "Related links" --type multi_url
+Set their values with issue property set --value or issue create --property.
+Use comma-separated values for simple entries, or a JSON array of strings.
+JSON is required for entries containing commas or input starting with "[":
+  multica issue property set <issue-id> --name "Related links" \
+      --value '["https://en.wikipedia.org/wiki/Washington,_D.C."]'
+  multica issue property set <issue-id> --name Aliases --value '["[draft] spec"]'`,
 	Args: exactArgs(0),
 	RunE: runPropertyCreate,
 }
@@ -134,7 +145,14 @@ var issuePropertySetCmd = &cobra.Command{
   checkbox      --value true|false
   number        --value 3.5
   date          --value 2026-07-13
-  text / url    --value "any string"`,
+  text / url    --value "any string"
+  multi_text    --value "alpha,beta"      (comma-separated strings)
+  multi_url     --value "https://a.example,https://b.example"
+For multi_text / multi_url, entries containing commas or input starting with
+"[" must use a JSON array of strings instead:
+  multi_url     --value '["https://en.wikipedia.org/wiki/Washington,_D.C."]'
+  multi_text    --value '["Smith, John","Doe, Jane"]'
+  multi_text    --value '["[draft] spec"]'`,
 	Args: exactArgs(1),
 	RunE: runIssuePropertySet,
 }
@@ -159,7 +177,7 @@ func init() {
 	propertyGetCmd.Flags().String("output", "json", "Output format: table or json")
 	propertyCreateCmd.Flags().String("output", "table", "Output format: table or json")
 	propertyCreateCmd.Flags().String("name", "", "Property name (required)")
-	propertyCreateCmd.Flags().String("type", "", "Property type: text, number, select, multi_select, date, checkbox, url, actor, multi_actor (required)")
+	propertyCreateCmd.Flags().String("type", "", "Property type: text, number, select, multi_select, date, checkbox, url, actor, multi_actor, multi_text, multi_url (required)")
 	propertyCreateCmd.Flags().String("description", "", "Property description")
 	propertyCreateCmd.Flags().String("icon", "", "Property icon key from the Web picker (for example, flag, tag, or shield)")
 	propertyCreateCmd.Flags().StringArray("option", nil, `Select option as "Name" or "Name:#rrggbb" (repeatable; select types only)`)
@@ -572,6 +590,29 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, direct
 			return nil, fmt.Errorf("--value must list at least one member")
 		}
 		return json.Marshal(refs)
+	case "multi_text", "multi_url":
+		// JSON array form first: it round-trips every entry the API accepts,
+		// including ones that contain commas ("Smith, John",
+		// "https://en.wikipedia.org/wiki/Washington,_D.C."), which the comma
+		// form below would split. Comma form stays for simple entries.
+		if strings.HasPrefix(raw, "[") {
+			var items []string
+			if err := json.Unmarshal([]byte(raw), &items); err != nil {
+				return nil, fmt.Errorf("--value must be a JSON array of strings (or a comma-separated list for entries without commas)")
+			}
+			return json.Marshal(items)
+		}
+		parts := strings.Split(raw, ",")
+		items := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				items = append(items, trimmed)
+			}
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("--value must list at least one entry")
+		}
+		return json.Marshal(items)
 	case "number":
 		if _, err := strconv.ParseFloat(raw, 64); err != nil {
 			return nil, fmt.Errorf("value %q is not a valid number", raw)
@@ -585,6 +626,58 @@ func encodeIssuePropertyValue(ctx context.Context, client *cli.APIClient, direct
 	default: // text, date, url — validated server-side
 		return json.Marshal(raw)
 	}
+}
+
+// buildIssueCreateProperties resolves repeatable Name=Value flags into the
+// API's ID-keyed typed bag. A definition may appear only once, including when
+// one flag uses its name and another its UUID.
+func buildIssueCreateProperties(ctx context.Context, client *cli.APIClient, pairs []string) (map[string]json.RawMessage, error) {
+	properties, err := fetchProperties(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]json.RawMessage, len(pairs))
+	var members memberDirectory
+	for _, pair := range pairs {
+		name, rawValue, found := strings.Cut(pair, "=")
+		name = strings.TrimSpace(name)
+		if !found || name == "" {
+			return nil, fmt.Errorf(`--property %q must be in "Name=Value" form`, pair)
+		}
+		if strings.HasSuffix(name, "<") || strings.HasSuffix(name, ">") || strings.HasSuffix(name, "!") {
+			return nil, fmt.Errorf(`--property %q: filter comparison operators are not valid when creating an issue; use a property UUID if its name ends with that character`, pair)
+		}
+		if strings.TrimSpace(rawValue) == "" {
+			return nil, fmt.Errorf("--property %s: value cannot be empty", name)
+		}
+		if strings.TrimSpace(rawValue) == propertyNoValueSentinel {
+			return nil, fmt.Errorf("--property %s: %s is a list-filter value and cannot unset a property during create", name, propertyNoValueSentinel)
+		}
+		property, err := resolvePropertyRef(properties, name)
+		if err != nil {
+			return nil, err
+		}
+		if property.Archived {
+			return nil, fmt.Errorf("property %q is archived and cannot receive new values", property.Name)
+		}
+		if _, duplicate := result[property.ID]; duplicate {
+			return nil, fmt.Errorf("property %q was provided more than once", property.Name)
+		}
+		encoded, err := encodeIssuePropertyValue(ctx, client, &members, property, rawValue)
+		if err != nil {
+			return nil, fmt.Errorf("--property %s: %w", name, err)
+		}
+		config, err := json.Marshal(property.Config)
+		if err != nil {
+			return nil, fmt.Errorf("encode property %q config: %w", property.Name, err)
+		}
+		canonical, err := issueproperty.ValidateValue(db.IssueProperty{Type: property.Type, Config: config}, encoded)
+		if err != nil {
+			return nil, fmt.Errorf("--property %s: %w", name, err)
+		}
+		result[property.ID] = canonical
+	}
+	return result, nil
 }
 
 // propertyOptionName maps a stored option id to its name, or returns the id
@@ -606,12 +699,15 @@ func actorPropertyName(actorNames map[string]string, ref string) string {
 	return ref
 }
 
-// issuePropertyDisplayValues resolves each item of a multi_select or
-// multi_actor value to its display name. The result stays index-parallel
-// with the stored array (a non-string item renders as JSON rather than being
-// dropped) and is nil for every other type or a non-array value.
+// issuePropertyDisplayValues resolves each item of a multi-value property to
+// its display string: option ids to names (multi_select), actor references to
+// member names (multi_actor), elements as-is (multi_text / multi_url). The
+// result stays index-parallel with the stored array (a non-string item renders
+// as JSON rather than being dropped) and is nil for every other type or a
+// non-array value.
 func issuePropertyDisplayValues(property propertyDTO, value any, actorNames map[string]string) []string {
-	if property.Type != "multi_select" && property.Type != "multi_actor" {
+	if property.Type != "multi_select" && property.Type != "multi_actor" &&
+		property.Type != "multi_text" && property.Type != "multi_url" {
 		return nil
 	}
 	items, ok := value.([]any)
@@ -626,8 +722,12 @@ func issuePropertyDisplayValues(property propertyDTO, value any, actorNames map[
 			names = append(names, formatMetadataValue(item))
 		case property.Type == "multi_select":
 			names = append(names, propertyOptionName(property, s))
-		default:
+		case property.Type == "multi_actor":
 			names = append(names, actorPropertyName(actorNames, s))
+		default:
+			// multi_text and multi_url are free-form. A string that happens to
+			// equal a member reference is still the text the user stored.
+			names = append(names, s)
 		}
 	}
 	return names
@@ -1052,7 +1152,8 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, dire
 			return "", fmt.Errorf("--property %s: value %q is not a date in YYYY-MM-DD form", property.Name, trimmed)
 		}
 		return trimmed, nil
-	case "url":
+	case "url", "multi_url":
+		// One --value token matches one element exactly.
 		if len(trimmed) > maxPropertyURLValueLen {
 			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyURLValueLen)
 		}
@@ -1060,7 +1161,7 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, dire
 			return "", fmt.Errorf("--property %s: value %q is not an http(s) URL", property.Name, trimmed)
 		}
 		return trimmed, nil
-	case "text":
+	case "text", "multi_text":
 		if utf8.RuneCountInString(raw) > maxPropertyTextValueLen {
 			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyTextValueLen)
 		}

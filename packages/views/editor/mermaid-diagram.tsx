@@ -17,6 +17,16 @@
  * This component owns the inline presentation; the full-screen experience
  * lives in `MermaidViewer`. Both read the same rendered SVG, so what you
  * export or blow up is always what you were looking at.
+ *
+ * The inline preview opens fitted — the whole diagram, within the column's
+ * width and MERMAID_PREVIEW_MAX_HEIGHT_PX — with zoom buttons to step in
+ * from there (MUL-7766). Browsing a thread reads every diagram in full; the
+ * viewer is for when the detail matters.
+ *
+ * Standalone (the editable code block's preview) it draws its own box,
+ * toolbar and error state. Inside a DynamicBlock (`frame`, MUL-7649) the frame
+ * owns all of that: this renders only the diagram, and hands the viewer's open
+ * state and any render error up to the frame.
  */
 
 import {
@@ -27,12 +37,17 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
 } from "react";
-import { Check, Copy, Maximize2 } from "lucide-react";
+import { Check, Copy, Frame, Maximize2, Minus, Plus } from "lucide-react";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
+import { DYNAMIC_BLOCK_COLLAPSE_AT_PX, DynamicBlockSkeleton } from "./dynamic-block";
 import { useDragToScroll } from "./hooks/use-drag-to-scroll";
+import { useInlineZoom, type InlineZoom } from "./hooks/use-inline-zoom";
+import { useThemeVersion } from "./hooks/use-theme-version";
 import { MermaidViewer } from "./mermaid-viewer";
+import { hashSource } from "./utils/source-hash";
 import type { Size } from "./utils/zoom-transform";
 
 type MermaidAPI = typeof import("mermaid").default;
@@ -102,9 +117,25 @@ function getMermaidThemeVariables(host: HTMLElement | null) {
 
 function getSandboxCssVariables(host: HTMLElement | null): string {
   const styles = host ? getComputedStyle(host) : null;
-  return ["--muted", "--primary", "--foreground", "--muted-foreground"]
+  const variables = ["--muted", "--primary", "--foreground", "--muted-foreground"]
     .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
     .join(" ");
+  // The diagram is drawn in the app's colors, so its document declares the
+  // app's scheme too. Without it a light document inside a dark page is
+  // painted on an opaque white canvas, under a diagram colored for dark.
+  const declared = styles?.colorScheme ?? "";
+  const scheme = /\bdark\b/.test(declared) && !/\blight\b/.test(declared) ? "dark" : "light";
+  return `${variables} color-scheme: ${scheme};`;
+}
+
+/**
+ * The host's font for the sandbox body. Mermaid measures label text in this
+ * page (its font is `inherit`), so the sandbox has to draw with the same font
+ * or the labels no longer fit the boxes laid out for them.
+ */
+function getSandboxFontFamily(host: HTMLElement | null): string {
+  const fontFamily = host ? getComputedStyle(host).fontFamily.trim() : "";
+  return fontFamily && !/[<>{};]/.test(fontFamily) ? fontFamily : "sans-serif";
 }
 
 /**
@@ -150,39 +181,57 @@ function getMermaidLayout(svg: string): Size | null {
 export const MERMAID_SKELETON_HEIGHT_PX = 280;
 const MERMAID_LAYOUT_CACHE_PREFIX = "multica:mermaid:layout:";
 
-// DJB2 — small, fast, sufficient for sessionStorage cache keys. The chart
-// text itself is too unwieldy as a key (length, special chars), and a
-// crypto-strength hash would have to be async.
-function hashChart(chart: string): string {
-  let hash = 5381;
-  for (let i = 0; i < chart.length; i++) {
-    hash = ((hash << 5) + hash) ^ chart.charCodeAt(i);
-  }
-  return (hash >>> 0).toString(36);
-}
+// `.mermaid-diagram` padding, top plus bottom (1rem each).
+const DIAGRAM_PADDING_Y_PX = 32;
 
 /**
- * Height to reserve for a diagram that has not rendered yet: the real height
- * when this exact chart already rendered in this session, otherwise the
- * skeleton default. Exported so the near-viewport lazy shell
- * (rich-content/lazy-rich-block.tsx) reserves the SAME space this component
- * would, instead of maintaining a second guess at the size.
+ * Tallest the inline preview draws a fitted diagram: the frame's collapse
+ * threshold less the diagram's padding, so a fitted diagram is always whole
+ * and never folds behind "Show all". Zooming in past it scrolls inside the
+ * same box rather than growing the page.
+ */
+export const MERMAID_PREVIEW_MAX_HEIGHT_PX =
+  DYNAMIC_BLOCK_COLLAPSE_AT_PX - DIAGRAM_PADDING_Y_PX;
+
+/**
+ * Height a framed diagram's body will take: the fitted height of this exact
+ * chart plus the container's padding when it already rendered in this
+ * session, otherwise the skeleton default. Exported so the near-viewport lazy
+ * shell (rich-content/lazy-rich-block.tsx) reserves the SAME space this
+ * component would, instead of maintaining a second guess at the size.
  *
  * NOT safe to call during render: it reads sessionStorage, which does not exist
  * on the server, so the value differs between the server frame and the browser's
  * hydration frame whenever the cache is warm. Callers must use the skeleton
  * default for the first frame and call this from an effect (see
- * useReservedMermaidHeightPx in rich-content/rich-code-block.tsx).
+ * useReservedHeightPx in rich-content/rich-code-block.tsx).
  */
-export function reservedMermaidHeightPx(chart: string): number {
-  return readCachedLayout(chart)?.height ?? MERMAID_SKELETON_HEIGHT_PX;
+export function framedMermaidBodyHeightPx(chart: string): number {
+  const cached = readCachedLayout(chart);
+  return cached ? previewHeightOf(cached) + DIAGRAM_PADDING_Y_PX : MERMAID_SKELETON_HEIGHT_PX;
 }
 
-function readCachedLayout(chart: string): Size | null {
+interface CachedLayout extends Size {
+  /**
+   * Height the fitted preview drew at, which depends on the column's width
+   * and so can only be recorded after the preview has been measured.
+   */
+  previewHeight?: number;
+}
+
+/**
+ * The fitted preview's height, or the best guess without a recorded one: the
+ * height cap, which assumes the diagram is not wider than its column.
+ */
+function previewHeightOf(layout: CachedLayout): number {
+  return layout.previewHeight ?? Math.min(layout.height, MERMAID_PREVIEW_MAX_HEIGHT_PX);
+}
+
+function readCachedLayout(chart: string): CachedLayout | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(
-      MERMAID_LAYOUT_CACHE_PREFIX + hashChart(chart),
+      MERMAID_LAYOUT_CACHE_PREFIX + hashSource(chart),
     );
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -192,7 +241,11 @@ function readCachedLayout(chart: string): Size | null {
       parsed.width > 0 &&
       parsed.height > 0
     ) {
-      return { width: parsed.width, height: parsed.height };
+      const previewHeight =
+        typeof parsed.previewHeight === "number" && parsed.previewHeight > 0
+          ? parsed.previewHeight
+          : undefined;
+      return { width: parsed.width, height: parsed.height, previewHeight };
     }
     return null;
   } catch {
@@ -200,13 +253,17 @@ function readCachedLayout(chart: string): Size | null {
   }
 }
 
-function writeCachedLayout(chart: string, layout: Size | null): void {
+function writeCachedLayout(chart: string, layout: CachedLayout | null): void {
   if (typeof window === "undefined") return;
   if (!layout) return;
   try {
     window.sessionStorage.setItem(
-      MERMAID_LAYOUT_CACHE_PREFIX + hashChart(chart),
-      JSON.stringify({ width: layout.width, height: layout.height }),
+      MERMAID_LAYOUT_CACHE_PREFIX + hashSource(chart),
+      JSON.stringify({
+        width: layout.width,
+        height: layout.height,
+        previewHeight: layout.previewHeight,
+      }),
     );
   } catch {
     // Quota exceeded or storage disabled — degrade silently; we still
@@ -214,10 +271,18 @@ function writeCachedLayout(chart: string, layout: Size | null): void {
   }
 }
 
+/**
+ * Inline document: the SVG fills the iframe, so the preview zooms by resizing
+ * the iframe and the diagram is redrawn as vectors at every step. Mermaid
+ * writes an inline `max-width` onto the SVG, which only `!important` outranks;
+ * left in place it would stop the diagram from growing past natural size.
+ */
 function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
   const cssVariables = getSandboxCssVariables(host);
 
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } body { margin: 0; display: flex; justify-content: center; background: transparent; } svg { max-width: 100%; height: auto; }</style></head><body>${svg}</body></html>`;
+  const fontFamily = getSandboxFontFamily(host);
+
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: ${fontFamily}; } svg { display: block; width: 100%; height: 100%; max-width: none !important; }</style></head><body>${svg}</body></html>`;
 }
 
 /**
@@ -233,36 +298,9 @@ function buildViewerMermaidDocument(
 ): string {
   const cssVariables = getSandboxCssVariables(host);
 
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; } svg { display: block; width: ${layout.width}px; height: ${layout.height}px; max-width: none; }</style></head><body>${svg}</body></html>`;
-}
+  const fontFamily = getSandboxFontFamily(host);
 
-function useThemeVersion() {
-  const [themeVersion, setThemeVersion] = useState(0);
-
-  useEffect(() => {
-    const bumpThemeVersion = () => setThemeVersion((version) => version + 1);
-    const observer = new MutationObserver(bumpThemeVersion);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style", "data-theme"],
-    });
-    if (document.body) {
-      observer.observe(document.body, {
-        attributes: true,
-        attributeFilter: ["class", "style", "data-theme"],
-      });
-    }
-
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    mediaQuery.addEventListener("change", bumpThemeVersion);
-
-    return () => {
-      observer.disconnect();
-      mediaQuery.removeEventListener("change", bumpThemeVersion);
-    };
-  }, []);
-
-  return themeVersion;
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: ${fontFamily}; } svg { display: block; width: ${layout.width}px; height: ${layout.height}px; max-width: none; }</style></head><body>${svg}</body></html>`;
 }
 
 /**
@@ -311,25 +349,41 @@ function useHorizontalOverflow(ref: React.RefObject<HTMLElement | null>, deps: u
   return edges;
 }
 
-// Size the viewer falls back to when the SVG carries no usable viewBox. Mermaid
-// always emits one, but the viewer's transform math needs a concrete content
-// size, and rendering nothing at all would be a worse failure than an
-// approximate one.
-const VIEWER_FALLBACK_LAYOUT: Size = { width: 800, height: MERMAID_SKELETON_HEIGHT_PX };
+// Size to fall back to when the SVG carries no usable viewBox. Mermaid always
+// emits one, but the inline zoom and the viewer's transform math both need a
+// concrete content size, and rendering nothing at all would be a worse failure
+// than an approximate one.
+const FALLBACK_LAYOUT: Size = { width: 800, height: MERMAID_SKELETON_HEIGHT_PX };
 
 interface RenderedDiagram {
   svg: string;
   inlineDocument: string;
   viewerDocument: string;
-  /** Natural size, or null when the viewBox was unreadable. Sizes the inline iframe. */
-  layout: Size | null;
-  /** Always concrete — the viewer cannot lay out against an unknown size. */
-  viewerLayout: Size;
+  /**
+   * Natural size. Always concrete — neither the inline zoom nor the viewer can
+   * lay out against an unknown size.
+   */
+  layout: Size;
   exportBackground: string;
   exportFontFamily: string;
 }
 
-export function MermaidDiagram({ chart }: { chart: string }) {
+/** What a DynamicBlock needs from the diagram it frames. */
+export interface MermaidFrameBinding {
+  viewerOpen: boolean;
+  onViewerOpenChange: (open: boolean) => void;
+  onErrorChange: (error: string | null) => void;
+  /** The frame's fullscreen button; focus returns there when the viewer closes. */
+  finalFocusRef: RefObject<HTMLButtonElement | null>;
+}
+
+export function MermaidDiagram({
+  chart,
+  frame,
+}: {
+  chart: string;
+  frame?: MermaidFrameBinding;
+}) {
   const { t } = useT("editor");
   const reactId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -347,11 +401,14 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   // current session, the cached layout lets us reserve correct space on the
   // very first paint — eliminating the 0px → real-height shift that breaks
   // deep-link scroll positioning and ambient reading position.
-  const [skeletonLayout, setSkeletonLayout] = useState<Size | null>(() =>
+  const [skeletonLayout, setSkeletonLayout] = useState<CachedLayout | null>(() =>
     readCachedLayout(chart),
   );
   const [error, setError] = useState<string | null>(null);
-  const [viewerOpen, setViewerOpen] = useState(false);
+  const [ownViewerOpen, setOwnViewerOpen] = useState(false);
+  const viewerOpen = frame ? frame.viewerOpen : ownViewerOpen;
+  const setViewerOpen = frame ? frame.onViewerOpenChange : setOwnViewerOpen;
+  const onErrorChange = frame?.onErrorChange;
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -388,7 +445,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
         if (cancelled) return;
 
         const measured = getMermaidLayout(renderedSvg);
-        const viewerLayout = measured ?? VIEWER_FALLBACK_LAYOUT;
+        const layout = measured ?? FALLBACK_LAYOUT;
         const exportStyle = getExportStyle(containerRef.current);
         writeCachedLayout(chart, measured);
         setSkeletonLayout(measured);
@@ -400,10 +457,9 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           viewerDocument: buildViewerMermaidDocument(
             renderedSvg,
             containerRef.current,
-            viewerLayout,
+            layout,
           ),
-          layout: measured,
-          viewerLayout,
+          layout,
           exportBackground: exportStyle.background,
           exportFontFamily: exportStyle.fontFamily,
         });
@@ -422,8 +478,30 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     };
   }, [chart, diagramId, themeVersion]);
 
-  const overflow = useHorizontalOverflow(scrollRef, [rendered?.inlineDocument]);
-  const openViewer = useCallback(() => setViewerOpen(true), []);
+  useEffect(() => {
+    onErrorChange?.(error);
+  }, [error, onErrorChange]);
+
+  const zoom = useInlineZoom({
+    content: rendered?.layout ?? null,
+    maxHeight: MERMAID_PREVIEW_MAX_HEIGHT_PX,
+    scrollRef,
+  });
+
+  // Record the fitted height once the column has been measured, so the next
+  // mount of this chart reserves exactly the space it will take. `rendered`
+  // is a dependency because the render effect rewrites the entry without it.
+  const fittedHeight = zoom.fitted ? zoom.size.height : null;
+  useEffect(() => {
+    if (!rendered || fittedHeight === null) return;
+    writeCachedLayout(chart, { ...rendered.layout, previewHeight: fittedHeight });
+  }, [chart, rendered, fittedHeight]);
+
+  const overflow = useHorizontalOverflow(scrollRef, [
+    rendered?.inlineDocument,
+    zoom.size.width,
+  ]);
+  const openViewer = useCallback(() => setViewerOpen(true), [setViewerOpen]);
   const dragToScroll = useDragToScroll({ onTap: openViewer });
 
   const handleCopySource = useCallback(async () => {
@@ -432,6 +510,12 @@ export function MermaidDiagram({ chart }: { chart: string }) {
       setTimeout(() => setCopied(false), 2000);
     }
   }, [chart]);
+
+  if (error && frame) {
+    // The frame shows the error panel; keep the host so a theme switch can
+    // still resolve colors for the next attempt.
+    return <div ref={containerRef} className="mermaid-diagram" data-framed="" />;
+  }
 
   if (error) {
     return (
@@ -463,12 +547,17 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   // drives layout. If the cache was right, this transition is zero-shift.
   const containerStyle: CSSProperties | undefined = rendered
     ? undefined
-    : { minHeight: skeletonLayout?.height ?? MERMAID_SKELETON_HEIGHT_PX };
+    : {
+        minHeight: skeletonLayout
+          ? previewHeightOf(skeletonLayout) + (frame ? DIAGRAM_PADDING_Y_PX : 0)
+          : MERMAID_SKELETON_HEIGHT_PX,
+      };
 
   return (
     <div
       ref={containerRef}
       className="mermaid-diagram"
+      data-framed={frame ? "" : undefined}
       aria-label={t(($) => $.mermaid.diagram_label)}
       style={containerStyle}
       data-overflow-start={overflow.start ? "" : undefined}
@@ -486,6 +575,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           <div
             ref={scrollRef}
             className="mermaid-diagram-scroll"
+            style={{ maxHeight: MERMAID_PREVIEW_MAX_HEIGHT_PX }}
             {...dragToScroll}
           >
             <iframe
@@ -493,46 +583,98 @@ export function MermaidDiagram({ chart }: { chart: string }) {
               sandbox=""
               srcDoc={rendered.inlineDocument}
               style={{
-                height: rendered.layout ? `${rendered.layout.height}px` : undefined,
-                width: rendered.layout ? `${rendered.layout.width}px` : undefined,
+                height: `${zoom.size.height}px`,
+                width: `${zoom.size.width}px`,
               }}
               title={t(($) => $.mermaid.diagram_label)}
             />
           </div>
-          <div className="mermaid-diagram-toolbar">
-            <button
-              type="button"
-              onClick={handleCopySource}
-              title={t(($) => $.mermaid.copy_source)}
-              aria-label={t(($) => $.mermaid.copy_source)}
-            >
-              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-            </button>
-            <button
-              ref={expandButtonRef}
-              type="button"
-              onClick={() => setViewerOpen(true)}
-              title={t(($) => $.mermaid.open_viewer)}
-              aria-label={t(($) => $.mermaid.open_viewer)}
-            >
-              <Maximize2 className="size-3.5" />
-            </button>
-          </div>
+          {/* Framed, the zoom floats on its own: the frame's title bar holds
+              the other actions. Standalone it joins the toolbar, because two
+              pills stacked on a short, wide diagram covered most of it. */}
+          {frame && <MermaidZoomControls zoom={zoom} />}
+          {!frame && (
+            <div className="mermaid-diagram-toolbar">
+              <MermaidZoomControls zoom={zoom} />
+              <button
+                type="button"
+                onClick={handleCopySource}
+                title={t(($) => $.mermaid.copy_source)}
+                aria-label={t(($) => $.mermaid.copy_source)}
+              >
+                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              </button>
+              <button
+                ref={expandButtonRef}
+                type="button"
+                onClick={() => setViewerOpen(true)}
+                title={t(($) => $.mermaid.open_viewer)}
+                aria-label={t(($) => $.mermaid.open_viewer)}
+              >
+                <Maximize2 className="size-3.5" />
+              </button>
+            </div>
+          )}
           <MermaidViewer
             open={viewerOpen}
             onOpenChange={setViewerOpen}
             chart={chart}
             svg={rendered.svg}
             viewerDocument={rendered.viewerDocument}
-            layout={rendered.viewerLayout}
+            layout={rendered.layout}
             exportBackground={rendered.exportBackground}
             exportFontFamily={rendered.exportFontFamily}
-            finalFocusRef={expandButtonRef}
+            finalFocusRef={frame ? frame.finalFocusRef : expandButtonRef}
           />
         </>
+      ) : frame ? (
+        <DynamicBlockSkeleton className="absolute inset-0 p-4" />
       ) : (
         <div className="mermaid-diagram-loading">{t(($) => $.mermaid.rendering)}</div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The preview's zoom buttons. Siblings of the scroll box, never inside it, so
+ * pressing one is not a tap that opens the viewer.
+ */
+function MermaidZoomControls({ zoom }: { zoom: InlineZoom }) {
+  const { t } = useT("editor");
+
+  return (
+    <div className="mermaid-diagram-zoom">
+      <button
+        type="button"
+        onClick={zoom.zoomOut}
+        disabled={!zoom.canZoomOut}
+        title={t(($) => $.canvas.zoom_out)}
+        aria-label={t(($) => $.canvas.zoom_out)}
+      >
+        <Minus className="size-3.5" />
+      </button>
+      {/* Not a live region: a fitted preview's percent follows the column's
+          width, and every diagram on the page would announce each resize. */}
+      <span>{zoom.zoomPercent}%</span>
+      <button
+        type="button"
+        onClick={zoom.zoomIn}
+        disabled={!zoom.canZoomIn}
+        title={t(($) => $.canvas.zoom_in)}
+        aria-label={t(($) => $.canvas.zoom_in)}
+      >
+        <Plus className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={zoom.fit}
+        disabled={zoom.fitted}
+        title={t(($) => $.canvas.zoom_fit)}
+        aria-label={t(($) => $.canvas.zoom_fit)}
+      >
+        <Frame className="size-3.5" />
+      </button>
     </div>
   );
 }

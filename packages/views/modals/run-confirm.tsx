@@ -213,7 +213,11 @@ export function RunConfirmModal({
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
-      <DialogContent onKeyDown={onDialogKeyDown}>
+      {/* Wider than the primitive's sm:max-w-sm: the two actions are long
+          phrases, not "Cancel"/"Save". In French they measure ~435px with the
+          send-shortcut keycaps against the 352px the default leaves, so the
+          dialog's overflow-auto showed a horizontal scrollbar. */}
+      <DialogContent className="sm:max-w-lg" onKeyDown={onDialogKeyDown}>
         <DialogHeader>
           <DialogTitle>
             {isPromote
@@ -225,7 +229,9 @@ export function RunConfirmModal({
 
         {/* The only spinner left is on the button the user just pressed, and it
             reflects the write in flight — never a pre-flight check. */}
-        <DialogFooter>
+        {/* flex-wrap keeps a longer translation, or a larger text size, from
+            bringing the scrollbar back: the actions stack instead. */}
+        <DialogFooter className="sm:flex-wrap">
           <Button type="button" variant="outline" disabled={submitting} onClick={() => submit(true)}>
             {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
           </Button>

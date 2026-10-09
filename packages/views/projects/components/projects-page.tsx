@@ -431,7 +431,7 @@ function ProjectTableRow({
             renderTrigger={(leadName) => (
               <button
                 type="button"
-                className="flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:bg-accent/60"
+                className="flex min-w-0 items-center gap-1.5 rounded-xs px-1 py-0.5 transition-colors hover:bg-accent/60"
               >
                 {project.lead_type && project.lead_id ? (
                   <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
@@ -647,7 +647,7 @@ function ProjectCard({
           project={project}
           handleUpdate={handleUpdate}
           renderTrigger={(leadName) => (
-            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-colors hover:bg-accent/60">
+            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded-xs px-1.5 py-0.5 transition-colors hover:bg-accent/60">
               {project.lead_type && project.lead_id ? (
                 <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
               ) : (
@@ -726,7 +726,7 @@ function ProjectBatchToolbar({
             type="button"
             aria-label={t(($) => $.page.clear_selection)}
             onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
+            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
           >
             <X className="size-3.5 text-muted-foreground" />
           </button>
@@ -1312,12 +1312,12 @@ function LoadingState({ isCompact }: { isCompact: boolean }) {
       {Array.from({ length: 8 }).map((_, i) => (
         <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
           <div className="flex items-center gap-2">
-            <Skeleton className="h-8 w-8 rounded" />
+            <Skeleton className="h-8 w-8 rounded-xs" />
             <Skeleton className="h-4 w-3/4" />
           </div>
           <div className="flex gap-1.5">
-            <Skeleton className="h-5 w-16 rounded" />
-            <Skeleton className="h-5 w-20 rounded" />
+            <Skeleton className="h-5 w-16 rounded-xs" />
+            <Skeleton className="h-5 w-20 rounded-xs" />
           </div>
         </div>
       ))}

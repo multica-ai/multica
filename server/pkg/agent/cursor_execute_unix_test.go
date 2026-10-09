@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // A real cursor-agent reads the prompt from stdin to EOF (see buildCursorArgs).
@@ -269,6 +271,20 @@ exit 1
 	}
 	if result.Output != "" {
 		t.Fatalf("output = %q, want empty failed output", result.Output)
+	}
+}
+
+func TestCursorExecuteConnectTimeoutIsResumeSafe(t *testing.T) {
+	t.Parallel()
+	result := executeFakeCursor(t, "#!/bin/sh\n"+drainStdin+"\nprintf '%s\\n' 'Error: [unavailable] connect ETIMEDOUT 192.0.2.1:443' >&2\nexit 1\n")
+	if result.Status != "failed" || result.SessionID != "" {
+		t.Fatalf("expected failure before first session event: %+v", result)
+	}
+	if result.ResumeRejected || result.ResumeRejectedTransient {
+		t.Fatal("a connection timeout does not prove resume was rejected")
+	}
+	if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("actual Cursor adapter error classified as %s, want network: %s", got, result.Error)
 	}
 }
 

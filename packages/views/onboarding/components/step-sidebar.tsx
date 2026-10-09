@@ -12,7 +12,6 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { DotSphere } from "@multica/ui/components/ui/dot-sphere";
 import {
   Stepper,
-  StepperDescription,
   StepperIndicator,
   StepperItem,
   StepperNav,
@@ -235,9 +234,6 @@ export function StepSidebar({
                         >
                           {t(($) => $.step_nav[key].label)}
                         </StepperTitle>
-                        <StepperDescription className="mt-0.5 max-w-none text-muted-foreground">
-                          {t(($) => $.step_nav[key].description)}
-                        </StepperDescription>
                       </div>
                     </>
                   );

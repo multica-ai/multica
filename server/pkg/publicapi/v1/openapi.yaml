@@ -363,6 +363,10 @@ components:
         type: { type: string }
         parent_id: { type: string }
         created_at: { type: string, format: date-time }
+        deleted_at:
+          type: string
+          format: date-time
+          description: Set only on a deleted comment kept as an empty placeholder because it still has replies.
     CommentListResponse:
       type: object
       required: [comments]

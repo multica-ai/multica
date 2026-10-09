@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	dshProfile         = "multica"
-	dshProtocolVersion = 1
+	dshProfile = "multica"
+	// DshProtocolVersion is the DSH stdio protocol this backend speaks. Exported
+	// because the daemon's profile probe accepts or rejects a runtime profile on
+	// this exact number, and a second copy of it there is a copy that can drift.
+	DshProtocolVersion = 1
 	dshCancelGrace     = 3 * time.Second
 	dshTerminateGrace  = 2 * time.Second
 )
@@ -251,7 +254,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		requestID = "multica-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 	command := dshExecuteCommand{
-		Version: dshProtocolVersion, Type: "execute", RequestID: requestID,
+		Version: DshProtocolVersion, Type: "execute", RequestID: requestID,
 		Cwd: opts.Cwd, Prompt: prompt, ResumeSessionID: opts.ResumeSessionID,
 		Model: model, ReasoningEffort: opts.ThinkingLevel, MCPServers: mcpServers,
 	}
@@ -281,7 +284,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			return
 		case <-runCtx.Done():
 		}
-		_ = writeFrame(dshCancelCommand{Version: dshProtocolVersion, Type: "cancel", RequestID: requestID})
+		_ = writeFrame(dshCancelCommand{Version: DshProtocolVersion, Type: "cancel", RequestID: requestID})
 		timer := time.NewTimer(dshCancelGrace)
 		defer timer.Stop()
 		select {
@@ -371,7 +374,7 @@ type dshRunState struct {
 }
 
 func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *dshRunState) {
-	if frame.Version != dshProtocolVersion {
+	if frame.Version != DshProtocolVersion {
 		state.protocolError = fmt.Sprintf("dsh returned unsupported protocol version %d", frame.Version)
 		return
 	}
@@ -449,7 +452,7 @@ func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 	scanner := newAgentStreamScanner(stdout)
 	for scanner.Scan() {
 		var frame dshFrame
-		if json.Unmarshal(scanner.Bytes(), &frame) != nil || frame.Version != dshProtocolVersion || frame.Type != "models" {
+		if json.Unmarshal(scanner.Bytes(), &frame) != nil || frame.Version != DshProtocolVersion || frame.Type != "models" {
 			continue
 		}
 		for _, item := range frame.Models {

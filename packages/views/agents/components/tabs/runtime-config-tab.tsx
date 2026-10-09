@@ -140,9 +140,6 @@ export function RuntimeConfigTab({
 
   return (
     <div className="flex h-full flex-col space-y-4">
-      <p className="text-caption text-muted-foreground">
-        {t(($) => $.tab_body.runtime_config.intro)}
-      </p>
 
       <fieldset className="space-y-2">
         <Label className="text-caption font-medium">

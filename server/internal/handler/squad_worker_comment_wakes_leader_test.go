@@ -6,8 +6,153 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+func TestGuestSquadWorkerReplayRequiresPlannedInput_GH8301(t *testing.T) {
+	trigger := commentAgentTrigger{Source: commentTriggerSourceThreadParent, NonLeaderAgentReply: true}
+	if got := keepReplayableAgentTriggers([]commentAgentTrigger{trigger}, false); len(got) != 0 {
+		t.Fatal("timestamp-only guest worker reply must not replay")
+	}
+	if got := keepReplayableAgentTriggers([]commentAgentTrigger{trigger}, true); len(got) != 1 {
+		t.Fatal("planned guest worker reply must replay")
+	}
+}
+
+func TestGuestSquadWorkerRouteOnMemberAssignedIssue_GH8301(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'member', assignee_id = $2 WHERE id = $1`, issueID, testUserID)
+	fx.Issue.AssigneeType = pgtype.Text{String: "member", Valid: true}
+	fx.Issue.AssigneeID = parseUUID(testUserID)
+
+	leaderTaskID := dbfx.Task(t, fx.LeaderID, testutil.Cols{
+		"runtime_id": testRuntimeID, "issue_id": issueID, "status": "completed",
+		"is_leader_task": true, "squad_id": fx.SquadID,
+		"originator_user_id": testUserID, "accountable_user_id": testUserID,
+	})
+	delegationID := dbfx.Comment(t, issueID, "delegate to guest worker", testutil.Cols{
+		"author_type": "agent", "author_id": fx.LeaderID, "source_task_id": leaderTaskID,
+	})
+	workerTaskID := dbfx.Task(t, fx.OtherID, testutil.Cols{
+		"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running",
+		"trigger_comment_id": delegationID, "squad_id": fx.SquadID,
+		"delegated_from_task_id": leaderTaskID,
+		"originator_user_id":     testUserID, "accountable_user_id": testUserID,
+	})
+	parent, err := testHandler.Queries.GetComment(ctx, parseUUID(delegationID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, fx.Issue, "done", &parent, "agent", fx.OtherID, commentTriggerComputeOptions{
+		AuthoringTaskID: parseUUID(workerTaskID), OriginatorUserID: testUserID,
+	})
+	if len(triggers) != 1 || triggers[0].Source != commentTriggerSourceThreadParent || triggers[0].Squad == nil {
+		t.Fatalf("guest worker route = %+v, want one squad leader thread-parent trigger", triggers)
+	}
+	if got := keepReplayableAgentTriggers(triggers, true); len(got) != 1 {
+		t.Fatal("planned guest worker reply must replay")
+	}
+}
+
+func TestCreateComment_GuestSquadWorkerRouting_GH8301(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	cases := []struct {
+		mode                    string
+		name                    string
+		wantAssigned, wantGuest int
+	}{
+		{mode: "live", name: "live guest delegation", wantGuest: 1},
+		{mode: "leader_changed", name: "changed guest leader fails closed"},
+		{mode: "permission_denied", name: "guest permission denied fails closed"},
+		{mode: "deleted", name: "deleted guest delegation uses assigned squad", wantAssigned: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mode := tc.mode
+			var outsiderID string
+			if mode == "permission_denied" {
+				outsiderID = dbfx.User(t, "GH-8301 outsider", "gh-8301-outsider-"+uuid.NewString()+"@multica.test")
+			}
+			assignedLeaderID := dbfx.Agent(t, "GH-8301 assigned leader "+mode, testRuntimeID)
+			guestLeaderID := dbfx.Agent(t, "GH-8301 exact guest leader "+mode, testRuntimeID)
+			replacementID := dbfx.Agent(t, "GH-8301 replacement leader "+mode, testRuntimeID)
+			workerID := dbfx.Agent(t, "GH-8301 exact guest worker "+mode, testRuntimeID)
+			assignedSquadID := dbfx.Squad(t, "GH-8301 assigned squad "+mode, assignedLeaderID)
+			guestSquadID := dbfx.Squad(t, "GH-8301 exact guest squad "+mode, guestLeaderID)
+			issueID := dbfx.Issue(t, "guest route beats assigned fallback "+mode, testutil.Cols{
+				"assignee_type": "squad",
+				"assignee_id":   assignedSquadID,
+			})
+			guestLeaderTaskID := dbfx.Task(t, guestLeaderID, testutil.Cols{
+				"runtime_id":          testRuntimeID,
+				"issue_id":            issueID,
+				"status":              "completed",
+				"is_leader_task":      true,
+				"squad_id":            guestSquadID,
+				"originator_user_id":  testUserID,
+				"accountable_user_id": testUserID,
+			})
+			delegationID := dbfx.Comment(t, issueID, "delegate to guest worker", testutil.Cols{
+				"author_type":    "agent",
+				"author_id":      guestLeaderID,
+				"source_task_id": guestLeaderTaskID,
+			})
+			workerTaskID := dbfx.Task(t, workerID, testutil.Cols{
+				"runtime_id":             testRuntimeID,
+				"issue_id":               issueID,
+				"status":                 "running",
+				"trigger_comment_id":     delegationID,
+				"squad_id":               guestSquadID,
+				"delegated_from_task_id": guestLeaderTaskID,
+				"originator_user_id":     testUserID,
+				"accountable_user_id":    testUserID,
+			})
+			dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+
+			switch mode {
+			case "leader_changed":
+				dbfx.Exec(t, `UPDATE squad SET leader_id = $2 WHERE id = $1`, guestSquadID, replacementID)
+			case "permission_denied":
+				dbfx.Exec(t, `UPDATE agent SET owner_id = $2 WHERE id = $1`, guestLeaderID, outsiderID)
+			case "deleted":
+				dbfx.Comment(t, issueID, "keep delegation reply tree", testutil.Cols{"parent_id": delegationID})
+				deleted, err := testHandler.deleteComment(context.Background(), parseUUID(delegationID), parseUUID(testWorkspaceID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if deleted.Tombstone == nil {
+					t.Fatal("delegation with replies was removed instead of tombstoned")
+				}
+			}
+
+			r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+				"content":   "guest work complete",
+				"parent_id": delegationID,
+			})
+			r.Header.Set("X-Agent-ID", workerID)
+			r.Header.Set("X-Task-ID", workerTaskID)
+			r = withURLParam(r, "id", issueID)
+			testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
+
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE AND squad_id = $3`, issueID, assignedLeaderID, assignedSquadID); got != tc.wantAssigned {
+				t.Fatalf("assigned squad leader received %d task(s), want %d", got, tc.wantAssigned)
+			}
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE AND squad_id = $3`, issueID, guestLeaderID, guestSquadID); got != tc.wantGuest {
+				t.Fatalf("exact guest squad leader received %d task(s), want %d", got, tc.wantGuest)
+			}
+		})
+	}
+}
 
 // TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015 pins the
 // full CreateComment behavior for the scenario reported in MUL-4015:

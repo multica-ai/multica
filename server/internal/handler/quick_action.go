@@ -868,6 +868,19 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "quick action is archived")
 		return
 	}
+	// A quick action carries its OWN configured target, so under the "derived vs
+	// named" rule it could be let through. It is refused in the first phase for a
+	// product reason rather than a rule one: it is an instruction to go and DO
+	// the action, not an invitation to talk, and Triage is where nobody has
+	// agreed the work should be done yet. Opening it later is deleting this if.
+	//
+	// Before the comment is written, not after: a quick action is a comment AND
+	// a run, and posting the prompt to an entry that will never run it leaves an
+	// instruction addressed to nobody (MUL-7189 §2.3).
+	if issue.TriageState.Valid {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
+		return
+	}
 
 	target := h.resolveQuickActionTarget(r.Context(), qa)
 	if !target.Found {
@@ -918,7 +931,7 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 		"issue_revision":      created.IssueRevision,
 	})
 
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, nil, actorType, actorID, originatorUserID, nil)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, nil, actorType, actorID, originatorUserID, nil, nil)
 
 	// Usage telemetry is best-effort and deliberately outside the run's
 	// success path: a failed counter must never cost the user the run.

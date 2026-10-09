@@ -5,7 +5,7 @@ description: Install Multica on your iPhone from source, and connect to Cloud or
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The Multica iOS client is not on the App Store yet. You can build a Release version from the open-source repository on a Mac and install it on your own iPhone. There is no Android client yet.
+The Multica iOS client is not on the App Store yet. You can build a Release version from the public source repository on a Mac and install it on your own iPhone. There is no Android client yet.
 
 The installed app connects to Multica Cloud by default; sign in with your existing account. Workspaces, issues, comments, and run history all live on the server — nothing needs to be synced manually from web or Desktop.
 
@@ -70,19 +70,21 @@ pnpm ios:mobile:device:prod:release
 
 ## Connecting to a self-hosted instance
 
-Release builds bake the API address into the app. To connect to a self-hosted instance, edit `apps/mobile/.env.production` first:
+Release builds bake the API address into the app. `apps/mobile/.env.production` is committed with the public multica.ai defaults, so a fresh clone builds against production as-is.
+
+To connect to a self-hosted instance, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy:
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`EXPO_PUBLIC_API_URL` is required. `EXPO_PUBLIC_WEB_URL` is optional and powers entries like "Copy link" and "Open on web"; when it's unset, those menu items are hidden.
+The `.local` file overrides the committed defaults key by key and is gitignored, so personal endpoints never reach the repository. `EXPO_PUBLIC_API_URL` is required. `EXPO_PUBLIC_WEB_URL` powers entries like "Copy link" and "Open on web". Set both in the copy: a key you leave out falls back to the multica.ai default, so those entries would open multica.ai instead of your instance.
 
 Re-run the build command after editing. The iPhone must be able to reach the API address; when using a LAN address, don't write `localhost` — on the iPhone it points at the phone itself.
 
 <Callout type="warning">
-Editing `.env.production` changes the production configuration of the current checkout. Committing the change writes your personal API address into the repository's production configuration.
+Editing `.env.production` directly changes the production configuration of the current checkout. Keep personal values in the gitignored `.env.production.local`.
 </Callout>
 
 For mobile development, using the Simulator, or connecting to staging, see [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) in the repository.

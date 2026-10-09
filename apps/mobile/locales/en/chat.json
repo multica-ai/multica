@@ -1,0 +1,157 @@
+{
+  "tabs": {
+    "title": "Chat"
+  },
+  "composer": {
+    "no_agent": "No agent selected",
+    "revoked": "You can no longer run this agent",
+    "no_agents": "No agents in this workspace",
+    "archived": "This chat is archived",
+    "runtime_required": "Agent needs a runtime",
+    "replying_to": "Replying to {{name}}",
+    "cancel_reply": "Cancel reply",
+    "mention": "Mention someone or an issue",
+    "upload_image": "Upload image",
+    "upload_file": "Upload file",
+    "send": "Send",
+    "default_placeholder": "Type a message…",
+    "unavailable": "Chat unavailable",
+    "stop_agent": "Stop agent",
+    "file_too_large_title": "File too large",
+    "file_too_large_message": "Files must be smaller than 100 MB.",
+    "working": "Agent is working…",
+    "message": "Message…"
+  },
+  "empty": {
+    "greeting": "Hi, I'm {{name}}",
+    "no_agent_title": "Chat with your agents",
+    "examples": "Examples fill the composer without sending.",
+    "starter_help_label": "What can you help with?",
+    "starter_help_prompt": "What are you best at helping with? Give me a concise overview.",
+    "starter_task_label": "Suggest a first task",
+    "starter_task_prompt": "Suggest three useful tasks I could delegate to you.",
+    "starter_action_label": "Recommend an action",
+    "starter_action_prompt": "Review what you know about my workspace and recommend a useful first action."
+  },
+  "picker": {
+    "title": "Choose an agent",
+    "placeholder": "Search agents...",
+    "empty": "No agents available.",
+    "needs_runtime": "Needs runtime"
+  },
+  "banners": {
+    "no_agent": "No agents available",
+    "runtime_required": "This agent needs a runtime before it can run.",
+    "offline": "{{name}} is offline. Messages will wait until its runtime is back.",
+    "no_agent_action": "Add or enable an agent in More → Agents to start chatting.",
+    "offline_unstable": "{{name}} may have just disconnected — your message will queue.",
+    "runtime_required_name": "{{name}} needs a runtime before it can run. Bind one on web or desktop."
+  },
+  "status": {
+    "offline": "Offline",
+    "reconnecting": "Reconnecting",
+    "queued": "Queued",
+    "starting": "Starting up",
+    "thinking": "Thinking",
+    "typing": "Typing",
+    "working": "Working",
+    "running_command": "Running command",
+    "reading_files": "Reading files",
+    "searching_code": "Searching code",
+    "making_edits": "Making edits",
+    "searching_web": "Searching web",
+    "retrying": "Retrying"
+  },
+  "alerts": {
+    "no_permission_title": "No permission to run this agent",
+    "no_permission_message": "You no longer have permission to run this agent, so the message was not sent. Ask its owner for access.",
+    "runtime_title": "Runtime required",
+    "runtime_message": "Bind a runtime to this agent on web or desktop before sending a message.",
+    "not_sent": "Message not sent",
+    "delete_title": "Delete this chat?",
+    "delete_confirm": "Delete"
+  },
+  "failure": {
+    "invocation_not_allowed": "You no longer have permission to run this agent, so the message was not sent.",
+    "agent_runtime_required": "Bind a runtime to this agent before sending a message.",
+    "runtime_access_denied": "Message not sent — {{detail}}",
+    "default": "Your message could not be sent. Please try again.",
+    "runtime_access_recovery": "This agent can't run on its private runtime. Make the runtime public, or rebind/copy the agent to a runtime its owner can use."
+  },
+  "a11y": {
+    "suggested_followups": "Suggested follow-ups",
+    "show_error_details": "Show error details",
+    "no_agents": "No agents available",
+    "session_actions": "Chat session actions",
+    "new_chat": "New chat",
+    "sessions_agent_picker": "Chat sessions and agent picker"
+  },
+  "title": {
+    "fallback": "Chat",
+    "this_agent": "This agent"
+  },
+  "elapsed": {
+    "replied": "Replied in {{time}}",
+    "finished": "Finished in {{time}}",
+    "failed": "Failed after {{time}}"
+  },
+  "details": {
+    "show": "Show details"
+  },
+  "sessions": {
+    "title": "Chats",
+    "empty": "No chats yet.",
+    "archived": "archived",
+    "new_chat": "New chat"
+  },
+  "picker.title": "Choose an agent",
+  "no_response": "The agent finished this turn without a text reply.",
+  "failure_reason": {
+    "default": "Run failed",
+    "queued_expired": "Expired in queue",
+    "runtime_offline": "Daemon offline",
+    "runtime_reconnect_timeout": "Daemon did not reconnect in time",
+    "runtime_recovery": "Daemon restarted",
+    "timeout": "Run timed out",
+    "iteration_limit": "Hit the iteration limit",
+    "agent_blocked": "Waiting on human input",
+    "api_invalid_request": "Rejected by the model API",
+    "skill_bundle_unavailable": "Couldn't download the agent's skills",
+    "runtime_cli_timeout": "Local runtime CLI timed out",
+    "environment_prepare_failed": "Couldn't prepare the execution environment",
+    "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
+    "invalid_task_identity": "Run identity mismatch",
+    "agent_error_provider_auth_or_access": "Provider auth failed",
+    "agent_error_provider_quota_limit": "Provider quota exhausted",
+    "agent_error_provider_capacity_or_rate_limit": "Rate limited by provider",
+    "agent_error_provider_server_error": "Provider server error",
+    "agent_error_provider_network": "Network error reaching provider",
+    "agent_error_process_failure": "Agent process crashed",
+    "agent_error_empty_or_unparseable_output": "Agent returned no usable output",
+    "agent_error_agent_timeout": "Agent timed out",
+    "agent_error_context_overflow": "Context window exceeded",
+    "agent_error_missing_config": "Missing API key or configuration",
+    "agent_error_model_not_found_or_unavailable": "Model unavailable",
+    "agent_error_runtime_version_unsupported": "Runner CLI version unsupported",
+    "agent_error_runtime_missing_executable": "Runner CLI not installed",
+    "agent_error_unknown": "Agent execution error",
+    "agent_fallback_message": "Agent returned a fallback message",
+    "codex_resume_oversized": "Session too large to resume",
+    "idle_watchdog": "Agent stopped after inactivity",
+    "local_directory_error": "Local directory error",
+    "cancelled": "Cancelled by the system",
+    "agent_error": "Agent execution error",
+    "codex_semantic_inactivity": "Codex semantic inactivity timeout",
+    "manual": "Cancelled by user",
+    "user_cancelled": "Cancelled by user"
+  },
+  "timeline": {
+    "steps_count_one": "{{count}} step",
+    "steps_count_other": "{{count}} steps",
+    "tool": "Tool",
+    "tool_result_named": "{{tool}} result: ",
+    "tool_result_unnamed": "result: ",
+    "truncated": "…(truncated)",
+    "error": "Error"
+  }
+}

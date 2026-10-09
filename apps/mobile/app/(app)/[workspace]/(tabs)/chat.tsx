@@ -79,7 +79,10 @@ import {
   seedAcceptedPendingTask,
 } from "@/data/realtime/chat-ws-updaters";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
-import { sendFailureMessage } from "@/lib/dispatch-reason";
+import {
+  dispatchReasonCode,
+} from "@/lib/dispatch-reason";
+import { useT } from "@/lib/i18n";
 import { useAgentPresence } from "@/lib/use-agent-presence";
 import { Header } from "@/components/ui/header";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
@@ -92,10 +95,24 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
-import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 
 export default function ChatTab() {
   const qc = useQueryClient();
+  const { t } = useT("chat");
+  const sendFailureMessage = useCallback((err: unknown) => {
+    switch (dispatchReasonCode(err)) {
+      case "invocation_not_allowed":
+        return t("failure.invocation_not_allowed");
+      case "agent_runtime_required":
+        return t("failure.agent_runtime_required");
+      case "runtime_access_denied":
+        return t("failure.runtime_access_denied", {
+          detail: t("failure.runtime_access_recovery"),
+        });
+      default:
+        return t("failure.default");
+    }
+  }, [t]);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
@@ -288,15 +305,15 @@ export default function ChatTab() {
       // this state; this is the belt-and-braces guard.
       if (accessRevoked) {
         Alert.alert(
-          "No permission to run this agent",
-          "You no longer have permission to run this agent, so the message was not sent. Ask its owner for access.",
+          t("alerts.no_permission_title"),
+          t("alerts.no_permission_message"),
         );
         return;
       }
       if (!runtimeBound) {
         Alert.alert(
-          "Runtime required",
-          "Bind a runtime to this agent on web or desktop before sending a message.",
+          t("alerts.runtime_title"),
+          t("alerts.runtime_message"),
         );
         return;
       }
@@ -309,7 +326,7 @@ export default function ChatTab() {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
         // reason code (MUL-6380).
-        Alert.alert("Message not sent", sendFailureMessage(err));
+        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
         throw err;
       }
       if (!sessionId) return;
@@ -391,7 +408,7 @@ export default function ChatTab() {
         // The composer restores the draft on a thrown rejection but says nothing
         // about it, so a revoked-permission 403 used to read as a silent no-op
         // (MUL-6380). Name the cause here: only this layer sees the error body.
-        Alert.alert("Message not sent", sendFailureMessage(err));
+        Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
         throw err;
       }
     },
@@ -402,6 +419,8 @@ export default function ChatTab() {
       runtimeBound,
       ensureSession,
       qc,
+      sendFailureMessage,
+      t,
       promoteNewDraft,
       clearDraft,
     ],
@@ -450,12 +469,12 @@ export default function ChatTab() {
   const handleDeleteActive = useCallback(() => {
     if (!activeSession) return;
     Alert.alert(
-      "Delete this chat?",
-      chatSessionDisplayTitle(activeSession.title),
+      t("alerts.delete_title"),
+      activeSession.title || t("sessions.new_chat"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("common:actions.cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: t("alerts.delete_confirm"),
           style: "destructive",
           onPress: () => {
             const id = activeSession.id;
@@ -466,7 +485,7 @@ export default function ChatTab() {
       ],
       { cancelable: true },
     );
-  }, [activeSession, deleteSession]);
+  }, [activeSession, deleteSession, t]);
 
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
@@ -476,15 +495,15 @@ export default function ChatTab() {
     isArchived === true ||
     !runtimeBound;
   const disabledReason = !currentAgent
-    ? "No agent selected"
+    ? t("composer.no_agent")
     : accessRevoked
-      ? "You can no longer run this agent"
+      ? t("composer.revoked")
       : availability === "none"
-        ? "No agents in this workspace"
+        ? t("composer.no_agents")
         : isArchived
-          ? "This chat is archived"
+          ? t("composer.archived")
           : !runtimeBound
-            ? "Agent needs a runtime"
+            ? t("composer.runtime_required")
           : undefined;
 
   return (

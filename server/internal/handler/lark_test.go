@@ -26,8 +26,8 @@ func TestRevokeLarkInstallation_NotConfigured(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/x/lark/installations/y", nil)
 	w := httptest.NewRecorder()
 	h.RevokeLarkInstallation(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
 	}
 }
 
@@ -36,15 +36,15 @@ func TestRedeemLarkBindingToken_NotConfigured(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/lark/binding/redeem", strings.NewReader(`{"token":"x"}`))
 	w := httptest.NewRecorder()
 	h.RedeemLarkBindingToken(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
 	}
 }
 
 func TestBeginLarkInstall_NotConfigured(t *testing.T) {
 	// When the device-flow registration service is nil (no at-rest
 	// key, or the stub APIClient is the only one wired), the begin
-	// endpoint must short-circuit to 503 — silently returning a
+	// endpoint must short-circuit to 403 — silently returning a
 	// "configured: false" envelope would hide a real misconfiguration
 	// from the operator. The UI hides the bind button in that case
 	// so this should not be reached through the normal flow.
@@ -52,8 +52,8 @@ func TestBeginLarkInstall_NotConfigured(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/x/lark/install/begin?agent_id=y", nil)
 	w := httptest.NewRecorder()
 	h.BeginLarkInstall(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -62,15 +62,15 @@ func TestGetLarkInstallStatus_NotConfigured(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/lark/install/sess_y/status", nil)
 	w := httptest.NewRecorder()
 	h.GetLarkInstallStatus(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
 	}
 }
 
 func TestListLarkInstallations_NotConfiguredReturnsEmpty(t *testing.T) {
 	// Listing is intentionally a "soft" endpoint: when lark is not
 	// configured we return an empty list + configured:false rather
-	// than a 503, so the Integrations tab renders normally with a
+	// than a 403, so the Integrations tab renders normally with a
 	// "not connected" empty state instead of an error banner.
 	h := &Handler{}
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/x/lark/installations", nil)

@@ -233,17 +233,17 @@ func TestGetCloudBillingCheckoutSession_MissingPathParamReturns400(t *testing.T)
 	}
 }
 
-// TestCloudBillingDisabledReturnsUnavailable confirms self-hosted
-// deployments (no cloud URL configured) get a clean 503 rather than
+// TestCloudBillingDisabledReturnsForbidden confirms self-hosted
+// deployments (no cloud URL configured) get a non-retryable 403 rather than
 // a cryptic upstream error.
-func TestCloudBillingDisabledReturnsUnavailable(t *testing.T) {
+func TestCloudBillingDisabledReturnsForbidden(t *testing.T) {
 	useCloudRuntimeProxy(t, &fakeCloudRuntimeProxy{enabled: false})
 
 	req := newRequest(http.MethodGet, "/api/cloud-billing/balance", nil)
 	w := httptest.NewRecorder()
 	testHandler.GetCloudBillingBalance(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
+	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 }
@@ -269,7 +269,7 @@ func TestCloudWorkspaceSubscriptionsDisabledByDefault(t *testing.T) {
 			w := httptest.NewRecorder()
 			invoke(w, req)
 
-			if w.Code != http.StatusServiceUnavailable {
+			if w.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 			}
 			if proxy.called {
@@ -851,10 +851,10 @@ func TestStripeWebhookRejectsLargeBody(t *testing.T) {
 	}
 }
 
-// TestStripeWebhookDisabledReturnsUnavailable mirrors the
+// TestStripeWebhookDisabledReturnsForbidden mirrors the
 // cloud-runtime disabled test but for the webhook path. Self-hosted
-// deployments without a cloud URL must return 503, not crash.
-func TestStripeWebhookDisabledReturnsUnavailable(t *testing.T) {
+// deployments without a cloud URL must return a non-retryable 403, not crash.
+func TestStripeWebhookDisabledReturnsForbidden(t *testing.T) {
 	useCloudRuntimeProxy(t, &fakeCloudRuntimeProxy{enabled: false})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/stripe",
@@ -863,7 +863,7 @@ func TestStripeWebhookDisabledReturnsUnavailable(t *testing.T) {
 	w := httptest.NewRecorder()
 	testHandler.HandleCloudBillingStripeWebhook(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
+	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 }

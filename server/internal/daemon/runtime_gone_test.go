@@ -749,11 +749,12 @@ func TestHandleRuntimeGone_RecoveryContextSurvivesCallerCancellation(t *testing.
 func TestHandleRuntimeGone_RecoveryContextStopsOnDaemonShutdown(t *testing.T) {
 	// Companion to RecoveryContextSurvivesCallerCancellation: when the daemon
 	// IS shutting down, recovery must abort promptly instead of holding the
-	// HTTP call open until its 30s client timeout. We bound the server
-	// handler with a short safety timeout so test cleanup never hangs on a
-	// stuck connection — the assertion is on the daemon-side return time,
-	// not on server-side context propagation.
+	// HTTP call open until its 30s client timeout. The server handler is
+	// released when the test ends so cleanup never hangs on a stuck
+	// connection — the assertion is on the daemon-side return time, not on
+	// server-side context propagation.
 	registerEntered := make(chan struct{}, 1)
+	releaseRegister := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/daemon/register" {
 			select {
@@ -762,13 +763,15 @@ func TestHandleRuntimeGone_RecoveryContextStopsOnDaemonShutdown(t *testing.T) {
 			}
 			select {
 			case <-r.Context().Done():
-			case <-time.After(2 * time.Second):
+			case <-releaseRegister:
 			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
+	// LIFO: release the handler before Close waits for it.
+	t.Cleanup(func() { close(releaseRegister) })
 
 	d := freshDaemon(srv.URL)
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}

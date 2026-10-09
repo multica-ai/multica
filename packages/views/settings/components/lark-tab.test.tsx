@@ -484,6 +484,20 @@ describe("LarkAgentBotConnectedBadge (Unbind / Disconnect)", () => {
     expect(screen.getByRole("link", { name: /Manage in Feishu/i })).toBeTruthy();
   });
 
+  it("points a silent bot at the event-delivery check (#8496)", () => {
+    render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
+      wrapper: I18nWrapper,
+    });
+    // A bound app whose events go to a request URL renders this exact
+    // badge and receives nothing, so the connected state has to name the
+    // one setting that explains the silence.
+    expect(screen.getByText(/long connection/i)).toBeTruthy();
+    const docs = screen.getByRole("link", { name: /Troubleshooting/i });
+    expect(docs.getAttribute("href")).toBe(
+      "https://multica.ai/docs/lark-bot-integration",
+    );
+  });
+
   it("opens the confirm dialog and does NOT call the API until the user confirms", async () => {
     const user = userEvent.setup();
     render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {

@@ -43,12 +43,20 @@ func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userI
 // SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
 // at most once per TTL window per token, not per request.
 //
+// cfSigner is optional; when non-nil, a session renewed here also gets fresh
+// CloudFront cookies. It is wired into THIS middleware rather than left to
+// RefreshCloudFrontCookies because renewal is what makes the two clocks
+// diverge: every route group that can renew must re-sign, and only the
+// renewer knows it renewed. A group that mounts Auth without the CDN
+// middleware (the plugin bridge) would otherwise slide the session forward
+// while leaving the CDN policy pinned to the original login.
+//
 // cloudPAT is optional; when non-nil, tokens with the mcn_ prefix are
 // validated by calling the Multica Cloud Fleet service rather than the
 // local DB. When nil (Fleet URL unset) mcn_ tokens are rejected at the
 // prefix branch — we don't fall through to the mul_ / JWT paths, since
 // an mcn_ string is by construction not a valid mul_ PAT or JWT.
-func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, cfSigner *auth.CloudFrontSigner) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — any value supplied by
@@ -275,6 +283,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			if email != "" {
 				r.Header.Set("X-User-Email", email)
 			}
+
+			// Sliding session: a browser that keeps using the app keeps its
+			// cookie, instead of being logged out on the anniversary of its
+			// login. No-op until the session drops below half its TTL
+			// (MUL-7436).
+			r = renewCookieSession(w, r, claims, fromCookie, cfSigner)
 
 			next.ServeHTTP(w, r)
 		})

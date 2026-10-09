@@ -1,0 +1,160 @@
+---
+title: Automatisations
+description: Confiez automatiquement le travail récurrent aux agents, selon une planification ou depuis un webhook.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Les automatisations prennent en charge le travail qui revient sans cesse — un résumé quotidien de l'avancement, une vérification périodique des dépendances, ou un agent lancé par un événement provenant d'un système externe.
+
+Chaque automatisation enregistre une procédure, un assigné et un ou plusieurs déclencheurs. Lorsqu'elle est déclenchée, Multica crée une tâche ou exécute directement l'agent, et conserve une trace de chaque exécution.
+
+## Créer une automatisation
+
+Ouvrez **Automatisation** dans la barre latérale, choisissez un modèle ou partez de zéro, puis configurez :
+
+- **Nom** : ce dont cette automatisation est responsable ;
+- **Procédure** : l'objectif, le contexte, les contraintes et les étapes que l'agent lit à chaque exécution ;
+- **Assigné à** : un agent ou un squad ;
+- **Projet** : facultatif ; place les tâches créées automatiquement dans un projet donné ;
+- **Mode de sortie** : créer une tâche, ou exécution seule ;
+- **Abonnés** : les membres à notifier après la création automatique d'une tâche ;
+- **Déclencheurs** : une planification ou un webhook.
+
+Une automatisation est activée par défaut après l'enregistrement ; **Exécuter maintenant** lance manuellement le flux complet une fois, à tout moment.
+
+## Choisir un mode de sortie
+
+| Mode | Comportement | Idéal pour |
+|---|---|---|
+| **Créer une tâche** | Chaque déclenchement crée d'abord une tâche, puis l'assigne à l'agent ou au squad assigné ; la discussion, le statut et les enregistrements d'exécution se trouvent tous sur la tâche. | Le travail que l'équipe doit relire, confirmer ou suivre. |
+| **Exécution seule** | Crée directement une exécution, sans tâche ; les résultats ne sont visibles que dans l'historique des exécutions de l'automatisation. | Les exécutions d'arrière-plan qui ne nécessitent aucune trace collaborative. |
+
+Le mode **Créer une tâche** utilise la même file d'exécution que les tâches ordinaires : lorsque le runtime est hors ligne, la tâche est tout de même créée et l'exécution attend que le runtime revienne en ligne.
+
+Le mode **Exécution seule** exige que le runtime soit disponible au moment du déclenchement ; sinon, l'exécution apparaît comme « Ignorée », et aucune tâche en attente n'est laissée derrière.
+
+## Exécuter selon une planification
+
+L'éditeur de planification vous permet de choisir l'heure d'exécution, les jours de répétition, la plage horaire et le fuseau horaire, et affiche un aperçu des prochaines exécutions. Une automatisation peut avoir plusieurs planifications ; l'activation ou la désactivation d'un déclencheur individuel se fait avec la commande CLI `autopilot trigger-update` — voir [Utiliser le CLI](/cli) pour les paramètres.
+
+Lorsque vous avez besoin de règles plus complexes, modifiez directement le cron standard à 5 champs :
+
+```text
+minute hour day month weekday
+```
+
+Par exemple :
+
+| Cron | Fuseau horaire | Signification |
+|---|---|---|
+| `0 9 * * 1-5` | `Asia/Shanghai` | 9 h 00 en semaine |
+| `*/30 * * * *` | `UTC` | Toutes les 30 minutes |
+| `0 3 * * *` | `UTC` | Tous les jours à 3 h 00 |
+
+Le cron n'a pas de champ pour les secondes, et les fuseaux horaires utilisent des noms IANA comme `Asia/Shanghai`. Avant d'enregistrer, comparez le résultat avec les horaires « Prochaines exécutions » affichés sur la page.
+
+![L'éditeur d'automatisation : procédure, paramètres de planification et aperçu des prochaines exécutions](/images/docs/autopilot-schedule.webp)
+
+## Exécuter depuis un webhook
+
+Après l'ajout d'un déclencheur webhook, Multica génère une URL unique. Envoyez-lui un objet ou un tableau JSON pour déclencher l'automatisation :
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-001" \
+  -d '{"event":"build.completed","eventPayload":{"status":"success"}}'
+```
+
+La charge utile est enregistrée dans les enregistrements de livraison et d'exécution, et transmise à l'agent. En mode création de tâche, elle est également ajoutée à la description de la tâche.
+
+Contraintes applicables aux requêtes webhook :
+
+- le corps doit être un objet ou un tableau JSON valide, de 256 Kio au maximum ;
+- `Idempotency-Key` évite les exécutions en double lorsque l'expéditeur réessaie ; les livraisons GitHub sont en outre dédupliquées par `X-GitHub-Delivery` ;
+- sans clé d'idempotence stable, Multica ne peut pas garantir que des requêtes répétées ne s'exécutent qu'une seule fois ;
+- lorsque le déclencheur est désactivé ou que l'événement ne correspond pas, la livraison est enregistrée comme ignorée et aucune exécution n'est créée.
+
+### Filtres d'événements
+
+Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtres d'événements au déclencheur. Chaque ligne contient un nom d'événement et une liste facultative d'actions ; une exécution est déclenchée si une ligne correspond, et laisser toutes les lignes vides accepte tous les événements.
+
+Par exemple, avec `workflow_run` comme nom d'événement et `completed, failed` comme actions, seuls ces deux types de résultats `workflow_run` sont acceptés. Multica reconnaît l'événement et l'action à partir des en-têtes de requête et des champs de charge utile courants, notamment l'en-tête `X-GitHub-Event` de GitHub et le champ `action` du corps.
+
+### Protéger l'URL du webhook
+
+<Callout type="warning">
+Le jeton contenu dans l'URL du webhook sert d'identifiant d'appel. Ne mettez pas l'URL complète dans des dépôts publics, des tâches ou des captures d'écran. En cas de fuite de l'URL, cliquez sur le bouton **Renouveler l'URL** situé à côté et mettez immédiatement à jour l'expéditeur ; l'ancienne URL cesse de fonctionner aussitôt.
+</Callout>
+
+Seuls le créateur de l'automatisation, les propriétaires/administrateurs de l'espace de travail et les collaborateurs ayant reçu un accès peuvent voir l'URL complète. Par défaut, l'interface masque le jeton dans l'URL, et la copie ne nécessite pas de l'afficher ; cliquez sur l'URL ou sur l'icône en forme d'œil pour voir l'adresse complète.
+
+### Référence des réponses du webhook
+
+Lors du débogage d'un expéditeur, utilisez ce tableau pour interpréter les réponses de Multica :
+
+| Statut HTTP | Statut de la réponse | Signification |
+|---|---|---|
+| 200 | `accepted` | Acceptée et une exécution a été créée ; renvoie les ID de la livraison et de l'exécution. |
+| 200 | `skipped` | Acceptée, mais cette exécution a été ignorée (par exemple, le runtime est hors ligne en mode exécution seule) ; inclut la raison. |
+| 200 | `ignored` | Aucune exécution créée : le déclencheur est désactivé, l'automatisation est en pause ou archivée, ou l'événement a été filtré ; le champ `reason` en indique la cause. |
+| 200 | `duplicate` | La clé d'idempotence correspond à une livraison existante ; renvoie l'ID de la livraison d'origine et n'exécute rien de nouveau. |
+| 400 | Message d'erreur | Le corps est vide, n'est pas du JSON valide, ou n'est pas un objet/tableau JSON. |
+| 401 | `rejected` | Le déclencheur a un secret de signature configuré, mais la requête n'a pas de signature ou la signature ne correspond pas. |
+| 404 | Message d'erreur | Le jeton de l'URL est invalide ou a été renouvelé. |
+| 413 | Message d'erreur | Le corps dépasse 256 Kio. |
+| 429 | Message d'erreur | Trop de requêtes ; réessayez plus tard en respectant l'en-tête de réponse `Retry-After`. |
+| 500 | Message d'erreur | Erreur interne de Multica ; l'expéditeur peut réessayer plus tard. |
+
+Les cas ignorés au niveau métier — mise en pause, archivage et filtrage d'événements — renvoient 200 plutôt qu'un code 4xx, afin que les expéditeurs ne réessaient pas indéfiniment.
+
+Ordre de déduction de l'événement et de l'action :
+
+1. si le corps contient un champ `event` de type chaîne, il est utilisé directement ;
+2. sinon, l'en-tête de requête `X-GitHub-Event`, combiné avec le champ `action` du corps sous la forme `github.<event>.<action>` ;
+3. puis l'en-tête de requête `X-Gitlab-Event` ;
+4. puis l'en-tête de requête `X-Event-Type` ;
+5. puis les champs `event`, `type` et `action` du corps ;
+6. si tous sont absents, l'événement est enregistré comme `webhook.received`.
+
+## Consulter les exécutions et les livraisons
+
+L'historique des exécutions affiche la source du déclenchement, l'heure, le statut, la tâche ou l'exécution liée, et la raison d'un échec ou d'une exécution ignorée. Les déclencheurs webhook conservent en plus des enregistrements de livraison distincts, avec l'événement analysé, la réponse, les informations de déduplication et la raison de l'échec.
+
+Une livraison de webhook entièrement traitée peut être rejouée depuis sa vue détaillée. Un rejeu crée une nouvelle livraison et une nouvelle exécution sans réécrire l'enregistrement d'origine ; les livraisons dont la vérification de signature a échoué ou qui sont encore en file d'attente ne peuvent pas être rejouées, et les rejeux ne participent pas à la déduplication.
+
+## Échecs, mise en pause et suppression
+
+En mode exécution seule, une exécution en échec n'est pas relancée automatiquement ; la planification suivante se déclenche tout de même comme prévu. Le mode création de tâche produit des exécutions de tâche ordinaires, et les échecs d'infrastructure suivent les règles décrites dans [Exécutions](/tasks#échecs-et-relances-automatiques).
+
+Multica vérifie périodiquement si les exécutions récentes échouent de façon répétée : lorsque les 7 derniers jours comptent au moins 50 exécutions terminées ou en échec avec un taux d'échec de 90 %, le système met l'automatisation en pause et notifie son créateur ; corrigez la cause, puis reprenez-la manuellement.
+
+La mise en pause manuelle arrête les planifications, les webhooks et **Exécuter maintenant**. La suppression est en réalité un archivage : les déclenchements futurs s'arrêtent, et l'historique des exécutions et des livraisons est conservé.
+
+## Permissions
+
+- Tout membre de l'espace de travail peut créer des automatisations ;
+- le créateur et les propriétaires/administrateurs de l'espace de travail peuvent modifier, exécuter, supprimer et gérer les déclencheurs ;
+- le créateur et les propriétaires/administrateurs peuvent accorder l'accès de gestion à des collaborateurs ;
+- les collaborateurs peuvent modifier, exécuter et gérer les déclencheurs, mais ne peuvent pas accorder l'accès à d'autres personnes ;
+- pouvoir gérer une automatisation ne garantit pas de pouvoir exécuter son agent — le paramètre Accès de l'agent continue de s'appliquer.
+
+## Utiliser le CLI
+
+```bash
+multica autopilot get <autopilot-id> --output json
+multica autopilot trigger <autopilot-id>
+multica autopilot runs <autopilot-id>
+multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
+```
+
+`autopilot get` définit par défaut `webhook_token`, `webhook_path` et `webhook_url` à `null`, et renvoie à la place `has_webhook_token` et `webhook_token_hint`. N'ajoutez `--show-secrets` que lorsque vous avez délibérément besoin de l'identifiant réel ; le CLI affiche alors un avertissement sur stderr afin que le JSON transmis par pipe reste valide.
+
+Consultez [Utiliser le CLI](/cli) pour la liste complète des paramètres.
+
+## Étapes suivantes
+
+- [Assigner des tâches aux agents](/assigning-issues) — l'assignation et la fenêtre de confirmation.
+- [Boîte de réception et abonnements](/inbox) — où arrivent les notifications d'exécution.
+- [Exécutions](/tasks) — états des exécutions et gestion des échecs.

@@ -12,8 +12,9 @@ INSERT INTO runtime_profile (
     fixed_args,
     visibility,
     created_by,
-    enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    enabled,
+    runtime_type
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: GetRuntimeProfile :one
@@ -81,13 +82,88 @@ DELETE FROM agent_runtime
 WHERE profile_id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
--- name: CountAgentsByProfile :one
--- Counts active (non-archived) agents bound to any runtime instance of this
--- profile. The profile-delete path uses this to refuse deletion (409) while
--- agents still depend on it, mirroring the runtime-delete guard.
-SELECT count(*) FROM agent a
-JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL;
+-- name: ListActiveAgentsByProfile :many
+-- Active (non-archived) agents bound to any runtime instance of this profile.
+-- The profile-delete path uses this to refuse deletion (409) while agents
+-- still depend on it, mirroring the runtime-delete guard.
+--
+-- It returns the rows rather than a count because the refusal has to name
+-- them: a profile spans every machine that registered it, so the agents
+-- blocking the delete are routinely bound to a different machine than the one
+-- the user was trying to clean up, and a bare count gives them no way to tell
+-- (GH #8456). Carrying the runtime is what lets the message say which machine.
+--
+-- Deliberately not filtered by kind: it defines when deletion is refused, and
+-- narrowing it to user agents here would let a profile with a bound builder
+-- carrier through, whereupon TeardownRuntime would hard-delete that carrier.
+--
+-- system_key rides along because it, not kind, decides what the user can
+-- actually do about a blocker. Mika is kind='user' with system_key='mika' and
+-- can be neither archived nor moved; a builder carrier is kind='system' and is
+-- released by its Builder session, not from the agent list.
+--
+-- Bounded on purpose. The caller only needs to know that blockers exist, name a
+-- few, and report how many there are — it never needs every row. This runs
+-- inside the delete transaction while profile, runtime and agent rows are
+-- locked, and the response is buffered whole before it is written, so an
+-- unbounded read here would make both the time under lock and the response body
+-- grow with the number of agents a profile has accumulated across machines.
+--
+-- The per-class counts are what let the refusal stay correct while bounded.
+-- Rows are ordered by machine and name, so which blockers land inside the LIMIT
+-- is arbitrary with respect to class: twenty ordinary agents can push the one
+-- Mika to position 21. A message whose advice came from the visible rows would
+-- then tell the user to archive all of them — the unactionable instruction this
+-- whole change removes, just deferred. So the recovery paths are chosen from
+-- these counts and only the names come from the rows.
+--
+-- Every count is a window function over the pre-LIMIT result, so they stay
+-- exact no matter how small max_rows is. blocker_class is emitted per row as
+-- well, giving the classification one definition that the Go classifier is
+-- pinned against in tests.
+WITH blockers AS (
+    SELECT
+        a.id,
+        a.name,
+        a.kind,
+        a.system_key,
+        ar.id AS runtime_id,
+        ar.name AS runtime_name,
+        ar.custom_name AS runtime_custom_name,
+        ar.status AS runtime_status,
+        CASE
+            WHEN a.system_key IS NULL OR btrim(a.system_key) = '' THEN 'user'
+            WHEN btrim(a.system_key) = 'mika' THEN 'mika'
+            -- starts_with, not LIKE: '_' is a single-character wildcard in
+            -- LIKE, so 'agent_builder:%' also matches 'agent-builder:x' and
+            -- 'agentXbuilder:x'. Those would be classified here as carriers
+            -- and by the Go side as other_system, and the refusal would send
+            -- the user to an Agent Builder session that does not exist.
+            WHEN starts_with(btrim(a.system_key), 'agent_builder:') THEN 'agent_builder'
+            ELSE 'other_system'
+        END AS blocker_class
+    FROM agent a
+    JOIN agent_runtime ar ON ar.id = a.runtime_id
+    WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
+)
+SELECT
+    id,
+    name,
+    kind,
+    system_key,
+    runtime_id,
+    runtime_name,
+    runtime_custom_name,
+    runtime_status,
+    blocker_class,
+    count(*) OVER () AS total_count,
+    count(*) FILTER (WHERE blocker_class = 'user') OVER () AS user_count,
+    count(*) FILTER (WHERE blocker_class = 'mika') OVER () AS mika_count,
+    count(*) FILTER (WHERE blocker_class = 'agent_builder') OVER () AS agent_builder_count,
+    count(*) FILTER (WHERE blocker_class = 'other_system') OVER () AS other_system_count
+FROM blockers
+ORDER BY runtime_name ASC, name ASC
+LIMIT @max_rows::int;
 
 -- name: ListAgentRuntimeIDsByProfile :many
 -- Enumerates the runtime instance rows registered against a profile. The

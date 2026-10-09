@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -24,6 +25,23 @@ func writeTestLocalSkill(t *testing.T, root, rel string, files map[string]string
 		}
 	}
 	return skillDir
+}
+
+// setTestUserHome redirects every environment variable used by Go and the
+// runtime home resolvers on supported platforms. HOME alone is not enough on
+// Windows: os.UserHomeDir reads USERPROFILE and Hermes uses LOCALAPPDATA.
+func setTestUserHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+}
+
+func testDefaultHermesHome(home string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(home, "AppData", "Local", "hermes")
+	}
+	return filepath.Join(home, ".hermes")
 }
 
 func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) string {
@@ -339,7 +357,9 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.provider, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
+			root := filepath.Join(home, tc.root)
+			wantPath := tc.wantPath
 			if tc.provider == "grok" {
 				t.Setenv("GROK_HOME", "")
 			}
@@ -352,8 +372,13 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			if tc.provider == "dsh" {
 				t.Setenv("DSH_HOME", "")
 			}
+			if tc.provider == "hermes" {
+				t.Setenv("HERMES_HOME", "")
+				root = filepath.Join(testDefaultHermesHome(home), "skills")
+				wantPath = relativizeHomePath(filepath.Join(root, "review-helper"))
+			}
 
-			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
+			writeTestLocalSkill(t, root, "review-helper", map[string]string{
 				"SKILL.md": "---\nname: " + tc.wantName + "\ndescription: Review code\n---\n# Review\n",
 				"notes.md": "notes",
 			})
@@ -377,8 +402,8 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			if skills[0].Root != localSkillRootProvider {
 				t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootProvider)
 			}
-			if skills[0].SourcePath != tc.wantPath {
-				t.Fatalf("source_path = %q, want %q", skills[0].SourcePath, tc.wantPath)
+			if skills[0].SourcePath != wantPath {
+				t.Fatalf("source_path = %q, want %q", skills[0].SourcePath, wantPath)
 			}
 
 			bundle, supported, err := loadRuntimeLocalSkillBundle(tc.provider, "review-helper")
@@ -391,13 +416,120 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			if bundle.Name != tc.wantName {
 				t.Fatalf("bundle name = %q, want %q", bundle.Name, tc.wantName)
 			}
-			if bundle.SourcePath != tc.wantPath {
-				t.Fatalf("bundle source_path = %q, want %q", bundle.SourcePath, tc.wantPath)
+			if bundle.SourcePath != wantPath {
+				t.Fatalf("bundle source_path = %q, want %q", bundle.SourcePath, wantPath)
 			}
 			if len(bundle.Files) != 1 {
 				t.Fatalf("expected 1 supporting file, got %d", len(bundle.Files))
 			}
 		})
+	}
+}
+
+// Hermes discovery must scan the home a Hermes task actually runs against, not
+// a hardcoded ~/.hermes: otherwise the skills Hermes loads never appear in the
+// Skills tab or the import dialog (GH #8310). The Windows default
+// (%LOCALAPPDATA%\hermes) comes from the same resolver and is covered by
+// execenv's TestPlatformDefaultHermesHome.
+func TestListRuntimeLocalSkills_HermesFollowsTaskHome(t *testing.T) {
+	tests := []struct {
+		name string
+		// setup configures the Hermes home and returns the skills dir a task
+		// would read; "" means no provider root should be scanned.
+		setup func(t *testing.T, hermesHome string) string
+	}{
+		{
+			name: "explicit HERMES_HOME",
+			setup: func(t *testing.T, _ string) string {
+				hermesHome := filepath.Join(t.TempDir(), "custom-hermes")
+				t.Setenv("HERMES_HOME", hermesHome)
+				return filepath.Join(hermesHome, "skills")
+			},
+		},
+		{
+			name: "sticky active profile",
+			setup: func(t *testing.T, hermesHome string) string {
+				writeTestHermesActiveProfile(t, hermesHome, "work")
+				return filepath.Join(hermesHome, "profiles", "work", "skills")
+			},
+		},
+		{
+			// Hermes refuses to start under a reserved sticky profile, so there
+			// is no home whose skills it would load.
+			name: "invalid sticky active profile",
+			setup: func(t *testing.T, hermesHome string) string {
+				writeTestHermesActiveProfile(t, hermesHome, "hermes")
+				return ""
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			setTestUserHome(t, home)
+			t.Setenv("HERMES_HOME", "")
+			hermesHome := testDefaultHermesHome(home)
+			skillsDir := tc.setup(t, hermesHome)
+
+			// A skill in the default Hermes home that the task-side resolver does
+			// not read must not be surfaced when another home/profile is selected.
+			writeTestLocalSkill(t, filepath.Join(hermesHome, "skills"), "wrong-home", map[string]string{
+				"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+			})
+			writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "shared-helper", map[string]string{
+				"SKILL.md": "---\nname: Shared Helper\n---\n# Shared\n",
+			})
+			wantKeys := []string{"shared-helper"}
+			if skillsDir != "" {
+				writeTestLocalSkill(t, skillsDir, "review-helper", map[string]string{
+					"SKILL.md": "---\nname: Hermes Home Review\n---\n# Review\n",
+				})
+				wantKeys = []string{"review-helper", "shared-helper"}
+			}
+
+			skills, supported, err := listRuntimeLocalSkills("hermes")
+			if err != nil {
+				t.Fatalf("listRuntimeLocalSkills: %v", err)
+			}
+			if !supported {
+				t.Fatal("hermes should be supported")
+			}
+			gotKeys := make([]string, 0, len(skills))
+			for _, s := range skills {
+				gotKeys = append(gotKeys, s.Key)
+			}
+			if !reflect.DeepEqual(gotKeys, wantKeys) {
+				t.Fatalf("keys = %v, want %v", gotKeys, wantKeys)
+			}
+			if skillsDir == "" {
+				return
+			}
+			if skills[0].Root != localSkillRootProvider {
+				t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootProvider)
+			}
+			if want := relativizeHomePath(filepath.Join(skillsDir, "review-helper")); skills[0].SourcePath != want {
+				t.Fatalf("source_path = %q, want %q", skills[0].SourcePath, want)
+			}
+
+			bundle, supported, err := loadRuntimeLocalSkillBundle("hermes", "review-helper")
+			if err != nil {
+				t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+			}
+			if !supported || bundle == nil || bundle.Name != "Hermes Home Review" {
+				t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
+			}
+		})
+	}
+}
+
+func writeTestHermesActiveProfile(t *testing.T, hermesHome, name string) {
+	t.Helper()
+	if err := os.MkdirAll(hermesHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hermesHome, "active_profile"), []byte(name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

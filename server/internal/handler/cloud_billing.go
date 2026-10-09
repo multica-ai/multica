@@ -87,7 +87,7 @@ func (h *Handler) requireCloudSubscriptionWorkspace(w http.ResponseWriter, r *ht
 		return "", "", false
 	}
 	if !featureflags.BillingWorkspaceSubscriptionsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusServiceUnavailable, "workspace subscriptions are not enabled")
+		writeFeatureDisabled(w, "workspace_subscriptions_disabled", "workspace subscriptions are not enabled")
 		return "", "", false
 	}
 
@@ -115,7 +115,7 @@ func (h *Handler) requireCloudSubscriptionWorkspace(w http.ResponseWriter, r *ht
 
 func (h *Handler) proxyCloudSubscription(w http.ResponseWriter, r *http.Request, method, path, userID string, body []byte, headers http.Header) {
 	if h.CloudRuntime == nil || !h.CloudRuntime.Enabled() {
-		writeError(w, http.StatusServiceUnavailable, "cloud runtime is not configured")
+		writeFeatureDisabled(w, "cloud_runtime_not_configured", "cloud runtime is not configured")
 		return
 	}
 	resp, err := h.CloudRuntime.Do(r.Context(), cloudruntime.Request{
@@ -519,7 +519,7 @@ func (h *Handler) CreateCloudBillingPortalSession(w http.ResponseWriter, r *http
 //     own delivery dashboard view.
 func (h *Handler) HandleCloudBillingStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.CloudRuntime == nil || !h.CloudRuntime.Enabled() {
-		writeError(w, http.StatusServiceUnavailable, "cloud runtime is not configured")
+		writeFeatureDisabled(w, "cloud_runtime_not_configured", "cloud runtime is not configured")
 		return
 	}
 

@@ -1,0 +1,37 @@
+{
+  "back": "返回",
+  "tabs": {
+    "inbox": "收件箱",
+    "my_issues": "我的任务",
+    "chat": "聊天",
+    "more": "更多"
+  },
+  "more_menu": {
+    "pinned": "已固定",
+    "issues": "任务",
+    "projects": "项目",
+    "account_settings": "账号设置"
+  },
+  "routes": {
+    "issues": "任务",
+    "projects": "项目",
+    "settings": "设置",
+    "profile": "个人资料",
+    "notifications": "通知",
+    "search": "搜索",
+    "issue": "任务",
+    "project": "项目",
+    "assignee": "负责人",
+    "mention": "提及",
+    "agents": "智能体",
+    "pinned": "已固定",
+    "switch_workspace": "切换工作区",
+    "new_issue": "新建任务",
+    "new_project": "新建项目",
+    "edit_issue": "编辑任务",
+    "edit_project": "编辑项目",
+    "runs": "运行",
+    "add_resource": "添加资源",
+    "recent": "最近"
+  }
+}

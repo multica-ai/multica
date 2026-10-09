@@ -1,5 +1,16 @@
-import { useCallback, useEffect } from "react";
-import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
+import { useCallback, useEffect, useMemo } from "react";
+import {
+  browsingHistoryKeyForUrl,
+  useTabStore,
+  useActiveBrowsingHistory,
+  useActiveBrowsingHistoryTitles,
+  useActiveTabHistory,
+} from "@/stores/tab-store";
+
+export interface BrowsingHistoryEntry {
+  url: string;
+  title?: string;
+}
 
 /**
  * Shell back/forward for the active tab (MUL-4741 session architecture).
@@ -11,7 +22,17 @@ import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
  * direction hints, no router.navigate(±1).
  */
 export function useTabHistory() {
-  const { historyIndex, historyLength } = useActiveTabHistory();
+  const { historyIndex, historyLength, historyEntries } = useActiveTabHistory();
+  const browsingHistoryUrls = useActiveBrowsingHistory();
+  const browsingHistoryTitles = useActiveBrowsingHistoryTitles();
+  const browsingHistory = useMemo<BrowsingHistoryEntry[]>(
+    () =>
+      browsingHistoryUrls.map((url) => ({
+        url,
+        title: browsingHistoryTitles[browsingHistoryKeyForUrl(url)],
+      })),
+    [browsingHistoryTitles, browsingHistoryUrls],
+  );
 
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < historyLength - 1;
@@ -24,7 +45,20 @@ export function useTabHistory() {
     useTabStore.getState().goForward();
   }, []);
 
-  return { canGoBack, canGoForward, goBack, goForward };
+  const goToHistoryIndex = useCallback((index: number) => {
+    useTabStore.getState().goToHistoryIndex(index);
+  }, []);
+
+  return {
+    canGoBack,
+    canGoForward,
+    historyEntries,
+    historyIndex,
+    browsingHistory,
+    goBack,
+    goForward,
+    goToHistoryIndex,
+  };
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

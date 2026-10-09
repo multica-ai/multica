@@ -249,17 +249,50 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
-  it("explains unavailable live events for an empty Antigravity transcript", async () => {
+  it("shows what was asked, whole, under the header", () => {
+    // The lists that open this dialog cut the ask to one line; here it wraps.
+    const ask = "Merge the three split-out sub-issues back into this PR &amp; ship conditions, history and runaway protection together";
+    renderDialog(items, { task: { ...baseTask, trigger_comment_id: "comment-1", trigger_summary: ask } });
+
+    expect(screen.getByText("Trigger")).toBeInTheDocument();
+    expect(
+      screen.getByText("Merge the three split-out sub-issues back into this PR & ship conditions, history and runaway protection together"),
+    ).toBeInTheDocument();
+  });
+
+  it("has no trigger row for a run with no snapshot", () => {
+    renderDialog(items, { task: { ...baseTask, trigger_summary: undefined } });
+    expect(screen.queryByText("Trigger")).not.toBeInTheDocument();
+  });
+
+  it("opens the matching result and duration for parallel same-tool calls", () => {
+    const at = (seconds: number) =>
+      new Date(Date.parse(baseTask.started_at!) + seconds * 1000).toISOString();
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", callId: "A", input: { command: "slow-A" }, created_at: at(0) },
+      { seq: 2, type: "tool_use", tool: "Bash", callId: "B", input: { command: "fast-B" }, created_at: at(1) },
+      { seq: 3, type: "tool_result", tool: "Bash", callId: "B", output: "B finished", created_at: at(3) },
+      { seq: 4, type: "tool_result", tool: "Bash", callId: "A", output: "A finished", created_at: at(10) },
+    ]);
+    const slow = screen.getByRole("button", { name: /slow-A/ });
+    const fast = screen.getByRole("button", { name: /fast-B/ });
+    expect(slow).toHaveTextContent("10s");
+    expect(fast).toHaveTextContent("2.0s");
+    fireEvent.click(slow);
+    expect(screen.getByText("A finished", { selector: "pre" })).toBeInTheDocument();
+    expect(screen.queryByText("B finished", { selector: "pre" })).not.toBeInTheDocument();
+    fireEvent.click(fast);
+    expect(screen.getByText("B finished", { selector: "pre" })).toBeInTheDocument();
+    expect(screen.queryByText("A finished", { selector: "pre" })).not.toBeInTheDocument();
+  });
+
+  it("waits for live events from Antigravity", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 
     renderDialog([], { task: liveTask, isLive: true });
 
-    expect(
-      await screen.findByText(
-        "Antigravity does not currently provide live execution events. The transcript will be available after the run completes.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
+    await screen.findByRole("button", { name: "Run details" });
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
   });
 
   it("keeps waiting for live events from other runtimes", async () => {
@@ -271,6 +304,19 @@ describe("AgentTranscriptDialog", () => {
     // the runtime loaded. The non-antigravity live state still waits.
     await screen.findByRole("button", { name: "Run details" });
     expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+  });
+
+  it("shows live Antigravity tool events", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
+
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "run_command", input: { CommandLine: "echo hello" } },
+      { seq: 2, type: "tool_result", tool: "run_command", output: "hello" },
+    ], { task: liveTask, isLive: true });
+
+    await screen.findByRole("button", { name: "Run details" });
+    expect(screen.queryByText("Waiting for events...")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/run_command/).length).toBeGreaterThan(0);
   });
 
   it("preserves selected filters across dialog remounts unconditionally", () => {
@@ -382,6 +428,57 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
     expect(screen.getByText("total 0")).toBeInTheDocument();
+  });
+
+  it("shows a meaningful bound instead of rounding a fast call to zero", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "sed -n 1,20p README.md" },
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "ok",
+        created_at: "2026-06-08T08:00:00.040Z",
+      },
+    ]);
+
+    expect(screen.getByText("<0.1s")).toBeInTheDocument();
+    expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a duration for legacy calls whose batched timestamps are identical", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "pwd" },
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+      {
+        seq: 2,
+        type: "tool_result",
+        tool: "Bash",
+        output: "/repo",
+        created_at: "2026-06-08T08:00:00.000Z",
+      },
+    ]);
+
+    const unknownDuration = screen.getByText("—");
+    expect(unknownDuration).toHaveAttribute("aria-hidden", "true");
+    expect(unknownDuration.parentElement).toHaveAttribute("title", "Exact duration is unavailable.");
+    expect(unknownDuration.parentElement).not.toHaveAttribute("aria-label");
+    expect(screen.getByText("Exact duration is unavailable.")).toHaveClass("sr-only");
+    const row = screen.getByRole("button", { name: /Exact duration is unavailable\./ });
+    fireEvent.click(row);
+    expect(screen.getAllByText("Exact duration is unavailable.")).toHaveLength(2);
+    expect(screen.queryByText("0.0s")).not.toBeInTheDocument();
   });
 
   it("keeps a screenshot out of the list and renders it as an image", () => {
@@ -786,7 +883,7 @@ describe("AgentTranscriptDialog — delivered branch", () => {
 // explain itself: the localized reason rides the status badge and heads the
 // "Reason" row in Run details, while the raw persisted diagnostic sits under
 // its own "Technical details" heading. A user's own cancel stays a plain
-// "Cancelled" — they know why they clicked.
+// "Cancelled" for historical rows that predate actor provenance.
 describe("AgentTranscriptDialog — cancel reason", () => {
   const gateError = "worktree mode needs daemon version 0.4.24 or newer on that machine";
 
@@ -823,13 +920,26 @@ describe("AgentTranscriptDialog — cancel reason", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps a user-initiated cancel a plain Cancelled", () => {
+  it("keeps a legacy user-initiated cancel a plain Cancelled", () => {
     renderDialog(items, {
       task: { ...baseTask, status: "cancelled", error: null },
     });
 
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.queryByText(/Local directory error/)).not.toBeInTheDocument();
+  });
+
+  it("names the actor on a new user-initiated cancellation", () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: null,
+        cancelled_by: { type: "member", id: "user-1", name: "Jiayuan" },
+      },
+    });
+
+    expect(screen.getByText("Cancelled by Jiayuan")).toBeInTheDocument();
   });
 
   // #7411: the status badge used to carry the raw English error as its
@@ -919,5 +1029,100 @@ describe("readable issue references", () => {
     expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
     fireEvent.change(search, { target: { value: issueId } });
     expect(screen.getByText("multica issue get DEV-17 --output json")).toBeInTheDocument();
+  });
+});
+
+// The completeness indicator, #8182 / #8183. A truncation remark sits at the
+// end of the output it describes and waits for the reader to reveal that end;
+// unknown-ness belongs to the run, because one daemon produced all of it. The
+// state matrix lives in build-timeline.test.ts.
+describe("tool output completeness", () => {
+  const SHORT = "line one";
+  // Past ToolDetailSurface's fade threshold, so the body opens collapsed.
+  const LONG = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+
+  function run(output: string, output_truncated?: boolean): TimelineItem[] {
+    return [
+      { seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat big.log" } },
+      { seq: 2, type: "tool_result", tool: "exec_command", output, output_truncated },
+    ];
+  }
+
+  function openStep(items: TimelineItem[]) {
+    renderDialog(items);
+    fireEvent.click(screen.getByRole("button", { name: /cat big\.log/ }));
+  }
+
+  it("remarks at the end of an output the record could not keep whole", () => {
+    openStep(run(SHORT, true));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+  });
+
+  it("says nothing about an output the daemon measured as complete", () => {
+    openStep(run(SHORT, false));
+
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+  });
+
+  // The remark answers "was that all of it?", which is a question the reader
+  // only has at the bottom. Showing it over a faded, half-shown body answers
+  // ahead of the question and puts the words nowhere near the end they describe.
+  it("waits for the body to be revealed before remarking", () => {
+    openStep(run(LONG, true));
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+  });
+
+  // Regression guard: a warning badge next to the tool name announced the
+  // caveat before the reader had asked the question.
+  it("keeps the remark out of the step header", () => {
+    openStep(run(SHORT, true));
+
+    const header = screen.getByRole("button", { name: "Copy this step" }).closest("div");
+    expect(header).toHaveTextContent("exec_command");
+    expect(header).not.toHaveTextContent(/only the beginning was kept/i);
+  });
+
+  // A stored tool result is capped at 8192 bytes upstream, so the render clip
+  // must never reach it: one remark, not a second reporting the rounding error.
+  it("leaves a stored tool result with exactly one remark", () => {
+    openStep(run("x".repeat(8192), true));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.getByText(/only the beginning was kept/i)).toBeInTheDocument();
+    expect(screen.queryByText(/only the start is displayed/i)).not.toBeInTheDocument();
+  });
+
+  // Tool input has no server-side budget and keeps its existing render ceiling.
+  // Nothing about how long an input renders is this change's business.
+  it("still clips a tool input at its existing length", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "exec_command",
+        input: { command: "echo", payload: "y".repeat(9000) },
+      },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: /exec_command/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    const body = screen.getByText(/only the start is displayed/i);
+    expect(body.textContent).not.toMatch(/copy|whole record|everything that was saved/i);
+  });
+
+  // A record from before the flag existed says nothing at all. The viewer only
+  // speaks when a daemon measured the output and found bytes missing; it never
+  // volunteers that it cannot tell, in the transcript or above it.
+  it("stays silent on a record whose completeness was never measured", () => {
+    openStep(run(LONG, undefined));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+
+    expect(screen.queryByText(/only the beginning was kept/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
   });
 });

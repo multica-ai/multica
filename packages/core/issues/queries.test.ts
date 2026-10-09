@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
 import { setApiInstance } from "../api";
@@ -7,21 +8,27 @@ import type {
   Issue,
   IssueTableRowsRequest,
   IssueTableRowsResponse,
+  ListIssuesCache,
   ListIssuesParams,
   ListIssuesResponse,
 } from "../types";
+import { pruneDeletedIssueFromListCaches } from "./delete-cache";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
+  ISSUE_PAGE_SIZE,
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
   childIssuesOptions,
+  flattenIssueBuckets,
   issueIdentifierOptions,
   issueKeys,
+  issueListOptions,
   issueTableRowPageOptions,
   projectGanttIssuesOptions,
   sourceContextPreviewOptions,
 } from "./queries";
+import { onIssueUpdated } from "./ws-updaters";
 
 const WS_ID = "ws-1";
 const PROJECT_ID = "project-1";
@@ -314,6 +321,84 @@ describe("issueTableRowPageOptions", () => {
   });
 });
 
+describe("issueListOptions", () => {
+  const todoIssue = makeIssue(1, { status: "todo", status_category: "unstarted" });
+  const startedIssue = makeIssue(2, { status: "in_progress", status_category: "started" });
+  const doneIssue = makeIssue(3, { status: "done", status_category: "done" });
+  // A custom status the server did not resolve to a category.
+  const customIssue = makeIssue(4, { status: "qa" });
+
+  let qc: QueryClient;
+  let listIssues: Mock<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Like the real client, the fake ignores `status_category`: every call
+    // returns the same first page.
+    listIssues = vi.fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>().mockResolvedValue({
+      issues: [todoIssue, startedIssue, doneIssue, customIssue],
+      total: 120,
+    });
+    installFakeApi(listIssues);
+  });
+
+  afterEach(() => {
+    qc.clear();
+  });
+
+  async function fetchList() {
+    const options = issueListOptions(WS_ID);
+    await qc.fetchQuery(options);
+    return () => qc.getQueryData<ListIssuesCache>(options.queryKey)!;
+  }
+
+  it("sends one list request per fetch", async () => {
+    await fetchList();
+
+    expect(listIssues).toHaveBeenCalledTimes(1);
+    expect(listIssues).toHaveBeenCalledWith({ limit: ISSUE_PAGE_SIZE, offset: 0 });
+  });
+
+  it("puts each issue in its own category's bucket only", async () => {
+    const cache = (await fetchList())();
+
+    expect(cache.byStatus).toEqual({
+      unstarted: { issues: [todoIssue, customIssue], total: 2 },
+      started: { issues: [startedIssue], total: 1 },
+      done: { issues: [doneIssue], total: 1 },
+      closed: { issues: [], total: 0 },
+    });
+    expect(flattenIssueBuckets(cache).map((issue) => issue.id)).toEqual([
+      todoIssue.id,
+      customIssue.id,
+      startedIssue.id,
+      doneIssue.id,
+    ]);
+  });
+
+  it("drops a deleted issue from every bucket", async () => {
+    const readCache = await fetchList();
+
+    pruneDeletedIssueFromListCaches(qc, WS_ID, todoIssue.id);
+
+    expect(flattenIssueBuckets(readCache()).map((issue) => issue.id)).not.toContain(todoIssue.id);
+  });
+
+  it("keeps only the updated copy of an issue moved to done", async () => {
+    const readCache = await fetchList();
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: todoIssue.id, status: "done", status_category: "done" },
+      { statusChanged: true },
+    );
+
+    const copies = flattenIssueBuckets(readCache()).filter((issue) => issue.id === todoIssue.id);
+    expect(copies).toEqual([{ ...todoIssue, status: "done", status_category: "done" }]);
+  });
+});
+
 describe("projectGanttIssuesOptions", () => {
   let qc: QueryClient;
 
@@ -555,16 +640,51 @@ describe("issueIdentifierOptions", () => {
     ).rejects.toThrow("boom");
   });
 
-  it("passes the query's abort signal down so unmount cancels the lookup", async () => {
-    const getIssue = vi
-      .fn<(id: string, options?: { signal?: AbortSignal }) => Promise<Issue>>()
-      .mockResolvedValue(makeIssue(7));
-    installFakeIssueApi(getIssue);
+  it.each(["found", "missing"] as const)(
+    "shares a pending %s lookup across rapid observer remounts and caches its result",
+    async (outcome) => {
+      let resolveLookup!: (issue: Issue) => void;
+      let rejectLookup!: (error: Error) => void;
+      let abortedLookups = 0;
+      const getIssue = vi
+        .fn<(id: string, options?: { signal?: AbortSignal }) => Promise<Issue>>()
+        .mockImplementation((_id, options) => new Promise((resolve, reject) => {
+          resolveLookup = resolve;
+          rejectLookup = reject;
+          options?.signal?.addEventListener("abort", () => {
+            abortedLookups++;
+            reject(new DOMException("Unmounted", "AbortError"));
+          }, { once: true });
+        }));
+      installFakeIssueApi(getIssue);
 
-    await qc.fetchQuery(issueIdentifierOptions(WS_ID, "MUL-7"));
+      const options = issueIdentifierOptions(WS_ID, "MUL-7");
+      // Streaming rich content can remove the last mention observer before
+      // its response arrives, then render that same identifier again.
+      for (let i = 0; i < 20; i++) {
+        const observer = new QueryObserver(qc, options);
+        const unsubscribe = observer.subscribe(() => {});
+        unsubscribe();
+      }
 
-    expect(getIssue.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
-  });
+      expect(getIssue).toHaveBeenCalledTimes(1);
+      expect(abortedLookups).toBe(0);
+      const completed = qc.fetchQuery(options);
+      if (outcome === "found") {
+        resolveLookup(makeIssue(7));
+      } else {
+        rejectLookup(new ApiError("issue not found", 404, "Not Found"));
+      }
+      const expected = outcome === "found" ? makeIssue(7) : null;
+      await expect(completed).resolves.toEqual(expected);
+
+      const observer = new QueryObserver(qc, options);
+      const unsubscribe = observer.subscribe(() => {});
+      expect(observer.getCurrentResult().data).toEqual(expected);
+      expect(getIssue).toHaveBeenCalledTimes(1);
+      unsubscribe();
+    },
+  );
 
   it("keys the query by workspace and identifier", () => {
     expect(issueKeys.identifier(WS_ID, "MUL-7")).toEqual([

@@ -204,6 +204,13 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 	case "label":
 		query = fmt.Sprintf(`SELECT itl.label_id::text, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN issue_to_label itl ON itl.issue_id = i.id WHERE %s GROUP BY itl.label_id`, compiled.where)
 	case "working_agents":
+		agentIDs, ok := h.issueTableWorkingAgentIDs(w, r, compiled.workspaceID)
+		if !ok {
+			return response, false
+		}
+		if len(agentIDs) == 0 {
+			return response, true
+		}
 		// One row per agent currently running issue work inside THIS surface,
 		// with its running-task count. Same predicate as
 		// ListWorkspaceWorkingAgents with type=issue (chat > autopilot > issue
@@ -211,17 +218,24 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		// comes from the surface's own compiled scope + filters instead of a
 		// second, independent workspace-wide definition. That is what keeps the
 		// header chip's count equal to the rows clicking it leaves (MUL-5525).
-		query = fmt.Sprintf(`SELECT a.id::text, COUNT(*)::bigint
-FROM issue i
-JOIN agent_task_queue atq ON atq.issue_id = i.id
-JOIN agent a ON a.id = atq.agent_id AND a.workspace_id = i.workspace_id
-WHERE %s
-  AND a.kind = 'user'
-  AND a.archived_at IS NULL
-  AND atq.status = 'running'
-  AND atq.chat_session_id IS NULL
-  AND atq.autopilot_run_id IS NULL
-GROUP BY a.id`, compiled.where)
+		// Join the unique visible-agent ids as a relation. With a large roster,
+		// ANY(array) can become a per-task linear filter on a global running
+		// scan; a relation also permits a hash join. Materialization bounds the
+		// intermediate set, not the optimizer's task access or issue join plan.
+		query = fmt.Sprintf(`WITH running AS MATERIALIZED (
+  SELECT atq.agent_id, atq.issue_id
+  FROM unnest($%d::uuid[]) AS cand(agent_id)
+  JOIN agent_task_queue atq
+    ON atq.agent_id = cand.agent_id AND atq.status = 'running'
+  WHERE atq.chat_session_id IS NULL
+    AND atq.autopilot_run_id IS NULL
+    AND atq.issue_id IS NOT NULL
+)
+SELECT r.agent_id::text, COUNT(*)::bigint
+FROM running r
+WHERE EXISTS (SELECT 1 FROM issue i WHERE i.id = r.issue_id AND %s)
+GROUP BY r.agent_id`, len(compiled.args)+1, compiled.where)
+		compiled.args = append(compiled.args, agentIDs)
 	case "property":
 		propertyID, err := util.ParseUUID(facet.PropertyID)
 		if err != nil {
@@ -251,13 +265,15 @@ GROUP BY a.id`, compiled.where)
 			// Unset issues count under the "__none__" bucket so the filter menu's
 			// "No value" option carries a real count (issues without the key).
 			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'string' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
-		case "text", "url", "date", "number":
-			// Scalar values are free-form, so grouping by distinct value would
-			// return one row per observed value with no bound. The filter menu
-			// only reads the "__none__" bucket for these types, so compute just
-			// the two bounded buckets instead of pulling the whole value space.
-			// Key existence is exact for "no value": stored values can never be
-			// null or empty, so a present key is always a set value.
+		case "text", "url", "date", "number", "multi_text", "multi_url":
+			// Scalar and free-form-list values are unbounded distinct-value
+			// spaces (multi_text/multi_url enumerate arbitrary user strings),
+			// so grouping by distinct value would return one row per observed
+			// value with no bound. The filter menu only reads the "__none__"
+			// bucket for these types, so compute just the two bounded buckets
+			// instead of pulling the whole value space. Key existence is exact
+			// for "no value": stored values can never be null or empty, so a
+			// present key is always a set value.
 			query = fmt.Sprintf(`SELECT CASE WHEN i.properties ? %s THEN '__set__' ELSE '__none__' END, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, propertyKey, compiled.where)
 		case "multi_select", "multi_actor":
 			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)
@@ -292,50 +308,45 @@ GROUP BY a.id`, compiled.where)
 		writeIssueTableQueryFailure(w, r, "failed to list table facets")
 		return response, false
 	}
-	if facet.Kind == "working_agents" {
-		values, ok := h.filterAccessibleAgentFacetValues(w, r, compiled.workspaceID, response.Values)
-		if !ok {
-			return response, false
-		}
-		response.Values = values
-	}
 	sort.Slice(response.Values, func(i, j int) bool {
 		return strings.Compare(response.Values[i].Key, response.Values[j].Key) < 0
 	})
 	return response, true
 }
 
-// The working-agents facet keys are agent ids, so it discloses agent identity
-// and must pass the same visibility gate as every other workspace-wide agent
-// aggregation: a private or non-allow-listed agent is never exposed by its id,
-// its count, or even its presence.
-func (h *Handler) filterAccessibleAgentFacetValues(
+// The working-agents facet discloses agent identity. Resolve its visible,
+// active user agents inside the table snapshot before scanning their tasks.
+// accessibleAgentIDs intentionally includes archived agents for other
+// aggregations, so it cannot supply this facet's candidate set.
+func (h *Handler) issueTableWorkingAgentIDs(
 	w http.ResponseWriter,
 	r *http.Request,
 	workspaceUUID pgtype.UUID,
-	values []issueTableFacetValueResponse,
-) ([]issueTableFacetValueResponse, bool) {
-	if len(values) == 0 {
-		return values, true
-	}
+) ([]pgtype.UUID, bool) {
 	workspaceID := util.UUIDToString(workspaceUUID)
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return nil, false
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	agents, err := h.Queries.ListAgents(r.Context(), workspaceUUID)
+	if err != nil {
+		writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
+		return nil, false
+	}
+	targetsByAgent, ok := h.loadInvocationTargetsByAgent(r.Context(), agents)
 	if !ok {
 		writeIssueTableQueryFailure(w, r, "failed to resolve agent access")
 		return nil, false
 	}
-	filtered := make([]issueTableFacetValueResponse, 0, len(values))
-	for _, value := range values {
-		if _, permitted := allowed[value.Key]; permitted {
-			filtered = append(filtered, value)
+	ids := make([]pgtype.UUID, 0, len(agents))
+	for _, agent := range agents {
+		if actorType == "member" && !memberAllowedToViewAgent(agent, targetsByAgent[uuidToString(agent.ID)], actorID, member.Role) {
+			continue
 		}
+		ids = append(ids, agent.ID)
 	}
-	return filtered, true
+	return ids, true
 }
 
 func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {

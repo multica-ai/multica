@@ -42,7 +42,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |
-| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
+| `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds. Sessions slide: one in continuous use is re-issued rather than expiring, from the halfway point of its lifetime onward. Values below `60s` are clamped to `60s` |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight runs fail; values below `150s` are clamped |
@@ -156,7 +156,8 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | empty | Used for shared rate limiting, realtime events, and the token cache; when unset, realtime events and invitation limits fall back to in-process memory, while auth rate limiting is off |
+| `REDIS_URL` | empty | The one connection URL used by all Redis-backed features, including shared rate limiting, realtime events, channel WebSocket leases, and token caches |
+| `REDIS_CLUSTER_MODE` | `false` | Forces the Redis Cluster client, including for a single configuration endpoint; cluster mode requires database 0 and `REALTIME_RELAY_MODE=sharded` |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
@@ -191,7 +192,7 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Plugins | `MULTICA_PLUGIN_API_URL` | Complete versioned Plugin Public API base URL, such as `https://plugin-api.example.com/v1`; falls back to `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
 
-Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
+Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and move issues on merge normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
 For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), [Slack bot](/slack-bot-integration#self-hosting-setup), and [Telegram bot](/telegram-bot-integration#self-hosting-setup).
 
@@ -205,8 +206,11 @@ This group configures server-side assist generation, such as conversation titles
 | `MULTICA_LLM_BASE_URL` | empty | OpenAI-compatible endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | Used when a request does not specify a model |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | Retry ceiling per call; `0` disables retries, `1`–`5` cap it at N |
+| `MULTICA_LLM_DISABLE_THINKING` | `false` | Add `chat_template_kwargs: {"enable_thinking": false}` to every request, for gateways that honor the field |
 
 `MULTICA_LLM_MAX_RETRIES` is the single source for the retry policy. Leave it unset for the default of 2, set `0` to send exactly one request per call, or set 1–5 to cap retries at that many. It is a ceiling, not a quota: only retryable failures consume it, and a success or the caller's own deadline can end the call sooner. Any other value — negative, non-numeric, or above 5 — fails startup instead of being corrected silently. The ceiling is a latency budget: backoff starts at 0.5s and doubles to an 8s cap, so a larger budget would outlast the callers' own deadlines and turn a retryable failure into a timeout. Retries cover connection failures and HTTP 408, 409, 429 and 5xx; all other 4xx responses are returned as-is. The server logs the effective policy at startup as `llm retry policy`, with no credentials in the line.
+
+`MULTICA_LLM_DISABLE_THINKING` is for gateways whose models spend a reasoning ("thinking") pass that dominates the latency budget of the assist calls. When set to `true` (or `1`), the server adds `chat_template_kwargs: {"enable_thinking": false}` to every request body; gateways that forward the field — vLLM/sglang-style deployments and some GLM/Qwen-style LiteLLM routes — then skip the thinking pass. Standard OpenAI endpoints reject unknown body fields, so only enable this when your upstream accepts it. GPT-5.6-family models already get `reasoning_effort: none` on the follow-up questions request. Chat auto-titling sends no reasoning field; this switch affects it only when the configured upstream accepts `chat_template_kwargs`. Accepted values are `true`/`false` and `1`/`0` (case-insensitive); anything else fails startup. The startup log reports the effective state alongside the retry policy.
 
 Two features use this layer, and each one sends chat content to the endpoint you configure:
 
@@ -249,7 +253,7 @@ The variables below are read on the computer that runs your agents, not in the A
 
 For the internal context that the daemon injects into agent tasks, see [Task runtime environment](/daemon-runtimes#task-runtime-environment).
 
-Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). DeepSeek Harness additionally accepts `MULTICA_DSH_PROFILE_BUNDLE`: a comma-separated list of bundles to install into its `multica` profile when that profile is missing, tried in order, where each entry is an npm spec, a directory, or a packed tarball. It is unset by default, and the `--stdio` protocol Multica drives is what that profile supplies, so an unset variable leaves the DSH installation untouched and the daemon reports the missing profile instead of registering an unusable runtime. Multica's own bridge is not on a public npm registry yet, so choosing a value is covered in [Install an agent runtime](/install-agent-runtime); whatever you set is installed into every daemon host's DSH home without further confirmation, so treat it as a supply-chain decision. The install `MULTICA_DSH_PROFILE_BUNDLE` enables is bounded on purpose: it runs at most once per daemon lifetime, only when the probe reports the profile genuinely absent, and a failure is logged with the package manager's own output and retried only after a daemon restart. A probe that times out, or answers with a protocol version this daemon does not drive, is reported and never installed over — the daemon does not overwrite a profile that is deliberately there. To diagnose, search the daemon log for `DSH runtime profile`; to undo an install, delete `$DSH_HOME/profiles/multica` (default `~/.dsh/profiles/multica`). `MULTICA_DSH_PLUGIN_PATH` overrides the directory the install resolves pnpm from. DSH Desktop keeps the pnpm that `dsh plugin` forwards to inside its own runtime-commands directory on both macOS and Windows, and the daemon finds and prepends it automatically — including the versioned layout a newer Desktop uses — so this variable is only needed for an installation the daemon cannot find, or to make the install use a pnpm of your own. Setting it replaces the search entirely: if the directory does not exist, the install falls back to whatever pnpm is on the daemon's `PATH` rather than to the bundled one. Linux has no DSH Desktop, so there the install always uses `PATH`. Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -303,11 +307,16 @@ A few value rules:
 
 | Variable | Default | Description |
 |---|---|---|
+| `DO_NOT_TRACK` | empty (telemetry enabled) | Set `1` or `true` (case-insensitive) to stop first-party anonymous self-host telemetry collection and delivery |
 | `ANALYTICS_DISABLED` | `false` | Set `true` to turn off PostHog reporting |
 | `POSTHOG_API_KEY` | empty | Reporting is off when unset; set it to use your own PostHog project |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog host |
 | `METRICS_ADDR` | empty | Prometheus metrics listen address; empty means not started |
 | `REALTIME_METRICS_TOKEN` | empty | Bearer token protecting `/health/realtime` |
+
+First-party self-host telemetry sends one deployment-level snapshot per UTC day to the fixed, non-configurable `https://telemetry.multica.ai/v1/telemetry/events` endpoint. It contains the formal release version; bucketed workspace, distinct-human-member, active-agent, and 24-hour active-daemon counts; and aggregate run counts for the previous 24 hours. It never includes names, email addresses or domains, IP addresses, business identifiers, host/device details, repositories, models/plugins, prompts/output, comments/chats, paths, token/cost data, credentials, errors, stacks, or logs. It is used only to understand self-hosted version adoption, deployment-size ranges, and aggregate usage—not for billing, licensing, authentication, or security decisions.
+
+`DO_NOT_TRACK` and `ANALYTICS_DISABLED` are independent. The former controls this first-party anonymous snapshot; the latter controls the optional PostHog integration.
 
 ## Next steps
 

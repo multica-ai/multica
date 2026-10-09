@@ -40,6 +40,7 @@ import { ProjectIcon } from "@/components/ui/project-icon";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";
 import { api } from "@/data/api";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 import {
   selectViewedIssueIds,
   useViewedIssuesStore,
@@ -54,6 +55,15 @@ const DEBOUNCE_MS = 300;
 const ISSUE_LIMIT = 20;
 const PROJECT_LIMIT = 10;
 const RECENT_LIMIT = 5;
+
+// `buildSearchRows` stays pure; it supplies stable section identities and the
+// localized render owns the label lookup.
+const SEARCH_HEADER_LABELS: Record<string, string> = {
+  "h-recent": "navigation:routes.recent",
+  "h-projects": "navigation:routes.projects",
+  "h-issues": "navigation:routes.issues",
+  "h-cancelled": "issues:status.cancelled",
+};
 
 // =====================================================
 // HighlightText — mobile port of web's HighlightText
@@ -127,14 +137,10 @@ function issueIconColor(category: IssueStatusCategory): string {
   // text tint matches the leading status icon visually. Keyed on CATEGORY: a
   // custom status inherits its category's tint, exactly as its glyph does.
   switch (category) {
-    case "in_progress":
+    case "started":
       return "text-warning";
-    case "in_review":
-      return "text-success";
     case "done":
       return "text-info";
-    case "blocked":
-      return "text-destructive";
     default:
       return "text-muted-foreground";
   }
@@ -163,7 +169,7 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
   // (server/internal/handler/issue.go:592). Keep mobile strictly aligned.
   const showSnippet =
     item.match_source === "comment" && !!item.matched_snippet;
-  const { colorOf, labelOf } = useIssueStatuses();
+  const { colorOf, labelOf, iconOf } = useIssueStatuses();
   const category = issueColumnCategory(item);
   const statusLabel = labelOf(item.status);
   return (
@@ -175,7 +181,7 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
         <StatusIcon
           status={item.status}
           category={category}
-          color={colorOf(item.status)}
+          icon={iconOf(item.status)} color={colorOf(item.status)}
           size={14}
         />
         <PriorityIcon priority={item.priority} size={14} />
@@ -269,7 +275,7 @@ interface RecentRowProps {
 }
 
 function RecentRow({ item, slug }: RecentRowProps) {
-  const { colorOf, labelOf } = useIssueStatuses();
+  const { colorOf, labelOf, iconOf } = useIssueStatuses();
   const category = issueColumnCategory(item);
   const statusLabel = labelOf(item.status);
   return (
@@ -281,7 +287,7 @@ function RecentRow({ item, slug }: RecentRowProps) {
         <StatusIcon
           status={item.status}
           category={category}
-          color={colorOf(item.status)}
+          icon={iconOf(item.status)} color={colorOf(item.status)}
           size={14}
         />
         <Text className="text-xs text-muted-foreground shrink-0 w-16">
@@ -312,6 +318,7 @@ const EMPTY_RESULTS: SearchResultsState = { issues: [], projects: [] };
 export default function SearchModal() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const slug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("issues");
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultsState>(EMPTY_RESULTS);
@@ -423,7 +430,7 @@ export default function SearchModal() {
         case "header":
           return (
             <Text className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground uppercase">
-              {item.title}
+              {t(SEARCH_HEADER_LABELS[item.key] ?? item.title)}
             </Text>
           );
         case "issue":
@@ -434,7 +441,7 @@ export default function SearchModal() {
           return <RecentRow item={item.issue} slug={slug} />;
       }
     },
-    [slug],
+    [slug, t],
   );
 
   return (
@@ -449,7 +456,7 @@ export default function SearchModal() {
           <TextInput
             value={query}
             onChangeText={handleChange}
-            placeholder="Search issues and projects"
+            placeholder={t("list.search_placeholder")}
             placeholderTextColor="#a1a1aa"
             autoFocus
             autoCorrect={false}
@@ -476,12 +483,6 @@ export default function SearchModal() {
               <View className="items-center justify-center py-12 px-6">
                 <Text className="text-sm text-muted-foreground text-center">
                   No results for &ldquo;{trimmedQuery}&rdquo;
-                </Text>
-              </View>
-            ) : !trimmedQuery && recentIssues.length === 0 ? (
-              <View className="items-center justify-center py-12 px-6">
-                <Text className="text-sm text-muted-foreground text-center">
-                  Type to search issues and projects.
                 </Text>
               </View>
             ) : null

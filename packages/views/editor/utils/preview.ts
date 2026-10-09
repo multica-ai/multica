@@ -5,7 +5,9 @@
  *   1. Add a new branch returning a new PreviewKind literal.
  *   2. Add the corresponding renderer in attachment-preview-modal.tsx's dispatch.
  *   3. If the renderer needs the file body as text, also extend isTextPreviewable
- *      in server/internal/handler/file.go so the proxy endpoint accepts it.
+ *      in server/internal/handler/file.go so the proxy endpoint accepts it, and
+ *      add the type to the case table both sides test (preview.test.ts and
+ *      TestIsTextPreviewable in file_test.go).
  *   4. If the renderer fetches a binary, decide whether to use download_url
  *      (CloudFront, no auth on the client side) or a new authenticated proxy.
  */
@@ -19,7 +21,15 @@ export type PreviewKind =
   | "audio"
   | "markdown"
   | "html"
+  // CSV / TSV — a sortable table.
+  | "table"
+  // JSON / JSON Lines / YAML — a collapsible tree, with the source one toggle
+  // away.
+  | "structured"
   | "text";
+
+/** How a `structured` file's body parses. */
+export type StructuredFormat = "json" | "jsonl" | "yaml";
 
 const EXT_LANGUAGE_MAP: Record<string, string> = {
   // Markdown
@@ -40,6 +50,8 @@ const EXT_LANGUAGE_MAP: Record<string, string> = {
   less: "less",
   // Config / data
   json: "json",
+  jsonl: "json",
+  ndjson: "json",
   yml: "yaml",
   yaml: "yaml",
   toml: "ini",
@@ -97,7 +109,7 @@ const BASENAME_LANGUAGE_MAP: Record<string, string> = {
 // (mirror reserved-slugs pattern in server/internal/handler/reserved_slugs.json).
 const TEXT_EXTENSIONS = new Set<string>([
   "md", "markdown", "txt", "log", "csv", "tsv",
-  "html", "htm", "json", "xml",
+  "html", "htm", "json", "jsonl", "ndjson", "xml",
   "yml", "yaml", "toml", "ini", "conf",
   "dockerfile", "makefile", "gitignore",
   "sh", "bash", "zsh",
@@ -112,6 +124,7 @@ const TEXT_EXTENSIONS = new Set<string>([
 
 const TEXT_CONTENT_TYPES = new Set<string>([
   "application/json",
+  "application/x-ndjson",
   "application/javascript",
   "application/xml",
   "application/x-yaml",
@@ -127,6 +140,28 @@ const TEXT_BASENAMES = new Set<string>([
   ".env",
   ".gitignore",
 ]);
+
+const TABLE_CONTENT_TYPES = new Set<string>([
+  "text/csv",
+  "text/tab-separated-values",
+]);
+
+const STRUCTURED_EXT_FORMATS: Record<string, StructuredFormat> = {
+  json: "json",
+  jsonl: "jsonl",
+  ndjson: "jsonl",
+  yml: "yaml",
+  yaml: "yaml",
+};
+
+const STRUCTURED_CONTENT_TYPE_FORMATS: Record<string, StructuredFormat> = {
+  "application/json": "json",
+  "application/x-ndjson": "jsonl",
+  "application/yaml": "yaml",
+  "application/x-yaml": "yaml",
+  "text/yaml": "yaml",
+  "text/x-yaml": "yaml",
+};
 
 // Extension fallbacks for media kinds — used when contentType is empty
 // (URL-only preview source, no server-side metadata available).
@@ -194,13 +229,72 @@ export function getPreviewKind(
   if (ct === "text/html" || ext === "html" || ext === "htm") {
     return "html";
   }
+  if (TABLE_CONTENT_TYPES.has(ct) || ext === "csv" || ext === "tsv") {
+    return "table";
+  }
+  if (structuredFormat(contentType, filename)) return "structured";
 
   if (isTextLike(contentType, filename)) return "text";
   return null;
 }
 
+/**
+ * The parser a `structured` file needs, or null when it is not one. The
+ * extension wins over the content type: a sniffer labels most of these
+ * `text/plain`, and a `.jsonl` uploaded as `application/json` is still lines.
+ */
+export function structuredFormat(
+  contentType: string,
+  filename: string,
+): StructuredFormat | null {
+  const ext = extOf(filename);
+  if (ext && STRUCTURED_EXT_FORMATS[ext]) return STRUCTURED_EXT_FORMATS[ext];
+  return STRUCTURED_CONTENT_TYPE_FORMATS[normalizeContentType(contentType)] ?? null;
+}
+
+/** The cell separator of a `table` file: tab for TSV, comma otherwise. */
+export function tableDelimiter(contentType: string, filename: string): "," | "\t" {
+  return extOf(filename) === "tsv" ||
+    normalizeContentType(contentType) === "text/tab-separated-values"
+    ? "\t"
+    : ",";
+}
+
+/** Short type label for metadata lines — the extension, upper-cased (`PNG`). */
+export function fileTypeLabel(filename: string): string {
+  return extOf(filename).toUpperCase();
+}
+
 export function isPreviewable(contentType: string, filename: string): boolean {
   return getPreviewKind(contentType, filename) !== null;
+}
+
+// Kinds that render straight from a URL. Text kinds (markdown / html / text)
+// go through the ID-keyed `/api/attachments/{id}/content` proxy, so they can
+// only open when the attachment record is known.
+const URL_PREVIEWABLE_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
+  "image",
+  "pdf",
+  "video",
+  "audio",
+]);
+
+/** Whether the viewer can open `kind`, given whether the record is known. */
+export function canOpenPreview(
+  kind: PreviewKind | null,
+  hasRecord: boolean,
+): kind is PreviewKind {
+  return kind !== null && (hasRecord || URL_PREVIEWABLE_KINDS.has(kind));
+}
+
+/**
+ * Whether a file reads better with long lines wrapped. Prose and logs do —
+ * their lines are paragraphs and messages; code keeps its lines intact so
+ * indentation stays readable, and scrolls sideways instead.
+ */
+export function wrapsByDefault(filename: string): boolean {
+  const language = extensionToLanguage(filename);
+  return language === undefined || language === "plaintext";
 }
 
 // Pick the hljs language token for a file. Returns undefined when the file

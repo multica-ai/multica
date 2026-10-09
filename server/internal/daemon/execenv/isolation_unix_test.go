@@ -38,7 +38,7 @@ func TestPrepareIsolated_PermanentFIFOBlockThenImmediateRetry(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
 	startedAt := time.Now()

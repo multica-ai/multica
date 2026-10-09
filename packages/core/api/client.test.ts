@@ -10,6 +10,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient status reorder", () => {
+  it("opts into built-in ordering and tolerates malformed responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ statuses: "invalid" }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const result = await client.reorderIssueStatuses("started", ["review", "qa", "progress"], true);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      category: "started", ids: ["review", "qa", "progress"], include_system: true,
+    });
+    expect(result.statuses).toEqual([]);
+  });
+});
+
 describe("ApiClient agent conversation-starter compatibility", () => {
   const prompt = {
     label: "Review a PR",
@@ -204,7 +219,53 @@ describe("ApiClient pull-request response schema", () => {
 
     await expect(
       new ApiClient("https://api.example.test").listIssuePullRequests("issue-1"),
-    ).resolves.toEqual({ pull_requests: [] });
+    ).resolves.toEqual({ pull_requests: [], auto_complete: null });
+  });
+
+  function stubPullRequests(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  it("parses the auto-complete decision and link source", async () => {
+    stubPullRequests({
+      pull_requests: [{ ...validPR, link_source: "title" }],
+      auto_complete: { state: "waiting", pull_request_ids: ["pr-1"], issue_disabled: false, workspace_enabled: true, target_status: "in_review" },
+    });
+    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    expect(result.pull_requests[0]?.link_source).toBe("title");
+    expect(result.auto_complete).toEqual({
+      state: "waiting",
+      pull_request_ids: ["pr-1"],
+      issue_disabled: false,
+      workspace_enabled: true,
+      target_status: "in_review",
+    });
+  });
+
+  it("treats a missing auto-complete block (older backend) as null", async () => {
+    stubPullRequests({ pull_requests: [validPR] });
+    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    expect(result.auto_complete).toBeNull();
+    expect(result.pull_requests).toHaveLength(1);
+  });
+
+  it("keeps the PR list when only the auto-complete block or link source is malformed", async () => {
+    stubPullRequests({
+      pull_requests: [{ ...validPR, link_source: "psychic" }],
+      auto_complete: { state: 42 },
+    });
+    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    expect(result.auto_complete).toBeNull();
+    expect(result.pull_requests).toHaveLength(1);
+    expect(result.pull_requests[0]?.link_source).toBeUndefined();
   });
 });
 
@@ -1087,13 +1148,41 @@ describe("ApiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    const tasks = await client.listAgentTasks("agent-1");
+    const { tasks, nextCursor } = await client.listAgentTasksPage("agent-1");
 
     expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
+    expect(nextCursor).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.example.test/api/agents/agent-1/tasks",
+      "https://api.example.test/api/agents/agent-1/tasks?limit=200",
     );
+  });
+
+  it("reads a lossless task cursor and passes it to the next bounded request", async () => {
+    const cursor = "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001";
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(
+      JSON.stringify([{ id: "task-1", status: "completed" }]),
+      { headers: { "X-Agent-Tasks-Next-Cursor": cursor } },
+    )));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const page = await client.listAgentTasksPage("agent-1", { limit: 7 });
+    expect(page.nextCursor).toBe(cursor);
+    const controller = new AbortController();
+    await client.listAgentTasksPage("agent-1", { limit: 7, before: page.nextCursor!, signal: controller.signal });
+    const request = new URL(fetchMock.mock.calls[1]![0]);
+    expect(request.searchParams.get("limit")).toBe("7");
+    expect(request.searchParams.get("before")).toBe(cursor);
+    expect(fetchMock.mock.calls[1]![1].signal).toBe(controller.signal);
+  });
+
+  it("drops the continuation when the task page is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ tasks: "not-an-array" }),
+      { headers: { "X-Agent-Tasks-Next-Cursor": "cursor" } },
+    )));
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listAgentTasksPage("agent-1")).resolves.toEqual({ tasks: [], nextCursor: null });
   });
 
   it("falls back to an empty agent task history for a malformed response", async () => {
@@ -1106,7 +1195,7 @@ describe("ApiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.listAgentTasks("agent-1")).resolves.toEqual([]);
+    await expect(client.listAgentTasksPage("agent-1")).resolves.toEqual({ tasks: [], nextCursor: null });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -2490,6 +2579,19 @@ describe("ApiClient workspace MCP servers", () => {
     expect(result[0]?.transport).toBe("websocket");
   });
 
+  it("keeps the agent count and degrades a malformed one to unknown", async () => {
+    stubJSON([
+      { ...server, id: "srv-1", agent_count: 3 },
+      { ...server, id: "srv-2", agent_count: "many" },
+      { ...server, id: "srv-3" },
+    ]);
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(result.map((item) => item.agent_count)).toEqual([3, undefined, undefined]);
+  });
+
   it("POSTs a name and entry when creating a library server", async () => {
     const fetchMock = stubJSON(server);
 
@@ -2719,5 +2821,323 @@ describe("ApiClient session expiry", () => {
     expect(store.getState().status).toBe("unauthenticated");
     expect(store.getState().expired).toBe(true);
     expect(storage.getItem("multica_token")).toBeNull();
+  });
+});
+
+describe("ApiClient sliding session renewal", () => {
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("validates the refresh response and falls back to 'not renewed'", async () => {
+    // A malformed body must never be read as a renewal: acting on it would
+    // hand `undefined` to the code that persists the token.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ renewed: "yes" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new ApiClient("https://api.example.test").refreshSession();
+
+    expect(result.renewed).toBe(false);
+    expect(result.token).toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/auth/refresh");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+  });
+
+  it("returns the renewed token for a bearer client", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          token: "token-v2",
+          expires_at: "2026-10-16T00:00:00Z",
+          renewed: true,
+          check_again_in_seconds: 259200,
+        }),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").refreshSession();
+
+    expect(result).toMatchObject({
+      token: "token-v2",
+      renewed: true,
+      check_again_in_seconds: 259200,
+    });
+  });
+
+  // The one case where a session renewal can invalidate a CSRF token another
+  // tab is already holding: the first renewal of a session that predates the
+  // session-bound binding. The cookie has already been replaced by then, so
+  // re-reading it and sending again is enough (MUL-7436).
+  it("retries once when a CSRF token turns out to be stale", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.markOnboardingComplete()).resolves.toBeDefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a 403 that is a real authorization failure", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: "forbidden" }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after one retry rather than looping", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: "CSRF validation failed" }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// This file runs in the node environment, so `document` is stubbed rather
+// than relying on jsdom — readCookie only ever reads `document.cookie`, and a
+// stub keeps these tests next to the rest of the client's coverage.
+// This file runs in the node environment, so `document` is stubbed rather
+// than relying on jsdom — readCookie only ever reads `document.cookie`, and a
+// stub keeps these tests next to the rest of the client's coverage.
+describe("ApiClient CSRF headers", () => {
+  function stubCookies(cookie: string) {
+    vi.stubGlobal("document", { cookie });
+  }
+
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function capturedHeaders(fetchMock: ReturnType<typeof vi.fn>, call = 0) {
+    return (fetchMock.mock.calls[call]?.[1]?.headers ?? {}) as Record<string, string>;
+  }
+
+  // One header name, deliberately. A second one would have to be in the
+  // server's CORS allowlist, and a rolled-back server allowlists only the
+  // names it shipped with — the preflight would fail and no retry could help.
+  it("sends exactly one CSRF header, preferring the session-bound value", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").markOnboardingComplete();
+
+    const headers = capturedHeaders(fetchMock);
+    expect(headers["X-CSRF-Token"]).toBe("session-bound");
+    expect(headers["X-CSRF-Session"]).toBeUndefined();
+  });
+
+  // A session that predates the session-bound cookie, and every request after
+  // a rollback, has only the token-bound value to offer.
+  it("falls back to the token-bound value when no session cookie exists", async () => {
+    stubCookies("multica_csrf=token-bound");
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock)["X-CSRF-Token"]).toBe("token-bound");
+  });
+
+  it("sends no CSRF header when there is no cookie to echo", async () => {
+    stubCookies("");
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock)["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  // The rollback path end to end: a server running the previous release
+  // cannot verify the session-bound value, and the client has to discover that
+  // and switch — otherwise the user is authenticated for reads and rejected
+  // for every write.
+  it("retries with the token-bound value when the server rejects the session-bound one", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      // A factory, not a fixed value: a Response body can only be read once,
+      // so a shared instance breaks on the second call.
+      .mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock, 0)["X-CSRF-Token"]).toBe("session-bound");
+    expect(capturedHeaders(fetchMock, 1)["X-CSRF-Token"]).toBe("token-bound");
+  });
+
+  // ...and it stays switched, so a rolled-back server does not cost two
+  // requests per write for the rest of the session.
+  it("keeps using the token-bound value while the rejected cookie is current", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      // A factory, not a fixed value: a Response body can only be read once,
+      // so a shared instance breaks on the second call.
+      .mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.markOnboardingComplete();
+    await client.markOnboardingComplete();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("token-bound");
+  });
+
+  // But only while it is current. A renewal or a new login replaces the
+  // session cookie, and the preferred binding is worth trying again — keying
+  // on the value rather than a boolean is what stops this oscillating once
+  // per renewal against a server that understands it perfectly well.
+  it("prefers the session-bound value again once the cookie changes", async () => {
+    stubCookies("multica_csrf=token-bound; multica_csrf_session=session-bound");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "CSRF validation failed" }, 403))
+      // A factory, not a fixed value: a Response body can only be read once,
+      // so a shared instance breaks on the second call.
+      .mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.markOnboardingComplete();
+
+    stubCookies("multica_csrf=token-bound-2; multica_csrf_session=session-bound-2");
+    await client.markOnboardingComplete();
+
+    expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("session-bound-2");
+  });
+});
+
+// Desktop runs one ApiClient per window over one shared localStorage. Before
+// MUL-7436 each instance cached the bearer token, so a session renewed in one
+// window left every other window sending the credential it happened to be
+// holding — until that one expired and took the whole session down with it,
+// clearing tabs and drafts on the way (MUL-7028).
+describe("ApiClient shared credential across windows", () => {
+  function sharedStorage(initial: string | null) {
+    let token = initial;
+    return {
+      read: () => token,
+      write: (next: string | null) => {
+        token = next;
+      },
+    };
+  }
+
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function authHeaderOf(fetchMock: ReturnType<typeof vi.fn>, call: number) {
+    const headers = (fetchMock.mock.calls[call]?.[1]?.headers ?? {}) as Record<string, string>;
+    return headers["Authorization"];
+  }
+
+  it("reads the current token per request, so a renewal in one window reaches the others", async () => {
+    const storage = sharedStorage("token-v1");
+    const windowA = new ApiClient("https://api.example.test", { getToken: storage.read });
+    const windowB = new ApiClient("https://api.example.test", { getToken: storage.read });
+
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await windowB.markOnboardingComplete();
+    expect(authHeaderOf(fetchMock, 0)).toBe("Bearer token-v1");
+
+    // Window A renews; only shared storage is updated, exactly as the renewal
+    // controller does it.
+    storage.write("token-v2");
+    windowA.setToken("token-v2");
+
+    await windowB.markOnboardingComplete();
+    expect(authHeaderOf(fetchMock, 1)).toBe("Bearer token-v2");
+  });
+
+  // The other half: a request that went out with the previous credential can
+  // 401 AFTER the renewal landed. Ending the session on that would tear down
+  // one that is demonstrably alive.
+  it("ignores a 401 for a credential that has since been replaced", async () => {
+    const storage = sharedStorage("token-v1");
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", {
+      getToken: storage.read,
+      onUnauthorized,
+    });
+
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      // The renewal lands while this request is in flight.
+      storage.write("token-v2");
+      return jsonResponse({ error: "invalid token" }, 401);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  // ...but a genuine expiry still ends the session: nothing replaced the
+  // credential, so the 401 is about the one still in use.
+  it("still ends the session on a 401 for the credential in use", async () => {
+    const storage = sharedStorage("token-v1");
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", {
+      getToken: storage.read,
+      onUnauthorized,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => jsonResponse({ error: "invalid token" }, 401)),
+    );
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  // Cookie mode has no bearer token to compare, so the guard must not swallow
+  // its expiries.
+  it("ends the session on a 401 in cookie mode", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => jsonResponse({ error: "invalid token" }, 401)),
+    );
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });

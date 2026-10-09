@@ -97,6 +97,20 @@ multica issue runs <issue-id>
 
 まず実行用コンピューターのターミナルで、同じツールを直接実行してください。ツール単体でも起動できない場合は、先にツールのログインや設定を修復してから、実行ログから実行を再試行します。
 
+## CLI のアップグレード後に macOS で実行が止まる
+
+Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica update`、**ランタイム**ページの**更新**、またはデーモンの自動更新でアップグレードされた後、`~/Desktop`、`~/Documents`、`~/Downloads`、iCloud Drive などの保護されたフォルダーを読み取る実行が進まなくなることがあります。エージェントのプロセスは CPU を使わず、実行は完了も失敗もしません。
+
+これは macOS がプライバシー権限（TCC）をデーモン自体に帰属させる場合に起こります。launchd から起動したデーモン（LaunchAgent など）がこれに当たり、待機中のダイアログには `multica` と表示され、エージェントが起動するすべてのツールはデーモンの許可を使います。Homebrew 版 CLI のバイナリは固定の ID で署名されていないため、macOS は許可をそのビルドと解決後のパス（例: `/opt/homebrew/Cellar/multica/<version>/bin/multica`）に結び付けます。アップグレード後、macOS は新しいバイナリを別のアプリとして扱い、再び許可を求めます。誰かが応答するまでファイルアクセスはブロックされ、デーモンは許可ダイアログが待機中であることを検知できません。
+
+アクセスを回復するには:
+
+1. その Mac で待機中の「アクセスしようとしています」ダイアログに**許可**で応答します。止まっていた実行が再開します。
+2. 無人で動かす Mac では、新しいバイナリにフルディスクアクセスを付与します。`realpath "$(command -v multica)"` でパスを表示し、**システム設定 → プライバシーとセキュリティ → フルディスクアクセス**で古い `multica` の項目を削除してそのパスを追加します（ファイル選択画面で ⌘⇧G を押すとパスを貼り付けられます）。
+3. デーモンを起動したときと同じ方法で再起動します。通常は `multica daemon restart`、LaunchAgent の場合は `launchctl kickstart -k gui/$(id -u)/<label>` です。
+
+CLI をアップグレードするたびにこの手順を繰り返してください。自動更新がデフォルトで有効なのは Multica Cloud に接続したデーモンだけです。`--no-auto-update` を付けてデーモンを起動すると、手動で実行したときだけアップグレードされます。[Multica Desktop](/desktop-app) に同梱の CLI は Developer ID で署名されているため、アップグレード後も許可が維持されます。
+
 ## リアルタイム更新が届かない
 
 実行は進むのに、コメントやステータスがリアルタイムに反映されない場合は、たいてい WebSocket がつながっていません。
@@ -129,6 +143,25 @@ CLI の到達確認は `<server-url>/health` に GET を送り、200 を要求�
 ```bash
 curl -fsS <server-url>/health
 ```
+
+## `multica login` が TLS ハンドシェイクのタイムアウトで失敗する
+
+`multica login` でブラウザが開き、Web 側のサインインは完了するのに、CLI は「Sign-in did not complete」または「TLS handshake timed out」で失敗します。`multica --debug login` では `POST /api/tokens` に `net/http: TLS handshake timeout` と表示され、同じマシンの `curl.exe -I https://api.multica.ai` やブラウザは問題なく接続できます。
+
+TCP 接続は確立されますが、TLS ハンドシェイクが完了しません。Multica CLI とデーモンを含む Go クライアントは、既定で TLS ClientHello にポスト量子鍵交換を含めるため、ClientHello が約 1.5 KB になり 2 つのパケットに分割されます。一部のセキュリティソフト、VPN、ルーター、ファイアウォールはこのようなハンドシェイクを破棄します。curl の ClientHello はずっと小さいため通過します。
+
+ポスト量子鍵交換を無効にして再試行し、原因を確認します:
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+これで成功する場合は、CLI とデーモンを実行するユーザーに対して `GODEBUG=tlsmlkem=0` を恒久的に設定し（Windows では `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` を実行して新しいターミナルを開く）、デーモンまたはデスクトップアプリを再起動してください。`MULTICA_HTTP_TIMEOUT` を大きくしても効果はありません。ハンドシェイクはこの設定の対象外です。根本的な解決はネットワーク側で行います。分割された TLS ハンドシェイクを破棄する機器やソフトウェアを更新または再設定してください。
 
 ## 認証コードや招待メールが届かない
 

@@ -189,9 +189,10 @@ export function inboxFiltersForPrioritySupport(
  * touched") than the one the row then displays, so selecting Alice would fill
  * the list with Bob. What you filter by is what you see.
  *
- * `unreadOnly` likewise reads the rendered row's `read`, which is what the
- * unread badge counts (`useInboxUnreadCount`) — so "only unread" and the
- * number next to Inbox can never disagree.
+ * `unreadOnly` likewise reads the rendered row's `read`. The unread badge
+ * (`useInboxUnreadCount`) counts the same thing from the server's summary
+ * endpoint, which applies that newest-per-issue rule in SQL — so "only unread"
+ * and the number next to Inbox still cannot disagree.
  */
 export function filterInboxItems(
   items: InboxItem[],

@@ -42,10 +42,10 @@ func modelListPendingKey(runtimeID string) string { return modelListPendingPrefi
 // RedisModelListStore stores model list requests in Redis so every API node
 // agrees on the same pending / running / terminal state.
 type RedisModelListStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisModelListStore(rdb *redis.Client) *RedisModelListStore {
+func NewRedisModelListStore(rdb redis.UniversalClient) *RedisModelListStore {
 	return &RedisModelListStore{rdb: rdb}
 }
 

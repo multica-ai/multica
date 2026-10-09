@@ -37,7 +37,7 @@ func (c *webhookStatusCatalog) GetIssueStatusEntryByKey(ctx context.Context, arg
 	return c.Querier.GetIssueStatusEntryByKey(ctx, arg)
 }
 
-// Exercise both real mirror paths, including their persisted PR close gate.
+// Exercise both real mirror paths, including the PR auto-complete gate.
 // Signature parsing is covered by the existing provider webhook suites.
 func TestWebhookStatusResolver(t *testing.T) {
 	ctx := context.Background()
@@ -66,9 +66,9 @@ func TestWebhookStatusResolver(t *testing.T) {
 						ws := dbfx.Workspace(t, "Webhook status resolver", fmt.Sprintf("resolver-%s-%s-%d", provider, tc.name, workspace), testutil.Cols{"issue_prefix": "RSL"})
 						wsID := parseUUID(ws)
 						fixture := testutil.New(testPool, ws, testUserID)
-						for key, category := range map[string]string{"approved": "done", "dropped": "cancelled", "review": "in_review"} {
+						for key, category := range map[string]string{"approved": "done", "dropped": "closed", "review": "started"} {
 							if workspace == 1 && key == "approved" {
-								category = "in_review"
+								category = "started"
 							}
 							cols := testutil.Cols{"workspace_id": ws, "key": key, "name": key, "category": category, "color": "#123456"}
 							if key == "approved" {
@@ -88,26 +88,30 @@ func TestWebhookStatusResolver(t *testing.T) {
 						fixture.Cleanup(t, "DELETE FROM github_pull_request WHERE workspace_id = $1", ws)
 						fixture.Cleanup(t, "DELETE FROM vcs_pull_request WHERE workspace_id = $1", ws)
 						const timestamp = "2026-09-08T00:00:00Z"
-						var mirror func()
+						// mirror delivers a merged PR whose body closes every
+						// fixture issue. Each PR number is a separate delivery.
+						var mirror func(number int32)
 						if provider == "github" {
-							p := &ghPullRequestPayload{}
-							p.Action = "closed"
-							p.Repository.Owner.Login, p.Repository.Name = "fixture", "resolver"
-							p.PullRequest.Number, p.PullRequest.Title = 1, "Resolve linked issues"
-							p.PullRequest.Body = strings.Join(closing, "\n")
-							p.PullRequest.State, p.PullRequest.Merged = "closed", true
-							p.PullRequest.HTMLURL = "https://github.test/fixture/resolver/pull/1"
-							p.PullRequest.CreatedAt, p.PullRequest.UpdatedAt = timestamp, timestamp
-							mirror = func() {
-								h.mirrorPullRequestForWorkspace(ctx, wsID, int64(91000+workspace), p, closeIntentPolicy{unrestricted: true})
+							mirror = func(number int32) {
+								p := &ghPullRequestPayload{}
+								p.Action = "closed"
+								p.Repository.Owner.Login, p.Repository.Name = "fixture", "resolver"
+								p.PullRequest.Number, p.PullRequest.Title = number, "Resolve linked issues"
+								p.PullRequest.Body = strings.Join(closing, "\n")
+								p.PullRequest.State, p.PullRequest.Merged = "closed", true
+								p.PullRequest.HTMLURL = fmt.Sprintf("https://github.test/fixture/resolver/pull/%d", number)
+								p.PullRequest.CreatedAt, p.PullRequest.UpdatedAt = timestamp, timestamp
+								h.mirrorPullRequestForWorkspace(ctx, wsID, int64(91000+workspace), p, prLinkPolicy{unrestricted: true})
 							}
 						} else {
 							connID := fixture.Insert(t, "vcs_connection", testutil.Cols{"workspace_id": ws, "provider": provider, "instance_url": "https://forgejo.test", "account_login": "fixture", "access_token_encrypted": "unused", "webhook_secret_encrypted": "unused"})
 							conn := db.VcsConnection{ID: parseUUID(connID), WorkspaceID: wsID, Provider: provider}
-							ev := vcs.PullRequestEvent{Action: "closed", State: "merged", RepoOwner: "fixture", RepoName: "resolver", Number: 1, Title: "Resolve linked issues", Body: strings.Join(closing, "\n"), HTMLURL: "https://forgejo.test/fixture/resolver/pulls/1", CreatedAt: timestamp, UpdatedAt: timestamp}
-							mirror = func() { h.mirrorVCSPullRequest(ctx, conn, ev) }
+							mirror = func(number int32) {
+								ev := vcs.PullRequestEvent{Action: "closed", State: "merged", RepoOwner: "fixture", RepoName: "resolver", Number: number, Title: "Resolve linked issues", Body: strings.Join(closing, "\n"), HTMLURL: fmt.Sprintf("https://forgejo.test/fixture/resolver/pulls/%d", number), CreatedAt: timestamp, UpdatedAt: timestamp}
+								h.mirrorVCSPullRequest(ctx, conn, ev)
+							}
 						}
-						mirror()
+						mirror(1)
 						if got := catalog.reads[wsID]; got != tc.wantReads {
 							t.Errorf("workspace %d catalog reads = %d, want %d", workspace, got, tc.wantReads)
 						}
@@ -122,13 +126,19 @@ func TestWebhookStatusResolver(t *testing.T) {
 								t.Errorf("workspace %d issue %d status = %q, want %q", workspace, i, status, want)
 							}
 						}
-						// A fresh delivery must not reuse even a successful prior
-						// resolver. Reset one row onto a custom terminal key and replay.
+						// A redelivery of the same merge is not a new PR event, so it
+						// decides nothing and reads nothing.
 						if tc.name == "custom" {
 							fixture.Exec(t, "UPDATE issue SET status = 'dropped' WHERE id = $1", ids[0])
-							mirror()
+							mirror(1)
+							if catalog.reads[wsID] != 1 {
+								t.Errorf("redelivered merge reads = %d, want 1 total", catalog.reads[wsID])
+							}
+							// A fresh delivery must not reuse even a successful
+							// prior resolver: a second merged PR re-reads once.
+							mirror(2)
 							if catalog.reads[wsID] != 2 {
-								t.Errorf("replayed delivery reads = %d, want 2 total", catalog.reads[wsID])
+								t.Errorf("second delivery reads = %d, want 2 total", catalog.reads[wsID])
 							}
 							var status string
 							fixture.QueryRow(t, "SELECT status FROM issue WHERE id = $1", ids[0]).Scan(&status)

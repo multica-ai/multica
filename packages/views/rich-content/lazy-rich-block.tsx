@@ -147,6 +147,13 @@ export function LazyRichBlock({
       ref={ref}
       data-rich-block-shell=""
       data-mounted={mounted ? "" : undefined}
+      // The shell, not the block inside it, owns the space around the block
+      // (MUL-7733). A child's bottom margin cannot collapse through a box with
+      // a min-height, so on the block it sat inside the reservation: the gap
+      // below grew by a paragraph margin and the page shifted on mount. Here
+      // it collapses with the paragraphs on both sides, and the prose
+      // first/last-child reset still applies.
+      className="my-5"
       // The reservation persists after mount so the shell never shrinks back
       // and re-triggers a measurement pass. Real diagrams and the fixed-height
       // HTML preview normally exceed it, so it rarely adds visible space.
@@ -165,7 +172,7 @@ export function LazyRichBlock({
 function RichBlockPlaceholder() {
   return (
     <div
-      className="my-3 h-full w-full rounded-md border border-border/50 bg-muted/20"
+      className="h-full w-full rounded-md border border-border/50 bg-muted/20"
       aria-hidden="true"
     />
   );

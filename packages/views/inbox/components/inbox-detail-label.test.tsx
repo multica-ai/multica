@@ -19,6 +19,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
     statuses: [],
     activeStatuses: [],
     categoryOf: (key: string) => key,
+    iconOf: () => null,
     colorOf: () => null,
     labelOf: (key: string) => key,
     entryOf: (key: string) =>

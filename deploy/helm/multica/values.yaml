@@ -108,8 +108,20 @@ backend:
       # backend replicas without S3.
       accessModes:
         - ReadWriteOnce
+  # Extra CA certificates for the backend's outbound HTTPS — e.g. a self-hosted
+  # Gitea / Forgejo / GitLab whose certificate comes from an internal CA. Set
+  # configMap to an existing ConfigMap in the release namespace whose keys are
+  # PEM certificate files. The chart mounts it read-only and adds it to the
+  # system trust store via SSL_CERT_DIR: public CAs stay trusted and TLS
+  # verification stays on. The backend reads the certificates at startup;
+  # `helm upgrade` rolls it when the ConfigMap changed, otherwise run
+  # `kubectl rollout restart` after updating it.
+  extraCACerts:
+    configMap: ""
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
+    # Optional container-loopback maintenance API; empty disables it. Never expose via Service/Ingress.
+    maintenancePort: ""
     # The migrator and API server retry transient PostgreSQL startup failures
     # within this budget. Set to 0 to restore fail-fast startup behavior.
     databaseStartupTimeout: 3m
@@ -134,6 +146,9 @@ backend:
     # every caller. Bootstrap the workspace with this false, then flip to
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
+    # Set to "1" or "true" to disable first-party anonymous self-host
+    # telemetry collection and delivery.
+    doNotTrack: ""
     # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
     # chart enables the product surface by default; operators must also provide
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.

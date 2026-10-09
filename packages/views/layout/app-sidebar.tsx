@@ -1,4 +1,5 @@
 "use client";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 
 import { issueStatusCategory } from "@multica/core/issues";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -67,7 +68,7 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
@@ -104,7 +105,6 @@ function isNavActive(pathname: string, href: string): boolean {
 const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
-const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 const PINNED_PREVIEW_LIMIT = 5;
 
@@ -291,6 +291,7 @@ function PinRow({
   wsId: string;
 }) {
   const isIssue = pin.item_type === "issue";
+  const statusCatalog = useIssueStatuses(wsId);
   const isView = pin.item_type === "view";
   const p = useWorkspacePaths();
   const setActiveView = useActiveIssueViewStore((s) => s.setActive);
@@ -375,6 +376,8 @@ function PinRow({
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
       <StatusIcon
         status={issue.status}
+        color={statusCatalog.colorOf(issue.status)}
+        icon={statusCatalog.iconOf(issue.status)}
         category={issueStatusCategory(issue) ?? undefined}
         className="!size-3.5 shrink-0"
       />
@@ -412,7 +415,7 @@ function PinSkeleton() {
     <SidebarMenuItem>
       <div className="flex h-7 w-full items-center gap-2 px-2">
         <div className="size-3.5 shrink-0 rounded-sm bg-sidebar-accent/40" />
-        <div className="h-3 w-24 rounded bg-sidebar-accent/40" />
+        <div className="h-3 w-24 rounded-xs bg-sidebar-accent/40" />
       </div>
     </SidebarMenuItem>
   );
@@ -454,15 +457,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   }, [pathname, setOpenMobile]);
 
   const wsId = workspace?.id;
-  const { data: inboxItems = EMPTY_INBOX } = useQuery({
-    queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
-    queryFn: () => api.listInbox(),
-    enabled: !!wsId,
-  });
-  const unreadCount = React.useMemo(
-    () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
-    [inboxItems],
-  );
+  // Nav badge. Reads the cross-workspace unread summary fetched just below
+  // for the switcher dot, so the count costs no request of its own — it used
+  // to download the whole inbox list here just to count it (MUL-6967).
+  const unreadCount = useInboxUnreadCount(wsId);
   // Chat tab unread badge: IM-style total of unread *messages* across chat
   // threads (countUnreadChatMessages is the shared definition — mobile's tab
   // badge derives from the same function, keeping the platforms in agreement).
@@ -591,10 +589,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         push(paths.workspace(joined.slug).issues());
       }
     },
+    onError: () => {
+      // "invitation is not pending" means the invite was concluded from
+      // another surface while this row was on screen. Refetch so the stale
+      // row drops instead of sticking around until restart — a silent
+      // failure here reads as "the button does nothing".
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+    },
   });
   const declineInvitationMut = useMutation({
     mutationFn: (id: string) => api.declineInvitation(id),
-    onSuccess: () => {
+    // Either outcome must refresh the list: success drops the declined row,
+    // and a failure ("invitation is not pending") means the invite was
+    // concluded from another surface — refetch drops the stale row.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     },
   });
@@ -700,7 +708,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <span className="flex-1 truncate text-body">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                               disabled={acceptInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -711,7 +719,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             </button>
                             <button
                               type="button"
-                              className="text-caption px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded-xs bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
                               disabled={declineInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -919,10 +927,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               );
             })}
           </SidebarMenu>
-          {/* One utility strip: the Discord link takes the leading space the
-              help trigger was leaving empty. `justify-end` keeps the trigger
-              right-aligned once the Discord link is dismissed. */}
-          <div className="flex items-center justify-end gap-1">
+          {/* Discord fills the strip while visible; once dismissed, help
+              aligns with the navigation icons above. */}
+          <div className="flex items-center gap-1">
             <JoinDiscordCard />
             <HelpLauncher />
           </div>

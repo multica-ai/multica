@@ -223,7 +223,7 @@ func (h *Handler) DownloadAttachmentWithCapability(w http.ResponseWriter, r *htt
 		return
 	}
 	if h.Storage == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage not configured")
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
 

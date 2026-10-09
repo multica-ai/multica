@@ -19,6 +19,15 @@ func (timeoutErr) Error() string   { return "i/o timeout" }
 func (timeoutErr) Timeout() bool   { return true }
 func (timeoutErr) Temporary() bool { return true }
 
+// tlsHandshakeTimeoutErr mirrors net/http's unexported tlsHandshakeTimeoutError:
+// it satisfies net.Error.Timeout(), so only its message tells it apart from a
+// plain socket timeout.
+type tlsHandshakeTimeoutErr struct{}
+
+func (tlsHandshakeTimeoutErr) Error() string   { return "net/http: TLS handshake timeout" }
+func (tlsHandshakeTimeoutErr) Timeout() bool   { return true }
+func (tlsHandshakeTimeoutErr) Temporary() bool { return true }
+
 func TestClassifyNetworkError(t *testing.T) {
 	cases := []struct {
 		name string
@@ -28,11 +37,13 @@ func TestClassifyNetworkError(t *testing.T) {
 		{"context deadline", context.DeadlineExceeded, KindNetworkTimeout},
 		{"wrapped deadline", fmt.Errorf("resolve issue: %w", context.DeadlineExceeded), KindNetworkTimeout},
 		{"net timeout", timeoutErr{}, KindNetworkTimeout},
+		{"tls handshake timeout (net.Error)", tlsHandshakeTimeoutErr{}, KindNetworkTLSHandshakeTimeout},
 		{"dns", &net.DNSError{Err: "no such host", Name: "api.multica.ai", IsNotFound: true}, KindNetworkDNS},
 		{"connection refused", syscall.ECONNREFUSED, KindNetworkRefused},
 		{"x509 unknown authority", x509.UnknownAuthorityError{}, KindNetworkTLS},
 		{"x509 hostname", x509.HostnameError{Host: "api.multica.ai"}, KindNetworkTLS},
 		{"timeout string fallback", errors.New("Get \"https://x\": net/http: request canceled (Client.Timeout exceeded)"), KindNetworkTimeout},
+		{"tls handshake timeout string", errors.New("Post \"https://api.multica.ai/api/tokens\": net/http: TLS handshake timeout"), KindNetworkTLSHandshakeTimeout},
 		{"dns string fallback", errors.New("dial tcp: lookup api.multica.ai: no such host"), KindNetworkDNS},
 		{"refused string fallback", errors.New("dial tcp 127.0.0.1:443: connect: connection refused"), KindNetworkRefused},
 		{"tls string fallback", errors.New("x509: certificate signed by unknown authority"), KindNetworkTLS},
@@ -80,7 +91,7 @@ func TestHTTPErrorKind(t *testing.T) {
 func TestFormatErrorAllKinds(t *testing.T) {
 	withLang(t, "") // default English
 	allKinds := []ErrorKind{
-		KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline,
+		KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkTLSHandshakeTimeout,
 		KindAuthRequired, KindTaskTokenRejected, KindForbidden, KindNotFound, KindConflict,
 		KindValidation, KindRateLimited, KindServerError, KindUnknown,
 	}
@@ -375,20 +386,21 @@ func withLang(t *testing.T, lang string) {
 
 func TestErrorKindString(t *testing.T) {
 	cases := map[ErrorKind]string{
-		KindNetworkTimeout:    "network_timeout",
-		KindNetworkDNS:        "network_dns",
-		KindNetworkRefused:    "network_refused",
-		KindNetworkTLS:        "network_tls",
-		KindNetworkOffline:    "network_offline",
-		KindAuthRequired:      "auth_required",
-		KindTaskTokenRejected: "task_token_rejected",
-		KindForbidden:         "forbidden",
-		KindNotFound:          "not_found",
-		KindConflict:          "conflict",
-		KindValidation:        "validation",
-		KindRateLimited:       "rate_limited",
-		KindServerError:       "server_error",
-		KindUnknown:           "unknown",
+		KindNetworkTimeout:             "network_timeout",
+		KindNetworkDNS:                 "network_dns",
+		KindNetworkRefused:             "network_refused",
+		KindNetworkTLS:                 "network_tls",
+		KindNetworkOffline:             "network_offline",
+		KindNetworkTLSHandshakeTimeout: "network_tls_handshake_timeout",
+		KindAuthRequired:               "auth_required",
+		KindTaskTokenRejected:          "task_token_rejected",
+		KindForbidden:                  "forbidden",
+		KindNotFound:                   "not_found",
+		KindConflict:                   "conflict",
+		KindValidation:                 "validation",
+		KindRateLimited:                "rate_limited",
+		KindServerError:                "server_error",
+		KindUnknown:                    "unknown",
 	}
 	seen := map[string]ErrorKind{}
 	for k, want := range cases {
@@ -609,4 +621,81 @@ func TestServerErrorCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFormatErrorTLSHandshakeTimeoutHint is GH #8654 in one assertion. A
+// Windows user whose network dropped the two-packet ClientHello saw only
+// "Request timed out ... raise the limit with MULTICA_HTTP_TIMEOUT", which
+// cannot help: the handshake has its own fixed budget. The copy has to name
+// the one knob that does (GODEBUG=tlsmlkem=0), in both languages.
+func TestFormatErrorTLSHandshakeTimeoutHint(t *testing.T) {
+	raw := errors.New("Post \"https://api.multica.ai/api/tokens\": net/http: TLS handshake timeout")
+	err := wrapTransport(nil, raw)
+
+	var netErr *NetworkError
+	if !errors.As(err, &netErr) || netErr.Kind != KindNetworkTLSHandshakeTimeout {
+		t.Fatalf("wrapTransport classified %v as %v, want network_tls_handshake_timeout", raw, err)
+	}
+	if code := ExitCodeFor(err); code != ExitNetwork {
+		t.Errorf("ExitCodeFor = %d, want ExitNetwork(%d)", code, ExitNetwork)
+	}
+
+	withLang(t, "en_US.UTF-8")
+	en := FormatError(err, false)
+	for _, sub := range []string{"TLS handshake", "GODEBUG=tlsmlkem=0"} {
+		if !strings.Contains(en, sub) {
+			t.Errorf("EN %q missing %q", en, sub)
+		}
+	}
+	if strings.Contains(en, "raise the limit") {
+		t.Errorf("EN still suggests raising the request timeout: %q", en)
+	}
+
+	withLang(t, "zh_CN.UTF-8")
+	zh := FormatError(err, false)
+	for _, sub := range []string{"握手", "GODEBUG=tlsmlkem=0"} {
+		if !strings.Contains(zh, sub) {
+			t.Errorf("ZH %q missing %q", zh, sub)
+		}
+	}
+}
+
+// TestWithUserMessageUnlessNetwork pins what `multica login` relies on: its
+// sign-in copy explains an HTTP refusal and must not paper over a transport
+// failure, whose kind copy is the only text that names the remedy.
+func TestWithUserMessageUnlessNetwork(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	const hint = "Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again."
+
+	t.Run("HTTP refusal keeps the command copy", func(t *testing.T) {
+		underlying := &HTTPError{Method: "GET", Path: "/api/me", StatusCode: 401, Body: `{"error":"unauthorized"}`}
+		err := WithUserMessageUnlessNetwork(hint, underlying)
+		if got := FormatError(err, false); got != hint {
+			t.Errorf("FormatError = %q, want the login hint", got)
+		}
+		if code := ExitCodeFor(err); code != ExitAuth {
+			t.Errorf("ExitCodeFor = %d, want ExitAuth(%d)", code, ExitAuth)
+		}
+	})
+
+	t.Run("transport failure keeps the network copy", func(t *testing.T) {
+		underlying := wrapTransport(nil, errors.New("Get \"https://api.multica.ai/api/me\": net/http: TLS handshake timeout"))
+		err := WithUserMessageUnlessNetwork(hint, underlying)
+		if err != underlying {
+			t.Fatalf("expected the *NetworkError to pass through unchanged, got %T", err)
+		}
+		got := FormatError(err, false)
+		if strings.Contains(got, "valid and not expired") {
+			t.Errorf("token copy masked a transport failure: %q", got)
+		}
+		if !strings.Contains(got, "GODEBUG=tlsmlkem=0") {
+			t.Errorf("network remedy missing from %q", got)
+		}
+	})
+
+	t.Run("nil error returns nil", func(t *testing.T) {
+		if WithUserMessageUnlessNetwork("x", nil) != nil {
+			t.Errorf("WithUserMessageUnlessNetwork(_, nil) should be nil")
+		}
+	})
 }

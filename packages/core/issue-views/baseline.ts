@@ -1,7 +1,8 @@
 import type { ActorFilterValue, FilterSnapshot } from "../issues/stores/view-store";
-import type { IssuePriority, IssueStatus, PropertyFilterValue } from "../types";
+import type { IssuePriority, IssueStatus, ProjectStatus, PropertyFilterValue } from "../types";
 import { isKnownPropertyFilterOp, isPropertyOperatorFilter, propertyFilterValueKey } from "../types";
 import { PRIORITY_DISPLAY_ORDER } from "../issues/config";
+import { PROJECT_STATUS_ORDER } from "../projects/config";
 
 /**
  * The open saved view's query, normalized for two jobs:
@@ -21,6 +22,7 @@ export interface IssueViewBaseline {
   creator: Set<string>;
   project: Set<string>;
   includeNoProject: boolean;
+  projectStatus: Set<string>;
   label: Set<string>;
   /** Property definition id → fixed member keys (`propertyFilterValueKey`). */
   property: Map<string, Set<string>>;
@@ -78,6 +80,11 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
   const assigneeFilters = actorArray(query.assigneeFilters);
   const creatorFilters = actorArray(query.creatorFilters);
   const projectFilters = stringArray(query.projectFilters);
+  // A saved view predating this dimension has no key at all, and an unknown
+  // member cannot be represented in the store — both collapse to "no filter".
+  const projectStatusFilters = stringArray(query.projectStatusFilters).filter(
+    (s): s is ProjectStatus => (PROJECT_STATUS_ORDER as readonly string[]).includes(s),
+  );
   const labelFilters = stringArray(query.labelFilters);
   const includeNoAssignee = query.includeNoAssignee === true;
   const includeNoProject = query.includeNoProject === true;
@@ -104,6 +111,7 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
     creator: new Set(creatorFilters.map(actorFilterKey)),
     project: new Set(projectFilters),
     includeNoProject,
+    projectStatus: new Set(projectStatusFilters),
     label: new Set(labelFilters),
     property,
     raw: {
@@ -114,6 +122,7 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
       creatorFilters,
       projectFilters,
       includeNoProject,
+      projectStatusFilters,
       labelFilters,
       propertyFilters,
     },

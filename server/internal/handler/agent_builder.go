@@ -113,7 +113,7 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 		Instructions: agentBuilderInstructions,
 		Model:        pgtype.Text{String: model, Valid: model != ""},
 		SystemKey: pgtype.Text{
-			String: fmt.Sprintf("agent_builder:%s", flowID),
+			String: agentBuilderSystemKeyPrefix + flowID,
 			Valid:  true,
 		},
 	})
@@ -508,5 +508,5 @@ func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Reque
 func isAgentBuilderCarrier(agent db.Agent) bool {
 	return agent.Kind == "system" &&
 		agent.SystemKey.Valid &&
-		strings.HasPrefix(agent.SystemKey.String, "agent_builder:")
+		strings.HasPrefix(agent.SystemKey.String, agentBuilderSystemKeyPrefix)
 }

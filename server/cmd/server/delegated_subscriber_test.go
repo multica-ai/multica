@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -454,42 +455,118 @@ func TestUnsubscribeIsDurableAgainstAutoRules(t *testing.T) {
 // synthesized "whole batch finished" roll-up; that machinery is gone (see the
 // MUL-5483 thread), and the tree-level signal comes from the parent's own status
 // transition, which this same rule delivers.
+//
+// Which statuses ARE handoffs is issueStatusIsHandoff's job and is covered by
+// TestIssueStatusIsHandoff; this table covers the routing on top of that answer.
 func TestDeliverToSubscriber_DelegatedTier(t *testing.T) {
 	cases := []struct {
-		name        string
-		reason      string
-		notifType   string
-		issueStatus string
-		want        bool
+		name      string
+		reason    string
+		notifType string
+		handoff   bool
+		want      bool
 	}{
-		{"direct subscriber keeps every event", "creator", "status_changed", "in_progress", true},
-		{"direct subscriber keeps comments", "assignee", "new_comment", "todo", true},
+		{"direct subscriber keeps every event", "creator", "status_changed", false, true},
+		{"direct subscriber keeps comments", "assignee", "new_comment", false, true},
 
-		{"delegated skips routine progress", "delegated", "status_changed", "in_progress", false},
-		{"delegated skips backlog parking", "delegated", "status_changed", "backlog", false},
-		{"delegated skips todo", "delegated", "status_changed", "todo", false},
-		{"delegated skips comment churn", "delegated", "new_comment", "in_progress", false},
-		{"delegated skips assignee churn", "delegated", "assignee_changed", "in_progress", false},
-		{"delegated skips date churn", "delegated", "due_date_changed", "in_progress", false},
+		{"delegated skips routine progress", "delegated", "status_changed", false, false},
+		{"delegated skips comment churn", "delegated", "new_comment", false, false},
+		{"delegated skips assignee churn", "delegated", "assignee_changed", false, false},
+		{"delegated skips date churn", "delegated", "due_date_changed", false, false},
+		{"delegated skips non-status events even on a handoff", "delegated", "due_date_changed", true, false},
 
-		{"delegated gets the review handoff", "delegated", "status_changed", "in_review", true},
-		{"delegated gets completion", "delegated", "status_changed", "done", true},
-		{"delegated gets cancellation", "delegated", "status_changed", "cancelled", true},
-		{"delegated gets blocked", "delegated", "status_changed", "blocked", true},
+		{"delegated gets the handoff", "delegated", "status_changed", true, true},
 
-		{"delegated always gets direct mentions", "delegated", "mentioned", "in_progress", true},
-		{"delegated always gets failures", "delegated", "task_failed", "in_progress", true},
-		{"delegated always gets agent_blocked", "delegated", "agent_blocked", "in_progress", true},
+		{"delegated always gets direct mentions", "delegated", "mentioned", false, true},
+		{"delegated always gets failures", "delegated", "task_failed", false, true},
+		{"delegated always gets agent_blocked", "delegated", "agent_blocked", false, true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := deliverToSubscriber(tc.reason, tc.notifType, tc.issueStatus); got != tc.want {
-				t.Fatalf("deliverToSubscriber(%q, %q, %q) = %v, want %v",
-					tc.reason, tc.notifType, tc.issueStatus, got, tc.want)
+			if got := deliverToSubscriber(tc.reason, tc.notifType, tc.handoff); got != tc.want {
+				t.Fatalf("deliverToSubscriber(%q, %q, %v) = %v, want %v",
+					tc.reason, tc.notifType, tc.handoff, got, tc.want)
 			}
 		})
 	}
+}
+
+// TestIssueStatusIsHandoff pins the predicate behind BOTH the delegated tier and
+// the stale task_failed dismissal (MUL-7379).
+//
+// The built-in rows reproduce, exactly, the two hand-kept allowlists this
+// replaced. The custom rows are the regression: before MUL-7240 every custom
+// status projected onto a built-in key, so a custom review gate notified
+// because it "was" in_review; collapsing to four categories left those keys raw
+// and silently stopped them.
+func TestIssueStatusIsHandoff(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	workspaceID := util.MustParseUUID(testWorkspaceID)
+
+	custom := func(key, category string) string {
+		t.Helper()
+		suffixed := fmt.Sprintf("%s_%d", key, time.Now().UnixNano()%1_000_000)
+		entry, err := queries.CreateIssueStatusEntry(ctx, db.CreateIssueStatusEntryParams{
+			WorkspaceID: workspaceID,
+			Key:         suffixed,
+			Name:        suffixed,
+			Description: "",
+			Category:    category,
+			Color:       "#123456",
+		})
+		if err != nil {
+			t.Fatalf("create custom status %q in %q: %v", suffixed, category, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE id = $1`, entry.ID)
+		})
+		return entry.Key
+	}
+
+	cases := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		// The seven built-ins: identical to the pre-MUL-7379 allowlists.
+		{"backlog is parked, nobody waits", issuestatus.Backlog, false},
+		{"todo is queued, nobody waits", issuestatus.Todo, false},
+		{"in_progress is the platform's own 'working' key", issuestatus.InProgress, false},
+		{"in_review hands over", issuestatus.InReview, true},
+		{"blocked hands over", issuestatus.Blocked, true},
+		{"done is terminal", issuestatus.Done, true},
+		{"cancelled is terminal", issuestatus.Cancelled, true},
+
+		// One custom status per lifecycle category.
+		{"custom unstarted is queued work", custom("later", issuestatus.CategoryUnstarted), false},
+		{"custom started is a review gate", custom("awaiting_response", issuestatus.CategoryStarted), true},
+		{"custom done is terminal", custom("shipped", issuestatus.CategoryDone), true},
+		{"custom closed is terminal", custom("wont_do", issuestatus.CategoryClosed), true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := issueStatusIsHandoff(ctx, queries, workspaceID, tc.status)
+			if err != nil {
+				t.Fatalf("issueStatusIsHandoff(%q): unexpected error: %v", tc.status, err)
+			}
+			if got != tc.want {
+				t.Fatalf("issueStatusIsHandoff(%q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("a catalog miss is reported, never guessed", func(t *testing.T) {
+		got, err := issueStatusIsHandoff(ctx, queries, workspaceID, "status_that_was_never_created")
+		if err == nil {
+			t.Fatal("an unresolvable custom key must return an error so each caller picks its own failure direction")
+		}
+		if got {
+			t.Fatal("the error return must not also claim a handoff")
+		}
+	})
 }
 
 // TestDelegatedTier_ChildCompletionDeliversExactlyOnce is the case a unit test of
@@ -571,7 +648,7 @@ func TestDelegatedTier_ChildCompletionDeliversExactlyOnce(t *testing.T) {
 // unrecognized reason must fall back to FULL delivery — silently dropping a
 // user's notifications is the worse failure.
 func TestDeliverToSubscriber_UnknownReasonIsDirect(t *testing.T) {
-	if !deliverToSubscriber("some_future_reason", "new_comment", "in_progress") {
+	if !deliverToSubscriber("some_future_reason", "new_comment", false) {
 		t.Fatal("an unrecognized subscription reason must default to full delivery")
 	}
 }

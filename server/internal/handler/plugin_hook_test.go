@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
 
@@ -127,15 +129,11 @@ func TestInvokePluginHookRefusesUnknownHook(t *testing.T) {
 // The flag gates the hook endpoint like every other plugin route: fail closed,
 // not merely hidden from the UI.
 func TestInvokePluginHookRequiresTheFeatureFlag(t *testing.T) {
-	withPluginsV1Flag(t, testHandler, true)
-	cleanupPluginInstallations(t)
-	installationID := installHookPlugin(t)
-
 	withPluginsV1Flag(t, testHandler, false)
 	recorder := httptest.NewRecorder()
-	testHandler.InvokePluginHook(recorder, invokeHookRequest(installationID, "summarize", map[string]any{"trigger": "manual"}))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d body=%s, want 503", recorder.Code, recorder.Body.String())
+	testHandler.InvokePluginHook(recorder, invokeHookRequest("11111111-1111-1111-1111-111111111111", "summarize", map[string]any{"trigger": "manual"}))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s, want 403", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -356,31 +354,63 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 		t.Fatalf("install: status=%d body=%s", install.Code, install.Body.String())
 	}
 
-	dispatch := func() {
+	dispatch := func() *service.PluginEventDispatcher {
 		dispatcher := service.NewPluginEventDispatcher(testHandler.PluginService)
-		defer dispatcher.Close()
 		dispatcher.Dispatch(plugincontract.EventIssueCreated, testWorkspaceID, map[string]any{})
-		// Long enough for a worker to pick the job up and complete the call.
-		time.Sleep(2 * time.Second)
+		return dispatcher
 	}
 
 	// Flag on: the endpoint is called.
 	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
-	dispatch()
+	dispatcher := dispatch()
 	select {
 	case <-received:
-	default:
+	case <-time.After(2 * time.Second):
+		dispatcher.Close()
 		t.Fatal("with the flag on, an installed event hook was never called")
 	}
+	dispatcher.Close()
 
 	// Flag off: nothing leaves, even though the same installation is still
 	// enabled and still declares the hook.
 	withPluginsV1Flag(t, testHandler, false)
-	testHandler.PluginService.FeatureFlags = testHandler.FeatureFlags
-	dispatch()
+	looked := make(chan struct{}, 1)
+	testHandler.PluginService.FeatureFlags = featureflag.NewService(flagLookupSignal{
+		Provider: testHandler.FeatureFlags.Provider(), key: featureflags.PluginsV1, looked: looked,
+	})
+	dispatcher = dispatch()
+	defer dispatcher.Close()
+	select {
+	case <-looked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("with the flag off, no dispatcher worker ever evaluated the flag")
+	}
+	// Close waits for the worker that read the flag to finish its job, so any
+	// call it made has already reached the endpoint. No window to wait out.
+	dispatcher.Close()
 	select {
 	case <-received:
 		t.Fatal("with the flag off, an event hook still called out — the flag does not gate the outbound path")
 	default:
 	}
+}
+
+// flagLookupSignal reports each evaluation of one flag, so a test can tell a
+// worker has reached its flag check instead of waiting out a window for a call
+// that should never come.
+type flagLookupSignal struct {
+	featureflag.Provider
+	key    string
+	looked chan<- struct{}
+}
+
+func (p flagLookupSignal) Lookup(ctx context.Context, key string) (featureflag.Decision, bool) {
+	decision, found := p.Provider.Lookup(ctx, key)
+	if key == p.key {
+		select {
+		case p.looked <- struct{}{}:
+		default:
+		}
+	}
+	return decision, found
 }

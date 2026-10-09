@@ -1,0 +1,163 @@
+---
+title: Connexion et inscription
+description: Configurez les codes de vérification par e-mail, la connexion avec Google et les personnes autorisées à s'inscrire.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Par défaut, Multica connecte les utilisateurs au moyen de codes de vérification envoyés par e-mail ; Google OAuth peut être ajouté en complément. Les utilisateurs existants peuvent toujours se reconnecter — les restrictions d'inscription décident uniquement si de nouveaux comptes peuvent être créés.
+
+## Codes de vérification par e-mail
+
+Une fois que l'utilisateur a saisi une adresse e-mail, Multica envoie un code de vérification à 6 chiffres. Le code est valable 10 minutes ; une fois vérifié, le navigateur reçoit un cookie de connexion.
+
+Les e-mails peuvent être envoyés via Resend ou SMTP. Lorsque les deux sont configurés, `SMTP_HOST` est prioritaire.
+
+### Utiliser Resend
+
+1. Vérifiez un domaine d'envoi et créez une clé d'API sur [Resend](https://resend.com/).
+2. Définissez :
+
+   ```dotenv
+   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+   RESEND_FROM_EMAIL=noreply@example.com
+   ```
+
+3. Redémarrez le service API.
+
+`RESEND_FROM_EMAIL` doit appartenir à un domaine déjà vérifié dans Resend.
+
+### Utiliser SMTP
+
+Définissez au minimum l'hôte et l'adresse de l'expéditeur :
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=<password>
+SMTP_FROM_EMAIL=noreply@example.com
+```
+
+Modes de connexion courants :
+
+| Scénario | Configuration |
+|---|---|
+| Relais anonyme interne | `SMTP_PORT=25`, laissez le nom d'utilisateur et le mot de passe vides |
+| STARTTLS | `SMTP_PORT=587` ; passe à TLS par défaut lorsque le serveur le prend en charge |
+| TLS implicite | `SMTP_PORT=465`, ou définissez explicitement `SMTP_TLS=implicit` |
+
+Si `SMTP_FROM_EMAIL` n'est pas défini, il se rabat sur `RESEND_FROM_EMAIL`. Avec une autorité de certification privée ou des certificats auto-signés, vous devez ajouter l'autorité de certification au magasin de confiance du conteneur ; `SMTP_TLS_INSECURE=true` désactive la vérification des certificats et ne doit être utilisé que temporairement, sur un réseau interne de confiance.
+
+Certains relais stricts exigent aussi un nom EHLO valide :
+
+```dotenv
+SMTP_EHLO_NAME=mail.example.com
+```
+
+### Comportement sans service d'e-mail
+
+Le serveur démarre quand même, mais les codes de vérification et les liens d'invitation sont uniquement écrits dans le journal ; aucun e-mail n'est envoyé. Cela convient au développement local, pas à la production.
+
+Le journal de démarrage indique si le mode actuel est `Resend API`, `SMTP relay` ou `DEV mode`.
+
+## Code de vérification local fixe
+
+Les tests automatisés locaux peuvent définir un code de vérification fixe :
+
+```dotenv
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+Le code doit comporter 6 chiffres. Le code fixe est ignoré lorsque `APP_ENV=production`.
+
+<Callout type="warning">
+N'activez pas de code fixe sur une instance accessible publiquement. La combinaison de production est `APP_ENV=production` avec un `MULTICA_DEV_VERIFICATION_CODE` vide.
+</Callout>
+
+## Connexion avec Google
+
+1. Créez un client OAuth 2.0 dans la [Google Cloud Console](https://console.cloud.google.com/).
+2. Ajoutez l'URL de rappel du frontend Multica dans **Authorized redirect URIs** (« URI de redirection autorisés » dans la console en français) :
+
+   ```text
+   https://multica.example.com/auth/callback
+   ```
+
+3. Définissez :
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+   ```
+
+4. Redémarrez le service API.
+
+Les URL indiquées dans la Google Console et dans `GOOGLE_REDIRECT_URI` doivent correspondre exactement, y compris le protocole, le port et la barre oblique finale. Une fois la configuration terminée, la page de connexion affiche un bouton **Continuer avec Google** ; l'image du frontend n'a pas besoin d'être reconstruite.
+
+## Restrictions d'inscription
+
+Trois variables déterminent ensemble si un nouveau compte peut être créé :
+
+| Variable | Effet |
+|---|---|
+| `ALLOWED_EMAILS` | Adresses e-mail complètes autorisées à s'inscrire, séparées par des virgules |
+| `ALLOWED_EMAIL_DOMAINS` | Domaines e-mail autorisés à s'inscrire, séparés par des virgules |
+| `ALLOW_SIGNUP` | Autorise ou non l'inscription lorsqu'aucune liste d'autorisation n'est configurée ; vaut `true` par défaut |
+
+L'ordre d'évaluation est le suivant :
+
+1. L'adresse e-mail correspond à `ALLOWED_EMAILS` — autorisé.
+2. Ou son domaine correspond à `ALLOWED_EMAIL_DOMAINS` — autorisé.
+3. Aucune liste d'autorisation n'est configurée et `ALLOW_SIGNUP=true` — autorisé.
+4. Sinon, si l'adresse e-mail a une invitation à un espace de travail en attente et non expirée — autorisé.
+5. Sinon — refusé.
+
+Configurations courantes :
+
+```dotenv
+# Domaine de l'entreprise et utilisateurs invités
+ALLOW_SIGNUP=false
+ALLOWED_EMAIL_DOMAINS=company.com
+
+# Admettre aussi un collaborateur externe
+ALLOWED_EMAILS=partner@example.net
+```
+
+<Callout type="info">
+Les deux listes d'autorisation fonctionnent aussi comme une liste d'exceptions explicite lorsque `ALLOW_SIGNUP=false`.
+</Callout>
+
+## Invitations et restrictions d'inscription
+
+Une invitation à un espace de travail en attente et non expirée permet à son adresse e-mail de créer un compte même lorsque `ALLOW_SIGNUP=false` ou que l'adresse ne correspond ni à `ALLOWED_EMAILS` ni à `ALLOWED_EMAIL_DOMAINS`. Cette exception s'applique aussi lorsque `ALLOW_SIGNUP=true` avec une liste d'autorisation configurée : les listes d'autorisation ne constituent pas une barrière stricte contre les utilisateurs invités.
+
+Les utilisateurs existants peuvent continuer à se connecter. Les nouveaux utilisateurs qui ne correspondent à aucune entrée d'une liste d'autorisation et ne bénéficient pas d'une inscription ouverte ont besoin d'une invitation en attente et non expirée ; les invitations absentes, expirées, acceptées, refusées ou révoquées ne donnent pas le droit de s'inscrire. L'invitation est vérifiée lors de la demande d'un code de connexion, puis à nouveau lors de la création du compte, y compris avec la connexion Google.
+
+Vous n'avez pas besoin d'ajouter les invités ordinaires à `ALLOWED_EMAILS` ni de redémarrer le serveur. L'invitation doit toujours être acceptée via le flux d'invitation habituel pour rejoindre l'espace de travail.
+
+La révocation d'une invitation ne supprime pas un compte déjà créé grâce à elle et n'empêche pas ce compte existant de se connecter.
+
+## Durée de vie des sessions
+
+Les sessions sont glissantes. La durée de vie ci-dessous est une limite d'**inactivité**, et non un compte à rebours depuis la connexion : dès qu'il reste moins de la moitié de cette durée à une session, la requête suivante la réémet avec une durée de vie complète, si bien qu'un compte utilisé en continu n'est jamais déconnecté selon un calendrier fixe. Il n'y a pas de plafond absolu.
+
+Cette limite est asymétrique. Une session n'est réémise qu'une fois passée la moitié de sa durée de vie ; une session utilisée pour la dernière fois alors qu'il lui restait plus de la moitié de sa durée de vie n'est donc pas prolongée — la période d'inactivité toujours tolérée correspond à la moitié de la valeur ci-dessous, et non à sa totalité.
+
+Ajustez-la avec `AUTH_TOKEN_TTL`, qui accepte une durée Go ou un nombre entier positif de secondes :
+
+```dotenv
+AUTH_TOKEN_TTL=720h
+```
+
+La valeur minimale est `60s` ; toute valeur plus courte est ramenée à ce minimum et un avertissement est journalisé au démarrage. En dessous, la cadence de renouvellement que le serveur en déduit passerait sous le plancher que les clients lui appliquent, et les clients vérifieraient le renouvellement moins souvent que la session ne peut survivre.
+
+Redémarrez le service API après l'avoir modifiée. La valeur s'applique aux sessions émises ou réémises ensuite — comme les sessions sont glissantes, une session existante adopte la nouvelle durée de vie lors de sa prochaine réémission.
+
+## Étapes suivantes
+
+- [Variables d'environnement](/environment-variables) — la référence complète des variables.
+- [Authentification et jetons](/auth-tokens) — sessions de connexion et types de jetons.
+- [Membres et rôles](/members-roles) — invitations et rôles.

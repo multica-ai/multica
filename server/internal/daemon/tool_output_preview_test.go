@@ -15,25 +15,32 @@ func TestToolOutputPreview(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name, input, want string
+		wantTruncated     bool
 	}{
-		{"empty", "", ""},
-		{"short unicode", "执行完成 😀\n", "执行完成 😀\n"},
-		{"under budget", strings.Repeat("a", 8191), strings.Repeat("a", 8191)},
-		{"exact budget", strings.Repeat("a", 8192), strings.Repeat("a", 8192)},
-		{"over budget", strings.Repeat("a", 8193), strings.Repeat("a", 8192)},
-		{"chinese", strings.Repeat("中", 5000), strings.Repeat("中", 2730)},
-		{"emoji", strings.Repeat("😀", 3000), strings.Repeat("😀", 2048)},
+		{"empty", "", "", false},
+		{"short unicode", "执行完成 😀\n", "执行完成 😀\n", false},
+		{"under budget", strings.Repeat("a", 8191), strings.Repeat("a", 8191), false},
+		{"exact budget", strings.Repeat("a", 8192), strings.Repeat("a", 8192), false},
+		{"over budget", strings.Repeat("a", 8193), strings.Repeat("a", 8192), true},
+		{"chinese", strings.Repeat("中", 5000), strings.Repeat("中", 2730), true},
+		{"emoji", strings.Repeat("😀", 3000), strings.Repeat("😀", 2048), true},
 		// Server-side redaction may expand this input. That is not source truncation.
-		{"redaction growth", strings.Repeat("TOKEN=x ", 1024), strings.Repeat("TOKEN=x ", 1024)},
-		{"nul", "before\x00after", "beforeafter"},
-		{"invalid utf8", "a\xffb", "a\uFFFDb"},
-		{"normalization growth", strings.Repeat("a", 8191) + "\xff", strings.Repeat("a", 8191)},
-		{"normalization shrink", strings.Repeat("a", 8191) + "\x00b", strings.Repeat("a", 8191) + "b"},
+		{"redaction growth", strings.Repeat("TOKEN=x ", 1024), strings.Repeat("TOKEN=x ", 1024), false},
+		{"nul", "before\x00after", "beforeafter", false},
+		{"invalid utf8", "a\xffb", "a\uFFFDb", false},
+		// Sanitizing this input pushes it past the budget, so the record really
+		// does lose bytes — the flag follows the stored preview, not the raw input.
+		{"normalization growth", strings.Repeat("a", 8191) + "\xff", strings.Repeat("a", 8191), true},
+		{"normalization shrink", strings.Repeat("a", 8191) + "\x00b", strings.Repeat("a", 8191) + "b", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := toolOutputPreview(tt.input); got != tt.want {
+			got, truncated := toolOutputPreview(tt.input)
+			if got != tt.want {
 				t.Fatalf("preview differs from expected text: got %d bytes, want %d", len(got), len(tt.want))
+			}
+			if truncated != tt.wantTruncated {
+				t.Fatalf("truncated=%v, want %v: the flag must describe whether the stored preview dropped bytes", truncated, tt.wantTruncated)
 			}
 		})
 	}
@@ -51,8 +58,12 @@ func TestToolOutputPreviewRuneBoundaries(t *testing.T) {
 				if kept == len(char) {
 					want += char
 				}
-				if got := toolOutputPreview(prefix + char + "tail"); got != want {
+				got, truncated := toolOutputPreview(prefix + char + "tail")
+				if got != want {
 					t.Fatalf("cut must retain exactly the complete runes: got %d bytes, want %d", len(got), len(want))
+				}
+				if !truncated {
+					t.Fatal("every cut in this loop drops the tail, so truncated must be true")
 				}
 			})
 		}

@@ -27,3 +27,27 @@ export function deriveGitHubSettings(
     autoLinkPRs: enabled && s.github_auto_link_prs_enabled !== false,
   };
 }
+
+/** The `pr_merge_status` value that leaves an issue's status alone. */
+export const PR_MERGE_STATUS_NONE = "none";
+
+/**
+ * What merging every PR linked to an issue does (MUL-7726): `"none"`, or the
+ * key of the status the issue moves to. Without the key it follows the retired
+ * `pr_auto_complete_enabled` switch (off → none, else Done), as the server does.
+ * Not GitHub-specific — self-hosted providers follow the same setting — so it
+ * ignores the GitHub master switch. The server re-validates the key against
+ * the status catalog.
+ */
+export function derivePRMergeStatus(
+  workspace: Pick<Workspace, "settings"> | null | undefined,
+): string {
+  const s = (workspace?.settings ?? {}) as Record<string, unknown>;
+  const value = s.pr_merge_status;
+  if (value === undefined || value === null) {
+    const legacy = s.pr_auto_complete_enabled;
+    return legacy === undefined || legacy === null || legacy === true ? "done" : PR_MERGE_STATUS_NONE;
+  }
+  if (typeof value !== "string") return PR_MERGE_STATUS_NONE;
+  return value.trim().toLowerCase() || PR_MERGE_STATUS_NONE;
+}

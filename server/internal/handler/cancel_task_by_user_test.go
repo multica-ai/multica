@@ -194,6 +194,13 @@ func TestCancelTaskByUser_QueuedEditPersistsDraftRestore(t *testing.T) {
 	if got := taskStatus(t, taskID); got != "cancelled" {
 		t.Fatalf("queued edit task status = %q, want cancelled", got)
 	}
+	var response CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode queued edit cancellation: %v", err)
+	}
+	if got := response.CancelledBy; got == nil || got.Type != "member" || got.ID != testUserID || got.Name != handlerTestName {
+		t.Fatalf("cancelled_by = %#v, want member %s (%s)", got, handlerTestName, testUserID)
+	}
 
 	var restoreCount int
 	dbfx.QueryRow(t, `

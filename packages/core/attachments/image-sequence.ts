@@ -1,12 +1,11 @@
 /**
- * Image sequence — the ordered list of images one surface exposes to the
- * preview viewer's prev / next navigation (MUL-5752).
+ * Attachment sequence — the ordered list of attachments one surface exposes
+ * to the preview viewer's prev / next navigation (MUL-5752, MUL-7642).
  *
- * Scope is deliberately narrow: ONLY images. PDFs, video, audio, markdown,
- * HTML and text attachments never enter this sequence — mixing kinds would
- * mean defining per-kind load/keyboard/state semantics for a "next" that can
- * land on a PDF page or a playing video. A non-image attachment simply keeps
- * opening its own single-file preview.
+ * `collectAttachmentSequence` takes the inclusion rule from the caller: web /
+ * desktop page through every previewable kind (images, PDFs, video, Markdown,
+ * HTML, text), so an issue reads as one run of files. `collectImageSequence`
+ * is the images-only rule mobile's lightbox is built on.
  *
  * The sequence is built from DATA, not from the DOM: both the issue timeline
  * and the chat message list are virtualized, so a registry of mounted <img>
@@ -151,6 +150,33 @@ export function selectStandaloneAttachments(
   });
 }
 
+/**
+ * How a standalone attachment is laid out under its body (MUL-7649): images
+ * at full size, everything else — HTML included — as file cards.
+ */
+export type StandaloneAttachmentGroup = "image" | "file";
+
+export function standaloneAttachmentGroup(
+  attachment: Pick<Attachment, "content_type" | "filename">,
+): StandaloneAttachmentGroup {
+  return isImageAttachment(attachment.content_type, attachment.filename) ? "image" : "file";
+}
+
+/**
+ * The order a surface renders its standalone attachments in (MUL-7649):
+ * images first (each at full size), then everything else (a grid of file
+ * cards). Stable within each group. The sequence builder walks standalone
+ * attachments in this same order, so paging through the viewer follows the
+ * screen.
+ */
+export function orderStandaloneAttachments<T extends Pick<Attachment, "content_type" | "filename">>(
+  attachments: ReadonlyArray<T>,
+): T[] {
+  const groups: Record<StandaloneAttachmentGroup, T[]> = { image: [], file: [] };
+  for (const a of attachments) groups[standaloneAttachmentGroup(a)].push(a);
+  return [...groups.image, ...groups.file];
+}
+
 // ---------------------------------------------------------------------------
 // Inline image references
 // ---------------------------------------------------------------------------
@@ -196,18 +222,18 @@ function maskCode(content: string): string {
   return lines.join("\n");
 }
 
-interface InlineImageRef {
+interface InlineRef {
   index: number;
   url: string;
   /** Best filename hint available at the reference site. */
   filename: string;
   /**
-   * Whether the reference still has to pass the image test. Markdown `![]()`
+   * `!file[name](url)` card rather than an image reference. Markdown `![]()`
    * and `<img>` are images by construction (the renderers pass
-   * `forceKind: "image"`); a `!file[name](url)` card only renders as an image
-   * when its name/type says so.
+   * `forceKind: "image"`); a card is whatever its name/type says it is, so it
+   * still has to pass the caller's inclusion rule.
    */
-  requiresImageCheck: boolean;
+  isFileCard: boolean;
 }
 
 // `![alt](url "title")`. The URL char class stops at whitespace and `)` so a
@@ -222,18 +248,18 @@ const HTML_IMAGE_RE =
   /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s">']+))[^>]*>/gi;
 
 // `!file[name](url)` on its own line — `preprocessFileCards` turns it into a
-// fileCard div, which the renderer hands to <Attachment>; an image filename
-// there renders as an inline image, not a card.
+// fileCard div, which the renderer hands to <Attachment>: an image filename
+// renders as an inline image, anything else as a file card.
 const FILE_CARD_LINE_RE = /^[ \t]*!file\[((?:\\.|[^\]\\\n])*)\]\(([^)\s]+)\)[ \t]*$/gm;
 
 function unescapeLabel(label: string): string {
   return label.replace(/\\([[\]\\()])/g, "$1");
 }
 
-function extractInlineImageRefs(rawContent: string): InlineImageRef[] {
+function extractInlineRefs(rawContent: string): InlineRef[] {
   if (!rawContent) return [];
   const content = maskCode(rawContent);
-  const refs: InlineImageRef[] = [];
+  const refs: InlineRef[] = [];
 
   for (const m of content.matchAll(MARKDOWN_IMAGE_RE)) {
     // Two alternations: `<...>`-wrapped URL (groups 1/2) or bare (groups 3/4).
@@ -244,7 +270,7 @@ function extractInlineImageRefs(rawContent: string): InlineImageRef[] {
       index: m.index ?? 0,
       url,
       filename: unescapeLabel(alt),
-      requiresImageCheck: false,
+      isFileCard: false,
     });
   }
 
@@ -255,7 +281,7 @@ function extractInlineImageRefs(rawContent: string): InlineImageRef[] {
       index: m.index ?? 0,
       url,
       filename: "",
-      requiresImageCheck: false,
+      isFileCard: false,
     });
   }
 
@@ -266,7 +292,7 @@ function extractInlineImageRefs(rawContent: string): InlineImageRef[] {
       index: m.index ?? 0,
       url,
       filename: unescapeLabel(m[1] ?? ""),
-      requiresImageCheck: true,
+      isFileCard: true,
     });
   }
 
@@ -277,12 +303,12 @@ function extractInlineImageRefs(rawContent: string): InlineImageRef[] {
 // Sequence
 // ---------------------------------------------------------------------------
 
-/** One image the viewer can page to. */
+/** One attachment the viewer can page to. */
 export interface ImageSequenceItem {
   /**
-   * Identity used to open the sequence at the clicked image. The attachment id
-   * when the reference resolves to a record, otherwise the URL as written in
-   * the body — matching what the renderer knows at click time.
+   * Identity used to open the sequence at the clicked attachment. The
+   * attachment id when the reference resolves to a record, otherwise the URL
+   * as written in the body — matching what the renderer knows at click time.
    */
   key: string;
   /** Best-known URL. Callers holding `attachment` should prefer re-resolving. */
@@ -290,24 +316,58 @@ export interface ImageSequenceItem {
   filename: string;
   /** Present when the reference resolved to a workspace attachment record. */
   attachment?: Attachment;
+  /**
+   * The body references this as an image (`![]()` / `<img>`), so it renders
+   * as one whatever `filename` says — for such a reference `filename` is the
+   * markdown caption, which is prose with no extension to read (MUL-7518).
+   */
+  imageByConstruction: boolean;
+  /**
+   * `id` of the block the item first appeared in, when the caller named its
+   * blocks — lets a viewer say where a file came from (MUL-7649).
+   */
+  blockId?: string;
 }
 
 /** One renderable unit: an issue description, a comment, a chat message. */
 export interface ImageSequenceBlock {
+  /** Caller-chosen identity, copied onto each item as `blockId`. */
+  id?: string;
   content?: string | null;
   attachments?: ReadonlyArray<Attachment> | null;
+  /**
+   * Whether the surface renders this block's unreferenced attachments as cards
+   * under it. Defaults to true. An issue description renders none, and its
+   * `attachments` is the whole issue's list (comment uploads keep `issue_id`),
+   * so there it only resolves the body's references.
+   */
+  standalone?: boolean;
+}
+
+/** What an inclusion rule gets to decide on. */
+export interface SequenceCandidate {
+  contentType: string;
+  filename: string;
+  /** False for a body reference that did not resolve to an attachment record. */
+  hasRecord: boolean;
 }
 
 /**
- * Flatten blocks into the ordered image sequence a viewer walks.
+ * Flatten blocks into the ordered sequence a viewer walks.
  *
- * Order is render order: for each block, images inline in the body in text
- * order, then the standalone attachment cards rendered under it. Repeats of
- * the same image collapse to their first position, so the counter matches the
- * number of distinct images rather than the number of references.
+ * Order is render order: for each block, references inline in the body in
+ * text order, then the standalone attachments rendered under it, grouped as
+ * `orderStandaloneAttachments` lays them out. Repeats
+ * of the same attachment collapse to their first position, so the counter
+ * matches the number of distinct files rather than the number of references.
+ *
+ * Image references (`![]()` / `<img>`) are always kept — they render as
+ * images by construction. File cards and standalone attachments are kept
+ * when `include` accepts them.
  */
-export function collectImageSequence(
+export function collectAttachmentSequence(
   blocks: ReadonlyArray<ImageSequenceBlock | null | undefined>,
+  include: (candidate: SequenceCandidate) => boolean,
 ): ImageSequenceItem[] {
   const items: ImageSequenceItem[] = [];
   const seen = new Set<string>();
@@ -323,13 +383,17 @@ export function collectImageSequence(
     const content = block.content ?? "";
     const attachments = block.attachments ?? [];
 
-    for (const ref of extractInlineImageRefs(content)) {
+    for (const ref of extractInlineRefs(content)) {
       const attachment = matchAttachmentByURL(ref.url, attachments);
-      if (ref.requiresImageCheck) {
-        const isImage = attachment
-          ? isImageAttachment(attachment.content_type, attachment.filename)
-          : isImageAttachment("", ref.filename || ref.url);
-        if (!isImage) continue;
+      if (
+        ref.isFileCard &&
+        !include({
+          contentType: attachment?.content_type ?? "",
+          filename: attachment?.filename || ref.filename || ref.url,
+          hasRecord: !!attachment,
+        })
+      ) {
+        continue;
       }
       push({
         key: attachment?.id ?? ref.url,
@@ -340,11 +404,22 @@ export function collectImageSequence(
           ref.url,
         filename: attachment?.filename || ref.filename,
         attachment,
+        imageByConstruction: !ref.isFileCard,
+        blockId: block.id,
       });
     }
 
-    for (const attachment of selectStandaloneAttachments(content, attachments)) {
-      if (!isImageAttachment(attachment.content_type, attachment.filename)) {
+    if (block.standalone === false) continue;
+    for (const attachment of orderStandaloneAttachments(
+      selectStandaloneAttachments(content, attachments),
+    )) {
+      if (
+        !include({
+          contentType: attachment.content_type,
+          filename: attachment.filename,
+          hasRecord: true,
+        })
+      ) {
         continue;
       }
       push({
@@ -353,11 +428,22 @@ export function collectImageSequence(
           attachment.download_url || attachment.markdown_url || attachment.url,
         filename: attachment.filename,
         attachment,
+        imageByConstruction: false,
+        blockId: block.id,
       });
     }
   }
 
   return items;
+}
+
+/** The images-only sequence (mobile's lightbox). */
+export function collectImageSequence(
+  blocks: ReadonlyArray<ImageSequenceBlock | null | undefined>,
+): ImageSequenceItem[] {
+  return collectAttachmentSequence(blocks, ({ contentType, filename }) =>
+    isImageAttachment(contentType, filename),
+  );
 }
 
 /** Index of `key` in the sequence, or -1 when it is not part of it. */

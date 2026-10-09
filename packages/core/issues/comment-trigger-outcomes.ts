@@ -69,11 +69,12 @@ export function parseCommentTriggerOutcomes(raw: unknown): CommentTriggerOutcome
 }
 
 // The only success-shaped outcome statuses: the mention WAS handled (a run was
-// queued, coalesced into an existing run, or intentionally deferred). Success is
+// queued, coalesced into an existing run, intentionally deferred, or the comment
+// went into the target's running turn). Success is
 // a WHITELIST, not "anything that isn't blocked", so an unknown/future status —
 // or the empty status the schema defaults for a malformed entry — never passes
 // as success (MUL-4525; mirrors the Run now whitelist).
-const HANDLED_TRIGGER_STATUSES = new Set(["queued", "coalesced", "deferred"]);
+const HANDLED_TRIGGER_STATUSES = new Set(["queued", "coalesced", "deferred", "steered"]);
 
 // The explicit @agent / @squad mentions that did NOT clearly trigger, so the
 // "posted, but N not triggered" warning must cover them: `blocked` plus any

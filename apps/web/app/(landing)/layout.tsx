@@ -29,7 +29,7 @@ const jsonLd = {
       applicationCategory: "ProjectManagement",
       operatingSystem: "Web",
       description:
-        "Open-source project management platform that turns coding agents into real teammates.",
+        "Source-available project management platform that turns coding agents into real teammates.",
       offers: {
         "@type": "Offer",
         price: "0",

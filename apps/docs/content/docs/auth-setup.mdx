@@ -111,14 +111,14 @@ The evaluation order is:
 
 1. The email matches `ALLOWED_EMAILS` — allow.
 2. Or its domain matches `ALLOWED_EMAIL_DOMAINS` — allow.
-3. With no match, if `ALLOW_SIGNUP=false` — reject.
-4. With `ALLOW_SIGNUP=true` but any allowlist configured and no match — still reject.
-5. With no allowlist configured and `ALLOW_SIGNUP=true` — allow.
+3. With no allowlist configured and `ALLOW_SIGNUP=true` — allow.
+4. Otherwise, if the email has a pending, unexpired workspace invitation — allow.
+5. Otherwise — reject.
 
 Common configurations:
 
 ```dotenv
-# Company domain only
+# Company domain and invited users
 ALLOW_SIGNUP=false
 ALLOWED_EMAIL_DOMAINS=company.com
 
@@ -132,22 +132,29 @@ Both allowlists also work as an explicit exception list when `ALLOW_SIGNUP=false
 
 ## Invitations and signup restrictions
 
-Invitations do not automatically bypass signup restrictions:
+A pending, unexpired workspace invitation allows its email address to create an account even when `ALLOW_SIGNUP=false` or the address does not match `ALLOWED_EMAILS` or `ALLOWED_EMAIL_DOMAINS`. This exception also applies when `ALLOW_SIGNUP=true` with an allowlist configured: allowlists are not a hard boundary against invited users.
 
-- If the invitee already has a Multica account, they can sign in and accept the invitation.
-- If they do not, their email must satisfy the signup rules above.
+Existing users can continue to sign in. New users without a matching allowlist entry or open signup need a pending, unexpired invitation; missing, expired, accepted, declined, and revoked invitations do not grant signup permission. The invitation is checked when requesting a login code and again when creating the account, including Google sign-in.
 
-To invite a new member on an instance with open signup disabled, add their email to `ALLOWED_EMAILS` first. Once the account is created and the invitation accepted, you can remove the entry again.
+You do not need to add ordinary invitees to `ALLOWED_EMAILS` or restart the server. The invitation must still be accepted through the normal invitation flow to join the workspace.
+
+Revoking an invitation does not delete an account already created using it or prevent that existing account from signing in.
 
 ## Session lifetime
 
-Browser sign-ins last 30 days by default. Adjust with `AUTH_TOKEN_TTL`, which accepts a Go duration or a positive integer of seconds:
+Sessions slide. The lifetime below is an **idle** bound, not a countdown from sign-in: once a session drops below half of it, the next request re-issues it with a full lifetime again, so an account in continuous use is never signed out on a schedule. There is no absolute cap.
+
+The bound is one-sided. A session is only re-issued once it is past the halfway point, so a session last used while it still had more than half its lifetime left is not extended — the idle gap that is always survivable is half the value below, not all of it.
+
+Adjust with `AUTH_TOKEN_TTL`, which accepts a Go duration or a positive integer of seconds:
 
 ```dotenv
 AUTH_TOKEN_TTL=720h
 ```
 
-Restart the API service after changing it. The value only affects sign-in cookies and JWTs issued afterwards; it does not extend tokens that were already issued.
+The minimum is `60s`; anything shorter is clamped up to it and logs a warning at startup. Below that, the renewal cadence the server derives would fall under the floor clients apply to it, and clients would check for renewal less often than the session can survive.
+
+Restart the API service after changing it. The value applies to sessions issued or re-issued afterwards — because sessions slide, an existing session picks up the new lifetime the next time it is re-issued.
 
 ## Next steps
 

@@ -303,11 +303,6 @@ export function CreateAgentDialog({
               {t(($) => $.create_dialog.description_duplicate, { name: template.name })}
             </DialogDescription>
           )}
-          {!isDuplicate && (
-            <DialogDescription className="mt-1 text-caption">
-              {t(($) => $.create_dialog.description_create)}
-            </DialogDescription>
-          )}
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-5">

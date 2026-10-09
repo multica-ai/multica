@@ -255,85 +255,6 @@ func TestPlatformSkillRoutingTableMatchesItsReferences(t *testing.T) {
 	}
 }
 
-// TestLegacyRedirectsFollowTheDaemonsBrief pins the compatibility contract for
-// the merge (MUL-6986).
-//
-// The runtime brief is assembled by the DAEMON, so deploying a backend does not
-// rewrite an installed daemon's copy of it. A daemon released before the merge
-// still tells its agent to "read the `multica-working-on-issues` skill" — a
-// name this server no longer ships — and backend upgrades do not force a daemon
-// upgrade, so that window is open-ended. Such a daemon gets a redirect stub;
-// a current one gets nothing extra, which is what lets the stub retire itself.
-//
-// The stub must stay a signpost: if it ever grows contracts of its own they
-// will rot against references/issues.md, silently, on exactly the installs that
-// cannot be updated from here.
-func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
-	const legacy = "multica-working-on-issues"
-	svc := &TaskService{}
-
-	current := svc.BuiltinSkills("", false)
-	if named(current, legacy) {
-		t.Errorf("a current daemon still receives %q; the stub only exists for briefs that name it", legacy)
-	}
-	if !named(current, PlatformSkillName) {
-		t.Fatalf("a current daemon does not receive %q", PlatformSkillName)
-	}
-
-	old := svc.BuiltinSkills("", true)
-	if !named(old, legacy) {
-		t.Errorf("a pre-merge daemon does not receive %q, so its brief points at a skill that is not installed", legacy)
-	}
-	if !named(old, PlatformSkillName) {
-		t.Errorf("a pre-merge daemon lost %q; the redirect adds to the set, it does not replace it", PlatformSkillName)
-	}
-
-	// Mika's scoping is orthogonal to the redirect: both dimensions compose.
-	if !named(svc.BuiltinSkills(MikaSystemKey, true), "multica-onboarding") {
-		t.Errorf("Mika on a pre-merge daemon lost multica-onboarding")
-	}
-	if named(svc.BuiltinSkills("", true), "multica-onboarding") {
-		t.Errorf("the redirect path leaked multica-onboarding to an ordinary agent")
-	}
-
-	var stub AgentSkillData
-	for _, s := range old {
-		if s.Name == legacy {
-			stub = s
-		}
-	}
-	if len(stub.Files) != 0 {
-		t.Errorf("redirect stub ships %d supporting files; it should carry nothing but the new location", len(stub.Files))
-	}
-	_, body, ok := splitFrontmatter(stub.Content)
-	if !ok {
-		t.Fatal("redirect stub has no frontmatter")
-	}
-	if !strings.Contains(body, PlatformSkillName) || !strings.Contains(body, "references/issues.md") {
-		t.Errorf("redirect stub does not name where the contracts went:\n%s", body)
-	}
-	// MUL-6966: the stub used to promise "Nothing was dropped in the move".
-	// The metadata guidance since was dropped, and the daemons that reach
-	// this stub are exactly the ones whose frozen brief still sends them
-	// here for it — so the one place the claim is read is the one place it
-	// is false. It has to state the replacement rule instead.
-	if strings.Contains(body, "Nothing was dropped") {
-		t.Errorf("redirect stub still promises nothing was dropped:\n%s", body)
-	}
-	if !strings.Contains(body, "goes in the result comment") {
-		t.Errorf("redirect stub does not say where the retired state now belongs:\n%s", body)
-	}
-	if n := strings.Count(body, "\n") + 1; n > 40 {
-		t.Errorf("redirect stub is %d lines; a signpost that grows contracts will rot against the real reference", n)
-	}
-
-	// Bundle resolution must still serve it: the stub reaches the daemon as a
-	// ref like any other built-in, and the resolve path is name-blind.
-	if !named(svc.AllBuiltinSkills(), legacy) {
-		t.Errorf("the unscoped set is missing %q; bundle resolution would 404 for a pre-merge daemon", legacy)
-	}
-}
-
 // TestPlatformSkillDescriptionNamesEveryDomain is the recall guard for the
 // nine-into-one merge (MUL-6986).
 //
@@ -437,13 +358,18 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// home, so losing one here loses it everywhere.
 				"A name is not an id",
 				"`--output json` writes to stdout",
-				"`--no-start` when you are only recording",
-				"Status is a category, not a literal",
+				"categories describe lifecycle only",
+				"Custom statuses do not inherit built-in automation behavior",
 				"Comment reads stay bounded",
 				"--roots-only --summary --compact",
 				"--thread <thread-id> --tail 30",
+				// MUL-7344: the per-turn `--since` delta IS a bounded read, so
+				// the bounded-reads rule must name it rather than leave an
+				// agent choosing between two contradicting instructions.
+				"that read is the bounded scan",
 			},
 			notWant: []string{
+				"--no-start",
 				// The singular forms this replaced.
 				"open the ONE reference",
 				"there is never a reason to read all eight",
@@ -457,8 +383,15 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"open or update a PR before posting the final Multica issue comment",
 				"This is a default, not",
 				"put a routable issue key in the PR **title**",
-				"body is reference-only and hidden from the issue PR list",
-				"unless the issue should auto-advance",
+				"body links nothing",
+				// The empty-PR-list guidance drives GitHub write actions, so
+				// both halves of it are pinned: a syntax problem is repairable
+				// by editing the PR, and an integration problem is not — an
+				// agent that keeps editing burns deliveries on a no-op.
+				"editing the title re-runs the scan",
+				"stop editing the PR blind",
+				"whether the installation is bound to this workspace",
+				"redelivered once the receiving side is fixed",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",
@@ -473,7 +406,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// playbook — if they leave, the brief pointer dangles.
 				"todo starts work now, backlog parks it",
 				"`--stage <N>`",
-				"when a whole stage finishes",
+				"wakes the parent assignee when a stage",
 				"multica issue status <child-id> todo",
 				// MUL-6966 phase 1 retired the metadata write discipline
 				// along with the brief section that pointed here. What the
@@ -500,6 +433,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`value` keeps the stored ids",
 			},
 			notWant: []string{
+				"--no-start",
 				// MUL-6966 phase 1: this reference must not teach the KV bag
 				// at all — not as a section, not as a command, and not as a
 				// named key inside a warning. A blanket ban on the vocabulary
@@ -584,6 +518,10 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--roots-only --summary",
 				"--thread <thread-id> --tail 30",
 				"scan the roots first, then open the threads",
+				// MUL-5850: the reads carry --compact, matching the brief and
+				// the router's bounded-reads rule.
+				"--roots-only --summary --compact --output json",
+				"--thread <thread-id> --tail 30 --compact --output json",
 			},
 			notWant: []string{
 				// MUL-5696: no unbounded comment pull. Both shapes contradict
@@ -679,13 +617,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			if !ok {
 				t.Fatalf("platform skill does not ship %q", tc.file)
 			}
+			unwrapped := collapseSpace(content)
 			for _, want := range tc.want {
-				if !containsUnwrapped(content, want) {
+				if !containsUnwrapped(unwrapped, want) {
 					t.Errorf("%s missing %q", tc.file, want)
 				}
 			}
 			for _, forbidden := range tc.notWant {
-				if containsUnwrapped(content, forbidden) {
+				if containsUnwrapped(unwrapped, forbidden) {
 					t.Errorf("%s carries banned content %q", tc.file, forbidden)
 				}
 			}
@@ -772,7 +711,8 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 	const onboarding = "multica-onboarding"
 
-	ordinary := loadBuiltinSkills("")
+	svc := &TaskService{}
+	ordinary := svc.BuiltinSkills("")
 	if named(ordinary, onboarding) {
 		t.Errorf("an ordinary agent still receives %q", onboarding)
 	}
@@ -780,7 +720,7 @@ func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 		t.Errorf("an ordinary agent does not receive %q, which every agent needs", PlatformSkillName)
 	}
 
-	mika := loadBuiltinSkills(MikaSystemKey)
+	mika := svc.BuiltinSkills(MikaSystemKey)
 	if !named(mika, onboarding) {
 		t.Errorf("Mika does not receive %q, which only Mika can use", onboarding)
 	}
@@ -800,8 +740,12 @@ func TestOnboardingSkillIsScopedToMika(t *testing.T) {
 // wrapped. These anchors pin a claim, not a line layout — matching raw bytes
 // made every reflow of a paragraph look like a deleted contract, which trains
 // authors to fix the test instead of the text.
-func containsUnwrapped(content, want string) bool {
-	return strings.Contains(collapseSpace(content), collapseSpace(want))
+//
+// unwrapped is content already passed through collapseSpace: callers collapse
+// each file once, because re-collapsing a whole reference per anchor made this
+// the slowest test in the package.
+func containsUnwrapped(unwrapped, want string) bool {
+	return strings.Contains(unwrapped, collapseSpace(want))
 }
 
 var whitespaceRun = regexp.MustCompile(`\s+`)
@@ -819,11 +763,9 @@ func named(skills []AgentSkillData, name string) bool {
 	return false
 }
 
-// allBuiltinSkillsForTest includes the legacy redirect stubs. They are shipped
-// payload like any other built-in, so the template, frontmatter and
-// source-leak suites must hold for them as well.
+// allBuiltinSkillsForTest includes every built-in regardless of agent scope.
 func allBuiltinSkillsForTest() []AgentSkillData {
-	return append(loadBuiltinSkillDirs(func(string) bool { return true }), legacyRedirectSkills()...)
+	return (&TaskService{}).AllBuiltinSkills()
 }
 
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {

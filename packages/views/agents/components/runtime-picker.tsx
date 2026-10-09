@@ -124,7 +124,7 @@ export function RuntimePicker({
               type="button"
               disabled={disabled}
               onClick={() => handleFilterChange("mine")}
-              className={`rounded px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
+              className={`rounded-xs px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
                 filter === "mine"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -136,7 +136,7 @@ export function RuntimePicker({
               type="button"
               disabled={disabled}
               onClick={() => handleFilterChange("all")}
-              className={`rounded px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
+              className={`rounded-xs px-2 py-0.5 text-caption font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
                 filter === "all"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -179,7 +179,7 @@ export function RuntimePicker({
                     : t(($) => $.create_dialog.runtime_none)}
               </span>
               {selectedRuntime?.runtime_mode === "cloud" && (
-                <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
+                <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                 </span>
               )}
@@ -273,12 +273,12 @@ export function RuntimePicker({
                               {runtimeRowLabel(device, machine.title)}
                             </span>
                             {device.runtime_mode === "cloud" && (
-                              <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
+                              <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
                                 {t(($) => $.create_dialog.runtime_cloud_badge)}
                               </span>
                             )}
                             {disabled && (
-                              <span className="shrink-0 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
+                              <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
                                 <Lock className="h-3 w-3" />
                                 {t(($) => $.create_dialog.runtime_private_badge)}
                               </span>

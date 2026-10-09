@@ -21,6 +21,7 @@ describe("docsSlugStaticParams", () => {
       { lang: "ko", slug: ["cli", "reference"] },
       { lang: "ja", slug: ["agents"] },
       { lang: "ja", slug: ["cli", "reference"] },
+      { lang: "fr", slug: ["agents"] },
     ];
 
     expect(docsSlugStaticParams(params)).toEqual([
@@ -31,6 +32,7 @@ describe("docsSlugStaticParams", () => {
       { lang: "ko", slug: ["cli", "reference"] },
       { lang: "ja", slug: ["agents"] },
       { lang: "ja", slug: ["cli", "reference"] },
+      { lang: "fr", slug: ["agents"] },
     ]);
   });
 
@@ -38,7 +40,7 @@ describe("docsSlugStaticParams", () => {
     const params: RawParam[] = [
       { lang: "ko", slug: ["agents"] },
       { lang: "ko", slug: ["agents"] },
-      { lang: "fr", slug: ["agents"] },
+      { lang: "de", slug: ["agents"] },
     ];
 
     expect(docsSlugStaticParams(params)).toEqual([

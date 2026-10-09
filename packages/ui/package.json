@@ -24,7 +24,11 @@
     "./lib/motion": "./lib/motion.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
-    "./styles/base.css": "./styles/base.css"
+    "./styles/base.css": "./styles/base.css",
+    "./docs/button.md": "./docs/button.md",
+    "./docs/button.zh.md": "./docs/button.zh.md",
+    "./docs/dialog.md": "./docs/dialog.md",
+    "./docs/dialog.zh.md": "./docs/dialog.zh.md"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
@@ -68,6 +72,7 @@
     "@types/linkify-it": "^5.0.0",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "esbuild": "^0.25.12",
     "typescript": "catalog:"
   }
 }

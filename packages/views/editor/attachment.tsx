@@ -8,8 +8,12 @@
  *
  *   - image  → ImageAttachmentView (figure + hover toolbar + lightbox via
  *              the shared AttachmentPreviewModal)
- *   - html   → HtmlAttachmentPreview (inline iframe + hover toolbar)
- *   - others → AttachmentCard (icon + filename + Eye/Download row)
+ *   - others → AttachmentCard (icon + filename + Eye/Download row), or
+ *              AttachmentFileCard in the card layout
+ *
+ * An HTML file is a file like any other (MUL-7649): it shows as a card and
+ * opens in the viewer. HTML meant to be read in place is written as a
+ * ```html block in the body, which renders as a dynamic block.
  *
  * Call sites:
  *   - extensions/file-card.tsx FileCardView (Tiptap NodeView)
@@ -29,6 +33,7 @@ import {
   Maximize2,
   Trash2,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -38,15 +43,14 @@ import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
-import { useImageSequencePreview } from "./image-sequence-context";
+import { usePreviewSequence } from "./preview-sequence-context";
 import {
   isObjectURL,
-  useResignedInlineMediaURL,
+  useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
-import { AttachmentCard } from "./attachment-card";
-import { HtmlAttachmentPreview } from "./html-attachment-preview";
-import { getPreviewKind, type PreviewKind } from "./utils/preview";
+import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
 
 // ---------------------------------------------------------------------------
@@ -95,6 +99,14 @@ export interface AttachmentProps {
   selected?: boolean;
   /** Editor hint — wired to Tiptap deleteNode(). */
   onDelete?: () => void;
+  /**
+   * "block" (default) renders each kind at full width, as a body renders it.
+   * "card" is the form a list of standalone attachments lays out: an image
+   * keeps its full size up to a height cap, any other file becomes a card.
+   */
+  layout?: "block" | "card";
+  /** Card layout only — rendered after the file name, e.g. a version badge. */
+  badge?: ReactNode;
   className?: string;
 }
 
@@ -316,6 +328,8 @@ export function Attachment({
   editable,
   selected,
   onDelete,
+  layout = "block",
+  badge,
   className,
 }: AttachmentProps) {
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
@@ -323,7 +337,7 @@ export function Attachment({
   const cdnSigned = useConfigStore((s) => s.cdnSigned);
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
-  const sequence = useImageSequencePreview();
+  const sequence = usePreviewSequence();
 
   const state = normalize(attachment, resolveAttachment, cdnDomain, cdnSigned);
   const forceKind =
@@ -339,7 +353,7 @@ export function Attachment({
   // on deployments that have no signed URL to give — to an object URL built
   // from the authenticated byte fetch. Only the image branch renders a native
   // resource load, so only it opts into that byte fetch.
-  const mediaUrl = useResignedInlineMediaURL(
+  const { url: mediaUrl } = useResignedInlineMedia(
     state.attachmentId,
     state.url,
     kind === "image",
@@ -348,18 +362,18 @@ export function Attachment({
   // to another surface keeps the durable pick instead.
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
 
-  // Identity this image has in the surrounding surface's sequence: the
+  // Identity this attachment has in the surrounding surface's sequence: the
   // attachment id once the URL resolves to a record, otherwise the URL exactly
-  // as written in the body — the same pair `collectImageSequence` keys on.
+  // as written in the body — the same pair `collectAttachmentSequence` keys on.
   const sequenceKey =
     state.attachmentId ?? (attachment.kind === "url" ? attachment.url : "");
 
   const openPreview = () => {
-    // Inside an issue / chat, an image opens the surface's shared viewer at
-    // its real position so the reader can page through the rest. Anything the
+    // Inside an issue / chat, a file opens the surface's shared viewer at its
+    // real position so the reader can page through the rest. Anything the
     // sequence doesn't know — a composer's in-flight upload, a surface with no
-    // provider — falls through to the single-image preview below.
-    if (kind === "image" && sequence.openAt(sequenceKey)) return;
+    // provider — falls through to the single-file preview below.
+    if (kind && sequence.openAt(sequenceKey)) return;
     if (state.record) {
       preview.tryOpen({
         kind: "full",
@@ -375,6 +389,12 @@ export function Attachment({
         kind: "url",
         url: mediaUrl,
         filename: state.filename,
+        // This dispatcher has already decided what the slot is — from the
+        // call site's `forceKind`, or from a content-type the modal's
+        // URL-only source doesn't carry. Hand that answer over instead of
+        // letting the modal re-guess from `filename`, which for a body image
+        // is the markdown caption (MUL-7518).
+        forceKind: kind ?? undefined,
       });
     }
   };
@@ -402,19 +422,25 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
-          className={className}
+          className={cn(layout === "card" && "image-standalone", className)}
         />
         {preview.modal}
       </>
     );
   }
 
-  if (kind === "html" && state.attachmentId && !state.uploading) {
+  if (layout === "card") {
     return (
       <>
-        <HtmlAttachmentPreview
-          attachmentId={state.attachmentId}
+        <AttachmentFileCard
           filename={state.filename}
+          contentType={state.contentType}
+          sizeBytes={state.record?.size_bytes}
+          // Same gate as the row's Eye button: text kinds need the record.
+          canPreview={!!shareUrl && canOpenPreview(kind, !!state.attachmentId)}
+          canDownload={!!shareUrl || !!state.attachmentId}
+          uploading={state.uploading}
+          badge={badge}
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}

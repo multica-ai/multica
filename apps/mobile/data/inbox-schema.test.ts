@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InboxListSchema } from "./schemas";
+import { InboxListSchema, InboxUnreadSummarySchema } from "./schemas";
 
 /**
  * Tests for mobile's CLIENT-SIDE parsing of GET /api/inbox.
@@ -92,5 +92,54 @@ describe("inbox list schema", () => {
 
     const parsed = InboxListSchema.safeParse([future]);
     expect(parsed.success).toBe(true);
+  });
+});
+
+/**
+ * GET /api/inbox/unread-summary — the source of the inbox tab badge.
+ *
+ * Blast radius differs from the list above: `getInboxUnreadSummary` falls back
+ * to an empty array, which reads as "nothing unread" and simply hides the
+ * badge. A wrong number would be worse than no number, so the schema stays
+ * strict about the shape and lenient only about extra fields.
+ */
+describe("inbox unread summary schema", () => {
+  it("parses the documented server payload", () => {
+    const parsed = InboxUnreadSummarySchema.safeParse([
+      { workspace_id: "ws-1", count: 3 },
+      { workspace_id: "ws-2", count: 1 },
+    ]);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data[1]?.count).toBe(1);
+  });
+
+  it("passes through a field this client does not know yet", () => {
+    const parsed = InboxUnreadSummarySchema.safeParse([
+      { workspace_id: "ws-1", count: 3, unread_mentions: 2 },
+    ]);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data[0]?.count).toBe(3);
+  });
+
+  it("reads a non-numeric count as zero rather than failing the list", () => {
+    // One malformed row must not blank every other workspace's count.
+    const parsed = InboxUnreadSummarySchema.safeParse([
+      { workspace_id: "ws-1", count: "many" },
+      { workspace_id: "ws-2", count: 5 },
+    ]);
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data[0]?.count).toBe(0);
+    expect(parsed.success && parsed.data[1]?.count).toBe(5);
+  });
+
+  it("rejects a row with no workspace id", () => {
+    // Without an id the entry can never be matched to a workspace, so it would
+    // silently contribute nothing — fail loudly into the empty fallback.
+    expect(
+      InboxUnreadSummarySchema.safeParse([{ count: 3 }]).success,
+    ).toBe(false);
   });
 });

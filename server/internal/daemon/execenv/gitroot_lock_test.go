@@ -100,6 +100,7 @@ func startLockHolder(t *testing.T, repo string) (release func()) {
 // the child still held the repository, which is the state that let two
 // prepares run `git stash create` on one index.
 func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	release := startLockHolder(t, repo)
 
@@ -137,6 +138,7 @@ func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
 // git dir gives two resources bound to two linked worktrees two different
 // locks while they still race on that shared state.
 func TestGitRootLockPathIsRepoWide(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	path, err := gitRootLockPath(repo)
 	if err != nil {
@@ -179,10 +181,24 @@ func TestGitRootLockPathIsRepoWide(t *testing.T) {
 func TestGitRootLockTimeoutDoesNotAdviseDeletingTheLock(t *testing.T) {
 	repo := newTestRepo(t)
 	original := gitRootLockWait
-	gitRootLockWait = 200 * time.Millisecond
+	gitRootLockWait = 50 * time.Millisecond
 	t.Cleanup(func() { gitRootLockWait = original })
 
-	startLockHolder(t, repo)
+	// Who holds the lock does not matter to the message, so it is held from
+	// here: a second open file description is excluded exactly like another
+	// process. TestLockGitRootExcludesOtherProcesses covers the process boundary.
+	path, err := gitRootLockPath(repo)
+	if err != nil {
+		t.Fatalf("gitRootLockPath: %v", err)
+	}
+	holder, err := openLockFile(path)
+	if err != nil {
+		t.Fatalf("open lock file: %v", err)
+	}
+	defer holder.Close()
+	if ok, err := lockFileExclusiveNonBlocking(holder); !ok || err != nil {
+		t.Fatalf("hold the repository lock: ok=%v err=%v", ok, err)
+	}
 
 	unlock, err := lockGitRoot(repo, worktreeTestLogger())
 	if unlock != nil {
@@ -212,6 +228,7 @@ func TestGitRootLockTimeoutDoesNotAdviseDeletingTheLock(t *testing.T) {
 // property, not for the retry that used to work around the absence of it
 // (#7434).
 func TestCaptureUserSnapshotIgnoresTheRepositoryIndexLock(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "edited by the user\n")
 	writeFile(t, filepath.Join(repo, "brand-new.txt"), "untracked\n")
@@ -242,6 +259,7 @@ func TestCaptureUserSnapshotIgnoresTheRepositoryIndexLock(t *testing.T) {
 // Every failure through runGitStdout used to arrive as "exit status 1": stderr
 // was captured by cmd.Output() and then dropped on the floor.
 func TestRunGitSurfacesStderrInTheError(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	_, err := runGitTrimmed(repo, "rev-parse", "--verify", "definitely-not-a-ref")
 	if err == nil {
@@ -256,6 +274,7 @@ func TestRunGitSurfacesStderrInTheError(t *testing.T) {
 // its own helper process. Both must get a worktree; before the cross-process
 // lock one of them routinely died in `git stash create`.
 func TestConcurrentIsolatedPreparesOnOneRepo(t *testing.T) {
+	t.Parallel()
 	repo := newTestRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "user work in progress\n")
 	writeFile(t, filepath.Join(repo, "untracked.txt"), "new file\n")

@@ -416,7 +416,6 @@ describe("RuntimeLocalSkillImportPanel", () => {
       target: { value: "terraform" },
     });
 
-    expect(screen.getByText("No matching local skills")).toBeInTheDocument();
     expect(
       screen.getByText('No local skills match "terraform".'),
     ).toBeInTheDocument();

@@ -51,10 +51,15 @@ echo $! > "` + pidFile + `"
 echo "` + output + `"
 exit 0
 `
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write fake cli: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	return script
+}
+
+// forkingCLIAnswered is a completeness rule for writeForkingCLI's answer. Tests
+// about the reap rather than the drain use it so the call returns once the
+// leader exits, instead of waiting collectDrainGrace on the pipe-holding helper.
+func forkingCLIAnswered(out []byte) bool {
+	return strings.Contains(string(out), "fake-cli 1.2.3")
 }
 
 // TestCheckOpenclawVersionReapsPipeHoldingGrandchild covers the task-start
@@ -63,6 +68,8 @@ exit 0
 // Session, so a pipe-holding descendant here would bypass both the provider
 // timeout and the daemon's inactivity watchdog.
 func TestCheckOpenclawVersionReapsPipeHoldingGrandchild(t *testing.T) {
+	t.Parallel()
+
 	pidFile := filepath.Join(t.TempDir(), "helper.pid")
 	cli := writeForkingCLIOutput(t, pidFile, "OpenClaw 2026.7.1")
 
@@ -139,12 +146,19 @@ func waitForProcessGone(pid int, within time.Duration) bool {
 	return false
 }
 
-// TestRunCollectReturnsDespitePipeHoldingGrandchild pins guarantee #1: the call
-// completes even though a helper still holds stdout. With any buffer-based form —
-// cmd.Output(), or launch.go's outputOwned — this blocks until the helper's
-// `sleep 300` finishes, or until probeWaitDelay converts it into
-// exec.ErrWaitDelay.
-func TestRunCollectReturnsDespitePipeHoldingGrandchild(t *testing.T) {
+// TestRunCollectReapsForkedHelper pins guarantees #1 and #2 on one call.
+//
+// #1: the call completes even though a helper still holds stdout. With any
+// buffer-based form — cmd.Output(), or launch.go's outputOwned — this blocks
+// until the helper's `sleep 300` finishes, or until probeWaitDelay converts it
+// into exec.ErrWaitDelay.
+//
+// #2: the helper is killed before RunCollect returns, so invoking a CLI on a
+// timer cannot accumulate orphans. This is the assertion that would have caught
+// the production leak.
+func TestRunCollectReapsForkedHelper(t *testing.T) {
+	t.Parallel()
+
 	pidFile := filepath.Join(t.TempDir(), "helper.pid")
 	cli := writeForkingCLI(t, pidFile)
 
@@ -163,18 +177,6 @@ func TestRunCollectReturnsDespitePipeHoldingGrandchild(t *testing.T) {
 		t.Errorf("RunCollect took %v — it waited on the helper instead of "+
 			"returning once the direct child exited", elapsed)
 	}
-}
-
-// TestRunCollectReapsForkedHelper pins guarantee #2: the helper is killed
-// before RunCollect returns, so invoking a CLI on a timer cannot accumulate
-// orphans. This is the assertion that would have caught the production leak.
-func TestRunCollectReapsForkedHelper(t *testing.T) {
-	pidFile := filepath.Join(t.TempDir(), "helper.pid")
-	cli := writeForkingCLI(t, pidFile)
-
-	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli); err != nil {
-		t.Fatalf("RunCollect returned an error: %v", err)
-	}
 
 	pid := waitForPidFile(t, pidFile)
 	if !waitForProcessGone(pid, 5*time.Second) {
@@ -191,9 +193,7 @@ func TestRunCollectSurfacesStderrAndExitStatus(t *testing.T) {
 	dir := t.TempDir()
 	cli := filepath.Join(dir, "failing-cli")
 	body := "#!/bin/sh\necho 'boom' >&2\nexit 7\n"
-	if err := os.WriteFile(cli, []byte(body), 0o755); err != nil {
-		t.Fatalf("write cli: %v", err)
-	}
+	writeTestExecutable(t, cli, []byte(body))
 
 	_, stderr, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli)
 	if err == nil {
@@ -236,7 +236,7 @@ func TestRunCollectRetriesTheTreeKill(t *testing.T) {
 	}
 	t.Cleanup(func() { reapKill = original })
 
-	out, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli)
+	out, _, _, err := RunCollectQuiet(context.Background(), nil, 0, forkingCLIAnswered, cli)
 	if err != nil {
 		t.Fatalf("RunCollect returned an error: %v", err)
 	}
@@ -276,9 +276,11 @@ func TestRunCollectRespectsProcessGroupPrecondition(t *testing.T) {
 // hanging CLI is the shape that would otherwise block for as long as the CLI
 // felt like running, with the ctx argument doing nothing at all.
 func TestRunCollectCmdHonorsContextWithoutACommandContext(t *testing.T) {
+	t.Parallel()
+
 	cli := writeCLI(t, "#!/bin/sh\nsleep 300\n")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 
 	start := time.Now()
@@ -297,6 +299,8 @@ func TestRunCollectCmdHonorsContextWithoutACommandContext(t *testing.T) {
 // detection runs inside the daemon's blocking preflight for every registered
 // provider, and it was one of the paths leaking `openclaw-config`.
 func TestDetectCLIVersionReapsForkedHelper(t *testing.T) {
+	t.Parallel()
+
 	pidFile := filepath.Join(t.TempDir(), "helper.pid")
 	cli := writeForkingCLI(t, pidFile)
 
@@ -350,15 +354,14 @@ func TestRunCollectLeavesNoGoroutines(t *testing.T) {
 	cli := writeForkingCLI(t, pidFile)
 
 	// Warm up so lazily-created runtime goroutines exist before the baseline.
-	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli); err != nil {
+	warmupCLI := writeCLI(t, "#!/bin/sh\nprintf '{}\\n'\n")
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, warmupCLI); err != nil {
 		t.Fatalf("warmup: %v", err)
 	}
 	before := runtime.NumGoroutine()
 
-	for i := 0; i < 2; i++ {
-		if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, nil, cli); err != nil {
-			t.Fatalf("run %d: %v", i, err)
-		}
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, forkingCLIAnswered, cli); err != nil {
+		t.Fatalf("run: %v", err)
 	}
 	assertNoGoroutineGrowth(t, before)
 }
@@ -369,16 +372,16 @@ func TestRunCollectLeavesNoGoroutines(t *testing.T) {
 // reap is what is being verified.
 func TestRunCollectQuietLeavesNoGoroutines(t *testing.T) {
 	cli := writePrintThenHangCLI(t, quietTestJSON, "")
+	// Only the idle-path return matters here, not how long it takes to fire.
+	const idleGrace = 50 * time.Millisecond
 
-	if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli); err != nil {
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, idleGrace, JSONOutputComplete, cli); err != nil {
 		t.Fatalf("warmup: %v", err)
 	}
 	before := runtime.NumGoroutine()
 
-	for i := 0; i < 2; i++ {
-		if _, _, _, err := RunCollectQuiet(context.Background(), nil, 0, JSONOutputComplete, cli); err != nil {
-			t.Fatalf("run %d: %v", i, err)
-		}
+	if _, _, _, err := RunCollectQuiet(context.Background(), nil, idleGrace, JSONOutputComplete, cli); err != nil {
+		t.Fatalf("run: %v", err)
 	}
 	assertNoGoroutineGrowth(t, before)
 }

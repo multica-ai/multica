@@ -118,7 +118,7 @@ function IssueHoverCardBody({
   fallbackLabel?: string;
 }) {
   const wsId = useWorkspaceId();
-  const { colorOf: statusColorOf } = useIssueStatuses(wsId);
+  const { colorOf: statusColorOf, iconOf: statusIconOf } = useIssueStatuses(wsId);
   const resolveStatusLabel = useStatusLabel(wsId);
   const detail = useQuery(issueDetailOptions(wsId, issueId));
   // One workspace-wide progress snapshot shared with the issues list and issue
@@ -191,6 +191,7 @@ function IssueHoverCardBody({
             status={issue.status}
             category={issueStatusCategory(issue) ?? undefined}
             color={statusColorOf(issue.status)}
+            icon={statusIconOf(issue.status)}
             className="h-3.5 w-3.5 shrink-0"
           />
         </span>

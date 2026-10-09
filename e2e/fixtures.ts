@@ -51,6 +51,7 @@ export class TestApiClient {
   private workspaceId: string | null = null;
   private email: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdProjectIds: string[] = [];
   private seededIssueIds: string[] = [];
 
   async login(email: string, name: string) {
@@ -184,6 +185,35 @@ export class TestApiClient {
     }
   }
 
+  /** Create a project and register it for cleanup. */
+  async createProject(title: string, opts?: Record<string, unknown>) {
+    const res = await this.authedFetch("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ title, ...opts }),
+    });
+    if (!res.ok) {
+      throw new Error(`create project failed: ${res.status} ${await res.text()}`);
+    }
+    const project = await res.json();
+    this.createdProjectIds.push(project.id);
+    return project as { id: string; title: string; status: string };
+  }
+
+  async updateProject(id: string, updates: Record<string, unknown>) {
+    const res = await this.authedFetch(`/api/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      throw new Error(`update project failed: ${res.status} ${await res.text()}`);
+    }
+    return res.json();
+  }
+
+  async deleteProject(id: string) {
+    await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
   async createIssue(title: string, opts?: Record<string, unknown>) {
     const res = await this.authedFetch("/api/issues", {
       method: "POST",
@@ -305,6 +335,62 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async createComment(issueId: string, content: string) {
+    const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) {
+      throw new Error(`create comment failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as { id: string };
+  }
+
+  /** Adds an existing user to this client's workspace and returns the member id. */
+  async addMemberByEmail(email: string, role: "admin" | "member" = "member"): Promise<string> {
+    if (!this.workspaceId) throw new Error("Cannot add a member before a workspace is selected");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const result = await client.query(
+        `INSERT INTO member (workspace_id, user_id, role)
+         SELECT $1, id, $3 FROM "user" WHERE email = $2
+         RETURNING id`,
+        [this.workspaceId, email, role],
+      );
+      if (result.rowCount !== 1) throw new Error(`No user with email ${email}`);
+      return result.rows[0].id as string;
+    } finally {
+      await client.end();
+    }
+  }
+
+  async removeMember(memberId: string) {
+    const res = await this.authedFetch(`/api/workspaces/${this.workspaceId}/members/${memberId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      throw new Error(`remove member failed: ${res.status} ${await res.text()}`);
+    }
+  }
+
+  /** Deletes this client's workspace; only for workspaces a test created. */
+  async deleteWorkspace() {
+    if (!this.workspaceId) return;
+    await this.authedFetch(`/api/workspaces/${this.workspaceId}`, { method: "DELETE" });
+  }
+
+  /** Server-side issue search, for comparing against what the UI shows. */
+  async searchIssues(q: string, opts: { includeClosed?: boolean; limit?: number } = {}) {
+    const params = new URLSearchParams({ q, limit: String(opts.limit ?? 20) });
+    if (opts.includeClosed) params.set("include_closed", "true");
+    const res = await this.authedFetch(`/api/issues/search?${params}`);
+    if (!res.ok) {
+      throw new Error(`search issues failed: ${res.status} ${await res.text()}`);
+    }
+    return (await res.json()) as { issues: { id: string; identifier: string; title: string }[] };
+  }
+
   async updateIssue(id: string, updates: Record<string, unknown>) {
     const res = await this.authedFetch(`/api/issues/${id}`, {
       method: "PUT",
@@ -339,6 +425,16 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+    // Projects last: an issue delete leaves no project reference behind, and
+    // dropping the project first would strand the issues in the list.
+    for (const id of this.createdProjectIds) {
+      try {
+        await this.deleteProject(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdProjectIds = [];
   }
 
   getToken() {

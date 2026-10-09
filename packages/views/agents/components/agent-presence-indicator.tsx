@@ -39,7 +39,7 @@ export function AgentPresenceIndicator({
     return compact ? (
       <Skeleton className="h-1.5 w-1.5 rounded-full" />
     ) : (
-      <Skeleton className="h-3 w-24 rounded" />
+      <Skeleton className="h-3 w-24 rounded-xs" />
     );
   }
 

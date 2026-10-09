@@ -1,0 +1,169 @@
+{
+  "tabs": {
+    "title": "聊天"
+  },
+  "composer": {
+    "no_agent": "未选择智能体",
+    "revoked": "你已无法运行该智能体",
+    "no_agents": "该工作区没有智能体",
+    "archived": "该聊天已归档",
+    "runtime_required": "智能体需要运行时",
+    "replying_to": "回复 {{name}}",
+    "cancel_reply": "取消回复",
+    "mention": "提及成员或任务",
+    "upload_image": "上传图片",
+    "upload_file": "上传文件",
+    "send": "发送",
+    "default_placeholder": "输入消息...",
+    "unavailable": "聊天不可用",
+    "stop_agent": "停止智能体",
+    "file_too_large_title": "文件过大",
+    "file_too_large_message": "文件必须小于 100 MB。",
+    "working": "智能体正在处理...",
+    "message": "消息..."
+  },
+  "empty": {
+    "greeting": "你好，我是 {{name}}",
+    "no_agent_title": "与智能体聊天",
+    "examples": "示例会填充输入框，不会直接发送。",
+    "starter_help_label": "你能帮我做什么？",
+    "starter_help_prompt": "你最擅长帮我做什么？请简要概述。",
+    "starter_task_label": "建议第一个任务",
+    "starter_task_prompt": "建议三个适合委托给你的有用任务。",
+    "starter_action_label": "推荐一个操作",
+    "starter_action_prompt": "了解我的工作区后，推荐一个有用的首要操作。"
+  },
+  "picker": {
+    "title": "选择智能体",
+    "placeholder": "搜索智能体...",
+    "empty": "没有可用智能体。",
+    "needs_runtime": "需要运行时"
+  },
+  "banners": {
+    "no_agent": "没有可用智能体",
+    "runtime_required": "该智能体需要先配置运行时才能运行。",
+    "offline": "{{name}} 已离线。消息会等待其运行时恢复后发送。",
+    "no_agent_action": "在 \"更多 → 智能体\" 中添加或启用智能体即可开始聊天。",
+    "offline_unstable": "{{name}} 可能刚断开连接，你的消息会先排队。",
+    "runtime_required_name": "{{name}} 需要先配置运行时才能运行。请在网页端或桌面端绑定。"
+  },
+  "status": {
+    "offline": "离线",
+    "reconnecting": "重新连接中",
+    "queued": "排队中",
+    "starting": "启动中",
+    "thinking": "思考中",
+    "typing": "输入中",
+    "working": "处理中",
+    "running_command": "正在运行命令",
+    "reading_files": "正在读取文件",
+    "searching_code": "正在搜索代码",
+    "making_edits": "正在修改",
+    "searching_web": "正在搜索网页",
+    "retrying": "重试中"
+  },
+  "alerts": {
+    "no_permission_title": "无权运行该智能体",
+    "no_permission_message": "你已无权运行该智能体，消息未发送。请联系该智能体的所有者申请权限。",
+    "runtime_title": "需要运行时",
+    "runtime_message": "发送消息前，请先在网页端或桌面端为该智能体绑定运行时。",
+    "not_sent": "消息未发送",
+    "delete_title": "删除这个聊天？",
+    "delete_confirm": "删除"
+  },
+  "failure": {
+    "invocation_not_allowed": "你已无权运行该智能体，消息未发送。",
+    "agent_runtime_required": "发送消息前，请先为该智能体绑定运行时。",
+    "runtime_access_denied": "消息未发送：{{detail}}",
+    "default": "消息无法发送，请重试。",
+    "runtime_access_recovery": "该智能体无法在其私有运行时上运行。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。"
+  },
+  "a11y": {
+    "suggested_followups": "建议的后续操作",
+    "show_error_details": "显示错误详情",
+    "no_agents": "没有可用智能体",
+    "session_actions": "聊天会话操作",
+    "new_chat": "新建聊天",
+    "sessions_agent_picker": "聊天会话和智能体选择器"
+  },
+  "title": {
+    "fallback": "聊天",
+    "this_agent": "该智能体"
+  },
+  "elapsed": {
+    "replied": "用时 {{time}} 回复",
+    "finished": "用时 {{time}} 完成",
+    "failed": "运行 {{time}} 后失败"
+  },
+  "details": {
+    "show": "显示详情"
+  },
+  "sessions": {
+    "title": "聊天",
+    "empty": "还没有聊天。",
+    "archived": "已归档",
+    "new_chat": "新建聊天"
+  },
+  "picker.title": "选择智能体",
+  "no_response": "本轮已结束，智能体没有返回文字回复。",
+  "failure_reason": {
+    "default": "运行失败",
+    "queued_expired": "排队已过期",
+    "runtime_offline": "守护进程离线",
+    "runtime_reconnect_timeout": "守护进程未及时重新连接",
+    "runtime_recovery": "守护进程已重启",
+    "timeout": "运行超时",
+    "iteration_limit": "达到迭代次数上限",
+    "agent_blocked": "等待人工输入",
+    "api_invalid_request": "模型 API 拒绝了请求",
+    "skill_bundle_unavailable": "无法下载智能体的 skill",
+    "runtime_cli_timeout": "本地运行时 CLI 超时",
+    "environment_prepare_failed": "无法准备执行环境",
+    "runtime_access_denied": "该智能体无法在其私有运行时上运行，暂时无法回复。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",
+    "invalid_task_identity": "运行身份不匹配",
+    "agent_error_provider_auth_or_access": "提供商认证失败",
+    "agent_error_provider_quota_limit": "提供商配额已用尽",
+    "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",
+    "agent_error_provider_server_error": "提供商服务器出错",
+    "agent_error_provider_network": "连接提供商时网络出错",
+    "agent_error_process_failure": "智能体进程崩溃",
+    "agent_error_empty_or_unparseable_output": "智能体未返回可用输出",
+    "agent_error_agent_timeout": "智能体运行超时",
+    "agent_error_context_overflow": "上下文窗口已超限",
+    "agent_error_missing_config": "缺少 API 密钥或配置",
+    "agent_error_model_not_found_or_unavailable": "模型不可用",
+    "agent_error_runtime_version_unsupported": "运行器 CLI 版本不受支持",
+    "agent_error_runtime_missing_executable": "未安装运行器 CLI",
+    "agent_error_unknown": "智能体执行出错",
+    "agent_fallback_message": "智能体返回了兜底消息",
+    "codex_resume_oversized": "会话过大，无法恢复",
+    "idle_watchdog": "智能体长时间无活动，运行已停止",
+    "local_directory_error": "本地目录出错",
+    "cancelled": "系统已取消",
+    "agent_error": "智能体执行出错",
+    "codex_semantic_inactivity": "Codex 长时间没有语义进展",
+    "manual": "用户取消",
+    "user_cancelled": "用户取消"
+  },
+  "timeline": {
+    "steps_count_other": "{{count}} 个步骤",
+    "tool": "工具",
+    "tool_result_named": "{{tool}} 结果：",
+    "tool_result_unnamed": "结果：",
+    "truncated": "…（已截断）",
+    "error": "错误"
+  },
+  "empty.starter_help_prompt": "你最擅长帮我做什么？请简要概述。",
+  "status.reconnecting": "重新连接中",
+  "status.running_command": "正在运行命令",
+  "status.reading_files": "正在读取文件",
+  "status.searching_code": "正在搜索代码",
+  "status.making_edits": "正在修改",
+  "status.searching_web": "正在搜索网页",
+  "elapsed.replied": "用时 {{time}} 回复",
+  "elapsed.finished": "用时 {{time}} 完成",
+  "elapsed.failed": "运行 {{time}} 后失败",
+  "alerts.no_permission_message": "你已无权运行该智能体，消息未发送。请联系该智能体的所有者申请权限。",
+  "failure.runtime_access_denied": "消息未发送：{{detail}}",
+  "banners.no_agent_action": "在 \"更多 → 智能体\" 中添加或启用智能体即可开始聊天。"
+}

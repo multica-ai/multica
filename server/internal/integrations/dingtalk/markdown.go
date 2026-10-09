@@ -1,20 +1,24 @@
 package dingtalk
 
 import (
+	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
-// DingTalk's robot send APIs (oToMessages.batchSend / groupMessages.send) hard-
-// reject a sampleMarkdown body over ~20000 bytes and drop the whole message, so
-// we chunk well under that. The budget is measured in UTF-8 BYTES, not runes,
-// because the limit is on the encoded payload. A code fence open at a chunk
-// boundary is closed at the end of the chunk and reopened at the start of the
-// next, so neither half renders as broken markdown.
+// DingTalk documents a 15000-byte msgParam limit for groupMessages.send:
+// https://open.dingtalk.com/document/orgapp/the-robot-sends-a-group-message
+// The send path measures serialized title + text, including JSON escapes.
+// Use the same conservative budget for private messages.
 
 const (
 	// markdownByteBudget bounds one chunk's body in UTF-8 bytes.
-	markdownByteBudget = 16000
+	markdownByteBudget        = 14000
+	markdownPayloadByteBudget = 15000
+	// Only the source-user preview displayed above a Bot reply is truncated.
+	// This is a presentation policy, not a provider title limit.
+	quotePreviewByteBudget = 256
 	// A split inside a code block appends "\n```" to make the emitted chunk
 	// self-contained. Keep this space out of the content budget so the final
 	// wire body, not just the pre-rendered slice, stays under the hard limit.
@@ -24,29 +28,91 @@ const (
 	// prefix so an adversarially long info string cannot consume the entire
 	// piece budget (or make it negative) when the next code line is split.
 	maxMarkdownFenceInfoBytes = 256
-	// defaultMarkdownTitle is the chat-list notification preview used when the
-	// body carries no leading heading. DingTalk shows the title only in the push
-	// preview, not in the message body.
+	// defaultMarkdownTitle is used when an answer chunk contains only whitespace.
 	defaultMarkdownTitle = "Multica has replied."
 )
 
-// markdownTitle derives the sampleMarkdown title (the notification preview) from
-// the body's first ATX heading, falling back to a default. The heading is left
-// in the body; only its leading hashes are stripped for the preview.
+// DingTalk's text quote callback carries the selected message's title.
+// Preserve the entire answer chunk. The sender budgets serialized title + text.
 func markdownTitle(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			heading := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
-			if heading != "" {
-				return heading
-			}
-		}
-		if trimmed != "" {
+	if strings.TrimSpace(body) == "" {
+		return defaultMarkdownTitle
+	}
+	return body
+}
+
+// quotePreview is only the source-user excerpt displayed in an outbound reply.
+// It never bounds the answer title or the inbound selected context.
+func quotePreview(body string) string {
+	body = strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
+	if body == "" {
+		return ""
+	}
+	return boundedPreview(body)
+}
+
+func boundedPreview(body string) string {
+	const suffix = "\n..."
+	if len(body) <= quotePreviewByteBudget {
+		return body
+	}
+	limit := quotePreviewByteBudget - len(suffix)
+	for !utf8.RuneStart(body[limit]) {
+		limit--
+	}
+	// A partial web address can link to a different resource. Omit a URL that
+	// straddles the preview boundary rather than publishing a truncated target.
+	for _, span := range webURLSpans(body) {
+		if span[0] < limit && span[1] > limit {
+			limit = span[0]
 			break
 		}
 	}
-	return defaultMarkdownTitle
+	prefix := strings.TrimRight(body[:limit], " \t\r\n")
+	if prefix == "" {
+		return "..."
+	}
+	return prefix + suffix
+}
+
+// These are source spans, not parsed/re-serialized URLs. Preserve the original
+// spelling, encoding, query and fragment when DingTalk auto-links quote text.
+var webURLStart = regexp.MustCompile(`(?i)(?:https?://|www\.)`)
+
+func webURLSpans(body string) [][]int {
+	var spans [][]int
+	for start := 0; start < len(body); {
+		span := webURLStart.FindStringIndex(body[start:])
+		if span == nil {
+			break
+		}
+		span[0] += start
+		contentStart := start + span[1]
+		span[1] = len(body)
+		var closing []rune
+	urlToken:
+		for offset, r := range body[contentStart:] {
+			if unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune("<>\"\\`", r) {
+				span[1] = contentStart + offset
+				break
+			}
+			switch r {
+			case '(':
+				closing = append(closing, ')')
+			case '[':
+				closing = append(closing, ']')
+			case ')', ']':
+				if len(closing) == 0 || closing[len(closing)-1] != r {
+					span[1] = contentStart + offset
+					break urlToken
+				}
+				closing = closing[:len(closing)-1]
+			}
+		}
+		spans = append(spans, span)
+		start = span[1]
+	}
+	return spans
 }
 
 // chunkMarkdown splits body into pieces each at most markdownByteBudget bytes,
@@ -55,7 +121,20 @@ func markdownTitle(body string) string {
 // chunk is self-contained markdown. A single line longer than the budget is
 // hard-split on a byte boundary that respects UTF-8 rune edges.
 func chunkMarkdown(body string) []string {
-	if len(body) <= markdownByteBudget {
+	return chunkMarkdownWithBudget(body, markdownByteBudget)
+}
+
+func chunkMarkdownWithBudget(body string, byteBudget int) []string {
+	return chunkMarkdownWithFirstBudget(body, byteBudget, byteBudget)
+}
+
+// Reserve attribution space only in the first emitted answer chunk. Later
+// chunks use the full budget, including when an oversized line is split.
+func chunkMarkdownWithFirstBudget(body string, firstBudget, laterBudget int) []string {
+	byteBudget := firstBudget
+	contentByteBudget := byteBudget - markdownSyntheticFenceCloseBytes
+	resetBudget := func() { byteBudget = laterBudget; contentByteBudget = byteBudget - markdownSyntheticFenceCloseBytes }
+	if len(body) <= byteBudget {
 		return []string{body}
 	}
 
@@ -82,6 +161,7 @@ func chunkMarkdown(body string) []string {
 		// after it — so it never renders as an empty code block.
 		if !isBlankChunk(text) {
 			chunks = append(chunks, text)
+			resetBudget()
 		}
 		cur.Reset()
 		if reopen && fenceOpen {
@@ -91,23 +171,39 @@ func chunkMarkdown(body string) []string {
 
 	for _, line := range splitKeepNewline(body) {
 		// A single oversized line cannot fit a chunk; hard-split it.
-		if len(line) > markdownContentByteBudget {
+		if len(line) > contentByteBudget {
 			flush(true)
-			pieceBudget := markdownContentByteBudget
-			if fenceOpen {
-				pieceBudget = markdownByteBudget - len(fenceInfo) - len("\n") - len("\n```")
+			quotePrefix := ""
+			if !fenceOpen && strings.HasPrefix(line, "> ") {
+				quotePrefix = "> "
+				line = strings.TrimPrefix(line, quotePrefix)
 			}
-			for _, piece := range hardSplit(line, pieceBudget) {
-				// A piece split out of an oversized line inside a code block must
-				// carry its own fences, or it would render as plain text.
+			for line != "" {
+				pieceBudget := contentByteBudget - len(quotePrefix)
+				if fenceOpen {
+					pieceBudget = byteBudget - len(fenceInfo) - len("\n") - len("\n```")
+				}
+				// Production budgets reserve room for the longest continuation fence.
+				if pieceBudget < utf8.UTFMax {
+					pieceBudget = utf8.UTFMax
+				}
+				cut := min(len(line), pieceBudget)
+				if cut < len(line) {
+					for cut > 0 && !utf8.RuneStart(line[cut]) {
+						cut--
+					}
+				}
+				piece := line[:cut]
+				line = line[cut:]
 				if fenceOpen {
 					piece = fenceInfo + "\n" + piece + "\n```"
 				}
-				chunks = append(chunks, piece)
+				chunks = append(chunks, quotePrefix+piece)
+				resetBudget()
 			}
 			continue
 		}
-		if cur.Len()+len(line) > markdownContentByteBudget {
+		if cur.Len()+len(line) > contentByteBudget {
 			flush(true)
 		}
 		if isFenceLine(line) {

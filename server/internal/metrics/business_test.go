@@ -139,6 +139,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordChatClaimSessionFallbackHit()
 	m.ObserveChatClaimLastSessionQuery(0.01)
 	m.ObserveChatClaimRolloutMissingQuery(0.01)
+	m.RecordIssueMetadataMutation("set", "changed", 10*time.Millisecond)
 	m.RecordLLMUsage("issue", "local", "codex", "gpt-5.4", 1, 1, 1, 1, 0)
 	m.RecordLLMUsage("issue", "local", "custom-provider", "custom-model", 1, 0, 0, 0, 0)
 
@@ -293,6 +294,59 @@ func TestBusinessMetricsFallsBackToRateTableWithoutProviderCost(t *testing.T) {
 	output := testutil.ToFloat64(m.llmCostUSD.WithLabelValues("xai", "grok-4.5", "output", "local", "issue"))
 	if math.Abs(input-2) > 1e-9 || math.Abs(output-6) > 1e-9 {
 		t.Fatalf("estimated cost = (%v, %v), want (2, 6) from the rate table", input, output)
+	}
+}
+
+func TestBusinessMetricsCostOnlyUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		model        string
+		provider     string
+		requestModel string
+	}{
+		{"priced", "grok-4.6", "xai", "grok-4.6"},
+		{"unpriced", "grok-composer-2.5-fast", "grok", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewBusinessMetrics()
+			const actualUSD = 0.01
+			m.RecordLLMUsage("issue", "local", "grok", tc.model,
+				0, 0, 0, 0, int64(actualUSD*CostUSDTicksPerUSD))
+
+			// Inspect collectors without creating zero-token series in the test.
+			if got := testutil.CollectAndCount(m.llmTokens); got != 0 {
+				t.Errorf("priced token series = %d, want 0", got)
+			}
+			if got := testutil.CollectAndCount(m.llmUnpricedTokens); got != 0 {
+				t.Errorf("unpriced token series = %d, want 0", got)
+			}
+			if got := testutil.CollectAndCount(m.llmCostUSD); got != 1 {
+				t.Errorf("cost series = %d, want 1", got)
+			}
+			got := testutil.ToFloat64(m.llmCostUSD.WithLabelValues(
+				tc.provider, tc.model, "input", "local", "issue"))
+			if math.Abs(got-actualUSD) > 1e-9 {
+				t.Errorf("recorded cost = %v, want %v", got, actualUSD)
+			}
+			if got := testutil.ToFloat64(m.llmRequests.WithLabelValues(tc.provider, tc.requestModel, "local")); got != 1 {
+				t.Errorf("request counter = %v, want 1", got)
+			}
+		})
+	}
+}
+
+func TestBusinessMetricsEmptyPricedUsage(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.RecordLLMUsage("issue", "local", "grok", "grok-4.6", 0, 0, 0, 0, 0)
+
+	if got := testutil.CollectAndCount(m.llmTokens); got != 0 {
+		t.Errorf("token series = %d, want 0", got)
+	}
+	if got := testutil.CollectAndCount(m.llmCostUSD); got != 0 {
+		t.Errorf("cost series = %d, want 0", got)
+	}
+	if got := testutil.ToFloat64(m.llmRequests.WithLabelValues("xai", "grok-4.6", "local")); got != 1 {
+		t.Errorf("request counter = %v, want 1", got)
 	}
 }
 

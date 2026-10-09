@@ -11,7 +11,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 通过邮箱验证码或 Google 登录后，Multica 会把 JWT 保存到名为 `multica_auth` 的 HttpOnly cookie 中。浏览器自动携带它，JavaScript 无法直接读取。
 
-会话默认有效 30 天。自托管管理员可以通过 `AUTH_TOKEN_TTL` 调整之后签发的会话有效期，见[登录与注册](/auth-setup#登录有效期)。退出登录会清除当前浏览器的认证与 CSRF cookie。
+会话默认有效 30 天，但这不是从登录起算的倒计时：持续使用的会话会在到期前自动续期，所以不需要每隔一段时间重新登录一次。续期只在剩余有效期过半之后才发生，因此闲置的会话可能在最后一次使用后不到 30 天就失效。自托管管理员可以通过 `AUTH_TOKEN_TTL` 调整有效期，见[登录与注册](/auth-setup#登录有效期)。退出登录会清除当前浏览器的认证与 CSRF cookie。
 
 浏览器 cookie 不适合复制到脚本或 CLI；从终端访问 Multica 使用个人访问令牌。
 

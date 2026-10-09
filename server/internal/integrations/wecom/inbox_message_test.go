@@ -15,7 +15,7 @@ func TestBuildInboxMarkdown_TitleBodyLink(t *testing.T) {
 		"body":     "from: todo\nto: in_review",
 		"issue_id": "9194c058-e8a4-4c15-9c65-86d1784ba715",
 	}
-	got := buildInboxMarkdown(item, "ws-uuid", "acme")
+	got := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if !strings.Contains(got, "**[状态变更] 登录页 500 错误**") {
 		t.Fatalf("missing typed title header: %q", got)
 	}
@@ -30,7 +30,7 @@ func TestBuildInboxMarkdown_TitleBodyLink(t *testing.T) {
 func TestBuildInboxMarkdown_UnknownTypeFallsBackToDefault(t *testing.T) {
 	t.Setenv("WECOM_APP_URL", "https://example.com")
 	item := map[string]any{"type": "some_new_type", "title": "hi"}
-	got := buildInboxMarkdown(item, "ws-uuid", "acme")
+	got := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if !strings.Contains(got, "**[新消息] hi**") {
 		t.Fatalf("expected fallback type label 新消息, got %q", got)
 	}
@@ -39,7 +39,7 @@ func TestBuildInboxMarkdown_UnknownTypeFallsBackToDefault(t *testing.T) {
 func TestBuildInboxMarkdown_FallsBackToWorkspaceUUIDWhenSlugMissing(t *testing.T) {
 	t.Setenv("WECOM_APP_URL", "https://example.com")
 	item := map[string]any{"type": "new_comment", "title": "t", "issue_id": "iid"}
-	got := buildInboxMarkdown(item, "ws-uuid", "")
+	got := buildInboxMarkdown(item, "ws-uuid", "", copyFor(DefaultLocale))
 	if !strings.Contains(got, "https://example.com/ws-uuid/inbox?issue=iid") {
 		t.Fatalf("expected workspace uuid path segment, got %q", got)
 	}
@@ -54,7 +54,7 @@ func TestBuildInboxMarkdown_NoAppURLDropsLink(t *testing.T) {
 		os.Unsetenv(k)
 	}
 	item := map[string]any{"type": "new_comment", "title": "t"}
-	got := buildInboxMarkdown(item, "ws-uuid", "acme")
+	got := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if strings.Contains(got, "查看详情") {
 		t.Fatalf("link section must be omitted when no app url is configured: %q", got)
 	}
@@ -69,7 +69,7 @@ func TestBuildInboxMarkdown_NonHTTPSAppURLIsRejected(t *testing.T) {
 	}
 	t.Setenv("WECOM_APP_URL", "http://insecure.example.com")
 	item := map[string]any{"type": "new_comment", "title": "t"}
-	got := buildInboxMarkdown(item, "ws-uuid", "acme")
+	got := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if strings.Contains(got, "insecure.example.com") {
 		t.Fatalf("http:// override must be dropped, got %q", got)
 	}
@@ -79,7 +79,7 @@ func TestBuildInboxMarkdown_TruncatesLongBody(t *testing.T) {
 	t.Setenv("WECOM_APP_URL", "https://example.com")
 	body := strings.Repeat("我", 5000) // 5000 runes, exceeds 4000 cap
 	item := map[string]any{"type": "new_comment", "title": "hi", "body": body, "issue_id": "iid"}
-	got := buildInboxMarkdown(item, "ws-uuid", "acme")
+	got := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if !strings.Contains(got, "...") {
 		t.Fatalf("expected truncation marker, got tail %q", got[len(got)-50:])
 	}
@@ -98,7 +98,7 @@ func TestBuildInboxMarkdown_HandlesPointerBodyAndIssueID(t *testing.T) {
 		"body":     &bodyStr,
 		"issue_id": &issueIDStr,
 	}
-	got := buildInboxMarkdown(item, "ws-uuid", "acme")
+	got := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if !strings.Contains(got, "详情") {
 		t.Fatalf("expected pointer body to be dereferenced, got %q", got)
 	}
@@ -108,7 +108,7 @@ func TestBuildInboxMarkdown_HandlesPointerBodyAndIssueID(t *testing.T) {
 }
 
 func TestBuildInboxMarkdown_EmptyItemReturnsEmpty(t *testing.T) {
-	got := buildInboxMarkdown(map[string]any{}, "ws", "slug")
+	got := buildInboxMarkdown(map[string]any{}, "ws", "slug", copyFor(DefaultLocale))
 	if got != "" {
 		t.Fatalf("expected empty output for empty item, got %q", got)
 	}
@@ -143,7 +143,7 @@ func TestInboxCardDoesNotRenderMemberAuthoredLinks(t *testing.T) {
 		"title": "[click here](http://evil.example)",
 		"body":  "and the body [too](http://evil.example)",
 	}
-	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	out := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if strings.Contains(out, "](http://evil.example)") {
 		t.Fatalf("member-authored link syntax rendered as a link in a bot-authored card: %q", out)
 	}
@@ -159,7 +159,7 @@ func TestInboxCardFitsTheCapEvenWithAHugeTitle(t *testing.T) {
 	huge := strings.Repeat("标题", 4000) // far past inboxMarkdownMaxLen on its own
 	t.Setenv("MULTICA_APP_URL", "https://multica.example")
 	item := map[string]any{"type": "mentioned", "title": huge, "body": "body"}
-	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	out := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
 		t.Fatalf("card is %d runes, cap is %d — WeCom refuses the frame and the push is lost", n, inboxMarkdownMaxLen)
 	}
@@ -185,7 +185,7 @@ func TestInboxCardKeepsAnOrdinaryBracketedTitleVerbatim(t *testing.T) {
 		"title": "[Bug] 登录失败",
 		"body":  "从 (todo) 到 (in_review)!",
 	}
-	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	out := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	want := "**[状态变更] [Bug] 登录失败**\n从 (todo) 到 (in_review)!"
 	if out != want {
 		t.Fatalf("member text did not survive verbatim:\n got %q\nwant %q", out, want)
@@ -229,7 +229,7 @@ func TestInboxCardNeverPutsCloseBracketNextToOpenParen(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out := buildInboxMarkdown(map[string]any{
 				"type": "mentioned", "title": tc.title, "body": tc.body,
-			}, "ws-uuid", "acme")
+			}, "ws-uuid", "acme", copyFor(DefaultLocale))
 			if i := strings.Index(out, "]("); i >= 0 {
 				t.Fatalf("\"](\" came out adjacent at byte %d — that is a working link in a card the bot signs: %q",
 					i, window(out, i))
@@ -257,7 +257,7 @@ func TestInboxCardSeamSurvivesEveryCutOffset(t *testing.T) {
 			{"body", map[string]any{"type": "mentioned", "title": "t", "body": body}},
 			{"title", map[string]any{"type": "mentioned", "title": title, "body": "b"}},
 		} {
-			out := buildInboxMarkdown(tc.item, "ws-uuid", "acme")
+			out := buildInboxMarkdown(tc.item, "ws-uuid", "acme", copyFor(DefaultLocale))
 			if i := strings.Index(out, "]("); i >= 0 {
 				t.Fatalf("%s cut at pad=%d fused a \"]\" onto a \"(\" at byte %d: %q", tc.name, pad, i, window(out, i))
 			}
@@ -281,7 +281,7 @@ func TestInboxCardBudgetsTheSpacesItInserts(t *testing.T) {
 		"title": "t",
 		"body":  strings.Repeat("](", 4000), // 8000 runes in, 12000 if broken
 	}
-	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	out := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
 		t.Fatalf("card is %d runes, cap is %d — the inserted spaces were not budgeted, so WeCom refuses the frame and the push is lost",
 			n, inboxMarkdownMaxLen)
@@ -322,7 +322,7 @@ func TestInboxCardDefinesNoResolvableLinkReference(t *testing.T) {
 
 			out := buildInboxMarkdown(map[string]any{
 				"type": "mentioned", "title": "t", "body": body,
-			}, "ws-uuid", "acme")
+			}, "ws-uuid", "acme", copyFor(DefaultLocale))
 			if dests := markdownDestinations(out); hasDestinationTo(dests, "evil.example") {
 				t.Fatalf("body: a member-defined link survived into the card: %q resolves %v", out, dests)
 			}
@@ -331,7 +331,7 @@ func TestInboxCardDefinesNoResolvableLinkReference(t *testing.T) {
 			// definition too, and it goes through a different length branch.
 			out = buildInboxMarkdown(map[string]any{
 				"type": "mentioned", "title": body, "body": "b",
-			}, "ws-uuid", "acme")
+			}, "ws-uuid", "acme", copyFor(DefaultLocale))
 			if dests := markdownDestinations(out); hasDestinationTo(dests, "evil.example") {
 				t.Fatalf("title: a member-defined link survived into the card: %q resolves %v", out, dests)
 			}
@@ -354,7 +354,7 @@ func TestInboxCardKeepsAReferenceLikeTitleVerbatim(t *testing.T) {
 		"title": "[Bug]: 登录失败",
 		"body":  "[WIP]: 明天再看\n\n[复现步骤]: 见 (todo) 到 (in_review)!",
 	}
-	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	out := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	want := "**[状态变更] [Bug]: 登录失败**\n[WIP]: 明天再看\n\n[复现步骤]: 见 (todo) 到 (in_review)!"
 	if out != want {
 		t.Fatalf("member text did not survive verbatim:\n got %q\nwant %q", out, want)
@@ -381,7 +381,7 @@ func TestInboxCardSeamKeepsDefinitionsBrokenAtEveryCutOffset(t *testing.T) {
 			{"body", map[string]any{"type": "mentioned", "title": "t", "body": filler + "\n\n" + dense}},
 			{"title", map[string]any{"type": "mentioned", "title": filler + "\n\n" + dense, "body": "b"}},
 		} {
-			out := buildInboxMarkdown(tc.item, "ws-uuid", "acme")
+			out := buildInboxMarkdown(tc.item, "ws-uuid", "acme", copyFor(DefaultLocale))
 			if dests := markdownDestinations(out); hasDestinationTo(dests, "evil.example") {
 				t.Fatalf("%s cut at pad=%d let a member-defined link through: resolves %v", tc.name, pad, dests)
 			}
@@ -405,7 +405,7 @@ func TestInboxCardBudgetsTheSpacesTheDefinitionBreakInserts(t *testing.T) {
 		"title": "t",
 		"body":  strings.Repeat("[a]: https://evil.example\n", 500),
 	}
-	out := buildInboxMarkdown(item, "ws-uuid", "acme")
+	out := buildInboxMarkdown(item, "ws-uuid", "acme", copyFor(DefaultLocale))
 	if n := utf8.RuneCountInString(out); n > inboxMarkdownMaxLen {
 		t.Fatalf("card is %d runes, cap is %d — the inserted spaces were not budgeted, so WeCom refuses the frame and the push is lost",
 			n, inboxMarkdownMaxLen)

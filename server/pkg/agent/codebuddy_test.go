@@ -384,7 +384,7 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage), make(map[string]struct{}))
 	output, tools := turn.text, turn.toolUses
 
 	if output != "codebuddy says hi" {
@@ -518,5 +518,165 @@ func TestCodebuddyHandleControlRequestApprovesInCodebuddyShape(t *testing.T) {
 	}
 	if updatedInput["command"] != "ls" {
 		t.Fatalf("expected the original tool input to be preserved, got %v", updatedInput["command"])
+	}
+}
+
+func TestBuildCodebuddyEnvDisablesBackgroundTasks(t *testing.T) {
+	t.Parallel()
+
+	env := buildCodebuddyEnv(map[string]string{"FOO": "bar"})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected %s=1 in child env, got %q (env=%v)", codebuddyDisableBackgroundTasksEnv, got, env)
+	}
+
+	// Exact-key override in caller env must still lose to the appended force.
+	env = buildCodebuddyEnv(map[string]string{codebuddyDisableBackgroundTasksEnv: "0"})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected forced %s=1 even when caller passes 0, got %q", codebuddyDisableBackgroundTasksEnv, got)
+	}
+
+	// Windows os/exec dedups case-insensitively and keeps the last entry. A
+	// lowercase custom_env key must not outvote the forced disable.
+	env = buildCodebuddyEnv(map[string]string{
+		strings.ToLower(codebuddyDisableBackgroundTasksEnv): "0",
+	})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected forced %s=1 to win over lowercase override, got %q (env=%v)",
+			codebuddyDisableBackgroundTasksEnv, got, env)
+	}
+	lastExact := ""
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == codebuddyDisableBackgroundTasksEnv {
+			lastExact = value
+		}
+	}
+	if lastExact != "1" {
+		t.Fatalf("forced entry must be last exact key so os/exec Windows dedup keeps it, got last=%q env=%v", lastExact, env)
+	}
+}
+
+// lastEnvValueFold mirrors os/exec's Windows dedup: case-insensitive key match,
+// last occurrence wins.
+func lastEnvValueFold(env []string, key string) string {
+	got := ""
+	for _, entry := range env {
+		k, v, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(k, key) {
+			got = v
+		}
+	}
+	return got
+}
+
+func TestCodebuddySystemIsBackgroundTask(t *testing.T) {
+	t.Parallel()
+
+	for _, subtype := range []string{"task_started", "task_progress", "task_updated", "task_notification"} {
+		if !codebuddySystemIsBackgroundTask(subtype) {
+			t.Fatalf("expected %q to be a background-task system subtype", subtype)
+		}
+	}
+	for _, subtype := range []string{"init", "status", "", "session_started"} {
+		if codebuddySystemIsBackgroundTask(subtype) {
+			t.Fatalf("did not expect %q to be treated as background-task", subtype)
+		}
+	}
+}
+
+func TestCodebuddyExecuteResumeRejectedFromStderr(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"echo \"No conversation found with session ID: sess-dead\" >&2\n" +
+		"exit 1\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "sess-dead",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed, got %q (%q)", result.Status, result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatalf("expected ResumeRejected when stderr reports missing session, got %+v", result)
+		}
+		if result.SessionID != "" {
+			t.Fatalf("expected empty SessionID after resume rejection, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestCodebuddyExecuteFailsOnBackgroundTaskStarted(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Replay the CodeBuddy 2.150.0 background-task shape from the headless
+	// docs: Bash tool_use → system/task_started → text tool_result → success
+	// result. Without a completion guard this used to report completed.
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-bg"}'` + "\n" +
+		`printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"sleep 60","run_in_background":true}}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"system","subtype":"task_started","task_id":"bash-1","tool_use_id":"toolu_01","description":"sleep 60","task_type":"Bash","session_id":"sess-bg"}'` + "\n" +
+		`printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Started the build in the background."}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-bg","result":"Started the build in the background."}'` + "\n" +
+		"exit 0\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed when system/task_started appears, got %q (%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "background task") {
+			t.Fatalf("expected background-task error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
