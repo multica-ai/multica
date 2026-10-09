@@ -116,6 +116,11 @@ type museExecuteRequest struct {
 	// daemon and the receptionist share a filesystem — the supported
 	// deployment runs both on the same host.
 	WorkDir string `json:"workdir,omitempty"`
+	// TaskToken is the task-scoped Multica API credential (mat_...). The
+	// receptionist hands it to the worker so the worker can call the Multica
+	// API (read issues, post comments) with the same scoped identity a CLI
+	// backend gets via MULTICA_TOKEN. Omitted when the daemon has none.
+	TaskToken string `json:"task_token,omitempty"`
 }
 
 type museExecuteResponse struct {
@@ -216,6 +221,7 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		SessionID: opts.ResumeSessionID,
 		TimeoutS:  timeoutS,
 		WorkDir:   opts.Cwd,
+		TaskToken: opts.TaskToken,
 	}, &execResp); err != nil {
 		return nil, err
 	}

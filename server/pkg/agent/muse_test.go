@@ -242,6 +242,37 @@ func TestMuseExecuteSuccess(t *testing.T) {
 	}
 }
 
+func TestMuseExecuteForwardsTaskToken(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{
+			{Status: "completed", Result: "done"},
+		},
+		health: museHealthResponse{ProtocolVersion: 1, Version: "9.9.9"},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, err := New("muse", museTestConfig(t, srv.URL, "sekret"))
+	if err != nil {
+		t.Fatalf("New(muse) = %v", err)
+	}
+	_, err = b.Execute(context.Background(), "do the thing", ExecOptions{
+		Cwd:       "/tmp/work-1",
+		TaskToken: "mat_abc123",
+	})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	var body museExecuteRequest
+	if err := json.Unmarshal(fake.executeBody, &body); err != nil {
+		t.Fatalf("decode execute body: %v", err)
+	}
+	if body.TaskToken != "mat_abc123" {
+		t.Errorf("task_token = %q, want %q", body.TaskToken, "mat_abc123")
+	}
+}
+
 func TestMuseExecuteEmptyPrompt(t *testing.T) {
 	fake := &fakeMuseReceptionist{}
 	srv := httptest.NewServer(fake.handler())
