@@ -3,21 +3,19 @@ package service
 import "testing"
 
 func TestOneAttemptBudget(t *testing.T) {
-	cases := []struct {
+	tests := []struct {
 		name  string
 		flags []bool
-		valid bool
-		want  int32
+		want  bool
 	}{
-		{"legacy default", nil, false, 0},
-		{"explicit false", []bool{false}, false, 0},
-		{"single attempt", []bool{true}, true, 1},
+		{"legacy default", nil, false},
+		{"explicit false", []bool{false}, false},
+		{"single attempt", []bool{true}, true},
 	}
-	for _, tc := range cases {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := oneAttemptBudget(tc.flags)
-			if got.Valid != tc.valid || (got.Valid && got.Int32 != tc.want) {
-				t.Fatalf("got %+v, wanted valid=%v limit=%d", got, tc.valid, tc.want)
+			if got := oneAttemptBudget(tc.flags); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
 	}
