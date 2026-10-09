@@ -7,6 +7,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica는 실행을 기록하고 조율하며 연결된 컴퓨터가 실행을 담당합니다. 컴퓨터의 **데몬**(daemon)이 실행을 가져간 뒤 로컬에 설치된 AI 코딩 도구를 호출합니다.
 
+## Qoder Cloud Agent 원격 런타임
+
+Qoder Cloud Agent는 할당된 태스크를 원격 세션으로 실행합니다. Multica 서버가 기존 데몬 프로토콜을 사용하는 브리지를 관리하므로 사용자가 로컬 데몬을 실행할 필요가 없습니다.
+
+셀프 호스팅에서는 `MULTICA_VCS_SECRET_KEY`와 영구 저장 경로인 `MULTICA_QODER_STATE_DIR`를 설정하세요. 런타임 화면에서 Qoder Cloud Agent를 추가하고 QCA PAT를 입력하면 사용 가능한 환경을 불러옵니다. 연결을 저장하고 시작한 뒤 기존 QCA Agent에 연결된 Multica 에이전트를 추가하세요. 자격 증명은 암호화되어 워크스페이스 내에서 공유됩니다. GitHub 자격 증명은 저장소별로 설정하며 QCA 세션 생성 시 전달됩니다.
+
+초기 버전은 태스크 실행, 진행 상황 동기화, 취소, 영구 실행 기록을 통한 복구를 지원합니다. 채팅, 로컬 디렉터리, 첨부 파일, 원격 QCA Agent 생성은 지원하지 않습니다. 자세한 내용은 [README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)를 참고하세요.
+
+
 ## 개념 구분
 
 - **데몬**은 한 컴퓨터에서 실행되는 Multica 백그라운드 프로그램입니다. 서버 연결, 로컬 도구 검색, 실행 수령, 결과 반환을 담당합니다.
