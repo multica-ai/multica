@@ -2191,25 +2191,9 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 	}
 }
 
-// TestBriefIssuePointerFollowsTheInstalledSkill covers the compatibility
-// direction the server cannot reach (MUL-6986). The brief carried two
-// pointers at this skill; MUL-6966 retired the metadata one, so the
-// sub-issue pointer is now the single subject here.
-//
-// The brief is assembled here, in the daemon, from a binary the user installs
-// on their own schedule. A backend deploy does not rewrite it, and an app
-// update does not wait for a deploy, so both skews happen:
-//
-//   - old daemon, new backend — the server ships a redirect stub under the old
-//     name, because this code is already frozen on that machine;
-//   - new daemon, old backend — the server has no idea the merge happened, so
-//     THIS code has to cope, which is why the pointer is resolved from the
-//     skills the task actually received rather than hardcoded.
-//
-// The third case is the one that matters most: when neither skill is installed
-// the brief says nothing. Naming a skill the agent does not have is worse than
-// omitting the pointer — it sends the agent hunting, and on a miss it may skip
-// the contract altogether.
+// TestBriefIssuePointerFollowsTheInstalledSkill ensures the sub-issue pointer
+// names the platform skill only when installed. The retired legacy skill is
+// no longer a fallback, even when an older backend still supplies it.
 func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
@@ -2228,15 +2212,12 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			want:   "`references/issues.md` in the `multica-platform` skill",
 		},
 		{
-			// New daemon against a backend that has not been deployed yet.
-			name:   "pre-merge backend",
+			name:   "retired legacy skill alone has no pointer",
 			skills: []SkillContextForEnv{skill("multica-working-on-issues")},
-			want:   "the `multica-working-on-issues` skill",
+			want:   "",
 		},
 		{
-			// Mid-transition: the redirect stub rides along with the merged
-			// skill. The merged skill wins — the stub is only a signpost.
-			name:   "merged skill wins over the redirect stub",
+			name:   "platform pointer ignores the retired legacy skill",
 			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
 			want:   "`references/issues.md` in the `multica-platform` skill",
 		},

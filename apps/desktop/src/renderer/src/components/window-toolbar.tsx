@@ -246,7 +246,7 @@ export function WindowToolbar() {
     <div
       data-slot="window-toolbar"
       data-sidebar-resize-consumer
-      className="fixed left-0 top-0 z-30 flex h-12 shrink-0 items-center pr-3"
+      className="fixed left-0 top-0 z-30 flex h-10 shrink-0 items-center pr-3"
       style={
         {
           WebkitAppRegion: "drag",

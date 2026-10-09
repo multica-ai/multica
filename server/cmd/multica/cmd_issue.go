@@ -255,7 +255,13 @@ var issueChildrenCmd = &cobra.Command{
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
-	RunE:  runIssueCreate,
+	Long: `Create a new issue. Use --property "Name=Value" to set a custom property
+atomically with creation (repeatable, one distinct property per flag).
+For multi_text / multi_url, use a JSON array of strings when entries contain
+commas or the value starts with "["; simple entries can use comma-separated values:
+  multica issue create --title "Review specs" --property 'Aliases=["Smith, John","[draft] spec"]'
+  multica issue create --title "Read docs" --property 'Related links=["https://en.wikipedia.org/wiki/Washington,_D.C."]'`,
+	RunE: runIssueCreate,
 }
 
 var issueUpdateCmd = &cobra.Command{
@@ -278,7 +284,11 @@ var issueStatusCmd = &cobra.Command{
 	Long: "Change an issue's status. The argument is a status KEY, not its display name.\n" +
 		"Built-in keys: backlog, todo, in_progress, in_review, done, blocked, cancelled.\n" +
 		"A workspace may define custom statuses on top of these; their keys are shown in\n" +
-		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.",
+		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.\n\n" +
+		"To cancel an issue because it duplicates another, mark it instead of only cancelling:\n" +
+		"  multica issue status <id> cancelled --duplicate-of <original>\n" +
+		"The original then lists it as a duplicate. Moving the issue to any status other\n" +
+		"than cancelled later removes the mark.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
 }
@@ -628,7 +638,7 @@ func init() {
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
-	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values inside one flag. Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
+	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values; multi_text/multi_url also accept JSON arrays (required for commas in entries or values starting with "["). Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -648,10 +658,12 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
+	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
@@ -1658,6 +1670,17 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	duplicateOf, err := duplicateOfFlag(cmd, statusFlag, statusChanged)
+	if err != nil {
+		return err
+	}
+	// The server rejects a mark alongside description or attachment writes,
+	// and attachments upload before the update, so refuse the combination
+	// before anything is uploaded and left unbound.
+	if duplicateOf != "" && (len(attachmentPaths) > 0 || cmd.Flags().Changed("description") ||
+		cmd.Flags().Changed("description-stdin") || cmd.Flags().Changed("description-file")) {
+		return fmt.Errorf("--duplicate-of cannot be combined with --description, --description-stdin, --description-file or --attachment; mark the duplicate first, then change the description in a separate update")
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1740,6 +1763,13 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			body["parent_issue_id"] = parent.ID
 		}
 	}
+	if duplicateOf != "" {
+		original, err := resolveIssueRef(ctx, client, duplicateOf)
+		if err != nil {
+			return fmt.Errorf("resolve --duplicate-of issue: %w", err)
+		}
+		body["duplicate_of_issue_id"] = original.ID
+	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")
 		if stage < 1 {
@@ -1801,6 +1831,11 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("update issue (uploaded IDs: %v): %w", attachmentIDs, err)
 		}
 		return fmt.Errorf("update issue: %w", err)
+	}
+	if duplicateOf != "" {
+		if _, err := recordedDuplicateOf(result, duplicateOf); err != nil {
+			return err
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1895,6 +1930,10 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if err := validateIssueStatus(status); err != nil {
 		return err
 	}
+	duplicateOf, err := duplicateOfFlag(cmd, status, true)
+	if err != nil {
+		return err
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1910,6 +1949,13 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
+	if duplicateOf != "" {
+		original, err := resolveIssueRef(ctx, client, duplicateOf)
+		if err != nil {
+			return fmt.Errorf("resolve --duplicate-of issue: %w", err)
+		}
+		body["duplicate_of_issue_id"] = original.ID
+	}
 	if noStart {
 		body["suppress_run"] = true
 	}
@@ -1918,13 +1964,58 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update status: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
+	if duplicateOf != "" {
+		original, err := recordedDuplicateOf(result, duplicateOf)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s as a duplicate of %s.\n", issueDisplayKey(result), status, original)
+	} else {
+		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// duplicateOfFlag returns the --duplicate-of reference, or "" when the flag is
+// unset. A duplicate is a cancelled issue that remembers its original
+// (MUL-7349): the server cancels the issue along with the mark and rejects
+// any other status, so that combination fails here before any request.
+func duplicateOfFlag(cmd *cobra.Command, status string, statusSet bool) (string, error) {
+	if !cmd.Flags().Changed("duplicate-of") {
+		return "", nil
+	}
+	ref, _ := cmd.Flags().GetString("duplicate-of")
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("--duplicate-of requires the original issue's key (e.g. MUL-123) or full UUID")
+	}
+	if statusSet && status != "cancelled" {
+		return "", fmt.Errorf("--duplicate-of cancels the issue, so the status must be cancelled, not %q", status)
+	}
+	return ref, nil
+}
+
+// recordedDuplicateOf returns the original an update response names, failing
+// when the server applied the update without the mark. Servers before v0.5.2
+// ignore duplicate_of_issue_id and have no duplicate_of field, so the key's
+// absence is the signal; a null value only means the original could not be
+// read back, so the caller's own reference names it instead.
+func recordedDuplicateOf(result map[string]any, ref string) (string, error) {
+	raw, ok := result["duplicate_of"]
+	if !ok {
+		return "", fmt.Errorf("issue %s was updated, but the server did not record the duplicate mark; marking duplicates needs server v0.5.2 or later", issueDisplayKey(result))
+	}
+	if original, ok := raw.(map[string]any); ok {
+		if key := strVal(original, "identifier"); key != "" {
+			return key, nil
+		}
+	}
+	return ref, nil
 }
 
 // ---------------------------------------------------------------------------

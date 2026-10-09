@@ -256,6 +256,57 @@ func win32FromExtendedLength(p string) (string, bool) {
 	return p, false
 }
 
+// evalPathStrict is evalPath for ResolveSymlinks, which must never return a
+// location the walk did not verify. evalPath has two exits that skip the walk:
+// an input already in the device namespace is returned as given, and a link
+// whose target has no Win32 spelling (`\\?\Volume{GUID}\...`) has the rest of
+// the path joined onto that target lexically. For the best-effort resolver
+// both are the fail-closed answer — a device path never compares as inside a
+// drive-letter root. A strict caller can be comparing two device paths with
+// each other, though: with the active workdir spelled `\\?\C:\task\workdir`,
+// the lexical `\\?\C:\task\workdir\escape\sub` reads as inside it even when
+// escape is a junction to another drive. So an extended-length path that has
+// a plain Win32 spelling is walked in that spelling, and anything that is, or
+// resolves into, the device namespace is ErrUnresolvablePath.
+func evalPathStrict(p string) (string, error) {
+	if conv, ok := win32FromExtendedLength(p); ok {
+		p = conv
+	}
+	if isDeviceNamespacePath(p) {
+		return "", fmt.Errorf("%w: %q has no Win32 spelling to walk", ErrUnresolvablePath, p)
+	}
+	resolved, err := evalPath(p)
+	if err != nil {
+		return "", err
+	}
+	if isDeviceNamespacePath(resolved) {
+		return "", fmt.Errorf("%w: %q leads into %q, which has no Win32 spelling to walk", ErrUnresolvablePath, p, resolved)
+	}
+	return resolved, nil
+}
+
+func isDeviceNamespacePath(p string) bool {
+	return strings.HasPrefix(p, `\\?\`) || strings.HasPrefix(p, `\\.\`)
+}
+
+// canonicalSpelling gives a path evalPathStrict already resolved the spelling
+// filepath.EvalSymlinks would: the on-disk case and long name of every
+// component. evalPath keeps each component as written, so without this a
+// caller switching from EvalSymlinks would see the same directory spelled
+// differently — an 8.3 short name on one side of a containment check and the
+// long name on the other would read as two directories. It changes spelling
+// only, never location: its input was walked and verified component by
+// component, with every link already followed, which is the one shape
+// EvalSymlinks handles correctly here. When EvalSymlinks still cannot answer —
+// a reparse point the walk proved redirects nowhere, which EvalSymlinks will
+// not pass through — the walk's own spelling of that verified path stands.
+func canonicalSpelling(resolved string) string {
+	if norm, err := filepath.EvalSymlinks(resolved); err == nil {
+		return norm
+	}
+	return resolved
+}
+
 // sameWin32Path compares the path a handle names with the path the walk is
 // standing on. GetFinalPathNameByHandle answers in extended-length form; both
 // sides are reduced to plain Win32 before comparing, case-insensitively, the

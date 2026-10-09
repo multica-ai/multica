@@ -35,6 +35,9 @@
     "steer_step": "{{name}} 插话",
     "steer_step_read": "已读取"
   },
+  "working_filter_error": {
+    "title": "无法加载智能体正在处理的任务"
+  },
   "status_catalog_error": {
     "title": "状态列表加载失败",
     "hint": "加载状态后才能显示任务。",
@@ -824,9 +827,11 @@
       "false_label": "否",
       "value_placeholder": "输入值…",
       "url_placeholder": "https://…",
+      "url_scheme_required": "URL 必须以 http:// 或 https:// 开头。",
       "number_placeholder": "0",
       "actor_search_placeholder": "搜索成员…",
       "open_link": "打开链接",
+      "remove_item": "移除 {{value}}",
       "archived_hint": "已归档属性——值为只读",
       "unknown_value": "无法显示",
       "unknown_value_hint": "该值由更新版本的 Multica 设置，当前版本无法编辑——请更新应用，或清除该值",

@@ -148,7 +148,8 @@ export interface ListIssuesParams {
   /**
    * Filter by lifecycle category rather than by exact key, so one bucket holds
    * all concrete and custom statuses in that phase. Task views use exact
-   * status keys for their columns instead.
+   * status keys for their columns instead. The web client's
+   * `ApiClient.listIssues` does not send it.
    */
   status_category?: IssueStatusCategory;
   /** Multi-value form of `status_category`. OR within the field. */
@@ -512,16 +513,16 @@ export interface WorkingAgentSummary {
   running_task_count: number;
 }
 
-/** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
+/** Per-category bucket in the issue list cache. The list's fetch sets `total` to the bucket's row count. */
 export interface IssueStatusBucket {
   issues: Issue[];
   total: number;
 }
 
 /**
- * Frontend cache shape for the issue list. Data is bucketed by status so
- * each column can paginate independently. Assembled from per-status
- * `api.listIssues` responses by the query functions in `issues/queries.ts`.
+ * Frontend cache shape for the issue list. Data is bucketed by status
+ * category. Assembled from one `api.listIssues` response by the query
+ * functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
   /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */

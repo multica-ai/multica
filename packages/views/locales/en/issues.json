@@ -36,6 +36,9 @@
     "steer_step": "{{name}} added",
     "steer_step_read": "Read"
   },
+  "working_filter_error": {
+    "title": "Couldn't load issues with working agents"
+  },
   "status_catalog_error": {
     "title": "Couldn't load the status list",
     "hint": "Issues can't be shown until statuses load.",
@@ -869,9 +872,11 @@
       "false_label": "No",
       "value_placeholder": "Enter value…",
       "url_placeholder": "https://…",
+      "url_scheme_required": "Start the URL with http:// or https://.",
       "number_placeholder": "0",
       "actor_search_placeholder": "Search members…",
       "open_link": "Open link",
+      "remove_item": "Remove {{value}}",
       "archived_hint": "Archived property — value is read-only",
       "unknown_value": "Unavailable",
       "unknown_value_hint": "This value was set by a newer version of Multica and can't be edited here — update the app, or clear it"

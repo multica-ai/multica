@@ -23,7 +23,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
-import { isActorPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, type PropertyFilterValue } from "@multica/core/types";
+import { isActorPropertyType, isListPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, type PropertyFilterValue } from "@multica/core/types";
 import {
   type ActorFilterValue,
   type FilterDimension,
@@ -531,8 +531,9 @@ function useFilterChips(
           ? t(($) => $.pickers.custom_property.true_label)
           : t(($) => $.pickers.custom_property.false_label);
       }
-      // Scalar properties have no option list — the filter value IS the label.
-      if (isScalarPropertyType(definition.type)) {
+      // Scalar and list properties have no option list — the filter value IS
+      // the label (for lists it is one matched element).
+      if (isScalarPropertyType(definition.type) || isListPropertyType(definition.type)) {
         return member;
       }
       return definition.config.options?.find((o) => o.id === member)?.name;

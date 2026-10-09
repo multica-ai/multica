@@ -35,6 +35,9 @@
     "steer_step": "{{name}}이(가) 추가",
     "steer_step_read": "읽음"
   },
+  "working_filter_error": {
+    "title": "에이전트가 작업 중인 태스크를 불러오지 못했습니다"
+  },
   "status_catalog_error": {
     "title": "상태 목록을 불러오지 못했습니다",
     "hint": "상태를 불러와야 태스크를 표시할 수 있습니다.",
@@ -830,9 +833,11 @@
       "false_label": "아니요",
       "value_placeholder": "값 입력…",
       "url_placeholder": "https://…",
+      "url_scheme_required": "URL은 http:// 또는 https://로 시작해야 합니다.",
       "number_placeholder": "0",
       "actor_search_placeholder": "멤버 검색…",
       "open_link": "링크 열기",
+      "remove_item": "{{value}} 제거",
       "archived_hint": "보관된 속성 — 값은 읽기 전용입니다",
       "unknown_value": "표시할 수 없음",
       "unknown_value_hint": "이 값은 최신 버전의 Multica에서 설정되어 여기서는 편집할 수 없습니다. 앱을 업데이트하거나 값을 지우세요"

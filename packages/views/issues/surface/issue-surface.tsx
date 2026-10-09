@@ -292,7 +292,9 @@ function IssueSurfaceContent({
             cannot be routed without it), so every branch below would render an
             unexplained empty surface with no way out. (MUL-6243) */}
         {controller.isStatusCatalogError ? (
-          <StatusCatalogErrorState onRetry={controller.retryStatusCatalog} />
+          <FilterDependencyErrorState kind="status" onRetry={controller.retryStatusCatalog} />
+        ) : controller.isWorkingFilterError ? (
+          <FilterDependencyErrorState kind="working" onRetry={controller.retryWorkingFilter} />
         ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
@@ -402,12 +404,16 @@ function IssueSurfaceContent({
 }
 
 /**
- * Shown when the surface has rows but the active filters match none of them.
- * Shared by every surface, so no caller has to remember that its own empty
- * copy only describes the unfiltered case. The action clears exactly the
- * filters this state tests for, so it always restores content.
+ * Missing filter dependencies must offer recovery instead of claiming that
+ * the filter matched no issues.
  */
-function StatusCatalogErrorState({ onRetry }: { onRetry: () => void }) {
+function FilterDependencyErrorState({
+  kind,
+  onRetry,
+}: {
+  kind: "status" | "working";
+  onRetry: () => void;
+}) {
   const { t } = useT("issues");
   return (
     <div
@@ -415,8 +421,14 @@ function StatusCatalogErrorState({ onRetry }: { onRetry: () => void }) {
       className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground"
     >
       <AlertTriangle className="h-10 w-10 text-faint-foreground" />
-      <p className="text-body">{t(($) => $.status_catalog_error.title)}</p>
-      <p className="text-caption">{t(($) => $.status_catalog_error.hint)}</p>
+      <p className="text-body">
+        {kind === "working"
+          ? t(($) => $.working_filter_error.title)
+          : t(($) => $.status_catalog_error.title)}
+      </p>
+      {kind === "status" && (
+        <p className="text-caption">{t(($) => $.status_catalog_error.hint)}</p>
+      )}
       <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
         {t(($) => $.status_catalog_error.retry)}
       </Button>

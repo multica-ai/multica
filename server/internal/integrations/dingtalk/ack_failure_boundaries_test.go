@@ -31,7 +31,7 @@ func TestAckBatchLookupFailuresKeepExistingReceipt(t *testing.T) {
 				q.rows[id] = db.ChatMessage{ID: id, ChatSessionID: sid, ChannelIngested: true, Role: "user", CreatedAt: pgtype.Timestamptz{Time: time.Unix(int64(i), 0), Valid: true}}
 				n.client.rememberReplySource(inst.ID, id, sid, groupReactionMessage(name))
 			}
-			n.OnIngested(context.Background(), inst, groupReactionMessage("existing"), sid)
+			n.OnIngested(context.Background(), inst, groupReactionMessage("existing"), sid, sid)
 			reads := 0
 			q.read = func(pgtype.UUID) {
 				reads++
@@ -39,13 +39,13 @@ func TestAckBatchLookupFailuresKeepExistingReceipt(t *testing.T) {
 					q.err = errors.New("database unavailable")
 				}
 			}
-			n.OnIngested(context.Background(), inst, groupReactionMessage("new"), sid)
+			n.OnIngested(context.Background(), inst, groupReactionMessage("new"), sid, sid)
 			if reads != failureRead || !slices.Equal(*actions, []string{"add:existing:" + emotionAcknowledged}) {
 				t.Fatalf("failed lookup moved receipt: reads=%d actions=%v", reads, *actions)
 			}
 			// A failed optional lookup must not poison the next accepted hook.
 			q.read, q.err = nil, nil
-			n.OnIngested(context.Background(), inst, groupReactionMessage("new"), sid)
+			n.OnIngested(context.Background(), inst, groupReactionMessage("new"), sid, sid)
 			want := []string{"add:existing:" + emotionAcknowledged, "recall:existing:" + emotionAcknowledged, "add:new:" + emotionAcknowledged}
 			if !slices.Equal(*actions, want) {
 				t.Fatalf("recovered lookup: actions=%v want=%v", *actions, want)
@@ -82,7 +82,7 @@ func TestOutboundTerminalOwnerFailureKeepsReceipts(t *testing.T) {
 			inst := engine.ResolvedInstallation{ID: sessionUUID(90)}
 			for i, name := range []string{"existing", "new"} {
 				n.client.rememberReplySource(inst.ID, sessionUUID(byte(92+i)), sid, groupReactionMessage(name))
-				n.OnIngested(context.Background(), inst, groupReactionMessage(name), sid)
+				n.OnIngested(context.Background(), inst, groupReactionMessage(name), sid, sid)
 			}
 			before := append([]string(nil), (*actions)...)
 			q := &terminalOwnerQueries{task: tc.task, taskErr: tc.err}

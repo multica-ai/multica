@@ -2020,6 +2020,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
 			"developerInstructions": nil,
+			// Only omit history from the response, not the resumed model context.
+			// We need the thread ID, not an unbounded single-line turns payload.
+			"excludeTurns": true,
 		}
 		// Explicit override of the persisted reasoning effort: without
 		// this, a Codex resume silently reuses whatever level the prior

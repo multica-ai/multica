@@ -294,6 +294,14 @@ func TestParseCodexModelCatalog(t *testing.T) {
 				"display_name": "GPT-6-Astra",
 				"visibility": "list",
 				"supported_reasoning_levels": []
+			},
+			{
+				"slug": "gpt-6.1-sol",
+				"display_name": "GPT-6.1-Sol",
+				"visibility": "list",
+				"default_reasoning_level": "low",
+				"supported_reasoning_levels": [{"effort": "low"}, {"effort": "max"}, {"effort": "ultra"}],
+				"service_tiers": [{"id": "priority", "name": "Fast", "description": "2x speed, increased usage"}]
 			}
 		]
 	}`)
@@ -301,8 +309,8 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCodexModelCatalog: %v", err)
 	}
-	if len(got) != 5 {
-		t.Fatalf("expected five visible models, got %+v", got)
+	if len(got) != 6 {
+		t.Fatalf("expected six visible models, got %+v", got)
 	}
 	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6 Sol" || !got[0].Default {
 		t.Errorf("unexpected first model: %+v", got[0])
@@ -315,6 +323,7 @@ func TestParseCodexModelCatalog(t *testing.T) {
 		{"gpt-5.6-terra", "GPT-5.6 Terra"},
 		{"gpt-5.6-luna", "GPT-5.6 Luna"},
 		{"gpt-6-astra", "GPT-6 Astra"},
+		{"gpt-6.1-sol", "GPT-6.1 Sol"},
 	} {
 		var found *Model
 		for i := range got {
@@ -340,6 +349,9 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if got[3].ID != "no-reasoning" || got[3].Thinking != nil {
 		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[3])
 	}
+	if got[5].Thinking == nil || got[5].Thinking.DefaultLevel != "low" || !hasThinkingLevel(got[5].Thinking, "ultra") || len(got[5].ServiceTiers) != 1 || got[5].ServiceTiers[0].ID != "priority" {
+		t.Errorf("GPT-6.1 Sol must preserve runtime capabilities: %+v", got[5])
+	}
 }
 
 // Codex reports the GPT-6 family as "GPT-6-Sol" and so on (codex-cli 0.155.1
@@ -350,9 +362,18 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 	static := map[string]string{}
 	for _, m := range codexStaticModels() {
 		static[m.ID] = m.Label
+		if m.ID == "gpt-6.1-sol" {
+			if m.Thinking == nil || m.Thinking.DefaultLevel != "low" || len(m.Thinking.SupportedLevels) != 6 || !hasThinkingLevel(m.Thinking, "max") || !hasThinkingLevel(m.Thinking, "ultra") {
+				t.Errorf("GPT-6.1 Sol fallback must match the observed live efforts: %+v", m.Thinking)
+			}
+			if m.Default || len(m.ServiceTiers) != 0 {
+				t.Errorf("new fallback must not change the default or guess service tiers: %+v", m)
+			}
+		}
 	}
 	for id, reported := range map[string]string{
 		"gpt-6-astra": "GPT-6-Astra",
+		"gpt-6.1-sol": "GPT-6.1-Sol",
 		"gpt-6-sol":   "GPT-6-Sol",
 		"gpt-6-luna":  "GPT-6-Luna",
 	} {

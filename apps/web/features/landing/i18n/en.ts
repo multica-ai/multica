@@ -523,6 +523,27 @@ export function createEnDict(
     },
     entries: [
       {
+        version: "0.6.1",
+        date: "2026-10-01",
+        title: "Cumulative run cost curves, a faster Issues list, and steadier workspace switching",
+        changes: [],
+        features: [
+          "The run chart follows your pointer, and shows the quiet stretches between runs.",
+          "An Issue's sidebar shows the cumulative cost of its runs as a curve.",
+          "Mark a duplicate Issue from the command line and keep the link to the original.",
+        ],
+        improvements: [
+          "The Issues list stays steady as runs come and go, and the working-agents filter returns faster.",
+        ],
+        fixes: [
+          "Codex offers GPT-6.1 Sol, and cost for the GPT-6 models reads at current prices.",
+          "Hitting a provider's usage limit reads as a quota, not as a credential problem.",
+          "Closing the floating chat leaves your keyboard shortcuts working, and keeps your draft.",
+          "On Windows, a repository checks out even after your workspaces folder was moved.",
+          "Switching workspace from an open chat lands you there, with your session and project still selected.",
+        ],
+      },
+      {
         version: "0.6.0",
         date: "2026-09-28",
         title: "Conditional wakeups, instant search, deliverable previews, and a new Settings page",
