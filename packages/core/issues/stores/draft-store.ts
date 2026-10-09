@@ -106,6 +106,11 @@ interface IssueDraftStore {
   // choice instead of always opening with no assignee.
   lastAssigneeType?: IssueAssigneeType;
   lastAssigneeId?: string;
+  // Last status and priority picked at submit time, persisted for the same
+  // reason: the next create dialog starts with these values pre-filled.
+  lastStatus?: IssueStatus;
+  lastPriority?: IssuePriority;
+  lastStage?: number;
   setShared: (patch: Partial<IssueCreateShared>) => void;
   setManual: (patch: Partial<IssueCreateManual>) => void;
   setAgent: (patch: Partial<IssueCreateAgent>) => void;
@@ -114,6 +119,9 @@ interface IssueDraftStore {
   beginIsolatedDraft: () => void;
   endIsolatedDraft: () => void;
   setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
+  /** Saves the status, priority, and optional stage the user picked at submit
+   *  time so the next open of the create dialog starts with those values. */
+  setLastProperties: (status: IssueStatus, priority: IssuePriority, stage?: number | null) => void;
   hasDraft: () => boolean;
 }
 
@@ -184,6 +192,9 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       draft: migrateDraft(undefined),
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
+      lastStatus: undefined as IssueStatus | undefined,
+      lastPriority: undefined as IssuePriority | undefined,
+      lastStage: undefined as number | undefined,
       setShared: (patch) =>
         set((s) => ({ draft: { ...s.draft, shared: { ...s.draft.shared, ...patch } } })),
       setManual: (patch) =>
@@ -195,11 +206,18 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       clearDraft: () =>
         set((s) => ({
           draft: {
-            shared: emptyShared(),
+            shared: {
+              ...emptyShared(),
+              // Re-seed priority from the last submission so the next
+              // create dialog opens with the user's previous choice.
+              ...(s.lastPriority !== undefined ? { priority: s.lastPriority } : {}),
+            },
             manual: {
               ...emptyManual(),
               assigneeType: s.lastAssigneeType,
               assigneeId: s.lastAssigneeId,
+              // Re-seed status from the last submission.
+              ...(s.lastStatus !== undefined ? { status: s.lastStatus } : {}),
             },
             agent: emptyAgent(),
             activeMode: s.draft.activeMode,
@@ -228,6 +246,12 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
           : s),
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
+      setLastProperties: (status, priority, stage) =>
+        set({
+          lastStatus: status,
+          lastPriority: priority,
+          ...(stage != null ? { lastStage: stage } : {}),
+        }),
       hasDraft: () => {
         const { manual, agent, shared } = get().draft;
         return !!(
@@ -251,6 +275,9 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         draft: state.isolatedDraftBackup ?? state.draft,
         lastAssigneeType: state.lastAssigneeType,
         lastAssigneeId: state.lastAssigneeId,
+        lastStatus: state.lastStatus,
+        lastPriority: state.lastPriority,
+        lastStage: state.lastStage,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<IssueDraftStore> & {
@@ -280,6 +307,9 @@ registerDraftCleanup({
       draft: migrateDraft(undefined),
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
+      lastStatus: undefined,
+      lastPriority: undefined,
+      lastStage: undefined,
       isolatedDraftBackup: undefined,
     }),
 });

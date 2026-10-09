@@ -42,6 +42,7 @@ const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
+const mockSetLastProperties = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
@@ -146,12 +147,14 @@ const mockDraftStore = {
   draft: emptyIssueDraft(),
   lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
   lastAssigneeId: undefined as string | undefined,
+  lastStage: undefined as number | undefined,
   setShared: mockSetShared,
   setManual: mockSetManual,
   setAgent: mockSetAgent,
   setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
+  setLastProperties: mockSetLastProperties,
   hasDraft: () => false,
 };
 
@@ -442,7 +445,11 @@ vi.mock("../issues/components", () => ({
   StatusIcon: ({ status }: { status: string }) => <span data-testid="status-icon">{status}</span>,
   StatusPicker: () => <div data-testid="status-picker" />,
   PriorityPicker: () => <div data-testid="priority-picker" />,
-  StagePicker: () => <div data-testid="stage-picker" />,
+  StagePicker: ({ stage }: { stage?: number | null }) => (
+    <div data-testid="stage-picker" data-stage={stage ?? undefined}>
+      {stage ? `Stage ${stage}` : "No stage"}
+    </div>
+  ),
   AssigneePicker: () => <div data-testid="assignee-picker" />,
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
@@ -634,6 +641,7 @@ describe("CreateIssueModal", () => {
     // Reset the unified draft mock so per-test seeding (assignee, project, …)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft = emptyIssueDraft();
+    mockDraftStore.lastStage = undefined;
     mockSetShared.mockImplementation((patch: Partial<typeof mockDraftStore.draft.shared>) => {
       mockDraftStore.draft.shared = { ...mockDraftStore.draft.shared, ...patch };
     });
@@ -743,6 +751,7 @@ describe("CreateIssueModal", () => {
     });
 
     expect(mockSetLastAssignee).toHaveBeenCalledWith(undefined, undefined);
+    expect(mockSetLastProperties).toHaveBeenCalledWith("todo", "none", null);
     expect(mockClearDraft).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
     expect(mockToastCustom).toHaveBeenCalledTimes(1);
@@ -2086,6 +2095,13 @@ describe("CreateIssueModal", () => {
 
   // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
   // is one tap away behind "Switch to Manual", so it hit the same bugs.
+  it("prefills stage from lastStage when opened as a sub-issue (#8762)", () => {
+    mockDraftStore.lastStage = 2;
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-1" }} />);
+
+    expect(screen.getByText("Stage 2")).toBeInTheDocument();
+  });
+
   describe("phone layout", () => {
 
     it("keeps every footer control a direct child of the grid container", () => {
