@@ -156,7 +156,7 @@ export function applyChatDoneToCache(
   });
   // A queued successor may already exist. Refetch the server-authoritative
   // head instead of clearing it and briefly presenting the session as idle.
-  invalidatePendingTask(qc, payload.chat_session_id);
+  void invalidatePendingTask(qc, payload.chat_session_id);
 }
 
 /**
@@ -216,7 +216,7 @@ export function seedPendingTaskFromQueued(
   if (!payload.chat_session_id) return;
   // A follow-up can be queued while another task is active. The event does
   // not carry enough queue state to replace that active head safely.
-  invalidatePendingTask(qc, payload.chat_session_id);
+  void invalidatePendingTask(qc, payload.chat_session_id);
 }
 
 export function promotePendingTaskToRunning(
@@ -233,17 +233,22 @@ export function promotePendingTaskToRunning(
       return { ...old, status: "running" };
     },
   );
-  invalidatePendingTask(qc, payload.chat_session_id);
+  void invalidatePendingTask(qc, payload.chat_session_id);
   qc.invalidateQueries({
     queryKey: chatKeys.messages(payload.chat_session_id),
   });
 }
 
-export function invalidatePendingTask(
+export async function invalidatePendingTask(
   qc: QueryClient,
   sessionId: string,
 ) {
-  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+  const queryKey = chatKeys.pendingTask(sessionId);
+  // Like the inbox refresh helpers, cancel before invalidating: a first load
+  // has no cached data, so invalidation alone reuses its pre-event request.
+  // Its stale response would then clear isInvalidated with no later refetch.
+  await qc.cancelQueries({ queryKey });
+  await qc.invalidateQueries({ queryKey });
 }
 
 export function seedAcceptedPendingTask(
@@ -293,7 +298,7 @@ export function seedAcceptedPendingTask(
       return next;
     },
   );
-  invalidatePendingTask(qc, payload.chat_session_id);
+  void invalidatePendingTask(qc, payload.chat_session_id);
 }
 
 // =====================================================
