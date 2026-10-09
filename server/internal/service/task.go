@@ -1234,14 +1234,8 @@ func (s *TaskService) ResolveIssueReviewSHA(ctx context.Context, issueID pgtype.
 // headShaText wraps a resolved review SHA into the pgtype.Text the dedup/enqueue
 // queries expect. Empty SHA marshals to an invalid (NULL) Text so the queries
 // take their fall-back branch.
-// oneAttemptBudget injects max_attempts=1 during task INSERT, before any
-// daemon notification. Legacy callsites retain the database default.
-func oneAttemptBudget(enabled []bool) pgtype.Int4 {
-	if len(enabled) > 0 && enabled[0] {
-		return pgtype.Int4{Int32: 1, Valid: true}
-	}
-	return pgtype.Int4{}
-}
+// Select the one-shot INSERT atomically, never by an UPDATE after enqueue.
+func oneAttemptBudget(enabled []bool) bool { return len(enabled) > 0 && enabled[0] }
 
 func headShaText(sha string) pgtype.Text {
 	return pgtype.Text{String: sha, Valid: sha != ""}
@@ -1320,8 +1314,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
-		HeadSha:     headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
-		MaxAttempts: oneAttemptBudget(singleAttempt),
+		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	}
 	var task db.AgentTaskQueue
 	if fireAt.Valid {
@@ -1351,6 +1344,8 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
 			FireAt:               fireAt,
 		})
+	} else if oneAttemptBudget(singleAttempt) {
+		task, err = s.Queries.CreateSingleAttemptAgentTask(ctx, db.CreateSingleAttemptAgentTaskParams(createParams))
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
 	}
@@ -1469,7 +1464,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
@@ -1494,9 +1489,14 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
-		HeadSha:     headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
-		MaxAttempts: oneAttemptBudget(singleAttempt),
-	})
+		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+	}
+	var task db.AgentTaskQueue
+	if oneAttemptBudget(singleAttempt) {
+		task, err = s.Queries.CreateSingleAttemptAgentTask(ctx, db.CreateSingleAttemptAgentTaskParams(createParams))
+	} else {
+		task, err = s.Queries.CreateAgentTask(ctx, createParams)
+	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
 		// unique index rejected this insert. That is benign — a sibling run
