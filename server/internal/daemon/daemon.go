@@ -2519,6 +2519,12 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 // not installed" apart from "CLI installed but dropped at registration", which
 // was previously only visible in the daemon log (MUL-5439).
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
+	// Muse has no local binary: version detection runs against the remote
+	// receptionist instead. This must come before any path resolution — an
+	// empty entry.Path is expected here, not a missing CLI.
+	if name == "muse" {
+		return d.probeMuseReceptionist(ctx)
+	}
 	var (
 		lastErr  error
 		attempts int
@@ -2719,6 +2725,29 @@ probeLoop:
 		reason = transientReason
 	}
 	return "", reason, builtinProbeUnavailable
+}
+
+// probeMuseReceptionist is the muse equivalent of CLI version detection.
+// There is no local binary to --version, so reachability and the wire
+// protocol version come from the receptionist's /v1/health endpoint.
+// An unreachable or protocol-skewed receptionist is builtinProbeUnavailable
+// (transient): the runtime stays unregistered without demoting anything,
+// and a later probe round recovers it — the same rule a CLI whose
+// --version fails gets. A missing MUSE_ENDPOINT simply never reaches here
+// (probeAgentCLIs only advertises muse when it is set); the guard stays as
+// defense for callers that bypass discovery.
+func (d *Daemon) probeMuseReceptionist(ctx context.Context) (string, string, builtinProbeVerdict) {
+	endpoint := strings.TrimSpace(os.Getenv("MUSE_ENDPOINT"))
+	if endpoint == "" {
+		return "", "MUSE_ENDPOINT is not set", builtinProbeUnavailable
+	}
+	version, err := agent.ProbeMuseReceptionist(ctx, endpoint, strings.TrimSpace(os.Getenv("MUSE_TOKEN")))
+	if err != nil {
+		d.logger.Warn("skip registering runtime: muse receptionist probe failed", "error", err)
+		return "", err.Error(), builtinProbeUnavailable
+	}
+	d.setAgentVersion("muse", version)
+	return version, "", builtinProbeOK
 }
 
 // detectBuiltinRuntimes version-detects every configured built-in agent CLI and
