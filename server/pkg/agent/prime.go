@@ -311,6 +311,30 @@ func primeGlobalRlmMaxDepthIn(dir string) (int64, bool) {
 	return depth, true
 }
 
+// primeRLMEnvZeroIgnoredFrom is the first prime-agent release whose depth
+// resolver drops RLM_MAX_DEPTH values below 1 and falls through to the
+// built-in default of 2. v0.9.8's parseDepth accepts 0
+// (packages/coding-agent/src/core/agent-session.ts). v0.10.0 filters
+// `value >= 1` (crates/pa-daemon/src/agent_engine/session_engine_impl.rs),
+// so RLM_MAX_DEPTH=0 no longer disables subagents on that release.
+const primeRLMEnvZeroIgnoredFrom = "0.10.0"
+
+// primeHonorsRLMEnvZero reports whether RLM_MAX_DEPTH=0 disables subagents
+// for the detected CLI version. An unparsed version keeps that contract:
+// unit-test fakes never print a semver, and a production launch only reaches
+// Execute after registration parsed a version at or above MinVersions["prime"].
+func primeHonorsRLMEnvZero(version string) bool {
+	detected, err := parseSemver(version)
+	if err != nil {
+		return true
+	}
+	floor, err := parseSemver(primeRLMEnvZeroIgnoredFrom)
+	if err != nil {
+		return true
+	}
+	return detected.lessThan(floor)
+}
+
 // primeGracefulExitGraceNanos optionally overrides, in nanoseconds, how long a
 // cancelled prime-agent is given to exit on its own from the stdin EOF before
 // its process group is signalled at all. Set via atomic store in tests; zero
@@ -361,16 +385,16 @@ func primeTeardownGrace() time.Duration {
 // https://github.com/PrimeIntellect-ai/prime-agent/tree/v0.7.1 — links below
 // point at specific files/lines on that tag).
 //
-// Re-checked through v0.9.5 (released 2026-09-16) and prime-agent main as of
-// 2026-09-23: loadSession stays false, the single-session-per-connection
-// model holds, ENV_AGENT_DIR, CONFIG_DIR_NAME and _resolveRlmMaxDepth's
-// precedence are unchanged, and isNonNegativeInteger is still
-// `typeof value === "number" && Number.isSafeInteger(value) && value >= 0`.
-// Everything this backend and the fail-closed rlmMaxDepth gate rely on
-// therefore holds across the whole 0.7.1-0.9.5 range. getAgentDir changed
-// once: v0.9.4 also expands a Windows `~\` value that earlier versions leave
-// relative, which primeAgentDirsFor covers by checking both readings. Beyond
-// that, only the mcpServers handling noted below differs:
+// Re-checked through v0.9.8 and the Rust port at v0.10.0: loadSession stays
+// false, the single-session-per-connection model holds, ENV_AGENT_DIR,
+// CONFIG_DIR_NAME and the settings key rlmMaxDepth are unchanged, and a
+// global numeric rlmMaxDepth still outranks RLM_MAX_DEPTH. getAgentDir
+// changed once before the port: v0.9.4 also expands a Windows `~\` value
+// that earlier versions leave relative, which primeAgentDirsFor covers by
+// checking both readings. v0.10.0's resolver drops RLM_MAX_DEPTH values
+// below 1 (see primeHonorsRLMEnvZero); every earlier release in the
+// MinVersions range still honors 0. Beyond that, only the mcpServers
+// handling noted below differs:
 //   - `initialize` reports `agentCapabilities.loadSession: false` and there
 //     is no `session/resume`/`session/load` method on the wire at all — Prime
 //     hosts exactly one session per ACP connection. Execute therefore never
@@ -463,11 +487,36 @@ func (b *primeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	for _, agentDir := range agentDirs {
 		if depth, ok := primeGlobalRlmMaxDepthIn(agentDir); ok && depth > 0 {
+			// Removing the key is safe only while RLM_MAX_DEPTH=0 still wins.
+			// v0.10.0 then uses the built-in default of 2, so the only fix is
+			// an explicit 0.
+			remedy := "Set it to 0 (`/rlm-max-depth 0 --global` in prime-agent) or remove the key to run Prime tasks from Multica"
+			if !primeHonorsRLMEnvZero(b.cfg.CLIVersion) {
+				remedy = "Set it to 0 (`/rlm-max-depth 0 --global` in prime-agent) to run Prime tasks from Multica"
+			}
 			return nil, fmt.Errorf(
 				"prime-agent has a global rlmMaxDepth of %d in %s, which re-enables RLM subagents and outranks the RLM_MAX_DEPTH=0 Multica sets; "+
 					"subagents can outlive the task and Multica would report it complete while they are still running. "+
-					"Set it to 0 (`/rlm-max-depth 0 --global` in prime-agent) or remove the key to run Prime tasks from Multica",
-				depth, filepath.Join(agentDir, "settings.json"))
+					"%s",
+				depth, filepath.Join(agentDir, "settings.json"), remedy)
+		}
+	}
+	// v0.10.0 ignores RLM_MAX_DEPTH=0, so a missing or discarded global value
+	// is the built-in default of 2, not a disabled tool. Every candidate
+	// settings file has to pin 0: a Windows `~\` value can name two
+	// directories, and the one the child opens is the one that must be 0.
+	if !primeHonorsRLMEnvZero(b.cfg.CLIVersion) {
+		var unpinned []string
+		for _, agentDir := range agentDirs {
+			if depth, ok := primeGlobalRlmMaxDepthIn(agentDir); !ok || depth != 0 {
+				unpinned = append(unpinned, filepath.Join(agentDir, "settings.json"))
+			}
+		}
+		if len(unpinned) > 0 {
+			return nil, fmt.Errorf(
+				"prime-agent %s ignores RLM_MAX_DEPTH=0 (values below 1 fall through to the built-in default of 2, which re-enables RLM subagents). "+
+					"Set rlmMaxDepth to 0 in %s (`/rlm-max-depth 0 --global` in prime-agent) to run Prime tasks from Multica",
+				strings.TrimSpace(b.cfg.CLIVersion), strings.Join(unpinned, " and "))
 		}
 	}
 
@@ -528,20 +577,18 @@ func (b *primeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// session (rlmDepth 0) always fails that check before any child is
 	// created.
 	//
-	// rlmMaxDepth's real resolution order (_resolveRlmMaxDepth in
-	// agent-session.ts) is, in priority: (1) state persisted on the
-	// session's own branch — never present here, since Execute always takes
-	// the fresh session/new path and never resumes a branch; (2) an explicit
-	// per-session override threaded through session construction — ACP mode
-	// never sets this (verified: no "rlmMaxDepth" reference anywhere under
-	// modes/acp/); (3) a GLOBAL setting persisted at
-	// ~/.prime/agent/settings.json (settingsManager.getRlmMaxDepth), which
-	// the SAME LOCAL USER can set outside Multica entirely via Prime's own
-	// interactive/daemon mode with `/rlm-max-depth <n> --global`; (4) this
-	// RLM_MAX_DEPTH env var; (5) a built-in default. v0.7.1's default was 1;
-	// v0.9.0 raised it to 2, and v0.9.5 (and main as of 2026-09-23) still
-	// returns `{ maxDepth: 2, source: "default" }`. That default is never
-	// load-bearing here: Execute sets RLM_MAX_DEPTH=0, which outranks it.
+	// rlmMaxDepth's resolution order is, in priority: (1) state persisted on
+	// the session's own branch — never present here, since Execute always
+	// takes the fresh session/new path and never resumes a branch; (2) an
+	// explicit per-session override threaded through session construction —
+	// ACP mode never sets this; (3) a GLOBAL setting persisted at
+	// ~/.prime/agent/settings.json (rlmMaxDepth), which the SAME LOCAL USER
+	// can set outside Multica entirely via Prime's own interactive mode with
+	// `/rlm-max-depth <n> --global`; (4) this RLM_MAX_DEPTH env var; (5) a
+	// built-in default of 2. Through v0.9.8, RLM_MAX_DEPTH=0 outranks that
+	// default. v0.10.0 drops env values below 1, so 0 falls through to the
+	// default unless the global setting is itself 0; the check above refuses
+	// that release when the pin is missing.
 	//
 	// This env var is therefore NOT the top of that chain and is not an
 	// absolute guarantee: a pre-existing global rlmMaxDepth the operating

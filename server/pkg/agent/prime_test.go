@@ -829,6 +829,73 @@ func TestPrimeFailsClosedOnGlobalRlmMaxDepth(t *testing.T) {
 	}
 }
 
+// TestPrimeV010RequiresGlobalDepthZero pins the Rust port's env filter.
+// v0.10.0 drops RLM_MAX_DEPTH values below 1 and uses the built-in default
+// of 2, so a missing or discarded global rlmMaxDepth re-enables subagents.
+// An explicit 0 still outranks that default. Versions before 0.10.0, and an
+// unparsed version (the fake binaries), keep honoring the env var.
+func TestPrimeV010RequiresGlobalDepthZero(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		version  string
+		settings string
+		want     string // "" means the run reaches the missing-executable error
+	}{
+		{"0.10.0 with no settings file refuses", "0.10.0", "", "ignores RLM_MAX_DEPTH=0"},
+		{"0.10.0 with a discarded value refuses", "0.10.0", `{"rlmMaxDepth": "2"}`, "ignores RLM_MAX_DEPTH=0"},
+		{"0.10.0 with an explicit zero proceeds", "0.10.0", `{"rlmMaxDepth": 0}`, ""},
+		{"0.10.0 with a positive depth keeps the override refusal", "0.10.0", `{"rlmMaxDepth": 2}`, "global rlmMaxDepth of 2"},
+		{"0.9.8 with no settings file still honors the env var", "0.9.8", "", ""},
+		{"an unparsed version still honors the env var", "", "", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			agentDir := t.TempDir()
+			if tc.settings != "" {
+				if err := os.WriteFile(filepath.Join(agentDir, "settings.json"), []byte(tc.settings), 0o600); err != nil {
+					t.Fatalf("write settings.json: %v", err)
+				}
+			}
+
+			backend, err := New("prime", Config{
+				ExecutablePath: filepath.Join(t.TempDir(), "prime-agent-does-not-exist"),
+				CLIVersion:     tc.version,
+				Logger:         testLogger(),
+				Env:            map[string]string{"PRIME_AGENT_CODING_AGENT_DIR": agentDir},
+			})
+			if err != nil {
+				t.Fatalf("new prime backend: %v", err)
+			}
+
+			_, err = backend.Execute(context.Background(), "prompt", ExecOptions{Cwd: t.TempDir()})
+			if err == nil {
+				t.Fatal("Execute returned no error; the missing executable should always stop it")
+			}
+			if tc.want == "" {
+				if !strings.Contains(err.Error(), "executable not found") {
+					t.Fatalf("expected the run to reach the executable lookup, got: %v", err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tc.want)
+			}
+			// Removing the key falls through to the built-in default of 2 on this release.
+			if strings.Contains(err.Error(), "remove the key") {
+				t.Fatalf("v0.10.0 refusal must not suggest removing the key: %v", err)
+			}
+			if !strings.Contains(err.Error(), filepath.Join(agentDir, "settings.json")) {
+				t.Fatalf("the refusal must name the settings file: %v", err)
+			}
+		})
+	}
+}
+
 // TestPrimeAgentDirForMatchesTheChildProcess pins the resolver against
 // getAgentDir's actual semantics, because the fail-closed gate is only as good
 // as its agreement with the file the child really reads.
