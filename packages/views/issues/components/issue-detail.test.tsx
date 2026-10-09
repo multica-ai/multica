@@ -738,6 +738,55 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getProject.mockReset();
   });
 
+  it("refreshes idle activity, comment, and reply timestamps without refetching (#7899)", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-01-18T00:04:45Z"));
+    const created_at = "2026-01-18T00:00:00Z";
+    mockApiObj.listTimeline.mockResolvedValue([
+      { ...mockTimeline[0], id: "idle-root", created_at },
+      { ...mockTimeline[1], id: "idle-reply", parent_id: "idle-root", created_at },
+      { type: "activity", id: "idle-activity", actor_type: "member", actor_id: "user-1",
+        action: "priority_changed", details: { from: "low", to: "high" }, created_at },
+    ]);
+    const view = renderIssueDetail();
+    try {
+      await waitFor(() => expect(screen.getAllByText("4m ago")).toHaveLength(3));
+      const fetches = mockApiObj.listTimeline.mock.calls.length;
+      act(() => vi.advanceTimersByTime(30_000));
+      expect(screen.getAllByText("5m ago")).toHaveLength(3);
+      expect(mockApiObj.listTimeline).toHaveBeenCalledTimes(fetches);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes wakeup timestamps while keeping the rule chip beside the timestamp", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-01-18T00:04:45Z"));
+    mockApiObj.listTimeline.mockResolvedValue([
+      { type: "activity", id: "idle-plain", actor_type: "member", actor_id: "user-1",
+        action: "priority_changed", details: { from: "low", to: "high" }, created_at: "2026-01-18T00:00:00Z" },
+      { type: "activity", id: "idle-wakeup", actor_type: "system", actor_id: "",
+        action: "wakeup_triggered", details: { rule: "child_done", total: 1, outcome: "none" }, created_at: "2026-01-18T00:00:01Z" },
+    ]);
+    const view = renderIssueDetail();
+    try {
+      await waitFor(() => expect(screen.getAllByText("4m ago")).toHaveLength(2));
+      const plain = view.container.querySelector('time[datetime="2026-01-18T00:00:00Z"]');
+      const wakeup = view.container.querySelector('time[datetime="2026-01-18T00:00:01Z"]');
+      expect(plain?.parentElement).toHaveClass("ml-auto");
+      expect(wakeup?.parentElement).not.toHaveClass("ml-auto");
+      const fetches = mockApiObj.listTimeline.mock.calls.length;
+      act(() => vi.advanceTimersByTime(30_000));
+      expect(screen.getAllByText("5m ago")).toHaveLength(2);
+      expect(mockApiObj.listTimeline).toHaveBeenCalledTimes(fetches);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("counts comment files as deliverables, a re-upload once as v2, never the description's (MUL-7649)", async () => {
     const file = (id: string, over: Partial<Attachment>): Attachment => ({
       id,
