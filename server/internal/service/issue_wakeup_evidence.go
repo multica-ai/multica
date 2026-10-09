@@ -18,12 +18,15 @@ const wakeupOmittedEvidence = "Some trigger details were omitted to keep this pr
 
 // Keep facts as data in task.context; handoff_note is only a rendering.
 // Legacy notes remain opaque during mixed-version operation, never parsed.
+// InstructionBy is who set a system rule's instruction on its issue when the
+// run got that one; the claim checks they may still use the agent.
 type wakeupEvidence struct {
-	Version     int          `json:"version"`
-	Instruction string       `json:"instruction,omitempty"`
-	Facts       []wakeupFact `json:"facts,omitempty"`
-	Legacy      string       `json:"legacy,omitempty"`
-	Omitted     bool         `json:"omitted,omitempty"`
+	Version       int          `json:"version"`
+	Instruction   string       `json:"instruction,omitempty"`
+	InstructionBy string       `json:"instruction_by,omitempty"`
+	Facts         []wakeupFact `json:"facts,omitempty"`
+	Legacy        string       `json:"legacy,omitempty"`
+	Omitted       bool         `json:"omitted,omitempty"`
 }
 type wakeupFact struct {
 	EventType string          `json:"event_type"`
@@ -101,7 +104,10 @@ func mergeWakeupEvidence(w db.IssueWakeup, previous db.AgentTaskQueue, receipts 
 		total += len(r.EventType) + len(payload) + 2
 		trim()
 	}
-	evidence.Instruction = w.Instruction
+	evidence.Instruction, evidence.InstructionBy = w.Instruction, ""
+	if w.SystemRule.Valid && w.InstructionBy.Valid {
+		evidence.InstructionBy = util.UUIDToString(w.InstructionBy)
+	}
 	raw, _ := json.Marshal(evidence)
 	return renderWakeupEvidence(w, evidence), raw
 }

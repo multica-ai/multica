@@ -34,11 +34,13 @@ type systemWakeupResponse struct {
 	Rule     string `json:"rule"`
 	Enabled  bool   `json:"enabled"`
 	// Instruction is set on this issue; DefaultInstruction is what runs
-	// receive when it is empty (the workspace's, else the platform's).
-	Instruction        string  `json:"instruction"`
-	DefaultInstruction string  `json:"default_instruction"`
-	Customized         bool    `json:"customized"`
-	PausedReason       *string `json:"paused_reason"`
+	// receive when it is empty (the workspace's, else the platform's), or
+	// when InstructionInactive: whoever set it cannot use the agent it wakes.
+	Instruction         string  `json:"instruction"`
+	DefaultInstruction  string  `json:"default_instruction"`
+	InstructionInactive bool    `json:"instruction_inactive"`
+	Customized          bool    `json:"customized"`
+	PausedReason        *string `json:"paused_reason"`
 	// Staged is true while a stage is open; Stage is the lowest open one.
 	// Otherwise the rule waits for every sub-issue.
 	Staged    bool   `json:"staged"`
@@ -135,6 +137,11 @@ func (h *Handler) childDoneSystemWakeup(r *http.Request, parent db.Issue) (*syst
 		if rule.PausedReason.Valid {
 			out.PausedReason = &rule.PausedReason.String
 		}
+		inEffect, err := (&service.IssueWakeupService{Tasks: h.TaskService}).ChildDoneInstructionInEffect(ctx, rule, parent)
+		if err != nil {
+			return nil, err
+		}
+		out.InstructionInactive = !inEffect
 	}
 	switch {
 	case !parent.AssigneeType.Valid || !parent.AssigneeID.Valid:
@@ -189,9 +196,10 @@ func (h *Handler) ListIssueSystemWakeups(w http.ResponseWriter, r *http.Request)
 }
 
 // systemWakeupHuman requires a person: agents cannot change platform rules.
-// Any workspace member who can see the issue may change it on that issue:
-// the rule wakes the issue's own assignee, whose invocation was already
-// authorized when the issue was assigned.
+// Any workspace member who can see the issue may turn it on or off there: the
+// rule wakes the issue's own assignee, whose invocation was already
+// authorized when the issue was assigned. Setting its instruction also takes
+// permission to use the agent it wakes (UpdateChildDoneRule).
 func (h *Handler) systemWakeupHuman(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
 	if actorType != "member" {
@@ -225,12 +233,17 @@ func (h *Handler) UpdateIssueSystemWakeup(w http.ResponseWriter, r *http.Request
 		writeError(w, 400, "invalid system wakeup body")
 		return
 	}
-	if _, ok := h.systemWakeupHuman(w, r, uuidToString(issue.WorkspaceID)); !ok {
+	member, ok := h.systemWakeupHuman(w, r, uuidToString(issue.WorkspaceID))
+	if !ok {
 		return
 	}
-	if _, err := (&service.IssueWakeupService{Tasks: h.TaskService}).UpdateChildDoneRule(r.Context(), issue.ID, in); err != nil {
+	if _, err := (&service.IssueWakeupService{Tasks: h.TaskService}).UpdateChildDoneRule(r.Context(), issue.ID, member.UserID, in); err != nil {
 		if errors.Is(err, service.ErrWakeupInput) {
 			writeError(w, 400, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrWakeupForbidden) {
+			writeError(w, 403, "only members who can use the assigned agent can change its instruction")
 			return
 		}
 		slog.Warn("update system wakeup failed", "error", err, "issue_id", uuidToString(issue.ID))

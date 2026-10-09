@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { ListChecks, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { ApiError } from "@multica/core/api";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
 import type { SystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -58,12 +59,11 @@ export function SystemWakeupRow({
       : rule.blocked && rule.blocked !== "member_assignee"
         ? blocked
         : [target, t(($) => $.wakeups.system.remaining, { count: rule.remaining })].join(" · "));
-  const save = (input: { enabled: boolean; instruction: string }) =>
+  const save = (input: { enabled: boolean; instruction?: string }) =>
     update.mutateAsync({ rule: rule.rule, ...input });
+  // Leaves the instruction as it is on the server, whoever set it.
   const toggle = (enabled: boolean) =>
-    void save({ enabled, instruction: rule.instruction }).catch(() =>
-      toast.error(t(($) => $.wakeups.system.save_error)),
-    );
+    void save({ enabled }).catch(() => toast.error(t(($) => $.wakeups.system.save_error)));
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto]" aria-busy={update.isPending}>
       <Popover>
@@ -150,7 +150,7 @@ function InstructionEditor({
 }: {
   rule: SystemWakeup;
   pending: boolean;
-  onSave: (input: { enabled: boolean; instruction: string }) => Promise<unknown>;
+  onSave: (input: { enabled: boolean; instruction?: string }) => Promise<unknown>;
 }) {
   const { t } = useT("issues");
   const id = useId();
@@ -178,7 +178,14 @@ function InstructionEditor({
           </Button>
         </div>
         {rule.instruction ? (
-          <p className="whitespace-pre-wrap break-words text-caption">{rule.instruction}</p>
+          <>
+            <p className="whitespace-pre-wrap break-words text-caption">{rule.instruction}</p>
+            {rule.instruction_inactive && (
+              <p className="mt-1 text-caption text-warning">
+                {t(($) => $.wakeups.system.instruction_inactive, { name: rule.target?.name ?? "" })}
+              </p>
+            )}
+          </>
         ) : (
           <div className="text-caption text-muted-foreground">
             <p>{t(($) => $.wakeups.system.instruction_default)}</p>
@@ -203,8 +210,12 @@ function InstructionEditor({
         try {
           await onSave({ enabled: rule.enabled, instruction });
           setEditing(false);
-        } catch {
-          setError(t(($) => $.wakeups.system.save_error));
+        } catch (err) {
+          setError(
+            err instanceof ApiError && err.status === 403 && rule.target
+              ? t(($) => $.wakeups.system.instruction_forbidden, { name: rule.target.name })
+              : t(($) => $.wakeups.system.save_error),
+          );
         }
       }}
     >

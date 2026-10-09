@@ -1259,6 +1259,8 @@
       "instruction_default": "이 태스크에는 설정되지 않아 기본 지시를 사용합니다:",
       "instruction_placeholder": "비워 두면 기본 지시를 사용합니다",
       "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
+      "instruction_inactive": "현재 적용되지 않습니다. 실행에는 기본 지시가 사용됩니다. {{name}}을(를) 사용할 수 있는 멤버가 수정해 저장하면 적용됩니다.",
+      "instruction_forbidden": "{{name}}을(를) 사용할 수 있는 멤버만 이 지시를 변경할 수 있습니다.",
       "paused": "일시 중지됨: {{reason}}"
     },
     "cond": {

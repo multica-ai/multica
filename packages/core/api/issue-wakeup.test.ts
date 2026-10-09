@@ -188,7 +188,7 @@ it("parses system wakeups and falls back on an unknown blocked reason", async ()
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([rule]))));
   // Fields a server may omit get defaults: the rule reads as on and not yet created.
   await expect(client.listIssueSystemWakeups("issue")).resolves.toEqual([{
-    ...rule, blocked: "", workspace_default: true, id: "", revision: 0, default_instruction: "", customized: false, paused_reason: null,
+    ...rule, blocked: "", workspace_default: true, id: "", revision: 0, default_instruction: "", instruction_inactive: false, customized: false, paused_reason: null,
   }]);
 });
 it("reads a member target and a pause, and drops an unknown target", async () => {

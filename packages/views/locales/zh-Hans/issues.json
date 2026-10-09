@@ -1259,6 +1259,8 @@
       "instruction_default": "此任务未设置，使用默认指令：",
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令最多 4,000 字节。",
+      "instruction_inactive": "当前不生效，运行使用默认指令。需由能使用 {{name}} 的成员修改并保存后才会生效。",
+      "instruction_forbidden": "只有能使用 {{name}} 的成员才能修改这条指令。",
       "paused": "已暂停：{{reason}}"
     },
     "cond": {

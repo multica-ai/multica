@@ -11,12 +11,23 @@ RETURNING *;
 
 -- name: CustomizeSystemWakeup :one
 -- A person changed the rule on this issue; it stops following the workspace
--- default. Turning it on clears a platform pause.
-UPDATE issue_wakeup SET enabled= @enabled,instruction= @instruction,customized_at=clock_timestamp(),
+-- default. Turning it on clears a platform pause. instruction_by is whoever
+-- set the instruction (NULL when there is none).
+UPDATE issue_wakeup SET enabled= @enabled,instruction= @instruction,instruction_by=sqlc.narg(instruction_by),customized_at=clock_timestamp(),
  paused_reason=CASE WHEN @enabled::bool THEN NULL ELSE paused_reason END,
  disabled_at=CASE WHEN @enabled::bool THEN NULL ELSE disabled_at END,
  updated_at=clock_timestamp()
 WHERE id= @id RETURNING *;
+
+-- name: FindPendingSystemWakeupTask :one
+-- The rule's own run waiting for this recipient: the agent on this runtime,
+-- in this squad role, run as this person. A run a firing left for an earlier
+-- assignee is not it and never takes on later inputs.
+SELECT * FROM agent_task_queue WHERE context->>'wakeup_id'= @wakeup_id::text AND status IN ('queued','dispatched')
+ AND agent_id= @agent_id AND runtime_id= @runtime_id
+ AND squad_id IS NOT DISTINCT FROM sqlc.narg(squad_id)::uuid
+ AND originator_user_id IS NOT DISTINCT FROM sqlc.narg(originator_user_id)::uuid
+ORDER BY created_at LIMIT 1 FOR UPDATE;
 
 -- name: ApplySystemWakeupDefault :many
 -- The workspace default changed. Rules nobody customized and the platform did

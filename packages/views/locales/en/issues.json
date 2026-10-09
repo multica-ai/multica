@@ -1301,6 +1301,8 @@
       "instruction_default": "Not set on this issue; uses the default:",
       "instruction_placeholder": "Leave empty to use the default",
       "instruction_invalid": "Keep the instruction within 4,000 bytes.",
+      "instruction_inactive": "Not in effect: runs get the default instruction. It applies once someone who can use {{name}} edits and saves it.",
+      "instruction_forbidden": "Only members who can use {{name}} can change this instruction.",
       "paused": "Paused: {{reason}}"
     },
     "cond": {

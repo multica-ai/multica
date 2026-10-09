@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -149,7 +150,7 @@ func TestTurnedOffChildDoneRuleLeavesARequeuedRun(t *testing.T) {
 			wakeRequeue(t, f, s, waiting)
 			off := false
 			if scope == "issue" {
-				if _, err := s.UpdateChildDoneRule(ctx, issue, SystemWakeupInput{Enabled: &off}); err != nil {
+				if _, err := s.UpdateChildDoneRule(ctx, issue, pgtype.UUID{}, SystemWakeupInput{Enabled: &off}); err != nil {
 					t.Fatal(err)
 				}
 			} else if _, err := s.SetChildDoneDefault(ctx, parseTestUUID(t, f.WorkspaceID), &off, nil); err != nil {
@@ -159,6 +160,105 @@ func TestTurnedOffChildDoneRuleLeavesARequeuedRun(t *testing.T) {
 				t.Fatalf("the turned-off rule still reaches the run: %q", notes)
 			}
 		})
+	}
+}
+
+// A person's instruction on the sub-issue rule reaches a run that joins it
+// only while that person may use the agent; otherwise the run gets the default.
+func TestJoinedChildDoneRuleChecksWhoSetTheInstruction(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		byOwner bool
+	}{{"set by the agent's owner", true}, {"set by someone who cannot use the agent", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, s, issue, agent := conditionFixture(t)
+			ctx := context.Background()
+			f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$2 WHERE id=$1", issue, agent)
+			child := f.Issue(t, "child", testutil.Cols{"parent_issue_id": issue, "status": "in_progress"})
+			f.Cleanup(t, "DELETE FROM issue_child_event WHERE parent_id=$1", issue)
+			if err := s.ProcessChildEvents(ctx, issue); err != nil {
+				t.Fatal(err)
+			}
+			author := f.UserID
+			if !tc.byOwner {
+				author = f.member(t, "wake-instruction")
+			}
+			// Written directly, as if the agent changed hands after it was set.
+			f.Exec(t, "UPDATE issue_wakeup SET instruction='Report to the author',instruction_by=$2,customized_at=now() WHERE issue_id=$1 AND system_rule='child_done'", issue, author)
+			waiting := wakeWaitingRun(t, f, issue, agent, f.UserID)
+			f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", child)
+			if err := s.ProcessChildEvents(ctx, issue); err != nil {
+				t.Fatal(err)
+			}
+			notes := wakeClaim(t, f, s, waiting)
+			if notes == "" || strings.Contains(notes, "Report to the author") != tc.byOwner || strings.Contains(notes, ChildDoneDefaultInstruction) == tc.byOwner {
+				t.Fatalf("joined run notes: %q", notes)
+			}
+		})
+	}
+}
+
+// A run the sub-issue rule queued for an earlier assignee never takes an
+// instruction set for the next one, and its claim checks whoever set the
+// instruction it carries against its own agent.
+func TestQueuedChildDoneRunKeepsItsRecipientsInstruction(t *testing.T) {
+	f, s, issue, first := conditionFixture(t)
+	ctx := context.Background()
+	f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$2 WHERE id=$1", issue, first)
+	child := f.Issue(t, "child", testutil.Cols{"parent_issue_id": issue, "status": "in_progress"})
+	f.Cleanup(t, "DELETE FROM issue_child_event WHERE parent_id=$1", issue)
+	if err := s.ProcessChildEvents(ctx, issue); err != nil {
+		t.Fatal(err)
+	}
+	finish := func(status string) {
+		t.Helper()
+		f.Exec(t, "UPDATE issue SET status=$2 WHERE id=$1", child, status)
+		if err := s.ProcessChildEvents(ctx, issue); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The first agent's run is queued; its daemon has not claimed it.
+	finish("done")
+	var queued string
+	f.QueryRow(t, "SELECT id FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status='queued' AND context ? 'wakeup_system'", issue, first).Scan(&queued)
+	// The parent moves to an agent another member may use, who sets an
+	// instruction; a sub-issue reopens and finishes again.
+	other := f.member(t, "wake-next-owner")
+	next := f.privateAgentOwnedBy(t, other, "wake-next")
+	f.Exec(t, "UPDATE issue SET assignee_id=$2 WHERE id=$1", issue, next)
+	instruction := "Send me the first agent's notes"
+	if _, err := s.UpdateChildDoneRule(ctx, issue, parseTestUUID(t, other), SystemWakeupInput{Instruction: &instruction}); err != nil {
+		t.Fatal(err)
+	}
+	finish("in_progress")
+	finish("done")
+	note := func(agent string) string {
+		t.Helper()
+		var note string
+		f.QueryRow(t, "SELECT COALESCE(handoff_note,'') FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status='queued' AND context ? 'wakeup_system'", issue, agent).Scan(&note)
+		return note
+	}
+	if strings.Contains(note(first), instruction) {
+		t.Fatalf("the earlier assignee's run took the new instruction: %q", note(first))
+	}
+	if !strings.Contains(note(next), instruction) {
+		t.Fatalf("the current assignee's run lacks its instruction: %q", note(next))
+	}
+	claim := func() error {
+		t.Helper()
+		task, err := f.q.GetAgentTask(ctx, parseTestUUID(t, queued))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.CheckClaim(ctx, task)
+	}
+	if err := claim(); err != nil {
+		t.Fatalf("the first agent's own run is refused: %v", err)
+	}
+	// Had the instruction reached it anyway, the claim refuses the run.
+	f.Exec(t, "UPDATE agent_task_queue SET context=jsonb_set(context,'{wakeup_evidence,instruction_by}',to_jsonb($2::text)) WHERE id=$1", queued, other)
+	if err := claim(); !errors.Is(err, ErrWakeupForbidden) {
+		t.Fatalf("claim with an instruction its author cannot give: %v", err)
 	}
 }
 

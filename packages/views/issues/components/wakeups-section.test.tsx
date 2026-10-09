@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { ApiError } from "@multica/core/api";
 import type { IssueWakeup, SystemWakeup } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { WakeupsSection } from "./wakeups-section";
@@ -373,7 +374,7 @@ describe("v2 sidebar", () => {
 
   it("shows the child-done system rule and turns it off for this issue", async () => {
     systemRules = [{
-      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", instruction_inactive: false, customized: false, paused_reason: null,
       rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: true, stage: 1, total: 2, remaining: 1,
       waiting: ["MUL-7704"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
     }];
@@ -383,12 +384,12 @@ describe("v2 sidebar", () => {
     expect(row).toHaveTextContent("唤醒负责人 Emacs · 还差 1 个");
     expect(screen.getByRole("button", { name: /唤醒 2/ })).toBeVisible();
     fireEvent.click(screen.getAllByRole("switch", { name: "子任务结束时唤醒负责人" })[0]!);
-    await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: false, instruction: "" }));
+    await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: false }));
   });
 
   it("says a member assignee is notified instead of woken", () => {
     systemRules = [{
-      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", instruction_inactive: false, customized: false, paused_reason: null,
       rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: false, stage: null, total: 3, remaining: 2,
       waiting: [], target: { type: "member", id: "u", name: "Jiayuan" }, blocked: "member_assignee",
     }];
@@ -398,7 +399,7 @@ describe("v2 sidebar", () => {
 
   it("shows the default instruction and saves one for this issue", async () => {
     systemRules = [{
-      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", instruction_inactive: false, customized: false, paused_reason: null,
       rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: false, stage: null, total: 1, remaining: 1,
       waiting: ["MUL-2"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
     }];
@@ -411,6 +412,23 @@ describe("v2 sidebar", () => {
     fireEvent.change(input, { target: { value: "Ask Jiayuan first" } });
     fireEvent.submit(input.closest("form")!);
     await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: true, instruction: "Ask Jiayuan first" }));
+  });
+
+  it("marks an instruction its author cannot give and says why a save is refused", async () => {
+    systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", instruction_inactive: true, customized: true, paused_reason: null,
+      rule: "child_done", workspace_default: true, enabled: true, instruction: "Forward the mail", staged: false, stage: null, total: 1, remaining: 1,
+      waiting: ["MUL-2"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
+    }];
+    updateSystem.mockRejectedValue(new ApiError("forbidden", 403, "Forbidden"));
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    fireEvent.click(screen.getByRole("button", { name: /当子任务全部结束时/ }));
+    expect(await screen.findByText("当前不生效，运行使用默认指令。需由能使用 Emacs 的成员修改并保存后才会生效。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "编辑指令" }));
+    const input = screen.getByLabelText("唤醒后要做什么");
+    fireEvent.change(input, { target: { value: "Forward all the mail" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(await screen.findByRole("alert")).toHaveTextContent("只有能使用 Emacs 的成员才能修改这条指令。");
   });
 });
 
