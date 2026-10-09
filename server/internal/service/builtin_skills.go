@@ -10,16 +10,7 @@ import (
 //go:embed builtin_skills
 var builtinSkillsFS embed.FS
 
-// Redirect stubs for built-ins this server no longer ships, keyed by the name
-// an older daemon's runtime brief still points at. See legacyRedirectSkills.
-//
-//go:embed builtin_skills_legacy
-var legacyBuiltinSkillsFS embed.FS
-
-const (
-	builtinSkillsRoot       = "builtin_skills"
-	legacyBuiltinSkillsRoot = "builtin_skills_legacy"
-)
+const builtinSkillsRoot = "builtin_skills"
 
 // PlatformSkillName is the built-in skill carrying Multica's platform
 // contracts — issues, mentions, agents, squads, autopilots, projects, runtimes
@@ -58,26 +49,8 @@ var builtinSkillSystemKey = map[string]string{
 // slug and take the bare directory. That is accepted, not handled — when it
 // becomes real, the fix is to reject the prefix at skill create/import rather
 // than to make every pointer defensive.
-// legacyRedirects asks for redirect stubs under the names this server has
-// stopped shipping. The runtime brief is assembled by the daemon, not the
-// server, so a backend deploy cannot rewrite an installed daemon's copy of it:
-// a daemon older than the multica-platform merge still tells its agent to read
-// `multica-working-on-issues`. Passing true for such a daemon keeps that
-// pointer resolvable; the stub carries no contracts of its own, only the new
-// location. Callers decide by capability, never by version string.
-func (s *TaskService) BuiltinSkills(agentSystemKey string, legacyRedirects bool) []AgentSkillData {
-	skills := loadBuiltinSkills(agentSystemKey)
-	if legacyRedirects {
-		skills = append(skills, legacyRedirectSkills()...)
-	}
-	return skills
-}
-
-// legacyRedirectSkills loads the redirect stubs. They live outside
-// builtin_skills/ so that nothing ships them by default — a stub is only ever
-// correct for a daemon whose brief still names the skill it replaces.
-func legacyRedirectSkills() []AgentSkillData {
-	return loadSkillDirs(legacyBuiltinSkillsFS, legacyBuiltinSkillsRoot, func(string) bool { return true })
+func (s *TaskService) BuiltinSkills(agentSystemKey string) []AgentSkillData {
+	return loadBuiltinSkills(agentSystemKey)
 }
 
 // AllBuiltinSkills returns every built-in skill regardless of agent scope. Only
@@ -86,7 +59,7 @@ func legacyRedirectSkills() []AgentSkillData {
 // handed, so re-deriving the scope there would cost an agent read to re-answer
 // a question the claim answered.
 func (s *TaskService) AllBuiltinSkills() []AgentSkillData {
-	return append(loadBuiltinSkillDirs(func(string) bool { return true }), legacyRedirectSkills()...)
+	return loadBuiltinSkillDirs(func(string) bool { return true })
 }
 
 func loadBuiltinSkills(agentSystemKey string) []AgentSkillData {

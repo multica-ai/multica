@@ -78,7 +78,7 @@ func TestAckBatchUsesSealedOwnershipAndInputOrder(t *testing.T) {
 				slices.Reverse(order)
 			}
 			for _, name := range order {
-				n.OnIngested(ctx, inst, groupReactionMessage(name), sid)
+				n.OnIngested(ctx, inst, groupReactionMessage(name), sid, sid)
 			}
 			if !slices.Equal(actions, tc.want) {
 				t.Fatalf("actions=%v want=%v", actions, tc.want)
@@ -105,11 +105,11 @@ func TestAckBatchDoesNotMoveAcrossTaskBoundary(t *testing.T) {
 		q.rows[id] = db.ChatMessage{ID: id, ChatSessionID: sid, Role: "user", ChannelIngested: true, ChannelContextRevision: pgtype.Int8{Int64: 1, Valid: true}}
 		n.client.rememberReplySource(inst.ID, id, sid, groupReactionMessage(name))
 	}
-	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
 	a := q.rows[sessionUUID(92)]
 	a.TaskID = sessionUUID(94)
 	q.rows[a.ID] = a
-	n.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid, sid)
 	if len(visible) != 2 {
 		t.Fatalf("new batch removed old receipt: %v", visible)
 	}
@@ -132,7 +132,7 @@ func TestAckTerminalBeforeIngestDoesNotRecreateReceipt(t *testing.T) {
 	// Even the local source capture may follow a fast terminal event.
 	n.onInputsSettled(context.Background(), sid, []db.ChatMessage{row})
 	n.client.rememberReplySource(inst.ID, id, sid, groupReactionMessage("a"))
-	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
 	if calls != 0 || len(n.active) != 0 {
 		t.Fatalf("late hook recreated receipt: calls=%d active=%v", calls, n.active)
 	}
@@ -156,7 +156,7 @@ func TestAckBatchRetriesWhenInputSealsDuringLookup(t *testing.T) {
 		q.rows[id] = db.ChatMessage{ID: id, ChatSessionID: sid, Role: "user", ChannelIngested: true}
 		n.client.rememberReplySource(inst.ID, id, sid, groupReactionMessage(name))
 	}
-	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
 	q.read = func(id pgtype.UUID) {
 		if id == sessionUUID(92) {
 			q.read = nil
@@ -166,7 +166,7 @@ func TestAckBatchRetriesWhenInputSealsDuringLookup(t *testing.T) {
 			}
 		}
 	}
-	n.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid, sid)
 	if len(visible) != 1 || !visible["b"] {
 		t.Fatalf("sealing race left wrong receipts: %v", visible)
 	}
@@ -198,13 +198,16 @@ func TestAckBatchRecallsSupersededInFlightAdd(t *testing.T) {
 		}
 		return nil
 	}
-	go func() { defer close(done); n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid) }()
+	go func() {
+		defer close(done)
+		n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
+	}()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("add did not begin")
 	}
-	n.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("b"), sid, sid)
 	close(release)
 	select {
 	case <-done:
@@ -227,7 +230,7 @@ func TestAckBatchQueryFailureSkipsReceipt(t *testing.T) {
 		t.Fatal("query failure guessed a batch")
 		return nil
 	}
-	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
 	if len(n.active) != 0 {
 		t.Fatal("failed query retained receipt")
 	}
@@ -255,7 +258,7 @@ func TestAckBatchRetriesFailedRecallOnNextMessage(t *testing.T) {
 		id := sessionUUID(byte(92 + i))
 		q.rows[id] = db.ChatMessage{ID: id, ChatSessionID: sid, Role: "user", ChannelIngested: true}
 		n.client.rememberReplySource(inst.ID, id, sid, groupReactionMessage(name))
-		n.OnIngested(context.Background(), inst, groupReactionMessage(name), sid)
+		n.OnIngested(context.Background(), inst, groupReactionMessage(name), sid, sid)
 		if name == "b" && len(visible) != 2 {
 			t.Fatalf("fixture did not leave failed recall visible: %v", visible)
 		}
@@ -279,7 +282,7 @@ func TestAckTerminalDuringBatchLookupDoesNotRecreateReceipt(t *testing.T) {
 		t.Fatal("terminal event during lookup recreated receipt")
 		return nil
 	}
-	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid)
+	n.OnIngested(context.Background(), inst, groupReactionMessage("a"), sid, sid)
 }
 
 func TestAckBatchRejectsUnattributableInput(t *testing.T) {
@@ -310,7 +313,7 @@ func TestAckBatchRejectsUnattributableInput(t *testing.T) {
 				t.Fatal("unattributable input received reaction")
 				return nil
 			}
-			n.OnIngested(context.Background(), inst, msg, sid)
+			n.OnIngested(context.Background(), inst, msg, sid, sid)
 		})
 	}
 }
@@ -381,7 +384,7 @@ func TestAckConcurrentBatchKeepsLastInput(t *testing.T) {
 		hooks.Add(1)
 		go func() {
 			defer hooks.Done()
-			n.OnIngested(ctx, inst, msg, sid)
+			n.OnIngested(ctx, inst, msg, sid, sid)
 		}()
 	}
 	hooks.Wait()

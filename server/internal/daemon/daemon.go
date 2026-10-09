@@ -6550,18 +6550,12 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // changes, so binding it to workdir reuse discards healthy conversation history
 // and forces the model to reconstruct it through `multica chat history`.
 //
-// A matching workdir is not sufficient on its own. Hermes keys its sessions to
-// HERMES_HOME — the per-task overlay under envRoot — not to the cwd, and the
-// two keys come apart precisely in the local_directory flow: reuse is disabled
-// there (shouldReusePriorWorkdir), so every task builds a fresh overlay with an
-// empty state.db, while envWorkDir stays the user's own directory and therefore
-// still equals PriorWorkDir. The gate read "reused" and forwarded a session id
-// that could not possibly resolve, and Hermes answers an unresolvable resume by
-// silently starting over (GH #6806). sessionHomeReachable is the provider's own
-// answer to "can a prior session still be found here?" — for Hermes, whether
-// the conversation's session store got mounted (execenv.Environment
-// HermesSessionStore) — and false drops the resume with the same disclosure as
-// a workdir mismatch.
+// Hermes is also independent of cwd: its transcript lives in HERMES_HOME's
+// state.db. sessionHomeReachable checks whether the conversation-scoped store
+// mounted by execenv holds history, or whether the task-local home was reused.
+// Requiring the prior cwd as well would discard reachable history whenever a
+// local_directory task gets a new worktree (#9062). An empty or unavailable
+// store must still drop the resume, even when the cwd matches (#6806).
 // sameExistingDir reports whether two paths name the same existing directory.
 // False when either cannot be stat'd, which is the safe answer for cwd-keyed
 // providers: an absent prior workdir means there is nothing to resume from.
@@ -6584,6 +6578,8 @@ func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
 		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
+	} else if provider == "hermes" {
+		reachable = sessionHomeReachable
 	} else {
 		// Compare the directories, not the spelling. Reuse runs in the canonical
 		// path it validated and locked, which need not be character-identical to

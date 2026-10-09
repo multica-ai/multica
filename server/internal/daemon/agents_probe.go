@@ -142,7 +142,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			// Codex Desktop bundles its CLI inside the macOS app instead of
 			// installing it onto PATH.
 			for _, p := range codexDesktopAppBundlePaths() {
-				if _, err := os.Stat(p); err == nil {
+				if executableCandidate(p) {
 					return AgentEntry{
 						Path:    p,
 						Command: cmd,

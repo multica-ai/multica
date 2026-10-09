@@ -230,7 +230,7 @@ func TestLoadAgentSkillBundles_FailsClosedOnReadFailure(t *testing.T) {
 	}
 	svc := &TaskService{Queries: db.New(fake)}
 
-	bundles, refs, err := svc.LoadAgentSkillBundles(context.Background(), testUUID(9), "", false)
+	bundles, refs, err := svc.LoadAgentSkillBundles(context.Background(), testUUID(9), "")
 	if err == nil {
 		t.Fatalf("LoadAgentSkillBundles returned nil error with %d bundles / %d refs", len(bundles), len(refs))
 	}

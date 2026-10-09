@@ -373,35 +373,58 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	timeout := opts.Timeout
 
-	// Pi's --session flag expects a file path where events are appended.
-	// The path doubles as our opaque session identifier: we return it as
-	// SessionID and expect it back as ResumeSessionID on the next turn.
+	// The persisted JSONL path is our opaque session identifier. OMP's
+	// --session is strictly resume-only; let it create fresh sessions in a
+	// private directory, then return the transcript it actually persisted.
 	sessionPath := opts.ResumeSessionID
-	if sessionPath == "" {
-		p, err := newPiSessionPath()
+	var sessionDir string
+	var sessionLock *os.File
+	if label == "omp" && sessionPath == "" {
+		dir, err := piSessionDir()
 		if err != nil {
-			return nil, fmt.Errorf("%s session path: %w", label, err)
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
 		}
-		sessionPath = p
-	}
-	if err := ensurePiSessionFile(sessionPath); err != nil {
-		return nil, fmt.Errorf("%s session file: %w", label, err)
-	}
-	sessionLock, locked, err := tryLockPiSessionFile(sessionPath)
-	if err != nil {
-		return nil, fmt.Errorf("%s session lock: %w", label, err)
-	}
-	if !locked {
-		if opts.ResumeSessionID != "" {
-			return piSessionBusyResult(label, sessionPath), nil
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
 		}
-		return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+		sessionDir, err = os.MkdirTemp(dir, "omp-")
+		if err != nil {
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
+		}
+	} else {
+		if sessionPath == "" {
+			sessionPath, err = newPiSessionPath()
+			if err != nil {
+				return nil, fmt.Errorf("%s session path: %w", label, err)
+			}
+		}
+		if label != "omp" {
+			if err := ensurePiSessionFile(sessionPath); err != nil {
+				return nil, fmt.Errorf("%s session file: %w", label, err)
+			}
+		}
+		var locked bool
+		sessionLock, locked, err = tryLockPiSessionFile(sessionPath)
+		if err != nil {
+			return nil, fmt.Errorf("%s session lock: %w", label, err)
+		}
+		if !locked {
+			if opts.ResumeSessionID != "" {
+				return piSessionBusyResult(label, sessionPath), nil
+			}
+			return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+		}
 	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 	processCtx, cancelProcess := context.WithCancel(runCtx)
 
-	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	var args []string
+	if label == "omp" {
+		args = buildOmpArgs(sessionPath, sessionDir, opts, b.cfg.Logger)
+	} else {
+		args = buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
@@ -613,6 +636,23 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					turnErrors.clear()
 				}
 
+			case "agent_end":
+				// agent_end closes the run, and its last assistant message holds
+				// the run's terminal state. Pi 0.74.0 and earlier report a
+				// failure raised outside a model stream, such as an API key they
+				// cannot resolve, only here: no turn_end, no error event, and
+				// print mode still exits 0. Record it like a turn_end error, so
+				// an automatic retry or a later successful turn still clears it.
+				msg := lastPiAssistantMessage(evt.Messages)
+				if msg == nil || msg.StopReason != "error" {
+					continue
+				}
+				runError := msg.ErrorMessage
+				if runError == "" {
+					runError = label + " ended the run with an error"
+				}
+				turnErrors.record(runError)
+
 			case "error":
 				errText := decodePiString(evt.Message)
 				trySend(msgCh, Message{Type: MessageError, Content: errText})
@@ -633,6 +673,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					}
 				}
 			}
+		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			// Scanner stopped consuming stdout. Close the pipe before Wait so Pi,
+			// still writing an oversized event, cannot deadlock on the full OS
+			// pipe; the scanner error remains the primary failure.
+			closePiReadPipe(stdout)
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
 			output.WriteString(d)
@@ -682,6 +729,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalStatus = "failed"
 			finalError = lastTurnError
 			authoritativeTerminal = true
+		} else if scanErr != nil && finalStatus == "completed" {
+			// The unread rest of the stream may hold the run's terminal state
+			// (agent_end repeats every message of the run, so it is the line
+			// most likely to overflow), so the run cannot count as a success.
+			// Ranked above waitErr: closing stdout is what made Pi exit.
+			authoritativeTerminal = true
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("%s stdout read error: %v", label, scanErr)
+			if lastTurnError != "" {
+				finalError = lastTurnError + "; " + finalError
+			}
 		} else if waitErr != nil && finalStatus == "completed" {
 			authoritativeTerminal = true
 			finalStatus = "failed"
@@ -712,6 +770,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = lastTurnError
 		} else if runCtx.Err() == nil {
 			authoritativeTerminal = true
+		}
+
+		if sessionDir != "" {
+			var sessionErr error
+			sessionPath, sessionErr = findOmpSessionFile(sessionDir)
+			if sessionErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("omp session file: %v", sessionErr)
+			}
 		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -843,6 +910,9 @@ type piStreamEvent struct {
 	// error: Message is a string. turn_end: Message is an object.
 	Message json.RawMessage `json:"message,omitempty"`
 
+	// agent_end: the messages the agent run produced, oldest first.
+	Messages json.RawMessage `json:"messages,omitempty"`
+
 	// auto_retry_end
 	Success    bool   `json:"success,omitempty"`
 	FinalError string `json:"finalError,omitempty"`
@@ -858,9 +928,10 @@ type piMessage struct {
 	Model string   `json:"model,omitempty"`
 	Usage *piUsage `json:"usage,omitempty"`
 
-	// turn_end carries the terminal state of the turn. Pi sets StopReason to
-	// "error" for a provider call it could not complete, whether or not it
-	// goes on to retry, and puts the provider's message in ErrorMessage.
+	// turn_end carries the terminal state of the turn, and agent_end's last
+	// assistant message that of the run. Pi sets StopReason to "error" for a
+	// provider call it could not complete, whether or not it goes on to retry,
+	// and puts the provider's message in ErrorMessage.
 	StopReason   string `json:"stopReason,omitempty"`
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
@@ -882,6 +953,22 @@ func decodePiMessage(raw json.RawMessage) *piMessage {
 		return nil
 	}
 	return &m
+}
+
+// lastPiAssistantMessage returns the newest assistant message in agent_end's
+// messages, or nil when there is none. Messages are decoded one at a time so
+// an unexpected shape elsewhere in the run cannot hide the last one.
+func lastPiAssistantMessage(raw json.RawMessage) *piMessage {
+	var messages []json.RawMessage
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if m := decodePiMessage(messages[i]); m != nil && m.Role == "assistant" {
+			return m
+		}
+	}
+	return nil
 }
 
 func decodePiString(raw json.RawMessage) string {
