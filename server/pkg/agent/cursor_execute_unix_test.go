@@ -309,3 +309,82 @@ func executeFakeCursor(t *testing.T, script string) Result {
 	}
 	return result
 }
+
+// runFakeCursorWithEnv runs a fake cursor-agent to completion, draining the
+// message stream so the run's cleanup has finished before it returns.
+func runFakeCursorWithEnv(t *testing.T, script string, env map[string]string, model string) Result {
+	t.Helper()
+
+	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
+	writeTestExecutable(t, fakePath, []byte(script))
+	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: env})
+	if err != nil {
+		t.Fatalf("New(cursor): %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Model: model, Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	return <-session.Result
+}
+
+const fakeCursorResult = `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"s"}'` + "\n"
+
+func TestCursorExecuteContextModelUsesTaskScopedConfigDir(t *testing.T) {
+	t.Parallel()
+
+	source := t.TempDir()
+	if err := os.WriteFile(filepath.Join(source, cursorCLIConfigFile), []byte(cursorTestCLIConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mark := filepath.Join(t.TempDir(), "seen")
+	script := "#!/bin/sh\n" + drainStdin + "\n" +
+		`printf '%s\n' "$CURSOR_CONFIG_DIR" > "` + mark + `.dir"` + "\n" +
+		`cp "$CURSOR_CONFIG_DIR/cli-config.json" "` + mark + `.json"` + "\n" +
+		`printf '%s\n' "$*" > "` + mark + `.args"` + "\n" +
+		fakeCursorResult
+	env := map[string]string{"CURSOR_CONFIG_DIR": source, "TMPDIR": t.TempDir()}
+
+	if result := runFakeCursorWithEnv(t, script, env, "grok-4.7[500k]"); result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+
+	dirBytes, _ := os.ReadFile(mark + ".dir")
+	dir := strings.TrimSpace(string(dirBytes))
+	if dir == "" || dir == source || !strings.HasPrefix(dir, env["TMPDIR"]) {
+		t.Fatalf("CURSOR_CONFIG_DIR = %q, want a per-run dir under TMPDIR %q", dir, env["TMPDIR"])
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("per-run config dir %q not removed after the run: %v", dir, err)
+	}
+	cfg, _ := os.ReadFile(mark + ".json")
+	if !strings.Contains(string(cfg), `"500k"`) || !strings.Contains(string(cfg), `"auth-123"`) {
+		t.Errorf("cursor saw config %s; want the 500k selection with auth preserved", cfg)
+	}
+	if args, _ := os.ReadFile(mark + ".args"); strings.Contains(string(args), "--model") {
+		t.Errorf("args = %s; want no --model for a context-tagged model", args)
+	}
+	if env["CURSOR_CONFIG_DIR"] != source {
+		t.Error("Execute mutated Config.Env")
+	}
+}
+
+func TestCursorExecuteWithoutContextTagKeepsUserConfigDir(t *testing.T) {
+	t.Parallel()
+
+	mark := filepath.Join(t.TempDir(), "seen")
+	script := "#!/bin/sh\n" + drainStdin + "\n" +
+		`printf '%s|%s\n' "${CURSOR_CONFIG_DIR-unset}" "$*" > "` + mark + `"` + "\n" +
+		fakeCursorResult
+	env := map[string]string{"CURSOR_CONFIG_DIR": "/user/cursor"}
+
+	if result := runFakeCursorWithEnv(t, script, env, "grok-4.7-high"); result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	seen, _ := os.ReadFile(mark)
+	if got := strings.TrimSpace(string(seen)); !strings.HasPrefix(got, "/user/cursor|") || !strings.Contains(got, "--model grok-4.7-high") {
+		t.Fatalf("cursor saw %q; want the user's CURSOR_CONFIG_DIR and --model untouched", got)
+	}
+}
