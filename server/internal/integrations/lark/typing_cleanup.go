@@ -115,6 +115,9 @@ func (m *TypingIndicatorManager) cleanupReaction(ctx context.Context, row db.Cha
 }
 
 func (m *TypingIndicatorManager) sweepForCleanup(ctx context.Context, creds InstallationCredentials, messageID string) error {
+	if creds.AppID == "" {
+		return fmt.Errorf("reaction owner App ID unavailable")
+	}
 	lister, ok := m.client.(ReactionLister)
 	if !ok {
 		return fmt.Errorf("reaction listing unavailable")
@@ -124,7 +127,7 @@ func (m *TypingIndicatorManager) sweepForCleanup(ctx context.Context, creds Inst
 		return err
 	}
 	for _, r := range reactions {
-		if r.OperatorType != "app" || r.EmojiType != typingEmoji {
+		if r.OperatorType != "app" || r.OperatorID != creds.AppID || r.EmojiType != typingEmoji {
 			continue
 		}
 		err = errors.Join(err, m.client.DeleteMessageReaction(ctx, DeleteReactionParams{InstallationID: creds, MessageID: messageID, ReactionID: r.ReactionID}))

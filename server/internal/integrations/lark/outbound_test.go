@@ -986,7 +986,7 @@ func TestPatcherSweepsTypingOnChatDoneAfterRestartEmptiedTheState(t *testing.T) 
 	// A fresh manager: no Add ever ran in this process, the map is empty.
 	typingAPI := &fakeTypingAPIClient{
 		listReturn: []MessageReaction{
-			{ReactionID: "r-stale", OperatorType: "app", EmojiType: typingEmoji},
+			{ReactionID: "r-stale", OperatorType: "app", OperatorID: "cli_test_app", EmojiType: typingEmoji},
 		},
 	}
 	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
@@ -1029,7 +1029,7 @@ func TestPatcherSweepsTypingOnTaskCancelledThroughTheDeliveryRow(t *testing.T) {
 
 	typingAPI := &fakeTypingAPIClient{
 		listReturn: []MessageReaction{
-			{ReactionID: "r-stale", OperatorType: "app", EmojiType: typingEmoji},
+			{ReactionID: "r-stale", OperatorType: "app", OperatorID: "cli_test_app", EmojiType: typingEmoji},
 		},
 	}
 	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},

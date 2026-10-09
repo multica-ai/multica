@@ -420,10 +420,10 @@ func TestTypingIndicatorDoesNotFallBackOnATransientLookupFailure(t *testing.T) {
 func TestTypingIndicatorSweepDeletesOnlyTheBotTypingReactions(t *testing.T) {
 	api := &fakeTypingAPIClient{
 		listReturn: []MessageReaction{
-			{ReactionID: "r-bot", OperatorType: "app", EmojiType: typingEmoji},
+			{ReactionID: "r-bot", OperatorType: "app", OperatorID: "cli_test", EmojiType: typingEmoji},
 			{ReactionID: "r-human", OperatorType: "user", EmojiType: typingEmoji},
-			{ReactionID: "r-bot-lower", OperatorType: "app", EmojiType: "typing"},
-			{ReactionID: "r-bot-smile", OperatorType: "app", EmojiType: "SMILE"},
+			{ReactionID: "r-bot-lower", OperatorType: "app", OperatorID: "cli_test", EmojiType: "typing"},
+			{ReactionID: "r-bot-smile", OperatorType: "app", OperatorID: "cli_test", EmojiType: "SMILE"},
 		},
 	}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, &fakeTypingQueries{}, newDiscardLogger())
@@ -456,7 +456,7 @@ func TestTypingIndicatorSweepDeletesOnlyTheBotTypingReactions(t *testing.T) {
 func TestTypingIndicatorSweepClearsWithoutAnyRecordedState(t *testing.T) {
 	api := &fakeTypingAPIClient{
 		listReturn: []MessageReaction{
-			{ReactionID: "r-from-another-process", OperatorType: "app", EmojiType: typingEmoji},
+			{ReactionID: "r-from-another-process", OperatorType: "app", OperatorID: "cli_test", EmojiType: typingEmoji},
 		},
 	}
 	mgr := NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, &fakeTypingQueries{}, newDiscardLogger())

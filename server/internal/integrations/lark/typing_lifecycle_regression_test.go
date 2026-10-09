@@ -163,7 +163,7 @@ func TestPatcherClearsTypingBeforeTerminalGates(t *testing.T) {
 func TestPatcherSessionDeleteSweepsCapturedTargetWithoutLocalState(t *testing.T) {
 	p, q, replies := newTestPatcher(t)
 	q.deliveryErr = pgx.ErrNoRows // Both binding and delivery disappeared at commit.
-	api := &fakeTypingAPIClient{listReturn: []MessageReaction{{ReactionID: "remote-reaction", OperatorType: "app", EmojiType: typingEmoji}}}
+	api := &fakeTypingAPIClient{listReturn: []MessageReaction{{ReactionID: "remote-reaction", OperatorType: "app", OperatorID: "cli_test_app", EmojiType: typingEmoji}}}
 	p.SetTypingIndicatorManager(NewTypingIndicatorManager(api, fakeTypingCreds{secret: "shh"}, &fakeTypingQueries{}, newDiscardLogger()))
 	p.handleEvent(events.Event{Type: protocol.EventTaskCancelled, TaskID: "ee777777-ee77-ee77-ee77-eeeeeeeeeeee", ChatSessionID: uuidString(q.binding.ChatSessionID), ChannelReactionTarget: &events.ChannelReactionTarget{ChannelType: channelTypeFeishu, InstallationID: uuidString(q.installation.ID), MessageID: "deleted-session-trigger"}})
 	if len(api.deleteCalled) != 1 || api.deleteCalled[0].messageID != "deleted-session-trigger" {

@@ -239,17 +239,15 @@ func (m *TypingIndicatorManager) removeState(key string, state *TypingIndicatorS
 // by the durable pending-Add record. The sweep also retries reactions whose
 // exact deletion failed during reconciliation.
 //
-// It deletes only reactions whose operator_type is "app". Lark lets a bot
-// delete solely what it added, so a human's own Typing reaction is untouchable
-// anyway; the filter keeps the sweep from burning delete calls (and warning
-// logs) on reactions it could never remove.
+// Both operator type and App ID must match. Other applications' reactions are
+// not ours to delete and must not turn an otherwise successful sweep into a retry.
 //
 // credentials came from the caller, which resolves them from the same
 // installation that added the reaction; errors are logged and swallowed — the
 // indicator is best-effort and must never fail a reply. A client that does not
 // implement ReactionLister (the stub, minimal fakes) skips the sweep.
 func (m *TypingIndicatorManager) SweepMessage(ctx context.Context, creds InstallationCredentials, messageID string) {
-	if messageID == "" {
+	if messageID == "" || creds.AppID == "" {
 		return
 	}
 	lister, ok := m.client.(ReactionLister)
@@ -272,7 +270,7 @@ func (m *TypingIndicatorManager) SweepMessage(ctx context.Context, creds Install
 		return
 	}
 	for _, r := range reactions {
-		if !strings.EqualFold(r.EmojiType, typingEmoji) || r.OperatorType != "app" {
+		if !strings.EqualFold(r.EmojiType, typingEmoji) || r.OperatorType != "app" || r.OperatorID != creds.AppID {
 			continue
 		}
 		if err := m.client.DeleteMessageReaction(ctx, DeleteReactionParams{

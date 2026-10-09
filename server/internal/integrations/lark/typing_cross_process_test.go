@@ -35,7 +35,7 @@ func (a *crossProcessReactionAPI) AddMessageReaction(ctx context.Context, p AddR
 	}
 	reactionID := "reaction-" + p.MessageID
 	a.mu.Lock()
-	a.remote[p.MessageID] = append(a.remote[p.MessageID], MessageReaction{ReactionID: reactionID, OperatorType: "app", EmojiType: typingEmoji})
+	a.remote[p.MessageID] = append(a.remote[p.MessageID], MessageReaction{ReactionID: reactionID, OperatorType: "app", OperatorID: p.InstallationID.AppID, EmojiType: typingEmoji})
 	a.mu.Unlock()
 	return reactionID, nil
 }

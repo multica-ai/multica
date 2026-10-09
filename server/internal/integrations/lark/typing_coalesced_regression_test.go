@@ -60,7 +60,7 @@ func qaRunTrueCheckThenTerminal(t *testing.T, actualTrigger bool, removal string
 		fakeTypingAPIClient: &fakeTypingAPIClient{},
 		remote: map[string][]MessageReaction{
 			"coalesced-input":  {{ReactionID: "human-typing", OperatorType: "user", EmojiType: typingEmoji}},
-			"delivery-trigger": {{ReactionID: "trigger-app", OperatorType: "app", EmojiType: typingEmoji}},
+			"delivery-trigger": {{ReactionID: "trigger-app", OperatorType: "app", OperatorID: f.inst.AppID, EmojiType: typingEmoji}},
 		},
 	}
 	platformMessage := "coalesced-input"
