@@ -780,6 +780,7 @@
     "search_placeholder": "이 작업 검색…",
     "no_matches": "검색과 일치하는 단계가 없습니다.",
     "more_actions": "더보기",
+    "kind_text": "에이전트",
     "kind_tool": "도구",
     "kind_thinking": "사고",
     "kind_error": "오류",

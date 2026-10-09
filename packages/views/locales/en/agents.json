@@ -891,6 +891,7 @@
     "search_placeholder": "Search this run…",
     "no_matches": "No steps match this search.",
     "more_actions": "More",
+    "kind_text": "Agent",
     "kind_tool": "Tool",
     "kind_thinking": "Thinking",
     "kind_error": "Error",

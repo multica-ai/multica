@@ -772,6 +772,7 @@
     "search_placeholder": "この実行を検索…",
     "no_matches": "一致するステップはありません。",
     "more_actions": "その他",
+    "kind_text": "エージェント",
     "kind_tool": "ツール",
     "kind_thinking": "思考",
     "kind_error": "エラー",

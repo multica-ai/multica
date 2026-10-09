@@ -874,6 +874,7 @@
     "search_placeholder": "搜索这次运行…",
     "no_matches": "没有匹配的步骤。",
     "more_actions": "更多",
+    "kind_text": "智能体",
     "kind_tool": "工具",
     "kind_thinking": "思考",
     "kind_error": "错误",

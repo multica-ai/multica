@@ -891,6 +891,7 @@
     "search_placeholder": "Rechercher dans cette exécution…",
     "no_matches": "Aucune étape ne correspond à cette recherche.",
     "more_actions": "Plus",
+    "kind_text": "Agent",
     "kind_tool": "Outil",
     "kind_thinking": "Réflexion",
     "kind_error": "Erreur",
