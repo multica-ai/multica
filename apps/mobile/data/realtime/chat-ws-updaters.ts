@@ -37,6 +37,14 @@ import type {
 } from "@multica/core/types";
 import { chatKeys } from "@/data/queries/chat";
 
+/** Stop pre-send reads before writing the local outgoing message/task. */
+export async function cancelChatSnapshotRequests(qc: QueryClient, sessionId: string) {
+  await Promise.all([
+    qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) }, { revert: false }),
+    qc.cancelQueries({ queryKey: chatKeys.pendingTask(sessionId) }, { revert: false }),
+  ]);
+}
+
 // =====================================================
 // Sessions list (ChatSession[] keyed by wsId)
 // =====================================================
@@ -154,8 +162,12 @@ export function applyChatDoneToCache(
   qc.invalidateQueries({
     queryKey: chatKeys.messages(payload.chat_session_id),
   });
-  // A queued successor may already exist. Refetch the server-authoritative
-  // head instead of clearing it and briefly presenting the session as idle.
+  // Drop only the completed task: preserve/promote any queued successor and
+  // don't leave a completed task's timer running if the snapshot GET fails.
+  qc.setQueryData<ChatPendingTask>(
+    chatKeys.pendingTask(payload.chat_session_id),
+    (old) => old?.task_id ? removePendingChatTask(old, payload.task_id) : old,
+  );
   invalidatePendingTask(qc, payload.chat_session_id);
 }
 

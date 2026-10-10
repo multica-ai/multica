@@ -75,9 +75,11 @@ import {
 import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-store";
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
 import {
+  cancelChatSnapshotRequests,
   invalidatePendingTask,
   seedAcceptedPendingTask,
 } from "@/data/realtime/chat-ws-updaters";
+import { beginChatSend, hasChatSendInFlight } from "@/data/chat-send-lifecycle";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
 import {
   dispatchReasonCode,
@@ -331,6 +333,10 @@ export default function ChatTab() {
       }
       if (!sessionId) return;
 
+      // A recovery GET may have read the idle session before this send. Abort
+      // those reads before seeding local state so a late snapshot can't erase it.
+      await cancelChatSnapshotRequests(qc, sessionId);
+
       const sentAt = new Date().toISOString();
       const optimistic: ChatMessage = {
         id: `optimistic-${Date.now()}`,
@@ -341,30 +347,31 @@ export default function ChatTab() {
         created_at: sentAt,
       };
       const optimisticTaskId = `optimistic-${optimistic.id}`;
-      qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-        old ? [...old, optimistic] : [optimistic],
-      );
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(sessionId),
-        (old) =>
-          enqueuePendingChatTask(
-            old,
-            {
-              task_id: optimisticTaskId,
-              status: "queued",
-              created_at: sentAt,
-              message_id: optimistic.id,
-              content,
-            },
-            Boolean(old?.task_id),
-          ),
-      );
-      if (isNewSession) {
-        promoteNewDraft(sessionId);
-        setActiveSessionId(sessionId);
-      }
-
+      const finishSend = beginChatSend(sessionId);
       try {
+        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+          old ? [...old, optimistic] : [optimistic],
+        );
+        qc.setQueryData<ChatPendingTask>(
+          chatKeys.pendingTask(sessionId),
+          (old) =>
+            enqueuePendingChatTask(
+              old,
+              {
+                task_id: optimisticTaskId,
+                status: "queued",
+                created_at: sentAt,
+                message_id: optimistic.id,
+                content,
+              },
+              Boolean(old?.task_id),
+            ),
+        );
+        if (isNewSession) {
+          promoteNewDraft(sessionId);
+          setActiveSessionId(sessionId);
+        }
+
         const result = await api.sendChatMessage(sessionId, content, {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         });
@@ -410,6 +417,15 @@ export default function ChatTab() {
         // (MUL-6380). Name the cause here: only this layer sees the error body.
         Alert.alert(t("alerts.not_sent"), sendFailureMessage(err));
         throw err;
+      } finally {
+        finishSend();
+        // A queued acknowledgement can retain a local placeholder while the
+        // first snapshot fails. Resume recovery based on request lifetime,
+        // rather than waiting for that placeholder to disappear by itself.
+        if (!hasChatSendInFlight(sessionId)) {
+          void qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) }, { cancelRefetch: false });
+          void qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) }, { cancelRefetch: false });
+        }
       }
     },
     [

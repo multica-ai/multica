@@ -6,9 +6,8 @@
  * the user is on — so when they DO open Chat tab, the dropdown / sheet
  * already reflects reality (latest titles, has_unread flags, deletions).
  *
- * Events handled here are listing-level only — per-session events
- * (chat:message, task:*) belong in `use-chat-session-realtime.ts` because
- * they target a specific session id known only inside the chat screen.
+ * Terminal events also mark existing offscreen session caches stale. The
+ * active screen owns its immediate patches and refetches.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { chatKeys } from "@/data/queries/chat";
@@ -25,14 +24,31 @@ export function useChatSessionsRealtime() {
     (ws, wsId) => {
       const invalidateSessions = () =>
         qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+      const invalidateInactiveSession = (payload: { chat_session_id?: string }) => {
+        if (!payload.chat_session_id) return;
+        for (const queryKey of [
+          chatKeys.messages(payload.chat_session_id),
+          chatKeys.pendingTask(payload.chat_session_id),
+        ]) {
+          void qc.invalidateQueries({ queryKey, type: "inactive", refetchType: "none" });
+        }
+      };
+      const onTerminal = (payload: { chat_session_id?: string }) => {
+        if (!payload.chat_session_id) return;
+        invalidateSessions();
+        invalidateInactiveSession(payload);
+      };
 
       return [
         // chat:done flips `has_unread` server-side; refetch so the dot shows
         // even when the user isn't in the chat screen.
-        ws.on("chat:done", invalidateSessions),
+        ws.on("chat:done", onTerminal),
         // Cancellation may delete a queued prompt or append "Stopped.", both
         // of which change the session preview.
-        ws.on("task:cancelled", invalidateSessions),
+        ws.on("task:cancelled", onTerminal),
+        // chat:done owns the list change; this is an offscreen recovery fallback.
+        ws.on("task:completed", invalidateInactiveSession),
+        ws.on("task:failed", onTerminal),
         // chat:session_read clears the unread flag (could be triggered from
         // web/desktop on the same account).
         ws.on("chat:session_read", invalidateSessions),

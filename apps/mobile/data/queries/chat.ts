@@ -10,13 +10,13 @@
  * Same shape as web's `chatKeys` in packages/core/chat/queries.ts (mobile
  * owns its own copy per the "mirror, don't import" rule in apps/mobile/CLAUDE.md).
  *
- * `staleTime: Infinity` everywhere — caches are kept fresh by WS event
- * handlers, not by background refetch. Foreground / reconnect invalidates
- * are scoped to each owning hook (see use-chat-sessions-realtime.ts and
- * use-chat-session-realtime.ts).
+ * WS events keep caches fresh. Messages and pending state also reconcile on
+ * foreground/entry; a visible pending task polls as a fallback for lost events.
  */
 import { queryOptions } from "@tanstack/react-query";
+import type { ChatPendingTask } from "@multica/core/types";
 import { api } from "@/data/api";
+import { hasChatSendInFlight } from "@/data/chat-send-lifecycle";
 
 export const chatKeys = {
   all: (wsId: string | null) => ["chat", wsId] as const,
@@ -62,14 +62,39 @@ export const chatMessagesOptions = (sessionId: string | null) =>
     queryFn: ({ signal }) => api.listChatMessages(sessionId!, { signal }),
     enabled: !!sessionId,
     staleTime: Infinity,
+    refetchOnWindowFocus: () => hasChatSendInFlight(sessionId) ? false : "always",
+    refetchOnMount: () => hasChatSendInFlight(sessionId) ? false : "always",
+    refetchOnReconnect: () => hasChatSendInFlight(sessionId) ? false : "always",
   });
 
 export const pendingChatTaskOptions = (sessionId: string | null) =>
   queryOptions({
     queryKey: chatKeys.pendingTask(sessionId ?? ""),
-    queryFn: ({ signal }) => api.getPendingChatTask(sessionId!, { signal }),
+    queryFn: async ({ signal, client }) => {
+      const previous = client.getQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(sessionId!),
+      );
+      const pending = await api.getPendingChatTask(sessionId!, { signal });
+      // A missed terminal event must recover the final reply as well as the
+      // status pill, including when a queued successor becomes the new head.
+      const previousId = isTaskMessageTaskId(previous?.task_id) ? previous.task_id : undefined;
+      const nextId = isTaskMessageTaskId(pending.task_id) ? pending.task_id : undefined;
+      if (previous && !hasChatSendInFlight(sessionId) && (
+        previousId !== nextId ||
+        (previous.queued_tasks?.length && !pending.task_id && !pending.queued_tasks?.length)
+      )) {
+        void client.invalidateQueries({ queryKey: chatKeys.messages(sessionId!) });
+      }
+      return pending;
+    },
     enabled: !!sessionId,
     staleTime: Infinity,
+    refetchOnWindowFocus: () => hasChatSendInFlight(sessionId) ? false : "always",
+    refetchOnMount: () => hasChatSendInFlight(sessionId) ? false : "always",
+    refetchOnReconnect: () => hasChatSendInFlight(sessionId) ? false : "always",
+    refetchInterval: (query) => !hasChatSendInFlight(sessionId) &&
+      (query.state.data?.task_id || query.state.data?.queued_tasks?.length) ? 30_000 : false,
+    refetchIntervalInBackground: false,
   });
 
 export const taskMessagesOptions = (taskId: string | null | undefined) =>

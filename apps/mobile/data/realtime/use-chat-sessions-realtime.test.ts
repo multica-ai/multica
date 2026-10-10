@@ -33,6 +33,26 @@ describe("useChatSessionsRealtime", () => {
     subscriptionSetups.length = 0;
   });
 
+  it.each(["chat:done", "task:completed", "task:failed", "task:cancelled"])(
+    "marks offscreen session snapshots stale on %s without background fetching", (event) => {
+      useChatSessionsRealtime();
+      const handlers = new Map<string, EventHandler>();
+      subscriptionSetups[0]({
+        on: vi.fn((name: string, handler: EventHandler) => {
+          handlers.set(name, handler); return () => {};
+        }),
+        onReconnect: vi.fn(() => () => {}),
+      }, "workspace-1");
+      handlers.get(event)!({ chat_session_id: "offscreen" });
+      for (const queryKey of [chatKeys.messages("offscreen"), chatKeys.pendingTask("offscreen")]) {
+        expect(invalidateQueries).toHaveBeenCalledWith({ queryKey, type: "inactive", refetchType: "none" });
+      }
+      invalidateQueries.mockClear();
+      handlers.get(event)!({ issue_id: "issue-task" });
+      expect(invalidateQueries).not.toHaveBeenCalled();
+    },
+  );
+
   it("invalidates the workspace session list for channel-created chats", () => {
     useChatSessionsRealtime();
     expect(subscriptionSetups).toHaveLength(1);

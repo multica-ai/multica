@@ -10,6 +10,7 @@ import type {
 import {
   applyChatDoneToCache,
   applyChatQuickActionsToCache,
+  cancelChatSnapshotRequests,
   promotePendingTaskToRunning,
   seedAcceptedPendingTask,
   seedPendingTaskFromQueued,
@@ -22,6 +23,47 @@ import { chatKeys } from "@/data/queries/chat";
 vi.mock("@/data/api", () => ({ api: {} }));
 
 const SESSION = "session-1";
+
+describe("cancelChatSnapshotRequests", () => {
+  it("prevents a session-entry GET from erasing a send started before that GET returns", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.messages(SESSION), []);
+    qc.setQueryData(chatKeys.pendingTask(SESSION), {});
+    let messagesReady: ((rows: ChatMessage[]) => void) | undefined;
+    let pendingReady: ((pending: ChatPendingTask) => void) | undefined;
+    const messages = new QueryObserver<ChatMessage[]>(qc, {
+      queryKey: chatKeys.messages(SESSION), staleTime: Infinity,
+      queryFn: () => new Promise((resolve) => { messagesReady = resolve; }),
+    });
+    const pending = new QueryObserver<ChatPendingTask>(qc, {
+      queryKey: chatKeys.pendingTask(SESSION), staleTime: Infinity,
+      queryFn: () => new Promise((resolve) => { pendingReady = resolve; }),
+    });
+    const unsubs = [messages.subscribe(() => {}), pending.subscribe(() => {})];
+    void qc.invalidateQueries({ queryKey: chatKeys.messages(SESSION) });
+    void qc.invalidateQueries({ queryKey: chatKeys.pendingTask(SESSION) });
+    await vi.waitFor(() => { expect(messagesReady).toBeTypeOf("function"); expect(pendingReady).toBeTypeOf("function"); });
+
+    // This cache update happened after the GET began. Cancellation must not
+    // revert a newer authoritative WS patch to the pre-fetch snapshot.
+    qc.setQueryData(chatKeys.pendingTask(SESSION), { task_id: "newer-task" });
+    await cancelChatSnapshotRequests(qc, SESSION);
+    expect(qc.getQueryData(chatKeys.pendingTask(SESSION))).toEqual({ task_id: "newer-task" });
+    const outgoing = [{ id: "optimistic-message", content: "new send" }];
+    qc.setQueryData(chatKeys.messages(SESSION), outgoing);
+    qc.setQueryData(chatKeys.pendingTask(SESSION), { task_id: "optimistic-task" });
+    messagesReady!([]);
+    pendingReady!({});
+    await vi.waitFor(() => {
+      expect(qc.getQueryData(chatKeys.messages(SESSION))).toEqual(outgoing);
+      expect(qc.getQueryData(chatKeys.pendingTask(SESSION))).toEqual({ task_id: "optimistic-task" });
+      expect(qc.getQueryState(chatKeys.messages(SESSION))?.fetchStatus).toBe("idle");
+      expect(qc.getQueryState(chatKeys.pendingTask(SESSION))?.fetchStatus).toBe("idle");
+    });
+    unsubs.forEach((unsub) => unsub());
+    qc.clear();
+  });
+});
 
 function donePayload(over: Partial<ChatDonePayload> = {}): ChatDonePayload {
   return {
@@ -36,6 +78,38 @@ function donePayload(over: Partial<ChatDonePayload> = {}): ChatDonePayload {
 }
 
 describe("applyChatDoneToCache", () => {
+  it("clears only the finished head and promotes its queued successor immediately", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), {
+      task_id: "task-1", status: "running", supports_queue: true,
+      queued_tasks: [{ task_id: "next", status: "queued", created_at: "2026-10-06T00:00:00Z" }],
+    });
+    applyChatDoneToCache(qc, donePayload());
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION))).toMatchObject({
+      task_id: "next", status: "queued", supports_queue: true,
+    });
+    // A duplicate terminal event must not clear a newer running task.
+    applyChatDoneToCache(qc, donePayload());
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION))?.task_id).toBe("next");
+  });
+
+  it("stops the completed task's timer without waiting for the snapshot request", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), { task_id: "task-1", status: "running" });
+    applyChatDoneToCache(qc, donePayload());
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION))?.task_id).toBeUndefined();
+  });
+
+  it("preserves a queue-only snapshot whose authoritative head has not loaded yet", () => {
+    const qc = new QueryClient();
+    const queueOnly: ChatPendingTask = {
+      supports_queue: true,
+      queued_tasks: [{ task_id: "next", status: "queued", created_at: "2026-10-06T00:00:00Z" }],
+    };
+    qc.setQueryData(chatKeys.pendingTask(SESSION), queueOnly);
+    applyChatDoneToCache(qc, donePayload());
+    expect(qc.getQueryData(chatKeys.pendingTask(SESSION))).toEqual(queueOnly);
+  });
   it("patches the assistant bubble inline AND invalidates messages so bound attachments refetch", () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), []);
