@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // plain `const` would be a TDZ ReferenceError when the factory runs.
 type CapturedMenuItem = {
   label?: string;
+  enabled?: boolean;
   role?: string;
   type?: string;
   click?: () => void;
@@ -58,6 +59,8 @@ vi.mock("electron", () => {
 import { installContextMenu } from "./context-menu";
 
 type ContextMenuParams = {
+  misspelledWord: string;
+  dictionarySuggestions: string[];
   selectionText: string;
   isEditable: boolean;
   linkURL: string;
@@ -82,6 +85,8 @@ type Listener = (event: unknown, params: ContextMenuParams) => void;
 function makeWebContents() {
   const handlers: Listener[] = [];
   return {
+    replaceMisspelling: vi.fn(),
+    session: { addWordToSpellCheckerDictionary: vi.fn() },
     copyImageAt: vi.fn(),
     on(event: string, fn: Listener) {
       if (event === "context-menu") handlers.push(fn);
@@ -246,10 +251,58 @@ describe("installContextMenu — image items", () => {
   });
 });
 
+describe("installContextMenu — spelling items", () => {
+  beforeEach(() => {
+    ctx.capturedItems.length = 0;
+    ctx.popupSpy.mockClear();
+    ctx.preferredLanguagesRef.current = ["en-US"];
+  });
+
+  it("offers at most five corrections and replaces the misspelling on selection", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({
+      isEditable: true,
+      misspelledWord: "helo",
+      dictionarySuggestions: ["hello", "halo", "help", "held", "hero", "helot"],
+      editFlags: { ...baseEditFlags, canPaste: true },
+    }));
+    expect(lastMenu().map((item) => item.label ?? item.role ?? item.type)).toEqual([
+      "hello", "halo", "help", "held", "hero", "Add to Dictionary", "separator", "paste",
+    ]);
+    invokeByLabel("hello");
+    expect(wc.replaceMisspelling).toHaveBeenCalledWith("hello");
+    invokeByLabel("Add to Dictionary");
+    expect(wc.session.addWordToSpellCheckerDictionary).toHaveBeenCalledWith("helo");
+  });
+
+  it("still offers Add to Dictionary when there are no suggestions", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ isEditable: true, misspelledWord: "multica" }));
+    expect(lastMenuLabels()).toEqual(["No suggestions", "Add to Dictionary"]);
+    expect(lastMenu()[0].enabled).toBe(false);
+    invokeByLabel("Add to Dictionary");
+    expect(wc.session.addWordToSpellCheckerDictionary).toHaveBeenCalledWith("multica");
+    expect(ctx.popupSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits spelling items on correctly spelled or non-editable text", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ isEditable: true, editFlags: { ...baseEditFlags, canPaste: true } }));
+    expect(menuItemRoles()).toEqual(["paste"]);
+    wc.fire(baseSelection({ misspelledWord: "helo", dictionarySuggestions: ["hello"] }));
+    expect(lastMenu()).toEqual([]);
+  });
+});
+
 // --- helpers ---
 
 function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
   return {
+    misspelledWord: "",
+    dictionarySuggestions: [],
     selectionText: "",
     isEditable: false,
     linkURL: "",

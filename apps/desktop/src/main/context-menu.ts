@@ -12,7 +12,7 @@ import { isSafeExternalHttpUrl, openExternalSafely } from "./external-url";
 // in the renderer has no way to copy it. Mirror Chrome's minimal clipboard
 // menu using `roles`, which keeps i18n + accelerator handling native.
 //
-// Custom (non-role) link and image items below are NOT auto-localized by
+// Custom (non-role) spelling, link and image items below are NOT auto-localized by
 // Electron — roles like "copy" pull labels from the OS, but a custom
 // MenuItem only shows the `label` you give it. We translate by OS-preferred
 // language so those items at least track Chinese / Japanese / Korean speakers
@@ -22,6 +22,8 @@ import { isSafeExternalHttpUrl, openExternalSafely } from "./external-url";
 export function installContextMenu(webContents: WebContents): void {
   webContents.on("context-menu", (_event, params) => {
     const {
+      misspelledWord,
+      dictionarySuggestions,
       editFlags,
       selectionText,
       isEditable,
@@ -42,6 +44,32 @@ export function installContextMenu(webContents: WebContents): void {
     const labels = pickLabels();
 
     const menu = new Menu();
+
+    if (isEditable && misspelledWord) {
+      for (const suggestion of dictionarySuggestions.slice(0, 5)) {
+        menu.append(new MenuItem({
+          label: suggestion,
+          click: () => webContents.replaceMisspelling(suggestion),
+        }));
+      }
+      if (dictionarySuggestions.length === 0) {
+        menu.append(new MenuItem({ label: labels.noSuggestions, enabled: false }));
+      }
+      menu.append(new MenuItem({
+        label: labels.addToDictionary,
+        click: () => {
+          webContents.session.addWordToSpellCheckerDictionary(misspelledWord);
+        },
+      }));
+      if (
+        editFlags.canCut ||
+        (hasSelection && editFlags.canCopy) ||
+        editFlags.canPaste ||
+        editFlags.canSelectAll
+      ) {
+        menu.append(new MenuItem({ type: "separator" }));
+      }
+    }
 
     if (isEditable && editFlags.canCut) {
       menu.append(new MenuItem({ role: "cut" }));
@@ -116,9 +144,11 @@ export function installContextMenu(webContents: WebContents): void {
 // Labels for the custom menu items in the user's OS-preferred language,
 // with English as the fallback. Kept inline because the main process has
 // no shared i18n loader (the renderer's i18next is per-window and not
-// reachable from here), and pulling one in for three strings would be
+// reachable from here), and pulling one in for a few strings would be
 // more rope than payload. Matches the four locales the renderer ships.
 type ContextMenuLabels = {
+  noSuggestions: string;
+  addToDictionary: string;
   openLink: string;
   copyLinkAddress: string;
   copyImage: string;
@@ -126,21 +156,29 @@ type ContextMenuLabels = {
 
 const labelsByLocale: Record<string, ContextMenuLabels> = {
   en: {
+    noSuggestions: "No suggestions",
+    addToDictionary: "Add to Dictionary",
     openLink: "Open Link in Browser",
     copyLinkAddress: "Copy Link Address",
     copyImage: "Copy Image",
   },
   "zh-Hans": {
+    noSuggestions: "无拼写建议",
+    addToDictionary: "添加到词典",
     openLink: "在浏览器中打开链接",
     copyLinkAddress: "复制链接地址",
     copyImage: "复制图片",
   },
   ja: {
+    noSuggestions: "候補なし",
+    addToDictionary: "辞書に追加",
     openLink: "ブラウザでリンクを開く",
     copyLinkAddress: "リンクのアドレスをコピー",
     copyImage: "画像をコピー",
   },
   ko: {
+    noSuggestions: "추천 단어 없음",
+    addToDictionary: "사전에 추가",
     openLink: "브라우저에서 링크 열기",
     copyLinkAddress: "링크 주소 복사",
     copyImage: "이미지 복사",
