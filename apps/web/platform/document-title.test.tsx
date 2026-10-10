@@ -8,7 +8,7 @@
  * navigation behavior of `document.title`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 
 const route = vi.hoisted(() => ({ pathname: "/acme/issues", search: "" }));
 vi.mock("next/navigation", () => ({
@@ -137,5 +137,43 @@ describe("WorkspaceDocumentTitle", () => {
     view.rerender(<WorkspaceDocumentTitle />);
 
     expect(document.title).toBe("Inbox | Multica");
+  });
+  it("restores the workspace title when route metadata overwrites it", async () => {
+    open("/acme/issues/MUL-123");
+    presentation.title = "MUL-123: Fix login";
+    render(<WorkspaceDocumentTitle />);
+
+    document.title = SITE_TITLE;
+
+    await waitFor(() => {
+      expect(document.title).toBe("MUL-123: Fix login | Multica");
+    });
+  });
+  it("updates when navigating from one issue to another", () => {
+    open("/acme/issues/HIBE-63");
+    presentation.title = "HIBE-63: First issue";
+    const view = render(<WorkspaceDocumentTitle />);
+    expect(document.title).toBe("HIBE-63: First issue | Multica");
+
+    open("/acme/issues/HIBE-64");
+    presentation.title = "HIBE-64: Second issue";
+    view.rerender(<WorkspaceDocumentTitle />);
+
+    expect(document.title).toBe("HIBE-64: Second issue | Multica");
+  });
+
+  it("restores the latest issue after metadata overwrites a later navigation", async () => {
+    open("/acme/issues/HIBE-63");
+    presentation.title = "HIBE-63: First issue";
+    const view = render(<WorkspaceDocumentTitle />);
+
+    open("/acme/issues/HIBE-64");
+    presentation.title = "HIBE-64: Second issue";
+    view.rerender(<WorkspaceDocumentTitle />);
+    document.title = SITE_TITLE;
+
+    await waitFor(() => {
+      expect(document.title).toBe("HIBE-64: Second issue | Multica");
+    });
   });
 });
