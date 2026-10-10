@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"sync/atomic"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -246,7 +246,10 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	// timeoutS rounds up: a sub-second timeout must not truncate to 0,
 	// which would tell the receptionist "no timeout".
-	timeoutS := int64(0)
+	// When opts.Timeout is 0 (no local deadline), send an explicit 24h
+	// rather than 0: the receptionist defaults unset/0 to 1h, which would
+	// kill long tasks the Go side is happy to wait for.
+	timeoutS := int64(24 * 3600)
 	if opts.Timeout > 0 {
 		timeoutS = int64((opts.Timeout + time.Second - 1) / time.Second)
 	}

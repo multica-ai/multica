@@ -2427,10 +2427,15 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 // windows impossible to mistake for a verdict, and costs a genuinely broken
 // provider one extra round.
 func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
-	// Below-minimum and protocol-skew are pure functions of the version
-	// string this round already parsed — a second look reaches the same
-	// conclusion, so no confirmation round is needed.
-	return verdict != builtinProbeBelowMinimum && verdict != builtinProbeProtocolSkew
+	// Below-minimum is a pure function of the version string this round
+	// already parsed — a second look reaches the same conclusion, so no
+	// confirmation round is needed.
+	// Protocol-skew is NOT exempt: for the muse backend the verdict comes
+	// from a live /v1/health HTTP response, not a locally parsed string.
+	// A transient proxy or a receptionist mid-upgrade could return a
+	// mismatched version once; requiring a second sighting avoids flapping
+	// an online runtime offline on a single bad probe.
+	return verdict != builtinProbeBelowMinimum
 }
 
 // dshMissingProfileReason is the user-facing explanation for a
