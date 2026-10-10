@@ -4,6 +4,7 @@ import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { DraftUpload } from "@multica/core/drafts";
+import type { Attachment } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 import enEditor from "../../locales/en/editor.json";
@@ -1058,6 +1059,23 @@ describe("ChatInput attachment wiring", () => {
 });
 
 describe("ChatInput async send", () => {
+  it("stages a durable edited prompt and its attachments before reporting it applied", async () => {
+    const attachment = makeUpload({ id: "att-restored", link: "/api/attachments/att-restored/download", filename: "draft.png" }) as unknown as Attachment;
+    const onRestoreDraftApplied = vi.fn(() => {
+      const uploads = useChatStore.getState().inputDraftAttachments["__draft_new__"];
+      expect(uploads).toEqual([expect.objectContaining({
+        status: "uploaded",
+        attachment: expect.objectContaining({ id: attachment.id, filename: attachment.filename, url: attachment.url }),
+      })]);
+    });
+    renderInput({
+      restoreDraftRequest: { id: "msg-restored", content: "Revise this prompt", attachments: [attachment] },
+      onRestoreDraftApplied,
+    });
+    await waitFor(() => expect(onRestoreDraftApplied).toHaveBeenCalledTimes(1));
+    expect(editorProps.last?.value).toBe("Revise this prompt");
+  });
+
   it("restores a cancelled empty run draft into the editor", async () => {
     const onRestoreDraftApplied = vi.fn();
     renderInput({

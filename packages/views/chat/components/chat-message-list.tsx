@@ -70,6 +70,8 @@ interface ChatMessageListProps {
   pendingTask: ChatPendingTask | null | undefined;
   /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
   availability: AgentAvailability | undefined;
+  onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+  onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
   firstItemIndex?: number;
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
@@ -112,6 +114,8 @@ interface ChatListContext {
   pendingTask: ChatPendingTask | null | undefined;
   liveTaskMessages: readonly TaskMessagePayload[] | undefined;
   availability: AgentAvailability | undefined;
+  onEditQueuedTask?: (taskId: string) => Promise<void> | void;
+  onRemoveQueuedTask?: (taskId: string) => Promise<void> | void;
 }
 
 /**
@@ -164,6 +168,8 @@ function ChatListFooter({ context }: { context?: ChatListContext }) {
           pendingTask={context.pendingTask}
           taskMessages={context.liveTaskMessages ?? []}
           availability={context.availability}
+          onEditQueuedTask={context.onEditQueuedTask}
+          onRemoveQueuedTask={context.onRemoveQueuedTask}
         />
       ) : null}
     </div>
@@ -179,6 +185,8 @@ export function ChatMessageList({
   messages,
   pendingTask,
   availability,
+  onEditQueuedTask,
+  onRemoveQueuedTask,
   firstItemIndex = 0,
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
@@ -286,6 +294,8 @@ export function ChatMessageList({
     pendingTask,
     liveTaskMessages,
     availability,
+    onEditQueuedTask,
+    onRemoveQueuedTask,
   };
 
   // Every previewable file in this session, in message order, so opening one
