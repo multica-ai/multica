@@ -1394,5 +1394,25 @@
     "overview_close": "閉じる",
     "overview_empty": "この種類の成果物はありません。",
     "group_comment_by": "{{name}} のコメント"
+  },
+  "attachments": {
+    "section_title": "添付",
+    "view_all_other": "添付 {{count}} 件をすべて表示",
+    "name_with_version": "{{name}}（バージョン {{version}}）",
+    "version_short": "v{{version}}",
+    "locate_comment": "コメントで表示",
+    "locate_description": "説明で表示",
+    "filter_all": "すべて",
+    "filter_image": "画像",
+    "filter_document": "ドキュメント",
+    "filter_video": "動画",
+    "filter_misc": "その他",
+    "overview_title": "{{identifier}} の添付",
+    "overview_summary_other": "添付 {{count}} 件",
+    "overview_summary_with_size_other": "添付 {{count}} 件 · 合計 {{size}}",
+    "overview_close": "閉じる",
+    "overview_empty": "この種類の添付はありません。",
+    "group_comment_by": "{{name}} のコメント",
+    "group_description": "タスクの説明"
   }
 }

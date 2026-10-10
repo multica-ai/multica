@@ -15,6 +15,7 @@
     "./types/*": "./types/*.ts",
     "./attachments": "./attachments/index.ts",
     "./attachments/deliverables": "./attachments/deliverables.ts",
+    "./attachments/issue-attachments": "./attachments/issue-attachments.ts",
     "./attachments/image-sequence": "./attachments/image-sequence.ts",
     "./api": "./api/index.ts",
     "./api/client": "./api/client.ts",

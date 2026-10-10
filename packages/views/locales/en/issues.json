@@ -1441,5 +1441,28 @@
     "overview_close": "Close",
     "overview_empty": "No deliverables of this type.",
     "group_comment_by": "Comment by {{name}}"
+  },
+  "attachments": {
+    "section_title": "Attachments",
+    "view_all_one": "View all {{count}} attachment",
+    "view_all_other": "View all {{count}} attachments",
+    "name_with_version": "{{name}}, version {{version}}",
+    "version_short": "v{{version}}",
+    "locate_comment": "Show in comments",
+    "locate_description": "Show in description",
+    "filter_all": "All",
+    "filter_image": "Images",
+    "filter_document": "Documents",
+    "filter_video": "Videos",
+    "filter_misc": "Other",
+    "overview_title": "{{identifier}} attachments",
+    "overview_summary_one": "{{count}} attachment",
+    "overview_summary_other": "{{count}} attachments",
+    "overview_summary_with_size_one": "{{count}} attachment · {{size}}",
+    "overview_summary_with_size_other": "{{count}} attachments · {{size}} total",
+    "overview_close": "Close",
+    "overview_empty": "No attachments of this type.",
+    "group_comment_by": "Comment by {{name}}",
+    "group_description": "Issue description"
   }
 }

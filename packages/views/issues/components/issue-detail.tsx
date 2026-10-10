@@ -114,6 +114,8 @@ import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
+import { AttachmentsSection } from "./attachments/attachments-section";
+import { AttachmentsOverview } from "./attachments/attachments-overview";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
 import {
@@ -122,6 +124,7 @@ import {
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
+import { collectIssueAttachmentFiles } from "@multica/core/attachments/issue-attachments";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -2341,6 +2344,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // overview grid, the viewer's info panel and the comments' version badges
   // all read this (MUL-7649).
   const deliverableFiles = useMemo(() => collectDeliverableFiles(timeline), [timeline]);
+  const issueAttachmentFiles = useMemo(
+    () =>
+      collectIssueAttachmentFiles({
+        description: issue?.description,
+        attachments: issueAttachments,
+        pendingDescriptionAttachments: descPendingAttachments,
+        comments: timeline,
+      }),
+    [issue?.description, issueAttachments, descPendingAttachments, timeline],
+  );
   const commentById = useMemo(
     () =>
       new Map(
@@ -2402,8 +2415,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     open: false,
     returnKey: null,
   });
+  const [attachmentsOverview, setAttachmentsOverview] = useState<{
+    open: boolean;
+    returnKey: string | null;
+  }>({
+    open: false,
+    returnKey: null,
+  });
   useEffect(() => {
     setOverview({ open: false, returnKey: null });
+    setAttachmentsOverview({ open: false, returnKey: null });
   }, [id]);
   const openOverview = useCallback(() => setOverview({ open: true, returnKey: null }), []);
   const openOverviewFromViewer = useCallback(
@@ -2412,6 +2433,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   );
   const closeOverview = useCallback(
     () => setOverview((current) => ({ ...current, open: false })),
+    [],
+  );
+  const openAttachmentsOverview = useCallback(
+    () => setAttachmentsOverview({ open: true, returnKey: null }),
+    [],
+  );
+  const closeAttachmentsOverview = useCallback(
+    () => setAttachmentsOverview((current) => ({ ...current, open: false })),
     [],
   );
 
@@ -2931,6 +2960,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           onOpenChange={setPullRequestsOpen}
         />
       )}
+
+      {/* Attachments — human-uploaded files on the description and comments.
+          Hidden while there are none. Sits above deliverables: inputs
+          before outputs. */}
+      <AttachmentsSection
+        files={issueAttachmentFiles}
+        onOpenOverview={openAttachmentsOverview}
+      />
 
       {/* Deliverables — the files this issue's comments delivered. Hidden
           while there are none. */}
@@ -3920,6 +3957,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         returnKey={overview.returnKey}
         identifier={issue.identifier}
         files={deliverableFiles}
+        commentById={commentById}
+        onLocate={locateOrigin}
+      />
+      <AttachmentsOverview
+        open={attachmentsOverview.open}
+        onClose={closeAttachmentsOverview}
+        returnKey={attachmentsOverview.returnKey}
+        identifier={issue.identifier}
+        files={issueAttachmentFiles}
         commentById={commentById}
         onLocate={locateOrigin}
       />
