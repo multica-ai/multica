@@ -129,10 +129,12 @@
     "cancelled": "已取消"
   },
   "status_category": {
+    "total": "总计",
     "unstarted": "未开始",
     "started": "已开始",
     "done": "已完成",
-    "closed": "已关闭"
+    "closed": "已关闭",
+    "cancelled": "已取消"
   },
   "priority": {
     "urgent": "紧急",
