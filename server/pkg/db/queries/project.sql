@@ -16,9 +16,15 @@ SELECT id FROM project
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
 
+-- name: LockProjectForIssueViewCreate :one
+-- Hold the project until its saved view commits, before deletion sweeps views.
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
 -- name: LockProjectForDelete :one
--- Serializes project deletion with chat-session creation. The handler locks,
--- clears every soft chat reference, and deletes the project in one transaction.
+-- Serializes deletion with chat-session and saved-view creation. The handler
+-- clears soft chat references and saved views before deleting the project.
 SELECT id FROM project
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;

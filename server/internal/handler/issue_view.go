@@ -194,21 +194,37 @@ func (h *Handler) CreateIssueView(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		// The project must exist in this workspace — a view on a foreign or
-		// deleted project would be unreachable and could leak across tenants.
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-			ID: projUUID, WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusNotFound, "project not found")
-			return
-		}
 		scopeID = projUUID
 	case "my":
 		// My Issues is a per-user perspective; sharing it is meaningless.
 		req.Visibility = "private"
 	}
 
-	view, err := h.Queries.CreateIssueView(r.Context(), db.CreateIssueViewParams{
+	queries := h.Queries
+	var tx pgx.Tx
+	if req.ScopeType == "project" {
+		tx, err = h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		queries = h.Queries.WithTx(tx)
+		// Keep the project alive until the view commits so deletion's sweep
+		// cannot finish before this soft reference is inserted.
+		if _, err := queries.LockProjectForIssueViewCreate(r.Context(), db.LockProjectForIssueViewCreateParams{
+			ID: scopeID, WorkspaceID: wsUUID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "project not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to lock project")
+			return
+		}
+	}
+
+	view, err := queries.CreateIssueView(r.Context(), db.CreateIssueViewParams{
 		WorkspaceID:       wsUUID,
 		OwnerID:           parseUUID(userID),
 		Name:              req.Name,
@@ -223,6 +239,12 @@ func (h *Handler) CreateIssueView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create view")
 		return
+	}
+	if tx != nil {
+		if err := tx.Commit(r.Context()); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to commit view")
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, issueViewToResponse(view))
 }

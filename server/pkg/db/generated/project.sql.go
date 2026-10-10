@@ -244,10 +244,29 @@ type LockProjectForDeleteParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Serializes project deletion with chat-session creation. The handler locks,
-// clears every soft chat reference, and deletes the project in one transaction.
+// Serializes deletion with chat-session and saved-view creation. The handler
+// clears soft chat references and saved views before deleting the project.
 func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDeleteParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockProjectForDelete, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockProjectForIssueViewCreate = `-- name: LockProjectForIssueViewCreate :one
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockProjectForIssueViewCreateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Hold the project until its saved view commits, before deletion sweeps views.
+func (q *Queries) LockProjectForIssueViewCreate(ctx context.Context, arg LockProjectForIssueViewCreateParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockProjectForIssueViewCreate, arg.ID, arg.WorkspaceID)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
