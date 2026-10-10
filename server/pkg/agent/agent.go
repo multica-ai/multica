@@ -94,6 +94,20 @@ type ExecOptions struct {
 	// knows the resume is gone, and the backend covers only the case the daemon
 	// cannot see — a live resume RPC rejected mid-run.
 	ResumeContinuityNotice string
+	// TaskToken is the task-scoped Multica API credential (mat_...) the server
+	// mints at claim time. CLI backends receive it as MULTICA_TOKEN in the
+	// subprocess environment. Backends that delegate remotely (muse) forward
+	// it in their wire request so the remote worker can call the Multica API
+	// with the same scoped identity. Empty when the server did not provide one.
+	TaskToken string
+	// MulticaServerURL is the Multica API base URL (e.g.
+	// https://multica.example.com). Remote backends forward it so the worker
+	// knows where to call; CLI backends get it as MULTICA_SERVER_URL.
+	MulticaServerURL string
+	// MulticaWorkspaceID is the workspace UUID for this task. Remote backends
+	// forward it so the worker can pass it as a query param; CLI backends get
+	// it as MULTICA_WORKSPACE_ID.
+	MulticaWorkspaceID string
 	// ExtraArgs is honoured only by backends that opt in by reading it; the
 	// rest ignore it. Deliberately not enumerated here — the previous list
 	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS
@@ -387,6 +401,7 @@ var SupportedTypes = []string{
 	"mcode",
 	"dim",
 	"zeroclaw",
+	"muse",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -492,6 +507,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &mcodeBackend{cfg: cfg}, nil
 	case "zeroclaw":
 		return &zeroclawBackend{cfg: cfg}, nil
+	case "muse":
+		return &museBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -539,6 +556,7 @@ var launchHeaders = map[string]string{
 	"dim":         "dim acp",
 	"mcode":       "mcode acp",
 	"zeroclaw":    "zeroclaw acp",
+	"muse":        "muse (remote receptionist)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

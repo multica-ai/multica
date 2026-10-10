@@ -331,6 +331,18 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	// Muse is not a CLI: there is no binary to discover. The daemon
+	// advertises a muse runtime exactly when MUSE_ENDPOINT points at a Muse
+	// receptionist; reachability and protocol version are verified against
+	// the receptionist itself in probeBuiltinRuntime (there is no --version
+	// to run). MUSE_MODEL is informational only — the backend's wire
+	// protocol has no model parameter, see ModelSelectionSupported.
+	if strings.TrimSpace(os.Getenv("MUSE_ENDPOINT")) != "" {
+		agents["muse"] = AgentEntry{
+			Command: "muse",
+			Model:   strings.TrimSpace(os.Getenv("MUSE_MODEL")),
+		}
+	}
 	return agents
 }
 
