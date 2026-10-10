@@ -105,6 +105,11 @@ type DedupeStore interface {
 	// same operation, so a holder that comes back later finds its Settle
 	// refused and records nothing. See RelayOutbound.settle.
 	Resolve(ctx context.Context, key string) (claimState, error)
+	// ClaimState is Resolve WITHOUT the fence: it reports what the key holds
+	// right now and changes nothing. It is what an inbox publish polls while it
+	// waits to see whether a replica took the delivery; Resolve would fence a
+	// holder that is merely mid-delivery. See RelayOutbound.confirmInbox.
+	ClaimState(ctx context.Context, key string) (claimState, error)
 	// ClaimBudget is the longest ONE round trip above may take. The store
 	// states it because the store enforces it: outcomeGrace pays this budget
 	// once per offer, and a copy of the number kept by the dispatcher would be
@@ -195,6 +200,15 @@ type RelayConfig struct {
 	// a tenth of one poll — and expired long before the move it existed for.
 	LeaseSettle time.Duration
 
+	// AcceptanceWindow is how long an inbox publish waits to see a replica take
+	// the delivery claim before it concludes that nobody holds that bot's
+	// socket. Its bound is the frame's trip to every replica's dispatcher plus
+	// one claim round trip (DedupeStore.ClaimBudget), NOT the re-offer chain
+	// the reply path's outcomeGrace outlasts: an inbox frame nobody claimed has
+	// no chain behind it, so waiting the chain out would only delay the
+	// fallback. Zero takes defaultRelayAcceptanceWindow.
+	AcceptanceWindow time.Duration
+
 	// RetryBackoff is the FIRST wait between re-offers; the chain doubles from
 	// there, capped at a quarter of LeaseSettle so a lease that lands early is
 	// not sat out. Small on purpose: the common reason a re-offer succeeds is
@@ -211,6 +225,11 @@ const (
 	// here would be free to drift from the thing it is meant to outlast.
 	defaultRelayLeaseSettle  = engine.DefaultPollInterval
 	defaultRelayRetryBackoff = 200 * time.Millisecond
+	// defaultRelayAcceptanceWindow matches defaultClaimBudget: one claim round
+	// trip plus room for the bus fan-out and a dispatcher's turn. The two live
+	// in different files on purpose — this is the relay's bound on how long it
+	// will wait, that is the store's bound on how long one call may take.
+	defaultRelayAcceptanceWindow = 2 * time.Second
 )
 
 // withDefaults fills the zero fields and returns the completed config.
@@ -237,6 +256,9 @@ func (c RelayConfig) withDefaults() RelayConfig {
 	}
 	if c.RetryBackoff <= 0 {
 		c.RetryBackoff = defaultRelayRetryBackoff
+	}
+	if c.AcceptanceWindow <= 0 {
+		c.AcceptanceWindow = defaultRelayAcceptanceWindow
 	}
 	return c
 }
@@ -371,6 +393,40 @@ const (
 	// a send at its own risk.
 	outcomeProvablyNotSent
 )
+
+// relayPublish is what one trip through the cross-replica router produced.
+//
+// The bool it replaces could not tell "the bus took it" from "a replica took
+// the delivery" from "the publish call itself failed", and an inbox push needs
+// all three: only an accepted-and-claimed frame is a delivery it may stop
+// making, and only a failed publish forbids it from trying another bot.
+type relayPublish int
+
+const (
+	// relayNotWired — nothing reached the bus: no relay is attached, or the
+	// frame could not even be built. A caller may treat it as a delivery that
+	// certainly did not happen.
+	relayNotWired relayPublish = iota
+	// relayAccepted — the bus took the frame. For a reply or a seal that is the
+	// whole answer. For an inbox push it means a replica that owns the target
+	// bot's socket took the delivery claim, so somebody is carrying it.
+	relayAccepted
+	// relayNoHolder — the bus took the frame, but across the acceptance window
+	// no replica took the delivery claim: nobody holds that installation's
+	// socket, so every dispatcher discards the frame. Only an inbox push can
+	// report this (see confirmInbox). The delivery provably did not happen.
+	relayNoHolder
+	// relayUncertain — the publish call failed, or the claim store could not
+	// answer. The frame may or may not have been accepted, so nothing may be
+	// concluded and nothing may be re-routed on this evidence.
+	relayUncertain
+)
+
+// routed reports whether the bus took the frame, which is the whole question
+// the reply and seal callers ask. They have no second route to fall back to,
+// and a frame that may have been accepted is treated as not carried, so they
+// keep their old local-send behaviour.
+func (p relayPublish) routed() bool { return p == relayAccepted }
 
 // seenEvents is a bounded, per-process set of relay event ids already acted on.
 // It is a cheap first gate in front of the Redis claim — the publisher's own
@@ -793,27 +849,116 @@ func (r *RelayOutbound) Wait() {
 	}
 }
 
-// publish hands a delivery to the other replicas. Reports whether it went out.
-func (r *RelayOutbound) publish(f relayFrame, eventID string) bool {
+// publish hands a delivery to the other replicas and reports what that
+// produced. See relayPublish for why the answer is not a bool.
+func (r *RelayOutbound) publish(f relayFrame, eventID string) relayPublish {
 	if r == nil || r.publisher == nil {
-		return false
+		return relayNotWired
 	}
 	body, err := json.Marshal(f)
 	if err != nil {
 		r.logger.Warn("wecom relay: marshal outbound frame", "error", err)
-		return false
+		return relayNotWired
 	}
 	if err := r.publisher.PublishWithID(realtime.ScopeWecomOutbound, f.InstallationID, "", body, eventID); err != nil {
 		r.logger.Warn("wecom relay: publish failed",
 			"error", err, "installation_id", f.InstallationID, "task_id", f.TaskID)
-		return false
+		// The bus call failed, but a publish whose RESPONSE was lost may still
+		// have been accepted. Nothing may be concluded from it.
+		return relayUncertain
 	}
 	// A published reply is now owed an outcome by somebody. watchOutcomes is
 	// that somebody — see its comment for why it cannot be anyone else.
 	if f.Kind == relayKindReply {
 		r.awaitOutcome(f, eventID)
 	}
-	return true
+	// Reply and seal frames are fire-and-forget: their callers read only "did
+	// the bus take it", and counting a routed reply twice is what the outcome
+	// watch exists to prevent. Only the inbox push asks whether a replica
+	// actually took the delivery, because only it has a second route to fall
+	// back to.
+	if f.Kind != relayKindInbox {
+		return relayAccepted
+	}
+	if r.dedupe == nil {
+		// No claim store means no relay in production (see DedupeStore); the
+		// bus call is the only signal available, so take it.
+		return relayAccepted
+	}
+	return r.confirmInbox(eventID)
+}
+
+// confirmInbox answers whether a replica took the delivery claim for an inbox
+// frame the bus accepted, so the publisher can tell "somebody is carrying this"
+// from "nobody holds that bot's socket" without waiting out a re-offer chain
+// that will never exist.
+//
+// It reads the claim key for up to RelayConfig.AcceptanceWindow. A claim that
+// appears means a replica owning the installation's socket engaged the
+// delivery, and the relay's own guarantees (re-offers, the outcome record) take
+// over from there. A key still absent at the end of the window means no replica
+// even took it — the frame is handed to each replica exactly once and only a
+// socket holder claims — so none ever will. The publisher then FENCES the key
+// under a token no delivery worker presents (fenceTokenFor) and reports
+// relayNoHolder, which is what lets the caller
+// route the notification somewhere else. The fence is what keeps that safe: a
+// dispatcher that is late, or a replica replaying the frame across a restart,
+// finds the claim taken and delivers nothing -- on the publishing replica too,
+// which is the one a fence under its own delivery token would NOT have stopped.
+// See fenceTokenFor.
+//
+// A claim store that cannot answer is relayUncertain: the delivery might be
+// happening, and the caller must not route a second copy on that.
+func (r *RelayOutbound) confirmInbox(eventID string) relayPublish {
+	window := r.cfg.AcceptanceWindow
+	// The poll's OWN deadline ends the wait; the context is only the backstop
+	// that keeps a claim store which ignores its deadline from outlasting the
+	// window, so it gets a little more room than the loop. Were the two equal,
+	// the context would fire in the same instant the last poll lands and the
+	// verdict would rest on which select case won: reporting "uncertain" for a
+	// bot nobody holds, and silently giving up the fallback.
+	ctx, cancel := context.WithTimeout(context.Background(), window+window/8+time.Millisecond)
+	defer cancel()
+	key := dedupeKey(eventID)
+	deadline := time.Now().Add(window)
+	step := window / 8
+	if step < time.Millisecond {
+		step = time.Millisecond
+	}
+	for {
+		state, err := r.dedupe.ClaimState(ctx, key)
+		if err != nil {
+			r.logger.WarnContext(ctx, "wecom relay: inbox claim state unreadable; the push is not re-routed",
+				"error", err, "event_id", eventID)
+			return relayUncertain
+		}
+		if state != claimAbsent {
+			return relayAccepted
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		timer := time.NewTimer(step)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return relayUncertain
+		}
+	}
+	won, err := r.dedupe.Claim(ctx, key, r.fenceTokenFor(eventID), r.dedupeTTL)
+	if err != nil {
+		r.logger.WarnContext(ctx, "wecom relay: could not fence an unclaimed inbox delivery; the push is not re-routed",
+			"error", err, "event_id", eventID)
+		return relayUncertain
+	}
+	if !won {
+		// A replica took the claim between the last read and the fence.
+		return relayAccepted
+	}
+	r.logger.InfoContext(ctx, "wecom relay: no replica holds the inbox push's bot; its sender may route it elsewhere",
+		"event_id", eventID)
+	return relayNoHolder
 }
 
 // DeliverWecomOutbound is realtime.WecomOutboundDeliverer. It must not block:
@@ -1063,6 +1208,19 @@ func settleBudgetSpent(ctx context.Context) bool {
 // delivery. Stable across re-offers on this process, unique across replicas.
 func (r *RelayOutbound) tokenFor(eventID string) string { return r.owner + "/" + eventID }
 
+// fenceTokenFor is the token a no-holder fence is planted under, and it is
+// deliberately NOT tokenFor. Claim answers "won" when the stored value equals
+// the caller's token, so a fence planted under the publisher's own delivery
+// token would be reclaimable by that replica's dispatcher the moment its
+// socket came back -- the ordinary reconnect, not an exotic one -- and the
+// frame it then delivered would be the second card the fallback had already
+// replaced. The suffix makes the fenced value one no delivery worker ever
+// presents, so the fence holds against every worker on every replica, the
+// publishing one included. It is never released; the claim TTL retires it.
+func (r *RelayOutbound) fenceTokenFor(eventID string) string {
+	return r.tokenFor(eventID) + "/fence"
+}
+
 func dedupeKey(eventID string) string { return "wecom:outbound:claim:" + eventID }
 
 // pendingOutcome is one routed reply whose end-to-end fate is not known yet.
@@ -1280,9 +1438,13 @@ func relayEventID(e events.Event, taskID pgtype.UUID) string {
 	return "wecom:" + e.Type + ":" + util.UUIDToString(taskID)
 }
 
-// relayInboxEventID is the same rule for an inbox push, which has no task.
-func relayInboxEventID(itemID, recipientID string) string {
-	return "wecom:inbox:" + itemID + ":" + recipientID
+// relayInboxEventID is the same rule for an inbox push, which has no task. The
+// installation is part of the id because one push is offered to two bots: the
+// acting agent's, then the recipient-wide one. The publisher FENCES the claim
+// of a bot nobody holds before it tries the other, and distinct ids are what
+// keep that fence from also swallowing the route around it.
+func relayInboxEventID(itemID, recipientID, installationID string) string {
+	return "wecom:inbox:" + itemID + ":" + recipientID + ":" + installationID
 }
 
 // deliverRelayed performs a delivery published by another replica. It is the

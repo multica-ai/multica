@@ -457,9 +457,9 @@ func TestAFailureOnAReplicaWithNoSocketIsRoutedToTheOneThatHasIt(t *testing.T) {
 // would have been handed to the replica holding the socket.
 type recordingRelay struct{ frames []relayFrame }
 
-func (r *recordingRelay) publish(f relayFrame, _ string) bool {
+func (r *recordingRelay) publish(f relayFrame, _ string) relayPublish {
 	r.frames = append(r.frames, f)
-	return true
+	return relayAccepted
 }
 
 // ---- the answer path's gate has to hand the bubble back too ----
