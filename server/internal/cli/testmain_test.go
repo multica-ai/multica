@@ -3,8 +3,11 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // TestMain redirects both home environment variables to one scratch directory
@@ -28,27 +31,15 @@ func TestMain(m *testing.M) {
 		os.Unsetenv(key)
 	}
 
-	var scratchHome string
-	if home, err := os.MkdirTemp("", "multica-cli-config-tests-home-"); err == nil {
-		scratchHome = home
-		os.Setenv("HOME", home)
-		os.Setenv("USERPROFILE", home)
+	scratchHome, err := testutil.IsolateUserHome("multica-cli-config-tests-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "isolate internal/cli test home: %v\n", err)
+		os.Exit(1)
 	}
 
 	code := m.Run()
-	if scratchHome != "" {
-		os.RemoveAll(scratchHome)
-	}
+	_ = os.RemoveAll(scratchHome)
 	os.Exit(code)
 }
 
-// redirectTestHome points BOTH home environment variables at dir. Production
-// resolves ~/.multica through os.UserHomeDir — HOME on unix and USERPROFILE on
-// Windows — so redirecting only HOME splits the fixture's write path from the
-// code's read path on Windows. Prefer TestMain's process-wide scratch home;
-// use this when a single test needs its own directory.
-func redirectTestHome(t *testing.T, dir string) {
-	t.Helper()
-	t.Setenv("HOME", dir)
-	t.Setenv("USERPROFILE", dir)
-}
+var redirectTestHome = testutil.RedirectUserHome

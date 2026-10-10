@@ -3,17 +3,19 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// TestMain redirects both home environment variables to one scratch directory
+// TestMain redirects the home environment variables to one scratch directory
 // for the whole binary before any test runs. Config paths resolve through
-// os.UserHomeDir — USERPROFILE on Windows, HOME elsewhere — so tests that only
-// redirect HOME split the fixture's write path from the code's read path on
-// Windows and land fixtures in the real ~/.multica. Process-wide redirection
-// isolates tests that forget their own redirect on every platform; per-test
-// t.Setenv overrides still take precedence.
+// os.UserHomeDir — USERPROFILE on Windows, HOME elsewhere — while Hermes uses
+// LOCALAPPDATA on Windows. Process-wide redirection isolates tests that forget
+// their own redirect; per-test t.Setenv overrides still take precedence.
 func TestMain(m *testing.M) {
 	for _, key := range []string{
 		"MULTICA_AGENT_ID",
@@ -27,27 +29,20 @@ func TestMain(m *testing.M) {
 		os.Unsetenv(key)
 	}
 
-	var scratchHome string
-	if home, err := os.MkdirTemp("", "multica-daemon-tests-home-"); err == nil {
-		scratchHome = home
-		os.Setenv("HOME", home)
-		os.Setenv("USERPROFILE", home)
+	scratchHome, err := testutil.IsolateUserHome("multica-daemon-tests-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "isolate internal/daemon test home: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Setenv("LOCALAPPDATA", filepath.Join(scratchHome, "AppData", "Local")); err != nil {
+		fmt.Fprintf(os.Stderr, "isolate internal/daemon LOCALAPPDATA: %v\n", err)
+		_ = os.RemoveAll(scratchHome)
+		os.Exit(1)
 	}
 
 	code := m.Run()
-	if scratchHome != "" {
-		os.RemoveAll(scratchHome)
-	}
+	_ = os.RemoveAll(scratchHome)
 	os.Exit(code)
 }
 
-// redirectTestHome points BOTH home environment variables at dir. Production
-// resolves ~/.multica through os.UserHomeDir — HOME on unix and USERPROFILE on
-// Windows — so redirecting only HOME splits the fixture's write path from the
-// code's read path on Windows. Prefer TestMain's process-wide scratch home;
-// use this when a single test needs its own directory.
-func redirectTestHome(t *testing.T, dir string) {
-	t.Helper()
-	t.Setenv("HOME", dir)
-	t.Setenv("USERPROFILE", dir)
-}
+var redirectTestHome = testutil.RedirectUserHome

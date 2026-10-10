@@ -33,7 +33,6 @@ func writeTestLocalSkill(t *testing.T, root, rel string, files map[string]string
 func setTestUserHome(t *testing.T, home string) {
 	t.Helper()
 	redirectTestHome(t, home)
-	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 }
 
