@@ -325,4 +325,40 @@ describe("createLiveEndFollow", () => {
     follow.setActive(true);
     expect(follow.isFollowing()).toBe(true); // latch untouched while inactive
   });
+
+  it("tolerates DPR rounding / easing tail overshoot on an animated notch", () => {
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    // 100px notch animates across 3 frames: 40px, 40px, 25px (total 105px, 5px overshoot)
+    follow.input(100);
+    tick(16);
+    expect(follow.onScroll(40)).toBe(false);
+    follow.endInputFrame();
+    tick(16);
+    expect(follow.onScroll(80)).toBe(false);
+    tick(16);
+    // 25px tail exceeds remaining 20px carry by 5px (<= CARRY_TOLERANCE_PX)
+    expect(follow.onScroll(105)).toBe(false);
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("tolerates DPR rounding overshoot on the initial notch scroll frame", () => {
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(100);
+    tick(16);
+    // Browser moves 104px for a 100px notch (4px overshoot <= CARRY_TOLERANCE_PX)
+    expect(follow.onScroll(104)).toBe(false);
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("tolerates fractional precision-touchpad input rounding differences", () => {
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    // Precision trackpad yields fractional delta (11.8px), DOM rounds to integer (12px)
+    follow.input(11.8);
+    tick(16);
+    expect(follow.onScroll(12)).toBe(false);
+    expect(follow.isFollowing()).toBe(true);
+  });
 });
