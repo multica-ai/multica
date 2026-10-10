@@ -132,7 +132,7 @@ const mockViewState: {
   labelFilters?: string[];
   propertyFilters?: Record<string, string[]>;
   cardPropertyIds?: string[];
-  agentRunningFilter?: boolean;
+  agentWorkingMode?: "all" | "working" | "not_working";
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -154,7 +154,7 @@ const mockViewState: {
   labelFilters: [],
   propertyFilters: {},
   cardPropertyIds: [],
-  agentRunningFilter: false,
+  agentWorkingMode: "all",
 };
 const mockSetSwimlaneOrder = mockViewState.setSwimlaneOrder as ReturnType<typeof vi.fn>;
 const mockToggleSwimlaneCollapsed = mockViewState.toggleSwimlaneCollapsed as ReturnType<typeof vi.fn>;
@@ -378,7 +378,7 @@ describe("SwimLaneView", () => {
     mockViewState.projectFilters = [];
     mockViewState.includeNoProject = false;
     mockViewState.labelFilters = [];
-    mockViewState.agentRunningFilter = false;
+    mockViewState.agentWorkingMode = "all";
     mockListChildrenByParents.mockResolvedValue({ issues: [] });
     mockGetAgentTaskSnapshot.mockResolvedValue([]);
   });
@@ -1803,7 +1803,7 @@ describe("SwimLaneView", () => {
           priorityFilters: [],
           assigneeFilters: [],
           includeNoAssignee: false,
-          agentRunningFilter: true,
+          agentWorkingMode: "working",
           runningIssueIds: new Set(["gc-running"]),
           creatorFilters: [],
           projectFilters: [],
@@ -1823,6 +1823,91 @@ describe("SwimLaneView", () => {
       expect(screen.getByText("Running Child")).toBeInTheDocument();
       expect(screen.queryByText("Non-running Child")).toBeNull();
     });
+  });
+
+  it("keeps the complement of the running set for batch-fetched children in Not working mode", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+    const parent = mockIssues[0]!;
+    const runningChild: Issue = {
+      ...mockIssues[1]!,
+      id: "nw-running-child",
+      identifier: "PROJ-50",
+      title: "Running Batch Child",
+      parent_issue_id: parent.id,
+    };
+    const idleChild: Issue = {
+      ...mockIssues[1]!,
+      id: "nw-idle-child",
+      identifier: "PROJ-51",
+      title: "Idle Batch Child",
+      parent_issue_id: parent.id,
+    };
+    mockListChildrenByParents.mockResolvedValueOnce({ issues: [runningChild, idleChild] });
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[parent]}
+        activeFilters={{
+          priorityFilters: [],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          agentWorkingMode: "not_working",
+          runningIssueIds: new Set(["nw-running-child"]),
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+        }}
+        childProgressMap={new Map([[parent.id, { done: 0, total: 2 }]])}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Idle Batch Child")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Running Batch Child")).toBeNull();
+  });
+
+  it("shows no batch-fetched children in Not working mode while the running set is unresolved", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+    const parent = mockIssues[0]!;
+    const child: Issue = {
+      ...mockIssues[1]!,
+      id: "nw-unknown-child",
+      identifier: "PROJ-52",
+      title: "Unknown Membership Child",
+      parent_issue_id: parent.id,
+    };
+    mockListChildrenByParents.mockResolvedValueOnce({ issues: [child] });
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[parent]}
+        activeFilters={{
+          priorityFilters: [],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          agentWorkingMode: "not_working",
+          runningIssueIds: undefined,
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+        }}
+        childProgressMap={new Map([[parent.id, { done: 0, total: 1 }]])}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+    await act(async () => {});
+    expect(screen.queryByText("Unknown Membership Child")).toBeNull();
   });
 
   it("hides batch-fetched children when the running issue set is empty", async () => {
@@ -1846,7 +1931,7 @@ describe("SwimLaneView", () => {
           priorityFilters: [],
           assigneeFilters: [],
           includeNoAssignee: false,
-          agentRunningFilter: true,
+          agentWorkingMode: "working",
           runningIssueIds: new Set(),
           creatorFilters: [],
           projectFilters: [],

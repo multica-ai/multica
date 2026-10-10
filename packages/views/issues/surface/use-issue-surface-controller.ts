@@ -230,7 +230,8 @@ export function useIssueSurfaceController({
   const projectStatusFilters = useViewStore((s) => s.projectStatusFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
-  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const agentWorkingMode = useViewStore((s) => s.agentWorkingMode);
+  const agentWorkingFilterOn = agentWorkingMode !== "all";
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const ganttShowCompleted = useViewStore((s) => s.ganttShowCompleted);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -407,7 +408,7 @@ export function useIssueSurfaceController({
     labelFilters.length > 0 ||
     Object.keys(effectivePropertyFilters).length > 0 ||
     dateFilter != null ||
-    agentRunningFilter === true;
+    agentWorkingFilterOn;
 
   const workingAgentMineRelation =
     scope.type === "my"
@@ -419,22 +420,28 @@ export function useIssueSurfaceController({
     ...workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
     // Ordinary surfaces get their chip count from the scoped facet. Only an
     // active working filter or Gantt's canvas count consumes the issue ids.
-    enabled: usesGantt || agentRunningFilter,
+    enabled: usesGantt || agentWorkingFilterOn,
   });
   const workspaceWorkingAgents = workingAgentsProjection.data ?? EMPTY_LIST;
+  // Both directions wait for the projection. "Not working" would otherwise
+  // read an unknown set as "nobody is running" and list every issue, running
+  // ones included. Loaded-but-empty is a real answer and is NOT unresolved.
   const workingFilterUnresolved =
-    agentRunningFilter && workingAgentsProjection.data === undefined;
+    agentWorkingFilterOn && workingAgentsProjection.data === undefined;
   const workingFilterPending =
     workingFilterUnresolved && workingAgentsProjection.isPending;
   const workingFilterError =
     workingFilterUnresolved && workingAgentsProjection.isError;
   const workingIssueIDs = useMemo(() => {
+    // undefined = projection not loaded; the client filter then matches
+    // nothing instead of treating the unknown as "no issue is running".
+    if (workingAgentsProjection.data === undefined) return undefined;
     const issueIDs = new Set<string>();
     for (const agent of workspaceWorkingAgents) {
       for (const issueID of agent.issue_ids) issueIDs.add(issueID);
     }
     return issueIDs;
-  }, [workspaceWorkingAgents]);
+  }, [workingAgentsProjection.data, workspaceWorkingAgents]);
 
   const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
@@ -502,8 +509,14 @@ export function useIssueSurfaceController({
         ...(date ? { date } : {}),
         // Unknown membership must not create a temporary match-nothing query
         // key. Dependent fetches stay gated until the projection resolves.
-        ...(agentRunningFilter && !workingFilterUnresolved
+        ...(agentWorkingMode === "working" && workingIssueIDs !== undefined
           ? { working_issue_ids: [...workingIssueIDs] }
+          : {}),
+        // The inverse sends the same visible ids as an exclusion. An empty
+        // list is a real answer (projection loaded, nothing running): the
+        // server excludes nothing, so every issue qualifies.
+        ...(agentWorkingMode === "not_working" && workingIssueIDs !== undefined
+          ? { not_working_issue_ids: [...workingIssueIDs] }
           : {}),
         include_sub_issues: showSubIssues,
       },
@@ -514,7 +527,7 @@ export function useIssueSurfaceController({
       },
     };
   }, [
-    agentRunningFilter,
+    agentWorkingMode,
     assigneeFilters,
     creatorFilters,
     dateParams,
@@ -531,7 +544,6 @@ export function useIssueSurfaceController({
     statusFilters,
     viewIncludeNoProject,
     viewProjectFilters,
-    workingFilterUnresolved,
     workingIssueIDs,
   ]);
   // Every consumer below — the facet request, the status/group branch hooks and
@@ -589,10 +601,14 @@ export function useIssueSurfaceController({
   // does not change the query identity — the number must not flicker when you
   // click the very chip it labels.
   const workingAgentsQuerySpec = useMemo<IssueTableQuerySpec>(() => {
-    if (!agentRunningFilter) return tableQuerySpec;
-    const { working_issue_ids: _working, ...filters } = tableQuerySpec.filters;
+    if (!agentWorkingFilterOn) return tableQuerySpec;
+    const {
+      working_issue_ids: _working,
+      not_working_issue_ids: _notWorking,
+      ...filters
+    } = tableQuerySpec.filters;
     return { ...tableQuerySpec, filters };
-  }, [agentRunningFilter, tableQuerySpec]);
+  }, [agentWorkingFilterOn, tableQuerySpec]);
   const workingAgentsFacetRequest = useMemo(
     () => ({
       query: workingAgentsQuerySpec,
@@ -609,7 +625,7 @@ export function useIssueSurfaceController({
     //
     // The actor panel (member / agent detail) renders no agents-working chip at
     // all, so nothing would read the answer — and with no control to toggle it,
-    // `agentRunningFilter` is unreachable there. Skip the aggregation rather
+    // the agents-working filter is unreachable there. Skip the aggregation rather
     // than pay for it on every panel mount. Adding the chip to that header
     // means dropping this clause.
     enabled: !usesGantt && scope.type !== "actor",
@@ -707,13 +723,13 @@ export function useIssueSurfaceController({
         projectStatusFilters,
         labelFilters,
         effectivePropertyFilters,
-        agentRunningFilter,
+        agentWorkingMode,
         showSubIssues,
         dateParams,
         debouncedActiveSearch,
       ]),
     [
-      agentRunningFilter,
+      agentWorkingMode,
       assigneeFilters,
       creatorFilters,
       dateParams,
@@ -750,7 +766,7 @@ export function useIssueSurfaceController({
     priorityFilters,
     assigneeFilters,
     includeNoAssignee,
-    agentRunningFilter,
+    agentWorkingMode,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,

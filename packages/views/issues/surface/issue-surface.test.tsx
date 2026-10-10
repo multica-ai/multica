@@ -346,8 +346,8 @@ describe("IssueSurface — table pagination ownership", () => {
     );
     const store = getIssueSurfaceViewStore("project:pt");
     store.getState().setViewMode("table");
-    if (!store.getState().agentRunningFilter) {
-      store.getState().toggleAgentRunningFilter();
+    if (store.getState().agentWorkingMode === "all") {
+      store.getState().cycleAgentWorkingMode();
     }
 
     const runningIssues = Array.from({ length: 250 }, (_, index) => ({
@@ -812,7 +812,7 @@ describe("IssueSurface — filtered empty state", () => {
 
   it("says the filters hid everything instead of offering to create the first issue", async () => {
     const store = getIssueSurfaceViewStore("project:pf");
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.getState().cycleAgentWorkingMode());
 
     render(filteredSurface());
 
@@ -824,7 +824,7 @@ describe("IssueSurface — filtered empty state", () => {
 
   it("clears exactly the filters it blamed, then hands the surface back", async () => {
     const store = getIssueSurfaceViewStore("project:pf");
-    act(() => store.getState().toggleAgentRunningFilter());
+    act(() => store.getState().cycleAgentWorkingMode());
 
     render(filteredSurface());
 
@@ -833,7 +833,7 @@ describe("IssueSurface — filtered empty state", () => {
       screen.getByRole("button", { name: "filtered_empty.clear_button" }),
     );
 
-    expect(store.getState().agentRunningFilter).toBe(false);
+    expect(store.getState().agentWorkingMode).toBe("all");
     await screen.findByText("detail.empty_issues_title");
     expect(screen.queryByText("filtered_empty.title")).toBeNull();
   });

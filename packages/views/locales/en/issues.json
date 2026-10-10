@@ -688,13 +688,17 @@
     "empty_hover": "No agents working right now",
     "unknown_hover": "Agents working: not loaded yet",
     "filter_active_label": "Viewing issues with agents working",
+    "filter_active_label_not_working": "Viewing issues without agents working",
     "tasks_count_one": "{{count}} run",
     "tasks_count_other": "{{count}} runs",
     "chip_agents_working_one": "{{count}} agent working",
     "chip_agents_working_other": "{{count}} agents working",
     "issues_count_one": "{{count}} issue",
     "issues_count_other": "{{count}} issues",
-    "chip_agents_working_unknown": "Agents working: —"
+    "chip_agents_working_unknown": "Agents working: —",
+    "chip_state_all": "showing all issues",
+    "chip_state_working": "showing only issues with agents working",
+    "chip_state_not_working": "showing only issues without agents working"
   },
   "filtered_empty": {
     "title": "No issues match these filters",

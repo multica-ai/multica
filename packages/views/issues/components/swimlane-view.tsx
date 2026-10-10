@@ -672,7 +672,7 @@ function SwimLaneViewImpl({
     assigneeFilterActive: activeFiltersProp?.assigneeFilterActive ?? false,
     // Extra children are not part of the server-grouped page yet, so apply
     // the same running-task issue ids returned by `/api/working-agents`.
-    agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
+    agentWorkingMode: activeFiltersProp?.agentWorkingMode ?? "all",
     runningIssueIds: activeFiltersProp?.runningIssueIds,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],

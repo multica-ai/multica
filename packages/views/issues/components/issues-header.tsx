@@ -1294,10 +1294,8 @@ export function IssuesHeader({
   // shared IssuesHeader consumers (/issues and project detail) toggle the
   // same filter state as the rest of the display controls. /my-issues keeps
   // its own sibling header and passes chip state explicitly.
-  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
-  const toggleAgentRunningFilter = useViewStore(
-    (s) => s.toggleAgentRunningFilter,
-  );
+  const agentWorkingMode = useViewStore((s) => s.agentWorkingMode);
+  const cycleAgentWorkingMode = useViewStore((s) => s.cycleAgentWorkingMode);
   const SCOPE_LABEL_KEY: Record<IssuesScope, "all_label" | "members_label" | "agents_label"> = {
     all: "all_label",
     members: "members_label",
@@ -1375,14 +1373,16 @@ export function IssuesHeader({
         </DropdownMenu>
 
         <div className="flex shrink-0 items-center gap-1">
-          {agentRunningFilter && (
+          {agentWorkingMode !== "all" && (
             <span className="mr-1 hidden text-caption text-muted-foreground md:inline">
-              {t(($) => $.agent_activity.filter_active_label)}
+              {agentWorkingMode === "not_working"
+                ? t(($) => $.agent_activity.filter_active_label_not_working)
+                : t(($) => $.agent_activity.filter_active_label)}
             </span>
           )}
           <WorkspaceAgentWorkingChip
-            value={agentRunningFilter}
-            onToggle={toggleAgentRunningFilter}
+            value={agentWorkingMode}
+            onToggle={cycleAgentWorkingMode}
             agents={workingAgents}
           />
           <IssueDisplayControls

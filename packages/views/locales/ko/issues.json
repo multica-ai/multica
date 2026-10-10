@@ -665,10 +665,14 @@
     "empty_hover": "현재 작업 중인 에이전트가 없습니다",
     "unknown_hover": "작업 중인 에이전트: 아직 불러오지 않았습니다",
     "filter_active_label": "에이전트가 작업 중인 태스크만 보는 중",
+    "filter_active_label_not_working": "에이전트가 작업하지 않는 태스크만 보는 중",
     "tasks_count_other": "실행 {{count}}개",
     "chip_agents_working_other": "작업 중인 에이전트 {{count}}개",
     "issues_count_other": "태스크 {{count}}개",
-    "chip_agents_working_unknown": "작업 중인 에이전트: —"
+    "chip_agents_working_unknown": "작업 중인 에이전트: —",
+    "chip_state_all": "모든 태스크 표시 중",
+    "chip_state_working": "에이전트가 작업 중인 태스크만 표시 중",
+    "chip_state_not_working": "에이전트가 작업하지 않는 태스크만 표시 중"
   },
   "filtered_empty": {
     "title": "필터 조건에 맞는 태스크가 없습니다",

@@ -73,6 +73,7 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 		// filter ON", which is also the answer while it is already on. That
 		// makes the header chip's count stable across the toggle.
 		output.Filters.WorkingIssueIDs = nil
+		output.Filters.NotWorkingIssueIDs = nil
 		output.Filters.WorkingOnly = false
 	}
 	return output

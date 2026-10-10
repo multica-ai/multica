@@ -719,7 +719,8 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
         // projection may contain newly started work. Other facets also
         // depend on this membership, not only rows and group descriptors.
         return spec?.filters.working_only === true ||
-          spec?.filters.working_issue_ids !== undefined;
+          spec?.filters.working_issue_ids !== undefined ||
+          spec?.filters.not_working_issue_ids !== undefined;
       },
     },
   ];

@@ -23,7 +23,7 @@ export function createIssueStatusListStore(key: string) {
     priorityFilters: [], assigneeFilters: [], includeNoAssignee: false,
     creatorFilters: [], projectFilters: [], includeNoProject: false,
     labelFilters: [], propertyFilters: {}, dateFilter: null,
-    agentRunningFilter: false, showSubIssues: true,
+    agentWorkingMode: "all", showSubIssues: true,
     hiddenStatuses: [], listCollapsedStatuses: [],
   }));
 }

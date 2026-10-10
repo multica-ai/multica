@@ -327,6 +327,10 @@ export interface IssueTableFilters {
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
+  /** Inverse of `working_issue_ids`: exclude these visible working issues.
+   *  An empty list excludes nothing. Mutually exclusive with
+   *  `working_issue_ids` — the server answers 400 when both are present. */
+  not_working_issue_ids?: string[];
   include_sub_issues?: boolean;
 }
 
