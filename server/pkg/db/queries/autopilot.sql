@@ -624,6 +624,15 @@ SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1;
 
+-- name: GetLatestAutopilotRunForIssueAttribution :one
+-- Attribution survives run completion; lifecycle callers still use the active-run lookup.
+SELECT r.* FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.issue_id = sqlc.arg(issue_id) AND r.autopilot_id = sqlc.arg(autopilot_id)
+  AND a.workspace_id = sqlc.arg(workspace_id)
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT 1;
+
 -- name: FailAutopilotRunsByIssue :many
 -- Fails active autopilot runs linked to a given issue.
 -- Must be called BEFORE issue deletion (ON DELETE SET NULL clears issue_id).

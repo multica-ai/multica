@@ -1092,6 +1092,48 @@ func (q *Queries) GetAutopilotTriggerForAutopilot(ctx context.Context, arg GetAu
 	return i, err
 }
 
+const getLatestAutopilotRunForIssueAttribution = `-- name: GetLatestAutopilotRunForIssueAttribution :one
+SELECT r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id, r.quota_reservation_id, r.reason_code FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.issue_id = $1 AND r.autopilot_id = $2
+  AND a.workspace_id = $3
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT 1
+`
+
+type GetLatestAutopilotRunForIssueAttributionParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Attribution survives run completion; lifecycle callers still use the active-run lookup.
+func (q *Queries) GetLatestAutopilotRunForIssueAttribution(ctx context.Context, arg GetLatestAutopilotRunForIssueAttributionParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getLatestAutopilotRunForIssueAttribution, arg.IssueID, arg.AutopilotID, arg.WorkspaceID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
+	)
+	return i, err
+}
+
 const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
 SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.published_by_type, t.published_by_id, t.created_by_type, t.created_by_id, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
