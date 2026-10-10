@@ -12,7 +12,6 @@
  */
 import { useCallback, useEffect } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -43,6 +42,7 @@ import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useT } from "@/lib/i18n";
+import { showActionSheetWithOptions } from "@/lib/action-sheet";
 
 export default function IssueDetail() {
   // `highlight` + `h` come from inbox deep-link (apps/mobile/app/(app)/
@@ -137,10 +137,10 @@ export default function IssueDetail() {
                 ? t("menu.copy_link")
                 : action === "open_web"
                   ? t("menu.open_web")
-                  : t("menu.delete_issue"),
+                : t("menu.delete_issue"),
     );
     const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,

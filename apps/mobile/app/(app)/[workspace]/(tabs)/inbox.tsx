@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   FlatList,
   View,
@@ -33,6 +32,7 @@ import {
   deduplicateInboxItems,
   getInboxNavigationTarget,
 } from "@/lib/inbox-display";
+import { showActionSheetWithOptions } from "@/lib/action-sheet";
 
 export default function Inbox() {
   const { t } = useT("inbox");
@@ -79,7 +79,7 @@ export default function Inbox() {
       t("actions.archive_completed"),
       t("actions.archive_all"),
     ];
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,

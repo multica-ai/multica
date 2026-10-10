@@ -38,7 +38,7 @@
  * default elsewhere.
  */
 import { useCallback, useMemo } from "react";
-import { Linking, View } from "react-native";
+import { Linking, Platform, View } from "react-native";
 import { router } from "expo-router";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
 import type { Attachment } from "@multica/core/types";
@@ -48,6 +48,11 @@ import { useMarkdownStyle } from "./markdown-style";
 import { splitMarkdown } from "./split-markdown";
 import { CodeBlock } from "./code-block";
 import { MarkdownImage } from "./markdown-image";
+
+// Android's github-flavor renderer under-measures its height by roughly one
+// line. This Android-only padding keeps the final line inside comment bubbles;
+// iOS retains the renderer's existing tight measurement.
+const ANDROID_CONTAINER_STYLE = { paddingBottom: 12 };
 
 interface Props {
   content: string;
@@ -194,6 +199,11 @@ export function Markdown({
                 markdownStyle={markdownStyle}
                 onLinkPress={onLinkPress}
                 selectable={selectable}
+                containerStyle={
+                  Platform.OS === "android"
+                    ? ANDROID_CONTAINER_STYLE
+                    : undefined
+                }
               />
             );
           case "code":

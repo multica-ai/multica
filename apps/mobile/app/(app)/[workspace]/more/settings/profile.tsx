@@ -12,9 +12,9 @@
  */
 import { useEffect, useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   View,
@@ -29,6 +29,7 @@ import { useAuthStore } from "@/data/auth-store";
 import { api } from "@/data/api";
 import type { FileAsset } from "@/data/api";
 import { useT } from "@/lib/i18n";
+import { showActionSheetWithOptions } from "@/lib/action-sheet";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB — matches what's reasonable on cellular.
 
@@ -61,10 +62,13 @@ export default function ProfileSettingsScreen() {
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
 
   const handleAvatarPick = () => {
-    const actions = ["camera", "library"];
+    // Camera permission is intentionally disabled in the Expo image-picker
+    // config; don't offer an unavailable camera action on Android.
+    const actions =
+      Platform.OS === "android" ? ["library"] : ["camera", "library"];
     if (user?.avatar_url) actions.push("remove");
     actions.push("cancel");
-    const removeIndex = user?.avatar_url ? 2 : -1;
+    const removeIndex = user?.avatar_url ? actions.indexOf("remove") : -1;
     const cancelIndex = actions.length - 1;
     const visibleOptions = actions.map((action) =>
       action === "camera"
@@ -76,7 +80,7 @@ export default function ProfileSettingsScreen() {
             : t("common:actions.cancel"),
     );
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options: visibleOptions,
         cancelButtonIndex: cancelIndex,

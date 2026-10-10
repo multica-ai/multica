@@ -62,8 +62,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ? "ai.multica.mobile.staging"
           : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
     },
+      android: {
+        package: isProd
+        ? (process.env.EXPO_ANDROID_PACKAGE_PROD ?? "ai.multica.mobile.community")
+        : isStaging
+          ? "ai.multica.mobile.staging"
+          : "ai.multica.mobile.dev",
+      adaptiveIcon: {
+        foregroundImage: "./assets/icon.png",
+        backgroundColor: "#ffffff",
+      },
+    },
     plugins: [
       "expo-router",
+      "./plugins/withAndroidFbjniCompatibility.cjs",
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
@@ -83,6 +95,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         "expo-build-properties",
         {
+          android: {
+            useLegacyPackaging: true,
+          },
           ios: {
             buildReactNativeFromSource: true,
           },
