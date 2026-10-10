@@ -1525,8 +1525,15 @@ describe("IssueDetail (shared)", () => {
     });
     await waitFor(() => expect(screen.getAllByText(reply.content!)).toHaveLength(1));
     await waitFor(() => expect(container.querySelector(`[data-run-comment-id="${task.id}"]`)).toBeNull());
-    expect(container.querySelector(`[data-run-slot-id="${task.id}"]`)).toBe(assignmentSlot);
     const replyBlock = container.querySelector("#comment-assignment-reply")!;
+    const parentBlock = container.querySelector("#comment-comment-1")!;
+    if (parentId) {
+      expect(parentBlock).toContainElement(replyBlock as HTMLElement);
+      expect(parentBlock.querySelector(`[data-run-slot-id="${task.id}"]`)).not.toBeNull();
+    } else {
+      expect(parentBlock).not.toContainElement(replyBlock as HTMLElement);
+      expect(container.querySelector(`[data-run-slot-id="${task.id}"]`)).toBe(assignmentSlot);
+    }
     expect(replyBlock.querySelector(`[data-run-id="${task.id}"]`)).not.toBeNull();
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
     const headerLog = within(replyBlock as HTMLElement).getByRole("button", { name: "Open full log" });
@@ -2316,6 +2323,39 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("highlightCommentId scroll-to-comment", () => {
+    it("folds an assignment reply with its resolved parent and unfolds that thread for a notification", async () => {
+      const run: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        kind: "direct", status: "completed", priority: 0, created_at: "2026-01-16T00:00:00Z", started_at: null, dispatched_at: null,
+        completed_at: "2026-01-16T00:01:00Z", result: null, error: null, delivered_comment_ids: [] };
+      const root = { ...mockTimeline[0]!, resolved_at: "2026-01-17T00:00:00Z" };
+      const target = { ...mockTimeline[1]!, id: "assigned-reply", parent_id: root.id, source_task_id: run.id,
+        content: "Assignment reply in the resolved discussion" };
+      mockApiObj.listTimeline.mockResolvedValue([root, target]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([run]);
+      const client = createTestQueryClient();
+      const { container, rerender } = render(<I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={client}>
+          <IssueDetail issueId="issue-1" />
+        </QueryClientProvider>
+      </I18nProvider>);
+      await screen.findByRole("button", { name: /2 resolved comments/ });
+      expect(container.querySelector(`#comment-${target.id}`)).toBeNull();
+
+      rerender(<I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={client}>
+          <IssueDetail issueId="issue-1" highlightCommentId={target.id} />
+        </QueryClientProvider>
+      </I18nProvider>);
+      await waitFor(() => expect(container.querySelector(`#comment-${target.id}`))
+        .toHaveClass(highlightedCommentBackgroundClass));
+      expect(container.querySelector(`#comment-${root.id}`))
+        .toContainElement(container.querySelector(`#comment-${target.id}`) as HTMLElement);
+      expect(screen.getAllByText(target.content)).toHaveLength(1);
+      expect(container.querySelectorAll(`[data-run-id="${run.id}"]`)).toHaveLength(1);
+      expect(within(container.querySelector(`#comment-${target.id}`) as HTMLElement)
+        .getByRole("button", { name: "Open full log" })).toBeInTheDocument();
+    });
+
     it.each(["root", "reply"])("unfolds an assignment run with a resolved %s when a notification targets a hidden reply", async (resolved) => {
       const run: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
         status: "completed", priority: 0, created_at: "2026-01-16T00:00:00Z", started_at: null, dispatched_at: null,
