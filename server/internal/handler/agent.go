@@ -1990,6 +1990,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
 			return
 		}
+		// Task delivery authorizes private runtimes against the agent owner,
+		// not the member making this update. Admin management permission must
+		// not save a binding that the existing delivery gate will reject.
+		if runtime.Visibility == "private" && runtime.OwnerID != existing.OwnerID {
+			writeError(w, http.StatusForbidden, "this runtime is private; its owner must match the agent owner")
+			return
+		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID

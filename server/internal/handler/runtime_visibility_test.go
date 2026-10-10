@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -716,5 +717,62 @@ func TestUpdateAgentRuntime_AdminMayEchoUnchangedVisibility(t *testing.T) {
 	}
 	if resp.Visibility != "private" {
 		t.Errorf("visibility drifted: got %q, want private", resp.Visibility)
+	}
+}
+
+// A workspace admin may manage another member's agent, but cannot bind that
+// agent to the admin's private runtime: task claim uses the agent owner's
+// identity, not the identity of the member saving the update (#8980).
+func TestUpdateAgent_RuntimeBindingMatchesAgentOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	for _, tc := range []struct {
+		name       string
+		actorRole  string
+		actorOwner bool
+		visibility string
+		wantStatus int
+	}{
+		{"admin private runtime on foreign agent", "admin", false, "private", http.StatusForbidden},
+		{"workspace owner private runtime on foreign agent", "owner", false, "private", http.StatusForbidden},
+		{"agent owner private runtime", "member", true, "private", http.StatusOK},
+		{"admin public runtime on foreign agent", "admin", false, "public", http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agentOwnerID := dbfx.User(t, "Agent binding owner", "binding-owner@multica.test")
+			dbfx.Member(t, testWorkspaceID, agentOwnerID, "member")
+			actorID := agentOwnerID
+			if !tc.actorOwner {
+				actorID = dbfx.User(t, "Agent binding manager", "binding-manager@multica.test")
+				dbfx.Member(t, testWorkspaceID, actorID, tc.actorRole)
+			}
+			originalRuntimeID := dbfx.Runtime(t, "Original binding runtime", testutil.Cols{"owner_id": agentOwnerID})
+			targetRuntimeID := dbfx.Runtime(t, "Target binding runtime", testutil.Cols{
+				"owner_id": actorID, "visibility": tc.visibility,
+			})
+			agentID := dbfx.Agent(t, "runtime-binding-regression", originalRuntimeID, testutil.Cols{
+				"owner_id": agentOwnerID,
+			})
+
+			req := withURLParam(newRequestAs(actorID, http.MethodPatch, "/api/agents/"+agentID,
+				map[string]any{"runtime_id": targetRuntimeID, "description": "updated binding"}), "id", agentID)
+			response := testutil.Call(t, testHandler.UpdateAgent, req).Want(tc.wantStatus)
+			if tc.wantStatus == http.StatusForbidden && !strings.Contains(response.Text(), "agent owner") {
+				t.Fatalf("expected agent-owner binding rejection, got %s", response.Text())
+			}
+
+			var savedRuntimeID, savedDescription string
+			dbfx.QueryRow(t, `SELECT runtime_id, description FROM agent WHERE id = $1`, agentID).
+				Scan(&savedRuntimeID, &savedDescription)
+			wantRuntimeID, wantDescription := originalRuntimeID, ""
+			if tc.wantStatus == http.StatusOK {
+				wantRuntimeID, wantDescription = targetRuntimeID, "updated binding"
+			}
+			if savedRuntimeID != wantRuntimeID || savedDescription != wantDescription {
+				t.Fatalf("saved binding/description = %s/%q, want %s/%q", savedRuntimeID, savedDescription, wantRuntimeID, wantDescription)
+			}
+		})
 	}
 }
