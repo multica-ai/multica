@@ -99,4 +99,9 @@ const EMERGENCY_COPY = {
     description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
     reload: "Recharger",
   },
+  id: {
+    title: "Terjadi kesalahan",
+    description: "Halaman mengalami error yang tidak terduga. Coba muat ulang.",
+    reload: "Muat ulang",
+  },
 } as const;

@@ -1,0 +1,71 @@
+---
+title: Obrolan dengan agent
+description: Percakapan satu-ke-satu yang sepenuhnya privat dengan seorang agent, di luar tugas mana pun. Agent memulai tanpa konteks tugas dan tidak pernah otomatis membuat tugas — tetapi agent bertindak dengan akses ruang kerja Anda saat Anda secara eksplisit memintanya.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Obrolan cocok untuk pekerjaan yang belum terbentuk menjadi tugas yang jelas: menyusun ide, memeriksa ruang kerja, mendiskusikan sebuah pendekatan, atau meminta agent menyelesaikan tugas kecil lebih dulu.
+
+**Obrolan adalah percakapan satu-ke-satu antara Anda dan seorang [agent](/agents)** — di luar board [tugas](/issues). Agent memulai tanpa **konteks tugas apa pun** — agent tidak melihat board Anda dan tidak akan mengubah percakapan menjadi tugas dengan sendirinya — dan seluruh percakapan **sepenuhnya privat** (tidak ada orang lain di [ruang kerja](/workspaces), termasuk admin, yang dapat melihatnya). Obrolan cocok untuk mendiskusikan sebuah pendekatan dengan agent, brainstorming, atau mengajukan pertanyaan yang tidak terkait dengan tugas mana pun.
+
+Sebuah obrolan **tidak terikat pada tugas mana pun**: agent tidak otomatis menerima deskripsi dan komentar dari sebuah tugas, tetapi agent masih dapat menggunakan Multica CLI untuk menanyakan ruang kerja, proyek, tugas, dan skill sesuai izinnya.
+
+Sebuah obrolan juga dapat membawa latar belakang. Klik **+** di kiri bawah kolom input dan pilih **Konteks proyek** untuk melampirkan sebuah [proyek](/projects) ke percakapan; saat agent berjalan, agent menerima deskripsi, repositori, dan resource lain dari proyek tersebut.
+
+![Sebuah obrolan dengan agent: pertanyaan yang dijawab dengan hasil yang disusun ke dalam tabel](/images/docs/chat-conversation.webp)
+
+## Memulai percakapan
+
+1. Buka **Obrolan** di sidebar.
+2. Klik baru dan pilih agent yang Anda memiliki izin untuk menjalankannya.
+3. Ketik pesan; Anda juga dapat melampirkan gambar atau file.
+4. Setelah Anda mengirim, Multica membuat eksekusi untuk pesan tersebut, dan balasannya kembali ke percakapan saat ini.
+
+Jika runtime sedang offline, pesan menunggu sampai runtime kembali online. Setelah agent diarsipkan, atau Anda kehilangan izin untuk menjalankannya, Anda tidak dapat mengirim pesan baru.
+
+Sebelum pesan pertama, Obrolan menampilkan hingga tiga saran yang dikonfigurasi untuk agent terpilih. Memilih salah satu menyalin prompt lengkapnya ke kolom input tanpa mengirimnya, sehingga Anda dapat menyesuaikannya dulu. Agent tanpa saran yang dikonfigurasi menggunakan contoh umum yang sudah dilokalkan.
+
+## Obrolan vs. tugas
+
+| Kebutuhan | Lebih cocok |
+|---|---|
+| Pertanyaan cepat, mengeksplorasi sebuah pendekatan, atau draf privat | **Obrolan** |
+| Penerima tugas, status, prioritas, dan hasil kerja yang jelas | **Tugas** |
+| Membiarkan rekan kerja melihat latar belakang dan melanjutkan diskusi | **Tugas** |
+| Melihat sekilas informasi ruang kerja tanpa perlu catatan kerja | **Obrolan** |
+
+Obrolan langsung yang dibuat di Multica hanya terlihat oleh pembuatnya; anggota ruang kerja lain dan admin tidak dapat membacanya. Kesimpulan yang perlu dilihat tim bersama-sama sebaiknya dituliskan ke dalam sebuah tugas, deskripsi proyek, atau skill.
+
+## Konteks multi-giliran
+
+Sebuah percakapan mencoba melanjutkan sesi asli di alat pengkodean AI, sehingga pesan selanjutnya tidak perlu mengulang konten sebelumnya. Multica menyimpan ID sesi dan merutekan eksekusi berikutnya ke runtime yang dapat mengakses sesi tersebut.
+
+Jika sesi lokal sudah tidak ada lagi, konteksnya tidak dapat dilanjutkan, atau error sebelumnya tidak seharusnya digunakan ulang, runtime mulai dari sesi baru. Riwayat pesan percakapan tetap tersimpan dalam kedua kasus.
+
+## Memantau dan menghentikan eksekusi
+
+Selama agent berjalan, UI menampilkan fase saat ini dan aktivitas tool. Perluas **Lihat detail** untuk memeriksa eksekusi secara lengkap.
+
+Untuk menghentikan, klik tombol stop di samping kolom input. Konten yang sudah dikembalikan ke percakapan tetap disimpan; input yang belum diproses dikembalikan ke editor jika memungkinkan.
+
+## Mengatur daftar percakapan
+
+Percakapan dapat diganti nama, disematkan, diarsipkan, dan dihapus:
+
+- **Sematkan** menjaga percakapan yang sering digunakan tetap di atas daftar;
+- **Arsipkan** memindahkan percakapan ke Diarsipkan dan membuatnya hanya-baca;
+- **Batalkan pengarsipan** memungkinkan Anda mengirim pesan lagi;
+- **Hapus** menghapus percakapan dan pesannya secara permanen.
+
+Jika sebuah percakapan terikat ke channel eksternal (seperti Slack), mengarsipkannya memutus ikatan tersebut; membuka arsip kembali tidak mengembalikannya — ikat ulang.
+
+<Callout type="warning">
+Menghapus sebuah percakapan tidak dapat dibatalkan dan menghentikan eksekusi apa pun di dalamnya yang belum selesai. Arsipkan saja jika Anda hanya belum membutuhkannya untuk saat ini.
+</Callout>
+
+## Langkah selanjutnya
+
+- [Tugaskan tugas ke agent](/assigning-issues) — ubah diskusi menjadi pekerjaan yang dapat dilacak.
+- [Kotak masuk dan subscription](/inbox) — ikuti aktivitas tim yang membutuhkan Anda.
+- [Matriks provider](/providers) — kemampuan sesi dan model per alat pengkodean AI.

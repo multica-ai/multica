@@ -1,0 +1,147 @@
+---
+title: Resource proyek
+description: Tautkan repositori GitHub atau direktori lokal ke sebuah proyek agar eksekusi berikutnya mendapatkan konteks kerja yang stabil.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Resource [proyek](/projects) memberi tahu agent kode apa yang digunakan oleh pekerjaan ini dan di mana harus berjalan. Resource tetap tertaut pada proyek, sehingga tidak perlu menempelkan ulang URL repositori atau path lokal ke setiap tugas.
+
+Saat ini ada dua jenis resource yang didukung:
+
+| Resource | Paling cocok untuk | Tempat eksekusi berjalan |
+|---|---|---|
+| **Repositori GitHub** | Kode yang dibagikan oleh tim, dengan checkout yang dikelola oleh runtime | Direktori kerja yang dikelola runtime |
+| **Direktori lokal** | Checkout yang sudah ada, repositori yang sangat besar, atau saat Anda ingin memeriksa perubahan lokal secara langsung | Direktori asli pada komputer tertentu |
+
+## Bagaimana resource masuk ke sebuah eksekusi
+
+Saat seorang agent mengerjakan tugas di dalam proyek, Multica menambahkan nama proyek, deskripsi proyek, dan daftar resource ke konteks eksekusi tersebut, serta menulis `.multica/project/resources.json` ke dalam direktori kerja.
+
+Daftar repositori yang tertaut pada ruang kerja selalu disertakan dalam konteks eksekusi. Repositori yang tertaut pada proyek secara tambahan menentukan kode dan ref default yang digunakan oleh pekerjaan ini.
+
+Direktori lokal hanya berlaku untuk daemon tempat ia diikat. Saat daemon yang mengeksekusi sebuah eksekusi memiliki direktori lokal yang cocok, agent bekerja langsung di direktori tersebut; komputer lain tetap menggunakan repositori GitHub milik proyek atau repositori ruang kerja.
+
+## Menambahkan repositori GitHub
+
+Buka proyek dan pilih "Add resource" di bawah **Resources**. Pilih repositori yang sudah tertaut pada ruang kerja, atau tempelkan URL Git. Repositori ruang kerja dikelola di **Settings → Code**; setelah GitHub terhubung, halaman yang sama menawarkan **Pick from GitHub** untuk mengimpor repositori yang diotorisasi untuk App tersebut.
+
+Repositori tidak terbatas pada GitHub: URL Git apa pun yang dapat dijangkau oleh runtime berfungsi sebagai resource repositori. Multica yang di-hosting sendiri juga dapat terhubung ke Forgejo, Gitea, atau GitLab yang di-hosting sendiri di bawah **Settings → Code**; lihat [Hosting Git mandiri](/vcs-integration).
+
+Saat membuat proyek, Anda juga dapat memilih repositori langsung di bawah **Repos**. Satu proyek dapat menautkan beberapa repositori GitHub.
+
+`ref` pada sebuah resource mengatur branch, tag, atau commit yang digunakan secara default oleh checkout berikutnya. `default_branch_hint` hanya memberi agent petunjuk branch default dan tidak memaksa perpindahan branch.
+
+## Menambahkan direktori lokal
+
+UI untuk menambahkan direktori lokal hanya tersedia di Desktop, karena browser tidak dapat memilih folder di komputer Anda.
+
+<Callout type="warning">
+**Ini adalah jalan keluar darurat, bukan default yang lebih praktis.** `local_directory` ada untuk orang-orang yang tidak memiliki pilihan lain — contoh baku-nya adalah proyek game dengan checkout berukuran puluhan gigabyte, di mana melakukan clone ulang untuk setiap eksekusi sama sekali tidak praktis.
+
+Jika direktori Anda adalah repo git biasa yang dapat Anda clone, **gunakan `github_repo` sebagai gantinya**: secara default ia menggunakan mode worktree, yang memungkinkan eksekusi konkuren tanpa batas pada repo yang sama. `local_directory` memproses **satu eksekusi dalam satu waktu secara default**; jika direktorinya adalah repo git, Anda dapat memilih mode worktree untuk mendapatkan kembali konkurensi (lihat "Bagaimana eksekusi membagikan direktori"). Baca "Kapan memilih" di bawah sebelum Anda memutuskan untuk menggunakannya.
+</Callout>
+
+
+1. Pastikan daemon lokal Desktop sedang online.
+2. Buka **Resources** milik proyek, atau tab **Local directory** pada dialog pembuatan proyek — pilihan yang sama tersedia sebelum proyek itu dibuat.
+3. Pilih "Add local directory", lalu pilih folder yang akan digunakan.
+4. Pilih bagaimana eksekusi harus menggunakannya — **Direct** atau **Parallel**, dijelaskan di bagian "Bagaimana eksekusi membagikan direktori". Desktop akan memilih **Parallel** secara default saat folder tersebut adalah repositori git yang dapat diisolasi oleh runtime pada mesin itu, dan **Direct** jika bukan. Ubah pilihan itu langsung di sana, atau kemudian dari **Resources** dengan ikon pensil di samping direktori.
+
+Pemilihan otomatis ini hanya berlaku untuk direktori yang sedang Anda tautkan sekarang. Direktori yang ditautkan sebelumnya tetap menggunakan mode yang tersimpan saat itu — pengaturan yang sudah ada tidak akan pernah berubah tanpa sepengetahuan Anda.
+
+Direktori tersebut harus berupa path absolut, harus sudah ada, dan harus dapat dibaca serta ditulis oleh daemon saat ini. Path berikut ini akan ditolak: root sistem dan root drive (`/`, `C:\`), direktori home itu sendiri dan induk dari direktori home (seperti `/Users`, `/home`, `/root`), serta direktori sistem seperti `/etc`, `/var`, `/tmp`, `/usr`, dan `/opt`. Jika path yang dipilih adalah symlink, path tersebut akan diselesaikan ke path aslinya terlebih dahulu dan divalidasi ulang dengan aturan yang sama; kunci serial juga berlaku pada path asli tersebut.
+
+Setiap proyek paling banyak dapat menautkan satu direktori lokal per daemon. Komputer-komputer berbeda dalam satu tim masing-masing dapat menautkan direktorinya sendiri untuk proyek yang sama.
+
+<Callout type="warning">
+Dalam mode default `in_place`, direktori lokal bukan environment yang terisolasi: agent secara langsung melihat dan mengubah branch Anda saat ini beserta file yang belum di-commit, dan Multica tidak secara otomatis beralih branch, stash, commit, push, atau membuka PR. Mode worktree mengubah hal ini — lihat "Bagaimana eksekusi membagikan direktori" di bawah.
+</Callout>
+
+<span id="how-tasks-share-the-directory" />
+
+## Bagaimana eksekusi membagikan direktori
+
+Direktori lokal memiliki dua mode eksekusi, yang diatur per resource dengan `execution_mode`. Desktop melabelinya sebagai **Direct** dan **Parallel**; API, CLI, dan sisa halaman ini menggunakan pengenal (identifier) tersebut.
+
+### `in_place` (default) — "Direct"
+
+Agent bekerja langsung di direktori Anda, dan eksekusi berjalan satu per satu. Saat dua eksekusi menggunakan direktori asli yang sama, eksekusi yang lebih baru masuk ke `waiting_local_directory` dan berlanjut setelah eksekusi sebelumnya melepaskan direktori tersebut. Dua path yang mengarah ke direktori yang sama melalui symlink berbeda akan diserialkan dengan cara yang sama.
+
+Menunggu tidak mengubah direktori. Eksekusi yang menunggu dapat dibatalkan; jika tidak, eksekusi tersebut menunggu hingga direktori tersedia.
+
+### `worktree` — "Parallel"
+
+Setiap eksekusi mendapatkan [git worktree](https://git-scm.com/docs/git-worktree) tersendiri dari repo Anda, yang dibuat di dalam direktori workspace milik runtime itu sendiri. **Eksekusi pada direktori yang sama berjalan secara konkuren — tidak satu pun yang menunggu**, dan tidak satu pun yang menulis ke working copy Anda.
+
+Mode ini membutuhkan direktori berupa repositori git dengan setidaknya satu commit. Jika bukan, eksekusi akan gagal dengan error yang jelas, bukan diam-diam kembali ke eksekusi serial. Runtime pada mesin tersebut juga harus mengimplementasikan mode ini. Runtime mendeklarasikan hal ini saat terhubung, dan Multica melakukan gating berdasarkan deklarasi tersebut, bukan berdasarkan nomor versi — sebuah development build bisa membawa string versi yang terlihat cukup baru padahal belum memiliki implementasinya sama sekali. Deklarasi ini diperiksa dua kali: penyimpanan resource ditolak, dengan petunjuk untuk memperbarui aplikasi pada mesin tersebut, selama runtime-nya belum mendeklarasikan kapabilitas ini; dan setiap eksekusi diperiksa ulang terhadap runtime yang benar-benar mengklaimnya — sehingga mesin yang di-downgrade setelah resource disimpan akan memiliki eksekusinya dibatalkan dengan sebuah alasan, bukan diam-diam dijalankan secara in place. Meminta `worktree` berarti meminta isolasi; mengedit working copy Anda sebagai gantinya tidak akan pernah menjadi fallback.
+
+Apa yang dilihat agent, dan apa yang Anda dapatkan kembali:
+
+- **Agent mulai dari apa yang Anda lihat, bukan dari `HEAD`.** Edit yang belum di-commit dan file yang belum dilacak (untracked) milik Anda akan diputar ulang (replay) ke dalam worktree, sehingga agent tidak meninjau kode yang sudah tidak Anda miliki lagi. Working copy, index, dan daftar stash Anda sendiri tidak pernah tersentuh. Jika state tersebut tidak dapat direproduksi secara akurat — termasuk saat ada konten untracked lebih banyak daripada yang dapat ditangani oleh replay (2000 file / 200 MiB) — eksekusi akan gagal daripada dimulai dari sebuah tree yang tidak Anda kenali. Perbaikan yang umum dilakukan adalah menambahkan gitignore atau membersihkan output build yang belum diabaikan.
+- **Hasilnya adalah sebuah branch di repo Anda**, satu per tugas bukan satu per eksekusi: `agent/<agent>/<issue>` (sebuah chat mendapatkan `agent/<agent>/chat-<session>`). Panel **Detail eksekusi** menampilkan nama branch tersebut (dan memungkinkan Anda menyalinnya); Anda juga dapat menemukannya dengan `git branch`. Tinjau dengan `git log` / `git diff`, dan gabungkan atau cherry-pick sendiri. Multica tidak pernah menggabungkannya untuk Anda. Eksekusi yang gagal di tengah jalan tetap melaporkan branch-nya, karena ia tetap melakukan commit atas apa pun yang telah dihasilkan agent.
+- **Lanjutan akan melanjutkan dari titik eksekusi terakhir berhenti.** Komentar berikutnya pada tugas yang sama akan melakukan checkout branch tersebut lagi, sehingga agent berdiri di atas pekerjaan yang baru saja diserahkannya, bukan mulai dari `HEAD` dengan perubahannya sendiri terdampar di branch lain. Hanya apa yang Anda ubah di direktori Anda sendiri sejak eksekusi terakhir yang diputar ulang di atasnya — branch tersebut sudah membawa sisanya. Gabungkan branch tersebut dan eksekusi berikutnya akan mulai dari `HEAD` Anda lagi. Jika dua eksekusi pada satu tugas tumpang tindih, eksekusi kedua akan bercabang dari hasil kerja eksekusi pertama menjadi `agent/<agent>/<issue>-<task>`, karena git hanya mengizinkan satu worktree per branch.
+- **Jika perubahan Anda berkonflik dengan perubahan agent, agent-lah yang menyelesaikannya.** Saat Anda menulis ulang baris yang sama dengan yang ditulis ulang oleh agent, git tidak dapat memutuskan versi mana yang menang, sehingga eksekusi dimulai pada worktree yang berkonflik dan diberi tahu untuk menyelesaikan merge tersebut sebelum melakukan apa pun yang lain — `git status` pada worktree itu menampilkan path yang belum di-merge. Eksekusi yang meninggalkan file yang belum di-merge tidak menghasilkan apa pun: eksekusi tersebut gagal, mempertahankan worktree-nya, dan eksekusi berikutnya akan menawarkan edit yang sama lagi, sehingga perubahan Anda tidak pernah diam-diam hilang.
+- **Hanya branch milik Multica yang dilanjutkan.** Melanjutkan sebuah branch ditentukan oleh catatan kepemilikan, bukan oleh namanya: catatan tersebut menyebutkan percakapannya, dan menyebutkan commit tempat branch itu ditinggalkan. Branch yang Anda buat sendiri yang kebetulan bernama `agent/<agent>/<issue>` tidak akan pernah di-checkout, ditambahkan, atau dibaca sebagai eksekusi sebelumnya — demikian pula branch yang tidak lagi mengandung commit yang tercatat, sehingga menghapus branch milik Multica dan membuat branch Anda sendiri dengan nama yang sama, atau memindahkannya secara paksa ke histori lain, aman untuk dilakukan. Dalam kasus-kasus tersebut eksekusi akan menggunakan `agent/<agent>/<issue>-<id>` sebagai gantinya. Melakukan commit di atas branch yang sudah diserahkan adalah hal yang normal dan membuatnya tetap berlanjut — commit Anda akan muncul begitu saja pada eksekusi berikutnya. Setiap branch juga dimulai dengan sebuah commit baseline miliknya sendiri, yang menandai tree tempat eksekusi pertama dimulai — commit tersebut yang mengidentifikasi branch itu nantinya, dan `git diff <baseline>..<branch>` adalah tepat pekerjaan agent tersebut. Eksekusi yang tidak dapat mencatat branch-nya — gagal sebelum selesai, catatannya tidak dapat ditulis, atau mereset worktree-nya melewati commit yang membawa perubahan Anda ke dalam branch tersebut — melaporkan kegagalan dan mempertahankan worktree-nya, dan eksekusi berikutnya memulai branch baru daripada melanjutkan branch yang tidak dapat dibuktikan sebagai miliknya.
+- **Tidak ada apa pun yang diam-diam hilang.** Apa pun yang ditinggalkan agent tanpa di-commit akan di-commit ke branch tersebut sebelum worktree-nya dihapus, termasuk saat eksekusi gagal di tengah jalan. Dalam kasus jarang di mana commit itu sendiri tidak dapat dibuat — misalnya repo dengan `commit.gpgSign` dan tidak ada signing key yang tersedia untuk runtime — worktree tersebut sengaja dipertahankan daripada dihapus, eksekusi dilaporkan sebagai gagal, dan `git worktree list` di repo Anda akan menunjuk ke direktori yang menyimpan pekerjaan tersebut.
+- **Eksekusi yang tidak mengubah apa pun tidak meninggalkan apa pun.** Branch-nya akan dihapus, bukan ditinggalkan sebagai entri kosong di `git branch` — kecuali itu adalah branch tugas yang membawa pekerjaan dari eksekusi sebelumnya, yang selalu tetap ada.
+
+Karena worktree tersebut berada di dalam direktori workspace milik runtime, ia akan dibersihkan sesuai jadwal pembersihan normal. Dua hal tetap ada di repo Anda: branch tersebut, dan satu hidden ref per branch di bawah `refs/multica/local-state/` yang mencatat siapa pemiliknya dan seperti apa direktori Anda saat terakhir kali dilanjutkan. Hidden ref tersebut tidak pernah muncul di `git branch`; daftarkan dengan `git for-each-ref refs/multica`. Multica menghapus setiap hidden ref beserta branch-nya, dan membuang hidden ref mana pun yang branch-nya Anda hapus sendiri pada saat eksekusi berikutnya dimulai pada repo tersebut — atau Anda dapat menghapusnya sekaligus dengan `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
+
+<Callout type="warn">
+**Operator self-hosted:** isolasi untuk mode ini ditegakkan oleh server (saat penyimpanan dan sekali lagi saat sebuah runtime mengklaim setiap eksekusi), sehingga runtime yang di-downgrade kapan pun akan tertangkap. Kombinasi yang *tidak* tertangkap adalah mengembalikan server ke build yang lebih lama dari fitur ini sementara runtime yang belum mengimplementasikan mode ini masih terhubung — server lama tidak memiliki gate, dan runtime semacam itu mengabaikan `execution_mode` serta akan mengeksekusi eksekusi tersebut secara in place. Jangan mengembalikan server ke versi sebelum rilis ini selama resource `worktree` masih ada, kecuali setiap runtime pada mesin-mesin tersebut sudah diperbarui.
+</Callout>
+
+<Callout type="info">
+Mode worktree hanya berlaku untuk repositori git. Direktori biasa yang bukan git tetap berjalan secara serial — itulah fungsi `in_place`.
+</Callout>
+
+## Apa yang ditulis selama sebuah eksekusi
+
+Selain perubahan kode yang dibuat agent, runtime juga dapat menulis ke direktori tersebut file instruksi yang dibutuhkan oleh AI coding tool yang sedang digunakan, beserta `.multica/project/resources.json`. Tambahkan file-file tersebut ke `.gitignore` jika Anda tidak ingin menyertakannya dalam version control.
+
+Multica tidak pernah menghapus direktori lokal yang tertaut saat membersihkan environment eksekusi. Perubahan agent pada direktori tersebut adalah jenis perubahan yang sama seperti saat Anda sendiri menjalankan AI coding tool di terminal, dan membutuhkan tinjauan yang sama.
+
+## Mengelola resource dengan CLI
+
+```bash
+# Link a repository when creating a project
+multica project create \
+  --title "Agent UX" \
+  --repo https://github.com/multica-ai/multica
+
+# List and add resources
+multica project resource list <project-id>
+multica project resource add <project-id> \
+  --type github_repo \
+  --url https://github.com/multica-ai/multica \
+  --ref main
+
+# Link a local directory on a specific daemon
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /absolute/path/to/repo \
+  --daemon-id <daemon-id>
+
+# Link a local git repo and let runs execute concurrently in their own worktrees
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /absolute/path/to/repo \
+  --daemon-id <daemon-id> \
+  --execution-mode worktree
+
+# Switch an existing local directory between modes
+multica project resource update <project-id> <resource-id> --execution-mode worktree
+multica project resource update <project-id> <resource-id> --execution-mode in_place
+
+# Remove a resource
+multica project resource remove <project-id> <resource-id>
+```
+
+Perubahan resource memengaruhi eksekusi yang dibuat setelahnya; perubahan tersebut tidak menulis ulang catatan eksekusi yang sudah berakhir.
+
+## Langkah selanjutnya
+
+- [Proyek](/projects) — pelajari tentang konteks proyek, progres, dan lead.
+- [Daemon dan runtime](/daemon-runtimes) — pelajari komputer mana yang mengambil sebuah eksekusi.
+- [Eksekusi](/tasks) — lihat status eksekusi seperti `waiting_local_directory`.

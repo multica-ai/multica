@@ -1,0 +1,174 @@
+---
+title: Daemon dan runtime
+description: Bagaimana Multica menghubungkan komputer, menemukan alat pengkodean AI, dan mengeksekusi eksekusi.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica mencatat dan mengoordinasikan pekerjaan; komputer yang terhubung mengeksekusinya. **Daemon** pada sebuah komputer mengklaim eksekusi dan menjalankan alat pengkodean AI yang terinstal di komputer tersebut.
+
+## Daemon vs runtime
+
+- **Daemon** adalah proses latar belakang Multica yang berjalan di satu komputer. Daemon terhubung ke server, menemukan tool lokal, mengklaim eksekusi, dan melaporkan hasilnya kembali.
+- **Runtime** merepresentasikan satu lingkungan eksekusi konkret yang tersedia untuk sebuah ruang kerja. Runtime berhubungan dengan satu komputer ditambah satu alat pengkodean AI — atau satu profil runtime kustom — di komputer tersebut.
+
+Misalnya, sebuah komputer memiliki Claude Code dan Codex terinstal dan terhubung ke dua ruang kerja. Daemon mendaftarkan runtime Claude Code dan Codex untuk setiap ruang kerja. Merestart daemon memperbarui catatan yang sudah ada; daemon tidak terus membuat runtime baru untuk kombinasi yang sama.
+
+## Lokasi eksekusi dan batasan data
+
+Alat pengkodean AI yang dijalankan oleh runtime lokal, kredensial login milik tool-tool itu sendiri, dan direktori kode lokal Anda semuanya tetap berada di komputer yang terhubung. Server Multica tidak mengeksekusi perintah atas nama tool lokal, dan tidak secara otomatis mengunggah seluruh direktori kerja Anda.
+
+Agar tim dapat berkolaborasi, server menyimpan tugas, komentar, konfigurasi agent, konteks eksekusi, catatan eksekusi, dan hasil yang ditulis balik oleh agent. Konten tersebut dapat mencakup potongan kode atau konteks proyek lain yang dipilih agent untuk dibaca dan disertakan dalam balasannya.
+
+<Callout type="warning">
+Environment variable kustom milik sebuah agent disimpan di server dan dikirim ke runtime saat eksekusi. Jangan menganggap "eksekusi lokal" berarti "setiap secret hanya ada di komputer ini": environment variable kustom dan konfigurasi MCP berada di server, dan tampilannya dibatasi oleh aturan nilai sensitif.
+</Callout>
+
+## Memulai daemon
+
+Dengan Multica Desktop, aplikasi memulai daemon secara otomatis — tanpa perlu perintah tambahan.
+
+Di web, komputer remote, atau lingkungan headless, [instal Multica CLI](/cli) dulu, lalu jalankan:
+
+```bash
+multica daemon start
+```
+
+Daemon berjalan di latar belakang secara default. Perintah umum:
+
+| Perintah | Tujuan |
+| --- | --- |
+| `multica daemon status` | Menampilkan status daemon dan koneksi |
+| `multica daemon logs -f` | Mengikuti log |
+| `multica daemon restart` | Merestart daemon dan mendeteksi ulang tool lokal |
+| `multica daemon stop` | Menghentikan daemon |
+| `multica daemon start --foreground` | Berjalan di terminal saat ini, untuk debugging |
+
+Untuk menempatkan workspace eksekusi di disk lain, simpan root untuk profil saat ini dengan `multica config set workspaces_root <path>`, atau berikan `--workspaces-root <path>` ke `daemon start` atau `daemon restart`. Flag ini mengganti `MULTICA_WORKSPACES_ROOT`, yang mengganti konfigurasi profil. Direktori eksekusi yang sudah ada tidak dipindahkan saat root berubah.
+
+Saat startup, daemon mendeteksi alat pengkodean AI yang didukung pada `PATH` dan mendaftarkan runtime untuk ruang kerja yang boleh Anda hubungkan. Jika sebuah tool baru saja diinstal atau masuk, restart daemon untuk mendeteksinya lagi.
+
+Daemon memerlukan setidaknya satu alat pengkodean AI bawaan yang didukung terdeteksi sebelum dapat dimulai. Metode instalasi dan nama executable ada di [Instal alat pengkodean AI](/install-agent-runtime).
+
+## Dispatch dan status online
+
+Setelah terdaftar, sebuah runtime menjaga koneksi persisten. Saat eksekusi baru masuk antrean, server memberi tahu daemon yang sesuai; daemon juga melakukan polling secara berkala sebagai cadangan setelah gangguan koneksi. Jadi saat sebuah runtime online dengan kapasitas tersisa, eksekusi biasanya langsung dimulai.
+
+Daemon mengirim heartbeat setiap 15 detik. Server menggabungkan heartbeat dan status koneksi untuk menentukan apakah sebuah runtime online; setelah sebuah daemon keluar secara tidak terduga, runtime biasanya ditandai offline dalam waktu paling lambat sekitar 3 menit.
+
+![Detail runtime untuk satu komputer online: daemon yang sama mendaftarkan 7 runtime, satu baris per alat pengkodean AI yang terdeteksi, masing-masing menunjukkan status online dan versi CLI](/images/docs/runtime-machine-detail.webp)
+
+Saat sebuah runtime offline:
+
+- Eksekusi yang sudah diantrekan menunggu runtime pulih. Eksekusi itu hanya gagal setelah runtime berhenti mengirim heartbeat lebih lama dari masa tenggang reconnect **dan** eksekusi itu sendiri sudah diantrekan selama itu juga, sehingga runtime yang hanya sibuk tetap mempertahankan antreannya, dan pekerjaan yang ditugaskan ke runtime yang sudah offline tetap mendapat masa tenggang penuh untuk ditunggu.
+- Eksekusi yang sedang berjalan akan gagal; eksekusi tugas atau obrolan yang memenuhi syarat dapat dicoba ulang secara otomatis.
+- Saat daemon dimulai lagi, daemon mendaftarkan ulang runtime-nya dan mengklaim kembali eksekusi yang tidak berakhir dengan bersih sebelumnya.
+- Sebuah runtime yang offline lebih dari 7 hari tanpa agent yang terikat padanya (termasuk yang diarsipkan) dibersihkan secara otomatis.
+
+Detail state dan aturan percobaan ulang ada di [Eksekusi](/tasks).
+
+## Batas konkurensi
+
+Secara default, satu daemon mengeksekusi paling banyak 20 eksekusi sekaligus; setiap agent paling banyak 6. Konkurensi efektifnya adalah yang lebih kecil dari keduanya.
+
+Setelah batasnya tercapai, eksekusi baru tetap mengantre. Anda dapat menyesuaikan konkurensi satu agent di pengaturan agent, dan batas seluruh komputer melalui `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Eksekusi paralel bersaing untuk kapasitas komputer, kuota akun tool, dan direktori kerja yang sama sekaligus.
+
+## Runtime privat dan publik
+
+Sebuah runtime lokal bersifat **privat** secara default: hanya pemilik runtime yang dapat membuat agent di dalamnya. Pemilik dan admin ruang kerja bukan pengecualian — runtime itu adalah komputer milik orang lain, dan menjalankan agent di sana menggunakan komputer dan kredensial tool milik mereka.
+
+Hanya pemilik runtime yang dapat menjadikannya **publik** — admin ruang kerja dapat mengganti nama atau menghapus sebuah runtime, tetapi membaginya adalah keputusan pemiliknya. Anggota ruang kerja lain kemudian dapat memilih runtime ini juga; itu tidak membagikan kredensial login alat pengkodean AI yang mendasarinya — ini hanya memungkinkan anggota merutekan eksekusi agent mereka ke komputer ini.
+
+## Profil runtime kustom
+
+Jika tim Anda menggunakan wrapper internal, sebuah executable dengan versi terkunci, atau memerlukan argumen tambahan yang tetap untuk sebuah tool yang kompatibel, buat sebuah **profil runtime kustom**.
+
+Profil kustom tidak menambahkan protokol komunikasi baru. Anda tetap memilih salah satu keluarga protokol yang sudah didukung Multica (tipe protokol integrasi tool tersebut; lihat [Perbandingan alat pengkodean AI](/providers)), dan perintahnya sendiri harus kompatibel dengan keluarga tersebut.
+
+### Lingkungan runtime eksekusi
+
+Saat daemon memulai sebuah eksekusi agent, daemon menyuntikkan konteks eksekusi ke dalam proses runtime. Nilai-nilai ini dimiliki oleh daemon: environment kustom sebuah agent tidak dapat menimpa variabel `MULTICA_` apa pun atau variabel direktori sementara eksekusi.
+
+Tabel berikut mendaftar variabel yang dapat digunakan runtime kustom hari ini. Daftar ini sengaja tidak lengkap dan bukan permukaan API yang berversi. Bangun integrasi hanya pada lima variabel yang ditandai **integration contract**; perlakukan sisanya sebagai detail informasional yang dapat berubah.
+
+| Variabel | Nilai dalam sebuah eksekusi | Stabilitas |
+| --- | --- | --- |
+| `MULTICA_TOKEN` | Kredensial API `mat_` yang terikat pada eksekusi | **Integration contract** |
+| `MULTICA_TASK_ID` | ID eksekusi yang aktif | **Integration contract** |
+| `MULTICA_AGENT_ID` | ID agent yang ditugaskan | **Integration contract** |
+| `MULTICA_WORKSPACE_ID` | ID ruang kerja eksekusi tersebut | **Integration contract** |
+| `MULTICA_SERVER_URL` | URL server Multica yang dipilih daemon | **Integration contract** |
+| `MULTICA_TASK_CONFIG_ROOT` | Root konfigurasi Multica CLI privat yang khusus untuk eksekusi ini | Informasional |
+| `MULTICA_TASK_WORKSPACES_ROOT` | Root workspace eksekusi yang dikelola daemon | Informasional |
+| `MULTICA_AGENT_NAME` | Nama tampilan agent yang ditugaskan | Informasional |
+| `MULTICA_DAEMON_PORT` | Port health/API daemon lokal yang digunakan perintah khusus eksekusi seperti `multica repo checkout` | Informasional |
+| `MULTICA_TASK_SLOT` | Slot dalam pool konkurensi daemon secara keseluruhan; berguna untuk resource yang diindeks per slot seperti GPU | Informasional |
+| `TMPDIR` | Direktori sementara privat untuk eksekusi yang aktif; juga disediakan sebagai `TMP` dan `TEMP` untuk tool lintas platform | Informasional |
+
+Server menentukan kepemilikan untuk permintaan yang dibuat dengan `MULTICA_TOKEN`; tulisan seperti komentar tugas diatribusikan ke agent yang ditugaskan dan eksekusi yang aktif. Untuk pengikatan lengkap token tersebut, izin, atribusi, masa hidup maksimum 24 jam, dan perilaku pembersihannya, lihat [Token sementara untuk eksekusi agent](/auth-tokens#token-sementara-untuk-eksekusi-agent).
+
+<Callout type="warning">
+Nilai-nilai ini ada di environment sebenarnya pada proses runtime. Child process apa pun yang dimulai oleh runtime mewarisi semuanya secara default, termasuk `MULTICA_TOKEN`. Jika sebuah child tidak seharusnya memegang kredensial ini, hapus secara eksplisit; jangan mengandalkan isolasi proses yang sebenarnya tidak ada. Pengecualiannya berjalan sebaliknya: tool yang menyaring environment subprocess-nya sendiri mungkin memerlukan aturan izin eksplisit. Misalnya, shell tool milik Codex menghapus nama yang mengandung `TOKEN`, `KEY`, atau `SECRET`, sehingga daemon memasang kebijakan shell terkelola yang mengizinkan variabel eksekusi yang diperlukan. Simpan token hanya di environment proses — jangan pernah di prompt, log, file repositori, atau konfigurasi persisten. Sebuah child membagikan identitas dan izin eksekusi induknya; child tidak menerima identitas baru yang berlingkup independen.
+</Callout>
+
+### Membuat profil
+
+Hanya pemilik dan admin ruang kerja yang dapat membuat, mengedit, atau menghapus profil runtime kustom:
+
+1. Buka **Runtimes** dan pilih sebuah komputer tempat perintah tersebut terinstal.
+2. Klik **Add custom runtime**.
+3. Pilih keluarga protokol yang benar-benar kompatibel dengan perintah tersebut.
+4. Isi nama, perintah, dan argumen tetap, lalu simpan.
+
+Profil ini dibagikan ke seluruh ruang kerja. Setiap komputer yang terhubung mencari perintah itu sendiri; hanya komputer yang dapat menemukannya di `PATH` yang mendaftarkan runtime yang bersangkutan. Membuat sebuah profil tidak menginstal perintah tersebut, dan tidak membuat anggota lain masuk ke tool itu.
+
+Kolom perintah menerima sebuah executable dan argumen, bukan skrip shell. Argumen biasa, tanda kutip, dan escape backslash berfungsi; pipe, redirect, `&&`, `;`, backtick, dan ekspansi environment variable tidak berfungsi. Saat Anda memerlukan perilaku tersebut, letakkan di skrip wrapper dan gunakan skrip itu sebagai perintahnya.
+
+### Bagaimana argumen Anda diurutkan
+
+Semua yang Anda ketik di kolom perintah tetap langsung setelah executable, sebelum argumen yang ditambahkan Multica:
+
+```text
+<your command> <your fixed arguments> <Multica's protocol arguments> <the agent's custom arguments>
+```
+
+Inilah yang membuat wrapper bergaya subcommand berfungsi. Jika perintah Anda adalah `ccms start q36`, tool itu melihat `start q36` lebih dulu dan dapat memilih subcommand-nya sebelum `-p` milik Multica dan argumen lainnya tiba — ini adalah satu-satunya urutan yang diterima wrapper semacam itu.
+
+Dulu argumen Anda ditambahkan di akhir. Kebanyakan perintah bergaya flag mengurai dengan cara yang sama baik dengan urutan apa pun, tetapi tidak semuanya begitu — sebuah perintah yang membedakan flag global dari flag subcommand bisa peduli di mana sebuah flag berada. Jika Anda sudah memiliki sebuah profil dengan argumen tetap, jalankan satu eksekusi di atasnya setelah upgrade untuk memastikan masih berfungsi.
+
+Dua konsekuensi lagi yang perlu diketahui:
+
+- **Nilai Multica sendiri yang menang saat terjadi konflik.** Jika argumen tetap Anda menyetel sebuah flag yang juga disetel Multica, nilai Multica datang lebih belakangan dan berlaku. Yang paling penting, model yang dipilih pada agent menimpa `--model` yang dipatok di profil. Untuk mematok sebuah model untuk semua orang, biarkan field model agent kosong.
+- **Flag yang kritis bagi protokol diabaikan.** `-p`, `--output-format`, `--input-format`, `--permission-mode`, dan yang setara untuk keluarga lain dihapus dari argumen tetap Anda, karena menimpanya akan merusak koneksi daemon ke tool tersebut. Subcommand dan argumen posisional lainnya selalu diteruskan.
+
+Jika sebuah daemon yang diluncurkan Desktop tidak dapat menemukan sebuah perintah yang bisa dijalankan terminal Anda, tetapkan path absolut untuk komputer saat ini:
+
+```bash
+multica runtime profile set-path <profile-id> --path /absolute/path/to/command
+```
+
+Hapus override path tersebut:
+
+```bash
+multica runtime profile unset-path <profile-id>
+```
+
+Mengedit sebuah profil hanya memengaruhi eksekusi yang diklaim setelahnya. Sebelum menghapus sebuah profil, selesaikan dulu agent aktif yang masih terikat pada runtime-nya. Menghapus hanya instans runtime pada satu komputer tidak menghapus profilnya — daemon yang masih berjalan akan mendaftarkannya ulang.
+
+## Memecahkan masalah runtime offline
+
+Periksa dengan urutan ini:
+
+1. Jalankan `multica daemon status` untuk memastikan daemon berjalan.
+2. Jalankan `multica daemon logs -f` untuk mencari error login, jaringan, atau deteksi tool.
+3. Jalankan `command -v <tool-command>` di environment yang sama untuk memastikan daemon dapat menemukannya.
+4. Buka halaman **Runtimes** Multica dan periksa apakah komputer target dan alat pengkodean AI yang sesuai tampil online.
+5. Setelah menginstal sebuah tool, mengubah path, atau memperbarui profil, jalankan `multica daemon restart`.
+
+Jika masalahnya berlanjut, lihat [Pemecahan masalah](/troubleshooting).
+
+## Langkah selanjutnya
+
+- [Instal alat pengkodean AI](/install-agent-runtime) — instal dan verifikasi sebuah alat pengkodean AI yang didukung.
+- [Perbandingan alat pengkodean AI](/providers) — bandingkan model, resumpsi sesi, MCP, dan dukungan skill.
+- [Eksekusi](/tasks) — antrean, penghentian, dan percobaan ulang.

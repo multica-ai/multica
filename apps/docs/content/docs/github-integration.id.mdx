@@ -1,0 +1,197 @@
+---
+title: Integrasi GitHub
+description: Tautkan pull request ke tugas Multica dan pantau progres pengembangan langsung dari tugas tersebut.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Setelah GitHub terhubung, Multica secara otomatis menautkan pull request berdasarkan identifier tugas. Detail tugas menampilkan status PR, ukuran perubahan, hasil CI, dan konflik merge langsung di tempat.
+
+Integrasi GitHub hanya membaca repositori yang diotorisasi pada saat instalasi; integrasi ini tidak pernah mendorong (push) commit, komentar, atau status check.
+
+Multica yang dihosting sendiri juga dapat menghubungkan instance Forgejo, Gitea, atau GitLab yang dihosting sendiri secara paralel, dengan auto-linking PR, perubahan status berdasarkan merge, dan tampilan CI yang sama. Titik masuknya adalah **Settings → Code**; lihat [Hosting Git mandiri](/vcs-integration). Multica Cloud tidak menyediakan titik masuk ini.
+
+## Hubungkan GitHub
+
+Pemilik atau admin ruang kerja dapat menyelesaikan koneksinya:
+
+1. Buka **Settings → Code**.
+2. Pada baris **GitHub**, klik **Connect GitHub**.
+3. Di GitHub, pilih akun atau organisasi dan otorisasi semua repositori atau subset yang dipilih.
+4. Kembali ke Multica setelah instalasi selesai.
+
+Status koneksi ditampilkan di halaman yang sama. Anggota biasa dapat melihat statusnya tetapi tidak dapat menghubungkan, memutuskan, atau mengubah switch-nya.
+
+<Callout type="info">
+**Koneksi GitHub** menentukan dari repositori mana Multica menerima event PR; pengaturan **code repositories** menentukan repositori mana yang dapat dipilih agent saat memulai eksekusi. Keduanya memiliki tujuan berbeda dan dikonfigurasi secara terpisah.
+</Callout>
+
+## Switch fitur
+
+Bagian **Pull requests & issues** pada **Settings → Code** memiliki pengaturan berikut. **Pause GitHub features** pada menu **⋯** baris GitHub menghentikan ketiga switch di bawah ini tanpa memutuskan GitHub App.
+
+| Switch | Efek |
+|---|---|
+| PR sidebar | Menampilkan pull request yang tertaut di detail tugas. |
+| Co-authored-by | Menambahkan `Co-authored-by: multica-agent <github@multica.ai>` ke commit yang dibuat oleh agent. |
+| Auto-link PR | Menautkan PR ke tugas yang identifier-nya ada di nama branch atau judulnya, atau mengikuti kata kunci penutup di isinya. |
+| After PRs merge, move the issue to | Apa yang dilakukan oleh merge semua PR yang tertaut ke sebuah tugas: memindahkannya ke suatu status (`Done` secara default) atau membiarkannya. Lihat [Kapan PR yang di-merge memindahkan tugas](#kapan-pr-yang-di-merge-memindahkan-tugas). |
+| **PR card → CI & mergeability** | Untuk setiap PR yang tertaut, Multica mengambil snapshot GitHub API terautentikasi dan mencerminkan **status CI** serta **mergeability**-nya pada card (lihat **Apa yang ditampilkan card PR** di bawah). |
+
+
+
+**After PRs merge, move the issue to** berlaku untuk setiap code host, termasuk [hosting Git mandiri](/vcs-integration).
+
+## Tautkan PR ke tugas
+
+Cara paling sederhana adalah menaruh identifier tugas di nama branch atau judul PR. Misalnya, untuk tugas `MUL-123`:
+
+```text
+mul-123-fix-login-redirect
+```
+
+```text
+MUL-123 Fix the redirect after login
+```
+
+Multica mengabaikan huruf besar/kecil dan hanya mencocokkan prefix tugas ruang kerja saat ini. Satu PR dapat tertaut ke beberapa tugas.
+
+Jika identifier hanya muncul di isi PR, taruh tepat setelah kata kunci penutup:
+
+```text
+Closes MUL-123
+Fixes MUL-123
+Resolves MUL-123
+```
+
+Sekadar disebutkan di isi, seperti `Related to MUL-123`, sama sekali tidak menautkan PR tersebut. Pesan commit dan komentar PR juga tidak memicu penautan.
+
+Anda juga dapat menautkan PR secara manual: di blok **Pull requests** pada tugas tersebut, klik **+** dan tempelkan URL PR. Untuk melepas PR dari sebuah tugas, buka menu **⋯** pada barisnya dan pilih **Remove from issue**; Multica tidak akan menautkannya kembali dari judul atau branch-nya.
+
+## Lihat PR pada sebuah tugas
+
+Setelah tertaut, PR muncul di blok **Pull requests** pada detail tugas. Setiap entri menampilkan:
+
+- repositori, nomor, judul, dan penulis;
+- status `Open`, `Draft`, `Merged`, atau `Closed`;
+- jumlah baris yang ditambahkan dan dihapus serta jumlah file yang diubah;
+- status CI: semua lolos (dengan jumlahnya), sebagian gagal (menyebutkan check yang gagal), atau sebagian masih berjalan; PR tanpa check yang dikonfigurasi tidak menampilkan item ini — "tidak ada check" tidak pernah diperlakukan sebagai lolos;
+- mergeability: mergeable (hanya ketika GitHub melaporkan status merge yang bersih/clean), conflicting, blocked, atau behind.
+
+Status CI dan mergeability berasal dari snapshot yang diambil Multica dari GitHub API, dan keduanya independen; PR yang sudah di-merge atau ditutup tidak lagi menampilkan keduanya. Ketika GitHub tidak tersedia untuk sementara, card tetap menyimpan snapshot terakhir dan menandainya sebagai basi (stale) dibanding menampilkannya kosong.
+
+Di bawah daftar, satu baris menyebutkan apa yang terjadi selanjutnya — misalnya *Moves to Done when #19 merges*, atau PR mana yang ditutup tanpa di-merge. Tidak ada baris ini ketika ruang kerja membiarkan status tidak berubah atau tugas sudah memiliki status target.
+
+Klik sebuah entri untuk membuka PR tersebut di GitHub. Menonaktifkan **PR sidebar** hanya menyembunyikan blok ini; tidak memutuskan apa pun.
+
+## Kapan PR yang di-merge memindahkan tugas
+
+PR yang di-merge tidak selalu berarti tugasnya selesai, sehingga ruang kerja yang menentukan apa yang dilakukan oleh merge: **Settings → Code → After PRs merge, move the issue to**. Pilih `Done` (default untuk ruang kerja baru), status lain yang sudah dimulai atau selesai — status kustom seperti *Awaiting regression* juga berfungsi — atau **Don't change**. Ruang kerja yang sudah ada sebelum pengaturan ini mempertahankan perilaku mereka: jika merge sebelumnya tidak selalu menyelesaikan tugas mereka, mereka mulai dengan **Don't change**.
+
+Sebuah tugas berpindah ke status yang dipilih ketika semua berikut ini terpenuhi:
+
+1. setiap PR yang tertaut berstatus `Merged` — PR berstatus `Open` atau `Draft` membuat tugas tetap menunggu, demikian pula PR yang ditutup tanpa di-merge sampai Anda melepasnya dari tugas;
+2. tugas tersebut bukan `done` atau `cancelled`, tidak berada di Triage, belum memiliki status target, dan belum dinonaktifkan untuk tugas ini (**Pull requests → ⋯ → Keep status when PRs merge**).
+
+Bagaimana PR ditautkan tidak menjadi masalah: judul, nama branch, dan `Closes MUL-123` di isi semuanya menautkannya, dan tidak satu pun dari itu mengubah apa yang dilakukan merge. Ketika sebuah PR hanya menyelesaikan sebagian dari tugas, atau sebuah rilis atau check harus menyusul setelah merge, pertahankan status tugas tersebut dari menu **Pull requests**-nya.
+
+Pemeriksaan ini berjalan saat sebuah event PR menyentuh tugas: PR yang tertaut di-merge, sebuah PR ditautkan, atau sebuah tautan dilepas. Membuka ulang sebuah tugas tidak memindahkannya kembali — PR tertaut berikutnya yang di-merge yang melakukannya. Mengubah pengaturan ini tidak memindahkan tugas yang PR-nya sudah di-merge sebelumnya.
+
+Perubahan status dicatat di timeline sebagai aksi sistem yang menyebutkan PR-nya, dan anggota yang berlangganan tugas tersebut akan diberi notifikasi.
+
+## Beberapa ruang kerja
+
+Instalasi GitHub App yang sama dapat terhubung ke beberapa ruang kerja Multica. Event GitHub mengalir ke setiap ruang kerja secara terpisah dan dicocokkan dengan prefix tugas milik masing-masing ruang kerja.
+
+Misalnya, sebuah PR yang menyebut baik `MUL-1` maupun `ENG-2` dapat tertaut di dua ruang kerja dengan prefix berbeda. Ruang kerja tidak pernah melihat tugas milik ruang kerja lain.
+
+Jika satu identifier cocok dengan tugas di lebih dari satu ruang kerja yang terhubung (mungkin terjadi jika mereka berbagi prefix yang sama), Multica tidak menautkannya secara otomatis di ruang kerja mana pun, sehingga meng-merge PR tersebut tidak dapat menyelesaikan tugas yang tidak terkait. Tautkan PR tersebut secara manual di ruang kerja yang benar.
+
+## Putuskan koneksi
+
+Memilih **Disconnect** dari menu **⋯** baris GitHub pada **Settings → Code** hanya menghapus relasi antara ruang kerja Multica saat ini dan instalasinya; ini tidak meng-uninstall App dari GitHub untuk Anda. Catatan PR yang ada tetap disimpan, dan event baru berhenti mengalir ke ruang kerja tersebut.
+
+Untuk mencabut otorisasi repositori di sisi GitHub, uninstall App tersebut atau sesuaikan scope repositorinya dari halaman instalasi GitHub App pribadi atau organisasi Anda. Setelah di-uninstall, setiap ruang kerja Multica yang tertaut ke instalasi tersebut berhenti menerima event.
+
+## Pengaturan hosting mandiri
+
+Multica Cloud tidak memerlukan bagian ini. Hosting mandiri mengharuskan Anda membuat GitHub App sendiri terlebih dahulu.
+
+### 1. Buat GitHub App
+
+Buat App tersebut di bawah **Developer settings → GitHub Apps** milik GitHub dan isi:
+
+| Field | Nilai |
+|---|---|
+| Homepage URL | Alamat frontend Multica Anda, misalnya `https://multica.example.com` |
+| Callback URL | Biarkan kosong |
+| Setup URL | `https://<api-host>/api/github/setup`, dengan **Redirect on update** diaktifkan |
+| Webhook URL | `https://<api-host>/api/webhooks/github` |
+| Webhook secret | String acak yang Anda simpan untuk jangka panjang |
+
+Izin repositori:
+
+| Izin | Level |
+|---|---|
+| Metadata | Read-only |
+| Contents | Read-only; diperlukan oleh query snapshot PR, yang membaca head commit bersama mergeability dan rollup CI |
+| Pull requests | Read-only |
+| Checks | Read-only; digunakan untuk menampilkan status CI |
+| Commit statuses | Read-only; digunakan untuk mengagregasi CI legacy-status |
+
+Subscribe ke event-event berikut:
+
+- **Pull request**;
+- **Check suite**, **Check run**, dan **Status**, yang memicu refresh CI dan mergeability.
+
+Jika Anda tidak perlu menampilkan CI di Multica, Anda dapat melewati izin Checks dan Commit statuses beserta event-nya. Contents tetap diperlukan — tanpanya query snapshot langsung gagal dan card PR juga kehilangan status merge.
+
+<Callout type="warning">
+Ini adalah **Webhook secret**, bukan OAuth Client secret. Jika kedua sisi memiliki webhook secret yang berbeda, pengiriman dari GitHub akan mengembalikan `401 invalid signature`.
+</Callout>
+
+### 2. Atur variabel lingkungan
+
+Ambil slug dari URL publik App tersebut. Misalnya, slug dari `https://github.com/apps/multica-acme` adalah `multica-acme`.
+
+```dotenv
+GITHUB_APP_SLUG=multica-acme
+GITHUB_WEBHOOK_SECRET=<the webhook secret you entered when creating the App>
+FRONTEND_ORIGIN=https://multica.example.com
+```
+
+Jika `GITHUB_APP_SLUG` atau `GITHUB_WEBHOOK_SECRET` tidak ada, tombol connect dinonaktifkan dan endpoint webhook menolak memproses event.
+
+Dua variabel berikutnya diperlukan agar card PR dapat menampilkan status CI dan mergeability — Multica menggunakannya untuk mengautentikasi sebagai App dan mengambil snapshot:
+
+```dotenv
+GITHUB_APP_ID=<the GitHub App's numeric ID>
+GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
+```
+
+Buat private key di bawah **Private keys → Generate a private key** milik GitHub App tersebut. Tanpa keduanya, integrasi tetap berjalan dengan penurunan fitur yang halus: PR tetap dicerminkan, tugas tetap auto-link dan berpindah saat merge — card PR hanya tidak menampilkan status CI atau merge.
+
+### 3. Perbarui database dan hubungkan
+
+Saat memperbarui deployment yang sudah ada, jalankan migrasi database reguler terlebih dahulu:
+
+```bash
+make migrate-up
+```
+
+Restart API server, lalu selesaikan koneksinya di **Settings → Code**.
+
+## Pemecahan masalah
+
+- **Tombol Connect dinonaktifkan**: periksa apakah `GITHUB_APP_SLUG` dan `GITHUB_WEBHOOK_SECRET` sudah sampai ke proses API.
+- **Webhook mengembalikan 401**: pastikan GitHub App dan API menggunakan webhook secret yang sama, lalu kirim ulang dari **Recent Deliveries** di GitHub.
+- **PR tidak tertaut**: periksa apakah repositorinya termasuk dalam scope otorisasi App, auto-linking aktif, identifier-nya milik ruang kerja saat ini, dan tidak ada yang melepas PR tersebut dari tugasnya.
+- **Identifier ada di isi tetapi tidak tertaut**: taruh tepat setelah kata kunci penutup (`Closes MUL-123`), atau di nama branch atau judul PR, atau tautkan PR tersebut secara manual.
+- **Tidak ada status CI**: pastikan `GITHUB_APP_ID` dan `GITHUB_APP_PRIVATE_KEY` sudah dikonfigurasi, dan App memiliki izin read-only Contents, Checks, dan Commit statuses dengan event yang sesuai telah disubscribe. Tanpa Contents seluruh snapshot akan gagal, sehingga card PR tidak menampilkan CI maupun status merge. Setelah menambahkan izin ke App yang sudah terinstal, pemilik setiap installation juga harus menyetujuinya di GitHub agar berlaku.
+- **Tugas tidak berpindah setelah PR di-merge**: baca baris di bawah daftar **Pull requests** milik tugas tersebut. Baris ini menyebutkan PR mana pun yang masih terbuka atau ditutup tanpa di-merge, atau menyatakan bahwa tugas mempertahankan statusnya saat PR di-merge. Tidak ada baris berarti pengaturan ruang kerja adalah **Don't change**, atau tugas sudah memiliki status target.
+
+## Langkah selanjutnya
+
+- [Tugas](/issues) — bagaimana transisi status berkaitan dengan PR yang di-merge.
+- [Resource proyek](/project-resources) — repositori mana yang digunakan agent saat berjalan.
+- [Variabel lingkungan](/environment-variables) — referensi konfigurasi lengkap GitHub App yang dihosting sendiri.

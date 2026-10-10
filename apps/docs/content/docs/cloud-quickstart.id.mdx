@@ -1,0 +1,95 @@
+---
+title: Mulai cepat
+description: Hubungkan sebuah komputer, buat Agent pertama Anda, dan biarkan Agent menyelesaikan Tugas pertamanya.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="info">
+Sebelum Agent dapat mengeksekusi, komputer yang menjalankannya memerlukan setidaknya satu [alat coding AI yang didukung](/providers) yang sudah terinstal dan masuk (sign in) — misalnya Claude Code, Codex, atau Cursor. Multica tidak menyediakan alat-alat ini.
+</Callout>
+
+## 1. Masuk dan buka Ruang Kerja Anda
+
+Masuk melalui web ([multica.ai](https://multica.ai)) atau dengan [Multica Desktop](https://multica.ai/download). Kode verifikasi email dan Google keduanya didukung.
+
+- **Desktop**: dapat menghubungkan komputer ini secara otomatis.
+- **Web**: hubungkan dari command line pada langkah berikutnya.
+
+## 2. Hubungkan sebuah komputer
+
+Agent mengeksekusi pekerjaan di komputer yang Anda hubungkan. Buka **Configure → Runtimes** di bagian bawah sidebar:
+
+- **Dengan Desktop**: Desktop secara otomatis mendaftarkan komputer ini sebagai runtime dan mendeteksi alat coding AI yang terinstal. Untuk alat yang baru saja Anda instal, klik **Refresh** untuk mendeteksinya lagi.
+- **Dengan Web, atau untuk menambahkan komputer lain**: klik **Add a computer** di kanan atas, lalu jalankan dua perintah dari dialog tersebut di terminal pada komputer target:
+
+  **macOS / Linux**
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+  multica setup
+  ```
+
+  **Windows PowerShell**
+
+  ```powershell
+  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+  multica setup
+  ```
+
+  `multica setup` membuka browser untuk menyelesaikan proses masuk, lalu membiarkan daemon berjalan di latar belakang. Setelah daemon online, dialog biasanya mendeteksi komputer tersebut dalam waktu satu menit.
+
+**Pemeriksaan keberhasilan**: sebuah komputer online muncul di daftar runtime.
+
+![Dialog Add a computer: dua perintah dan notifikasi menunggu deteksi](/images/docs/quickstart-add-computer.webp)
+
+<Callout type="info">
+Perintah koneksi sedikit berbeda pada instance self-hosted — lihat [Mulai cepat self-host](/self-host-quickstart).
+</Callout>
+
+## 3. Buat sebuah Agent
+
+Buka **Workspace → Agents** di sidebar, klik **New agent**, dan pilih salah satu jalur:
+
+- **Start blank**: isi sendiri semua field. Hanya nama yang benar-benar wajib diisi — konfirmasi runtime dan alat coding AI, lalu buat.
+- **Build with AI**: jelaskan apa yang Anda inginkan, dan Agent Builder akan mengajukan pertanyaan dan membuat konfigurasinya. Jalur ini memerlukan runtime yang online.
+
+Semua hal lainnya dapat disempurnakan nanti — lihat [Buat dan konfigurasikan Agent](/agents-create).
+
+**Pemeriksaan keberhasilan**: Agent Anda muncul di daftar Agent dan ditampilkan sebagai online.
+
+![Pemilih titik awal pembuatan Agent: Start blank dan Build with AI](/images/docs/quickstart-new-agent.webp)
+
+## 4. Serahkan Tugas pertama Anda
+
+Klik **New Issue** di bagian atas sidebar (atau tekan `C`). Dalam mode Agent default:
+
+1. Pada **Created by**, pilih Agent yang baru Anda buat.
+2. Jelaskan pekerjaannya dalam satu atau dua kalimat, misalnya "Jelaskan bagaimana Ruang Kerja ini dapat digunakan."
+3. Kirim. Multica membuat Tugas, menjadikan Agent sebagai Penerima Tugas, dan langsung mulai mengeksekusi.
+
+![Dialog New issue dalam mode Agent: Created by diatur ke Multica Assistant](/images/docs/quickstart-new-issue.webp)
+
+## 5. Pantau progres dan hasil
+
+Setelah mengirim, buka Tugas tersebut: log eksekusi menunjukkan status eksekusi, dan progres serta balasan Agent muncul di timeline.
+
+**Pemeriksaan keberhasilan**: status log eksekusi berubah menjadi Completed dan balasan Agent muncul di timeline. Untuk melihat transkrip lengkap, klik **View transcript**.
+
+![Balasan Agent dalam Tugas dan log eksekusi yang telah selesai](/images/docs/quickstart-run-result.webp)
+
+## Masalah umum
+
+| Gejala | Periksa dulu |
+|---|---|
+| Runtime tidak ditemukan | Pastikan alat coding AI sudah terinstal dan dapat berjalan di terminal. Di Desktop, klik **Refresh**; pada jalur CLI, jalankan ulang `multica setup`. |
+| Runtime menunjukkan offline | Biarkan Desktop tetap terbuka; pada jalur CLI, jalankan `multica daemon status`, dan `multica daemon start` jika belum berjalan. |
+| Tugas tetap dalam antrean | Pastikan runtime yang digunakan Agent online. Saat runtime mencapai batas konkurensinya, Eksekusi baru akan terus mengantre. |
+
+Untuk kasus lainnya, lihat [Pemecahan masalah](/troubleshooting).
+
+## Langkah selanjutnya
+
+- [Konsep inti](/concepts) — kenali semua objek inti Multica dalam tiga menit.
+- [Cara kerja Multica](/how-multica-works) — bagaimana Tugas, Agent, runtime, dan setiap Eksekusi saling berhubungan.
+- [Libatkan Agent untuk bekerja](/triggering-agents) — selain penugasan: @-mention, Obrolan, dan Otomatisasi.

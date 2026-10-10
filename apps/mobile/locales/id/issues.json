@@ -1,0 +1,266 @@
+{
+  "tabs": {
+    "all": "Semua",
+    "created": "Dibuat",
+    "assigned": "Ditugaskan",
+    "agents": "Agent",
+    "members": "Anggota"
+  },
+  "status": {
+    "queued": "Dalam antrean",
+    "deferred": "Dalam antrean",
+    "dispatched": "Memulai",
+    "waiting_local_directory": "Menunggu direktori",
+    "running": "Sedang bekerja",
+    "completed": "Selesai",
+    "failed": "Gagal",
+    "cancelled": "Dibatalkan",
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked"
+  },
+  "category": {
+    "unstarted": "Unstarted",
+    "started": "Started",
+    "done": "Done",
+    "closed": "Closed"
+  },
+  "priority": {
+    "none": "Tanpa prioritas",
+    "low": "Rendah",
+    "medium": "Sedang",
+    "high": "Tinggi",
+    "urgent": "Mendesak"
+  },
+  "filters": {
+    "title": "Filter",
+    "status": "Status",
+    "priority": "Prioritas",
+    "assignee": "Penerima Tugas",
+    "project": "Proyek",
+    "label": "Label",
+    "clear": "Hapus filter",
+    "apply": "Terapkan",
+    "due_date": "Tanggal tenggat"
+  },
+  "list": {
+    "empty": "Tidak ada tugas yang cocok dengan filter Anda",
+    "count_other": "{{count}} tugas",
+    "search_placeholder": "Cari tugas dan proyek"
+  },
+  "detail": {
+    "properties": "Properti",
+    "activity": "Aktivitas",
+    "comments": "Komentar",
+    "comment": "Komentar",
+    "reply": "Balasan",
+    "add_comment": "Tambah komentar...",
+    "description": "Deskripsi",
+    "add_description": "Tambah deskripsi...",
+    "runs": "Eksekusi",
+    "copy_link": "Salin tautan",
+    "open_on_web": "Buka di web",
+    "delete_comment": "Hapus komentar",
+    "edit_comment": "Edit komentar",
+    "no_runs": "Belum ada eksekusi"
+  },
+  "new": {
+    "title": "Tugas baru",
+    "title_placeholder": "Judul tugas",
+    "create": "Buat tugas",
+    "creating": "Membuat...",
+    "description_placeholder": "Deskripsi... (ketik @ untuk menyebut)"
+  },
+  "edit": {
+    "title": "Edit tugas",
+    "save": "Simpan perubahan",
+    "saving": "Menyimpan..."
+  },
+  "activity": {
+    "created": "membuat tugas",
+    "status_changed": "mengubah status: {{from}} → {{to}}",
+    "priority_changed": "mengubah prioritas: {{from}} → {{to}}",
+    "self_assigned": "menugaskan ke diri sendiri",
+    "removed_assignee": "menghapus penerima tugas",
+    "assigned_to": "menugaskan ke {{name}}",
+    "assignee_changed": "mengubah penerima tugas",
+    "start_date_set": "mengatur tanggal mulai ke {{date}}",
+    "start_date_removed": "menghapus tanggal mulai",
+    "due_date_set": "mengatur tanggal tenggat ke {{date}}",
+    "due_date_removed": "menghapus tanggal tenggat",
+    "title_changed": "mengganti nama: \"{{from}}\" → \"{{to}}\"",
+    "description_updated": "memperbarui deskripsi",
+    "duplicate_marked": "menandai tugas ini sebagai duplikat dari {{identifier}}",
+    "duplicate_unmarked": "menghapus tanda duplikat tugas ini dari {{identifier}}",
+    "duplicate_unmarked_to": "menghapus tanda duplikat tugas ini dari {{identifier}} dan memindahkannya ke {{status}}",
+    "duplicate_unmarked_original_deleted": "menghapus tanda duplikat, {{identifier}} telah dihapus",
+    "duplicate_added": "menandai {{identifier}} sebagai duplikat dari tugas ini",
+    "duplicate_removed": "menghapus tanda duplikat {{identifier}} dari tugas ini",
+    "tasks_completed_other": "menyelesaikan {{count}} eksekusi",
+    "tasks_failed_other": "{{count}} eksekusi gagal",
+    "squad_action_with_reason": "mengevaluasi dan mengambil tindakan: {{reason}}",
+    "squad_action": "mengevaluasi dan mengambil tindakan",
+    "squad_no_action_with_reason": "mengevaluasi: tidak perlu tindakan ({{reason}})",
+    "squad_no_action": "mengevaluasi: tidak perlu tindakan",
+    "squad_failed_with_reason": "evaluasi gagal: {{reason}}",
+    "squad_failed": "evaluasi gagal",
+    "squad_evaluated": "mengevaluasi pemicu squad",
+    "commented": "berkomentar"
+  },
+  "errors": {
+    "create_failed": "Gagal membuat tugas",
+    "load_failed": "Gagal memuat tugas: {{message}}"
+  },
+  "empty": {
+    "filtered": "Tidak ada tugas yang cocok dengan filter saat ini.",
+    "assigned": "Tidak ada tugas yang ditugaskan kepada Anda.",
+    "created": "Anda belum membuat tugas apa pun.",
+    "agents": "Tidak ada tugas yang ditugaskan ke agent atau squad.",
+    "all": "Tidak ada tugas di ruang kerja ini.",
+    "members": "Tidak ada tugas yang ditugaskan ke anggota."
+  },
+  "menu": {
+    "pin": "Sematkan",
+    "unpin": "Lepas sematan",
+    "edit_details": "Edit detail",
+    "copy_link": "Salin tautan",
+    "open_web": "Buka di web",
+    "delete_issue": "Hapus tugas",
+    "issue_actions": "Tindakan tugas"
+  },
+  "delete": {
+    "title": "Hapus tugas?",
+    "message": "{{identifier}} beserta komentar, reaksi, dan lampirannya akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan."
+  },
+  "summary": {
+    "comment": "Eksekusi komentar",
+    "autopilot": "Eksekusi autopilot",
+    "chat": "Eksekusi obrolan",
+    "quick_create": "Pembuatan cepat",
+    "direct": "Eksekusi"
+  },
+  "cancel": {
+    "title": "Batalkan eksekusi?",
+    "message": "Agent akan berhenti setelah langkah saat ini.",
+    "keep_running": "Tetap jalankan",
+    "cancel_task": "Batalkan eksekusi"
+  },
+  "form": {
+    "discard_title": "Buang perubahan?",
+    "discard_message_issue": "Edit Anda pada tugas ini akan hilang.",
+    "keep_editing": "Lanjutkan edit",
+    "save_failed": "Gagal menyimpan"
+  },
+  "picker": {
+    "unassigned": "Belum ditugaskan",
+    "agent": "Agent",
+    "needs_runtime": "Memerlukan runtime",
+    "leader_needs_runtime": "Leader memerlukan runtime",
+    "squad": "Squad",
+    "no_matches": "Tidak ada yang cocok.",
+    "no_project": "Tanpa proyek",
+    "no_projects": "Belum ada proyek di ruang kerja ini.\nBuat di web.",
+    "no_labels": "Belum ada label di ruang kerja ini.",
+    "create_label": "Buat \"{{name}}\"",
+    "no_members_agents": "Belum ada anggota atau agent di ruang kerja ini.",
+    "people": "Orang",
+    "agents": "Agent",
+    "squads": "Squad",
+    "issues": "Tugas",
+    "everyone": "Semua orang (@all)",
+    "unknown": "Tidak diketahui",
+    "search_people": "Cari orang",
+    "search_projects": "Cari proyek",
+    "search_labels": "Cari label",
+    "search_members_agents": "Cari anggota atau agent",
+    "search_people_issues": "Cari orang atau tugas",
+    "reference_issue": "Rujuk tugas",
+    "clear": "Hapus"
+  },
+  "comments": {
+    "reply": "Balas",
+    "react": "Beri reaksi...",
+    "copy": "Salin",
+    "select_text": "Pilih Teks",
+    "copy_link": "Salin Tautan",
+    "resolve": "Selesaikan Thread",
+    "unresolve": "Batalkan Penyelesaian Thread",
+    "delete": "Hapus",
+    "delete_title": "Hapus komentar?",
+    "delete_keep_replies": "Komentar ini akan dihapus secara permanen. Balasan apa pun tetap ada di thread. Tindakan ini tidak dapat dibatalkan.",
+    "delete_with_replies": "Komentar ini akan dihapus secara permanen. Balasan dalam thread ini juga akan dihapus. Tindakan ini tidak dapat dibatalkan.",
+    "more_reactions": "Reaksi lainnya...",
+    "fallback_actor": "komentar",
+    "composer_placeholder": "Tambah komentar…",
+    "composer_pill": "Tambah komentar, ketik @ untuk menyebut..."
+  },
+  "suggestions": {
+    "everyone": "Semua orang",
+    "all": "Semua",
+    "member": "Anggota",
+    "recent": "Terbaru",
+    "my_issues": "Tugas saya"
+  },
+  "resolved": {
+    "a11y_folded_other": "Thread terselesaikan oleh {{authors}}, {{count}} pesan. Ketuk untuk memperluas.",
+    "summary_other": "Terselesaikan · {{count}} pesan oleh {{authors}}",
+    "resolved_by": "Diselesaikan oleh {{name}}",
+    "collapse": "Lipat",
+    "collapse_a11y": "Lipat thread yang terselesaikan"
+  },
+  "failed": {
+    "send": "Tidak terkirim",
+    "retry": "Coba lagi",
+    "retry_a11y": "Coba lagi kirim komentar",
+    "discard": "Buang",
+    "discard_a11y": "Buang komentar yang gagal"
+  },
+  "resources": {
+    "title": "Lampirkan repository",
+    "url": "URL repository",
+    "branch": "Cabang awal (opsional)",
+    "label": "Label (opsional)",
+    "attach": "Lampirkan",
+    "attaching": "Melampirkan...",
+    "branch_hint": "Eksekusi dimulai dari cabang ini dan membuka pull request terhadapnya. Biarkan kosong untuk menggunakan cabang default repository.",
+    "commit": "Ini adalah ID commit, bukan cabang. Eksekusi mengirimkan hasilnya kembali ke cabang tempat dimulai. Untuk revisi satu kali, gunakan --ref pada multica repo checkout.",
+    "too_long": "Gunakan paling banyak 255 karakter.",
+    "invalid_characters": "Nama cabang tidak boleh mengandung spasi atau salah satu dari ~ ^ : ? * [ \\",
+    "invalid": "Bukan nama cabang yang valid.",
+    "failed": "Gagal melampirkan resource",
+    "error": "Error tidak diketahui"
+  },
+  "runs": {
+    "active": "Aktif",
+    "past": "Lampau",
+    "title": "Eksekusi Agent",
+    "status": {
+      "queued": "Dalam antrean",
+      "deferred": "Ditangguhkan",
+      "dispatched": "Dikirim ke agent",
+      "running": "Berjalan",
+      "waiting_local_directory": "Menunggu direktori lokal",
+      "completed": "Eksekusi berhasil",
+      "failed": "Eksekusi gagal",
+      "cancelled": "Dibatalkan"
+    }
+  },
+  "header_filter": "Filter",
+  "new_badge": "Baru",
+  "jump_a11y_other": "Lompat ke {{count}} pesan baru",
+  "a11y": {
+    "agent_working": "Agent bekerja — buka eksekusi",
+    "remove_mention": "Hapus sebutan {{name}}",
+    "retry_upload": "Coba lagi unggah {{name}}",
+    "open_file": "Buka {{name}}",
+    "remove_file": "Hapus {{name}}"
+  },
+  "summary.comment": "Eksekusi komentar",
+  "summary.chat": "Eksekusi obrolan",
+  "summary.direct": "Eksekusi",
+  "cancel.title": "Batalkan eksekusi?",
+  "cancel.cancel_task": "Batalkan eksekusi"
+}

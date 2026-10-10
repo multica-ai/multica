@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "Kotak Masuk",
+    "back": "Kotak Masuk"
+  },
+  "menu": {
+    "mark_all_read": "Tandai semua sudah dibaca",
+    "archive_all": "Arsipkan semua",
+    "archive_all_read": "Arsipkan semua yang sudah dibaca",
+    "archive_completed": "Arsipkan yang selesai"
+  },
+  "filters": {
+    "tooltip": "Filter kotak masuk",
+    "active_count_other": "{{count}} filter aktif",
+    "status": "Status",
+    "priority": "Prioritas",
+    "from": "Dari",
+    "unread_only": "Hanya yang belum dibaca",
+    "notification_count_other": "{{count}} notifikasi",
+    "clear": "Hapus filter",
+    "empty": "Tidak ada notifikasi yang cocok dengan filter Anda"
+  },
+  "context_menu": {
+    "mark_read": "Tandai sudah dibaca",
+    "mark_unread": "Tandai belum dibaca",
+    "archive": "Arsipkan",
+    "unarchive": "Batalkan pengarsipan",
+    "open_in_new_tab": "Buka di tab baru"
+  },
+  "list": {
+    "loading_selection": "Memuat notifikasi…",
+    "empty": "Tidak ada notifikasi",
+    "mark_done_tooltip": "Tandai selesai",
+    "archive_tooltip": "Arsipkan",
+    "time": {
+      "just_now": "baru saja",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}j",
+      "days": "{{count}}h"
+    },
+    "archived_title": "Diarsipkan",
+    "archived_empty": "Tidak ada notifikasi yang diarsipkan",
+    "unarchive_tooltip": "Batalkan pengarsipan",
+    "actions_aria": "Aksi notifikasi",
+    "load_more": "Muat lebih banyak",
+    "loading_more": "Memuat…",
+    "retry": "Coba lagi"
+  },
+  "detail": {
+    "select_prompt": "Pilih notifikasi untuk melihat detailnya",
+    "empty": "Kotak masuk Anda kosong",
+    "original_input": "Input asli",
+    "retry_with_context": "Coba lagi dengan konteks",
+    "edit_advanced": "Edit sebagai formulir lanjutan",
+    "autopilot_quota_exceeded_body": "Ruang kerja ini telah mencapai batas {{limit}} eksekusi autopilot untuk periode saat ini. Eksekusi autopilot selanjutnya tidak akan dimulai sampai kuota diatur ulang pada {{resetAt}}.",
+    "autopilot_quota_upgrade": "Lihat opsi upgrade",
+    "archive": "Arsipkan",
+    "unarchive": "Batalkan pengarsipan"
+  },
+  "types": {
+    "issue_assigned": "Ditugaskan",
+    "issue_subscribed": "Berlangganan",
+    "unassigned": "Penugasan dibatalkan",
+    "assignee_changed": "Penerima tugas berubah",
+    "status_changed": "Status berubah",
+    "priority_changed": "Prioritas berubah",
+    "start_date_changed": "Tanggal mulai berubah",
+    "due_date_changed": "Tanggal tenggat berubah",
+    "new_comment": "Komentar baru",
+    "mentioned": "Disebut",
+    "review_requested": "Peninjauan diminta",
+    "task_completed": "Eksekusi selesai",
+    "task_failed": "Eksekusi gagal",
+    "agent_blocked": "Agent terblokir",
+    "agent_completed": "Agent selesai",
+    "reaction_added": "Diberi reaksi",
+    "quick_create_done": "Dibuat dengan agent",
+    "quick_create_failed": "Pembuatan dengan agent gagal",
+    "quick_create_unconfirmed": "Pembuatan dengan agent belum dikonfirmasi",
+    "autopilot_paused": "Autopilot dijeda",
+    "children_done": "Sub-tugas selesai",
+    "autopilot_quota_exceeded": "Batas eksekusi autopilot tercapai"
+  },
+  "labels": {
+    "set_status_to": "Setel status ke",
+    "set_priority_to": "Setel prioritas ke",
+    "assigned_to": "Ditugaskan ke {{name}}",
+    "removed_assignee": "Penerima tugas dihapus",
+    "set_start_date_to": "Setel tanggal mulai ke {{date}}",
+    "removed_start_date": "Tanggal mulai dihapus",
+    "set_due_date_to": "Setel tanggal tenggat ke {{date}}",
+    "removed_due_date": "Tanggal tenggat dihapus",
+    "reacted_to_comment": "Memberi reaksi {{emoji}} pada komentar Anda",
+    "created_with_agent": "Dibuat dengan agent: {{identifier}}",
+    "failed_with_detail": "Gagal: {{detail}}",
+    "autopilot_quota_blocked": "Eksekusi diblokir karena batas telah tercapai",
+    "children_done_stage": "Sub-tugas tahap {{stage}} selesai"
+  },
+  "toasts": {
+    "source_context_retry_started": "Percobaan ulang dimulai dengan konteks asli",
+    "archived": "Notifikasi diarsipkan",
+    "unarchived": "Notifikasi dikembalikan"
+  },
+  "errors": {
+    "archived_lookup_failed": "Gagal memuat notifikasi terkait",
+    "source_context_retry_failed": "Tidak dapat mencoba lagi dengan konteks asli",
+    "source_context_retry_unavailable": "Konteks ini tidak dapat dicoba lagi. Mulai lagi dari titik percabangan.",
+    "mark_read_failed": "Gagal menandai sudah dibaca",
+    "mark_unread_failed": "Gagal menandai belum dibaca",
+    "archive_failed": "Gagal mengarsipkan",
+    "mark_done_failed": "Gagal menandai selesai",
+    "mark_all_read_failed": "Gagal menandai semua sudah dibaca",
+    "archive_all_failed": "Gagal mengarsipkan semua",
+    "archive_all_read_failed": "Gagal mengarsipkan item yang sudah dibaca",
+    "archive_completed_failed": "Gagal mengarsipkan yang selesai",
+    "unarchive_failed": "Gagal membatalkan pengarsipan",
+    "archived_load_failed": "Gagal memuat notifikasi yang diarsipkan",
+    "filters_load_failed": "Tidak dapat memuat filter"
+  }
+}

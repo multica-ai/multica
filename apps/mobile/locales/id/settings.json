@@ -1,0 +1,85 @@
+{
+  "title": "Pengaturan",
+  "account": {
+    "title": "Akun",
+    "sign_out": "Keluar",
+    "sign_out_message": "Anda harus masuk lagi untuk menggunakan Multica di perangkat ini.",
+    "workspace": "Ruang Kerja",
+    "workspaces": "Ruang Kerja",
+    "notifications_subtitle": "Kotak masuk dan peringatan sistem",
+    "load_failed": "Gagal memuat ruang kerja"
+  },
+  "profile": {
+    "title": "Profil",
+    "name": "Nama",
+    "email": "Email",
+    "save": "Simpan profil",
+    "saving": "Menyimpan..."
+  },
+  "appearance": {
+    "title": "Tampilan",
+    "theme": "Tema",
+    "light": "Terang",
+    "dark": "Gelap",
+    "system": "Sistem"
+  },
+  "language": {
+    "title": "Bahasa",
+    "system": "Sistem",
+    "english": "English",
+    "chinese_simplified": "中文",
+    "indonesian": "Bahasa Indonesia"
+  },
+  "notifications": {
+    "title": "Notifikasi",
+    "issues": "Tugas",
+    "inbox": "Kotak Masuk",
+    "chat": "Obrolan",
+    "mentions": "Sebutan",
+    "assignments": "Penugasan",
+    "status_changes": "Perubahan status",
+    "saved": "Pengaturan notifikasi disimpan"
+  },
+  "workspace": {
+    "switch": "Ganti ruang kerja",
+    "select": "Pilih ruang kerja",
+    "empty": "Belum ada ruang kerja"
+  },
+  "avatar": {
+    "take": "Ambil Foto",
+    "library": "Pilih dari Galeri",
+    "remove": "Hapus Foto",
+    "change_hint": "Ketuk untuk mengubah foto",
+    "permission_title": "Izin diperlukan",
+    "permission_message": "Akses kamera diperlukan untuk mengambil foto.",
+    "too_large_title": "Gambar terlalu besar",
+    "too_large_message": "Pilih gambar di bawah 5 MB.",
+    "upload_failed": "Unggahan gagal",
+    "upload_failed_default": "Avatar tidak dapat diunggah.",
+    "remove_failed": "Penghapusan gagal",
+    "remove_failed_default": "Avatar tidak dapat dihapus."
+  },
+  "errors": {
+    "load_failed": "Gagal memuat preferensi notifikasi.",
+    "save_failed": "Gagal menyimpan profil.",
+    "save_failed_default": "Profil Anda tidak dapat disimpan."
+  },
+  "email_fixed": "Email ditetapkan saat mendaftar dan tidak dapat diubah di sini.",
+  "groups": {
+    "assignments": "Penugasan",
+    "assignments_description": "Ditugaskan atau dibatalkan penugasannya.",
+    "status_changes": "Perubahan status",
+    "comments": "Komentar",
+    "comments_description": "Komentar baru pada tugas yang Anda ikuti.",
+    "mentions": "Sebutan",
+    "mentions_description": "Saat seseorang men-@mention Anda, termasuk @all dan @squad.",
+    "updates": "Perubahan tugas",
+    "updates_description": "Perubahan pada judul, deskripsi, label, prioritas, atau tanggal tenggat.",
+    "agent_activity": "Aktivitas agent",
+    "agent_activity_description": "Saat eksekusi agent gagal.",
+    "inbox_notifications": "Notifikasi kotak masuk",
+    "system": "Sistem",
+    "system_notifications": "Notifikasi sistem",
+    "system_description": "Perubahan akun, peringatan keamanan, pembaruan produk."
+  }
+}
