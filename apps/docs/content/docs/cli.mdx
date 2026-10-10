@@ -64,6 +64,21 @@ multica login --token
 
 The command prompts you to paste the token in the terminal, keeping the full value out of shell history.
 
+### ChatGPT plan authorization for Codex
+
+`multica login` authenticates with Multica. The separate `multica chatgpt` commands authorize local Codex runs to use a ChatGPT plan:
+
+```bash
+multica chatgpt login
+multica chatgpt accounts
+multica chatgpt use <client-id>
+multica chatgpt models
+multica chatgpt status
+multica chatgpt logout
+```
+
+Add `--account <client-id>` to `chatgpt login` to reauthorize an existing registration, or `--no-browser` to open its authorization URL yourself. Finish or stop active Codex runs before changing accounts or signing out. New runs read the current selection without a daemon restart; existing runs do not switch accounts. `chatgpt disable` explicitly restores Codex's own authentication for new runs; signing out alone does not enable a billing fallback. These settings and credentials belong to the current local CLI profile. See [ChatGPT plan setup](/install-agent-runtime#use-a-chatgpt-plan-with-codex) for account scope, remote-machine callbacks, storage, and revocation.
+
 ## Choosing a workspace
 
 List workspaces and switch the default:
