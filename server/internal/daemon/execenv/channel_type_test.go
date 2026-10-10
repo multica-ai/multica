@@ -117,7 +117,7 @@ func TestChannelCarriesFiles(t *testing.T) {
 // it into the wecom conversation".
 func TestEveryKnownChannelHasADisplayName(t *testing.T) {
 	t.Parallel()
-	for _, ct := range []string{ChannelTypeSlack, ChannelTypeFeishu, ChannelTypeWecom} {
+	for _, ct := range []string{ChannelTypeSlack, ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk, ChannelTypeSharecrm} {
 		if name := ChannelDisplayName(ct); name == ct {
 			t.Errorf("channel %q has no display name — the brief would name it %q", ct, name)
 		}

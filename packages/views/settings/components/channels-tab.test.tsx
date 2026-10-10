@@ -41,6 +41,7 @@ vi.mock("./slack-tab", () => ({ SlackTab: () => <div>Slack detail</div> }));
 vi.mock("./dingtalk-tab", () => ({ DingTalkTab: () => <div>DingTalk detail</div> }));
 vi.mock("./wecom-tab", () => ({ WecomTab: () => <div>WeCom detail</div> }));
 vi.mock("./telegram-tab", () => ({ TelegramTab: () => <div>Telegram detail</div> }));
+vi.mock("./sharecrm-tab", () => ({ ShareCRMTab: () => <div>ShareCRM detail</div> }));
 
 import { ChannelsTab } from "./channels-tab";
 
@@ -60,10 +61,10 @@ describe("ChannelsTab", () => {
     expect(screen.queryByRole("link", { name: /GitHub/ })).toBeNull();
     expect(screen.queryByRole("link", { name: /Composio/ })).toBeNull();
     expect(screen.queryByText("Slack detail")).toBeNull();
-    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram"].map(
+    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram", "sharecrm"].map(
       (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
     );
-    expect(new Set(shapes).size).toBe(5);
+    expect(new Set(shapes).size).toBe(shapes.length);
 
     fireEvent.click(screen.getByRole("link", { name: /Slack Connected/ }));
     expect(state.push).toHaveBeenCalledWith("/acme/settings?tab=channels&integration=slack");
@@ -72,7 +73,9 @@ describe("ChannelsTab", () => {
   it("does not report a revoked bot as connected", () => {
     state.installationStatus = "revoked";
     renderWithI18n(<ChannelsTab />);
-    expect(screen.getByRole("link", { name: /Slack Not connected/ })).toBeInTheDocument();
+    for (const channel of ["Lark", "Slack", "DingTalk", "WeCom", "Telegram", "ShareCRM"]) {
+      expect(screen.getByRole("link", { name: new RegExp(`${channel} Not connected`) })).toBeInTheDocument();
+    }
   });
 
   it.each([
@@ -101,5 +104,17 @@ describe("ChannelsTab", () => {
     state.search = "tab=lark";
     renderWithI18n(<ChannelsTab />);
     expect(screen.getByText("Lark detail")).toBeInTheDocument();
+  });
+
+  it("opens ShareCRM from the messaging directory", () => {
+    state.search = "tab=channels&integration=sharecrm";
+    renderWithI18n(<ChannelsTab />);
+
+    expect(screen.getByText("ShareCRM detail")).toBeInTheDocument();
+    expect(screen.queryByText("Slack detail")).toBeNull();
+    expect(screen.getByRole("link", { name: "Messaging" })).toHaveAttribute(
+      "href",
+      "/acme/settings?tab=channels",
+    );
   });
 });

@@ -323,14 +323,14 @@ describe("SettingsPage search", () => {
     );
   });
 
-  it("opens the highlighted result from the keyboard and clears on Escape", () => {
+  it.each(["slack", "sharecrm"])("opens the highlighted %s result from the keyboard and clears on Escape", (channel) => {
     renderWithI18n(<SettingsPage />);
     const input = screen.getByRole("searchbox", { name: "Search settings" });
 
-    fireEvent.change(input, { target: { value: "slack" } });
+    fireEvent.change(input, { target: { value: channel } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(push).toHaveBeenCalledWith(
-      "/acme/settings?tab=channels&integration=slack",
+      `/acme/settings?tab=channels&integration=${channel}`,
     );
 
     fireEvent.keyDown(input, { key: "Escape" });
