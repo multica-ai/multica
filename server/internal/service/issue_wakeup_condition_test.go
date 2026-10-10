@@ -215,3 +215,50 @@ func TestWakeupConditionValidation(t *testing.T) {
 		}
 	}
 }
+
+// A check that loses its lock wait records an error; the next unmet check that commits clears it.
+func TestWakeupConditionCheckClearsAnEarlierFailure(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	workspace := parseTestUUID(t, f.WorkspaceID)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Review when ready",
+		Condition: condition(t, map[string]any{"type": "issue_field", "field": "status", "value": "in_review"})})
+	due := func() {
+		f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()-interval '1 second' WHERE id=$1", w.ID)
+	}
+
+	due()
+	tx, err := f.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, "SELECT 1 FROM issue WHERE id=$1 FOR UPDATE", issue); err != nil {
+		t.Fatal(err)
+	}
+	tickErr := s.TickWorkspaces(ctx, workspace)
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if tickErr == nil {
+		t.Fatal("a check blocked on its issue row reported no error")
+	}
+	failed, err := f.q.LocklessWakeup(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !failed.LastError.Valid {
+		t.Fatal("the failed check recorded no error")
+	}
+
+	due()
+	if err = s.TickWorkspaces(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.q.LocklessWakeup(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastError.Valid {
+		t.Fatalf("the check that committed kept the earlier error %q", got.LastError.String)
+	}
+}

@@ -1749,7 +1749,7 @@ func (q *Queries) SetClaimedTaskContext(ctx context.Context, arg SetClaimedTaskC
 }
 
 const setWakeupConditionState = `-- name: SetWakeupConditionState :exec
-UPDATE issue_wakeup SET condition_state= $1,next_fire_at=$2,updated_at=clock_timestamp() WHERE id= $3
+UPDATE issue_wakeup SET condition_state= $1,next_fire_at=$2,last_error=NULL,updated_at=clock_timestamp() WHERE id= $3
 `
 
 type SetWakeupConditionStateParams struct {
@@ -1758,6 +1758,8 @@ type SetWakeupConditionStateParams struct {
 	ID             pgtype.UUID        `json:"id"`
 }
 
+// Writing condition state means evaluation succeeded, so clear any earlier
+// failure; an unmet condition never reaches AdvanceIssueWakeup.
 func (q *Queries) SetWakeupConditionState(ctx context.Context, arg SetWakeupConditionStateParams) error {
 	_, err := q.db.Exec(ctx, setWakeupConditionState, arg.ConditionState, arg.NextFireAt, arg.ID)
 	return err
