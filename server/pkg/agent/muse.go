@@ -223,12 +223,22 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		logger = slog.Default()
 	}
 
+	// B1: Establish a local deadline via runContext (Hermes pattern).
+	// opts.Timeout bounds the entire execution locally; the receptionist
+	// also receives timeout_s as a hint, but the local context is authoritative.
+	// NOTE: Do NOT defer cancel() here — Execute returns immediately with
+	// the Session; the goroutine below owns the context lifetime and
+	// cancels it when the run finishes.
+	runCtx, cancel := runContext(ctx, opts.Timeout)
+
+	// timeoutS rounds up: a sub-second timeout must not truncate to 0,
+	// which would tell the receptionist "no timeout".
 	timeoutS := int64(0)
 	if opts.Timeout > 0 {
-		timeoutS = int64(opts.Timeout / time.Second)
+		timeoutS = int64((opts.Timeout + time.Second - 1) / time.Second)
 	}
 	var execResp museExecuteResponse
-	if err := b.postExecute(ctx, mc, museExecuteRequest{
+	if err := b.postExecute(runCtx, mc, museExecuteRequest{
 		Prompt:      prompt,
 		SessionID:   opts.ResumeSessionID,
 		TimeoutS:    timeoutS,
@@ -251,6 +261,7 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	go func() {
 		defer close(msgCh)
 		defer close(resCh)
+		defer cancel() // Release the runContext when the run finishes.
 		startTime := time.Now()
 		// output is what the text events add up to: running commentary
 		// ("looking that up…"), not the answer. It is the answer only when
@@ -284,7 +295,7 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// fetch succeeded.
 		applyEvents := func() bool {
 			var eventsResp museEventsResponse
-			if err := b.getJSON(ctx, mc, museTaskPath(taskID, "/events?since="+strconv.FormatInt(lastSeq, 10)), &eventsResp); err != nil {
+			if err := b.getJSON(runCtx, mc, museTaskPath(taskID, "/events?since="+strconv.FormatInt(lastSeq, 10)), &eventsResp); err != nil {
 				logger.Debug("muse events poll failed", "task_id", taskID, "error", err)
 				return false
 			}
@@ -321,12 +332,12 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-runCtx.Done():
 				// Best-effort remote cancel; the local verdict is authoritative.
 				cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = b.postCancel(cancelCtx, mc, taskID)
 				cancel()
-				if ctx.Err() == context.DeadlineExceeded {
+				if runCtx.Err() == context.DeadlineExceeded {
 					finalStatus = "timeout"
 					finalError = "muse task timed out"
 					if opts.Timeout > 0 {
@@ -350,8 +361,16 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			applyEvents()
 
 			var st museTaskStatus
-			if err := b.getJSON(ctx, mc, museTaskPath(taskID, ""), &st); err != nil {
+			if err := b.getJSON(runCtx, mc, museTaskPath(taskID, ""), &st); err != nil {
 				if musePollFailed(&pollErrs, err, logger, taskID) {
+					// B2: Local polling failed but the remote task may still be
+					// running. Best-effort cancel it so we don't leave an
+					// orphaned worker. The local verdict stays "failed" —
+					// a cancel failure doesn't change that, and we don't
+					// claim the remote worker actually stopped.
+					cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					_ = b.postCancel(cancelCtx, mc, taskID)
+					cancel()
 					finalStatus = "failed"
 					finalError = fmt.Sprintf("muse backend: receptionist unreachable: %v", err)
 					finish()
@@ -397,6 +416,12 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// budget so a receptionist speaking a newer protocol fails
 				// loudly instead of polling forever.
 				if musePollFailed(&pollErrs, fmt.Errorf("unknown status %q", st.Status), logger, taskID) {
+					// B2: Same as the poll-failure branch — best-effort
+					// cancel the remote task before returning the local
+					// failure verdict.
+					cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					_ = b.postCancel(cancelCtx, mc, taskID)
+					cancel()
 					finalStatus = "failed"
 					finalError = fmt.Sprintf("muse backend: receptionist reported unknown status %q", st.Status)
 					finish()
