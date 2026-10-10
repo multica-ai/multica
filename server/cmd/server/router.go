@@ -851,7 +851,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Socket Mode connection per active Slack installation, authenticated
 			// with that installation's OWN app-level token (xapp-, pasted at BYO
 			// install) — no deployment-level app token, no single connection.
-			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash})
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{
+				Decrypt: box.Open,
+				Logger:  slog.Default(),
+				Slash:   slackSlash,
+				// Off until set: forwards `block_actions` (button/select) clicks
+				// as a JSON POST, e.g. to an autopilot's generic webhook trigger.
+				InteractionWebhookURL: strings.TrimSpace(os.Getenv("MULTICA_SLACK_INTERACTION_WEBHOOK_URL")),
+			})
 
 			// BYO self-serve install (paste bot token + app-level token). The
 			// InstallService needs only the at-rest encryption key — there is no
