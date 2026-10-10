@@ -215,3 +215,64 @@ func TestWakeupConditionValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestWakeupConditionPullRequestChecksCoversVCSProviders(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	var pr, connection string
+	if err := f.Pool.QueryRow(ctx, `INSERT INTO vcs_pull_request(workspace_id,connection_id,provider,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,head_sha)
+		VALUES($1,gen_random_uuid(),'forgejo','selfhosted','wakeup-test',(extract(epoch from clock_timestamp())*1000)::bigint % 100000,'PR','open','https://forgejo.example.test/pr',now(),now(),'aaa') RETURNING id, connection_id`, f.WorkspaceID).Scan(&pr, &connection); err != nil {
+		t.Fatal(err)
+	}
+	f.Cleanup(t, "DELETE FROM vcs_pull_request WHERE id=$1", pr)
+	f.Cleanup(t, "DELETE FROM issue_vcs_pull_request WHERE pull_request_id=$1", pr)
+	f.Exec(t, "INSERT INTO issue_vcs_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+	f.Exec(t, `INSERT INTO vcs_commit_status(connection_id,sha,context,state) VALUES($1,'aaa','ci/test','pending')`, connection)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Look at CI",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "checks_finished"})})
+	// Pending statuses from before registration are not a finished check.
+	wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("pending statuses started %d runs", n)
+	}
+	f.Exec(t, "UPDATE vcs_pull_request SET head_sha='bbb' WHERE id=$1", pr)
+	f.Exec(t, `INSERT INTO vcs_commit_status(connection_id,sha,context,state) VALUES($1,'bbb','ci/test','failed')`, connection)
+	got := wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("failed statuses on the new head started %d runs, want 1", n)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"checks":"failure"`) || !strings.Contains(task.HandoffNote.String, `"head_sha":"bbb"`) {
+		t.Fatalf("VCS PR facts missing: %s", task.HandoffNote.String)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"provider":"forgejo"`) {
+		t.Fatalf("provider missing from PR facts: %s", task.HandoffNote.String)
+	}
+}
+
+func TestWakeupConditionPullRequestMergedCoversVCSProviders(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	var pr string
+	if err := f.Pool.QueryRow(ctx, `INSERT INTO vcs_pull_request(workspace_id,connection_id,provider,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,head_sha)
+		VALUES($1,gen_random_uuid(),'gitea','selfhosted','wakeup-test',(extract(epoch from clock_timestamp())*1000)::bigint % 100000,'PR','open','https://gitea.example.test/pr',now(),now(),'ccc') RETURNING id`, f.WorkspaceID).Scan(&pr); err != nil {
+		t.Fatal(err)
+	}
+	f.Cleanup(t, "DELETE FROM vcs_pull_request WHERE id=$1", pr)
+	f.Cleanup(t, "DELETE FROM issue_vcs_pull_request WHERE pull_request_id=$1", pr)
+	f.Exec(t, "INSERT INTO issue_vcs_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Note the merge",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "merged"})})
+	wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("open PR started %d runs", n)
+	}
+	f.Exec(t, "UPDATE vcs_pull_request SET state='merged' WHERE id=$1", pr)
+	if got := wakeTick(t, f, s, w.ID); wakeRuns(t, f, w.ID) != 1 {
+		_ = got
+		t.Fatalf("merged VCS PR did not start exactly 1 run")
+	}
+}
