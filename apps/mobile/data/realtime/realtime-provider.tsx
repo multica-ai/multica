@@ -65,6 +65,18 @@ export function useWSClient(): WSClient | null {
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  return (
+    <WorkspaceRealtimeProvider key={`${userId}:${wsSlug}`} userId={userId} wsSlug={wsSlug}>
+      {children}
+    </WorkspaceRealtimeProvider>
+  );
+}
+
+function WorkspaceRealtimeProvider({ children, userId, wsSlug }: {
+  children: React.ReactNode;
+  userId: string | null;
+  wsSlug: string | null;
+}) {
   const [client, setClient] = useState<WSClient | null>(null);
 
   // Track NetInfo's last known state so we only force-reconnect on the
@@ -73,10 +85,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const lastConnectedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
-    if (!userId || !wsSlug) {
-      setClient(null);
-      return;
-    }
+    if (!userId || !wsSlug) return;
 
     let cancelled = false;
     let ws: WSClient | null = null;
@@ -138,7 +147,6 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       appStateSub?.remove();
       netInfoUnsub?.();
       ws?.disconnect();
-      setClient(null);
     };
   }, [userId, wsSlug]);
 

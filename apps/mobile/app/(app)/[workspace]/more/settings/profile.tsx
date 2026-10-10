@@ -10,7 +10,7 @@
  * store via setUser — same source-of-truth pattern as web (server response
  * is authoritative, never the local form state).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -54,9 +54,11 @@ export default function ProfileSettingsScreen() {
 
   // Resync if `user` updates from outside (avatar upload, refetch, login as
   // different user). Without this the form would render stale init forever.
-  useEffect(() => {
+  const [previousUser, setPreviousUser] = useState(user);
+  if (previousUser !== user) {
+    setPreviousUser(user);
     setName(user?.name ?? "");
-  }, [user]);
+  }
 
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
 
