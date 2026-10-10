@@ -718,6 +718,30 @@ FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE atq.id = $1;
 
+-- name: TouchAgentTaskHeartbeat :exec
+-- Per-task liveness stamp (#9105), piggybacked on the GetTaskStatus poll the
+-- daemon already makes every ~5s per in-flight task. THROTTLED: the row is
+-- only written when the previous stamp is at least 60s old, so the hot path
+-- costs at most one row write per running task per minute (not per poll).
+-- Scoped to status='running' so a task that went terminal between the
+-- status read and this write can never get a fresh heartbeat.
+UPDATE agent_task_queue
+SET last_heartbeat_at = now()
+WHERE id = $1
+  AND status = 'running'
+  AND (last_heartbeat_at IS NULL OR last_heartbeat_at < now() - interval '60 seconds');
+
+-- name: ListStaleRunningAgentTasks :many
+-- Running tasks in a workspace whose liveness signal -- or, for a task with
+-- none yet, its started_at -- is older than the caller's threshold. No
+-- universal constant: the consumer (a reaper, an ops surface) picks what
+-- "stale" means; it should be comfortably above the 60s write throttle.
+SELECT atq.* FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.status = 'running'
+  AND COALESCE(atq.last_heartbeat_at, atq.started_at) < sqlc.arg(stale_before)::timestamptz;
+
 -- name: GetAgentTaskForDelegatedFailureUpdate :one
 -- Serializes the idempotent delegated-failure recovery signal for one failed
 -- task. FailTask and the stale-task sweepers can converge on the same row; the
