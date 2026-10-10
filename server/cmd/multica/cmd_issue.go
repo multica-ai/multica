@@ -39,6 +39,26 @@ import (
 // to a native command), so Chinese / Cyrillic / any non-ASCII content
 // arrives as `?`. Reading a UTF-8 file directly bypasses the shell's pipe
 // re-encoding entirely. See issues #2198 / #2236 / #2376.
+// expectedRevisionFlag is the name of the optimistic-concurrency precondition
+// flag shared by the mutating issue commands.
+const expectedRevisionFlag = "expected-revision"
+
+// readExpectedRevision validates the optional precondition before any request.
+// Zero means the flag was omitted and preserves unconditional writes.
+func readExpectedRevision(cmd *cobra.Command) (int64, error) {
+	if !cmd.Flags().Changed(expectedRevisionFlag) {
+		return 0, nil
+	}
+	rev, err := cmd.Flags().GetInt64(expectedRevisionFlag)
+	if err != nil {
+		return 0, err
+	}
+	if rev < 1 {
+		return 0, fmt.Errorf("--%s must be a positive integer", expectedRevisionFlag)
+	}
+	return rev, nil
+}
+
 func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) {
 	stdinFlag := flagName + "-stdin"
 	fileFlag := flagName + "-file"
@@ -658,11 +678,13 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
+	issueStatusCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -674,6 +696,7 @@ func init() {
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
+	issueAssignCmd.Flags().Int64(expectedRevisionFlag, 0, "Optimistic-concurrency precondition: only apply if the issue is still at this revision (from `issue get`), else fail with a revision conflict")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
@@ -1654,6 +1677,10 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	attachmentPaths, _ := cmd.Flags().GetStringSlice("attachment")
 	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
@@ -1824,6 +1851,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if noStart {
 		body["suppress_run"] = true
 	}
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
@@ -1855,6 +1885,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueAssign(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
 	noStart, _ := cmd.Flags().GetBool("no-start")
@@ -1904,6 +1938,10 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
+	}
+
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("assign issue: %w", err)
@@ -1923,6 +1961,10 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueStatus(cmd *cobra.Command, args []string) error {
+	expectedRevision, err := readExpectedRevision(cmd)
+	if err != nil {
+		return err
+	}
 	id := args[0]
 	status := args[1]
 	noStart, _ := cmd.Flags().GetBool("no-start")
@@ -1958,6 +2000,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 	if noStart {
 		body["suppress_run"] = true
+	}
+	if expectedRevision > 0 {
+		body["expected_revision"] = expectedRevision
 	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
