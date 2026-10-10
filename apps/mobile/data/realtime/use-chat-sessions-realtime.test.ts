@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { chatKeys } from "@/data/queries/chat";
+import { useChatSessionsRealtime } from "./use-chat-sessions-realtime";
+
 const { invalidateQueries, subscriptionSetups } = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
-  subscriptionSetups: [] as Array<(ws: MockWS, wsId: string) => Array<() => void>>,
+  subscriptionSetups: [] as ((ws: MockWS, wsId: string) => (() => void)[])[],
 }));
 
 type EventHandler = (payload: unknown) => void;
@@ -17,15 +20,12 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@/lib/use-ws-subscriptions", () => ({
-  useWSSubscriptions: (setup: (ws: MockWS, wsId: string) => Array<() => void>) => {
+  useWSSubscriptions: (setup: (ws: MockWS, wsId: string) => (() => void)[]) => {
     subscriptionSetups.push(setup);
   },
 }));
 
 vi.mock("@/data/api", () => ({ api: {} }));
-
-import { chatKeys } from "@/data/queries/chat";
-import { useChatSessionsRealtime } from "./use-chat-sessions-realtime";
 
 describe("useChatSessionsRealtime", () => {
   beforeEach(() => {

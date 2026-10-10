@@ -57,7 +57,8 @@ describe("RealtimeProvider foreground recovery", () => {
 
   it("opens exactly one socket per background or inactive return", async () => {
     const { RealtimeProvider } = await import("./realtime-provider");
-    RealtimeProvider({ children: null });
+    const element = RealtimeProvider({ children: null });
+    element.type(element.props);
     cleanup = lifecycle.setup!();
     // Let the effect finish reading the token and install native listeners.
     await Promise.resolve();
@@ -73,4 +74,16 @@ describe("RealtimeProvider foreground recovery", () => {
     lifecycle.onAppState!("active");
     expect(MockWebSocket.instances).toHaveLength(3);
   });
+
+  it("does not open a socket if unmounted while the token is loading", async () => {
+    const { RealtimeProvider } = await import("./realtime-provider");
+    const element = RealtimeProvider({ children: null });
+    element.type(element.props);
+    const cancel = lifecycle.setup!();
+    cancel();
+    await Promise.resolve();
+    expect(MockWebSocket.instances).toHaveLength(0);
+    expect(lifecycle.onAppState).toBeUndefined();
+  });
+
 });
