@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -48,6 +49,7 @@ func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
 				"display_name":"Company Codex",
 				"protocol_family":"codex",
 				"command_name":"company-codex",
+				"skip_if_missing":true,
 				"description":null,
 				"fixed_args":["--foo"],
 				"visibility":"workspace",
@@ -81,6 +83,9 @@ func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
 	}
 	if !p.Enabled {
 		t.Errorf("profile should be enabled")
+	}
+	if !p.SkipIfMissing {
+		t.Errorf("profile should skip missing commands")
 	}
 	if len(p.FixedArgs) != 1 || p.FixedArgs[0] != "--foo" {
 		t.Errorf("fixed_args = %v, want [--foo]", p.FixedArgs)
@@ -335,6 +340,57 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	}
 	if len(fx.sentFailures) != 1 || fx.sentFailures[0]["profile_id"] != "prof-1" {
 		t.Fatalf("sent failures = %+v, want prof-1", fx.sentFailures)
+	}
+}
+
+func TestRegisterRuntimes_SkipsMissingProfileWithoutFailureWhenConfigured(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{})
+
+	profiles := []RuntimeProfile{{
+		ID:             "prof-1",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "Company Codex",
+		ProtocolFamily: "codex",
+		CommandName:    "company-codex",
+		SkipIfMissing:  true,
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	fx.daemon.cfg.Agents = map[string]AgentEntry{
+		"qwen": {Path: "/usr/bin/true", Command: "qwen"},
+	}
+
+	if _, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 || fx.sentRuntimes[0]["type"] != "qwen" {
+		t.Fatalf("sent runtimes = %+v, want only the built-in runtime", fx.sentRuntimes)
+	}
+	if len(fx.sentFailures) != 0 {
+		t.Fatalf("sent failures = %+v, want none", fx.sentFailures)
+	}
+}
+
+func TestRegisterRuntimes_SkipMissingCustomOnlyHostStillReturnsSignature(t *testing.T) {
+	stubLookPath(t, map[string]string{})
+	profiles := []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex",
+		ProtocolFamily: "codex", CommandName: "company-codex",
+		SkipIfMissing: true, Enabled: true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	fx.daemon.cfg.Agents = map[string]AgentEntry{}
+
+	_, sig, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if !errors.Is(err, ErrNoRuntimesToRegister) {
+		t.Fatalf("registerRuntimesForWorkspace error = %v, want ErrNoRuntimesToRegister", err)
+	}
+	if sig == "" {
+		t.Fatal("missing-only profile must still produce a convergence signature")
+	}
+	if fx.sentRuntimes != nil || fx.sentFailures != nil {
+		t.Fatalf("register request must not be sent: runtimes=%+v failures=%+v", fx.sentRuntimes, fx.sentFailures)
 	}
 }
 
