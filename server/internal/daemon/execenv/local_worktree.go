@@ -408,6 +408,13 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		tracksState: plan.tracksState && actualBranch == plan.name,
 	}
 
+	// A continued branch already has a verified checkpoint. A replay conflict
+	// skips recordState until the agent resolves it; retain that exact ref so
+	// Finalize can CAS against it instead of treating the turn as unprepared.
+	if wt.tracksState && plan.continues {
+		wt.preparedStateRef = plan.priorState
+	}
+
 	// Tear the worktree back down on every failure below. A half-replayed tree
 	// is the worst outcome available: it looks like a working checkout, so
 	// nothing downstream questions it, while the agent silently reads different

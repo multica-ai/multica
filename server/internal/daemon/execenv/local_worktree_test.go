@@ -1009,6 +1009,11 @@ func TestConflictResolvedByTheAgentIsDeliveredAndNotReplayedAgain(t *testing.T) 
 
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "C\n")
 	second := prepareTurn(t, repo, "MUL-6881", turnTwoTask)
+	// A conflicted replay does not publish a new prepare checkpoint. It must
+	// retain the previously verified ref for Finalize's compare-and-swap.
+	if got, err := readUserStateRef(repo, second.Branch); err != nil || second.preparedStateRef != got {
+		t.Fatalf("conflict prepare checkpoint = %q, recorded = %q, err = %v", second.preparedStateRef, got, err)
+	}
 	if len(second.ReplayConflicts) == 0 {
 		t.Fatal("turn two saw no conflict between the agent's B and the user's C")
 	}
@@ -2047,6 +2052,11 @@ func TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain(t *testing.T
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "rewritten by the user instead\n")
 
 	second := prepareTurn(t, repo, "MUL-6881", turnTwoTask)
+	// A conflicted replay does not publish a new prepare checkpoint. It must
+	// retain the previously verified ref for Finalize's compare-and-swap.
+	if got, err := readUserStateRef(repo, second.Branch); err != nil || second.preparedStateRef != got {
+		t.Fatalf("conflict prepare checkpoint = %q, recorded = %q, err = %v", second.preparedStateRef, got, err)
+	}
 	if !second.Continued {
 		t.Fatal("second turn did not continue the branch the user had committed on")
 	}
@@ -2075,6 +2085,57 @@ func TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain(t *testing.T
 	third := prepareTurn(t, repo, "MUL-6881", turnThreeTask)
 	if len(third.ReplayConflicts) == 0 {
 		t.Error("the user's local edit was recorded as delivered even though no commit carried it")
+	}
+}
+
+
+func TestFinalizeConflictReplayRejectsConcurrentCheckpointUpdate(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "original\n")
+
+	first := prepareTurn(t, repo, "MUL-6881", turnOneTask)
+	writeFile(t, filepath.Join(first.WorkDir, "tracked.txt"), "agent\n")
+	finalizeOK(t, first)
+
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "user\n")
+	second := prepareTurn(t, repo, "MUL-6881", turnTwoTask)
+	if len(second.ReplayConflicts) == 0 {
+		t.Fatal("expected a conflicting user edit")
+	}
+	prior := gitRun(t, repo, "rev-parse", userStateRef(second.Branch))
+	if second.preparedStateRef != prior {
+		t.Fatalf("prepared checkpoint = %q, want %q", second.preparedStateRef, prior)
+	}
+	tip := gitRun(t, repo, "rev-parse", second.Branch)
+	otherSnapshot := gitRun(t, repo, "commit-tree", second.userState+"^{tree}", "-m", "concurrent snapshot")
+	concurrentRef, err := writeBranchRecord(repo, second.Branch, otherSnapshot, tip, second.owner)
+	if err != nil {
+		t.Fatalf("concurrent checkpoint: %v", err)
+	}
+	if concurrentRef == prior {
+		t.Fatal("concurrent checkpoint did not change")
+	}
+
+	// Resolve in favour of the existing branch content: there is no new
+	// commit, but Finalize must still refuse to overwrite the other writer.
+	writeFile(t, filepath.Join(second.WorkDir, "tracked.txt"), "agent\n")
+	gitRun(t, second.Path, "add", "tracked.txt")
+	outcome, err := second.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("Finalize overwrote a concurrently changed conflict checkpoint")
+	}
+	if outcome.Branch != "" || outcome.PreservedPath != second.Path {
+		t.Errorf("failed delivery = %+v, want no branch and preserved worktree %q", outcome, second.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", userStateRef(second.Branch)); got != concurrentRef {
+		t.Errorf("checkpoint = %s, want concurrent ref %s", got, concurrentRef)
+	}
+	if got := gitRun(t, repo, "rev-parse", second.Branch); got != tip {
+		t.Errorf("branch = %s, want unchanged %s", got, tip)
+	}
+	if _, err := os.Stat(second.Path); err != nil {
+		t.Errorf("worktree not preserved: %v", err)
 	}
 }
 
