@@ -162,6 +162,10 @@ type LocalWorktree struct {
 	// turn replayed and still be recorded as having delivered it, which is how
 	// the user's edits went missing from the turn after (MUL-6881 review).
 	BaseCommit string
+	// preparedStateRef is the exact checkpoint ref written before the agent ran.
+	// Finalize must not overwrite a concurrent checkpoint update, even when the
+	// conversation branch itself has not moved.
+	preparedStateRef string
 	// DirtyBaseCaptured records that the user had uncommitted tracked edits
 	// which were replayed into the worktree.
 	DirtyBaseCaptured bool
@@ -225,20 +229,22 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 	type wire LocalWorktree
 	return json.Marshal(struct {
 		*wire
-		CreatedBranch   bool        `json:"created_branch"`
-		UserState       string      `json:"user_state"`
-		PriorState      string      `json:"prior_state"`
-		Owner           branchOwner `json:"owner"`
-		TracksState     bool        `json:"tracks_state"`
-		SnapshotPending bool        `json:"snapshot_pending"`
+		CreatedBranch    bool        `json:"created_branch"`
+		PreparedStateRef string      `json:"prepared_state_ref"`
+		UserState        string      `json:"user_state"`
+		PriorState       string      `json:"prior_state"`
+		Owner            branchOwner `json:"owner"`
+		TracksState      bool        `json:"tracks_state"`
+		SnapshotPending  bool        `json:"snapshot_pending"`
 	}{
-		wire:            (*wire)(w),
-		CreatedBranch:   w.createdBranch,
-		UserState:       w.userState,
-		PriorState:      w.priorState,
-		Owner:           w.owner,
-		TracksState:     w.tracksState,
-		SnapshotPending: w.snapshotPending,
+		wire:             (*wire)(w),
+		CreatedBranch:    w.createdBranch,
+		PreparedStateRef: w.preparedStateRef,
+		UserState:        w.userState,
+		PriorState:       w.priorState,
+		Owner:            w.owner,
+		TracksState:      w.tracksState,
+		SnapshotPending:  w.snapshotPending,
 	})
 }
 
@@ -246,17 +252,19 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 	type wire LocalWorktree
 	aux := struct {
 		*wire
-		CreatedBranch   bool        `json:"created_branch"`
-		UserState       string      `json:"user_state"`
-		PriorState      string      `json:"prior_state"`
-		Owner           branchOwner `json:"owner"`
-		TracksState     bool        `json:"tracks_state"`
-		SnapshotPending bool        `json:"snapshot_pending"`
+		CreatedBranch    bool        `json:"created_branch"`
+		PreparedStateRef string      `json:"prepared_state_ref"`
+		UserState        string      `json:"user_state"`
+		PriorState       string      `json:"prior_state"`
+		Owner            branchOwner `json:"owner"`
+		TracksState      bool        `json:"tracks_state"`
+		SnapshotPending  bool        `json:"snapshot_pending"`
 	}{wire: (*wire)(w)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	w.createdBranch = aux.CreatedBranch
+	w.preparedStateRef = aux.PreparedStateRef
 	w.userState = aux.UserState
 	w.priorState = aux.PriorState
 	w.owner = aux.Owner
@@ -398,6 +406,13 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		// A branch a sibling task forked because the conversation's own branch
 		// was busy is delivered once and never continued, so it records nothing.
 		tracksState: plan.tracksState && actualBranch == plan.name,
+	}
+
+	// A continued branch already has a verified checkpoint. A replay conflict
+	// skips recordState until the agent resolves it; retain that exact ref so
+	// Finalize can CAS against it instead of treating the turn as unprepared.
+	if wt.tracksState && plan.continues {
+		wt.preparedStateRef = plan.priorState
 	}
 
 	// Tear the worktree back down on every failure below. A half-replayed tree
@@ -654,7 +669,8 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	// makes that recoverable — the worktree is still there to preserve, exactly
 	// as for a commit that could not be made.
 	if !dropped {
-		if verifyErr := w.verifyDeliveryPoint(tip); verifyErr != nil {
+		advanceFrom, verifyErr := w.verifyDeliveryPoint(tip)
+		if verifyErr != nil {
 			outcome.Branch = ""
 			outcome.PreservedPath = w.Path
 			if logger != nil {
@@ -666,15 +682,22 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 					"recover the work from there, and let the run keep the commit the worktree started from instead of resetting past it",
 				w.Branch, verifyErr, w.Path, w.GitRoot)
 		}
-		if recErr := w.recordState(tip, logger); recErr != nil {
+		var recErr error
+		if advanceFrom != "" {
+			recErr = w.recordFastForwardState(advanceFrom, tip, logger)
+		} else {
+			recErr = w.recordFinalizedState(tip)
+		}
+		if recErr != nil {
+			outcome.Branch = "" // Without a recorded checkpoint, no delivery can be claimed.
 			outcome.PreservedPath = w.Path
 			if logger != nil {
 				logger.Error("execenv: could not record the delivered task branch; keeping the worktree",
 					"path", w.Path, "branch", w.Branch, "git_root", w.GitRoot, "error", recErr)
 			}
 			return outcome, fmt.Errorf(
-				"could not record branch %s as this conversation's: %w; the work is committed to that branch and the "+
-					"task worktree is preserved at %s (listed by `git worktree list` in %s) — a follow-up run will start "+
+				"could not record branch %s as this conversation's: %w; the task worktree is preserved "+
+					"at %s (listed by `git worktree list` in %s) — a follow-up run will start "+
 					"a new branch instead of continuing this one",
 				w.Branch, recErr, w.Path, w.GitRoot)
 		}
@@ -1058,6 +1081,19 @@ type branchRecord struct {
 // means a branch that moved in that window simply fails the ancestor test next
 // time, which is the safe direction.
 func writeBranchRecord(gitRoot, branch, userState, checkpoint string, owner branchOwner) (string, error) {
+	record, err := createBranchRecord(gitRoot, branch, userState, checkpoint, owner)
+	if err != nil {
+		return "", err
+	}
+	if out, err := runGit(gitRoot, "update-ref", userStateRef(branch), record); err != nil {
+		return "", fmt.Errorf("git update-ref: %s: %w", strings.TrimSpace(out), err)
+	}
+	return record, nil
+}
+
+// createBranchRecord writes the checkpoint object without publishing its ref.
+// Finalize can then publish it with the conversation branch in one transaction.
+func createBranchRecord(gitRoot, branch, userState, checkpoint string, owner branchOwner) (string, error) {
 	if checkpoint == "" {
 		return "", fmt.Errorf("no checkpoint to record for branch %s", branch)
 	}
@@ -1066,9 +1102,6 @@ func writeBranchRecord(gitRoot, branch, userState, checkpoint string, owner bran
 	record, err := runGitTrimmed(gitRoot, args...)
 	if err != nil {
 		return "", fmt.Errorf("git commit-tree: %w", err)
-	}
-	if out, err := runGit(gitRoot, "update-ref", userStateRef(branch), record); err != nil {
-		return "", fmt.Errorf("git update-ref: %s: %w", strings.TrimSpace(out), err)
 	}
 	return record, nil
 }
@@ -1419,41 +1452,138 @@ func quotedPaths(paths []string) string {
 // verifyDeliveryPoint checks that tip is a commit this conversation can put its
 // name on before it becomes the branch's recorded checkpoint.
 //
-// Two things are asserted, and they are the two ways a delivery can be
-// something other than what this task built. The tip has to BE the task's
-// branch — a run that checked out something else, or a branch someone moved
-// underneath it, delivers a commit this record has no business describing. And
-// it has to still contain the commit this turn started from — this turn's own
-// baseline when it made one, otherwise the branch tip it continued. A run that
-// resets its worktree back to the user's own HEAD passes neither test but the
-// second is the one that matters, twice over: recording a plain user commit as
-// the checkpoint is what makes a branch they later recreate there look like
-// ours, and a tip without this turn's starting point no longer carries the
-// snapshot about to be recorded as delivered (MUL-6881 review).
-func (w *LocalWorktree) verifyDeliveryPoint(tip string) error {
+// The ordinary case ends on the conversation branch itself, so its ref already
+// equals tip. A repository may instead require the agent to check out its own
+// task branch inside the worktree. That is still a valid delivery when tip is a
+// strict descendant of the conversation branch: advancing the conversation ref
+// is then only a fast-forward, and keeps the next turn on the work just
+// delivered.
+//
+// Refuse any divergence. Return the expected old tip rather than moving the
+// branch here: Finalize atomically updates the branch AND its checkpoint, so a
+// failed checkpoint write cannot strand an unrecorded branch advance.
+func (w *LocalWorktree) verifyDeliveryPoint(tip string) (string, error) {
 	if !w.tracksState {
 		// Nothing will be recorded for this branch, so there is nothing to prove.
-		return nil
+		return "", nil
 	}
 	if tip == "" {
-		return errors.New("the task worktree has no resolvable HEAD")
+		return "", errors.New("the task worktree has no resolvable HEAD")
 	}
-	branchTip, err := runGitTrimmed(w.GitRoot, "rev-parse", "--verify", "refs/heads/"+w.Branch)
+	branchRef := "refs/heads/" + w.Branch
+	branchTip, err := runGitTrimmed(w.GitRoot, "rev-parse", "--verify", branchRef)
 	if err != nil {
-		return fmt.Errorf("resolve branch %s: %w", w.Branch, err)
+		return "", fmt.Errorf("resolve branch %s: %w", w.Branch, err)
 	}
-	if branchTip != tip {
-		return fmt.Errorf("the worktree delivered %s while branch %s points at %s, so the run did not deliver onto its own branch",
-			shortID(tip), w.Branch, shortID(branchTip))
+	advanceBranch := branchTip != tip
+	if advanceBranch {
+		if _, err := runGit(w.GitRoot, "merge-base", "--is-ancestor", branchTip, tip); err != nil {
+			return "", fmt.Errorf("the worktree delivered %s while branch %s points at %s, so the run did not deliver a fast-forward of its conversation branch",
+				shortID(tip), w.Branch, shortID(branchTip))
+		}
 	}
 	if w.BaseCommit == "" {
-		return fmt.Errorf("branch %s has no commit of this task's own to prove it by", w.Branch)
+		return "", fmt.Errorf("branch %s has no commit of this task's own to prove it by", w.Branch)
 	}
 	if _, err := runGit(w.GitRoot, "merge-base", "--is-ancestor", w.BaseCommit, tip); err != nil {
-		return fmt.Errorf("the delivered commit %s no longer contains %s, the commit this turn started from",
+		return "", fmt.Errorf("the delivered commit %s no longer contains %s, the commit this turn started from",
 			shortID(tip), shortID(w.BaseCommit))
 	}
+	if advanceBranch {
+		// update-ref is atomic but deliberately lower-level than the porcelain
+		// branch commands: it will move a branch even when another worktree has
+		// it checked out. Do not change HEAD underneath a sibling/user checkout.
+		if checkedOutAt, checkedOut, err := branchWorktreePath(w.GitRoot, w.Branch); err != nil {
+			return "", fmt.Errorf("check whether branch %s is in use before fast-forwarding it: %w", w.Branch, err)
+		} else if checkedOut {
+			return "", fmt.Errorf("branch %s is checked out at %s, so it cannot be advanced to delivered commit %s without moving another worktree underneath it",
+				w.Branch, checkedOutAt, shortID(tip))
+		}
+		return branchTip, nil
+	}
+	return "", nil
+}
+
+// recordFastForwardState advances the conversation ref and its ownership
+// checkpoint in one Git ref transaction. A failed update of either ref leaves
+// both untouched; the worktree and its off-branch commit remain recoverable.
+func (w *LocalWorktree) recordFastForwardState(from, tip string, logger *slog.Logger) error {
+	if w.userState == "" {
+		return fmt.Errorf("branch %s has no user snapshot to record", w.Branch)
+	}
+	if w.preparedStateRef == "" {
+		return fmt.Errorf("branch %s has no checkpoint recorded before this turn; refusing to overwrite an unknown state", w.Branch)
+	}
+	record, err := createBranchRecord(w.GitRoot, w.Branch, w.userState, tip, w.owner)
+	if err != nil {
+		return err
+	}
+	branchRef := "refs/heads/" + w.Branch
+	// Compare-and-swap BOTH refs. The prepared checkpoint is the only state
+	// this turn is entitled to replace; a concurrent writer can update it
+	// without moving the branch, and must not be silently overwritten.
+	input := fmt.Sprintf("start\nupdate %s %s %s\nupdate %s %s %s\nprepare\ncommit\n",
+		branchRef, tip, from, userStateRef(w.Branch), record, w.preparedStateRef)
+	out, err := runGitInput(w.GitRoot, input, "update-ref", "--stdin")
+	if err != nil {
+		return fmt.Errorf("atomically fast-forward branch %s from %s to %s and record its checkpoint: %s: %w",
+			w.Branch, shortID(from), shortID(tip), strings.TrimSpace(out), err)
+	}
+	w.preparedStateRef = record
+	if logger != nil {
+		logger.Warn("execenv: worktree delivered on another branch; fast-forwarded the conversation branch",
+			"path", w.Path, "branch", w.Branch, "from", from, "to", tip)
+	}
 	return nil
+}
+
+// recordFinalizedState handles a delivery whose HEAD already equals the
+// conversation tip. This includes a retry after a successful fast-forward CAS
+// when removing the worktree failed. Do not fall back to unconditional
+// update-ref: that would erase a checkpoint written by another process.
+func (w *LocalWorktree) recordFinalizedState(tip string) error {
+	if w == nil || !w.tracksState || w.Branch == "" || w.userState == "" {
+		return nil
+	}
+	if w.preparedStateRef == "" {
+		return fmt.Errorf("branch %s has no prepared checkpoint to finalize safely", w.Branch)
+	}
+	record, err := createBranchRecord(w.GitRoot, w.Branch, w.userState, tip, w.owner)
+	if err != nil {
+		return err
+	}
+	// Verify the branch tip and compare-and-swap the checkpoint atomically.
+	// This rejects both a concurrent branch move and a checkpoint rewrite.
+	input := fmt.Sprintf("start\nverify %s %s\nupdate %s %s %s\nprepare\ncommit\n",
+		"refs/heads/"+w.Branch, tip, userStateRef(w.Branch), record, w.preparedStateRef)
+	out, err := runGitInput(w.GitRoot, input, "update-ref", "--stdin")
+	if err != nil {
+		return fmt.Errorf("finalize branch %s checkpoint with CAS: %s: %w",
+			w.Branch, strings.TrimSpace(out), err)
+	}
+	w.preparedStateRef = record
+	return nil
+}
+
+// branchWorktreePath reports where branch is currently checked out, if
+// anywhere. A low-level update-ref does not enforce git's normal checked-out
+// branch protection, so callers that move a branch ref must check this first.
+func branchWorktreePath(gitRoot, branch string) (string, bool, error) {
+	out, err := runGitStdout(gitRoot, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", false, err
+	}
+	target := "branch refs/heads/" + branch
+	var worktreePath string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			worktreePath = strings.TrimPrefix(line, "worktree ")
+		case line == target:
+			return worktreePath, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // unmergedPaths lists the files git considers unresolved in a worktree.
@@ -1512,9 +1642,11 @@ func (w *LocalWorktree) recordState(checkpoint string, logger *slog.Logger) erro
 	if w == nil || !w.tracksState || w.Branch == "" || w.userState == "" {
 		return nil
 	}
-	if _, err := writeBranchRecord(w.GitRoot, w.Branch, w.userState, checkpoint, w.owner); err != nil {
+	record, err := writeBranchRecord(w.GitRoot, w.Branch, w.userState, checkpoint, w.owner)
+	if err != nil {
 		return err
 	}
+	w.preparedStateRef = record
 	if logger != nil {
 		logger.Debug("execenv: recorded the local-directory snapshot for the task branch",
 			"branch", w.Branch, "checkpoint", checkpoint)
@@ -1677,6 +1809,20 @@ func runGitEnv(dir string, extraEnv []string, args ...string) (string, error) {
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
+	cmd.WaitDelay = 5 * time.Second
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runGitInput runs a bounded local Git command with its protocol on stdin.
+// Used for update-ref transactions so both delivery refs commit or neither does.
+func runGitInput(dir, input string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+
+	full := append([]string{"-C", dir}, args...)
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Stdin = strings.NewReader(input)
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	return string(out), err
