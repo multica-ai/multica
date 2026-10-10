@@ -44,6 +44,17 @@ const (
 	// missing first model token and a stalled response stream. The generic
 	// AgentIdleWatchdog remains the global enable/disable switch.
 	DefaultOpenCodeIdleWatchdog = 10 * time.Minute
+	// DefaultCursorIdleWatchdog shortens the no-message budget for Cursor runs
+	// the same way DefaultOpenCodeIdleWatchdog does for OpenCode. Cursor's
+	// resume path can hang upstream before its first token (GH #8978: a
+	// resumed run sat silent for 30 minutes on an idle cursor-agent), and the
+	// daemon-wide default then leaves the attempt looking healthy for up to
+	// AgentIdleWatchdog. Healthy resumes emit well inside two minutes, so 10m
+	// keeps a wide margin while turning the observed hang into a retryable
+	// failure. In-flight tools are unaffected: they keep the separate tool
+	// watchdog budget. The generic AgentIdleWatchdog remains the global
+	// enable/disable switch.
+	DefaultCursorIdleWatchdog = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
@@ -150,6 +161,7 @@ type Config struct {
 	CodexTurnInterruptTimeout   time.Duration
 	CodexThreadHandshakeTimeout time.Duration
 	OpenCodeIdleWatchdog        time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
+	CursorIdleWatchdog          time.Duration // Cursor-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog           time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog           time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call, which now also covers a live Cursor background shell); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
 	ClaudeArgs                  []string
@@ -343,6 +355,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// cannot extend the global bound, and the global zero still disables the
 	// whole mechanism.
 	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+	// MULTICA_CURSOR_IDLE_WATCHDOG narrows the no-message window for Cursor
+	// runs, whose resume path can hang upstream before the first token
+	// (GH #8978). Zero removes the provider-specific override and falls back
+	// to MULTICA_AGENT_IDLE_WATCHDOG; positive values cannot extend the
+	// global bound, and the global zero still disables the whole mechanism.
+	cursorIdleWatchdog, err := durationFromEnv("MULTICA_CURSOR_IDLE_WATCHDOG", DefaultCursorIdleWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -660,6 +681,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexTurnInterruptTimeout:       codexTurnInterruptTimeout,
 		CodexThreadHandshakeTimeout:     codexThreadHandshakeTimeout,
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
+		CursorIdleWatchdog:              cursorIdleWatchdog,
 		AgentIdleWatchdog:               agentIdleWatchdog,
 		AgentToolWatchdog:               agentToolWatchdog,
 		ClaudeArgs:                      claudeArgs,
