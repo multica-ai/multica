@@ -64,6 +64,27 @@ describe("useCanonicalIssueUrl", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it("defers late canonicalization while retained detail is inactive", () => {
+    const { rerender } = renderHook(
+      ({ identifier, active }: { identifier?: string; active: boolean }) =>
+        useCanonicalIssueUrl("cb240efb-154c-42a8-ae92-42b02676feca", identifier, "#comment-7", active),
+      { wrapper, initialProps: { identifier: undefined as string | undefined, active: true } },
+    );
+
+    rerender({ identifier: undefined, active: false });
+    rerender({ identifier: "TRS-134", active: false });
+    expect(replace).not.toHaveBeenCalled();
+
+    rerender({ identifier: "TRS-134", active: true });
+    expect(replace).toHaveBeenCalledExactlyOnceWith("/acme/issues/TRS-134#comment-7");
+    rerender({ identifier: "TRS-134", active: true });
+    expect(replace).toHaveBeenCalledTimes(1);
+
+    rerender({ identifier: "TRS-134", active: false });
+    rerender({ identifier: "TRS-134", active: true });
+    expect(replace).toHaveBeenCalledTimes(2);
+  });
+
   it("leaves an already-canonical URL alone", () => {
     renderHook(() => useCanonicalIssueUrl("TRS-134", "TRS-134"), { wrapper });
     expect(replace).not.toHaveBeenCalled();
