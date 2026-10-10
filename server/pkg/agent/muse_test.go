@@ -100,7 +100,13 @@ func (f *fakeMuseReceptionist) handler() http.Handler {
 		}
 		w.WriteHeader(code)
 		if code == 200 {
-			_ = json.NewEncoder(w).Encode(f.health)
+			h := f.health
+			// Default to protocol v1 if the test didn't set a version.
+			// (Real receptionists always return a version.)
+			if h.ProtocolVersion == 0 {
+				h.ProtocolVersion = 1
+			}
+			_ = json.NewEncoder(w).Encode(h)
 		}
 	})
 	return mux

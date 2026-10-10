@@ -142,7 +142,8 @@ type museExecuteRequest struct {
 }
 
 type museExecuteResponse struct {
-	TaskID string `json:"task_id"`
+	TaskID          string `json:"task_id"`
+	ProtocolVersion int    `json:"protocol_version,omitempty"`
 }
 
 type museTaskStatus struct {
@@ -243,6 +244,12 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if opts.Timeout > 0 {
 		timeoutS = int64((opts.Timeout + time.Second - 1) / time.Second)
 	}
+	// Go-B3: Verify protocol compatibility before submitting.
+	// The probe runs at daemon startup; the receptionist could upgrade
+	// between probe and execute. The execute response carries the
+	// receptionist's protocol version; postExecute validates it.
+	// (A separate health check would add a round trip and break
+	// callers without a health endpoint.)
 	var execResp museExecuteResponse
 	if err := b.postExecute(runCtx, mc, museExecuteRequest{
 		Prompt:      prompt,
@@ -253,9 +260,13 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		ServerURL:   opts.MulticaServerURL,
 		WorkspaceID: opts.MulticaWorkspaceID,
 	}, &execResp); err != nil {
+		// R2: Release the runContext on early failure. The success path
+		// hands ownership to the polling goroutine (which defers cancel).
+		cancel()
 		return nil, err
 	}
 	if execResp.TaskID == "" {
+		cancel()
 		return nil, fmt.Errorf("muse backend: receptionist returned an empty task id")
 	}
 	taskID := execResp.TaskID
@@ -411,8 +422,17 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					logger.Warn("muse final events fetch failed; the answer may be missing its tail", "task_id", taskID)
 				}
 				if st.Status == "completed" {
-					finalStatus = "completed"
-					answer = st.Result
+					// N1: A completed status with an error (e.g. "result too
+					// large") is not a success. The Python side reports the
+					// problem via the error field; don't mask it by falling
+					// back to the transcript and calling it completed.
+					if st.Error != "" {
+						finalStatus = "failed"
+						finalError = st.Error
+					} else {
+						finalStatus = "completed"
+						answer = st.Result
+					}
 				} else if st.Status == "cancelled" {
 					finalStatus = "cancelled"
 					finalError = "muse task cancelled remotely"
@@ -472,7 +492,18 @@ func musePollFailed(pollErrs *int, err error, logger *slog.Logger, taskID string
 }
 
 func (b *museBackend) postExecute(ctx context.Context, mc museEndpointConfig, req museExecuteRequest, out *museExecuteResponse) error {
-	return b.doJSONWithConfig(ctx, mc, http.MethodPost, "/v1/execute", req, out)
+	if err := b.doJSONWithConfig(ctx, mc, http.MethodPost, "/v1/execute", req, out); err != nil {
+		return err
+	}
+	// Go-B3: The receptionist reports its protocol version in the execute
+	// response. If it speaks a different version, fail fast instead of
+	// sending a task it can't handle. (Older receptionists omit the field;
+	// treat missing as v1 for backward compatibility during rollout.)
+	if out.ProtocolVersion != 0 && out.ProtocolVersion != museProtocolVersion {
+		return fmt.Errorf("%w: receptionist speaks v%d, backend implements v%d",
+			ErrMuseProtocolSkew, out.ProtocolVersion, museProtocolVersion)
+	}
+	return nil
 }
 
 func (b *museBackend) getJSON(ctx context.Context, mc museEndpointConfig, path string, out any) error {
