@@ -433,7 +433,7 @@ describe("ChatMessageList auto-scroll", () => {
   // conversation and the next one jumped. Readiness is judged from the
   // newest row's own box, because during the estimate the scroll geometry
   // reports the viewport as being at the live end.
-  it("stays hidden until the newest message has actually landed at the bottom", () => {
+  it("stays visible while the newest message is still settling", () => {
     const { view, scroll } = renderStreamingChat();
 
     const box = (el: Element, top: number, bottom: number) => {
@@ -443,34 +443,19 @@ describe("ChatMessageList auto-scroll", () => {
     const liveEndRow = view.container.querySelector("[data-chat-live-end]");
     if (!liveEndRow) throw new Error("the newest row is not marked as the live end");
 
-    const frames = (count: number) => {
-      for (let i = 0; i < count; i++) act(() => renderFrame());
-    };
+    expect(scroll.el.className).not.toContain("invisible");
+    expect(view.queryByRole("button", { name: "Jump to latest" })).toBeNull();
 
-    expect(scroll.el.className).toContain("invisible");
-
-    // Rows are on screen, but sitting where the estimate put them: below the
-    // fold, still to be corrected. This is the frame that used to flicker.
-    box(liveEndRow, 4600, 5200);
-    frames(20);
-    expect(scroll.el.className).toContain("invisible");
-
-    // The correction lands and the newest row reaches the bottom — but the
-    // list holds until the content has stopped moving there.
     box(liveEndRow, VIEWPORT - 200, VIEWPORT - 16);
-    frames(2);
-    expect(scroll.el.className).toContain("invisible");
-
-    frames(20);
+    for (let i = 0; i < 20; i++) act(() => renderFrame());
     expect(scroll.el.className).not.toContain("invisible");
   });
 
   // A row settling after its first paint — an image decoding, a code block
   // highlighting — moves the content under a reader pinned to the bottom.
   // Reaching the live end once is not enough to reveal (MUL-6879).
-  it("keeps waiting while rows are still changing size at the live end", () => {
+  it("offers a jump when the reader is away from the newest message", () => {
     const { view, scroll } = renderStreamingChat();
-
     const box = (el: Element, top: number, bottom: number) => {
       el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
     };
@@ -478,18 +463,14 @@ describe("ChatMessageList auto-scroll", () => {
     const liveEndRow = view.container.querySelector("[data-chat-live-end]");
     if (!liveEndRow) throw new Error("the newest row is not marked as the live end");
     box(liveEndRow, VIEWPORT - 200, VIEWPORT - 16);
-
-    // Content keeps arriving: every settle window restarts.
-    for (let i = 0; i < 6; i++) {
-      scroll.grow(120);
-      act(() => renderFrame());
-      act(() => renderFrame());
-    }
-    expect(scroll.el.className).toContain("invisible");
-
-    // It stops, and the list appears.
     for (let i = 0; i < 20; i++) act(() => renderFrame());
-    expect(scroll.el.className).not.toContain("invisible");
+
+    scroll.readerScrollsTo(400);
+    fireResizeObservers();
+
+    const jump = view.getByRole("button", { name: "Jump to latest" });
+    act(() => jump.click());
+    expect(scroll.pinCalls()).toContainEqual({ index: "LAST", align: "end" });
   });
 
   it("keeps the newest content clear of a composer that grew", () => {

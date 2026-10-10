@@ -83,7 +83,8 @@
     "quick_actions_heading": "后续提问",
     "quick_actions_aria": "后续提问建议",
     "quick_actions_regenerate": "重新生成建议",
-    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
+    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。",
+    "jump_to_latest": "跳到最新"
   },
   "session_history": {
     "untitled": "无标题",
