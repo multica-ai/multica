@@ -347,6 +347,26 @@ describe("CallbackPage", () => {
     });
   });
 
+  // `next` is one comma-separated OAuth state field. A comma inside the path
+  // (a multi-value query) must survive the round-trip, and must not be read
+  // as a following field such as cli_callback.
+  it("follows a next path that contains a comma", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockSearchParams.set(
+      "state",
+      `next:${encodeURIComponent("/acme/issues?status=todo,doing")}`,
+    );
+
+    renderCallback();
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/acme/issues?status=todo,doing");
+    });
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
+  });
+
   it("falls through to /onboarding when listMyInvitations errors", async () => {
     mockListMyInvitations.mockRejectedValue(new Error("network"));
     renderCallback();
