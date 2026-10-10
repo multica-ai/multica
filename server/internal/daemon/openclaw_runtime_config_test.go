@@ -19,12 +19,15 @@ func quietLogger() *slog.Logger {
 func TestDecodeOpenclawRuntimeConfigEmpty(t *testing.T) {
 	t.Parallel()
 
-	mode, gw := decodeOpenclawRuntimeConfig(nil, quietLogger())
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(nil, quietLogger())
 	if mode != "" {
 		t.Errorf("mode for nil payload: got %q, want \"\"", mode)
 	}
 	if !gw.IsZero() {
 		t.Errorf("gateway for nil payload: got %+v, want zero", gw)
+	}
+	if modelOverride != "" {
+		t.Errorf("model override for nil payload: got %q, want empty", modelOverride)
 	}
 }
 
@@ -40,7 +43,7 @@ func TestDecodeOpenclawRuntimeConfigGatewayMode(t *testing.T) {
 			"tls": true
 		}
 	}`)
-	mode, gw := decodeOpenclawRuntimeConfig(raw, quietLogger())
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(raw, quietLogger())
 	if mode != "gateway" {
 		t.Errorf("mode: got %q, want %q", mode, "gateway")
 	}
@@ -53,6 +56,9 @@ func TestDecodeOpenclawRuntimeConfigGatewayMode(t *testing.T) {
 	if gw != want {
 		t.Errorf("gateway: got %+v, want %+v", gw, want)
 	}
+	if modelOverride != "" {
+		t.Errorf("model override: got %q, want empty", modelOverride)
+	}
 }
 
 func TestDecodeOpenclawRuntimeConfigMalformedFailsSoftToLocal(t *testing.T) {
@@ -60,12 +66,15 @@ func TestDecodeOpenclawRuntimeConfigMalformedFailsSoftToLocal(t *testing.T) {
 
 	// A broken JSON blob must never block dispatch — the agent runs in the
 	// historical embedded mode until the user fixes the config.
-	mode, gw := decodeOpenclawRuntimeConfig(json.RawMessage(`{"mode": "gateway"`), quietLogger())
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(json.RawMessage(`{"mode": "gateway"`), quietLogger())
 	if mode != "" {
 		t.Errorf("mode for malformed payload: got %q, want \"\"", mode)
 	}
 	if !gw.IsZero() {
 		t.Errorf("gateway for malformed payload: got %+v, want zero", gw)
+	}
+	if modelOverride != "" {
+		t.Errorf("model override for malformed payload: got %q, want empty", modelOverride)
 	}
 }
 
@@ -74,12 +83,34 @@ func TestDecodeOpenclawRuntimeConfigModeOnly(t *testing.T) {
 
 	// Users may switch to gateway mode and rely on the daemon host's local
 	// ~/.openclaw/openclaw.json for the endpoint — gateway block stays zero.
-	mode, gw := decodeOpenclawRuntimeConfig(json.RawMessage(`{"mode": "gateway"}`), quietLogger())
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(json.RawMessage(`{"mode": "gateway"}`), quietLogger())
 	if mode != "gateway" {
 		t.Errorf("mode: got %q, want %q", mode, "gateway")
 	}
 	if !gw.IsZero() {
 		t.Errorf("gateway: got %+v, want zero", gw)
+	}
+	if modelOverride != "" {
+		t.Errorf("model override: got %q, want empty", modelOverride)
+	}
+}
+
+func TestDecodeOpenclawRuntimeConfigModelOverride(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"mode": "gateway",
+		"model_override": "  openrouter/@preset/agent-reasoning  "
+	}`)
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(raw, quietLogger())
+	if mode != "gateway" {
+		t.Errorf("mode: got %q, want gateway", mode)
+	}
+	if !gw.IsZero() {
+		t.Errorf("gateway: got %+v, want zero", gw)
+	}
+	if modelOverride != "openrouter/@preset/agent-reasoning" {
+		t.Errorf("model override: got %q", modelOverride)
 	}
 }
 
@@ -129,12 +160,15 @@ func TestDecodeOpenclawRuntimeConfigLocalModeDropsGatewayPin(t *testing.T) {
 		"mode": "local",
 		"gateway": {"host": "gw.internal", "port": 18789, "token": "secret", "tls": true}
 	}`)
-	mode, gw := decodeOpenclawRuntimeConfig(raw, quietLogger())
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(raw, quietLogger())
 	if mode != "local" {
 		t.Errorf("mode: got %q, want %q", mode, "local")
 	}
 	if !gw.IsZero() {
 		t.Errorf("gateway for local mode: got %+v, want zero", gw)
+	}
+	if modelOverride != "" {
+		t.Errorf("model override: got %q, want empty", modelOverride)
 	}
 }
 
@@ -150,12 +184,15 @@ func TestDecodeOpenclawRuntimeConfigUnknownModeWarnsAndDropsPin(t *testing.T) {
 		"mode": "gatway",
 		"gateway": {"host": "gw.internal", "port": 18789, "token": "secret"}
 	}`)
-	mode, gw := decodeOpenclawRuntimeConfig(raw, logger)
+	mode, gw, modelOverride := decodeOpenclawRuntimeConfig(raw, logger)
 	if mode != "gatway" {
 		t.Errorf("mode: got %q, want %q", mode, "gatway")
 	}
 	if !gw.IsZero() {
 		t.Errorf("gateway for unknown mode: got %+v, want zero", gw)
+	}
+	if modelOverride != "" {
+		t.Errorf("model override: got %q, want empty", modelOverride)
 	}
 	if !strings.Contains(buf.String(), "unrecognized mode") {
 		t.Errorf("expected WARN about unrecognized mode, got: %q", buf.String())

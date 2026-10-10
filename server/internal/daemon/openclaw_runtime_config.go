@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -16,6 +17,7 @@ import (
 //
 //	{
 //	  "mode": "local" | "gateway",     // default: "local"
+//	  "model_override": "provider/model", // optional, one-run model pin
 //	  "gateway": {
 //	    "host":  "<hostname>",         // remote OpenClaw gateway host
 //	    "port":  18789,                // gateway port
@@ -27,8 +29,9 @@ import (
 // Other providers' runtime_config payloads pass through untouched — this
 // decoder only reads keys that have meaning for the openclaw backend.
 type openclawRuntimeConfig struct {
-	Mode    string                       `json:"mode"`
-	Gateway openclawRuntimeGatewayConfig `json:"gateway"`
+	Mode          string                       `json:"mode"`
+	ModelOverride string                       `json:"model_override"`
+	Gateway       openclawRuntimeGatewayConfig `json:"gateway"`
 }
 
 // openclawRuntimeGatewayConfig is the owner-supplied Gateway endpoint.
@@ -48,21 +51,22 @@ type openclawRuntimeGatewayConfig struct {
 }
 
 // decodeOpenclawRuntimeConfig extracts the openclaw-specific knobs from an
-// agent's runtime_config payload. Returns the routing mode plus the gateway
-// pin shaped for execenv. The pin is non-zero only in gateway mode — any
-// other mode drops it so a local-mode payload can't smuggle a bearer token
+// agent's runtime_config payload. Returns the routing mode, gateway pin, and
+// optional per-run model override. The pin is non-zero only in gateway mode —
+// any other mode drops it so a local-mode payload can't smuggle a bearer token
 // into the per-task wrapper. A malformed payload logs a warning and degrades
-// to local mode (mode="", zero gateway) rather than failing dispatch — the
-// alternative would let one bad save block every task that agent runs.
-func decodeOpenclawRuntimeConfig(raw json.RawMessage, logger *slog.Logger) (string, execenv.OpenclawGatewayPin) {
+// to local mode with no override rather than failing dispatch — the alternative
+// would let one bad save block every task that agent runs.
+func decodeOpenclawRuntimeConfig(raw json.RawMessage, logger *slog.Logger) (string, execenv.OpenclawGatewayPin, string) {
 	if len(raw) == 0 {
-		return "", execenv.OpenclawGatewayPin{}
+		return "", execenv.OpenclawGatewayPin{}, ""
 	}
 	var cfg openclawRuntimeConfig
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		logger.Warn("openclaw runtime_config: parse failed; falling back to local mode", "error", err)
-		return "", execenv.OpenclawGatewayPin{}
+		return "", execenv.OpenclawGatewayPin{}, ""
 	}
+	modelOverride := strings.TrimSpace(cfg.ModelOverride)
 	// Surface an unrecognized non-empty mode instead of silently treating it
 	// as local — a typo like "gatway" would otherwise leave the user wondering
 	// why their gateway config is ignored.
@@ -75,12 +79,12 @@ func decodeOpenclawRuntimeConfig(raw json.RawMessage, logger *slog.Logger) (stri
 	// {"mode":"local","gateway":{...,"token":"..."}} never writes the bearer
 	// token into the 0o600 per-task wrapper that `--local` makes openclaw ignore.
 	if cfg.Mode != "gateway" {
-		return cfg.Mode, execenv.OpenclawGatewayPin{}
+		return cfg.Mode, execenv.OpenclawGatewayPin{}, modelOverride
 	}
 	return cfg.Mode, execenv.OpenclawGatewayPin{
 		Host:  cfg.Gateway.Host,
 		Port:  cfg.Gateway.Port,
 		Token: cfg.Gateway.Token,
 		TLS:   cfg.Gateway.TLS,
-	}
+	}, modelOverride
 }
