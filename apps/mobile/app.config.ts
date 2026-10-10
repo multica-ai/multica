@@ -67,6 +67,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       "expo-secure-store",
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
+      // Xcode 27 (iOS 27 SDK) compatibility: scene-based life cycle and pod
+      // deployment targets. See plugins/withIosXcode27Support.js.
+      "./plugins/withIosXcode27Support",
       [
         "expo-image-picker",
         {
@@ -85,6 +88,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           ios: {
             buildReactNativeFromSource: true,
+            deploymentTarget: "16.0",
           },
         },
       ],
