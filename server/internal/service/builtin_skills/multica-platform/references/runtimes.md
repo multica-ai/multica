@@ -6,6 +6,7 @@ processes and claims queued tasks from the server.
 - [Core model](#core-model)
 - [CLI](#cli)
 - [Task CLI boundary](#task-cli-boundary)
+- [Chat session sends](#chat-session-sends)
 - [Debugging an agent that did not run](#debugging-an-agent-that-did-not-run)
 - [Repos](#repos)
 
@@ -102,6 +103,38 @@ absent, you are not in the normal agent checkout path. When a project
 `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that
 ref by default for the current task; an explicit
 `repo checkout <url> --ref <branch-or-sha>` overrides it.
+
+## Chat session sends
+
+```bash
+multica chat list --title "Review" --output json
+multica chat send <session-id> --body "Please review the proposed change."
+```
+
+`chat list` is read-only. It lists accessible active sessions owned by the
+authenticated user in the current workspace; inside a task, that user is the
+runtime owner bound to the `mat_` token, not necessarily the task initiator.
+`--title` filters by exact title, which need not be unique. Select a real full
+session UUID from the result; table output also preserves full UUIDs.
+
+`chat send` is a real write that enqueues an agent run and consumes budget.
+Use it only when the user requested sending to that destination. It reuses the
+web composer's direct-chat message endpoint and existing membership, creator,
+agent-access and invocation gates. A private session belonging to another
+member is not an allowed destination. A `mat_` credential never falls back to
+a saved member credential. The message is normal chat input, not a structured
+agent-authored card or a new issue.
+
+The response includes `message_id`, `task_id` (run ID), and `queued`. A busy
+session queues the new turn; acknowledgement is not completion. The command
+does not create sessions, send attachments, wait for replies, forward replies,
+or retry. After a server error, timeout or lost response, check the target
+conversation before sending again: the original send may already have committed.
+Do not assume an error means nothing was sent or turn it into an agent-to-agent
+auto-reply loop.
+
+`chat history` and `chat thread` remain scoped to the caller's current
+conversation/channel; neither becomes a cross-session transcript reader.
 
 ## Task CLI boundary
 
