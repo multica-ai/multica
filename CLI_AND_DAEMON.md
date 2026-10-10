@@ -272,6 +272,7 @@ Daemon behavior is configured via flags or environment variables:
 | Codex first-turn no-progress timeout | — | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` (keeps the built-in `60s` ceiling) |
 | Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start` and `thread/resume`: `60s` (an explicit value overrides both budgets globally) |
 | Codex turn-interrupt timeout | — | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` (bounded grace period for `turn/interrupt` acknowledgement and `turn/completed`; tune from the logged interrupt latency on unusually slow hosts) |
+| Cursor first-output timeout | — | `MULTICA_CURSOR_FIRST_OUTPUT_TIMEOUT` | `3m` (`0` disables; independent of the idle watchdog) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
@@ -290,6 +291,8 @@ Daemon behavior is configured via flags or environment variables:
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 | GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 | GC task temp legacy TTL (pre-lock `multica-task-*`) | — | `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` (disabled; set a duration to opt in) |
+
+Cursor launches and resumes must emit a valid JSON event with a non-empty `type` within the first-output timeout. On expiry, the attempt fails as `timeout`, using the existing bounded retry policy (default: two total attempts). The timer stops at the first event, so long-running tools retain the normal tool-watchdog budget. Caller cancellation remains cancellation; setting the global idle watchdog to zero does not disable this separate startup timer.
 
 #### Workspace garbage collection
 

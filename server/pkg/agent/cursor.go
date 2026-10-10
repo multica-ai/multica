@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 )
+
+var errCursorFirstOutputTimeout = errors.New("cursor-agent first-output timeout")
 
 // cursorBackend implements Backend by spawning the Cursor Agent CLI
 // (cursor-agent) with --output-format stream-json and parsing the JSONL
@@ -33,7 +36,12 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
+	timeoutCtx, timeoutCancel := runContext(ctx, timeout)
+	runCtx, cancelCause := context.WithCancelCause(timeoutCtx)
+	cancel := func() {
+		cancelCause(context.Canceled)
+		timeoutCancel()
+	}
 
 	args := buildCursorArgs(opts, b.cfg.Logger)
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseCursorInvocation, lookedUp, args, b.cfg.Logger)
@@ -66,6 +74,20 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
 
+	// Bound silent launches and resumes, without limiting later tool execution.
+	// Cancel causes preserve whichever won first: caller cancellation or timeout.
+	var firstOutputTimer *time.Timer
+	if opts.CursorFirstOutputTimeout > 0 {
+		firstOutputTimer = time.AfterFunc(opts.CursorFirstOutputTimeout, func() {
+			cancelCause(errCursorFirstOutputTimeout)
+		})
+	}
+	stopFirstOutputTimer := func() {
+		if firstOutputTimer != nil {
+			firstOutputTimer.Stop()
+		}
+	}
+
 	b.cfg.Logger.Info("cursor-agent started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	msgCh := make(chan Message, 256)
@@ -87,6 +109,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	go func() {
 		defer cancel()
+		defer stopFirstOutputTimer()
 		defer close(msgCh)
 		defer close(resCh)
 		defer background.Close()
@@ -155,6 +178,9 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
 				invalidEventCount++
 				continue
+			}
+			if evt.Type != "" {
+				stopFirstOutputTimer()
 			}
 			eventCount++
 			lastEventType = observedCursorEventType(evt.Type)
@@ -362,6 +388,9 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 		} else {
 			switch {
+			case errors.Is(context.Cause(runCtx), errCursorFirstOutputTimeout):
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("cursor-agent produced no protocol event within %s", opts.CursorFirstOutputTimeout)
 			case runCtx.Err() == context.DeadlineExceeded:
 				finalStatus = "timeout"
 				finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
