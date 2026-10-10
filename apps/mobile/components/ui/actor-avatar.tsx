@@ -117,13 +117,47 @@ function BareAvatar({
     : avatarUrl;
   const displayName =
     name ?? (type === "system" ? "Multica" : getName(type, id));
-  const emoji = rawUrl?.startsWith("emoji:")
-    ? rawUrl.slice("emoji:".length).trim() || null
-    : null;
+  const brand = parseBrandAvatar(rawUrl);
+  const emoji =
+    !brand && rawUrl?.startsWith("emoji:")
+      ? rawUrl.slice("emoji:".length).trim() || null
+      : null;
   const url =
-    !emoji && rawUrl && /^(https?:|data:|file:|asset:)/.test(rawUrl)
+    !emoji && !brand && rawUrl && /^(https?:|data:|file:|asset:)/.test(rawUrl)
       ? rawUrl
       : null;
+
+  if (brand) {
+    // Mobile cannot load the bundled web artwork; the letter tile stands in,
+    // wearing the tier's frame color as its ring so the capability grade
+    // stays visible here too.
+    const tierWidth = Math.max(2, Math.round(size * 0.06));
+    return (
+      <View
+        accessibilityLabel={displayName}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: radius,
+          backgroundColor: brand.bg,
+          borderWidth: brand.tier ? tierWidth : 0,
+          borderColor: brand.tier ?? undefined,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text
+          style={{
+            color: brand.fg,
+            fontSize: Math.round(size * 0.42),
+            fontWeight: "600",
+          }}
+        >
+          {brand.letter}
+        </Text>
+      </View>
+    );
+  }
 
   if (emoji) {
     return (
@@ -228,4 +262,45 @@ function AgentAvatarWithPresence({
       )}
     </View>
   );
+}
+
+// Keep in lockstep with `packages/ui/lib/avatar-brand.ts`. Mobile cannot
+// import `@multica/ui`, so the marker parser and tile colors live here as
+// the same `brand:<id>[/<tier>]` contract the web picker persists.
+const BRAND_FACE: Record<string, { bg: string; fg: string; letter: string }> = {
+  gpt: { bg: "#111111", fg: "#FFFFFF", letter: "G" },
+  gemini: { bg: "#1A73E8", fg: "#FFFFFF", letter: "G" },
+  claude: { bg: "#D97757", fg: "#FFFFFF", letter: "C" },
+  glm: { bg: "#3B6FF6", fg: "#FFFFFF", letter: "Z" },
+  kimi: { bg: "#111111", fg: "#FFFFFF", letter: "K" },
+  deepseek: { bg: "#4D6BFE", fg: "#FFFFFF", letter: "D" },
+  composer: { bg: "#111111", fg: "#FFFFFF", letter: "C" },
+  grok: { bg: "#0A0A0A", fg: "#F4F4F5", letter: "G" },
+  devin: { bg: "#0E7490", fg: "#FFFFFF", letter: "D" },
+};
+
+const BRAND_TIER_COLOR: Record<string, string> = {
+  gold: "#D7A414",
+  silver: "#B9C0CA",
+  copper: "#C7793B",
+  cyan: "#10BDC1",
+  diamond: "#4D9DFF",
+  crown: "#E0AD23",
+};
+
+function parseBrandAvatar(raw: string | null | undefined): {
+  bg: string;
+  fg: string;
+  letter: string;
+  tier: string | null;
+} | null {
+  if (!raw?.startsWith("brand:")) return null;
+  const rest = raw.slice("brand:".length).trim();
+  if (!rest) return null;
+  const slash = rest.indexOf("/");
+  const id = slash === -1 ? rest : rest.slice(0, slash);
+  const tierRaw = slash === -1 ? "" : rest.slice(slash + 1);
+  const face = BRAND_FACE[id];
+  if (!face) return null;
+  return { ...face, tier: tierRaw ? (BRAND_TIER_COLOR[tierRaw] ?? null) : null };
 }

@@ -756,6 +756,7 @@ function SquadDetailInspector({
               name={squad.name}
               size={64}
               onUploaded={onUploadAvatar}
+              onEmojiSelected={onUploadAvatar}
             />
             <div className="flex flex-col gap-1">
               <SquadNameEditor value={squad.name} onSave={onRename} />

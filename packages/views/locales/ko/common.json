@@ -8,7 +8,15 @@
     "upload_image": "이미지 업로드",
     "emoji_label": "이모지",
     "more_emojis": "이모지 더 보기…",
-    "emoji_loading": "불러오는 중…"
+    "emoji_loading": "불러오는 중…",
+    "brand_label": "브랜드",
+    "tier_label": "역량 등급",
+    "tier_gold": "골드",
+    "tier_silver": "실버",
+    "tier_copper": "코퍼",
+    "tier_cyan": "시안",
+    "tier_diamond": "다이아몬드",
+    "tier_crown": "크라운"
   },
   "avatar_crop": {
     "title": "아바타 편집",

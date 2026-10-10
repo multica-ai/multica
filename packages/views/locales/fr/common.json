@@ -8,7 +8,15 @@
     "upload_image": "Envoyer une image",
     "emoji_label": "Emoji",
     "more_emojis": "Plus d'emojis…",
-    "emoji_loading": "Chargement…"
+    "emoji_loading": "Chargement…",
+    "brand_label": "Marque",
+    "tier_label": "Niveau de capacité",
+    "tier_gold": "Or",
+    "tier_silver": "Argent",
+    "tier_copper": "Cuivre",
+    "tier_cyan": "Cyan",
+    "tier_diamond": "Diamant",
+    "tier_crown": "Couronne"
   },
   "avatar_crop": {
     "title": "Modifier l'avatar",
