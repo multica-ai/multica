@@ -3694,7 +3694,7 @@ func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentR
 		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
 			continue
 		}
-		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
+		if (ref.ExecutionMode != localDirectoryModeWorktree && ref.ExecutionMode != localDirectoryModeWorktreeClean) || ref.DaemonID != runtime.DaemonID.String {
 			continue
 		}
 		return fmt.Sprintf(

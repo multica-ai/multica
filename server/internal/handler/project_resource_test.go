@@ -1879,3 +1879,18 @@ func TestProjectResourceRejectsInvalidCheckoutRef(t *testing.T) {
 		t.Fatalf("url after clearing the ref = %q, want it preserved", clearedRef.URL)
 	}
 }
+
+func TestNormalizeCleanWorktreeResource(t *testing.T) {
+	t.Parallel()
+	ref, err := validateLocalDirectoryRef(json.RawMessage(`{"local_path":"/tmp/project","daemon_id":"daemon","execution_mode":"worktree_clean"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got localDirectoryRef
+	if err := json.Unmarshal(ref, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ExecutionMode != localDirectoryModeWorktreeClean {
+		t.Fatalf("mode = %q", got.ExecutionMode)
+	}
+}

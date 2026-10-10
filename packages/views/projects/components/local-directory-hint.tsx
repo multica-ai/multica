@@ -63,7 +63,7 @@ export function LocalDirectoryHint({
         // Anything other than an explicit "worktree" is in_place: the mode is
         // absent on resources created before it existed, and an unknown value
         // from a newer server must not claim isolation we cannot verify.
-        const isWorktree = ref.execution_mode === "worktree";
+        const isWorktree = (ref.execution_mode === "worktree" || ref.execution_mode === "worktree_clean");
         return (
           <div key={resource.id} className="space-y-0.5">
             <div className="flex items-center gap-2">

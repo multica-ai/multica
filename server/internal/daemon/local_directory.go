@@ -26,6 +26,8 @@ const localDirectoryResourceType = "local_directory"
 const (
 	localDirectoryModeInPlace  = "in_place"
 	localDirectoryModeWorktree = "worktree"
+	// Clean mode starts from committed HEAD, excluding local edits and untracked files.
+	localDirectoryModeWorktreeClean = "worktree_clean"
 )
 
 // localDirectoryRef mirrors the server-side ref shape for local_directory
@@ -56,7 +58,7 @@ type localDirectoryAssignment struct {
 // serialises, cleans up sidecars, or exempts the env root from GC must branch
 // on this rather than on "is there a local_directory assignment at all".
 func (a *localDirectoryAssignment) UsesWorktree() bool {
-	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
+	return a != nil && (strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree || strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktreeClean)
 }
 
 // DisplayName is the human-facing name for this directory, safe to render in
@@ -93,7 +95,7 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 		return nil
 	}
 	switch strings.TrimSpace(a.Ref.ExecutionMode) {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeWorktreeClean:
 		return nil
 	default:
 		return fmt.Errorf(

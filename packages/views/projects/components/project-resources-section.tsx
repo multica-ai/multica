@@ -88,7 +88,9 @@ function isLocalDirectoryRef(r: ProjectResource): r is ProjectResource & {
 function executionModeOf(
   ref: LocalDirectoryResourceRef,
 ): LocalDirectoryExecutionMode {
-  return ref.execution_mode === "worktree" ? "worktree" : "in_place";
+  return ref.execution_mode === "worktree" || ref.execution_mode === "worktree_clean"
+    ? ref.execution_mode
+    : "in_place";
 }
 
 /** Pending mode edit — either for a directory being added, or an existing row. */
@@ -818,7 +820,7 @@ function LocalDirectoryRow({
           way to tell whether tasks on this folder edit it directly or hand back
           a branch, which is the first thing someone asks when a task queues (or
           does not). */}
-      {mode === "worktree" && (
+      {(mode === "worktree" || mode === "worktree_clean") && (
         <Tooltip>
           <TooltipTrigger
             render={

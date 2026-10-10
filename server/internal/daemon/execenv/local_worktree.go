@@ -79,6 +79,8 @@ type LocalWorktreeParams struct {
 	// or any subdirectory of it; the worktree always covers the whole repo,
 	// and the agent's cwd is the matching subdirectory inside it.
 	LocalPath string
+	// CleanBaseline excludes local tracked edits and untracked files from the snapshot.
+	CleanBaseline bool
 	// EnvRoot is the daemon-owned task env root. The worktree is created
 	// inside it so the ordinary env-root GC reclaims it.
 	EnvRoot string
@@ -280,8 +282,8 @@ type LocalWorktreeOutcome struct {
 	PreservedPath string
 }
 
-// PrepareLocalWorktree creates the task's worktree and replays the user's
-// uncommitted state into it. It never writes to the user's working tree: the
+// PrepareLocalWorktree creates the task's worktree and, unless CleanBaseline
+// is selected, replays the user's uncommitted state into it. It never writes to the user's working tree: the
 // snapshot is built in a private index inside the task's env root, which leaves
 // their index, their files and their refs exactly as they were.
 func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*LocalWorktree, error) {
@@ -356,26 +358,31 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 			"(worktree mode needs at least one commit; make an initial commit or switch the resource back to in_place): %w", gitRoot, err)
 	}
 
-	// Refuse an untracked payload too large to reproduce BEFORE snapshotting it:
-	// the snapshot writes every one of those bytes into the user's own object
-	// database, which is not something to do by accident on a directory full of
-	// un-ignored build output.
-	if err := checkUntrackedReplayable(gitRoot, logger); err != nil {
-		return nil, err
-	}
+	// Clean mode never reads local file contents into the object database.
+	// HEAD is the user-state snapshot; continuation still keeps prior agent work.
+	userState := headSHA
+	if !params.CleanBaseline {
+		// Refuse an untracked payload too large to reproduce BEFORE snapshotting it:
+		// the snapshot writes every one of those bytes into the user's own object
+		// database, which is not something to do by accident on a directory full of
+		// un-ignored build output.
+		if err := checkUntrackedReplayable(gitRoot, logger); err != nil {
+			return nil, err
+		}
 
-	// The commit describing the user's directory as this task sees it — their
-	// tracked edits and their untracked files in one tree. Everything below
-	// reasons about the user's state through this single object.
-	userState, err := captureUserSnapshot(gitRoot, params.EnvRoot, headSHA, logger)
-	if err != nil {
-		// Fail closed. The promise of this mode is that the agent reasons about
-		// the code the user actually has; silently starting from HEAD instead
-		// would have it review a tree the user never saw and report confidently
-		// on it. A task that does not start is recoverable — one that answers
-		// from the wrong sources is not.
-		return nil, fmt.Errorf("execenv: could not capture the uncommitted changes in %q, "+
-			"so the worktree would not match what you have on disk: %w", gitRoot, err)
+		// The commit describing the user's directory as this task sees it — their
+		// tracked edits and their untracked files in one tree. Everything below
+		// reasons about the user's state through this single object.
+		userState, err = captureUserSnapshot(gitRoot, params.EnvRoot, headSHA, logger)
+		if err != nil {
+			// Fail closed. The promise of this mode is that the agent reasons about
+			// the code the user actually has; silently starting from HEAD instead
+			// would have it review a tree the user never saw and report confidently
+			// on it. A task that does not start is recoverable — one that answers
+			// from the wrong sources is not.
+			return nil, fmt.Errorf("execenv: could not capture the uncommitted changes in %q, "+
+				"so the worktree would not match what you have on disk: %w", gitRoot, err)
+		}
 	}
 
 	plan := resolveTaskBranch(gitRoot, params, headSHA, logger)

@@ -129,6 +129,8 @@ const (
 	// Only valid when the directory is a git working tree — the daemon
 	// verifies that at task time, since the server can't see the filesystem.
 	localDirectoryModeWorktree = "worktree"
+	// Clean mode starts from committed HEAD, excluding local edits and untracked files.
+	localDirectoryModeWorktreeClean = "worktree_clean"
 )
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
@@ -168,7 +170,7 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 		return true
 	}
 	var ref localDirectoryRef
-	if err := json.Unmarshal(normalizedRef, &ref); err != nil || ref.ExecutionMode != localDirectoryModeWorktree {
+	if err := json.Unmarshal(normalizedRef, &ref); err != nil || (ref.ExecutionMode != localDirectoryModeWorktree && ref.ExecutionMode != localDirectoryModeWorktreeClean) {
 		return true
 	}
 
@@ -290,10 +292,10 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	payload.Label = strings.TrimSpace(payload.Label)
 	payload.ExecutionMode = strings.TrimSpace(payload.ExecutionMode)
 	switch payload.ExecutionMode {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeWorktreeClean:
 	default:
-		return nil, fmt.Errorf("local_directory: execution_mode must be %q or %q, got %q",
-			localDirectoryModeInPlace, localDirectoryModeWorktree, payload.ExecutionMode)
+		return nil, fmt.Errorf("local_directory: execution_mode must be %q, %q, or %q, got %q",
+			localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeWorktreeClean, payload.ExecutionMode)
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {

@@ -87,10 +87,13 @@ export interface GithubRepoResourceRef {
  *   the repo, not by the branch name, so a same-named branch the user made is
  *   never adopted.
  *
+ * - `worktree_clean`: the same isolated branch lifecycle, starting from
+ *   committed HEAD without replaying local edits or untracked files.
+ *
  * Absent means `in_place`: resources created before the mode existed keep their
  * original behavior, so this is optional rather than defaulted on the server.
  */
-export type LocalDirectoryExecutionMode = "in_place" | "worktree";
+export type LocalDirectoryExecutionMode = "in_place" | "worktree" | "worktree_clean";
 
 export interface LocalDirectoryResourceRef {
   local_path: string;
