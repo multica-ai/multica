@@ -584,6 +584,76 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 }
 
+// A squad-picked task with a known initiator exports the squad and initiator
+// identity to the task environment so tools inside the task (git hooks, MCP
+// gateways) can record who a run is for without an extra API round-trip. The
+// variables are daemon-owned: agent custom_env must not override them.
+func TestTaskMulticaEnvironmentExportsSquadAndInitiator(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		ID:             "task-test",
+		AgentID:        "agent-test",
+		WorkspaceID:    "workspace-test",
+		SquadID:        "squad-uuid-1",
+		SquadName:      "Frontend Squad",
+		InitiatorID:    "user-uuid-1",
+		InitiatorName:  "Alice",
+		InitiatorEmail: "alice@example.com",
+	}
+	env := taskMulticaEnvironment(task, "agent-name", "mat_task_sentinel", "/task/root", "/ws/root", "https://task.example", 19514, 3, "/task/tmp")
+
+	want := map[string]string{
+		"MULTICA_SQUAD_ID":        "squad-uuid-1",
+		"MULTICA_SQUAD_NAME":      "Frontend Squad",
+		"MULTICA_INITIATOR_ID":    "user-uuid-1",
+		"MULTICA_INITIATOR_NAME":  "Alice",
+		"MULTICA_INITIATOR_EMAIL": "alice@example.com",
+	}
+	for k, v := range want {
+		if env[k] != v {
+			t.Fatalf("taskMulticaEnvironment()[%q] = %q, want %q (env = %#v)", k, env[k], v, env)
+		}
+	}
+
+	layerCustomEnvAndHermesHome(env, map[string]string{
+		"MULTICA_SQUAD_ID":     "forged-squad",
+		"MULTICA_INITIATOR_ID": "forged-user",
+	}, "", nil)
+	if env["MULTICA_SQUAD_ID"] != "squad-uuid-1" {
+		t.Fatalf("custom env replaced squad id: %q", env["MULTICA_SQUAD_ID"])
+	}
+	if env["MULTICA_INITIATOR_ID"] != "user-uuid-1" {
+		t.Fatalf("custom env replaced initiator id: %q", env["MULTICA_INITIATOR_ID"])
+	}
+}
+
+// A task with no squad and no initiator (autopilot run, direct member task)
+// leaves the squad and initiator variables unset so consumers can tell
+// "unknown" apart from "empty".
+func TestTaskMulticaEnvironmentOmitsAbsentSquadAndInitiator(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		ID:          "task-test",
+		AgentID:     "agent-test",
+		WorkspaceID: "workspace-test",
+	}
+	env := taskMulticaEnvironment(task, "agent-name", "mat_task_sentinel", "/task/root", "/ws/root", "https://task.example", 19514, 3, "/task/tmp")
+
+	for _, k := range []string{
+		"MULTICA_SQUAD_ID",
+		"MULTICA_SQUAD_NAME",
+		"MULTICA_INITIATOR_ID",
+		"MULTICA_INITIATOR_NAME",
+		"MULTICA_INITIATOR_EMAIL",
+	} {
+		if v, ok := env[k]; ok {
+			t.Fatalf("taskMulticaEnvironment() set %q = %q for a task without squad/initiator; want unset", k, v)
+		}
+	}
+}
+
 // When `brew --prefix` is unavailable but the executable path is under a
 // known Cellar root, triggerRestart must recover the prefix from the
 // known-prefix list and target <prefix>/bin/multica.

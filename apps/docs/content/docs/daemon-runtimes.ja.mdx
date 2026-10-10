@@ -96,11 +96,16 @@ multica daemon start
 | `MULTICA_TOKEN` | 作業スコープの `mat_` API 認証情報 | **連携契約** |
 | `MULTICA_TASK_ID` | 実行中の作業の ID | **連携契約** |
 | `MULTICA_AGENT_ID` | 割り当てられたエージェントの ID | **連携契約** |
+| `MULTICA_SQUAD_ID` | スコッドがタスクを選んだ場合のスコッドの UUID。スコッドが関わらない場合は設定されません | **連携契約** |
+| `MULTICA_INITIATOR_ID` | この実行の権限元ユーザーの ID。権限元がいない場合は設定されません | **連携契約** |
 | `MULTICA_WORKSPACE_ID` | 作業が属するワークスペースの ID | **連携契約** |
 | `MULTICA_SERVER_URL` | デーモンが選択した Multica サーバー URL | **連携契約** |
 | `MULTICA_TASK_CONFIG_ROOT` | 作業専用の Multica CLI 設定ルート | 参考情報 |
 | `MULTICA_TASK_WORKSPACES_ROOT` | デーモンが管理する作業用ワークスペースのルート | 参考情報 |
 | `MULTICA_AGENT_NAME` | 割り当てられたエージェントの表示名 | 参考情報 |
+| `MULTICA_SQUAD_NAME` | そのスコッドの表示名。スコッドが関わらない場合は設定されません | 参考情報 |
+| `MULTICA_INITIATOR_NAME` | 権限元ユーザーの表示名。権限元がいない場合は設定されません | 参考情報 |
+| `MULTICA_INITIATOR_EMAIL` | 権限元ユーザーのメールアドレス。権限元がいない場合は設定されません | 参考情報 |
 | `MULTICA_DAEMON_PORT` | `multica repo checkout` など作業専用コマンドが使うローカルデーモンのヘルス/API ポート | 参考情報 |
 | `MULTICA_TASK_SLOT` | デーモン全体の同時実行プール内のスロット。GPU などスロット番号付きリソースに使用可能 | 参考情報 |
 | `TMPDIR` | 実行中の作業専用の一時ディレクトリ。クロスプラットフォームツール向けに `TMP` と `TEMP` でも提供 | 参考情報 |

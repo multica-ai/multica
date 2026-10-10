@@ -96,11 +96,16 @@ The table lists the variables that custom runtimes can use today. It is intentio
 | `MULTICA_TOKEN` | Task-scoped `mat_` API credential | **Integration contract** |
 | `MULTICA_TASK_ID` | ID of the active task | **Integration contract** |
 | `MULTICA_AGENT_ID` | ID of the assigned agent | **Integration contract** |
+| `MULTICA_SQUAD_ID` | Squad UUID when a squad picked the task; unset when no squad is involved | **Integration contract** |
+| `MULTICA_INITIATOR_ID` | ID of the human whose authority the run uses; unset when there is no initiator | **Integration contract** |
 | `MULTICA_WORKSPACE_ID` | ID of the task's workspace | **Integration contract** |
 | `MULTICA_SERVER_URL` | Multica server URL selected by the daemon | **Integration contract** |
 | `MULTICA_TASK_CONFIG_ROOT` | Private task-local Multica CLI configuration root | Informational |
 | `MULTICA_TASK_WORKSPACES_ROOT` | Root of the daemon-managed task workspaces | Informational |
 | `MULTICA_AGENT_NAME` | Display name of the assigned agent | Informational |
+| `MULTICA_SQUAD_NAME` | Display name of that squad; unset when no squad is involved | Informational |
+| `MULTICA_INITIATOR_NAME` | Display name of the initiator; unset when there is no initiator | Informational |
+| `MULTICA_INITIATOR_EMAIL` | Email of the initiator; unset when there is no initiator | Informational |
 | `MULTICA_DAEMON_PORT` | Local daemon health/API port used by task-only commands such as `multica repo checkout` | Informational |
 | `MULTICA_TASK_SLOT` | Slot in the daemon-wide concurrency pool; useful for slot-indexed resources such as GPUs | Informational |
 | `TMPDIR` | Private temporary directory for the active task; also supplied as `TMP` and `TEMP` for cross-platform tools | Informational |
