@@ -18,6 +18,7 @@ import type {
   AgentRuntime,
   AgentTask,
   MemberWithUser,
+  ProviderUsageSnapshot,
   RuntimeProfile,
 } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -31,6 +32,7 @@ import {
   deriveRuntimeHealth,
   isRuntimeUsableForUser,
   runtimeProfileListOptions,
+  runtimeProviderUsageListOptions,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -67,6 +69,10 @@ import {
 } from "../utils";
 import { runtimeRowLabel } from "./runtime-machines";
 import {
+  RuntimePlanUsageCell,
+  runtimeHasPlanUsage,
+} from "./runtime-plan-usage-cell";
+import {
   customRuntimeRegistrationFailure,
   isDisabledCustomRuntime,
   isPendingCustomRuntime,
@@ -85,7 +91,7 @@ import { useT, useTimeAgo } from "../../i18n";
 // operation) is deliberately not offered.
 const GRID_COLS =
   "grid-cols-[0.75rem_minmax(120px,1fr)_var(--rtc-health)_var(--rtc-kebab)_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-cli)_var(--rtc-kebab)_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-usage)_var(--rtc-cli)_var(--rtc-kebab)_0.75rem]";
 
 const COLUMN_WIDTHS = {
   // Health folds the workload in as a suffix ("Healthy · 2 running") —
@@ -94,13 +100,14 @@ const COLUMN_WIDTHS = {
   owner: 96,
   agents: 92,
   cost: 96,
+  usage: 112,
   cli: 112,
 } as const;
 
-// Fixed tracks (edges 12+12, name min 140) plus the 8 gap-x-3 gaps
-// between the wide template's 9 tracks (zero-width tracks still carry
+// Fixed tracks (edges 12+12, name min 140) plus the 9 gap-x-3 gaps
+// between the wide template's 10 tracks (zero-width tracks still carry
 // gaps).
-const FIXED_TRACKS_WIDTH = 164 + 8 * 12;
+const FIXED_TRACKS_WIDTH = 164 + 9 * 12;
 
 // The kebab track is conditional like the owner column: on a list where
 // no row carries a delete-permission, EVERY row's only action is hidden,
@@ -116,6 +123,7 @@ function columnTrackVars(
     (showOwner ? COLUMN_WIDTHS.owner : 0) +
     COLUMN_WIDTHS.agents +
     COLUMN_WIDTHS.cost +
+    COLUMN_WIDTHS.usage +
     COLUMN_WIDTHS.cli +
     (showActions ? 28 : 0);
   return {
@@ -123,6 +131,7 @@ function columnTrackVars(
     "--rtc-owner": showOwner ? `${COLUMN_WIDTHS.owner}px` : "0px",
     "--rtc-agents": `${COLUMN_WIDTHS.agents}px`,
     "--rtc-cost": `${COLUMN_WIDTHS.cost}px`,
+    "--rtc-usage": `${COLUMN_WIDTHS.usage}px`,
     "--rtc-cli": `${COLUMN_WIDTHS.cli}px`,
     "--rtc-kebab": showActions ? "1.75rem" : "0px",
     "--rtc-minw": `${minWidth}px`,
@@ -748,6 +757,29 @@ export function RuntimeList({
   // width when at least one row will actually show the menu.
   const showActions = rows.some((row) => row.canDelete);
 
+  const planUsageRuntimeIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const runtime of runtimes) {
+      if (!runtimeHasPlanUsage(runtime.provider)) continue;
+      if (isPendingCustomRuntime(runtime)) continue;
+      if (!canReadRuntimeUsage(runtime, user?.id ?? null)) continue;
+      ids.push(runtime.id);
+    }
+    ids.sort();
+    return ids;
+  }, [runtimes, user?.id]);
+  const { data: planUsage, isLoading: planUsageLoading } = useQuery(
+    runtimeProviderUsageListOptions(wsId, planUsageRuntimeIds),
+  );
+  const planUsageByRuntimeId = useMemo(() => {
+    const map = new Map<string, ProviderUsageSnapshot[]>();
+    for (const item of planUsage?.runtimes ?? []) {
+      if (!item.runtime_id) continue;
+      map.set(item.runtime_id, item.providers ?? []);
+    }
+    return map;
+  }, [planUsage]);
+
   return (
     <div className="overflow-x-auto overflow-y-hidden @container">
       <ListGrid
@@ -771,6 +803,9 @@ export function RuntimeList({
           </ListGridHeaderCell>
           <ListGridHeaderCell className="hidden @2xl:flex" align="right">
             {t(($) => $.list.col_cost)}
+          </ListGridHeaderCell>
+          <ListGridHeaderCell className="hidden @2xl:flex">
+            {t(($) => $.list.col_usage)}
           </ListGridHeaderCell>
           <ListGridHeaderCell className="hidden @2xl:flex">
             {t(($) => $.list.col_cli)}
@@ -829,6 +864,17 @@ export function RuntimeList({
                     enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
                   />
                 )}
+              </ListGridCell>
+              <ListGridCell className="hidden @2xl:flex">
+                <RuntimePlanUsageCell
+                  provider={row.runtime.provider}
+                  providers={planUsageByRuntimeId.get(row.runtime.id)}
+                  loading={
+                    runtimeHasPlanUsage(row.runtime.provider) &&
+                    planUsageLoading &&
+                    !planUsageByRuntimeId.has(row.runtime.id)
+                  }
+                />
               </ListGridCell>
               <ListGridCell className="hidden @2xl:flex">
                 <CliCell runtime={row.runtime} />

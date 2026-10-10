@@ -384,7 +384,11 @@ export function AgentOverviewPane({
             className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}
           >
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <ActivityTab agent={agent} showPerformance={false} />
+              <ActivityTab
+                agent={agent}
+                showPerformance={false}
+                provider={runtime?.provider}
+              />
               <AgentOverviewSummary
                 agent={agent}
                 runtime={runtime}

@@ -38,6 +38,7 @@ import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
+import { ProviderUsageBlock } from "../../../runtimes/components/provider-usage-block";
 import { useT, useTimeAgo } from "../../../i18n";
 
 // Reveal cached rows in small batches and fetch another page only on demand.
@@ -51,6 +52,8 @@ const RECENT_SKELETON_ROWS = 4;
 interface ActivityTabProps {
   agent: Agent;
   showPerformance?: boolean;
+  /** Protocol family of the agent's runtime. Other vendors stay hidden. */
+  provider?: string;
 }
 
 /**
@@ -64,7 +67,11 @@ interface ActivityTabProps {
  * "Now" and performance reuse workspace projections. Recent work loads
  * bounded history pages on demand; opening the tab never fetches all runs.
  */
-export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps) {
+export function ActivityTab({
+  agent,
+  showPerformance = true,
+  provider,
+}: ActivityTabProps) {
   const wsId = useWorkspaceId();
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
@@ -177,6 +184,13 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {agent.runtime_id ? (
+        <ProviderUsageBlock
+          wsId={wsId}
+          runtimeId={agent.runtime_id}
+          provider={provider}
+        />
+      ) : null}
       <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
       {showPerformance && (
         <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />

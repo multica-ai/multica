@@ -12,6 +12,10 @@ export const runtimeKeys = {
   // by-hour now follows the viewer's tz, like the other reports.
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
+  providerUsage: (wsId: string, runtimeId: string) =>
+    [...runtimeKeys.all(wsId), "provider-usage", runtimeId] as const,
+  providerUsageList: (wsId: string, runtimeIds: readonly string[]) =>
+    [...runtimeKeys.all(wsId), "provider-usage-list", runtimeIds] as const,
 };
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
@@ -35,6 +39,28 @@ export function runtimeUsageByAgentOptions(
   return queryOptions({
     queryKey: runtimeKeys.usageByAgent(runtimeId, days, tz),
     queryFn: () => api.getRuntimeUsageByAgent(runtimeId, { days, tz }),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function runtimeProviderUsageOptions(wsId: string, runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.providerUsage(wsId, runtimeId),
+    queryFn: () => api.getRuntimeProviderUsage(runtimeId),
+    enabled: wsId.length > 0 && runtimeId.length > 0,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function runtimeProviderUsageListOptions(
+  wsId: string,
+  runtimeIds: readonly string[],
+) {
+  const ids = [...runtimeIds].sort();
+  return queryOptions({
+    queryKey: runtimeKeys.providerUsageList(wsId, ids),
+    queryFn: () => api.listRuntimeProviderUsage(ids),
+    enabled: wsId.length > 0 && ids.length > 0,
     staleTime: 60 * 1000,
   });
 }
