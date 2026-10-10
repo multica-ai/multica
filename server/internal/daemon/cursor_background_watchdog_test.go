@@ -128,13 +128,13 @@ func TestBackgroundToolWatchdogShortOverride(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		var last, threshold atomic.Int64
+		var threshold atomic.Int64
+		activity := newTestWatchdogActivity()
 		var tools atomic.Int32
 		var fired atomic.Bool
-		last.Store(time.Now().UnixNano())
 		tools.Store(1)
 		calls := 0
-		go new(Daemon).runIdleWatchdog(ctx, 10*time.Minute, time.Minute, &last, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool { calls++; cancel(); return true }, nil, slog.Default())
+		go new(Daemon).runIdleWatchdog(ctx, 10*time.Minute, time.Minute, activity, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool { calls++; cancel(); return true }, nil, slog.Default())
 		synctest.Wait()
 		time.Sleep(time.Minute)
 		synctest.Wait()
@@ -148,14 +148,14 @@ func TestBackgroundToolWatchdogNaturalExitRace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		var last, threshold atomic.Int64
+		var threshold atomic.Int64
+		activity := newTestWatchdogActivity()
 		var tools atomic.Int32
 		var fired atomic.Bool
-		last.Store(time.Now().UnixNano())
 		tools.Store(1)
-		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, &last, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool {
+		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, activity, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool {
 			tools.Store(0)
-			last.Store(time.Now().UnixNano())
+			activity.record()
 			return false
 		}, nil, slog.Default())
 		synctest.Wait()
@@ -171,20 +171,20 @@ func TestBackgroundToolWatchdogFreshActivityDuringRevalidation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		var last, threshold atomic.Int64
+		var threshold atomic.Int64
+		activity := newTestWatchdogActivity()
 		var fired atomic.Bool
-		last.Store(time.Now().UnixNano())
 		refreshAtBoundary, refreshed := false, false
 		// Match Session.ToolActivity's production callback: refreshing native
 		// activity publishes a timestamp even when the tool count stays positive.
 		toolState := func() int32 {
 			if refreshAtBoundary && !refreshed {
-				last.Store(time.Now().UnixNano())
+				activity.record()
 				refreshed = true
 			}
 			return 1
 		}
-		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, &last, toolState, &fired, &threshold, cancel, make(chan agent.Message), func() bool {
+		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, activity, toolState, &fired, &threshold, cancel, make(chan agent.Message), func() bool {
 			refreshAtBoundary = true
 			return false
 		}, nil, slog.Default())
