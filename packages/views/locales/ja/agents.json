@@ -359,7 +359,14 @@
       "system_layer_hide": "隠す",
       "workspace_notes_label": "ワークスペースの補足",
       "workspace_notes_intro": "チームのコンテキストや好みを下に追加してください。Multica がこのエージェント向けに管理している指示の上に適用されます。Markdown が使えます。",
-      "workspace_notes_placeholder": "このエージェントが常に知っておくべきことを書きます。\n\n# 例\nメインリポジトリは github.com/acme/platform です。\nチャットが日本語でも、タスクは英語で書いてください。\n金曜日はデプロイしません。"
+      "workspace_notes_placeholder": "このエージェントが常に知っておくべきことを書きます。\n\n# 例\nメインリポジトリは github.com/acme/platform です。\nチャットが日本語でも、タスクは英語で書いてください。\n金曜日はデプロイしません。",
+      "conflict_title": "このプロンプトは別の場所で変更されました",
+      "conflict_hint": "再度保存する前に、サーバー版を使うか下書きを保持してください。",
+      "conflict_refreshing": "最新のサーバー版を読み込んでいます…",
+      "conflict_server": "サーバー版 · リビジョン {{revision}}",
+      "conflict_draft": "下書き",
+      "conflict_use_server": "サーバー版を使う",
+      "conflict_keep_draft": "下書きを保持"
     },
     "env": {
       "intro_readonly": "エージェントプロセスの起動時に注入されます。値の読み取りや編集ができるのはワークスペースのオーナーと admin のみで、すべての表示と編集はワークスペースの監査ログに記録されます。",

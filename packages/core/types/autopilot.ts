@@ -26,6 +26,8 @@ export type AutopilotRunSource = "schedule" | "manual" | "webhook" | "api";
 export interface Autopilot {
   id: string;
   workspace_id: string;
+  /** Monotonic prompt revision used to reject stale description writes. */
+  revision?: number;
   title: string;
   description: string | null;
   project_id?: string | null;
@@ -167,6 +169,8 @@ export interface CreateAutopilotRequest {
 }
 
 export interface UpdateAutopilotRequest {
+  /** Required when `description` is present; omitted for unrelated updates. */
+  expected_revision?: number;
   title?: string;
   description?: string | null;
   project_id?: string | null;

@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Check,
@@ -46,8 +46,9 @@ import {
   useUpdateAutopilot,
   useUpdateAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
+import { autopilotKeys } from "@multica/core/autopilots/queries";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api } from "@multica/core/api";
+import { api, errorCode } from "@multica/core/api";
 import type {
   AutopilotAssigneeType,
   AutopilotCollaborator,
@@ -80,12 +81,23 @@ import type { WebhookEventFilter } from "@multica/core/types";
 export interface AutopilotInitial {
   title: string;
   description: string;
+  revision?: number;
   project_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   subscriber_user_ids?: string[];
 }
+
+type AutopilotConflict = {
+  attemptedRevision?: number;
+  draftTitle: string;
+  draftDescription: string;
+  serverTitle: string;
+  serverDescription: string;
+  serverRevision?: number;
+  resolved: boolean;
+};
 
 export type AutopilotDialogProps =
   | {
@@ -140,6 +152,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const { open, onOpenChange } = props;
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
@@ -152,6 +165,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
+  const [titleDefault, setTitleDefault] = useState(initial.title ?? "");
+  const [descriptionDefault, setDescriptionDefault] = useState(initial.description ?? "");
+  const [editorResetKey, setEditorResetKey] = useState(0);
+  const [conflict, setConflict] = useState<AutopilotConflict | null>(null);
   const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
@@ -275,6 +292,29 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   // and click into it to grab the URL" friction.
   const [createdWebhookTrigger, setCreatedWebhookTrigger] = useState<AutopilotTrigger | null>(null);
 
+  useEffect(() => {
+    if (
+      isCreate ||
+      !conflict ||
+      conflict.resolved ||
+      props.initial.revision === undefined ||
+      props.initial.revision === conflict.attemptedRevision ||
+      props.initial.revision === conflict.serverRevision
+    ) {
+      return;
+    }
+    setConflict((current) =>
+      current && !current.resolved
+        ? {
+            ...current,
+            serverTitle: props.initial.title,
+            serverDescription: props.initial.description,
+            serverRevision: props.initial.revision,
+          }
+        : current,
+    );
+  }, [conflict, isCreate, props.initial]);
+
   const scheduleGate = useScheduleSubmitGate(wsId);
 
   // The schedule only gates submit when this save would actually write it. A
@@ -304,7 +344,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const assigneeErrorId = useId();
 
   const handleSubmit = async () => {
-    if (submitting) return;
+    if (submitting || (conflict && !conflict.resolved)) return;
     if (missingField !== null) {
       // Reveal the inline errors and take the user to the field at fault;
       // focusing scrolls the config column to it on its own.
@@ -376,6 +416,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           id: props.autopilotId,
           title: title.trim(),
           description: description.trim() || null,
+          ...(conflict?.serverRevision !== undefined
+            ? { expected_revision: conflict.serverRevision }
+            : props.mode === "edit" && props.initial.revision !== undefined
+              ? { expected_revision: props.initial.revision }
+            : {}),
           project_id: projectId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
@@ -444,6 +489,23 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         }
       }
     } catch (err) {
+      if (!isCreate && errorCode(err) === "revision_conflict") {
+        setConflict({
+          attemptedRevision: conflict?.serverRevision ?? props.initial.revision,
+          draftTitle: title,
+          draftDescription: description,
+          serverTitle: props.initial.title,
+          serverDescription: props.initial.description,
+          serverRevision: undefined,
+          resolved: false,
+        });
+        if (props.mode === "edit") {
+          void queryClient.invalidateQueries({
+            queryKey: autopilotKeys.detail(wsId, props.autopilotId),
+          });
+        }
+        return;
+      }
       toast.error(
         err instanceof Error && err.message
           ? err.message
@@ -567,15 +629,66 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Body: two columns (stacks on narrow screens via flex-wrap at container level) */}
         <div
           key={contentKey}
-          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
+          className={cn(
+            "flex-1 min-h-0 flex flex-col overflow-y-auto lg:overflow-hidden",
+            !(conflict && !conflict.resolved) && "lg:flex-row",
+          )}
         >
+          {conflict && !conflict.resolved && (
+            <div role="alert" className="mx-6 mt-4 space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <div>
+                <p className="text-body font-medium">{t(($) => $.dialog.conflict_title)}</p>
+                <p className="text-caption text-muted-foreground">{t(($) => $.dialog.conflict_hint)}</p>
+              </div>
+              {conflict.serverRevision !== undefined ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-md border bg-background p-2">
+                    <p className="mb-1 text-micro font-medium uppercase text-muted-foreground">
+                      {t(($) => $.dialog.conflict_server, { revision: conflict.serverRevision })}
+                    </p>
+                    <p className="text-caption font-medium">{conflict.serverTitle}</p>
+                    <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-caption">{conflict.serverDescription}</pre>
+                  </div>
+                  <div className="rounded-md border bg-background p-2">
+                    <p className="mb-1 text-micro font-medium uppercase text-muted-foreground">{t(($) => $.dialog.conflict_draft)}</p>
+                    <p className="text-caption font-medium">{conflict.draftTitle}</p>
+                    <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-caption">{conflict.draftDescription}</pre>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-caption text-muted-foreground">{t(($) => $.dialog.conflict_refreshing)}</p>
+              )}
+              {conflict.serverRevision !== undefined && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setTitle(conflict.serverTitle);
+                      setDescription(conflict.serverDescription);
+                      setTitleDefault(conflict.serverTitle);
+                      setDescriptionDefault(conflict.serverDescription);
+                      setEditorResetKey((key) => key + 1);
+                      setConflict({ ...conflict, resolved: true });
+                    }}
+                  >
+                    {t(($) => $.dialog.conflict_use_server)}
+                  </Button>
+                  <Button size="sm" onClick={() => setConflict({ ...conflict, resolved: true })}>
+                    {t(($) => $.dialog.conflict_keep_draft)}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
           {/* Left: Runbook */}
           <div className="flex-none lg:flex-1 min-h-0 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 ref={titleEditorRef}
                 autoFocus={isCreate}
-                defaultValue={initial.title ?? ""}
+                key={`title-${editorResetKey}`}
+                defaultValue={titleDefault}
                 placeholder={t(($) => $.dialog.title_placeholder)}
                 className="text-display-sm font-semibold tracking-tight"
                 onChange={setTitle}
@@ -604,7 +717,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col lg:h-full">
               <div className="min-h-[200px] lg:min-h-0 lg:h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
                 <ContentEditor
-                  defaultValue={initial.description ?? ""}
+                  key={`description-${editorResetKey}`}
+                  defaultValue={descriptionDefault}
                   placeholder={t(($) => $.dialog.description_placeholder)}
                   onUpdate={setDescription}
                   debounceMs={300}
@@ -676,7 +790,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     // over the network and then writes the schedule it read before
                     // that round trip, so an edit made in between would be dropped
                     // on the floor with a success toast over it.
-                    disabled={submitting}
+                    disabled={submitting || Boolean(conflict && !conflict.resolved)}
                   />
                 )}
               </div>
@@ -717,7 +831,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <Button
               size="sm"
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || Boolean(conflict && !conflict.resolved)}
               aria-busy={submitting || undefined}
             >
               {submitting

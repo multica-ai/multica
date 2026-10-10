@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ApiError } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent } from "@multica/core/types";
@@ -62,6 +63,7 @@ describe("InstructionsTab persisted-state synchronization", () => {
   });
 
   afterEach(() => {
+    cleanup();
     act(() => {
       configStore.getState().setAgentConversationStartersSupported(false);
     });
@@ -173,6 +175,89 @@ describe("InstructionsTab persisted-state synchronization", () => {
 
     expect(onSave).toHaveBeenCalledWith({
       instructions: "Updated instructions.",
+    });
+  });
+
+  it("sends the loaded prompt revision with instruction saves", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(tab({ ...baseAgent, revision: 7 }, onSave));
+
+    const instructions = screen.getByLabelText("System prompt");
+    await user.clear(instructions);
+    await user.type(instructions, "Updated instructions.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      instructions: "Updated instructions.",
+      expected_revision: 7,
+      conversation_starters: [persistedPrompt],
+    });
+  });
+
+  it("retains the draft and gates retry after a revision conflict", async () => {
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError("stale", 409, "Conflict", { code: "revision_conflict" }))
+      .mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+    const { rerender } = render(tab({ ...baseAgent, revision: 7 }, onSave));
+    const instructions = screen.getByLabelText("System prompt");
+    await user.clear(instructions);
+    await user.type(instructions, "Local draft");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      instructions: "Local draft",
+      expected_revision: 7,
+      conversation_starters: [persistedPrompt],
+    });
+    expect(screen.getByRole("alert").textContent).toContain("Loading the latest server version");
+    expect((screen.getByLabelText("System prompt") as HTMLTextAreaElement).value).toBe("Local draft");
+
+    rerender(
+      tab(
+        { ...baseAgent, revision: 8, instructions: "Server version" },
+        onSave,
+      ),
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("Server version · revision 8");
+    expect(screen.getByRole("alert").textContent).toContain("Server version");
+    expect((screen.getByLabelText("System prompt") as HTMLTextAreaElement).value).toBe("Local draft");
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Keep my draft" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave).toHaveBeenLastCalledWith({
+      instructions: "Local draft",
+      expected_revision: 8,
+      conversation_starters: [persistedPrompt],
+    });
+  });
+
+  it("adopts the refreshed server prompt before an agent retry", async () => {
+    const onSave = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError("stale", 409, "Conflict", { code: "revision_conflict" }))
+      .mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+    const { rerender } = render(tab({ ...baseAgent, revision: 7 }, onSave));
+    const instructions = screen.getByLabelText("System prompt");
+    await user.clear(instructions);
+    await user.type(instructions, "Local draft");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    rerender(tab({ ...baseAgent, revision: 8, instructions: "Server version" }, onSave));
+    await user.click(screen.getByRole("button", { name: "Use server version" }));
+    await user.type(screen.getByLabelText("System prompt"), " updated");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave).toHaveBeenLastCalledWith({
+      instructions: "Server version updated",
+      expected_revision: 8,
+      conversation_starters: [persistedPrompt],
     });
   });
 });
