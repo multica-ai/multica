@@ -1449,7 +1449,14 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		if popErr != nil {
 			slog.Warn("local skill list PopPending failed", "error", popErr, "runtime_id", runtimeID)
 		} else if pendingSkills != nil {
-			ack.PendingLocalSkills = &protocol.DaemonHeartbeatPendingLocalSkills{ID: pendingSkills.ID}
+			pending, err := h.pendingLocalSkillList(ctx, pendingSkills)
+			if err != nil {
+				if failErr := h.LocalSkillListStore.Fail(ctx, pendingSkills.ID, err.Error()); failErr != nil {
+					slog.Warn("local skill scope failure could not be persisted", "error", failErr)
+				}
+			} else {
+				ack.PendingLocalSkills = pending
+			}
 		}
 	case probeErr != nil:
 		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {

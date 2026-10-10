@@ -3710,3 +3710,26 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Catalog scopes are additive: older runtime-default responses omit them.
+export const RuntimeLocalSkillListRequestSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string(),
+  agent_id: z.string().optional(),
+  agent_updated_at: z.string().optional(),
+  status: z.enum(["pending", "running", "completed", "failed", "timeout"]).catch("failed"),
+  supported: z.boolean().catch(false),
+  skills: z.array(z.object({
+    key: z.string(), name: z.string(), description: z.string().optional(),
+    source_path: z.string(), provider: z.string(), root: z.string().optional(),
+    plugin: z.string().optional(), can_disable: z.boolean().optional(),
+    file_count: z.number(),
+  })).optional(),
+  mcp_servers: z.array(z.object({
+    name: z.string(), transport: z.string().optional(), source: z.string().optional(),
+    enabled: z.boolean(),
+  })).optional(),
+  mcp_supported: z.boolean().optional(),
+  error: z.string().optional(),
+  created_at: z.string(), updated_at: z.string(),
+});

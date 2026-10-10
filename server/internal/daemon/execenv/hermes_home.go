@@ -618,6 +618,23 @@ func linkSharedHermesEntry(src, dst string) error {
 	return createFileLink(src, dst)
 }
 
+// HermesSkillRoots returns the inherited roots in the same order used by the
+// task overlay. Callers supply the sanitized task environment with HERMES_HOME
+// set to the resolved source home, so expansion agrees with execution.
+func HermesSkillRoots(sourceHome string, env map[string]string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(sourceHome, "config.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read Hermes skill configuration: %w", err)
+	}
+	var doc yaml.Node
+	if len(data) > 0 {
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return nil, fmt.Errorf("parse Hermes skill configuration: %w", err)
+		}
+	}
+	return computeHermesExternalDirs(sourceHome, existingHermesExternalDirs(&doc), env), nil
+}
+
 // writeDerivedHermesConfig writes the task-local config.yaml: the user's config
 // with `skills.external_dirs` set to their existing external dirs plus the shared
 // ~/.hermes/skills, all as absolute paths. When the user has no config we still

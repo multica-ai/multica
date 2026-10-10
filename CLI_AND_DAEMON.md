@@ -1137,3 +1137,21 @@ The immutable `runtime_type` selects model discovery, skills paths, and launch b
 the server derives `protocol_family` (`pi` for `omp`). Custom command/path overrides and
 fixed arguments still apply, and the runtime retains its custom-profile provenance.
 Existing profiles and the legacy `--protocol-family` flag retain their original target.
+
+### Hermes inherited skill catalog scope
+
+`POST /api/runtimes/{runtimeId}/local-skills?agent_id={agentId}` discovers
+skills for that Hermes agent's selected profile, including `custom_args`,
+custom runtime launch arguments, `custom_env.HERMES_HOME`, and the profile's
+`skills.external_dirs`. The agent must belong to the workspace and be assigned
+to that runtime. Both discovery and result polling require access to the runtime
+and the agent. If the agent changes while a request is pending, refresh the
+catalog. Agent environment values travel only to the assigned daemon; catalog
+responses contain no environment map.
+
+The agent Skills tab uses this scope and caches by workspace, runtime, agent,
+agent revision, and profile arguments. Omitting `agent_id` explicitly selects the runtime-default
+catalog used by runtime imports; listing an agent never changes the import
+scope. Runtime-default discovery and import share the same root ordering.
+Agent-scoped discovery requires an updated server and daemon: older unscoped
+results are rejected instead of being displayed as the selected profile.

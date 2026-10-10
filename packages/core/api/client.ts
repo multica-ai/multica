@@ -248,6 +248,7 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  RuntimeLocalSkillListRequestSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -2691,17 +2692,28 @@ export class ApiClient {
 
   async initiateListLocalSkills(
     runtimeId: string,
+    agentId?: string,
   ): Promise<RuntimeLocalSkillListRequest> {
-    return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
+    const scope = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    const data = await this.fetch(`/api/runtimes/${runtimeId}/local-skills${scope}`, {
       method: "POST",
     });
+    return this.parseLocalSkillList(data, runtimeId);
   }
 
   async getListLocalSkillsResult(
     runtimeId: string,
     requestId: string,
   ): Promise<RuntimeLocalSkillListRequest> {
-    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
+    const data = await this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
+    return this.parseLocalSkillList(data, runtimeId);
+  }
+
+  private parseLocalSkillList(data: unknown, runtimeId: string): RuntimeLocalSkillListRequest {
+    return parseWithFallback<RuntimeLocalSkillListRequest>(data, RuntimeLocalSkillListRequestSchema, {
+      id: "", runtime_id: runtimeId, status: "failed", supported: false,
+      error: "Invalid runtime skill catalog response", created_at: "", updated_at: "",
+    }, { endpoint: "runtime-local-skills" });
   }
 
   async initiateImportLocalSkill(

@@ -71,7 +71,19 @@ export function SkillsTab({
     canReadRuntime
       ? runtime.id
       : null;
-  const runtimeQuery = useQuery(runtimeCapabilitiesOptions(runtimeId));
+  const runtimeQuery = useQuery(
+    runtimeCapabilitiesOptions(
+      runtimeId,
+      runtime?.provider === "hermes"
+        ? {
+            workspaceId: wsId,
+            agentId: agent.id,
+            agentUpdatedAt: agent.updated_at,
+            customArgs: agent.custom_args,
+          }
+        : undefined,
+    ),
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<SelectedSkill>(null);

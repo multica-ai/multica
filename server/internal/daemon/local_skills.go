@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -108,8 +109,7 @@ const (
 //     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
 //   - Hermes: <HERMES_HOME>/skills is Hermes Agent's primary skill directory
 //     (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills);
-//     the home is resolved as for a task without agent-level overrides
-//     (see hermesLocalSkillsRoot)
+//     agent-scoped discovery uses the same profile and external roots as execution
 //   - Kimi: ~/.kimi/skills mirrors Kimi CLI's project-level .kimi/skills layout
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
 //   - Qoder: ~/.qoder/skills mirrors Qoder CLI's project-level .qoder/skills layout
@@ -126,12 +126,17 @@ const (
 // definitions under server/pkg/agent so adding a new runtime can't silently
 // miss the local-skills surface.
 func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error) {
+	return localSkillRootsForScope(provider, nil, nil)
+}
+
+func localSkillRootsForScope(provider string, scope *protocol.LocalSkillAgentScope, fixedArgs []string) ([]localSkillRoot, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
 	}
 
 	var providerRoot string
+	var hermesRoots []string
 	// Built-in runtime identities (e.g. "omp") declare their user skills dir
 	// in the descriptor; resolve to providerRoot and fall through to the
 	// common construction below so universal roots, merging, and fallback
@@ -173,7 +178,33 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		case "cursor":
 			providerRoot = filepath.Join(home, ".cursor", "skills")
 		case "hermes":
-			providerRoot = hermesLocalSkillsRoot()
+			var customArgs []string
+			var customEnv map[string]string
+			if scope != nil {
+				customArgs, customEnv = scope.CustomArgs, scope.CustomEnv
+			}
+			sel := agent.ParseHermesProfileArgs(agent.HermesLaunchArgv(fixedArgs, customArgs, slog.Default()))
+			res := execenv.ResolveHermesProfile(customEnv["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
+			if res.Err != nil {
+				if scope != nil {
+					return nil, true, res.Err
+				}
+				break // Preserve the unscoped invalid-sticky-profile behavior.
+			}
+			if res.MustExist {
+				if info, err := os.Stat(res.SourceHome); err != nil || !info.IsDir() {
+					return nil, true, fmt.Errorf("Hermes profile home is unavailable")
+				}
+			}
+			env := sanitizeAgentEnv(customEnv)
+			if env == nil {
+				env = map[string]string{}
+			}
+			env["HERMES_HOME"] = res.SourceHome
+			hermesRoots, err = execenv.HermesSkillRoots(res.SourceHome, env)
+			if err != nil {
+				return nil, true, err
+			}
 		case "kimi":
 			providerRoot = filepath.Join(home, ".kimi", "skills")
 		case "reasonix":
@@ -250,6 +281,13 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	roots := make([]localSkillRoot, 0, 2)
+	for _, path := range hermesRoots {
+		// Unresolved variables cannot safely identify a directory on this host.
+		if !filepath.IsAbs(path) || strings.Contains(path, "${") {
+			continue
+		}
+		roots = append(roots, localSkillRoot{path: path, kind: localSkillRootProvider})
+	}
 	// An empty providerRoot means the runtime has no home it would run under;
 	// skip it rather than resolve skill keys against the daemon's cwd.
 	if providerRoot != "" {
@@ -274,22 +312,6 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		}
 	}
 	return roots, true, nil
-}
-
-// hermesLocalSkillsRoot returns the skills dir of the Hermes home a task runs
-// against when its agent sets no HERMES_HOME or profile of its own. It goes
-// through execenv.ResolveHermesProfile — the resolver the task path uses — so
-// discovery follows the daemon's HERMES_HOME, the platform default
-// (%LOCALAPPDATA%\hermes on native Windows, ~/.hermes elsewhere) and the sticky
-// active_profile instead of a hardcoded ~/.hermes, which hid every skill Hermes
-// actually loads on Windows (GH #8310). A selection Hermes would refuse to start
-// under returns "": there is no home whose skills it would load.
-func hermesLocalSkillsRoot() string {
-	res := execenv.ResolveHermesProfile("", "", false, false)
-	if res.Err != nil {
-		return ""
-	}
-	return filepath.Join(res.SourceHome, "skills")
 }
 
 func isIgnoredLocalSkillEntry(name string) bool {
@@ -481,6 +503,11 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 		return nil, supported, err
 	}
 
+	skills, err := listRuntimeLocalSkillsFromRoots(provider, roots)
+	return skills, true, err
+}
+
+func listRuntimeLocalSkillsFromRoots(provider string, roots []localSkillRoot) ([]runtimeLocalSkillSummary, error) {
 	// Walk each runtime root with two extensions over filepath.WalkDir:
 	//   - Follow symlinks at every level. Installers like lark-cli ship
 	//     each skill as a symlink into a shared ~/.agents/skills/<name>;
@@ -503,7 +530,7 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, true, err
+			return nil, err
 		}
 
 		// Each root gets its OWN `visited` set. It must NOT be shared across
@@ -531,7 +558,7 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 	sort.Slice(skills, func(i, j int) bool {
 		return skills[i].Key < skills[j].Key
 	})
-	return skills, true, nil
+	return skills, nil
 }
 
 // enumerateLocalSkills walks `currentDir` looking for skill directories
