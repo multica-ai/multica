@@ -69,6 +69,7 @@ vi.mock("@multica/views/layout", () => ({
   AppSidebar: () => null,
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
+  WorkspaceSwitchShortcuts: () => null,
 }));
 
 vi.mock("@multica/views/modals/registry", () => ({ ModalRegistry: () => null }));

@@ -39,19 +39,20 @@ import {
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useWorkspacePaths, WORKSPACE_PAGES } from "@multica/core/paths";
+import { paths, useWorkspacePaths, WORKSPACE_PAGES } from "@multica/core/paths";
 import type { WorkspacePageKey, WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { createShortcutChord } from "@multica/core/shortcuts";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { routeIconForPath } from "../layout/route-icon-components";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
-import type { ProjectStatus } from "@multica/core/types";
+import type { ProjectStatus, Workspace } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
@@ -136,6 +137,11 @@ function memberInitials(name: string) {
 // Pinyin is included for the same reason member search has it: under a Chinese
 // UI the localized label is the only thing the user can aim at, so typing
 // "renwu" has to reach "任务".
+// A workspace row matches on its name, or on these prefixes, so "work" lists
+// every workspace you can switch to.
+const WORKSPACE_KEYWORDS = ["workspace", "switch"];
+const EMPTY_WORKSPACES: Workspace[] = [];
+
 function matchesRow(label: string, keywords: string[], query: string) {
   return (
     label.toLowerCase().includes(query) ||
@@ -353,6 +359,7 @@ export function SearchCommand() {
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
 
   // Resolve each recent issue via its cached detail entry. Recent items are
   // typically already in the detail cache because the user has opened them;
@@ -547,6 +554,15 @@ export function SearchCommand() {
     return commands.filter((c) => matchesRow(c.label, c.keywords, q));
   }, [commands, query]);
 
+  // Every other workspace, so the palette can switch without the sidebar menu.
+  const filteredWorkspaces = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return workspaces.filter(
+      (ws) => ws.id !== wsId && matchesRow(ws.name, WORKSPACE_KEYWORDS, q),
+    );
+  }, [workspaces, wsId, query]);
+
   const filteredMembers = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
@@ -699,6 +715,14 @@ export function SearchCommand() {
     [intentNavigate, consumeIntent, setOpen, p],
   );
 
+  const handleWorkspaceSelect = useCallback(
+    (slug: string) => {
+      setOpen(false);
+      intentNavigate(paths.workspace(slug).issues(), consumeIntent());
+    },
+    [intentNavigate, consumeIntent, setOpen],
+  );
+
   const handleMemberSelect = useCallback(
     (userId: string) => {
       intentNavigate(p.memberDetail(userId), consumeIntent());
@@ -803,6 +827,27 @@ export function SearchCommand() {
                       <HighlightText text={cmd.label} query={query} />
                     </span>
                     {cmd.trailing}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {filteredWorkspaces.length > 0 && (
+              <CommandPrimitive.Group
+                heading={t(($) => $.groups.workspaces)}
+                className={GROUP_CLASS}
+              >
+                {filteredWorkspaces.map((ws) => (
+                  <CommandPrimitive.Item
+                    key={ws.id}
+                    value={`workspace:${ws.id}`}
+                    onSelect={() => handleWorkspaceSelect(ws.slug)}
+                    className="flex cursor-default select-none items-center gap-2.5 rounded-lg px-3 py-2.5 text-body outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="md" />
+                    <span className="truncate">
+                      <HighlightText text={ws.name} query={query} />
+                    </span>
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

@@ -84,8 +84,10 @@ import { ProjectIcon } from "../projects/components/project-icon";
 import { routeIconForPath } from "./route-icon-components";
 import { useT } from "../i18n";
 import {
+  formatShortcut,
   useShortcut,
 } from "@multica/core/shortcuts";
+import { workspaceSwitchShortcut } from "./workspace-switch-shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useAppForeground } from "../common/use-app-foreground";
 
@@ -621,7 +623,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   render={
                     <SidebarMenuButton>
                       <span className="relative">
-                        <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
+                        <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="md" />
                         {/* Shared brand dot: a pending invitation OR another
                             workspace with unread inbox items. The active
                             workspace's own unread stays on the Inbox nav count
@@ -664,14 +666,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <DropdownMenuLabel className="text-caption text-muted-foreground">
                       {t(($) => $.sidebar.workspaces_label)}
                     </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
+                    {workspaces.map((ws, index) => {
+                      const switchShortcut = workspaceSwitchShortcut(index);
+                      return (
                       <DropdownMenuItem
                         key={ws.id}
+                        className="py-1.5"
                         render={
                           <AppLink href={paths.workspace(ws.slug).issues()} />
                         }
                       >
-                        <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
+                        <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="md" />
                         <span className="flex-1 truncate">{ws.name}</span>
                         {/* Points at the specific workspace holding unread
                             inbox items. Sits in the same right-edge slot as the
@@ -684,8 +689,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />
                         )}
+                        {/* Decorative, after the unread/active marker: the row's accessible name stays the
+                            workspace name. The chord is the positional
+                            Alt+Shift+N handled by WorkspaceSwitchShortcuts. */}
+                        {switchShortcut && (
+                          <span aria-hidden className="text-caption text-muted-foreground">
+                            {formatShortcut(switchShortcut)}
+                          </span>
+                        )}
                       </DropdownMenuItem>
-                    ))}
+                      );
+                    })}
                     {!workspaceCreationDisabled && (
                       <DropdownMenuItem
                         onClick={() => push(paths.newWorkspace())}

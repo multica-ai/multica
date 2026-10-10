@@ -91,7 +91,11 @@ const {
   mockCommentExpandAll,
   mockResolvedCollapseAll,
   mockResolvedExpandAll,
+  mockWorkspaces,
 } = vi.hoisted(() => ({
+  mockWorkspaces: {
+    current: [] as Array<{ id: string; slug: string; name: string; avatar_url: string | null }>,
+  },
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
   mockSearchProjects: vi.fn(),
@@ -244,6 +248,7 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["workspaces", "ws-test", "members"] }),
   agentListOptions: () => ({ queryKey: ["workspaces", "ws-test", "agents"] }),
   squadListOptions: () => ({ queryKey: ["workspaces", "ws-test", "squads"] }),
+  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -272,6 +277,9 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key[0] === "workspaces" && key[2] === "squads") {
       return { data: mockSquads.current };
+    }
+    if (key[0] === "workspaces" && key[1] === "list") {
+      return { data: mockWorkspaces.current };
     }
     if (opts.enabled === false) return { data: undefined };
     return { data: resolveIssue(key) };
@@ -323,6 +331,7 @@ describe("SearchCommand", () => {
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
     mockMembers.current = [];
+    mockWorkspaces.current = [];
     mockOpenModal.mockReset();
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
@@ -1030,6 +1039,47 @@ describe("SearchCommand", () => {
   // palette renders the whole Projects group before the whole Issues group, so
   // per-type ranking let one cancelled project be the very first row. The
   // partition has to be cross-type and applied here, where results aggregate.
+  it("switches to another workspace from the Workspaces group", async () => {
+    const user = userEvent.setup();
+    mockWorkspaces.current = [
+      { id: "ws-test", slug: "ws-test", name: "Media Lab", avatar_url: null },
+      { id: "ws-2", slug: "studio", name: "Studio Fox", avatar_url: null },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "studio");
+
+    await waitFor(() => {
+      expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    });
+    await user.click(
+      await screen.findByText((_, el) => el?.textContent === "Studio Fox" && el?.tagName === "SPAN"),
+    );
+
+    expect(mockPush).toHaveBeenCalledWith("/studio/issues");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("lists every other workspace for the keyword, never the current one", async () => {
+    const user = userEvent.setup();
+    mockWorkspaces.current = [
+      { id: "ws-test", slug: "ws-test", name: "Media Lab", avatar_url: null },
+      { id: "ws-2", slug: "studio", name: "Studio Fox", avatar_url: null },
+      { id: "ws-3", slug: "repos", name: "Repos", avatar_url: null },
+    ];
+    renderSearch();
+
+    await user.type(screen.getByPlaceholderText("Type a command or search..."), "work");
+
+    await waitFor(() => {
+      expect(screen.getByText("Workspaces")).toBeInTheDocument();
+    });
+    expect(screen.getByText((_, el) => el?.textContent === "Studio Fox" && el?.tagName === "SPAN")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.textContent === "Repos" && el?.tagName === "SPAN")).toBeInTheDocument();
+    expect(screen.queryByText("Media Lab")).not.toBeInTheDocument();
+  });
+
   describe("mixed issue/project cancelled demotion", () => {
     const fixtureIssue = (
       over: Partial<Record<string, unknown>> & { id: string },

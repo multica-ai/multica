@@ -9,6 +9,7 @@ import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { WorkspaceSwitchShortcuts } from "./workspace-switch-shortcuts";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -36,6 +37,7 @@ export function DashboardLayout({
     >
       <SidebarProvider className="h-svh bg-app-shell">
         <GlobalShortcuts />
+        <WorkspaceSwitchShortcuts />
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
         <SidebarInset className="relative overflow-hidden">

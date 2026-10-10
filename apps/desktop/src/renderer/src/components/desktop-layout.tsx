@@ -15,6 +15,7 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import {
   AppSidebar,
   GlobalShortcuts,
+  WorkspaceSwitchShortcuts,
   NavigationProgress,
 } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
@@ -270,6 +271,7 @@ export function DesktopShell() {
             className="flex-1 bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]"
           >
             {slug && <GlobalShortcuts />}
+            {slug && <WorkspaceSwitchShortcuts />}
             {slug && <WindowToolbar />}
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
             {/* Right side: header + content container */}
