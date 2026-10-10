@@ -108,12 +108,13 @@ func (f *fakeMuseReceptionist) handler() http.Handler {
 
 func fastMusePolls(t *testing.T) {
 	t.Helper()
-	oldInterval, oldBudget := musePollInterval, museMaxConsecutivePollErrors
-	musePollInterval = 5 * time.Millisecond
-	museMaxConsecutivePollErrors = 3
+	oldInterval := musePollInterval.Load()
+	oldBudget := museMaxConsecutivePollErrors.Load()
+	musePollInterval.Store(int64(5 * time.Millisecond))
+	museMaxConsecutivePollErrors.Store(3)
 	t.Cleanup(func() {
-		musePollInterval = oldInterval
-		museMaxConsecutivePollErrors = oldBudget
+		musePollInterval.Store(oldInterval)
+		museMaxConsecutivePollErrors.Store(oldBudget)
 	})
 }
 

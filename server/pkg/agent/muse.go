@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sync/atomic"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -66,14 +67,19 @@ const (
 // musePollInterval is the steady-state cadence for task status/event polls.
 // The receptionist is expected to be local or near-local (loopback or
 // tailnet); 500ms keeps the transcript live without hammering it.
-// A var so tests can shrink it without changing concurrent executions.
-var musePollInterval = 500 * time.Millisecond
+// Atomic so tests can shrink it without racing concurrent poll loops.
+var musePollInterval atomic.Int64 // nanoseconds
 
 // museMaxConsecutivePollErrors bounds transient network failures before the
 // run is failed. Ten misses at the poll interval is ~5s of silence — long
 // enough to ride out a blip, short enough not to wedge a task on a dead
-// receptionist. A var for the same test reason as musePollInterval.
-var museMaxConsecutivePollErrors = 10
+// receptionist. Atomic for the same test reason as musePollInterval.
+var museMaxConsecutivePollErrors atomic.Int32
+
+func init() {
+	musePollInterval.Store(int64(500 * time.Millisecond))
+	museMaxConsecutivePollErrors.Store(10)
+}
 
 type museEndpointConfig struct {
 	endpoint string
@@ -311,7 +317,7 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			return true
 		}
 
-		ticker := time.NewTicker(musePollInterval)
+		ticker := time.NewTicker(time.Duration(musePollInterval.Load()))
 		defer ticker.Stop()
 		for {
 			select {
@@ -416,7 +422,7 @@ func museTaskPath(taskID, suffix string) string {
 func musePollFailed(pollErrs *int, err error, logger *slog.Logger, taskID string) bool {
 	*pollErrs++
 	logger.Debug("muse poll failed", "task_id", taskID, "consecutive", *pollErrs, "error", err)
-	return *pollErrs >= museMaxConsecutivePollErrors
+	return *pollErrs >= int(museMaxConsecutivePollErrors.Load())
 }
 
 func (b *museBackend) postExecute(ctx context.Context, mc museEndpointConfig, req museExecuteRequest, out *museExecuteResponse) error {
