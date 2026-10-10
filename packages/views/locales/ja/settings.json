@@ -187,6 +187,7 @@
     "comments_title": "コメントとチャット",
     "region_title": "言語と地域",
     "appearance_title": "外観",
+    "sidebar_title": "サイドバーの項目",
     "issue_fields_title": "タスク作成時に表示するフィールド",
     "issue_fields": {
       "field": "フィールド",

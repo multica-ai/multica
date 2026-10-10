@@ -188,6 +188,7 @@
     "comments_title": "Commentaires et discussion",
     "region_title": "Langue et région",
     "appearance_title": "Apparence",
+    "sidebar_title": "Éléments de la barre latérale",
     "issue_fields_title": "Champs affichés à la création de tâches",
     "issue_fields": {
       "field": "Champ",

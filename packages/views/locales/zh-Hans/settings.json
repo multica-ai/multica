@@ -187,6 +187,7 @@
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
     "appearance_title": "外观",
+    "sidebar_title": "侧边栏项目",
     "issue_fields_title": "创建任务时显示的字段",
     "issue_fields": {
       "field": "字段",
