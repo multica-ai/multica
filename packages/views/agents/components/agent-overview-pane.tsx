@@ -30,6 +30,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
+import { AgentChatsTab } from "./tabs/chats-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
@@ -44,11 +45,17 @@ import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 
-type DetailSection = "overview" | "work" | "capabilities" | "settings";
+type DetailSection =
+  | "overview"
+  | "work"
+  | "chats"
+  | "capabilities"
+  | "settings";
 
 export type DetailTab =
   | "overview"
   | "work"
+  | "chats"
   | "instructions"
   | "skills"
   | "mcp_config"
@@ -94,6 +101,7 @@ const SETTINGS_TABS: SecondaryTab[] = [
 const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
   { id: "overview", labelKey: "overview" },
   { id: "work", labelKey: "work" },
+  { id: "chats", labelKey: "chats" },
   { id: "capabilities", labelKey: "capabilities" },
   { id: "settings", labelKey: "settings" },
 ];
@@ -105,6 +113,7 @@ const SETTINGS_IDS = new Set<DetailTab>(SETTINGS_TABS.map((tab) => tab.id));
 const DETAIL_VIEWS = new Set<DetailTab>([
   "overview",
   "work",
+  "chats",
   ...CAPABILITY_TABS.map((tab) => tab.id),
   ...SETTINGS_TABS.map((tab) => tab.id),
 ]);
@@ -116,6 +125,7 @@ function isDetailTab(value: string | null): value is DetailTab {
 function sectionForView(view: DetailTab): DetailSection {
   if (view === "overview") return "overview";
   if (view === "work") return "work";
+  if (view === "chats") return "chats";
   if (CAPABILITY_IDS.has(view)) return "capabilities";
   return "settings";
 }
@@ -238,10 +248,23 @@ export function AgentOverviewPane({
       new Set<DetailTab>([
         "overview",
         "work",
+        // Conversation monitoring is a privileged read of other members'
+        // private chats, so it mirrors the env tab: the server admits only the
+        // agent owner or a workspace owner/admin (canEdit), and the tab is
+        // hidden from everyone else rather than offering a dead 403.
+        ...(canEdit ? (["chats"] as const) : []),
         ...visibleCapabilityTabs.map((tab) => tab.id),
         ...visibleSettingsTabs.map((tab) => tab.id),
       ]),
-    [visibleCapabilityTabs, visibleSettingsTabs],
+    [canEdit, visibleCapabilityTabs, visibleSettingsTabs],
+  );
+
+  // Top tabs are rendered straight from TOP_TABS, so a privileged one (Chats)
+  // must be filtered here as well as in visibleViews — otherwise it appears and
+  // routes to a view that immediately falls back to Overview.
+  const visibleTopTabs = useMemo(
+    () => TOP_TABS.filter((tab) => tab.id !== "chats" || canEdit),
+    [canEdit],
   );
 
   const effectiveView = visibleViews.has(activeView) ? activeView : "overview";
@@ -272,7 +295,11 @@ export function AgentOverviewPane({
   );
 
   const requestSection = (section: DetailSection) => {
-    if (section === "overview" || section === "work") {
+    if (
+      section === "overview" ||
+      section === "work" ||
+      section === "chats"
+    ) {
       requestView(section);
       return;
     }
@@ -333,7 +360,7 @@ export function AgentOverviewPane({
         aria-label={t(($) => $.tabs.page_navigation_aria)}
       >
         <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
-          {TOP_TABS.map((tab) => (
+          {visibleTopTabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -376,7 +403,7 @@ export function AgentOverviewPane({
       <div
         className={cn(
           "min-h-0 flex-1 overflow-y-auto",
-          isSecondaryLayout && "md:overflow-hidden",
+          (isSecondaryLayout || effectiveView === "chats") && "md:overflow-hidden",
         )}
       >
         {effectiveView === "overview" && (
@@ -397,6 +424,12 @@ export function AgentOverviewPane({
         {effectiveView === "work" && (
           <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col")}>
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+          </div>
+        )}
+
+        {effectiveView === "chats" && (
+          <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col md:h-full")}>
+            <AgentChatsTab agent={agent} members={members} />
           </div>
         )}
 

@@ -127,14 +127,14 @@ describe("useRealtimeSync — ws instance change", () => {
 
     // Should have called invalidateQueries for all workspace-scoped keys
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
-    // prefixes + the workspace working-agents projection + 5 per-chat
-    // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls).
+    // prefixes + the workspace working-agents projection + 6 per-chat
+    // prefixes [incl. agent-messages monitoring] + 1 workspaceKeys.list() +
+    // 1 cross-workspace inbox unread summary = 32 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(31));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(32));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -243,6 +243,7 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["chat", "messages-page"]);
     expect(calls).toContainEqual(["chat", "pending-task"]);
     expect(calls).toContainEqual(["task-messages"]);
+    expect(calls).toContainEqual(["chat", "agent-messages"]);
   });
 
   it("invalidates per-chat-session caches after an established ws reconnects", () => {
@@ -260,6 +261,7 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(chatKeys.messagesAll());
     expect(calls).toContainEqual(chatKeys.messagesPageAll());
     expect(calls).toContainEqual(chatKeys.pendingTaskAll());
+    expect(calls).toContainEqual(chatKeys.agentMessagesAll());
   });
 
   it("invalidates one issue attachment cache after detached channel media binds", () => {
@@ -338,6 +340,9 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: chatKeys.sessions("ws-1"),
     });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["chat", "ws-1", "agent-sessions"],
+    });
 
 		invalidateSpy.mockClear();
 		(sessionCreated as (payload: unknown) => void)({
@@ -345,6 +350,27 @@ describe("useRealtimeSync — ws instance change", () => {
 			chat_session_id: "other-workspace-session",
 		});
 		expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+
+  it("invalidates the agent monitoring list when a session is renamed or archived", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const sessionUpdated = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "chat:session_updated")?.[1];
+    expect(sessionUpdated).toBeDefined();
+
+    invalidateSpy.mockClear();
+    (sessionUpdated as (payload: unknown) => void)({
+      chat_session_id: "session-1",
+      status: "archived",
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["chat", "ws-1", "agent-sessions"],
+    });
   });
 });
 

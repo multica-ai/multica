@@ -106,6 +106,46 @@ WHERE cs.workspace_id = $1 AND cs.creator_id = $2
   )
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
+-- name: ListChatSessionsByAgent :many
+-- Monitor projection: every member's sessions with ONE agent, for the agent
+-- owner or a workspace owner/admin. Unlike ListChatSessionsByCreator this is
+-- not scoped to a creator, so it drops the pinned ordering (a pin is the
+-- creator's private list preference, not a property of the conversation) and
+-- orders purely by recent activity. Archived sessions are included only when
+-- @include_archived, and the same "has a real message or was explicitly
+-- created" guard as ListAllChatSessionsByCreator keeps command-only channel
+-- sessions out. Unread is relative to each session's own creator cursor and is
+-- informational here — the viewer is never the creator.
+SELECT cs.*,
+       CASE WHEN cs.status = 'archived' THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.role = 'assistant'
+                      AND m.created_at > cs.last_read_at)
+       END::int AS unread_count,
+       COALESCE(lm.content, '') AS last_message_content,
+       COALESCE(lm.role, '') AS last_message_role,
+       lm.created_at AS last_message_at,
+       lm.failure_reason AS last_message_failure_reason,
+       COALESCE(lm.message_kind, '') AS last_message_kind
+FROM chat_session cs
+LEFT JOIN LATERAL (
+  SELECT content, role, created_at, failure_reason, message_kind
+    FROM chat_message m
+   WHERE m.chat_session_id = cs.id
+     AND m.message_kind != 'channel_command'
+   ORDER BY m.created_at DESC
+   LIMIT 1
+) lm ON true
+WHERE cs.workspace_id = @workspace_id
+  AND cs.agent_id = @agent_id
+  AND (@include_archived::bool OR cs.status = 'active')
+  AND (
+    cs.explicitly_created_at IS NOT NULL
+    OR lm.created_at IS NOT NULL
+  )
+ORDER BY COALESCE(lm.created_at, cs.updated_at) DESC;
+
 -- name: ListAgentBuilderSessionsByCreator :many
 -- The caller's unfinished agent-creation conversations.
 --

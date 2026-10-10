@@ -66,6 +66,12 @@ export const chatKeys = {
   /** Per-task execution messages — shared with issue agent cards. */
   taskMessagesAll: () => ["task-messages"] as const,
   taskMessages: (taskId: string) => [...chatKeys.taskMessagesAll(), taskId] as const,
+  /** Every member's sessions with one agent, for owner/admin monitoring. */
+  agentSessions: (wsId: string, agentId: string) =>
+    [...chatKeys.all(wsId), "agent-sessions", agentId] as const,
+  agentMessagesAll: () => ["chat", "agent-messages"] as const,
+  agentMessages: (agentId: string, sessionId: string) =>
+    [...chatKeys.agentMessagesAll(), agentId, sessionId] as const,
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -153,6 +159,52 @@ export function chatMessagesPageOptions(sessionId: string, limit = 50) {
     getNextPageParam: (lastPage) =>
       lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
     enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Owner/admin monitoring: every member's chat sessions with one agent.
+ * `includeArchived` is folded into the key so the active and full lists cache
+ * separately. Gap query for the agent detail Chats tab.
+ */
+export function agentChatSessionsOptions(
+  wsId: string,
+  agentId: string,
+  includeArchived = false,
+) {
+  return queryOptions({
+    queryKey: [
+      ...chatKeys.agentSessions(wsId, agentId),
+      includeArchived ? "all" : "active",
+    ],
+    queryFn: () =>
+      api.listAgentChatSessions(
+        agentId,
+        includeArchived ? { status: "all" } : undefined,
+      ),
+    enabled: !!agentId,
+    staleTime: Infinity,
+  });
+}
+
+/** One monitored session's read-only transcript, paged like the user's own. */
+export function agentChatMessagesPageOptions(
+  agentId: string,
+  sessionId: string,
+  limit = 50,
+) {
+  return infiniteQueryOptions({
+    queryKey: chatKeys.agentMessages(agentId, sessionId),
+    queryFn: ({ pageParam }) =>
+      api.listAgentChatSessionMessages(agentId, sessionId, {
+        before: pageParam,
+        limit,
+      }),
+    initialPageParam: null as { created_at: string; id: string } | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
+    enabled: !!agentId && !!sessionId,
     staleTime: Infinity,
   });
 }

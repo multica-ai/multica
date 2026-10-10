@@ -245,6 +245,7 @@
   "tabs": {
     "overview": "概要",
     "work": "作業",
+    "chats": "会話",
     "capabilities": "機能",
     "settings": "設定",
     "general": "一般",
@@ -863,6 +864,15 @@
     "section_columns": "列",
     "section_owner": "オーナー",
     "section_model": "モデル"
+  },
+  "chats": {
+    "title": "会話履歴",
+    "show_archived": "アーカイブを表示",
+    "empty_list": "このエージェントとの会話はまだありません。",
+    "empty_transcript": "この会話には表示できるメッセージがありません。",
+    "select_conversation": "会話を選択して内容を表示します。",
+    "untitled": "無題",
+    "archived": "アーカイブ済み"
   },
   "creation_studio": {
     "title": "エージェントを作成",

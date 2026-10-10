@@ -1807,6 +1807,109 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("agent conversation monitoring", () => {
+    const jsonResponse = (body: unknown, status: number, statusText = "") =>
+      new Response(JSON.stringify(body), {
+        status,
+        statusText,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const session = {
+      id: "s1",
+      workspace_id: "ws-1",
+      agent_id: "agent-1",
+      creator_id: "user-2",
+      title: "Deploy help",
+      status: "active",
+      has_unread: false,
+      unread_count: 0,
+      last_message: null,
+      pinned: false,
+      created_at: "2026-06-01T00:00:00Z",
+      updated_at: "2026-06-01T00:00:00Z",
+    };
+
+    it("lists an agent's sessions and folds malformed rows out", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse([session, { id: 42 }], 200),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const sessions = await client.listAgentChatSessions("agent-1", {
+        status: "all",
+      });
+
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/agents/agent-1/chat-sessions?status=all",
+      );
+      expect(sessions).toEqual([session]);
+    });
+
+    it("omits the status query for the active-only default", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse([], 200));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.listAgentChatSessions("agent-1");
+
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/agents/agent-1/chat-sessions",
+      );
+    });
+
+    it("pages a monitored transcript by cursor", async () => {
+      const page = {
+        messages: [
+          {
+            id: "m1",
+            chat_session_id: "s1",
+            role: "user",
+            content: "hi",
+            task_id: null,
+            created_at: "2026-06-01T00:00:00Z",
+            quick_actions: [],
+          },
+        ],
+        limit: 20,
+        has_more: true,
+        next_cursor: { created_at: "2026-06-01T00:00:00Z", id: "m1" },
+      };
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(page, 200));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.listAgentChatSessionMessages("agent-1", "s1", {
+        limit: 20,
+        before: { created_at: "2026-06-02T00:00:00Z", id: "m9" },
+      });
+
+      const url = fetchMock.mock.calls[0]![0] as string;
+      expect(url).toContain("/api/agents/agent-1/chat-sessions/s1/messages");
+      expect(url).toContain("limit=20");
+      expect(url).toContain("before_id=m9");
+      expect(result).toEqual(page);
+    });
+
+    it("falls back to an empty page for a malformed transcript response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(jsonResponse({ messages: "broken" }, 200)),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listAgentChatSessionMessages("agent-1", "s1", { limit: 25 }),
+      ).resolves.toEqual({
+        messages: [],
+        limit: 25,
+        has_more: false,
+        next_cursor: null,
+      });
+    });
+  });
+
   describe("cancelTaskById response parsing", () => {
     const taskResponse = {
       id: "task-1",
