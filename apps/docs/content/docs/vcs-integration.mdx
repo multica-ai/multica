@@ -1,6 +1,6 @@
 ---
-title: Self-hosted Git providers
-description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that carry an issue identifier in their branch name or title, or after a closing keyword in the body, auto-attach to that issue, move it to the workspace's chosen status when they merge, and show CI status.
+title: Git provider integration
+description: Connect Forgejo, Gitea, GitLab or Tencent Gongfeng to link pull/merge requests to issues and move issues after merges.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -14,7 +14,7 @@ and set `MULTICA_VCS_SECRET_KEY`; until then the section does not appear in
 Settings → Code.
 </Callout>
 
-Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name or title contains an issue identifier (for example `MUL-123`), or whose body names one after a closing keyword (`Closes MUL-123`), is **auto-linked** to that [issue](/issues) and appears under **Pull requests** in the issue sidebar. When every PR linked to the issue is merged, the issue moves to the status the workspace chose (**Done** by default). CI for the head commit shows as a checks bar on the card.
+Self-hosted Multica connects **Forgejo**, **Gitea**, **GitLab**, or official **Tencent Gongfeng** per workspace. Once connected, any pull request (GitLab: merge request) whose branch name or title contains an issue identifier (for example `MUL-123`), or whose body names one after a closing keyword (`Closes MUL-123`), is **auto-linked** to that [issue](/issues) and appears under **Pull requests** in the issue sidebar. When every PR linked to the issue is merged, the issue moves to the status the workspace chose (**Done** by default). Forgejo/Gitea and GitLab CI for the head commit shows as a checks bar on the card.
 
 These providers run alongside GitHub: a workspace can use any combination.
 
@@ -51,7 +51,7 @@ Set `MULTICA_PUBLIC_URL` to the server's public base URL so Multica can show a r
 1. Create an access token in your provider with read access to the repositories you want mirrored:
    - **Forgejo / Gitea**: Settings → Applications.
    - **GitLab**: a personal (or group/project) access token with the `read_api` scope.
-2. In Multica, open **Settings → Code**, then click **Connect** in the **Self-hosted Git** row.
+2. In Multica, open **Settings → Code**, then click **Connect** in the **Git providers** row.
 3. Choose the **provider**, enter the instance URL (for example `https://forgejo.example.com`) and the access token, then **Connect**. Multica validates the token against the instance before saving.
 4. Copy the **webhook URL** and **webhook secret** shown after connecting.
 
@@ -93,3 +93,62 @@ Multica authenticates every delivery against the stored secret, so a webhook wit
 ## Agents opening pull requests
 
 Creating PRs needs no provider configuration in Multica. Agents check out repositories in the runtime and push branches and open PRs using the runtime host's own Git credentials. To let agents work against a provider, ensure the daemon host can authenticate to it — for example an SSH deploy key, or a token in the host's Git credential helper — and add the repository URL as usual. Repository checkout works with any Git URL, so no provider-specific wiring is required.
+
+## Tencent Gongfeng
+
+Choose **Tencent Gongfeng** in the provider selector. The official instance URL
+is `https://git.code.tencent.com`; create a **Private Token** in your Gongfeng
+account settings. Multica validates it through `/api/v3/user`.
+
+After connecting, select **Gongfeng repositories**. Multica configures a merge-request webhook and imports existing MRs in the background. The token needs repository read access and permission to manage its webhooks; the Multica public URL must be reachable from Gongfeng over HTTPS. Repository selection also appears under **Add repository → Choose from Gongfeng**, where selected clone URLs are added to the workspace for agents.
+
+The repository picker shows sync progress and permission errors. **Retry sync** imports the full history again and repairs the webhook. Rotating the webhook secret updates registered webhooks without creating duplicates. Stopping sync removes the registered webhook and preserves mirrored MRs; disconnecting removes the connection and its mirrored data. If a revoked token prevents remote webhook cleanup, the connection is still removed and Multica asks you to delete the remaining webhook in Gongfeng. For manual setup, regenerate the webhook secret and enable **Merge request events** with the provided URL and token. Deliveries use `X-Event: Merge Request Hook` and `X-Token`.
+
+MR creation, update, close, reopen and merge reuse the linking and issue-status rules above. Cards display the repository-local `iid`; API detail requests resolve the global `id` separately. API refreshes fill in the author and recover missed events. CI checks and conflict information refresh on MR events, page visits and periodic background sweeps. Checks belong to the current source commit, including fork branches; changing the commit invalidates old checks. Failed refreshes mark last-known results as stale. Missing merge-policy or approval information is not inferred from conflict status.
+
+For agents, install the community [gongfeng-cli](https://github.com/studyzy/gongfeng-cli)
+on the runtime host and configure CLI authentication separately from Git credentials.
+The official Multica CLI `v0.6.1` works with this integration: the server delivers
+the Gongfeng reference in the `multica-platform` task skill bundle, so a custom
+runtime build is not required. Real task execution with Codex on an Apple silicon
+Mac covered MR creation and updates, check synchronization, and issue completion
+after merge. Windows and other agent providers still require native acceptance.
+Download `v0.5.0` from the original project's [Releases](https://github.com/studyzy/gongfeng-cli/releases/tag/v0.5.0).
+Prebuilt packages are available for macOS arm64, Linux x86_64 and Windows x86_64;
+Go is not required for these packages. With Go installed, use the same pinned version:
+
+```sh
+go install github.com/studyzy/gongfeng-cli/cmd/gongfeng@v0.5.0
+```
+
+Authenticate with `GONGFENG_TOKEN` or a private `~/.gongfeng.json` file (the token
+is stored in plaintext; use mode `0600` on macOS/Linux or a personal file ACL on
+Windows). Some agents filter environment variables;
+confirm access inside the actual runtime. Keep tokens out of command arguments,
+repository files and task comments. Repository-local configuration can override
+the API address and credentials. Pass the official `--base-url` explicitly and
+verify the account before writes:
+
+```sh
+gongfeng --base-url https://git.code.tencent.com user me --json
+gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr list --json
+```
+
+The explicit address does not restrict HTTP redirects. The community CLI's
+credential loading and redirect handling need separate hardening before using
+it with untrusted repositories.
+
+Use `gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr create --help` to check flags,
+then specify `--source-branch`, `--target-branch`, `--title` and `--description`.
+The CLI's `show`, `update` and `accept` commands use the global MR `id`; resolve
+it with `mr list --json` instead of passing the displayed `iid`. The server's
+stored token is not passed to agents.
+
+MR actions use the CLI account on the runtime host. Multica does not switch to
+the task creator's account, and separate Multica profiles under the same OS
+account share CLI credentials. For personal attribution, each member needs an
+isolated personal runtime and credentials. Git commit authors and SSH push
+identities are configured separately.
+
+Multica reads check results; it does not run repository tests. For ongoing
+checks, configure a CI runner to report against the current source commit SHA.

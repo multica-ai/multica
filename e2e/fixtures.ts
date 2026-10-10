@@ -224,6 +224,23 @@ export class TestApiClient {
     return issue;
   }
 
+  async getIssue(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}`);
+    if (!res.ok) throw new Error(`getIssue failed: ${res.status}`);
+    return res.json();
+  }
+
+  async getIssuePullRequests(id: string) {
+    const res = await this.authedFetch(`/api/issues/${id}/pull-requests`);
+    if (!res.ok) throw new Error(`getIssuePullRequests failed: ${res.status}`);
+    return res.json();
+  }
+
+  async deleteVCSConnection(workspaceId: string, connectionId: string) {
+    const res = await this.authedFetch(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`deleteVCSConnection failed: ${res.status}`);
+  }
+
   /**
    * Insert a large, deterministic issue fixture in one transaction.
    *

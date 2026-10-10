@@ -1,5 +1,7 @@
 "use client";
 
+import { GongfengRepositoryPicker } from "./gongfeng-repository-picker";
+import { vcsConnectionsOptions } from "@multica/core/vcs";
 import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
@@ -64,6 +66,7 @@ import {
 import { api } from "@multica/core/api";
 import type {
   GitHubRepository,
+  VCSConnection,
   Workspace,
   WorkspaceRepo,
 } from "@multica/core/types";
@@ -139,6 +142,8 @@ export function RepositoriesSection() {
   const canManageWorkspace = role === "owner" || role === "admin";
   const repositories = workspace?.repos ?? EMPTY_REPOSITORIES;
 
+  const { data: vcsData } = useQuery({ ...vcsConnectionsOptions(wsId), enabled: !!wsId && canManageWorkspace });
+  const [gongfengConnection, setGongfengConnection] = useState<VCSConnection | null>(null);
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingRemovalIndex, setPendingRemovalIndex] = useState<number | null>(null);
@@ -414,6 +419,11 @@ export function RepositoriesSection() {
                   ) : null}
                 </span>
               </DropdownMenuItem>
+              {vcsData?.connections.filter((connection) => connection.provider === "gongfeng").map((connection) => (
+                <DropdownMenuItem key={connection.id} onClick={() => setGongfengConnection(connection)}>
+                  <FolderGit2 />{t(($) => $.vcs.gongfeng_choose)}
+                </DropdownMenuItem>
+              ))}
               <DropdownMenuItem
                 onClick={() => setDraft({ index: null, url: "", description: "" })}
               >
@@ -585,6 +595,16 @@ export function RepositoriesSection() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {gongfengConnection ? <GongfengRepositoryPicker wsId={wsId} connection={gongfengConnection} onClose={() => setGongfengConnection(null)} onImport={async (chosen) => {
+        const known = new Set(repositories.map((repo) => repositoryIdentity(repo.url)));
+        const additions = chosen.filter((repo) => {
+          const identity = repositoryIdentity(repo.clone_url);
+          if (!identity || known.has(identity)) return false;
+          known.add(identity); return true;
+        }).map((repo) => ({ url: repo.clone_url, description: repo.description }));
+        return additions.length === 0 || await persist([...repositories, ...additions]);
+      }} /> : null}
 
       <Dialog
         open={githubPickerOpen}

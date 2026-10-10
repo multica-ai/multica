@@ -1,6 +1,6 @@
 ---
-title: 자체 호스팅 Git 코드 호스팅
-description: 워크스페이스마다 자체 호스팅 Forgejo, Gitea, GitLab 인스턴스를 연결해 브랜치 이름이나 제목에 태스크 번호가 있거나 본문의 종료 키워드 뒤에 태스크 번호가 있는 Pull Request / Merge Request를 해당 태스크에 자동 연결하고, merge되면 워크스페이스가 정한 상태로 옮기며 CI 상태를 표시합니다.
+title: Git 제공자 통합
+description: Forgejo, Gitea, GitLab 또는 Tencent Gongfeng의 Pull Request를 이슈에 연결하고 병합 후 이슈 상태를 변경합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 **자체 배포한 Multica에서만 사용할 수 있습니다.** 이 연동은 Multica를 **직접 배포해 운영할 때만** 제공되며 Multica Cloud에서는 사용할 수 없습니다. 여기서 "자체 호스팅"은 **Multica 자체를 배포하는 것**을 뜻합니다. 일반적으로 자체 네트워크의 Git 인스턴스에 접근하기 위해 사용합니다. 서버 운영자가 `MULTICA_VCS_INTEGRATION_ENABLED=true`로 기능을 켜고 `MULTICA_VCS_SECRET_KEY`도 설정해야 합니다. 그전에는 설정 → 코드에 이 행이 표시되지 않습니다.
 </Callout>
 
-Multica는 워크스페이스별로 자체 호스팅 Git 코드 호스팅인 **Forgejo**, **Gitea**, **GitLab** 중 하나에 연결합니다. 연결하면 브랜치 이름이나 제목에 태스크 번호(예: `MUL-123`)가 포함되거나 본문의 종료 키워드 뒤에 태스크 번호(`Closes MUL-123`)가 있는 Pull Request(GitLab에서는 Merge Request)가 해당 [태스크](/issues)에 **자동으로 연결**되고 태스크 사이드바의 **Pull requests**에 표시됩니다. 태스크에 연결된 PR이 모두 merge되면 태스크가 워크스페이스가 정한 상태(기본값 완료)로 이동합니다. head commit의 CI는 카드에 check bar로 표시됩니다.
+자체 배포한 Multica는 워크스페이스별로 **Forgejo**, **Gitea**, **GitLab** 또는 공식 **Tencent Gongfeng**에 연결합니다. 연결하면 브랜치 이름이나 제목에 태스크 번호(예: `MUL-123`)가 포함되거나 본문의 종료 키워드 뒤에 태스크 번호(`Closes MUL-123`)가 있는 Pull Request(GitLab에서는 Merge Request)가 해당 [태스크](/issues)에 **자동으로 연결**되고 태스크 사이드바의 **Pull requests**에 표시됩니다. 태스크에 연결된 PR이 모두 merge되면 태스크가 워크스페이스가 정한 상태(기본값 완료)로 이동합니다. Forgejo/Gitea 및 GitLab의 head commit CI는 카드에 check bar로 표시됩니다.
 
 이 코드 호스팅은 GitHub와 동시에 사용할 수 있으며 워크스페이스 하나에서 원하는 대로 조합할 수 있습니다.
 
@@ -46,7 +46,7 @@ MULTICA_VCS_SECRET_KEY=<base64 32바이트 키>
 1. Git 코드 호스팅에서 저장소 읽기 권한이 있는 액세스 token을 만듭니다.
    - **Forgejo / Gitea**: 설정 → 애플리케이션.
    - **GitLab**: `read_api` 권한이 있는 개인(또는 그룹/프로젝트) 액세스 token.
-2. Multica에서 **설정 → 코드**를 열고 **셀프 호스팅 Git** 행에서 **연결**을 클릭합니다.
+2. Multica에서 **설정 → 코드**를 열고 **Git 제공자** 행에서 **연결**을 클릭합니다.
 3. **제공자**를 선택하고 인스턴스 URL(예: `https://forgejo.example.com`)과 액세스 token을 입력한 뒤 **연결**을 클릭합니다. Multica는 저장하기 전에 해당 token으로 인스턴스에 접근해 검증합니다.
 4. 연결 후 표시되는 **Webhook URL**과 **Webhook secret**을 복사합니다.
 
@@ -88,3 +88,60 @@ Multica는 저장된 secret으로 모든 delivery를 검증하므로 일치하�
 ## 에이전트의 Pull Request 생성
 
 PR을 만드는 데 Multica의 Git 코드 호스팅 설정은 필요하지 않습니다. 에이전트는 런타임에서 저장소를 checkout하고 런타임 host 자체의 Git 자격 증명으로 브랜치를 push하고 PR을 만듭니다. 에이전트가 특정 코드 호스팅에서 작업하게 하려면 SSH deploy key 또는 host의 Git credential helper에 저장된 token 등을 사용해 데몬 host가 해당 서비스에 인증할 수 있게 하고 평소처럼 저장소 URL을 추가하세요. 저장소 checkout은 모든 Git URL을 지원하므로 제공자별 설정이 필요하지 않습니다.
+
+## Tencent Gongfeng
+
+제공자에서 **Tencent Gongfeng**을 선택하고 공식 URL
+`https://git.code.tencent.com`과 계정 설정에서 만든 **Private Token**을 입력하세요.
+토큰은 `/api/v3/user`로 검증합니다.
+
+연결 후 **Gongfeng 저장소**를 선택하세요. Multica가 MR Webhook을 자동 설정하고 기존 MR을 백그라운드에서 가져옵니다. 토큰에는 저장소 읽기 및 Webhook 관리 권한이 필요합니다. 공개 URL은 Gongfeng에서 HTTPS로 접근할 수 있어야 합니다. **저장소 추가 → Gongfeng에서 선택**에서는 복제 URL도 에이전트용 저장소에 추가됩니다.
+
+선택 화면에서 진행 상황과 오류를 확인할 수 있습니다. **다시 동기화**는 전체 기록을 다시 가져오고 Webhook을 복구합니다. 시크릿 재생성은 기존 Webhook을 갱신합니다. 동기화 중지는 Webhook을 삭제하고 MR을 보존합니다. 연결 해제는 연결 및 미러 데이터를 삭제합니다. 만료된 토큰으로 원격 Webhook을 삭제할 수 없어도 연결은 해제되며 Gongfeng에서 수동 삭제하도록 안내합니다. 수동 설정 시 시크릿을 재생성하고 제공된 URL과 token으로 **Merge request** 이벤트를 활성화하세요. 전송은 `X-Event: Merge Request Hook`과 `X-Token`을 사용합니다.
+
+MR은 위의 연결 규칙과 저장소 내 `iid`를 사용하며, API 상세 조회는 전역 `id`를 확인합니다. API 갱신으로 작성자와 누락된 이벤트를 복구합니다. CI와 충돌 정보는 이벤트, 페이지 방문, 주기적인 스캔에서 갱신됩니다. 결과는 fork를 포함한 현재 소스 커밋에 속하며 새 커밋은 이전 결과를 무효화합니다. 갱신 실패 시 기존 결과를 오래된 정보로 표시합니다. 제공되지 않은 승인이나 병합 정책을 충돌 상태에서 추정하지 않습니다.
+
+에이전트는 런타임 호스트에 커뮤니티 도구
+[gongfeng-cli](https://github.com/studyzy/gongfeng-cli)를 설치해야 합니다.
+공식 Multica CLI `v0.6.1`은 서버가 보내는 `multica-platform` 번들에서 Gongfeng
+작업 지침을 받으므로 별도 커스텀 런타임이 필요하지 않습니다. Apple silicon Mac에서
+Codex로 실제 태스크 실행, MR 생성 및 갱신, 체크 결과 동기화, 병합 후 태스크 완료를
+검증했습니다. Windows와 다른 에이전트는 별도의 실기기 검증이 필요합니다.
+원본 프로젝트의 [v0.5.0](https://github.com/studyzy/gongfeng-cli/releases/tag/v0.5.0)에서
+macOS arm64, Linux x86_64, Windows x86_64 바이너리를 받으면 Go가 필요하지 않습니다.
+Go가 설치되어 있다면 같은 고정 버전을 설치할 수 있습니다.
+
+```sh
+go install github.com/studyzy/gongfeng-cli/cmd/gongfeng@v0.5.0
+```
+
+Git 인증 정보와 별도로 `GONGFENG_TOKEN` 또는 `~/.gongfeng.json`으로 CLI 인증을
+설정하세요. 파일에는 토큰이 평문으로 저장되므로 macOS/Linux에서는 권한을 `0600`으로,
+Windows에서는 파일 ACL을 본인만 접근할 수 있도록 제한하세요.
+일부 에이전트는 환경 변수를 필터링하므로 실제 런타임 안에서 접근을 확인해야 합니다.
+서버 토큰은 에이전트에 전달하지 않습니다. 토큰을 명령 인자, 저장소 파일, 태스크 댓글에
+넣지 마세요.
+
+저장소 설정은 API 주소와 인증 정보를 덮어쓸 수 있습니다.
+공식 주소를 명시하고 쓰기 작업 전에 계정을 확인하세요.
+
+```sh
+gongfeng --base-url https://git.code.tencent.com user me --json
+gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr list --json
+```
+
+주소를 명시해도 HTTP 리디렉션은 제한되지 않습니다. 신뢰할 수 없는 저장소에서 사용하기
+전에 커뮤니티 CLI의 인증 정보 로딩과 리디렉션 처리를 강화해야 합니다.
+
+`gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr create --help`로
+플래그를 확인하고 `--source-branch`, `--target-branch`, `--title`, `--description`을
+지정하세요. `show`, `update`, `accept`는 전역 MR `id`를 사용하므로
+`mr list --json`에서 조회하고 표시 번호 `iid`와 혼동하지 마세요.
+
+MR 작업에는 런타임 호스트의 CLI 계정이 사용되며 태스크 작성자 계정으로 자동 전환되지
+않습니다. 같은 OS 계정의 Multica 프로필은 CLI 인증 정보를 공유합니다. 각 멤버의
+작업으로 기록하려면 개인별로 격리된 런타임과 인증 정보가 필요합니다. Git 커밋 작성자와
+SSH push 계정도 별도로 설정하세요.
+
+Multica는 체크 결과를 읽으며 저장소 테스트를 실행하지 않습니다.
+지속적인 체크에는 현재 소스 커밋 SHA에 결과를 보고하는 CI 러너가 필요합니다.

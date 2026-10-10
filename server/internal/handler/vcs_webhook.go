@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -50,7 +52,7 @@ func vcsPullRequestToResponse(p db.VcsPullRequest) GitHubPullRequestResponse {
 // vcsPullRequestRowToResponse maps an issue's PR-list row, which carries the
 // aggregated commit-status counts, onto the shared response shape.
 func vcsPullRequestRowToResponse(p db.ListVCSPullRequestsByIssueRow) GitHubPullRequestResponse {
-	return GitHubPullRequestResponse{
+	resp := GitHubPullRequestResponse{
 		ID:               uuidToString(p.ID),
 		Provider:         p.Provider,
 		WorkspaceID:      uuidToString(p.WorkspaceID),
@@ -79,6 +81,26 @@ func vcsPullRequestRowToResponse(p db.ListVCSPullRequestsByIssueRow) GitHubPullR
 		Deletions:        p.Deletions,
 		ChangedFiles:     p.ChangedFiles,
 	}
+	if p.Provider == "gongfeng" {
+		available := p.SnapshotFetchedAt.Valid && p.HeadSha != "" && p.SnapshotHeadSha == p.HeadSha
+		var checks vcs.GongfengChecks
+		if available && json.Unmarshal(p.Snapshot, &checks) != nil {
+			available = false
+		}
+		resp.SnapshotAvailable = &available
+		resp.SnapshotFetchedAt = timestampToPtr(p.SnapshotFetchedAt)
+		resp.SnapshotStale = p.SnapshotError != "" || (available && time.Since(p.SnapshotFetchedAt.Time) > prSnapshotStaleThreshold)
+		resp.ChecksTotal, resp.ChecksPassed, resp.ChecksFailed, resp.ChecksPending, resp.ChecksRunning = 0, 0, 0, 0, 0
+		resp.ChecksConclusion = nil
+		if available {
+			resp.Mergeable = checks.Mergeable
+			resp.ChecksRollup = checks.Rollup
+			resp.ChecksTotal, resp.ChecksPassed, resp.ChecksFailed, resp.ChecksPending, resp.ChecksRunning = checks.Total, checks.Passed, checks.Failed, checks.Pending, checks.Running
+			resp.ChecksConclusion = aggregateChecksConclusion(checks.Failed, checks.Passed, checks.Pending, checks.Total)
+			resp.FailedCheckNames = checks.FailedNames
+		}
+	}
+	return resp
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
@@ -118,6 +140,15 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown connection")
 		return
 	}
+	if conn.Provider == "gongfeng" {
+		unlock := h.GongfengSync.lockConnection(conn.ID, false)
+		defer unlock()
+		conn, err = h.Queries.GetVCSConnectionByID(r.Context(), conn.ID)
+		if err != nil {
+			writeError(w, 404, "unknown connection")
+			return
+		}
+	}
 	provider, ok := vcs.For(conn.Provider)
 	if !ok {
 		slog.Error("vcs: connection has unknown provider", "provider", conn.Provider)
@@ -141,7 +172,19 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 		if pr, err := provider.ParsePullRequest(body); err != nil {
 			slog.Warn("vcs: bad pull_request payload", "provider", conn.Provider, "err", err)
 		} else {
-			h.mirrorVCSPullRequest(r.Context(), conn, pr)
+			if err := h.mirrorVCSPullRequest(r.Context(), conn, pr); err != nil {
+				writeError(w, 500, "failed to mirror merge request")
+				return
+			}
+			if conn.Provider == "gongfeng" {
+				stored, err := h.Queries.GetVCSPullRequestByKey(r.Context(), db.GetVCSPullRequestByKeyParams{ConnectionID: conn.ID, RepoOwner: pr.RepoOwner, RepoName: pr.RepoName, PrNumber: pr.Number})
+				if err == nil {
+					linked, linkErr := h.Queries.ListIssueIDsForVCSPullRequest(r.Context(), stored.ID)
+					if linkErr == nil && len(linked) > 0 {
+						h.GongfengSync.enqueuePR(stored)
+					}
+				}
+			}
 		}
 	case vcs.EventCIStatus:
 		if st, err := provider.ParseCIStatus(body); err != nil {
@@ -155,10 +198,10 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) {
+func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnection, ev vcs.PullRequestEvent) error {
 	if ev.RepoOwner == "" || ev.RepoName == "" || ev.Number == 0 {
 		slog.Warn("vcs: pull_request missing repo identity", "provider", conn.Provider)
-		return
+		return nil
 	}
 
 	// The stored state before this event, so a merge completes issues once —
@@ -197,7 +240,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	})
 	if err != nil {
 		slog.Warn("vcs: upsert pr failed", "err", err)
-		return
+		return err
 	}
 
 	// Out-of-order guard for the link write. UpsertVCSPullRequest keeps the
@@ -211,7 +254,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	// stored value, so it proceeds.)
 	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
 	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
-		return
+		return nil
 	}
 
 	workspaceID := uuidToString(conn.WorkspaceID)
@@ -262,6 +305,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+	return nil
 }
 
 func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, ev vcs.CIStatusEvent) {

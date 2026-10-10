@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -230,6 +231,20 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		connectedBy = member.UserID
 	}
 
+	{
+		existing, listErr := h.Queries.ListVCSConnectionsByWorkspace(r.Context(), wsUUID)
+		if listErr != nil {
+			writeError(w, 500, "failed to load connections")
+			return
+		}
+		for _, previous := range existing {
+			if previous.InstanceUrl == instanceURL && (previous.Provider == "gongfeng" || provider.Kind() == vcs.KindGongfeng) {
+				unlock := h.GongfengSync.lockConnection(previous.ID, true)
+				defer unlock()
+				break
+			}
+		}
+	}
 	conn, err := h.Queries.UpsertVCSConnection(r.Context(), db.UpsertVCSConnectionParams{
 		WorkspaceID:            wsUUID,
 		Provider:               string(provider.Kind()),
@@ -244,6 +259,10 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.resetGongfengHooks(r.Context(), conn); err != nil {
+		writeError(w, 500, "connection saved but webhook update could not be scheduled; regenerate the webhook secret")
+		return
+	}
 	resp := h.vcsConnectionToResponse(conn)
 	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
 	writeJSON(w, http.StatusOK, VCSConnectResponse{
@@ -285,6 +304,19 @@ func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	unlock := h.GongfengSync.lockConnection(idUUID, true)
+	defer unlock()
+	conn, err := h.Queries.GetVCSConnectionByID(r.Context(), idUUID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 500, "failed to load connection")
+		return
+	}
+	cleanupError := ""
+	if err == nil && conn.WorkspaceID == wsUUID && conn.Provider == "gongfeng" {
+		if err := h.removeGongfengHooks(r.Context(), conn); err != nil {
+			cleanupError = err.Error()
+		}
+	}
 	if err := h.Queries.DeleteVCSConnection(r.Context(), db.DeleteVCSConnectionParams{
 		ID:          idUUID,
 		WorkspaceID: wsUUID,
@@ -295,6 +327,10 @@ func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventVCSConnectionDeleted, workspaceID, "system", "", map[string]any{
 		"id": chi.URLParam(r, "connectionId"),
 	})
+	if cleanupError != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"webhook_cleanup_error": cleanupError})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -321,6 +357,8 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	unlock := h.GongfengSync.lockConnection(connUUID, true)
+	defer unlock()
 	conn, err := h.Queries.GetVCSConnectionByID(r.Context(), connUUID)
 	if err != nil || uuidToString(conn.WorkspaceID) != uuidToString(wsUUID) {
 		writeError(w, http.StatusNotFound, "vcs connection not found")
@@ -348,6 +386,10 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if err := h.resetGongfengHooks(r.Context(), updated); err != nil {
+		writeError(w, 500, "webhook secret rotated but repository update could not be scheduled; retry regeneration")
+		return
+	}
 	resp := h.vcsConnectionToResponse(updated)
 	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
 	writeJSON(w, http.StatusOK, VCSConnectResponse{

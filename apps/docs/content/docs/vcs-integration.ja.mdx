@@ -1,6 +1,6 @@
 ---
-title: セルフホスト Git ホスティング
-description: ワークスペースごとにセルフホストの Forgejo、Gitea、GitLab インスタンスを接続し、ブランチ名かタイトルにタスク番号を含む、または本文で終了キーワードの直後にタスク番号を置いた Pull Request / Merge Request を対応するタスクへ自動的に紐づけ、マージ時にワークスペースが選んだステータスへ移動して CI ステータスを表示します。
+title: Git プロバイダー連携
+description: Forgejo、Gitea、GitLab、Tencent Gongfeng の Pull Request をタスクに関連付け、マージ後にタスクのステータスを変更します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 **セルフホスト版 Multica 専用です。** この連携は Multica を**自分でデプロイしている**場合のみ利用でき、Multica Cloud では提供されません。ここでの「セルフホスト」は **Multica 自体**のセルフホストを意味します。通常は独自ネットワーク内の Git インスタンスへアクセスするために使用します。サーバー運用者が `MULTICA_VCS_INTEGRATION_ENABLED=true` を設定して機能を有効にし、`MULTICA_VCS_SECRET_KEY` も設定する必要があります。それまでは、設定 → コードにこの行は表示されません。
 </Callout>
 
-Multica はワークスペースごとにセルフホストの Git ホスティング、**Forgejo**、**Gitea**、**GitLab** のいずれかへ接続します。接続後、ブランチ名かタイトルにタスク番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）、または本文で終了キーワードの直後にタスク番号を置いた PR は、対応する[タスク](/issues)へ**自動的に紐づけられ**、タスクサイドバーの **Pull requests** に表示されます。タスクに紐づく PR がすべてマージされると、タスクはワークスペースが選んだステータス（既定は「完了」）へ移動します。head commit の CI はカード上のチェックバーとして表示されます。
+セルフホスト版 Multica はワークスペースごとに **Forgejo**、**Gitea**、**GitLab**、公式 **Tencent Gongfeng** のいずれかへ接続します。接続後、ブランチ名かタイトルにタスク番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）、または本文で終了キーワードの直後にタスク番号を置いた PR は、対応する[タスク](/issues)へ**自動的に紐づけられ**、タスクサイドバーの **Pull requests** に表示されます。タスクに紐づく PR がすべてマージされると、タスクはワークスペースが選んだステータス（既定は「完了」）へ移動します。Forgejo/Gitea と GitLab の head commit CI はカード上のチェックバーとして表示されます。
 
 これらの Git ホスティングは GitHub と並行して利用でき、1 つのワークスペースで任意に組み合わせられます。
 
@@ -46,7 +46,7 @@ MULTICA_VCS_SECRET_KEY=<base64 32 バイト鍵>
 1. Git ホスティング側で、リポジトリの読み取り権限を持つアクセストークンを作成します。
    - **Forgejo / Gitea**: 設定 → アプリケーション。
    - **GitLab**: `read_api` 権限を持つ個人（またはグループ/プロジェクト）アクセストークン。
-2. Multica で **設定 → コード**を開き、**セルフホスト Git** の行で **接続** をクリックします。
+2. Multica で **設定 → コード**を開き、**Git プロバイダー** の行で **接続** をクリックします。
 3. **プロバイダー**を選択し、インスタンス URL（例: `https://forgejo.example.com`）とアクセストークンを入力して **接続**をクリックします。Multica は保存前に、そのトークンでインスタンスへアクセスして検証します。
 4. 接続後に表示される **Webhook URL** と **Webhook secret** をコピーします。
 
@@ -88,3 +88,60 @@ Multica は保存済みの secret で各 delivery を検証するため、一致
 ## エージェントによる Pull Request の作成
 
 PR の作成には Multica 側の Git ホスティング設定は不要です。エージェントはランタイムでリポジトリを checkout し、ランタイムホスト自身の Git 認証情報を使ってブランチを push し、PR を作成します。エージェントを特定の Git ホスティングで動かすには、SSH deploy key やホストの Git credential helper に保存したトークンなどを使って、デーモンホストがその Git ホスティングへ認証できるようにし、通常どおりリポジトリ URL を追加してください。任意の Git URL を checkout できるため、プロバイダー固有の設定は必要ありません。
+
+## Tencent Gongfeng
+
+プロバイダーで **Tencent Gongfeng** を選択し、公式 URL
+`https://git.code.tencent.com` とアカウント設定で作成した **Private Token**
+を入力してください。トークンは `/api/v3/user` で検証されます。
+
+接続後、**Gongfeng リポジトリ**を選択してください。Multica が MR Webhook を自動設定し、既存 MR をバックグラウンドで取り込みます。トークンにはリポジトリの読み取りと Webhook 管理権限が必要です。公開 URL は Gongfeng から HTTPS で到達できる必要があります。**リポジトリを追加 → Gongfeng から選択**では、クローン URL もエージェント用のリポジトリに追加されます。
+
+選択画面には進捗とエラーが表示されます。**再同期**で全履歴を再取得し、Webhook を修復できます。シークレットの再生成は既存 Webhook を更新します。同期の停止は Webhook を削除し、MR を保持します。接続の解除は接続とミラー済みデータを削除します。失効したトークンで Webhook を削除できない場合も接続を解除し、Gongfeng での手動削除を案内します。手動設定にはシークレットを再生成し、URL と token を使って **Merge request** イベントを有効にしてください。配信は `X-Event: Merge Request Hook` と `X-Token` を使用します。
+
+MR は上記のリンク規則を使用し、リポジトリ内の `iid` を表示します。API 詳細ではグローバル `id` を解決します。API 更新で作者を補完し、未受信イベントを回復します。CI と競合情報はイベント、ページ表示、定期スキャンで更新されます。結果は fork を含む現在のソースコミットに対応し、新しいコミットでは古い結果を無効化します。更新失敗時は既知の結果を古い情報として表示します。未提供の承認・マージポリシー情報を競合状態から推定しません。
+
+エージェントには、ランタイムホストにコミュニティ製の
+[gongfeng-cli](https://github.com/studyzy/gongfeng-cli) をインストールしてください。
+公式 Multica CLI `v0.6.1` はサーバーから `multica-platform` の Gongfeng 操作手順を
+受け取るため、カスタムランタイムは不要です。Apple silicon Mac 上で Codex による
+実際のタスク実行、MR の作成と更新、チェック結果の同期、マージ後のタスク完了を
+検証済みです。Windows とその他のエージェントは実機での検証が必要です。
+開発元の [v0.5.0](https://github.com/studyzy/gongfeng-cli/releases/tag/v0.5.0) から
+macOS arm64、Linux x86_64、Windows x86_64 用のバイナリを取得できます。Go は不要です。
+Go がある場合は、同じ固定バージョンをインストールできます。
+
+```sh
+go install github.com/studyzy/gongfeng-cli/cmd/gongfeng@v0.5.0
+```
+
+Git の認証情報とは別に、`GONGFENG_TOKEN` または `~/.gongfeng.json` で CLI 認証を
+設定してください。ファイルにはトークンが平文で保存されるため、macOS/Linux では
+権限を `0600` にし、Windows ではファイル ACL で本人だけがアクセスできるようにします。
+環境変数を除外するエージェントもあるので、実際のランタイム内でアクセスを確認してください。
+サーバーのトークンはエージェントに渡されません。トークンをコマンド引数、リポジトリ内の
+ファイル、タスクのコメントに含めないでください。
+
+リポジトリ内の設定は API アドレスや認証情報を上書きできます。
+公式アドレスを明示し、書き込み前にアカウントを確認してください。
+
+```sh
+gongfeng --base-url https://git.code.tencent.com user me --json
+gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr list --json
+```
+
+アドレスの明示だけでは HTTP リダイレクトを制限できません。信頼できないリポジトリで
+使う前に、コミュニティ CLI の認証情報の読み込みとリダイレクト処理を強化する必要があります。
+
+`gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr create --help`
+でフラグを確認し、`--source-branch`、`--target-branch`、`--title`、`--description` を
+指定してください。`show`・`update`・`accept` はグローバル MR `id` を使用するため、
+`mr list --json` で取得し、表示番号 `iid` と混同しないでください。
+
+MR 操作にはランタイムホストの CLI アカウントが使われ、タスク作成者のアカウントへ
+自動では切り替わりません。同じ OS アカウントの Multica プロファイルは CLI 認証情報を
+共有します。メンバー本人の操作として記録するには、個人ごとに分離したランタイムと
+認証情報が必要です。Git コミットの作者と SSH の push アカウントも別途設定してください。
+
+Multica はチェック結果を読み取りますが、リポジトリのテストは実行しません。
+継続的なチェックには、現在のソースコミット SHA に結果を報告する CI ランナーが必要です。

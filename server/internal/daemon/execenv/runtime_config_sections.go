@@ -420,7 +420,12 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Repositories\n\n")
 	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
 	pinned := false
+	pinnedOther := false
+	pinnedGongfeng := false
+	usesGongfeng := false
 	for _, repo := range ctx.Repos {
+		gongfeng := isGongfengRepository(repo.URL)
+		usesGongfeng = usesGongfeng || gongfeng
 		line := "- " + repo.URL
 		if repo.Description != "" {
 			line += " — " + repo.Description
@@ -432,6 +437,8 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		// were on the default branch.
 		if ref := strings.TrimSpace(repo.Ref); ref != "" {
 			pinned = true
+			pinnedOther = pinnedOther || !gongfeng
+			pinnedGongfeng = pinnedGongfeng || gongfeng
 			line += fmt.Sprintf(" (starts from `%s`)", ref)
 		}
 		b.WriteString(line + "\n")
@@ -451,8 +458,17 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		// deliberately does not do, so the agent resolves it at the point it
 		// already has the repository in hand.
 		b.WriteString("\nA repository that starts from a branch is already checked out there — do not pass `--ref` to get back to it. ")
-		b.WriteString("Deliver to the same line: open pull requests with `gh pr create --base <that-branch>`. ")
+		b.WriteString("Deliver to the same line. ")
+		if pinnedOther {
+			b.WriteString("For GitHub, open pull requests with `gh pr create --base <that-branch>`. ")
+		}
+		if pinnedGongfeng {
+			b.WriteString("For Tencent Gongfeng, pass `--target-branch <that-branch>` to `gongfeng mr create`. ")
+		}
 		b.WriteString("If what it starts from is a tag or a commit rather than a branch, treat it as a starting point only and confirm the target branch before opening a pull request.\n")
+	}
+	if usesGongfeng {
+		writeGongfengGuidance(b)
 	}
 	// Stated for ANY repo, pinned or not, because it protects work that began
 	// under a setting this brief can no longer see. A project cleared back to

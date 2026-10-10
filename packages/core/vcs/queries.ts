@@ -12,3 +12,10 @@ export const vcsConnectionsOptions = (wsId: string) =>
     queryFn: () => api.listVCSConnections(wsId),
     enabled: !!wsId,
   });
+
+export const gongfengRepositoriesOptions = (wsId: string, connectionId: string, search = "") => ({
+  queryKey: [...vcsKeys.all(wsId), "repositories", connectionId, search],
+  queryFn: ({ pageParam }: { pageParam: number }) => api.listGongfengRepositories(wsId, connectionId, pageParam, search),
+  initialPageParam: 1,
+  getNextPageParam: (page: Awaited<ReturnType<typeof api.listGongfengRepositories>>) => page.next_page || undefined,
+});

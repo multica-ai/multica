@@ -1,0 +1,33 @@
+{
+  "object_kind": "merge_request",
+  "user": {
+    "username": "alice",
+    "avatar_url": "https://git.code.tencent.com/uploads/alice.png"
+  },
+  "object_attributes": {
+    "id": 901,
+    "iid": 7,
+    "author_id": 42,
+    "title": "MUL-123 Fix login",
+    "description": "Closes MUL-123",
+    "state": "opened",
+    "action": "open",
+    "source_branch": "mul-123-fix-login",
+    "created_at": "2026-10-09T08:00:00+0000",
+    "updated_at": "2026-10-09T08:00:00.123456+0000",
+    "url": "https://git.code.tencent.com/acme/team/widget/merge_requests/7",
+    "source": {
+      "name": "Widget fork",
+      "namespace": "alice",
+      "web_url": "https://git.code.tencent.com/alice/widget"
+    },
+    "target": {
+      "name": "Widget display name",
+      "namespace": "acme/team",
+      "web_url": "https://git.code.tencent.com/acme/team/widget"
+    },
+    "last_commit": {
+      "id": "deadbeef"
+    }
+  }
+}
