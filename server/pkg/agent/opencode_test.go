@@ -86,6 +86,7 @@ func TestOpencodeHandleToolUseEventCompleted(t *testing.T) {
 				Status: "completed",
 				Input:  json.RawMessage(`{"command":"pwd","description":"Prints current working directory path"}`),
 				Output: "/tmp/multica\n",
+				Time:   &opencodeToolTime{Start: 1775117187092, End: 1775117187162},
 			},
 		},
 	}
@@ -111,6 +112,9 @@ func TestOpencodeHandleToolUseEventCompleted(t *testing.T) {
 	if cmd, ok := msg.Input["command"].(string); !ok || cmd != "pwd" {
 		t.Errorf("input.command: got %v", msg.Input["command"])
 	}
+	if got, want := msg.StartedAt.UnixMilli(), int64(1775117187092); got != want {
+		t.Errorf("started_at: got %d, want %d", got, want)
+	}
 
 	// Second: tool-result
 	msg = <-ch
@@ -122,6 +126,9 @@ func TestOpencodeHandleToolUseEventCompleted(t *testing.T) {
 	}
 	if msg.Output != "/tmp/multica\n" {
 		t.Errorf("output: got %q", msg.Output)
+	}
+	if got, want := msg.EndedAt.UnixMilli(), int64(1775117187162); got != want {
+		t.Errorf("ended_at: got %d, want %d", got, want)
 	}
 }
 
@@ -344,6 +351,9 @@ func TestOpencodeEventParsingToolUseFixture(t *testing.T) {
 	}
 	if event.Part.State.Status != "completed" {
 		t.Errorf("state.status: got %q, want %q", event.Part.State.Status, "completed")
+	}
+	if event.Part.State.Time == nil || event.Part.State.Time.Start != 1775117187092 || event.Part.State.Time.End != 1775117187162 {
+		t.Errorf("state.time: got %+v", event.Part.State.Time)
 	}
 
 	// Parse state.input

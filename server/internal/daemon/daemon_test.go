@@ -2878,9 +2878,11 @@ func (timedTranscriptBackend) Execute(_ context.Context, _ string, _ agent.ExecO
 	msgCh := make(chan agent.Message)
 	resCh := make(chan agent.Result, 1)
 	go func() {
-		msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "bash", CallID: "timed"}
+		startedAt := time.UnixMilli(1000).UTC()
+		endedAt := time.UnixMilli(1250).UTC()
+		msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "bash", CallID: "timed", StartedAt: startedAt}
 		time.Sleep(10 * time.Millisecond)
-		msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "bash", CallID: "timed", Output: "ok"}
+		msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "bash", CallID: "timed", Output: "ok", EndedAt: endedAt}
 		close(msgCh)
 		resCh <- agent.Result{Status: "completed", Output: "done"}
 		close(resCh)
@@ -2900,8 +2902,8 @@ func TestExecuteAndDrain_ReportsPerEventTimestamps(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("reported %d messages, want tool use and result: %+v", len(got), got)
 	}
-	if got[0].CreatedAt.IsZero() || !got[1].CreatedAt.After(got[0].CreatedAt) {
-		t.Fatalf("event timestamps = [%s, %s], want distinct ordered times", got[0].CreatedAt, got[1].CreatedAt)
+	if got[0].CreatedAt != time.UnixMilli(1000).UTC() || got[1].CreatedAt != time.UnixMilli(1250).UTC() {
+		t.Fatalf("event timestamps = [%s, %s], want backend-reported times", got[0].CreatedAt, got[1].CreatedAt)
 	}
 }
 

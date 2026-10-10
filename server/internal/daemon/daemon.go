@@ -9576,12 +9576,16 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						callIDToTool[msg.CallID] = msg.Tool
 					}
 					s := msgSeq.Add(1)
+					createdAt := msg.StartedAt
+					if createdAt.IsZero() {
+						createdAt = observedAt
+					}
 					batch = append(batch, TaskMessageData{
 						Seq:       int(s),
 						Type:      "tool_use",
 						CallID:    transcriptCallID(msg.CallID),
 						Tool:      msg.Tool,
-						CreatedAt: observedAt,
+						CreatedAt: createdAt,
 						// Redact before the payload leaves this process, not
 						// only on arrival. The server redacts again in its
 						// ingest handler, but that is the *remote* side: a
@@ -9619,13 +9623,17 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 					s := msgSeq.Add(1)
 					taskLog.Info("tool_result observed", "seq", s, "tool", toolName, "call_id", msg.CallID)
+					createdAt := msg.EndedAt
+					if createdAt.IsZero() {
+						createdAt = observedAt
+					}
 					batch = append(batch, TaskMessageData{
 						Seq:       int(s),
 						Type:      "tool_result",
 						CallID:    transcriptCallID(msg.CallID),
 						Tool:      toolName,
 						Output:    output,
-						CreatedAt: observedAt,
+						CreatedAt: createdAt,
 						// Always sent, including false: the reader has to be
 						// able to tell "this record is complete" from "this
 						// record predates the flag", and only a daemon that
