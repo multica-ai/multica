@@ -2254,3 +2254,23 @@ func TestPromptCarriesJoinedWakeups(t *testing.T) {
 		t.Errorf("prompt without joined wakeups mentions them:\n%s", out)
 	}
 }
+
+func TestBuildChatPromptAttachmentOnlyMessage(t *testing.T) {
+	// A file sent with no caption: the agent is told so and given the
+	// attachment, instead of an empty "User message:" line.
+	out := buildChatPrompt(Task{
+		ChatSessionID: "s",
+		ChatMessageAttachments: []ChatAttachmentMeta{
+			{ID: "att-1", Filename: "quote.pdf", ContentType: "application/pdf"},
+		},
+	})
+	for _, want := range []string{
+		"User message:\n(no text — the user sent only the attachments below)",
+		`id=att-1 filename="quote.pdf" content_type=application/pdf`,
+		"multica attachment download <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("attachment-only prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}

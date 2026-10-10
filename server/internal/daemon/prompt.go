@@ -706,7 +706,13 @@ func buildChatPrompt(task Task) string {
 			}
 		}
 	}
-	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	if strings.TrimSpace(task.ChatMessage) == "" && len(task.ChatMessageAttachments) > 0 {
+		// An attachment-only message (a file sent with no caption): say so,
+		// so the agent works from the files instead of answering an empty line.
+		b.WriteString("User message:\n(no text — the user sent only the attachments below)\n")
+	} else {
+		fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
+	}
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
 	// live behind a signed CDN with a short TTL, so by the time the agent

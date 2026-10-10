@@ -3276,13 +3276,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
 
-		// Fail closed: a task-owned direct task that resolves to no user text
+		// Fail closed: a task-owned direct task that resolves to no user input
 		// (and is not the agent's proactive intro) must never dispatch an
 		// empty prompt. The send path creates the owning user message in the
 		// same transaction as the task, so this only fires on genuinely
 		// corrupt state — cancel the just-dispatched task and reject the claim
 		// rather than run the agent with nothing to answer (MUL-4351).
-		if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
+		//
+		// Attachments ARE user input. A channel message that carries only a
+		// file (e.g. a PDF dropped into a Slack DM with no caption) has empty
+		// content but a non-empty attachment list; cancelling it silently
+		// drops the file, and the follow-up text message ("this is the
+		// quote") then runs without it.
+		if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" && len(resp.ChatMessageAttachments) == 0 {
 			slog.Error("chat claim: task-owned direct task has no user input; cancelling",
 				"task_id", uuidToString(task.ID),
 				"chat_session_id", uuidToString(cs.ID),
