@@ -982,6 +982,74 @@ func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
 
 // clearDaemonTaskEnv drops every daemon-injected marker so a subtest starts
 // from a known context and can opt back in to exactly the ones it needs.
+// TestHealthPortOverride pins the health-port precedence introduced for #8476:
+// --health-port flag > MULTICA_DAEMON_HEALTH_PORT env > per-profile default, so
+// two daemons on one host no longer collide on the hardcoded 19514. Note this
+// is unrelated to MULTICA_DAEMON_PORT, the agent->daemon port injected into a
+// task's environment.
+func TestHealthPortOverride(t *testing.T) {
+	newStartCmd := func() *cobra.Command {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("profile", "", "")
+		cmd.Flags().Int("health-port", 0, "")
+		return cmd
+	}
+
+	t.Run("absent env and flag falls back to the default port", func(t *testing.T) {
+		t.Setenv(healthPortEnv, "")
+		if got := healthPortForProfile(""); got != daemon.DefaultHealthPort {
+			t.Fatalf("default-profile port = %d, want %d", got, daemon.DefaultHealthPort)
+		}
+		if got := resolveHealthPort(newStartCmd(), ""); got != daemon.DefaultHealthPort {
+			t.Fatalf("resolveHealthPort with no override = %d, want %d", got, daemon.DefaultHealthPort)
+		}
+	})
+
+	t.Run("env override is honored across every command", func(t *testing.T) {
+		t.Setenv(healthPortEnv, "20050")
+		if got := healthPortForProfile(""); got != 20050 {
+			t.Fatalf("env override = %d, want 20050", got)
+		}
+		// Named-profile daemons honor the same explicit port; it wins over the
+		// per-profile offset.
+		if got := healthPortForProfile("staging"); got != 20050 {
+			t.Fatalf("env override for named profile = %d, want 20050", got)
+		}
+	})
+
+	t.Run("explicit value wins over the default-profile binding", func(t *testing.T) {
+		t.Setenv(healthPortEnv, "")
+		if daemon.DefaultHealthPort == 20077 {
+			t.Fatal("test port collides with the default; pick another")
+		}
+		cmd := newStartCmd()
+		if err := cmd.Flags().Set("health-port", "20077"); err != nil {
+			t.Fatalf("set health-port flag: %v", err)
+		}
+		if got := resolveHealthPort(cmd, ""); got != 20077 {
+			t.Fatalf("flag override = %d, want 20077", got)
+		}
+	})
+
+	t.Run("flag wins over env", func(t *testing.T) {
+		t.Setenv(healthPortEnv, "20050")
+		cmd := newStartCmd()
+		if err := cmd.Flags().Set("health-port", "20077"); err != nil {
+			t.Fatalf("set health-port flag: %v", err)
+		}
+		if got := resolveHealthPort(cmd, ""); got != 20077 {
+			t.Fatalf("flag+env = %d, want the flag's 20077", got)
+		}
+	})
+
+	t.Run("invalid env is ignored and falls back to the default", func(t *testing.T) {
+		t.Setenv(healthPortEnv, "not-a-port")
+		if got := healthPortForProfile(""); got != daemon.DefaultHealthPort {
+			t.Fatalf("invalid env port = %d, want fallback %d", got, daemon.DefaultHealthPort)
+		}
+	})
+}
+
 func clearDaemonTaskEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
