@@ -78,3 +78,32 @@ func TestPiPowerShellCommandArgs_ForwardsMultiLineArgVerbatim(t *testing.T) {
 		t.Errorf("multi-line arg was not forwarded verbatim:\n got  %q\n want %q", got[len(got)-1], multiLine)
 	}
 }
+
+func TestBuildPiArgsIncludesTaskMcpExtension(t *testing.T) {
+	got := buildPiArgs("/tmp/pi-session.jsonl", ExecOptions{
+		PiExtensionPath: "/tmp/task/.pi/extensions/multica-mcp.js",
+	}, slog.Default())
+	want := []string{
+		"-p", "--mode", "json", "--session", "/tmp/pi-session.jsonl",
+		"--extension", "/tmp/task/.pi/extensions/multica-mcp.js",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildPiArgsOwnsTaskMcpExtensionFlag(t *testing.T) {
+	got := buildPiArgs("/tmp/pi-session.jsonl", ExecOptions{
+		PiExtensionPath: "/tmp/task/.pi/extensions/multica-mcp.js",
+		CustomArgs:      []string{"--extension", "/tmp/user-extension.js"},
+	}, slog.Default())
+	for i, arg := range got {
+		if arg == "--extension" {
+			if i+1 >= len(got) || got[i+1] != "/tmp/task/.pi/extensions/multica-mcp.js" {
+				t.Fatalf("task extension was overridden: %#v", got)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing task extension in %#v", got)
+}
