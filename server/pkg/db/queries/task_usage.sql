@@ -184,6 +184,41 @@ WHERE workspace_id = $1
 GROUP BY agent_id, LOWER(provider), model
 ORDER BY agent_id, LOWER(provider), model;
 
+-- name: ListWorkspaceUsageExport :many
+-- Exact, workspace-scoped usage rows for machine-readable exports. Unlike the
+-- dashboard's rolling `days` views, exports accept an arbitrary half-open
+-- instant interval, so they read the authoritative task_usage timestamps
+-- rather than whole-hour rollups that could include data outside the bounds.
+-- The handler applies the dashboard's restricted-agent folding before it
+-- performs caller-selected grouping and pagination.
+SELECT
+    atq.agent_id,
+    a.name AS agent_name,
+    LOWER(tu.provider) AS provider,
+    tu.model,
+    DATE(tu.created_at AT TIME ZONE sqlc.arg('tz')::text) AS day,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND tu.created_at >= sqlc.arg('from_time')::timestamptz
+  AND tu.created_at < sqlc.arg('to_time')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('runtime_id')::uuid IS NULL OR atq.runtime_id = sqlc.narg('runtime_id'))
+GROUP BY atq.agent_id, a.name, LOWER(tu.provider), tu.model,
+         DATE(tu.created_at AT TIME ZONE sqlc.arg('tz')::text)
+ORDER BY day, atq.agent_id, LOWER(tu.provider), tu.model;
+
 -- name: ListDashboardRunTimeDaily :many
 -- Daily per-date run time + task counts for the workspace, optionally
 -- scoped to a single project. Powers the workspace dashboard's "Time"
