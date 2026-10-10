@@ -128,7 +128,7 @@ overrides:
 patchedDependencies:
   expo-modules-core@57.0.21:
     hash: 52e0bb7a9afc2d62b773afaf938f3be85fde749ce4047635e71547c1ba8cde0e
-    path: patches/expo-modules-core@57.0.21.patch
+    path: apps/mobile/patches/expo-modules-core@57.0.21.patch
 
 importers:
 

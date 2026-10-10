@@ -19,6 +19,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run && bash scripts/ios-run.test.sh"
   },
+  "expo": {
+    "install": {
+      "exclude": [
+        "eslint-config-expo",
+        "typescript"
+      ]
+    }
+  },
   "dependencies": {
     "@expo/dom-webview": "~57.0.1",
     "@expo/metro-runtime": "~57.0.16",

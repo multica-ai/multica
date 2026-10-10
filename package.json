@@ -54,7 +54,7 @@
       "builder-util-runtime": "9.7.0"
     },
     "patchedDependencies": {
-      "expo-modules-core@57.0.21": "patches/expo-modules-core@57.0.21.patch"
+      "expo-modules-core@57.0.21": "apps/mobile/patches/expo-modules-core@57.0.21.patch"
     }
   },
   "devDependencies": {

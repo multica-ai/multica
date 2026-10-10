@@ -65,11 +65,19 @@ See [Expo's migration guidance](https://github.com/expo/fyi/blob/main/ios-scene-
 
 SDK 57's scene backport does not include the later scene-aware presenter lookup
 used by native modules such as `expo-image-picker`. The workspace applies
-`patches/expo-modules-core@57.0.21.patch`, a direct backport of Expo's
+`apps/mobile/patches/expo-modules-core@57.0.21.patch`, a direct backport of Expo's
 [#46956](https://github.com/expo/expo/pull/46956) and
 [#48319](https://github.com/expo/expo/pull/48319), so avatar, chat, and issue
-image pickers resolve their presenting window from the foregrounded scene. Keep
-the patch until Expo backports the change to SDK 57 or mobile moves to SDK 58+.
+image pickers and document attachments resolve their presenting window from the
+foregrounded scene. pnpm requires patched dependencies to be registered at the
+workspace root, but the patch source stays with the mobile app so patch-only
+changes remain in the mobile CI scope. Keep the patch until Expo backports the
+change to SDK 57 or mobile moves to SDK 58+.
+
+`eslint-config-expo` and TypeScript are temporarily excluded from
+`expo install --check`: upgrading them enables additional compiler lint rules
+that need a focused cleanup. [#9165](https://github.com/multica-ai/multica/issues/9165)
+tracks removing the exclusions and aligning both tools with SDK 57.
 
 After updating dependencies, regenerate an existing native project once (save
 any local native customizations first; `ios/` is generated and ignored):
@@ -84,8 +92,9 @@ build script. Keep normal development builds on the incremental prebuild path.
 For native validation, test a Release cold launch to sign-in, cold and warm
 `multica://` links, background/foreground transitions, and the Debug dev-client
 in each variant. Also open the image picker from profile, chat, and the issue
-editor, select an image, and confirm the upload completes. Unit tests do not
-replace this device validation.
+editor, select an image, and confirm the upload completes. From the issue editor,
+also attach a document and confirm its picker dismisses and the upload completes.
+Unit tests do not replace this device validation.
 
 ## First-time setup
 
