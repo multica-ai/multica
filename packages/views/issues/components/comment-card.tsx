@@ -62,6 +62,8 @@ import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 import { WakeupSourceChip } from "./wakeup-source-chip";
+import { parseDelegatedFailureComment } from "./delegated-failure-comment";
+import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
@@ -291,6 +293,35 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
     (entry.attachments ?? [])
       .filter((attachment) => !contentReferencesAttachment(content, attachment))
       .map((attachment) => attachment.id),
+  );
+}
+
+/**
+ * A comment's body. The platform's English "delegated task failed" signal
+ * (see delegated-failure-comment.ts) is shown as a localized line, with the
+ * original text kept as technical detail; every other comment renders as is.
+ */
+function CommentBody({ entry }: { entry: TimelineEntry }) {
+  const { t } = useT("issues");
+  const { t: tAgents } = useT("agents");
+  const delegated = parseDelegatedFailureComment(entry);
+  if (!delegated) {
+    return <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />;
+  }
+  return (
+    <div className="space-y-1">
+      <p>
+        {t(($) => $.comment.delegated_failure.body, {
+          reason: failureReasonLabel(delegated.reason, tAgents) ?? delegated.reason,
+        })}
+      </p>
+      <details className="text-caption text-muted-foreground">
+        <summary className="cursor-pointer select-none">{t(($) => $.comment.delegated_failure.details)}</summary>
+        <div className="mt-1">
+          <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -907,7 +938,7 @@ function CommentRow({
           <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            <CommentBody entry={entry} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
@@ -1444,7 +1475,7 @@ function CommentCardImpl({
                 <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
             data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  <CommentBody entry={entry} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">

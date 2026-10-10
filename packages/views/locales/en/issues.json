@@ -652,7 +652,11 @@
     "recipient_count_other": "{{count}} agents will receive this",
     "steer_attachment_notice": "Only text can join a running run, so a message with files is handled after it.",
     "restart_send": "Stop and send",
-    "restart_failed": "Couldn't stop the current run. Your message wasn't sent."
+    "restart_failed": "Couldn't stop the current run. Your message wasn't sent.",
+    "delegated_failure": {
+      "body": "A delegated run failed for good: {{reason}}. No automatic retry is pending, so the coordinating agent takes the work back.",
+      "details": "Technical details"
+    }
   },
   "reply": {
     "placeholder": "Leave a reply...",

@@ -633,7 +633,11 @@
     "recipient_count_other": "{{count}} 个智能体会收到",
     "steer_attachment_notice": "插话只支持文字，带附件的消息会在本轮结束后处理。",
     "restart_send": "停止并发送",
-    "restart_failed": "没能停止当前运行，消息还没有发送。"
+    "restart_failed": "没能停止当前运行，消息还没有发送。",
+    "delegated_failure": {
+      "body": "委派的运行最终失败：{{reason}}。没有待执行的自动重试，由协调智能体接手处理。",
+      "details": "技术详情"
+    }
   },
   "reply": {
     "placeholder": "回复...",

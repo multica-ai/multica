@@ -633,7 +633,11 @@
     "recipient_count_other": "에이전트 {{count}}개가 받습니다",
     "steer_attachment_notice": "실행 중에는 텍스트만 추가할 수 있어, 파일이 있는 메시지는 이번 실행 후에 처리됩니다.",
     "restart_send": "중지하고 보내기",
-    "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다."
+    "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다.",
+    "delegated_failure": {
+      "body": "위임한 실행이 최종 실패했습니다: {{reason}}. 자동 재시도가 예정되어 있지 않아 조율 에이전트가 작업을 다시 맡습니다.",
+      "details": "기술 세부 정보"
+    }
   },
   "reply": {
     "placeholder": "답글 남기기...",

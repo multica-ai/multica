@@ -633,7 +633,11 @@
     "recipient_count_other": "{{count}} 個のエージェントが受け取ります",
     "steer_attachment_notice": "実行中に追加できるのはテキストのみのため、ファイル付きのメッセージはこの実行の後に処理されます。",
     "restart_send": "停止して送信",
-    "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。"
+    "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。",
+    "delegated_failure": {
+      "body": "委任した実行が最終的に失敗しました：{{reason}}。自動再試行の予定はないため、調整役のエージェントが作業を引き取ります。",
+      "details": "技術的な詳細"
+    }
   },
   "reply": {
     "placeholder": "返信を残す...",
