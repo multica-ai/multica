@@ -166,6 +166,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
 });
 vi.mock("@multica/core/inbox/queries", () => ({
   inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
+  inboxUnreadSummaryEnabled: (wsId: string | null) => () => !!wsId,
   // The nav badge and the switcher dot read the SAME cross-workspace summary,
   // so the fixture that drives one drives the other.
   useInboxUnreadCount: (currentWsId: string | null) =>

@@ -1,7 +1,7 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
 import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
-import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
+import { focusManager, infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
 
@@ -88,12 +88,36 @@ export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (
  * Cross-workspace unread inbox summary. One cache entry shared across all
  * workspaces — the data is account-level, so switching workspaces does not
  * refetch it; only the derived "is this for another workspace" view changes.
+ *
+ * Observers gate on `inboxUnreadSummaryEnabled`, so an inbox event on a hidden
+ * page only marks the summary invalidated. `refetchOnWindowFocus` re-reads it
+ * once when the page is shown again; with `staleTime: Infinity` a page that
+ * missed no event is not stale and makes no request.
  */
 export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
     queryFn: () => api.getInboxUnreadSummary(),
+    refetchOnWindowFocus: true,
   });
+}
+
+/**
+ * `enabled` for an observer of the unread summary: fetch only while the page
+ * is on screen. Every open tab is its own client and receives every inbox
+ * event, so each event cost one summary request per open tab, and each request
+ * recomputes the newest item per issue over the user's whole active inbox. A
+ * hidden tab renders nothing that reads the summary, and with no enabled
+ * observer left an invalidation marks the query without refetching it.
+ *
+ * `whileHidden` is for a reader that stays on screen while the page is hidden:
+ * the desktop dock badge of a minimized window.
+ */
+export function inboxUnreadSummaryEnabled(
+  wsId: string | null | undefined,
+  { whileHidden = false }: { whileHidden?: boolean } = {},
+) {
+  return () => !!wsId && (whileHidden || focusManager.isFocused());
 }
 
 /**
@@ -147,10 +171,13 @@ export function unreadCountForWorkspace(
  * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
  * applies client-side, so this number matches the list the user sees.
  */
-export function useInboxUnreadCount(wsId: string | null | undefined): number {
+export function useInboxUnreadCount(
+  wsId: string | null | undefined,
+  options?: { whileHidden?: boolean },
+): number {
   const { data } = useQuery({
     ...inboxUnreadSummaryOptions(),
-    enabled: !!wsId,
+    enabled: inboxUnreadSummaryEnabled(wsId, options),
     select: (summary: InboxWorkspaceUnread[]) =>
       unreadCountForWorkspace(summary, wsId),
   });

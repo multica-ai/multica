@@ -124,8 +124,8 @@ export function onInboxIssueStatusChanged(
 // summary rather than these lists, so the summary is refreshed here too. It
 // has to happen inside this updater and not at the call site: deletion is an
 // `issue:*` event, so no `inbox:*` handler runs to pick it up, and the summary
-// query is `staleTime: Infinity` with no refetch on focus — nothing else would
-// ever correct it, leaving the badge stuck above an empty inbox (MUL-6967).
+// query is `staleTime: Infinity`, re-read only once invalidated — nothing else
+// would ever correct it, leaving the badge stuck above an empty inbox (MUL-6967).
 export async function onInboxIssueDeleted(
   qc: QueryClient,
   wsId: string,
