@@ -48,10 +48,29 @@ const FAST_MODEL: RuntimeModel = {
 
 const PLAIN_MODEL: RuntimeModel = { id: "gpt-5.4-mini", label: "GPT-5.4 mini" };
 
+const ZCODE_MODEL: RuntimeModel = {
+  id: "zai-api/GLM-5.3",
+  label: "GLM-5.3",
+  thinking: {
+    supported_levels: [
+      { value: "low", label: "low" },
+      { value: "max", label: "max" },
+    ],
+    default_level: "max",
+  },
+};
+
 const ONLINE_RUNTIME = {
   id: "runtime-1",
   name: "Codex laptop",
   provider: "codex",
+  status: "online",
+} as RuntimeDevice;
+
+const ZCODE_RUNTIME = {
+  id: "runtime-1",
+  name: "ZCode laptop",
+  provider: "zcode",
   status: "online",
 } as RuntimeDevice;
 
@@ -181,5 +200,36 @@ describe("AgentExecutionOverrides", () => {
     await waitFor(() => expect(mockInitiateListModels).toHaveBeenCalled());
     expect(screen.queryByText("Speed")).toBeNull();
     expect(screen.queryByText("Thinking")).toBeNull();
+  });
+
+  // zcode's session/create rejects a reasoning-capable selection without an
+  // explicit level, so the create flow cannot save the "no override" state for
+  // it: the picked model's advertised default is prefilled through the same
+  // draft change the picker itself writes.
+  it("prefills the model's default thinking level for zcode", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([ZCODE_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([ZCODE_MODEL]));
+    const { onChange } = renderOverrides({
+      draft: { ...baseDraft, model: "zai-api/GLM-5.3" },
+      runtime: ZCODE_RUNTIME,
+    });
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ thinkingLevel: "max" }),
+    );
+  });
+
+  it("never prefills for providers where an empty level is launchable", async () => {
+    const modelWithDefault: RuntimeModel = {
+      ...FAST_MODEL,
+      thinking: { ...FAST_MODEL.thinking!, default_level: "medium" },
+    };
+    mockInitiateListModels.mockResolvedValue(listResult([modelWithDefault]));
+    mockGetListModelsResult.mockResolvedValue(listResult([modelWithDefault]));
+    const { onChange } = renderOverrides();
+
+    await screen.findByText("Thinking");
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

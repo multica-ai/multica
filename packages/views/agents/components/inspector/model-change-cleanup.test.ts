@@ -38,6 +38,20 @@ const CLAUDE_MEDIUM_ONLY: RuntimeModel = {
   thinking: { supported_levels: [{ value: "medium", label: "Medium" }] },
 };
 
+// zcode's registry always pairs levels with a default; the composite id shape
+// matches what discovery reports (providerId/modelId).
+const ZCODE_GLM: RuntimeModel = {
+  id: "zai-api/GLM-5.3",
+  label: "GLM-5.3",
+  thinking: {
+    supported_levels: [
+      { value: "low", label: "low" },
+      { value: "max", label: "max" },
+    ],
+    default_level: "max",
+  },
+};
+
 describe("buildModelChangeUpdate (MUL-5390)", () => {
   it("clears overrides the new model does not advertise", () => {
     expect(
@@ -167,5 +181,60 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
         catalog: CATALOG,
       }),
     ).toEqual({ model: "gpt-5.4-mini" });
+  });
+
+  // zcode's session/create rejects a reasoning-capable selection without an
+  // explicit level, so an empty stored level must never survive a model change.
+  it("prefills the catalog default for zcode when no level is stored", () => {
+    expect(
+      buildModelChangeUpdate({
+        provider: "zcode",
+        model: "zai-api/GLM-5.3",
+        thinkingLevel: "",
+        serviceTier: "",
+        catalog: [ZCODE_GLM],
+      }),
+    ).toEqual({ model: "zai-api/GLM-5.3", thinking_level: "max" });
+  });
+
+  it("resolves an unsupported zcode level to the catalog default, not empty", () => {
+    expect(
+      buildModelChangeUpdate({
+        provider: "zcode",
+        model: "zai-api/GLM-5.3",
+        thinkingLevel: "ultra",
+        serviceTier: "",
+        catalog: [ZCODE_GLM],
+      }),
+    ).toEqual({ model: "zai-api/GLM-5.3", thinking_level: "max" });
+  });
+
+  it("keeps a still-supported zcode level on model change", () => {
+    expect(
+      buildModelChangeUpdate({
+        provider: "zcode",
+        model: "zai-api/GLM-5.3",
+        thinkingLevel: "low",
+        serviceTier: "",
+        catalog: [ZCODE_GLM],
+      }),
+    ).toEqual({ model: "zai-api/GLM-5.3" });
+  });
+
+  it("leaves a zcode level unset when the catalog carries no default", () => {
+    expect(
+      buildModelChangeUpdate({
+        provider: "zcode",
+        model: "zai-api/GLM-5.3",
+        thinkingLevel: "",
+        serviceTier: "",
+        catalog: [
+          {
+            ...ZCODE_GLM,
+            thinking: { supported_levels: ZCODE_GLM.thinking!.supported_levels },
+          },
+        ],
+      }),
+    ).toEqual({ model: "zai-api/GLM-5.3" });
   });
 });

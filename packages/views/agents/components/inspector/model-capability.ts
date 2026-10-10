@@ -36,3 +36,15 @@ export function findModelCapabilityEntry(
     (entry) => modelIdForCapabilityLookup(provider, entry.id) === lookupId,
   );
 }
+
+/**
+ * Providers whose protocol refuses a reasoning-capable model selection that
+ * carries no level: zcode's session/create answers -32603 "Reasoning level is
+ * required" (verified against the 0.16.9 binary), so the empty
+ * "no override / follow CLI config" thinking_level is not a launchable state
+ * there. The UI must persist an explicit level — the catalog's
+ * `default_level` stands in until the user picks one.
+ */
+export function thinkingLevelRequiredForProvider(provider: string): boolean {
+  return provider === "zcode";
+}

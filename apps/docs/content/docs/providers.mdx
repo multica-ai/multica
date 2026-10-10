@@ -45,6 +45,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | — |
+| ZCode | `zcode` | ✓ | ✓ | — |
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. It does not mean the tool has no other way to configure MCP.
 
@@ -57,6 +58,8 @@ If you do not pick a model, Multica uses the tool's own default. If the list is 
 QwenPaw and MiniMax Code are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list is expected there and is not a sign that the runtime is offline.
 
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
+
+ZCode's model list comes from the signed-in account's provider registry, and its ids use the `providerId/modelId` form (for example `zai-api/GLM-5.3`), so select the full id from the list. Reasoning-capable ZCode models also require a thinking level; when none is saved, Multica launches with the model's own advertised default.
 
 <Callout type="info">
 Different tools may use different model names. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.

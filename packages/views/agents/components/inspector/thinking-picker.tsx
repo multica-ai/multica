@@ -29,6 +29,7 @@ export function ThinkingPicker({
   value,
   levels,
   canEdit = true,
+  allowClear = true,
   variant = "chip",
   showLabel = true,
   onChange,
@@ -42,6 +43,10 @@ export function ThinkingPicker({
   levels: RuntimeModelThinkingLevel[];
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
+  /** Whether the "no override" empty state is offered as a choice. Providers
+   *  whose protocol refuses a level-less reasoning selection (zcode) pass
+   *  false, so the picker never parks the agent in a state that cannot run. */
+  allowClear?: boolean;
   variant?: "chip" | "field";
   showLabel?: boolean;
   onChange: (next: string) => Promise<void> | void;
@@ -170,7 +175,7 @@ export function ThinkingPicker({
         </PickerItem>
       ))}
 
-      {value && (
+      {value && allowClear && (
         <button
           type="button"
           onClick={() => void select("")}

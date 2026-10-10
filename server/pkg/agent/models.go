@@ -329,6 +329,18 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// ModelSelectionSupported. Return an empty list rather than spawning
 		// an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
+	case "zcode":
+		// ZCode has no model-catalog command or RPC — the catalog lives only
+		// inside a running session's snapshot (settings.model.available,
+		// assembled from the logged-in account's provider registry). Discovery
+		// spawns a throwaway app-server, creates a deferred draft session and
+		// reads the snapshot (discoverZcodeModels, modelled on
+		// discoverTraecliModels); any failure degrades to the empty catalog so
+		// the UI keeps manual entry in the composite `providerId/modelId`
+		// format (see splitZcodeModelSelection).
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverZcodeModels(ctx, runtimeCmd)
+		})
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -430,6 +442,11 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // a model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
+//
+// zcode deliberately stays out of the false list: it supports model selection
+// end-to-end, but its selection string is the composite `providerId/modelId`
+// (the runtime's own picker format, model-selection.ts), split by the backend
+// in splitZcodeModelSelection.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
 	case "qwenpaw", "mcode", "zeroclaw":

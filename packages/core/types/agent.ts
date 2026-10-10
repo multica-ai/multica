@@ -133,6 +133,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qwenpaw",
   "mcode",
   "zeroclaw",
+  "zcode",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -1183,10 +1184,12 @@ export interface RuntimeModelThinking {
   /** Levels the user is allowed to pick for this model. */
   supported_levels: RuntimeModelThinkingLevel[];
   /** Informational: the level the upstream CLI documents as its built-in
-   *  default when no `--effort` flag is passed. Surfaced by the daemon
-   *  but not actively rendered today — Multica's empty `thinking_level`
-   *  means "no override; let the local CLI config decide", which may
-   *  itself differ from this value. */
+   *  default when no `--effort` flag is passed. Surfaced by the daemon and
+   *  rendered as-is. Multica's empty `thinking_level` means "no override; let
+   *  the local CLI config decide", which may itself differ from this value —
+   *  except for providers whose protocol refuses a level-less reasoning
+   *  selection (zcode), where the create/settings flows prefill this value so
+   *  the agent never persists in a state its runtime rejects. */
   default_level?: string;
 }
 

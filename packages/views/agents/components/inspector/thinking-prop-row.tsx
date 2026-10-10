@@ -8,7 +8,10 @@ import { PropRow } from "../../../common/prop-row";
 import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
-import { findModelCapabilityEntry } from "./model-capability";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "./model-capability";
 
 /**
  * Thinking row for the agent inspector. Hidden when the active model has
@@ -63,6 +66,7 @@ export function ThinkingPropRow({
         value={value}
         levels={levels}
         canEdit={canEdit}
+        allowClear={!thinkingLevelRequiredForProvider(provider)}
         onChange={onChange}
       />
     </PropRow>
@@ -106,6 +110,7 @@ export function ThinkingSettingField({
         value={value}
         levels={levels}
         canEdit={canEdit}
+        allowClear={!thinkingLevelRequiredForProvider(provider)}
         onChange={onChange}
       />
     </SettingsRow>

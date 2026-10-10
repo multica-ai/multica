@@ -245,6 +245,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | `qwenpaw` | QwenPaw ACP coding agent (ACP via `qwenpaw acp`; model is fixed by its own configuration) |
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
+| ZCode | `zcode` | Z.AI GLM coding agent (its own NDJSON app-server protocol via `zcode app-server`; model ids are composite `providerId/modelId` values from the logged-in registry) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -371,15 +372,20 @@ Agent-specific overrides:
 | `MULTICA_MCODE_PATH` | Custom path to the `mcode` binary |
 | `MULTICA_DSH_PATH` | Custom path to the `dsh` binary |
 | `MULTICA_DSH_MODEL` | Override the DeepSeek Harness model used (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`) |
+| `MULTICA_ZCODE_PATH` | Custom path to the `zcode` binary |
+| `MULTICA_ZCODE_MODEL` | Override the ZCode model used (a composite `providerId/modelId` id from your logged-in registry, e.g. `zai-api/GLM-5.3`) |
 
 If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
 
 The daemon launches Qoder and Qoder CN as `qodercli --yolo --acp` and `qoderclicn --yolo --acp`, respectively, matching their ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`. It writes the task brief to `QWEN.md`; when an agent has managed `mcp_config`, the daemon writes a 0600 per-run JSON file and passes it through `--mcp-config <path>`, then removes it after the process exits. A null config preserves Qwen Code native MCP settings.
+The daemon launches ZCode as `zcode app-server` and speaks its NDJSON protocol (frames carry no `jsonrpc` member). Headless runs use its `yolo` approval mode; permission prompts that still arrive are denied. Reasoning-capable models require a thinking level on every run — when none is saved, the daemon resolves the model's advertised default level from the discovered catalog.
 
 #### `mcp_config` on ACP runtimes
 
 ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.
+
+ZCode is not an ACP runtime but follows the same delivery model: the daemon translates `mcp_config` into its `mcpServers` array and sends it with `session/create`, and again with `session/resume` so a cold-resumed task keeps the same tools.
 
 Nothing is written to the runtime's own config file, and the runtime's own file is not read or merged. `~/.hermes/…`, `~/.jcode/mcp.json` and the like stay untouched; an agent's servers travel with its tasks instead of being installed per machine.
 

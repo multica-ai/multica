@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   applyDraftModelChange,
@@ -9,6 +10,7 @@ import {
   type AgentPermissionScope,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -24,6 +26,10 @@ import {
 import { CharCounter } from "../components/char-counter";
 import { ServiceTierSettingField } from "../components/inspector/service-tier-setting-field";
 import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "../components/inspector/model-capability";
 import { ModelDropdown } from "../components/model-dropdown";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
@@ -398,6 +404,41 @@ export function AgentExecutionOverrides({
 }) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
+  // Same cached query the Thinking / Speed fields below subscribe to, so the
+  // prefill adds no extra round-trip.
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(runtimeOnline ? runtime?.id ?? null : null),
+  );
+
+  // Providers that require an explicit level (zcode: its session/create
+  // rejects a reasoning-capable selection with "Reasoning level is required")
+  // cannot launch the "no override" state the picker would otherwise default
+  // to. When the picked model's catalog lands, prefill the draft with the
+  // model's advertised default — visibly, through the same draft change the
+  // picker itself writes, so the user sees and can still adjust the selection.
+  useEffect(() => {
+    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? "")) {
+      return;
+    }
+    if (draft.thinkingLevel || !draft.model) return;
+    const data = modelsQuery.data;
+    if (!modelsQuery.isSuccess || !data?.supported) return;
+    const entry = findModelCapabilityEntry(
+      data.models,
+      draft.model,
+      runtime?.provider ?? "",
+    );
+    const level = entry?.thinking?.default_level;
+    if (level) onChange({ ...draft, thinkingLevel: level });
+  }, [
+    disabled,
+    draft,
+    modelsQuery.data,
+    modelsQuery.isSuccess,
+    onChange,
+    runtime?.provider,
+  ]);
+
   return (
     <>
       <ThinkingSettingField

@@ -331,6 +331,14 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	// ZCode (`zcode`) is a self-owned app-server protocol CLI (`zcode
+	// app-server`), driven over newline-delimited JSON. Model selection IS
+	// supported (per-turn modelSelection on session/send), so
+	// MULTICA_ZCODE_MODEL seeds the daemon-wide default like other
+	// model-capable runtimes.
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
+	}
 	return agents
 }
 

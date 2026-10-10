@@ -376,6 +376,27 @@ function ZeroClawLogo({ className }: { className: string }) {
   );
 }
 
+// Minimal placeholder until ZCode ships an official mark; currentColor keeps
+// it legible in both themes. Swap for a real asset when one exists, following
+// the DimLogo <img> pattern.
+function ZCodeLogo({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M5 5h14" />
+      <path d="M19 19H5" />
+      <path d="M19 5L5 19" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -435,6 +456,8 @@ export function ProviderLogo({
       return <DimLogo className={className} />;
     case "zeroclaw":
       return <ZeroClawLogo className={className} />;
+    case "zcode":
+      return <ZCodeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

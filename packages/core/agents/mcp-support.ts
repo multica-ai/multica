@@ -27,6 +27,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "traecli",
   "dim",
   "omp",
+  "zcode",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {
