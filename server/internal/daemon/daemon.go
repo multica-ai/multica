@@ -2746,8 +2746,11 @@ probeLoop:
 // An unreachable receptionist is builtinProbeUnavailable (transient).
 // A protocol-skewed receptionist is builtinProbeProtocolSkew (demotable):
 // the version mismatch is deterministic, so an already-registered runtime
-// must stop taking tasks instead of failing them mid-run.
-// (transient): the runtime stays unregistered without demoting anything,
+// must stop taking tasks instead of failing them mid-run. Skew now goes
+// through confirmation (builtinProbeNeedsConfirmation) since the verdict
+// rests on a live HTTP response, not a locally parsed string.
+// An unreachable receptionist is builtinProbeUnavailable (transient):
+// the runtime stays unregistered without demoting anything,
 // and a later probe round recovers it — the same rule a CLI whose
 // --version fails gets. A missing MUSE_ENDPOINT simply never reaches here
 // (probeAgentCLIs only advertises muse when it is set); the guard stays as

@@ -877,3 +877,149 @@ func TestMuseProtocolSkewCancelsOrphanedTask(t *testing.T) {
 		t.Error("expected cancel attempt for orphaned task, got 0")
 	}
 }
+
+// TestMuseProbeProtocolSkew: Codex round2 item 5.
+// probeMuseReceptionist must map version mismatch to ErrMuseProtocolSkew.
+func TestMuseProbeProtocolSkew(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museHealthResponse{ProtocolVersion: 999, Version: "9.9"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	_, err := ProbeMuseReceptionist(context.Background(), srv.URL, "")
+	if err == nil {
+		t.Fatal("expected protocol skew error")
+	}
+	if !strings.Contains(err.Error(), "protocol skew") {
+		t.Errorf("Error = %q, want protocol skew", err.Error())
+	}
+}
+
+// TestMuseProbeProtocolOK: matching version passes.
+func TestMuseProbeProtocolOK(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museHealthResponse{ProtocolVersion: museProtocolVersion, Version: "1.4.0"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ver, err := ProbeMuseReceptionist(context.Background(), srv.URL, "")
+	if err != nil {
+		t.Fatalf("Probe = %v", err)
+	}
+	if ver != "1.4.0" {
+		t.Errorf("Version = %q, want 1.4.0", ver)
+	}
+}
+
+// TestMuseTimeoutSRoundsUp: Codex round2 item 5.
+// Sub-second timeout must round up to 1, not truncate to 0.
+func TestMuseTimeoutSRoundsUp(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{{Status: "completed", Result: "done"}},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	// 500ms should round up to timeout_s=1, not 0
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{Timeout: 500 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	drainMuseSession(t, sess)
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var req museExecuteRequest
+	if err := json.Unmarshal(fake.executeBody, &req); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if req.TimeoutS != 1 {
+		t.Errorf("TimeoutS = %d, want 1 (500ms rounds up)", req.TimeoutS)
+	}
+}
+
+// TestMuseNoTimeoutSends24h: Codex round2 item 3.
+// When Go has no deadline, send explicit 24h so the receptionist
+// doesn't default to 1h and kill a task Go is happy to wait for.
+func TestMuseNoTimeoutSends24h(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{{Status: "completed", Result: "done"}},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	drainMuseSession(t, sess)
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var req museExecuteRequest
+	if err := json.Unmarshal(fake.executeBody, &req); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if req.TimeoutS != 24*3600 {
+		t.Errorf("TimeoutS = %d, want 86400 (24h default)", req.TimeoutS)
+	}
+}
+
+// TestMusePollFailureCancelsRemote: Codex round2 item 5.
+// When polling fails exhaustively, the backend must best-effort cancel
+// the remote task (B2).
+func TestMusePollFailureCancelsRemote(t *testing.T) {
+	fastMusePolls(t)
+	var cancelCalls int
+	var mu sync.Mutex
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museHealthResponse{ProtocolVersion: 1})
+	})
+	mux.HandleFunc("/v1/execute", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museExecuteResponse{TaskID: "t1", ProtocolVersion: 1})
+	})
+	// Status endpoint always fails
+	mux.HandleFunc("/v1/tasks/t1", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	})
+	mux.HandleFunc("/v1/tasks/t1/events", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museEventsResponse{})
+	})
+	mux.HandleFunc("/v1/tasks/t1/cancel", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cancelCalls++
+		mu.Unlock()
+		w.WriteHeader(200)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Shrink the poll budget for a fast test
+	oldMax := museMaxConsecutivePollErrors.Load()
+	museMaxConsecutivePollErrors.Store(3)
+	defer museMaxConsecutivePollErrors.Store(oldMax)
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	res, _ := drainMuseSession(t, sess)
+	if res.Status != "failed" {
+		t.Errorf("Status = %q, want failed", res.Status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if cancelCalls == 0 {
+		t.Error("expected best-effort cancel on poll exhaustion")
+	}
+}
