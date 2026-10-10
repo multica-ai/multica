@@ -55,6 +55,18 @@ type WakeupCondition struct {
 
 var errBadCondition = errors.New("invalid condition")
 
+// These are recoverable observations, not invalid rules or database failures.
+// Keep polling so delayed webhooks, snapshots or restored configuration heal.
+var (
+	errPRSnapshotsUnavailable = errors.New("PR checks cannot be evaluated: GitHub snapshot refresh is unavailable on this server; ask the server administrator to configure the GitHub App snapshot client")
+	errPRNotLinked            = errors.New("No pull request is linked to this issue; link the PR to this issue (a parent issue's PR is not included), or wait for the linking webhook")
+	errPRSnapshotPending      = errors.New("PR check snapshot is not available yet; inspect this issue's pull-requests snapshot_available field and ask the server administrator to check snapshot refresh if it persists")
+)
+
+func conditionDiagnostic(err error) bool {
+	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending)
+}
+
 func badCondition(msg string) error {
 	return fmt.Errorf("%w: %w: %s", ErrWakeupInput, errBadCondition, msg)
 }
@@ -205,7 +217,7 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 // evaluateCondition reports whether the predicate holds, a fingerprint of the
 // satisfying facts (so a rule fires when they change, not on every tick) and a
 // small observation for the woken agent's trigger facts.
-func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup) (bool, string, map[string]any, error) {
+func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup) (bool, string, map[string]any, error) {
 	var c WakeupCondition
 	if err := json.Unmarshal(w.Condition, &c); err != nil {
 		return false, "", nil, err
@@ -244,11 +256,15 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 		met, fingerprint, observed := childrenDone(c, children)
 		return met, fingerprint, observed, nil
 	case "pull_request":
+		if c.Event == "checks_finished" && (s.Tasks == nil || !s.Tasks.PRSnapshotsEnabled) {
+			return false, "", nil, errPRSnapshotsUnavailable
+		}
 		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,'')
 			FROM github_pull_request pr JOIN issue_pull_request ipr ON ipr.pull_request_id=pr.id WHERE ipr.issue_id=$1`, w.IssueID)
 		if err != nil {
 			return false, "", nil, err
 		}
+		linked, missingSnapshot := 0, false
 		var keys []string
 		var prs []map[string]any
 		for rows.Next() {
@@ -258,6 +274,8 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 				rows.Close()
 				return false, "", nil, err
 			}
+			linked++
+			missingSnapshot = missingSnapshot || head == ""
 			switch c.Event {
 			case "merged":
 				if state == "merged" {
@@ -274,6 +292,13 @@ func evaluateCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.Issue
 		rows.Close()
 		if err = rows.Err(); err != nil {
 			return false, "", nil, err
+		}
+		if linked == 0 {
+			return false, "", nil, errPRNotLinked
+		}
+		// Any matching PR satisfies the rule, even if another awaits a snapshot.
+		if c.Event == "checks_finished" && len(keys) == 0 && missingSnapshot {
+			return false, "", nil, errPRSnapshotPending
 		}
 		sort.Strings(keys)
 		return len(keys) > 0, "pr:" + strings.Join(keys, ","), map[string]any{"pull_requests": prs}, nil
@@ -354,7 +379,7 @@ func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (bool
 // pollCondition evaluates a condition rule when it is due or a related event
 // arrived, and returns the next scheduled evaluation. A newly satisfied
 // predicate becomes one condition.met input for the ordinary dispatch below.
-func pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) (pgtype.Timestamptz, error) {
+func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) (pgtype.Timestamptz, error) {
 	hinted, causes, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return w.NextFireAt, err
@@ -362,8 +387,11 @@ func pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWake
 	if !hinted && w.NextFireAt.Valid && w.NextFireAt.Time.After(now) {
 		return w.NextFireAt, nil
 	}
-	met, fingerprint, observed, err := evaluateCondition(ctx, tx, q, w)
-	if err != nil {
+	met, fingerprint, observed, err := s.evaluateCondition(ctx, tx, q, w)
+	if err != nil && !conditionDiagnostic(err) {
+		return w.NextFireAt, err
+	}
+	if err = saveConditionDiagnostic(ctx, q, w.ID, err); err != nil {
 		return w.NextFireAt, err
 	}
 	// condition_state dedups a satisfied predicate; each new satisfaction
@@ -393,15 +421,27 @@ func conditionFiresOnChange(raw []byte) bool {
 
 // baselineCondition records which facts already satisfy a new or re-enabled
 // rule, so it wakes the agent when they change rather than immediately.
-func baselineCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) error {
-	met, fingerprint, _, err := evaluateCondition(ctx, tx, q, w)
-	if err != nil {
+func (s *IssueWakeupService) baselineCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) error {
+	met, fingerprint, _, err := s.evaluateCondition(ctx, tx, q, w)
+	if err != nil && !conditionDiagnostic(err) {
+		return err
+	}
+	if err = saveConditionDiagnostic(ctx, q, w.ID, err); err != nil {
 		return err
 	}
 	if !met {
 		fingerprint = ""
 	}
 	return q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: fingerprint, NextFireAt: pgtype.Timestamptz{Time: now.Add(conditionPollInterval), Valid: true}})
+}
+
+// saveConditionDiagnostic clears a previous diagnostic once evaluation recovers.
+func saveConditionDiagnostic(ctx context.Context, q *db.Queries, id pgtype.UUID, diagnostic error) error {
+	var lastError pgtype.Text
+	if diagnostic != nil {
+		lastError = pgtype.Text{String: diagnostic.Error(), Valid: true}
+	}
+	return q.NoteWakeupFailure(ctx, db.NoteWakeupFailureParams{ID: id, LastError: lastError})
 }
 
 // subIssue is one sub-issue as the children_done condition reads it. Closed
