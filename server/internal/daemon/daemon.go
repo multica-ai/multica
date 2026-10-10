@@ -2361,6 +2361,11 @@ const (
 	builtinProbeOK builtinProbeVerdict = iota
 	builtinProbeUnavailable
 	builtinProbeBelowMinimum
+	// builtinProbeProtocolSkew: the backend and its remote counterpart
+	// (e.g. the Muse receptionist) speak different protocol versions.
+	// Deterministic like below-minimum: retrying won't fix it, and an
+	// already-registered runtime must be demoted so it stops taking tasks.
+	builtinProbeProtocolSkew
 	// builtinProbeNotExecutable: the file resolved, but the OS rejected it as
 	// not a runnable program (an npm placeholder stub whose postinstall was
 	// blocked is the case in the field — MUL-6164). Deterministic in the same
@@ -2404,7 +2409,7 @@ const (
 // learned this round.
 func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 	switch verdict {
-	case builtinProbeBelowMinimum, builtinProbeNotExecutable, builtinProbeMissingProfile:
+	case builtinProbeBelowMinimum, builtinProbeProtocolSkew, builtinProbeNotExecutable, builtinProbeMissingProfile:
 		return true
 	}
 	return false
@@ -2422,7 +2427,10 @@ func demotableBuiltinProbeVerdict(verdict builtinProbeVerdict) bool {
 // windows impossible to mistake for a verdict, and costs a genuinely broken
 // provider one extra round.
 func builtinProbeNeedsConfirmation(verdict builtinProbeVerdict) bool {
-	return verdict != builtinProbeBelowMinimum
+	// Below-minimum and protocol-skew are pure functions of the version
+	// string this round already parsed — a second look reaches the same
+	// conclusion, so no confirmation round is needed.
+	return verdict != builtinProbeBelowMinimum && verdict != builtinProbeProtocolSkew
 }
 
 // dshMissingProfileReason is the user-facing explanation for a
@@ -2730,7 +2738,10 @@ probeLoop:
 // probeMuseReceptionist is the muse equivalent of CLI version detection.
 // There is no local binary to --version, so reachability and the wire
 // protocol version come from the receptionist's /v1/health endpoint.
-// An unreachable or protocol-skewed receptionist is builtinProbeUnavailable
+// An unreachable receptionist is builtinProbeUnavailable (transient).
+// A protocol-skewed receptionist is builtinProbeProtocolSkew (demotable):
+// the version mismatch is deterministic, so an already-registered runtime
+// must stop taking tasks instead of failing them mid-run.
 // (transient): the runtime stays unregistered without demoting anything,
 // and a later probe round recovers it — the same rule a CLI whose
 // --version fails gets. A missing MUSE_ENDPOINT simply never reaches here
@@ -2744,6 +2755,9 @@ func (d *Daemon) probeMuseReceptionist(ctx context.Context) (string, string, bui
 	version, err := agent.ProbeMuseReceptionist(ctx, endpoint, strings.TrimSpace(os.Getenv("MUSE_TOKEN")))
 	if err != nil {
 		d.logger.Warn("skip registering runtime: muse receptionist probe failed", "error", err)
+		if errors.Is(err, agent.ErrMuseProtocolSkew) {
+			return "", err.Error(), builtinProbeProtocolSkew
+		}
 		return "", err.Error(), builtinProbeUnavailable
 	}
 	d.setAgentVersion("muse", version)

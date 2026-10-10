@@ -58,6 +58,12 @@ type museBackend struct {
 // protocol skew fails at probe time, not mid-task.
 const museProtocolVersion = 1
 
+// ErrMuseProtocolSkew is returned by ProbeMuseReceptionist when the
+// receptionist speaks a different protocol version than this backend.
+// It is a sentinel so the daemon can distinguish deterministic protocol
+// incompatibility (demotable) from transient network failures.
+var ErrMuseProtocolSkew = fmt.Errorf("muse backend: protocol skew")
+
 const (
 	museEnvEndpoint = "MUSE_ENDPOINT"
 	museEnvToken    = "MUSE_TOKEN"
@@ -201,8 +207,8 @@ func ProbeMuseReceptionist(ctx context.Context, endpoint, token string) (string,
 		return "", fmt.Errorf("muse backend: decode health response: %w", err)
 	}
 	if health.ProtocolVersion != museProtocolVersion {
-		return "", fmt.Errorf("muse backend: protocol skew: receptionist speaks v%d, backend implements v%d",
-			health.ProtocolVersion, museProtocolVersion)
+		return "", fmt.Errorf("%w: receptionist speaks v%d, backend implements v%d",
+			ErrMuseProtocolSkew, health.ProtocolVersion, museProtocolVersion)
 	}
 	if health.Version == "" {
 		health.Version = "unknown"
