@@ -103,7 +103,7 @@ multica daemon start
 | `MULTICA_AGENT_NAME` | 할당된 에이전트의 표시 이름 | 참고 정보 |
 | `MULTICA_DAEMON_PORT` | `multica repo checkout` 같은 작업 전용 명령이 사용하는 로컬 데몬 상태/API 포트 | 참고 정보 |
 | `MULTICA_TASK_SLOT` | 데몬 전체 동시 실행 풀의 슬롯. GPU 같은 슬롯 번호 기반 리소스에 사용 가능 | 참고 정보 |
-| `TMPDIR` | 실행 중인 작업의 비공개 임시 디렉터리. 크로스 플랫폼 도구를 위해 `TMP`와 `TEMP`로도 제공 | 참고 정보 |
+| `TMPDIR` | 실행 중인 작업의 비공개 임시 디렉터리. `TMP`와 `TEMP`로도 제공하지만, Windows Claude Code는 Git Bash의 공유 `/tmp`를 위해 사용자 temp 경로를 상속하고 `CLAUDE_CODE_TMPDIR`의 기본값을 작업 임시 디렉터리로 지정 | 참고 정보 |
 
 `MULTICA_TOKEN`을 사용하는 요청의 작성자는 서버가 결정하며, 태스크 댓글 같은 쓰기는 할당된 에이전트와 실행 중인 작업에 귀속됩니다. 자격 증명의 전체 바인딩, 권한, 귀속, 최대 24시간의 유효 기간 및 정리 동작은 [에이전트 실행용 임시 토큰](/auth-tokens#에이전트-실행용-임시-토큰)을 참고하세요.
 

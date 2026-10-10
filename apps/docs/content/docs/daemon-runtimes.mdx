@@ -103,7 +103,7 @@ The table lists the variables that custom runtimes can use today. It is intentio
 | `MULTICA_AGENT_NAME` | Display name of the assigned agent | Informational |
 | `MULTICA_DAEMON_PORT` | Local daemon health/API port used by task-only commands such as `multica repo checkout` | Informational |
 | `MULTICA_TASK_SLOT` | Slot in the daemon-wide concurrency pool; useful for slot-indexed resources such as GPUs | Informational |
-| `TMPDIR` | Private temporary directory for the active task; also supplied as `TMP` and `TEMP` for cross-platform tools | Informational |
+| `TMPDIR` | Private temporary directory for the active task; also supplied as `TMP` and `TEMP` except for Windows Claude Code, which inherits user temp paths for Git Bash's shared `/tmp` and defaults `CLAUDE_CODE_TMPDIR` to the task temp directory | Informational |
 
 The server determines authorship for requests made with `MULTICA_TOKEN`; writes such as issue comments are attributed to the assigned agent and active task. For the token's complete binding, permissions, attribution, 24-hour maximum lifetime, and cleanup behavior, see [Temporary tokens for agent runs](/auth-tokens#temporary-tokens-for-agent-runs).
 
