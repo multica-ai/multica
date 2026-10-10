@@ -3023,6 +3023,183 @@ func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams
 	return i, err
 }
 
+const createSingleAttemptAgentTask = `-- name: CreateSingleAttemptAgentTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
+    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
+    max_attempts, id
+)
+SELECT
+    $1, $2, $3, 'queued', $4, $5,
+    COALESCE($6::uuid[], '{}'),
+    $7,
+    COALESCE($8::boolean, FALSE),
+    COALESCE($9::boolean, FALSE),
+    $10,
+    $11,
+    CASE
+        WHEN COALESCE($12::text, '') <> ''
+        THEN jsonb_build_object('head_sha', $12::text, 'explicit_single_attempt_budget', true)
+        ELSE jsonb_build_object('explicit_single_attempt_budget', true)
+    END,
+    $13,
+    $14,
+    $15,
+    $16,
+    $17,
+    $18,
+    $19,
+    $20,
+    $21,
+    $22,
+    1,
+    COALESCE($23::uuid, gen_random_uuid())
+WHERE lock_task_owner_rows($1, $3, $2)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
+`
+
+type CreateSingleAttemptAgentTaskParams struct {
+	AgentID              pgtype.UUID   `json:"agent_id"`
+	RuntimeID            pgtype.UUID   `json:"runtime_id"`
+	IssueID              pgtype.UUID   `json:"issue_id"`
+	Priority             int32         `json:"priority"`
+	TriggerCommentID     pgtype.UUID   `json:"trigger_comment_id"`
+	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
+	TriggerSummary       pgtype.Text   `json:"trigger_summary"`
+	ForceFreshSession    pgtype.Bool   `json:"force_fresh_session"`
+	IsLeaderTask         pgtype.Bool   `json:"is_leader_task"`
+	HandoffNote          pgtype.Text   `json:"handoff_note"`
+	SquadID              pgtype.UUID   `json:"squad_id"`
+	HeadSha              pgtype.Text   `json:"head_sha"`
+	OriginatorUserID     pgtype.UUID   `json:"originator_user_id"`
+	AccountableUserID    pgtype.UUID   `json:"accountable_user_id"`
+	RuntimeMcpOverlay    []byte        `json:"runtime_mcp_overlay"`
+	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
+	OriginatorSource     pgtype.Text   `json:"originator_source"`
+	DelegatedFromTaskID  pgtype.UUID   `json:"delegated_from_task_id"`
+	RuleVersionID        pgtype.UUID   `json:"rule_version_id"`
+	RerunOfTaskID        pgtype.UUID   `json:"rerun_of_task_id"`
+	TriggerEvidenceKind  pgtype.Text   `json:"trigger_evidence_kind"`
+	TriggerEvidenceRefID pgtype.UUID   `json:"trigger_evidence_ref_id"`
+	ID                   pgtype.UUID   `json:"id"`
+}
+
+// This separate INSERT intentionally stamps max_attempts=1 and a context marker.
+// The ordinary CreateAgentTask omits the column entirely, keeping the real
+// database default (currently 2, potentially 4 with workspace override).
+// Migration 573 adds a late BEFORE INSERT trigger enforcing the opt-in budget
+// AFTER workspace-config triggers, before this row is claimable.
+// Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+// locks the owners' workspace rows in the writer's own transaction and returns
+// false once they are gone, so this statement writes no row instead of stranding
+// a task in a workspace that has just been deleted (MUL-5999).
+// head_sha stamps the commit under review into the task's context JSONB so the
+// reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
+// against an OLD head apart from a fresh request against a NEW head (TEN-356).
+// Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
+// issues with no linked PR. Issue-linked tasks never hit quick-create context
+// parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
+// key rides harmlessly alongside.
+// id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
+// enqueues cluster in a narrow contiguous primary-key range instead of
+// scattering across the B-tree. On a table with existing v4 ids, that range
+// is not necessarily the tree's right edge.
+// COALESCE keeps the column's gen_random_uuid() default reachable, so a caller
+// that passes no id still inserts — it just gets a random v4, exactly as before.
+// The same pattern is used by every INSERT listed in pkg/dbid's write table.
+func (q *Queries) CreateSingleAttemptAgentTask(ctx context.Context, arg CreateSingleAttemptAgentTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, createSingleAttemptAgentTask,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.IssueID,
+		arg.Priority,
+		arg.TriggerCommentID,
+		arg.CoalescedCommentIds,
+		arg.TriggerSummary,
+		arg.ForceFreshSession,
+		arg.IsLeaderTask,
+		arg.HandoffNote,
+		arg.SquadID,
+		arg.HeadSha,
+		arg.OriginatorUserID,
+		arg.AccountableUserID,
+		arg.RuntimeMcpOverlay,
+		arg.RuntimeConnectedApps,
+		arg.OriginatorSource,
+		arg.DelegatedFromTaskID,
+		arg.RuleVersionID,
+		arg.RerunOfTaskID,
+		arg.TriggerEvidenceKind,
+		arg.TriggerEvidenceRefID,
+		arg.ID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
+		&i.CommentThreadID,
+		&i.CancelledByType,
+		&i.CancelledByID,
+		&i.CancelledByName,
+		&i.IssueSnapshot,
+	)
+	return i, err
+}
+
 const createSystemUserAgent = `-- name: CreateSystemUserAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode, runtime_config,

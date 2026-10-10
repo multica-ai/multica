@@ -349,6 +349,65 @@ SELECT
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
 
+-- name: CreateSingleAttemptAgentTask :one
+-- This separate INSERT intentionally stamps max_attempts=1 and a context marker.
+-- The ordinary CreateAgentTask omits the column entirely, keeping the real
+-- database default (currently 2, potentially 4 with workspace override).
+-- Migration 573 adds a late BEFORE INSERT trigger enforcing the opt-in budget
+-- AFTER workspace-config triggers, before this row is claimable.
+-- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
+-- locks the owners' workspace rows in the writer's own transaction and returns
+-- false once they are gone, so this statement writes no row instead of stranding
+-- a task in a workspace that has just been deleted (MUL-5999).
+-- head_sha stamps the commit under review into the task's context JSONB so the
+-- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
+-- against an OLD head apart from a fresh request against a NEW head (TEN-356).
+-- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
+-- issues with no linked PR. Issue-linked tasks never hit quick-create context
+-- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
+-- key rides harmlessly alongside.
+-- id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
+-- enqueues cluster in a narrow contiguous primary-key range instead of
+-- scattering across the B-tree. On a table with existing v4 ids, that range
+-- is not necessarily the tree's right edge.
+-- COALESCE keeps the column's gen_random_uuid() default reachable, so a caller
+-- that passes no id still inserts — it just gets a random v4, exactly as before.
+-- The same pattern is used by every INSERT listed in pkg/dbid's write table.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
+    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
+    max_attempts, id
+)
+SELECT
+    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
+    sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
+    sqlc.narg(handoff_note),
+    sqlc.narg(squad_id),
+    CASE
+        WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
+        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text, 'explicit_single_attempt_budget', true)
+        ELSE jsonb_build_object('explicit_single_attempt_budget', true)
+    END,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(runtime_mcp_overlay),
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(rule_version_id),
+    sqlc.narg(rerun_of_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id),
+    1,
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+WHERE lock_task_owner_rows($1, $3, $2)
+RETURNING *;
+
 -- name: CreateDeferredChannelIssueTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 -- locks the owners' workspace rows in the writer's own transaction and returns
