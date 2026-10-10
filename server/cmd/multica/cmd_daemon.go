@@ -375,6 +375,90 @@ func daemonIdentityMismatch(health map[string]any, profile string, port int) err
 	return &daemonProfileMismatchError{Want: profile, Got: got, Port: port}
 }
 
+type sameWorkspaceDaemonConflictError struct {
+	WorkspaceID string
+	WantProfile string
+	GotProfile  string
+	Port        int
+	PID         int
+}
+
+func (e *sameWorkspaceDaemonConflictError) Error() string {
+	pid := "unknown"
+	if e.PID > 0 {
+		pid = strconv.Itoa(e.PID)
+	}
+	return fmt.Sprintf(
+		"refusing to start %s: %s already has a live daemon for workspace_id %s on port %d (pid %s)",
+		describeProfile(e.WantProfile), describeProfile(e.GotProfile), e.WorkspaceID, e.Port, pid)
+}
+
+func healthIncludesWorkspace(health map[string]any, workspaceID string) bool {
+	workspaces, ok := health["workspaces"].([]any)
+	if !ok {
+		return false
+	}
+	for _, rawWorkspace := range workspaces {
+		workspace, ok := rawWorkspace.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := workspace["id"].(string); id == workspaceID {
+			return true
+		}
+	}
+	return false
+}
+
+// requireNoSameWorkspaceDaemon refuses a second daemon identity for a workspace
+// already managed by another live local daemon. Health ports are profile-scoped,
+// so the ordinary same-port liveness check misses the default/profile split that
+// launches two daemons against one workspace_id.
+func requireNoSameWorkspaceDaemon(profile, workspaceID string) error {
+	if workspaceID == "" {
+		return nil
+	}
+	profiles := []string{""}
+	known, err := knownProfiles()
+	if err != nil {
+		return fmt.Errorf("list profiles for daemon workspace guard: %w", err)
+	}
+	profiles = append(profiles, known...)
+	seenPorts := make(map[int]bool, len(profiles))
+	for _, candidate := range profiles {
+		if candidate == profile {
+			continue
+		}
+		port := healthPortForProfile(candidate)
+		if seenPorts[port] {
+			continue
+		}
+		seenPorts[port] = true
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health := checkDaemonHealthOnPort(ctx, port)
+		cancel()
+		if !daemonAlive(health) || !healthIncludesWorkspace(health, workspaceID) {
+			continue
+		}
+		pid := 0
+		if rawPID, ok := health["pid"].(float64); ok {
+			pid = int(rawPID)
+		}
+		gotProfile := candidate
+		if reported, ok := health["profile"].(string); ok {
+			gotProfile = reported
+		}
+		return &sameWorkspaceDaemonConflictError{
+			WorkspaceID: workspaceID,
+			WantProfile: profile,
+			GotProfile:  gotProfile,
+			Port:        port,
+			PID:         pid,
+		}
+	}
+	return nil
+}
+
 // unknownProfileError reports an explicitly named --profile that has no
 // directory under ~/.multica/profiles. It carries the known profile names so
 // both the text and JSON renderings can list them without re-reading the disk.
@@ -577,6 +661,13 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	if err := requireDaemonAuth(profile); err != nil {
+		return err
+	}
+	fileCfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return fmt.Errorf("load CLI config: %w", err)
+	}
+	if err := requireNoSameWorkspaceDaemon(profile, fileCfg.WorkspaceID); err != nil {
 		return err
 	}
 
@@ -924,6 +1015,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// than server URL: an unreadable / missing config only means "no
 	// persisted overrides", not "cannot start".
 	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	if err := requireNoSameWorkspaceDaemon(profile, fileCfg.WorkspaceID); err != nil {
+		return err
+	}
 	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
 	// keeps live, colored logging on their terminal (a documented debugging
 	// path — see docs troubleshooting). A detached/background child, whose
