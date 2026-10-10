@@ -63,6 +63,14 @@ and linking events. This requires Expo 57.0.23+ and expo-build-properties
 57.0.20+; adding a scene manifest alone to an SDK 55 app is insufficient.
 See [Expo's migration guidance](https://github.com/expo/fyi/blob/main/ios-scene-lifecycle.md).
 
+SDK 57's scene backport does not include the later scene-aware presenter lookup
+used by native modules such as `expo-image-picker`. The workspace applies
+`patches/expo-modules-core@57.0.21.patch`, a direct backport of Expo's
+[#46956](https://github.com/expo/expo/pull/46956) and
+[#48319](https://github.com/expo/expo/pull/48319), so avatar, chat, and issue
+image pickers resolve their presenting window from the foregrounded scene. Keep
+the patch until Expo backports the change to SDK 57 or mobile moves to SDK 58+.
+
 After updating dependencies, regenerate an existing native project once (save
 any local native customizations first; `ios/` is generated and ignored):
 
@@ -75,7 +83,9 @@ Use `development` or `staging` instead for those variants, then run the usual
 build script. Keep normal development builds on the incremental prebuild path.
 For native validation, test a Release cold launch to sign-in, cold and warm
 `multica://` links, background/foreground transitions, and the Debug dev-client
-in each variant. Unit tests do not replace this device validation.
+in each variant. Also open the image picker from profile, chat, and the issue
+editor, select an image, and confirm the upload completes. Unit tests do not
+replace this device validation.
 
 ## First-time setup
 

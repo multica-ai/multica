@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfigContext } from "expo/config";
 import createConfig from "./app.config";
@@ -6,6 +9,23 @@ import createConfig from "./app.config";
 afterEach(() => vi.unstubAllEnvs());
 
 describe("iOS scene lifecycle configuration", () => {
+  it("resolves native presenters from the foregrounded scene", () => {
+    const requireFromTest = createRequire(import.meta.url);
+    const requireFromExpo = createRequire(requireFromTest.resolve("expo/package.json"));
+    const modulesCoreRoot = dirname(
+      requireFromExpo.resolve("expo-modules-core/package.json"),
+    );
+    const utilities = readFileSync(
+      join(modulesCoreRoot, "ios", "Utilities", "Utilities.swift"),
+      "utf8",
+    );
+
+    expect(utilities).toContain("return SceneGeometry.keyWindow()");
+    expect(utilities).not.toContain(
+      "UIApplication.shared.keyWindow?.rootViewController",
+    );
+  });
+
   it.each([
     [undefined, "Multica (Dev)", "ai.multica.mobile.dev"],
     ["development", "Multica (Dev)", "ai.multica.mobile.dev"],
