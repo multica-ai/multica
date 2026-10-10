@@ -47,7 +47,12 @@ export function enqueuePendingChatTask(
       ? {}
       : { supports_queue: current.supports_queue };
     return queued
-      ? { ...queueSupport, queued_tasks: [task] }
+      ? {
+          ...queueSupport,
+          // The head may still be loading when several follow-ups settle.
+          // Accumulate their acknowledgements instead of replacing the queue.
+          queued_tasks: normalizeQueue([...(current?.queued_tasks ?? []), task]),
+        }
       : {
           ...task,
           ...queueSupport,
