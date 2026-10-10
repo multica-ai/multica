@@ -161,7 +161,7 @@ import {
   useViewStateWriter,
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_CHROME_GUTTER } from "../../layout/page-header";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -1202,7 +1202,7 @@ export function IssueNotFound({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {(leading || trailing) && (
-        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_CHROME_GUTTER)}>
           {leading}
           {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
         </div>
@@ -1239,7 +1239,7 @@ export function IssueDetailSkeleton({
       {/* The way back is real from the first frame, not once the issue lands:
           a host that gave up its own bar for `leadingAction` has nothing else
           to offer while this skeleton owns the screen. */}
-      <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+      <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_CHROME_GUTTER)}>
         {leading ?? (
           <>
             <Skeleton className="h-4 w-16" />

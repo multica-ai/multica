@@ -90,38 +90,50 @@
  * a separate ramp and stays out of this scale on purpose. */
 @theme {
     /* counters, badges, timestamps, overline labels */
-    --text-micro: 11px;
-    --text-micro--line-height: 15px;
+    --text-micro: calc(11px * var(--mobile-type-scale));
+    --text-micro--line-height: calc(15px * var(--mobile-type-scale));
     /* secondary and helper text — was text-xs */
-    --text-caption: 12px;
-    --text-caption--line-height: 16px;
+    --text-caption: calc(12px * var(--mobile-type-scale));
+    --text-caption--line-height: calc(16px * var(--mobile-type-scale));
     /* dense labels: table headers, metadata rows */
-    --text-label: 13px;
-    --text-label--line-height: 18px;
+    --text-label: calc(13px * var(--mobile-type-scale));
+    --text-label--line-height: calc(18px * var(--mobile-type-scale));
     /* UI body, the workhorse — was text-sm */
-    --text-body: 14px;
-    --text-body--line-height: 20px;
+    --text-body: calc(14px * var(--mobile-type-scale));
+    --text-body--line-height: calc(20px * var(--mobile-type-scale));
     /* roomier body: dialog copy, onboarding prose */
-    --text-body-lg: 15px;
-    --text-body-lg--line-height: 22px;
+    --text-body-lg: calc(15px * var(--mobile-type-scale));
+    --text-body-lg--line-height: calc(22px * var(--mobile-type-scale));
     /* small headings — was text-base */
-    --text-title-sm: 16px;
-    --text-title-sm--line-height: 24px;
+    --text-title-sm: calc(16px * var(--mobile-type-scale));
+    --text-title-sm--line-height: calc(24px * var(--mobile-type-scale));
     /* section headings — was text-lg */
-    --text-title: 18px;
-    --text-title--line-height: 28px;
+    --text-title: calc(18px * var(--mobile-type-scale));
+    --text-title--line-height: calc(28px * var(--mobile-type-scale));
     /* card and dialog titles — was text-xl */
-    --text-title-lg: 20px;
-    --text-title-lg--line-height: 28px;
+    --text-title-lg: calc(20px * var(--mobile-type-scale));
+    --text-title-lg--line-height: calc(28px * var(--mobile-type-scale));
     /* page titles — was text-2xl */
-    --text-display-sm: 24px;
-    --text-display-sm--line-height: 32px;
+    --text-display-sm: calc(24px * var(--mobile-type-scale));
+    --text-display-sm--line-height: calc(32px * var(--mobile-type-scale));
     /* hero numbers and empty-state headlines — was text-3xl (30px) */
-    --text-display: 36px;
-    --text-display--line-height: 40px;
+    --text-display: calc(36px * var(--mobile-type-scale));
+    --text-display--line-height: calc(40px * var(--mobile-type-scale));
 }
 
 :root {
+    /* Mobile appearance preferences (Settings -> Preferences -> Appearance).
+       Defaults reproduce the unscaled UI exactly. The overrides live in the
+       sm-and-below block at the end of this file, keyed on root attributes
+       that MobileAppearanceSync projects from the device-local store. */
+    --mobile-type-scale: 1;
+    /* Shared outer page gutter, read by PAGE_GUTTER (px-4 by default). */
+    --page-gutter: 1rem;
+    /* Edge inset for header and toolbar bands (PAGE_CHROME_GUTTER). Equals the
+       page gutter by default; Full Width keeps a smaller inset here so controls
+       never touch the screen edge while page content goes edge to edge. */
+    --page-chrome-gutter: var(--page-gutter);
+
     /* Dialog motion, shared by popup and backdrop. */
     --dialog-enter-duration: 100ms;
     --dialog-exit-duration: 100ms;
@@ -312,4 +324,29 @@
     --find-match: oklch(0.82 0.16 100);
     --find-match-active: oklch(0.76 0.18 60);
     --find-match-foreground: oklch(0.18 0.02 92);
+}
+
+/* Mobile appearance preferences. Strictly below the `sm` breakpoint (40rem) so
+ * tablet and desktop layout never changes. Font size scales the --text-* size
+ * and line-height tokens through --mobile-type-scale; icons, illustrations and
+ * the app container are untouched. Full width drops only the shared outer
+ * gutter, keeping any left/right safe-area inset (landscape notch). */
+@media (width < 40rem) {
+    :root[data-mobile-font-size="small"] {
+        --mobile-type-scale: 0.9;
+    }
+    :root[data-mobile-font-size="large"] {
+        --mobile-type-scale: 1.1;
+    }
+    :root[data-mobile-content-width="full"] {
+        --page-gutter: max(
+            env(safe-area-inset-left, 0px),
+            env(safe-area-inset-right, 0px)
+        );
+        --page-chrome-gutter: max(
+            0.75rem,
+            env(safe-area-inset-left, 0px),
+            env(safe-area-inset-right, 0px)
+        );
+    }
 }

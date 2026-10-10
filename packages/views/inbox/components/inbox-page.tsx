@@ -84,7 +84,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
+import { PageHeader, PAGE_CHROME_GUTTER } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
@@ -664,7 +664,7 @@ export function InboxPage() {
   ) : undefined;
 
   const compactBackBar = compactBackAction ? (
-    <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+    <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_CHROME_GUTTER)}>
       {compactBackAction}
     </div>
   ) : null;
@@ -823,7 +823,7 @@ export function InboxPage() {
     if (viewLoading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
+          <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_CHROME_GUTTER)}>
             <Skeleton className="h-5 w-16" />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
@@ -885,7 +885,7 @@ export function InboxPage() {
           groupResizeBehavior="preserve-pixel-size"
         >
           <div className="flex flex-col border-r h-full">
-            <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
+            <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_CHROME_GUTTER)}>
               <Skeleton className="h-5 w-16" />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">

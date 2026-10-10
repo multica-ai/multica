@@ -8,7 +8,13 @@ import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
 } from "./collection-page";
-import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "./page-header";
+import {
+  CollapsedNavTrigger,
+  PAGE_CHROME_GUTTER,
+  PAGE_GUTTER,
+  PAGE_RAIL,
+  PageHeader,
+} from "./page-header";
 
 // The layout rules under test are documented on `PageHeader` itself; each
 // test here pins one of them against the rendered output.
@@ -68,6 +74,24 @@ describe("PageHeader title alignment", () => {
 
 describe("PageHeader base chrome", () => {
 
+  // Full Width (mobile appearance preference) zeroes --page-gutter, so the
+  // shared gutter must read that variable, and the rail's cap must not move.
+  it("reads the gutter from --page-gutter and leaves PAGE_RAIL untouched", () => {
+    expect(PAGE_GUTTER).toBe("px-(--page-gutter)");
+    expect(PAGE_RAIL).toBe("mx-auto w-full max-w-[1440px]");
+    expect(PAGE_CHROME_GUTTER).toBe("px-(--page-chrome-gutter)");
+  });
+
+  it("puts the header band on the chrome gutter, not the page gutter", () => {
+    const header = renderHeader(
+      <PageHeader>
+        <h1>Inbox</h1>
+      </PageHeader>,
+    );
+    expect(header).toHaveClass(PAGE_CHROME_GUTTER);
+    expect(header).not.toHaveClass(PAGE_GUTTER);
+  });
+
   it("does not let a call site override the shared gutter", () => {
     const header = renderHeader(
       <PageHeader className="px-8">
@@ -75,7 +99,7 @@ describe("PageHeader base chrome", () => {
       </PageHeader>,
     );
 
-    expect(header).toHaveClass(PAGE_GUTTER);
+    expect(header).toHaveClass(PAGE_CHROME_GUTTER);
     expect(header).not.toHaveClass("px-8");
   });
 

@@ -119,7 +119,7 @@ import {
 import { actorKindForViewVariant } from "@multica/core/issues/surface/scope";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_CHROME_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { useStatusOptions } from "../utils/status-options";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
@@ -1313,7 +1313,7 @@ export function IssuesHeader({
 
   return (
     <>
-    <div className={cn("min-h-12 shrink-0 py-2 [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
+    <div className={cn("min-h-12 shrink-0 py-2 [-webkit-overflow-scrolling:touch]", PAGE_CHROME_GUTTER)}>
       <div className="flex w-full min-w-0 items-start justify-between gap-2">
         {/* Left: the view bar — built-in tabs and saved views as one flat,
             per-user ordered row; wraps instead of overflowing. */}
