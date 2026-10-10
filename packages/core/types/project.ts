@@ -63,7 +63,7 @@ export interface ListProjectsResponse {
 // Known types (UI must default-case unknown server-side additions):
 //   - github_repo: cloud-side git checkout, ref = { url, ref?, default_branch_hint? }
 //   - local_directory: agent execution on a specific daemon,
-//     ref = { local_path, daemon_id, label?, execution_mode? }
+//     ref = { local_path, daemon_id, agent_id?, label?, execution_mode? }
 export type ProjectResourceType = "github_repo" | "local_directory";
 
 export interface GithubRepoResourceRef {
@@ -95,6 +95,8 @@ export type LocalDirectoryExecutionMode = "in_place" | "worktree";
 export interface LocalDirectoryResourceRef {
   local_path: string;
   daemon_id: string;
+  /** Optional exact agent binding. Absent means the daemon-wide project default. */
+  agent_id?: string;
   label?: string;
   execution_mode?: LocalDirectoryExecutionMode;
 }
