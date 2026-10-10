@@ -238,6 +238,7 @@ export function ManualCreatePanel({
   const setShared = useIssueDraftStore((s) => s.setShared);
   const setAgent = useIssueDraftStore((s) => s.setAgent);
   const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+  const beginBatchContinuation = useIssueDraftStore((s) => s.beginBatchContinuation);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
@@ -290,8 +291,7 @@ export function ManualCreatePanel({
   const parentIssueLocked = anchorCommentId !== null
     && typeof data?.parent_issue_id === "string"
     && data.parent_issue_id.length > 0;
-  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
-  // since it's a per-creation choice tied to the chosen parent.
+  // Stage belongs to this create session and only applies to a sub-issue.
   const [stage, setStage] = useState<number | null>(
     typeof data?.stage === "number" ? (data.stage as number) : null,
   );
@@ -386,6 +386,10 @@ export function ManualCreatePanel({
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
+  const updateParent = (id?: string) => {
+    setParentIssueId(id);
+    setStage(null);
+  };
   const updateStartDate = (v: string | null) => { setStartDate(v); setManual({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setShared({ dueDate: v }); };
   const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setManual({ labelIds: ids }); };
@@ -418,7 +422,7 @@ export function ManualCreatePanel({
   const attachLabelMutation = useAttachLabelToIssue();
   const resetForNextIssue = () => {
     setTitle("");
-    setStatus("todo");
+    setStatus(status);
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
@@ -428,15 +432,13 @@ export function ManualCreatePanel({
     setPropertyErrorId(null);
     setUnavailablePropertyRemoved(false);
     setProjectId(undefined);
-    setParentIssueId(undefined);
-    setStage(null);
     setChildIssues([]);
-    // Keep the just-used assignee for the next issue in the batch; reset
-    // everything else across the manual + shared slots.
+    // Keep status and assignee in this batch. Parent and stage stay in local
+    // state, while other manual and shared fields reset for the next issue.
     setManual({
       title: "",
       description: "",
-      status: "todo",
+      status,
       assigneeType,
       assigneeId,
       startDate: null,
@@ -449,8 +451,14 @@ export function ManualCreatePanel({
       dueDate: null,
       attachments: [],
     });
+    // The reset above is a batch continuation, not user input: record it so a
+    // field the user actually changes afterwards (priority, a date, a label —
+    // anything `hasDraft` alone would not consider content) keeps the draft
+    // recoverable, while a continuation nobody touched is still discarded.
+    beginBatchContinuation();
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
+    batchContinuationRef.current = true;
   };
 
   // Manual create runs through the shared await-then-render composer contract
@@ -464,10 +472,17 @@ export function ManualCreatePanel({
   // object identity at submit; success clears ONLY an untouched draft —
   // whether the edit came mid-flight or from a reopened dialog.
   const mountedRef = useRef(true);
+  const batchContinuationRef = useRef(false);
   useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // A keep-open form nobody edited is only a batch continuation. If it
+      // closes without edits, the next fresh dialog starts from the usual todo
+      // draft; a continuation the user did edit reports a draft and survives.
+      if (batchContinuationRef.current && !useIssueDraftStore.getState().hasDraft()) {
+        useIssueDraftStore.getState().clearDraft();
+      }
     };
   }, []);
   const submittedDraftRef = useRef<IssueCreateDraft | null>(null);
@@ -757,8 +772,7 @@ export function ManualCreatePanel({
     }
   },
     onAccepted: () => {
-      // These preferences derive from the SUBMITTED values, not the live
-      // draft — an issue was created, so record them regardless of the guard.
+      // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
       // Success may only consume the draft it submitted (MUL-5181 P0): any
@@ -1185,7 +1199,7 @@ export function ManualCreatePanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setParentIssueId(undefined)}
+                    onClick={() => updateParent(undefined)}
                     className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
                     aria-label={t(($) => $.create_issue.remove_parent_aria)}
                   >
@@ -1349,7 +1363,7 @@ export function ManualCreatePanel({
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         variant="destructive"
-                        onClick={() => setParentIssueId(undefined)}
+                        onClick={() => updateParent(undefined)}
                       >
                         <XIcon className="h-3.5 w-3.5" />
                         {t(($) => $.create_issue.remove_parent)}
@@ -1378,7 +1392,7 @@ export function ManualCreatePanel({
                 ...(parentIssueId ? [parentIssueId] : []),
               ]}
               onSelect={(selected) => {
-                setParentIssueId(selected.id);
+                updateParent(selected.id);
               }}
             />
             <IssuePickerModal

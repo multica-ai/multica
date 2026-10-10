@@ -101,6 +101,13 @@ interface IssueDraftStore {
    *  create session and persistence continues to serialize this ordinary
    *  backup, so a reload cannot leak the source draft into normal create. */
   isolatedDraftBackup?: IssueCreateDraft;
+  /** In-memory only. Snapshot of the draft a successful "Create another"
+   *  create reset into the next issue of the batch. Compared by value against
+   *  the live draft, so an untouched continuation — which merely inherits the
+   *  submitted status/assignee — is not recoverable content, while any field
+   *  the user actually changed is. Never persisted: untouched continuations reload as todo;
+   *  explicitly edited drafts retain their selections. */
+  batchContinuationBaseline?: IssueCreateDraft;
   // Last assignee picked at submit time. Persisted across drafts so the
   // create-issue modal can prefill the picker with the user's most recent
   // choice instead of always opening with no assignee.
@@ -110,6 +117,12 @@ interface IssueDraftStore {
   setManual: (patch: Partial<IssueCreateManual>) => void;
   setAgent: (patch: Partial<IssueCreateAgent>) => void;
   setActiveMode: (mode: CreateMode) => void;
+  /** Record the current draft as the untouched baseline of a keep-open batch
+   *  continuation. Call once a successful create has reset the draft for the
+   *  next issue; holding the reference is safe because every write below
+   *  rebuilds `draft` instead of mutating it. Cleared whenever the draft
+   *  stops being that continuation (fresh draft, isolated session, rehydrate). */
+  beginBatchContinuation: () => void;
   clearDraft: () => void;
   beginIsolatedDraft: () => void;
   endIsolatedDraft: () => void;
@@ -178,6 +191,58 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
   };
 }
 
+function hasDraftContent(draft: IssueCreateDraft): boolean {
+  const { manual, agent, shared } = draft;
+  return !!(
+    manual.title ||
+    manual.description ||
+    agent.prompt ||
+    Object.keys(manual.propertyValues).length > 0 ||
+    // Recoverable uploads only; failed/interrupted remnants do not pin a draft.
+    shared.attachments.some((u) => u.status === "uploaded" || u.status === "uploading")
+  );
+}
+
+// Value equality over the draft's plain-object shape. An untouched draft is
+// usually still the same reference; the structural walk additionally absorbs a
+// re-created draft whose values did not change, so an internal rewrite can
+// never read as an edit. Only compares shapes this store writes — nested
+// arrays (labelIds, attachments) and plain records (propertyValues).
+function draftValuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, i) => draftValuesEqual(item, b[i]))
+    );
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (!draftValuesEqual(left[key], right[key])) return false;
+  }
+  return true;
+}
+
+// Whether the draft holds anything worth recovering: explicit content, or a
+// change away from the untouched keep-open continuation it started from. A
+// batch continuation inherits the submitted status and assignee, so those
+// inherited values only count once the user changes them — otherwise an
+// unedited continuation would keep the inherited status alive (and persist it).
+function hasRecoverableIntent(
+  draft: IssueCreateDraft,
+  batchContinuationBaseline?: IssueCreateDraft,
+): boolean {
+  return (
+    hasDraftContent(draft) ||
+    (batchContinuationBaseline !== undefined &&
+      !draftValuesEqual(draft, batchContinuationBaseline))
+  );
+}
+
 export const useIssueDraftStore = create<IssueDraftStore>()(
   persist(
     (set, get) => ({
@@ -192,6 +257,8 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         set((s) => ({ draft: { ...s.draft, agent: { ...s.draft.agent, ...patch } } })),
       setActiveMode: (mode) =>
         set((s) => ({ draft: { ...s.draft, activeMode: mode } })),
+      beginBatchContinuation: () =>
+        set((s) => ({ batchContinuationBaseline: s.draft })),
       clearDraft: () =>
         set((s) => ({
           draft: {
@@ -204,12 +271,14 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
             agent: emptyAgent(),
             activeMode: s.draft.activeMode,
           },
+          batchContinuationBaseline: undefined,
         })),
       beginIsolatedDraft: () =>
         set((s) => {
           if (s.isolatedDraftBackup) return s;
           return {
             isolatedDraftBackup: s.draft,
+            batchContinuationBaseline: undefined,
             draft: {
               shared: emptyShared(),
               manual: {
@@ -224,21 +293,13 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         }),
       endIsolatedDraft: () =>
         set((s) => s.isolatedDraftBackup
-          ? { draft: s.isolatedDraftBackup, isolatedDraftBackup: undefined }
+          ? { draft: s.isolatedDraftBackup, isolatedDraftBackup: undefined, batchContinuationBaseline: undefined }
           : s),
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
-        const { manual, agent, shared } = get().draft;
-        return !!(
-          manual.title ||
-          manual.description ||
-          agent.prompt ||
-          Object.keys(manual.propertyValues).length > 0 ||
-          // Recoverable uploads only: a failed/interrupted remnant the user
-          // never dismissed must not pin the sidebar's draft dot forever.
-          shared.attachments.some((u) => u.status === "uploaded" || u.status === "uploading")
-        );
+        const { draft, batchContinuationBaseline } = get();
+        return hasRecoverableIntent(draft, batchContinuationBaseline);
       },
     }),
     {
@@ -247,19 +308,37 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       // An isolated source-context draft must never reach localStorage. Persist
       // the ordinary backup throughout that session; a crash/reload therefore
       // restores the user's normal create draft, not source-specific input.
-      partialize: (state) => ({
-        draft: state.isolatedDraftBackup ?? state.draft,
-        lastAssigneeType: state.lastAssigneeType,
-        lastAssigneeId: state.lastAssigneeId,
-      }),
+      partialize: (state) => {
+        const draft = state.isolatedDraftBackup ?? state.draft;
+        // A batch's status must not outlive the batch: an untouched
+        // continuation rehydrates as a fresh todo create. A continuation the
+        // user actually edited — even if only a field outside the recovery
+        // predicate, such as priority or status — is a real draft, as is every
+        // draft that is not a batch continuation at all.
+        const untouchedContinuation =
+          state.isolatedDraftBackup === undefined &&
+          state.batchContinuationBaseline !== undefined &&
+          !hasRecoverableIntent(state.draft, state.batchContinuationBaseline);
+        return {
+          draft: untouchedContinuation
+            ? { ...draft, manual: { ...draft.manual, status: "todo" as const } }
+            : draft,
+          lastAssigneeType: state.lastAssigneeType,
+          lastAssigneeId: state.lastAssigneeId,
+        };
+      },
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<IssueDraftStore> & {
           draft?: unknown;
         };
         return {
           ...currentState,
-          ...persisted,
+          lastAssigneeType: persisted.lastAssigneeType,
+          lastAssigneeId: persisted.lastAssigneeId,
           draft: migrateDraft(persisted.draft),
+          // A rehydrate replaces the draft (fresh load or workspace switch), so
+          // the in-memory continuation snapshot no longer describes it.
+          batchContinuationBaseline: undefined,
         };
       },
     },
@@ -281,5 +360,6 @@ registerDraftCleanup({
       lastAssigneeType: undefined,
       lastAssigneeId: undefined,
       isolatedDraftBackup: undefined,
+      batchContinuationBaseline: undefined,
     }),
 });

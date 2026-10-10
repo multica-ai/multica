@@ -40,6 +40,7 @@ const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
+const mockBeginBatchContinuation = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -127,7 +128,7 @@ const emptyIssueDraft = () => ({
   manual: {
     title: "",
     description: "",
-    status: "todo" as const,
+    status: "todo" as string,
     startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
@@ -146,13 +147,30 @@ const mockDraftStore = {
   draft: emptyIssueDraft(),
   lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
   lastAssigneeId: undefined as string | undefined,
+  // The keep-open reset's snapshot. Mirrors the store: the batch reset records
+  // the draft it produced, so a later change is a user edit while an untouched
+  // continuation is still "no draft" (see draft-store.test.ts for the
+  // predicate's own coverage).
+  batchContinuationBaseline: undefined as ReturnType<typeof emptyIssueDraft> | undefined,
   setShared: mockSetShared,
   setManual: mockSetManual,
   setAgent: mockSetAgent,
   setActiveMode: mockSetActiveMode,
+  beginBatchContinuation: mockBeginBatchContinuation,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
-  hasDraft: () => false,
+  hasDraft: () => !!(
+    mockDraftStore.draft.manual.title ||
+    mockDraftStore.draft.manual.description ||
+    mockDraftStore.draft.agent.prompt ||
+    Object.keys(mockDraftStore.draft.manual.propertyValues).length > 0 ||
+    mockDraftStore.draft.shared.attachments.some((upload) =>
+      upload.status === "uploaded" || upload.status === "uploading") ||
+    // Every setter below rebuilds `draft`, so a changed reference means the
+    // continuation was edited.
+    (mockDraftStore.batchContinuationBaseline !== undefined &&
+      mockDraftStore.draft !== mockDraftStore.batchContinuationBaseline)
+  ),
 };
 
 const mockQuickCreateStore = {
@@ -441,7 +459,11 @@ vi.mock("../editor", async () => {
 vi.mock("../issues/components", () => ({
   StatusIcon: ({ status }: { status: string }) => <span data-testid="status-icon">{status}</span>,
   StatusPicker: () => <div data-testid="status-picker" />,
-  PriorityPicker: () => <div data-testid="priority-picker" />,
+  // Surface onUpdate so tests can drive a field-only edit (priority is not
+  // part of the draft's recoverable content).
+  PriorityPicker: ({ onUpdate }: { onUpdate: (u: { priority: string }) => void }) => (
+    <div data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
+  ),
   StagePicker: () => <div data-testid="stage-picker" />,
   AssigneePicker: () => <div data-testid="assignee-picker" />,
   // Surface open/onOpenChange so tests can assert progressive-disclosure
@@ -634,20 +656,42 @@ describe("CreateIssueModal", () => {
     // Reset the unified draft mock so per-test seeding (assignee, project, …)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft = emptyIssueDraft();
+    mockDraftStore.lastAssigneeType = undefined;
+    mockDraftStore.lastAssigneeId = undefined;
+    mockDraftStore.batchContinuationBaseline = undefined;
+    mockSetLastAssignee.mockImplementation((type, id) => {
+      mockDraftStore.lastAssigneeType = type;
+      mockDraftStore.lastAssigneeId = id;
+    });
+    // Each write rebuilds `draft`, matching the real store — the keep-open
+    // baseline is held by reference and must not see later edits.
     mockSetShared.mockImplementation((patch: Partial<typeof mockDraftStore.draft.shared>) => {
-      mockDraftStore.draft.shared = { ...mockDraftStore.draft.shared, ...patch };
+      mockDraftStore.draft = {
+        ...mockDraftStore.draft,
+        shared: { ...mockDraftStore.draft.shared, ...patch },
+      };
     });
     mockSetManual.mockImplementation((patch: Partial<typeof mockDraftStore.draft.manual>) => {
-      mockDraftStore.draft.manual = { ...mockDraftStore.draft.manual, ...patch };
+      mockDraftStore.draft = {
+        ...mockDraftStore.draft,
+        manual: { ...mockDraftStore.draft.manual, ...patch },
+      };
     });
     mockSetAgent.mockImplementation((patch: Partial<typeof mockDraftStore.draft.agent>) => {
-      mockDraftStore.draft.agent = { ...mockDraftStore.draft.agent, ...patch };
+      mockDraftStore.draft = {
+        ...mockDraftStore.draft,
+        agent: { ...mockDraftStore.draft.agent, ...patch },
+      };
+    });
+    mockBeginBatchContinuation.mockImplementation(() => {
+      mockDraftStore.batchContinuationBaseline = mockDraftStore.draft;
     });
     mockClearDraft.mockImplementation(() => {
       const next = emptyIssueDraft();
       next.manual.assigneeType = mockDraftStore.lastAssigneeType;
       next.manual.assigneeId = mockDraftStore.lastAssigneeId;
       mockDraftStore.draft = next;
+      mockDraftStore.batchContinuationBaseline = undefined;
     });
     mockApiUploadFile.mockResolvedValue({
       id: "11111111-2222-3333-4444-555555555555",
@@ -762,6 +806,35 @@ describe("CreateIssueModal", () => {
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 
+  it("starts a fresh create from todo without a remembered stage", async () => {
+    const user = userEvent.setup();
+    const first = renderModal(<CreateIssueModal onClose={vi.fn()} data={{
+      parent_issue_id: "parent-1",
+      status: "in_progress",
+      stage: 2,
+    }} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Follow up" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "in_progress", parent_issue_id: "parent-1", stage: 2 }),
+    ));
+    first.unmount();
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-1" }} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Another child" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "todo", parent_issue_id: "parent-1", stage: undefined }),
+    ));
+  });
+
   it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
     const user = userEvent.setup();
     mockDraftStore.draft.manual.labelIds = [
@@ -827,12 +900,16 @@ describe("CreateIssueModal", () => {
     });
   });
 
-  it("keeps manual mode open and clears content when create another is enabled", async () => {
+  it("keeps status, assignee, parent, and stage for the next issue in a batch", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     mockQuickCreateStore.keepOpen = true;
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
 
-    renderModal(<CreateIssueModal onClose={onClose} />);
+    const modal = renderModal(<CreateIssueModal onClose={onClose} data={{
+      parent_issue_id: "parent-1", status: "in_progress", stage: 2,
+    }} />);
 
     await user.type(screen.getByPlaceholderText("Issue title"), "First follow-up issue");
     await user.type(screen.getByPlaceholderText("Add description..."), "Description to clear");
@@ -842,14 +919,15 @@ describe("CreateIssueModal", () => {
       expect(mockCreateIssue).toHaveBeenCalledWith({
         title: "First follow-up issue",
         description: "Description to clear",
-        status: "todo",
+        status: "in_progress",
         priority: "none",
-        assignee_type: undefined,
-        assignee_id: undefined,
+        assignee_type: "member",
+        assignee_id: "alice",
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
-        parent_issue_id: undefined,
+        parent_issue_id: "parent-1",
+        stage: 2,
         project_id: undefined,
       });
     });
@@ -860,9 +938,9 @@ describe("CreateIssueModal", () => {
     expect(mockSetManual).toHaveBeenCalledWith({
       title: "",
       description: "",
-      status: "todo",
-      assigneeType: undefined,
-      assigneeId: undefined,
+      status: "in_progress",
+      assigneeType: "member",
+      assigneeId: "alice",
       startDate: null,
       labelIds: [],
       propertyValues: {},
@@ -873,6 +951,81 @@ describe("CreateIssueModal", () => {
       dueDate: null,
       attachments: [],
     });
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Second follow-up issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      title: "Second follow-up issue",
+      status: "in_progress",
+      assignee_type: "member",
+      assignee_id: "alice",
+      parent_issue_id: "parent-1",
+      stage: 2,
+    }));
+
+    // An untouched continuation is not a draft: closing it drops the batch
+    // defaults so the next fresh create starts from todo again.
+    const clearsAfterSubmit = mockClearDraft.mock.calls.length;
+    modal.unmount();
+    expect(mockClearDraft).toHaveBeenCalledTimes(clearsAfterSubmit + 1);
+    expect(mockDraftStore.draft.manual.status).toBe("todo");
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Fresh issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(3));
+    expect(mockCreateIssue).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      status: "todo", parent_issue_id: undefined, stage: undefined,
+    }));
+  });
+
+  it("keeps a field-only edit in the next batch issue when the dialog closes", async () => {
+    const user = userEvent.setup();
+    mockQuickCreateStore.keepOpen = true;
+
+    const modal = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    // The submitted draft is consumed, leaving an untouched continuation.
+    await waitFor(() => expect(mockClearDraft).toHaveBeenCalledTimes(1));
+    const clearsAfterSubmit = mockClearDraft.mock.calls.length;
+
+    // Priority only — no title, body or attachment to mark the draft as content.
+    await user.click(screen.getByTestId("priority-picker"));
+    expect(mockSetShared).toHaveBeenCalledWith({ priority: "high" });
+
+    modal.unmount();
+
+    // The explicit selection survives the close instead of being reset away.
+    expect(mockClearDraft).toHaveBeenCalledTimes(clearsAfterSubmit);
+    expect(mockDraftStore.draft.shared.priority).toBe("high");
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Carried priority issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ priority: "high" }),
+    ));
+  });
+
+  it("preserves an unfinished next issue instead of clearing it on close", async () => {
+    const user = userEvent.setup();
+    mockQuickCreateStore.keepOpen = true;
+    const modal = renderModal(<CreateIssueModal onClose={vi.fn()} data={{
+      status: "in_progress",
+    }} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "First issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(screen.getByPlaceholderText("Issue title")).toHaveValue(""));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Unfinished next issue");
+    modal.unmount();
+
+    expect(mockDraftStore.draft.manual.title).toBe("Unfinished next issue");
+    expect(mockDraftStore.draft.manual.status).toBe("in_progress");
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Unfinished next issue");
   });
 
   it("includes configured custom properties in the atomic create request", async () => {
