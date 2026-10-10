@@ -1660,13 +1660,7 @@ func resolveDaemonStringOverride(flagValue, envName, cfgValue string) string {
 // scans, and cross-profile hints on this path prevents diagnostics from
 // drifting away from the directory the daemon actually uses.
 func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) {
-	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
-	override := resolveDaemonStringOverride(
-		flagValue,
-		"MULTICA_WORKSPACES_ROOT",
-		fileCfg.WorkspacesRoot,
-	)
-	return daemon.ResolveWorkspacesRoot(profile, override)
+	return daemon.ResolveWorkspacesRootForProfile(profile, flagValue)
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for
@@ -1998,40 +1992,7 @@ func runDaemonDiskUsageAggregate(cmd *cobra.Command, byWorkspace bool, top int, 
 // (e.g. when MULTICA_WORKSPACES_ROOT pins every profile to one directory) are
 // collapsed to a single entry.
 func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
-	out := make([]daemon.DiskUsageRoot, 0)
-
-	if root, err := resolveWorkspacesRootForProfile("", ""); err == nil {
-		out = append(out, daemon.DiskUsageRoot{Profile: "", Root: root})
-	}
-
-	profilesRoot, err := profilesRootDir()
-	if err != nil {
-		return out, nil
-	}
-	entries, err := os.ReadDir(profilesRoot)
-	if err != nil {
-		return out, nil
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			names = append(names, entry.Name())
-		}
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		root, err := resolveWorkspacesRootForProfile(name, "")
-		if err != nil || containsDiskUsageRoot(out, root) {
-			continue
-		}
-		// Skip profile roots that were never created on disk — a configured
-		// profile whose daemon never ran has nothing to report.
-		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
-			continue
-		}
-		out = append(out, daemon.DiskUsageRoot{Profile: name, Root: root})
-	}
-	return out, nil
+	return daemon.EnumerateWorkspaceRoots()
 }
 
 func containsDiskUsageRoot(roots []daemon.DiskUsageRoot, candidate string) bool {

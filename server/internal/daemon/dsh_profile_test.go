@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -528,15 +527,6 @@ func TestDshProvisionOutput(t *testing.T) {
 			}
 		}
 	})
-}
-
-// processAlive reports whether a pid still refers to a running process.
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // Cancelling the daemon must stop the install's whole process tree. `dsh plugin`

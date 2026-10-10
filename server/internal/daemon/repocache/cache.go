@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/filelock"
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 )
 
@@ -167,7 +168,8 @@ type CachedRepo struct {
 type Cache struct {
 	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
 	logger *slog.Logger
-	// repoLocks maps bare repo path → dedicated mutex. Any mutating operation
+	// repoLocks maps bare repo path → mutex backed by a cross-process file lock.
+	// Any mutating operation
 	// on a given bare repo (clone, fetch, worktree add, ref update) must
 	// hold its lock — git's own lockfiles (packed-refs.lock, config.lock,
 	// worktree admin dirs) don't tolerate parallel mutations on the same
@@ -194,6 +196,8 @@ type Activity struct {
 // as soon as a foreground operation queues. The maintenance holder remains
 // responsible for stopping its Git process tree before unlocking.
 type repoLock struct {
+	path              string
+	file              *os.File
 	mu                sync.Mutex
 	held              bool
 	maintenance       bool
@@ -228,6 +232,16 @@ func (l *repoLock) LockContext(ctx context.Context) error {
 			l.maintenance = false
 			l.foregroundWaiters--
 			l.mu.Unlock()
+			// Keep the in-process gate held while waiting for another daemon.
+			// Every clone, fetch and checkout reaches this same acquisition path.
+			if l.path != "" {
+				f, err := filelock.Acquire(ctx, l.path)
+				if err != nil {
+					l.Unlock()
+					return err
+				}
+				l.file = f
+			}
 			return nil
 		}
 		changed := l.changed
@@ -246,6 +260,8 @@ func (l *repoLock) Lock() {
 
 func (l *repoLock) Unlock() {
 	l.mu.Lock()
+	filelock.Release(l.file)
+	l.file = nil
 	if !l.held {
 		l.mu.Unlock()
 		panic("repocache: unlock of unlocked repository")
@@ -310,6 +326,9 @@ func (c *Cache) lockForRepo(barePath string) *repoLock {
 		return l.(*repoLock)
 	}
 	newLock := newRepoLock()
+	// The persistent sibling survives eviction; deleting a locked inode would
+	// let the next clone acquire a different lock at the same pathname.
+	newLock.path = filepath.Join(filepath.Dir(filepath.Dir(barePath)), ".locks", filepath.Base(filepath.Dir(barePath)), filepath.Base(barePath)+".lock")
 	actual, _ := c.repoLocks.LoadOrStore(barePath, newLock)
 	return actual.(*repoLock)
 }
@@ -491,6 +510,11 @@ func (c *Cache) WithRepoMaintenance(ctx context.Context, barePath string, fn fun
 		return false, nil
 	}
 	defer repoLock.Unlock()
+	f, err := filelock.Try(repoLock.path)
+	if err != nil || f == nil {
+		return false, err
+	}
+	repoLock.file = f
 	return true, fn(maintenanceCtx)
 }
 
