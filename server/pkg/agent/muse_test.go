@@ -773,3 +773,107 @@ func TestMuseExecuteUnknownStatus(t *testing.T) {
 		t.Errorf("Error = %q, want unknown status", res.Error)
 	}
 }
+
+// TestMuseCompletedWithErrorIsFailed: N1 regression.
+// When the receptionist returns completed+error (e.g. "result too large"),
+// the backend must report failed, not completed with transcript fallback.
+func TestMuseCompletedWithErrorIsFailed(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{{
+			Status: "completed",
+			Error:  "result too large (204801 bytes > 204800 byte limit)",
+		}},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	res, _ := drainMuseSession(t, sess)
+	if res.Status != "failed" {
+		t.Errorf("Status = %q, want failed (completed+error is not success)", res.Status)
+	}
+	if !strings.Contains(res.Error, "result too large") {
+		t.Errorf("Error = %q, want 'result too large'", res.Error)
+	}
+}
+
+// TestMuseExecuteSendsProtocolVersion: Go-B3 regression.
+// The execute request must carry protocol_version so the receptionist
+// can reject incompatible versions before creating the task.
+func TestMuseExecuteSendsProtocolVersion(t *testing.T) {
+	fastMusePolls(t)
+	fake := &fakeMuseReceptionist{
+		statuses: []museTaskStatus{{Status: "completed", Result: "done"}},
+	}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	sess, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatalf("Execute = %v", err)
+	}
+	drainMuseSession(t, sess)
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.executeBody) == 0 {
+		t.Fatal("no execute request captured")
+	}
+	var req museExecuteRequest
+	if err := json.Unmarshal(fake.executeBody, &req); err != nil {
+		t.Fatalf("failed to parse execute request: %v", err)
+	}
+	if req.ProtocolVersion != museProtocolVersion {
+		t.Errorf("ProtocolVersion = %d, want %d", req.ProtocolVersion, museProtocolVersion)
+	}
+}
+
+// TestMuseProtocolSkewCancelsOrphanedTask: Go-B3 regression.
+// If the receptionist accepts the task but reports a version mismatch,
+// the backend must attempt to cancel the orphaned task.
+func TestMuseProtocolSkewCancelsOrphanedTask(t *testing.T) {
+	fastMusePolls(t)
+	// Fake that returns v2 in execute response (simulating old receptionist
+	// without pre-create validation)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(museHealthResponse{ProtocolVersion: 1, Version: "1.0"})
+	})
+	var cancelCalls int
+	var mu sync.Mutex
+	mux.HandleFunc("/v1/execute", func(w http.ResponseWriter, r *http.Request) {
+		// Old receptionist: creates task, returns v2 in response
+		_ = json.NewEncoder(w).Encode(museExecuteResponse{
+			TaskID:          "orphan-task-1",
+			ProtocolVersion: 2,
+		})
+	})
+	mux.HandleFunc("/v1/tasks/orphan-task-1/cancel", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cancelCalls++
+		mu.Unlock()
+		w.WriteHeader(200)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	b, _ := New("muse", museTestConfig(t, srv.URL, ""))
+	_, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err == nil {
+		t.Fatal("Execute should fail on protocol skew")
+	}
+	if !strings.Contains(err.Error(), "protocol skew") {
+		t.Errorf("Error = %q, want protocol skew", err.Error())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if cancelCalls == 0 {
+		t.Error("expected cancel attempt for orphaned task, got 0")
+	}
+}
