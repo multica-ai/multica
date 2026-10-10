@@ -291,7 +291,7 @@ func TestClaimTasksForRuntimesKeepsOwnerlessPrivateAgentClaimable(t *testing.T) 
 	}
 	svc := NewTaskService(db.New(fixture.pool), fixture.pool, nil, events.New())
 
-	claimed, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{fixture.runtimeID}, 1)
+	claimed, _, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{fixture.runtimeID}, 1)
 	if err != nil {
 		t.Fatalf("claim tasks: %v", err)
 	}
