@@ -28,6 +28,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { LinkedPRIndicator } from "./linked-pr-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -205,7 +206,9 @@ export const BoardCardContent = memo(function BoardCardContent({
           <p className="text-caption text-muted-foreground truncate">{issue.identifier}</p>
           <IssueDuplicateOfMarker issue={issue} insideLink />
         </div>
-        <IssueAgentActivityIndicator issueId={issue.id} />
+        <span className={issue.linked_pull_requests?.length ? "mr-7" : undefined}>
+          <IssueAgentActivityIndicator issueId={issue.id} />
+        </span>
       </div>
 
       {/* Row 2: Title */}
@@ -390,7 +393,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         data-peeked={peeked ? "" : undefined}
         {...attributes}
         {...listeners}
-        className={`group/card ${isDragging ? "opacity-30" : ""}`}
+        className={`group/card relative ${isDragging ? "opacity-30" : ""}`}
         onKeyDown={
           peek
             ? (e) => {
@@ -418,6 +421,17 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
             project={project}
           />
         </AppLink>
+        {issue.linked_pull_requests?.length ? (
+          <div
+            className="absolute right-2.5 top-3 z-10"
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === " ") event.stopPropagation();
+            }}
+          >
+            <LinkedPRIndicator prs={issue.linked_pull_requests} />
+          </div>
+        ) : null}
       </div>
     </IssueActionsContextMenu>
   );
