@@ -538,6 +538,8 @@ export interface SearchIssueResult extends Issue {
 
 export interface SearchIssuesResponse {
   issues: SearchIssueResult[];
+  /** True when the server holds more matching rows beyond this page. */
+  has_more: boolean;
 }
 
 export interface SearchProjectResult extends Project {
@@ -547,6 +549,8 @@ export interface SearchProjectResult extends Project {
 
 export interface SearchProjectsResponse {
   projects: SearchProjectResult[];
+  /** True when the server holds more matching rows beyond this page. */
+  has_more: boolean;
 }
 
 // Local search index sync (MUL-7754): GET /api/search-index/manifest,
