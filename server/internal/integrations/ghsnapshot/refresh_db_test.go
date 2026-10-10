@@ -117,11 +117,19 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 	q := db.New(pool)
 	ctx := context.Background()
 	now := time.Unix(1_700_010_000, 0)
+	// Go runs DB-backed packages concurrently against one database. Keep this
+	// cursor test at the top of the BIGINT address space so ordinary fixtures
+	// from another package sort only after this test's bounded page wraps.
+	const (
+		firstInstallationID  int64 = 1<<63 - 2
+		secondInstallationID int64 = 1<<63 - 1
+		beforeFixtures       int64 = firstInstallationID - 1
+	)
 
-	settled := seedPRAt(t, pool, q, 111, "settled", 1, "S")
-	oldest := seedPRAt(t, pool, q, 111, "oldest", 2, "O")
-	running := seedPRAt(t, pool, q, 222, "running", 3, "R")
-	newer := seedPRAt(t, pool, q, 222, "newer", 4, "N")
+	settled := seedPRAt(t, pool, q, firstInstallationID, "settled", 1, "S")
+	oldest := seedPRAt(t, pool, q, firstInstallationID, "oldest", 2, "O")
+	running := seedPRAt(t, pool, q, secondInstallationID, "running", 3, "R")
+	newer := seedPRAt(t, pool, q, secondInstallationID, "newer", 4, "N")
 	prs := []db.GithubPullRequest{settled, oldest, running, newer}
 	t.Cleanup(func() {
 		for _, pr := range prs {
@@ -155,7 +163,7 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 
 	rows, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
 		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
-		AfterInstallationID: 0,
+		AfterInstallationID: beforeFixtures,
 		AfterRepoOwner:      "",
 		AfterRepoName:       "",
 		AfterPrNumber:       0,
@@ -179,7 +187,7 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 
 	first, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
 		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
-		AfterInstallationID: 0,
+		AfterInstallationID: beforeFixtures,
 		AfterRepoOwner:      "",
 		AfterRepoName:       "",
 		AfterPrNumber:       0,
