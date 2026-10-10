@@ -584,6 +584,67 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 }
 
+// TestTaskMulticaEnvironmentIncludesInitiator verifies that the task
+// initiator's identity is exposed to the spawned agent process as
+// MULTICA_INITIATOR_* environment variables, so agent CLIs (Hermes, Claude
+// Code, …) and MCP tools can read who triggered the task without parsing
+// the `## Task Initiator` block out of the prompt text. Empty initiator
+// fields are omitted rather than emitted as empty strings, so task kinds
+// with no attributable human initiator (on-assign, autopilot, quick-create)
+// do not receive the vars at all.
+func TestTaskMulticaEnvironmentIncludesInitiator(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		ID:             "task-init",
+		AgentID:        "agent-init",
+		WorkspaceID:    "ws-init",
+		InitiatorType:  "member",
+		InitiatorID:    "u-initiator",
+		InitiatorName:  "Bohan",
+		InitiatorEmail: "bohan@example.com",
+	}
+	env := taskMulticaEnvironment(task, "agent-name", "mat_sentinel", "/cfg", "/ws", "https://task.example", 19514, 1, "/tmp")
+
+	if got := env["MULTICA_INITIATOR_TYPE"]; got != "member" {
+		t.Fatalf("MULTICA_INITIATOR_TYPE = %q, want %q", got, "member")
+	}
+	if got := env["MULTICA_INITIATOR_ID"]; got != "u-initiator" {
+		t.Fatalf("MULTICA_INITIATOR_ID = %q, want %q", got, "u-initiator")
+	}
+	if got := env["MULTICA_INITIATOR_NAME"]; got != "Bohan" {
+		t.Fatalf("MULTICA_INITIATOR_NAME = %q, want %q", got, "Bohan")
+	}
+	if got := env["MULTICA_INITIATOR_EMAIL"]; got != "bohan@example.com" {
+		t.Fatalf("MULTICA_INITIATOR_EMAIL = %q, want %q", got, "bohan@example.com")
+	}
+}
+
+// TestTaskMulticaEnvironmentOmitsEmptyInitiator verifies that when a task
+// has no initiator (e.g. autopilot or on-assign tasks), no
+// MULTICA_INITIATOR_* variables are emitted at all — not even empty ones.
+func TestTaskMulticaEnvironmentOmitsEmptyInitiator(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		ID:          "task-no-init",
+		AgentID:     "agent-no-init",
+		WorkspaceID: "ws-no-init",
+	}
+	env := taskMulticaEnvironment(task, "agent-name", "mat_sentinel", "/cfg", "/ws", "https://task.example", 19514, 1, "/tmp")
+
+	for _, key := range []string{
+		"MULTICA_INITIATOR_TYPE",
+		"MULTICA_INITIATOR_ID",
+		"MULTICA_INITIATOR_NAME",
+		"MULTICA_INITIATOR_EMAIL",
+	} {
+		if _, ok := env[key]; ok {
+			t.Fatalf("unexpected %q in env for initiator-less task", key)
+		}
+	}
+}
+
 // When `brew --prefix` is unavailable but the executable path is under a
 // known Cellar root, triggerRestart must recover the prefix from the
 // known-prefix list and target <prefix>/bin/multica.
