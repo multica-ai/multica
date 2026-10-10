@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { QueryClient, hashKey } from "@tanstack/react-query";
+import { QueryClient, hashKey, type InfiniteData } from "@tanstack/react-query";
 import {
   applyIssueChange,
   invalidateLastActivitySortedIssueLists,
@@ -9,9 +9,11 @@ import {
 } from "./cache-coordinator";
 import { issueChangedDims } from "./surface/membership";
 import { issueKeys, type IssueSortParam } from "./queries";
-import { inboxKeys } from "../inbox/queries";
+import { EMPTY_INBOX_FILTERS } from "../inbox/filter-store";
+import { archivedInboxPagesOptions, inboxPagesOptions } from "../inbox/queries";
 import type {
   InboxItem,
+  InboxPage,
   Issue,
   IssueTableRowsResponse,
   ListIssuesCache,
@@ -32,7 +34,8 @@ const membersKey = issueKeys.myListSorted(
   { assignee_types: ["member"] },
   sort,
 );
-const inboxKey = inboxKeys.list(WS_ID);
+const inboxKey = inboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS).queryKey;
+const archivedInboxKey = archivedInboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS).queryKey;
 const flatKey = issueKeys.flat(WS_ID, "workspace:all", {}, sort);
 const flatTitleKey = issueKeys.flat(
   WS_ID,
@@ -128,6 +131,14 @@ const assigneeGroupsPositionKey = issueKeys.assigneeGroups(WS_ID, {
 const myAssigneeGroupsUpdatedKey = issueKeys.myAssigneeGroups(WS_ID, "all", {
   ...updatedSort,
 });
+
+function inboxPages(items: InboxItem[]): InfiniteData<InboxPage> {
+  return { pages: [{ items, nextCursor: null, hasMore: false }], pageParams: [null] };
+}
+
+function inboxRows(qc: QueryClient, key: typeof inboxKey | typeof archivedInboxKey) {
+  return qc.getQueryData<InfiniteData<InboxPage>>(key)?.pages.flatMap((p) => p.items);
+}
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
@@ -387,7 +398,7 @@ describe("applyIssueChange", () => {
     qc.setQueryData<ListIssuesCache>(projectP1Key, bucketed([], 3));
     // p2 list loaded; the issue was never a member — untouched.
     qc.setQueryData<ListIssuesCache>(projectP2Key, bucketed([]));
-    qc.setQueryData<InboxItem[]>(inboxKey, [
+    qc.setQueryData(inboxKey, inboxPages([
       {
         id: "inbox-1",
         workspace_id: WS_ID,
@@ -406,7 +417,7 @@ describe("applyIssueChange", () => {
         created_at: "2025-01-01T00:00:00Z",
         details: null,
       },
-    ]);
+    ]));
 
     const patch = { status: "in_progress" as const };
     const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
@@ -416,9 +427,7 @@ describe("applyIssueChange", () => {
 
     expect(ids(qc, wsKey, "unstarted")).toEqual([]);
     expect(ids(qc, wsKey, "started")).toEqual(["issue-1"]);
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKey)?.[0]?.issue_status,
-    ).toBe("in_progress");
+    expect(inboxRows(qc, inboxKey)?.[0]?.issue_status).toBe("in_progress");
 
     // Off-window count arithmetic: todo 3 → 2, in_progress 0 → 1, loaded
     // arrays untouched (never hard-insert).
@@ -462,8 +471,8 @@ describe("applyIssueChange", () => {
       id: "inbox-archived",
       archived: true,
     } satisfies InboxItem;
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [active]);
-    qc.setQueryData<InboxItem[]>(inboxKeys.archived(WS_ID), [archived]);
+    qc.setQueryData(inboxKey, inboxPages([active]));
+    qc.setQueryData(archivedInboxKey, inboxPages([archived]));
 
     const result = applyIssueChange(
       qc,
@@ -476,24 +485,12 @@ describe("applyIssueChange", () => {
       },
     );
 
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.list(WS_ID))?.[0]
-        ?.issue_priority,
-    ).toBe("urgent");
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.archived(WS_ID))?.[0]
-        ?.issue_priority,
-    ).toBe("urgent");
+    expect(inboxRows(qc, inboxKey)?.[0]?.issue_priority).toBe("urgent");
+    expect(inboxRows(qc, archivedInboxKey)?.[0]?.issue_priority).toBe("urgent");
 
     rollbackIssueChange(qc, WS_ID, "issue-1", result);
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.list(WS_ID))?.[0]
-        ?.issue_priority,
-    ).toBe("low");
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.archived(WS_ID))?.[0]
-        ?.issue_priority,
-    ).toBe("low");
+    expect(qc.getQueryData(inboxKey)).toEqual(inboxPages([active]));
+    expect(qc.getQueryData(archivedInboxKey)).toEqual(inboxPages([archived]));
   });
 
   it("off-window leave: decrements the old status bucket total without a refetch", () => {
@@ -655,7 +652,7 @@ describe("applyIssueChange", () => {
     const listSnapshot = bucketed([issue()]);
     qc.setQueryData<ListIssuesCache>(myAssignedKey, listSnapshot);
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, "issue-1"), issue());
-    qc.setQueryData<InboxItem[]>(inboxKey, []);
+    qc.setQueryData(inboxKey, inboxPages([]));
 
     const patch = { assignee_id: "bob", assignee_type: "member" as const, status: "in_progress" as const };
     const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
@@ -668,7 +665,7 @@ describe("applyIssueChange", () => {
 
     expect(qc.getQueryData<ListIssuesCache>(myAssignedKey)).toEqual(listSnapshot);
     expect(qc.getQueryData<Issue>(issueKeys.detail(WS_ID, "issue-1"))).toEqual(issue());
-    expect(qc.getQueryData<InboxItem[]>(inboxKey)).toEqual([]);
+    expect(qc.getQueryData(inboxKey)).toEqual(inboxPages([]));
   });
 
   it("skips grouped caches living under the same key prefixes", () => {

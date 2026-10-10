@@ -102,7 +102,7 @@
     "unarchived": "알림을 복원했습니다"
   },
   "errors": {
-    "archived_lookup_failed": "링크된 알림을 불러오지 못했습니다",
+    "lookup_failed": "링크된 알림을 불러오지 못했습니다",
     "source_context_retry_failed": "원본 컨텍스트로 재시도하지 못했습니다",
     "source_context_retry_unavailable": "이 컨텍스트는 더 이상 재시도할 수 없습니다. 분기 지점에서 다시 시작하세요.",
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
@@ -115,6 +115,7 @@
     "archive_completed_failed": "완료된 항목을 보관하지 못했습니다",
     "unarchive_failed": "보관 해제에 실패했습니다",
     "archived_load_failed": "보관된 알림을 불러오지 못했습니다",
+    "load_failed": "알림을 불러오지 못했습니다",
     "filters_load_failed": "필터를 불러올 수 없습니다"
   }
 }

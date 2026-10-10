@@ -69,14 +69,15 @@ export interface InboxItem {
   details: Record<string, string> | null;
 }
 
-
-export interface ArchivedInboxPage {
+/** One page of inbox groups, from either the active or the archived view. */
+export interface InboxPage {
   items: InboxItem[];
   nextCursor: string | null;
   hasMore: boolean;
 }
 
-export interface ArchivedInboxFacets {
+/** Per-value group counts behind the inbox filter menu. */
+export interface InboxFacets {
   statuses: Record<string, number>;
   priorities: Record<string, number>;
   actors: Record<string, number>;

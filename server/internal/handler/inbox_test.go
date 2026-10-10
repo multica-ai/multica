@@ -330,6 +330,21 @@ func TestInboxListsShipCommentPreviewNotFullComment(t *testing.T) {
 		t.Errorf("issue-less notification lost its full body (its detail pane renders it)")
 	}
 
+	var page inboxPageResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInboxPage),
+		inboxRequest(http.MethodGet, "/api/inbox/page", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&page)
+	if got := bodyOf(page.Items, activeIssue); got != wantPreview {
+		t.Errorf("inbox page body = %d characters, want the %d-character preview",
+			utf8.RuneCountInString(got), inboxListBodyPreviewLimit)
+	}
+	for _, item := range page.Items {
+		if item.IssueID == nil && (item.Body == nil || *item.Body != issueLessBody) {
+			t.Errorf("issue-less notification lost its full body on the inbox page")
+		}
+	}
+
 	var archived []InboxItemResponse
 	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInbox),
 		inboxRequest(http.MethodGet, "/api/inbox/archived", workspaceID)).

@@ -2439,6 +2439,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
+				// Bounded, filterable counterpart of "/", paged by issue group.
+				// "/" stays as it is for installed clients.
+				r.Get("/page", h.ListInboxPage)
+				r.Get("/facets", h.GetInboxFacets)
 				// Archived notifications, for the inbox's "Archived" sub-view.
 				// Separate from "/" so the main list keeps its contract and
 				// never carries the unbounded archive.

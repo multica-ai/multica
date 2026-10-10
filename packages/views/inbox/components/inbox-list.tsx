@@ -185,17 +185,23 @@ export function InboxList({
   useEffect(() => {
     if (items.length === 0) loadMore();
   }, [items.length, loadMore]);
+  // More pages load as the end scrolls into view; the button covers retry and
+  // keyboard use. It sits right below the rows, above the archive entry.
   const Footer = useCallback(() => <>
-    {archivedEntry}
-    {isArchivedView && onLoadMore && (
+    {onLoadMore && (
       <div className="flex flex-col items-center gap-2 py-3">
-        {loadMoreError && <p role="alert" className="text-caption text-destructive">{t(($) => $.errors.archived_load_failed)}</p>}
+        {loadMoreError && (
+          <p role="alert" className="text-caption text-destructive">
+            {isArchivedView ? t(($) => $.errors.archived_load_failed) : t(($) => $.errors.load_failed)}
+          </p>
+        )}
         <button type="button" disabled={loadingMore} onClick={onLoadMore}
           className="rounded-md px-3 py-2 text-caption text-muted-foreground hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50">
           {loadingMore ? t(($) => $.list.loading_more) : loadMoreError ? t(($) => $.list.retry) : t(($) => $.list.load_more)}
         </button>
       </div>
     )}
+    {archivedEntry}
   </>, [archivedEntry, isArchivedView, onLoadMore, loadingMore, loadMoreError, t]);
 
   if (items.length === 0) {

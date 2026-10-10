@@ -232,3 +232,32 @@ describe("InboxList archive pagination", () => {
     expect(screen.queryByText("No archived notifications")).toBeNull();
   });
 });
+
+describe("InboxList active pagination", () => {
+  const props = { items, view: "inbox" as const, selectedKey: "", onSelect: vi.fn(), onAction: vi.fn(), onOpenArchived: vi.fn() };
+
+  it("loads the next page at the end, ahead of the archive entry", () => {
+    const onLoadMore = vi.fn();
+    render(<InboxList {...props} onLoadMore={onLoadMore} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reach list end" }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
+    const loadMore = screen.getByRole("button", { name: "Load more" });
+    const archive = screen.getByRole("button", { name: "Archived" });
+    expect(loadMore.compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("names the active list in a failed page and retries only on request", () => {
+    const onLoadMore = vi.fn();
+    render(<InboxList {...props} onLoadMore={onLoadMore} loadMoreError />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load notifications");
+    fireEvent.click(screen.getByRole("button", { name: "Reach list end" }));
+    expect(onLoadMore).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
+  it("shows no load-more control once every page is loaded", () => {
+    render(<InboxList {...props} />);
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+});

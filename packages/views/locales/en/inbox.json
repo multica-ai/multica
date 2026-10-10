@@ -104,7 +104,7 @@
     "unarchived": "Notification restored"
   },
   "errors": {
-    "archived_lookup_failed": "Failed to load the linked notification",
+    "lookup_failed": "Failed to load the linked notification",
     "source_context_retry_failed": "Could not retry with the original context",
     "source_context_retry_unavailable": "This context can no longer be retried. Start again from the branch point.",
     "mark_read_failed": "Failed to mark as read",
@@ -117,6 +117,7 @@
     "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
+    "load_failed": "Failed to load notifications",
     "filters_load_failed": "Could not load filters"
   }
 }

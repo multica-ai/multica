@@ -6,9 +6,7 @@ import {
   EMPTY_INBOX_FILTERS,
   filterInboxItems,
   inboxActorKey,
-  inboxFiltersForPrioritySupport,
   inboxFilterCount,
-  inboxPriorityFilterSupport,
   useInboxFilterStore,
 } from "./filter-store";
 
@@ -73,29 +71,6 @@ describe("filterInboxItems", () => {
         priorities: ["high"],
       }).map((candidate) => candidate.id),
     ).toEqual(["todo-high", "done-high"]);
-  });
-
-  it("does not apply a priority condition until the projection is supported", () => {
-    const filters = {
-      ...EMPTY_INBOX_FILTERS,
-      statuses: ["todo"],
-      priorities: ["high"],
-      actors: ["member:alice"],
-      unreadOnly: true,
-    } as const;
-
-    // Only the unsupported dimension is dropped — a backend that cannot
-    // project priority still has nothing to say about who sent a
-    // notification or whether it was read.
-    expect(inboxFiltersForPrioritySupport(filters, "unknown")).toEqual({
-      ...filters,
-      priorities: [],
-    });
-    expect(inboxFiltersForPrioritySupport(filters, "unsupported")).toEqual({
-      ...filters,
-      priorities: [],
-    });
-    expect(inboxFiltersForPrioritySupport(filters, "supported")).toBe(filters);
   });
 });
 
@@ -172,18 +147,6 @@ describe("unread filtering", () => {
   });
 });
 
-describe("inboxPriorityFilterSupport", () => {
-  it("distinguishes an omitted legacy projection from a supported null", () => {
-    expect(inboxPriorityFilterSupport([])).toBe("unknown");
-    expect(inboxPriorityFilterSupport([item("system", null, null)])).toBe(
-      "supported",
-    );
-    expect(inboxPriorityFilterSupport([item("legacy", "todo", undefined)])).toBe(
-      "unsupported",
-    );
-  });
-});
-
 describe("useInboxFilterStore", () => {
   it("keeps filters isolated by workspace and clears one workspace only", () => {
     const store = useInboxFilterStore.getState();
@@ -204,44 +167,6 @@ describe("useInboxFilterStore", () => {
     useInboxFilterStore.getState().clearFilters("ws-1");
     expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toBeUndefined();
     expect(useInboxFilterStore.getState().filtersByWorkspace["ws-2"]).toBeDefined();
-  });
-
-  it("clears only the unsupported priority dimension", () => {
-    const store = useInboxFilterStore.getState();
-    store.toggleStatusFilter("ws-1", "todo");
-    store.togglePriorityFilter("ws-1", "high");
-
-    useInboxFilterStore.getState().clearPriorityFilters("ws-1");
-
-    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toEqual({
-      ...EMPTY_INBOX_FILTERS,
-      statuses: ["todo"],
-    });
-  });
-
-  it("keeps an actor or unread selection alive when priority is dropped", () => {
-    const store = useInboxFilterStore.getState();
-    store.toggleActorFilter("ws-1", "member:alice");
-    store.toggleUnreadOnly("ws-1");
-    store.togglePriorityFilter("ws-1", "high");
-
-    useInboxFilterStore.getState().clearPriorityFilters("ws-1");
-
-    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toEqual({
-      ...EMPTY_INBOX_FILTERS,
-      actors: ["member:alice"],
-      unreadOnly: true,
-    });
-  });
-
-  it("drops the workspace entry when clearing priority leaves nothing", () => {
-    useInboxFilterStore.getState().togglePriorityFilter("ws-1", "high");
-
-    useInboxFilterStore.getState().clearPriorityFilters("ws-1");
-
-    expect(
-      useInboxFilterStore.getState().filtersByWorkspace["ws-1"],
-    ).toBeUndefined();
   });
 
   it("toggles the unread dimension off again", () => {

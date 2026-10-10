@@ -1,15 +1,20 @@
 import { ActivityIndicator, Linking, ScrollView, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   resolveBillingRecovery,
   type BillingRecoveryKind,
 } from "@multica/core/billing/recovery";
 import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import type { InboxItem } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { inboxListOptions } from "@/data/queries/inbox";
+import {
+  inboxCacheItems,
+  inboxLookupOptions,
+  inboxPagesOptions,
+} from "@/data/queries/inbox";
 import {
   appConfigOptions,
   workspaceSubscriptionSummaryOptions,
@@ -68,13 +73,25 @@ export default function InboxNoticeDetail() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { t } = useT("inbox");
-  const { data: items, isLoading } = useQuery(inboxListOptions(wsId));
-
   // Read the raw workspace-scoped cache: deduplication can replace a row,
   // but a sheet already opened for a specific notification must remain stable.
-  const item = items?.find(
-    (candidate) => candidate.id === id && candidate.workspace_id === wsId,
-  );
+  // The tab's loaded pages answer the usual tap; this sheet only observes
+  // them, it never pages the list itself.
+  const { data: pages } = useInfiniteQuery({
+    ...inboxPagesOptions(wsId),
+    enabled: false,
+  });
+  const isThisNotice = (candidate: InboxItem) =>
+    candidate.id === id && candidate.workspace_id === wsId;
+  const pageItem = pages ? inboxCacheItems(pages).find(isThisNotice) : undefined;
+  // A deep link, or a notice past the loaded pages, reads its own group. The
+  // sheet only opens issue-less notices, whose group key is their own id.
+  const lookup = useQuery({
+    ...inboxLookupOptions(wsId, id ?? ""),
+    enabled: !!wsId && !!id && !pageItem,
+  });
+  const item = pageItem ?? lookup.data?.items.find(isThisNotice);
+  const isLoading = !item && lookup.isLoading;
   const isQuotaNotice = item?.type === "autopilot_quota_exceeded";
   const configQuery = useQuery({
     ...appConfigOptions(),

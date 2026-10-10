@@ -14,10 +14,7 @@ import {
   BUILT_IN_STATUS_CATEGORY,
   BUILT_IN_STATUS_ORDER,
 } from "@multica/core/issues/config";
-import {
-  type InboxPriorityFilterSupport,
-  useInboxFilterStore,
-} from "@multica/core/inbox/filter-store";
+import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import type { InboxItem, IssueStatusEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { InboxFilterMenu } from "./inbox-filter-menu";
@@ -85,20 +82,26 @@ const ITEMS = [
   item("done-low", "done", "low"),
 ];
 
+// The server's counts for ITEMS: the active view's menu reads facets, not rows.
+const ITEM_FACETS = {
+  statuses: { todo: 1, done: 1 }, priorities: { high: 1, low: 1 }, actors: {}, unreadCount: 2,
+};
+
 function renderMenu({
   items = ITEMS,
-  priorityFilterSupport = "supported",
   archived = false,
+  getInboxFacets = vi.fn(async () => ITEM_FACETS),
   getArchivedInboxFacets = vi.fn(async () => ({ statuses: {}, priorities: {}, actors: {}, unreadCount: 0 })),
   statusEntries = BUILT_IN_STATUS_ORDER.map(statusEntry),
 }: {
   items?: InboxItem[];
-  priorityFilterSupport?: InboxPriorityFilterSupport;
   archived?: boolean;
+  getInboxFacets?: ReturnType<typeof vi.fn>;
   getArchivedInboxFacets?: ReturnType<typeof vi.fn>;
   statusEntries?: IssueStatusEntry[];
 } = {}) {
   setApiInstance({
+    getInboxFacets,
     getArchivedInboxFacets,
     listIssueStatuses: async () => ({
       statuses: statusEntries,
@@ -114,7 +117,6 @@ function renderMenu({
       <InboxFilterMenu
         wsId="ws-1"
         items={items}
-        priorityFilterSupport={priorityFilterSupport}
         archived={archived}
       />
     </QueryClientProvider>,
@@ -165,6 +167,17 @@ describe("InboxFilterMenu", () => {
     expect(selected).toHaveAttribute("aria-checked", "true");
     fireEvent.click(selected);
     expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]?.priorities).toEqual([]);
+  });
+
+  it("loads active inbox facets only when opened, counting groups beyond the loaded rows", async () => {
+    const getInboxFacets = vi.fn(async () => ({ statuses: { done: 900 }, priorities: { high: 900 }, actors: { "member:alice": 900 }, unreadCount: 12 }));
+    const getArchivedInboxFacets = vi.fn();
+    renderMenu({ items: [], getInboxFacets, getArchivedInboxFacets });
+    expect(getInboxFacets).not.toHaveBeenCalled();
+    await openSubmenu("From");
+    expect(await screen.findByRole("menuitemcheckbox", { name: /Alice.*900/ })).toBeTruthy();
+    expect(getInboxFacets).toHaveBeenCalledTimes(1);
+    expect(getArchivedInboxFacets).not.toHaveBeenCalled();
   });
 
   it("loads full-archive facets only when opened, including an actor absent from loaded rows", async () => {
@@ -223,18 +236,11 @@ describe("InboxFilterMenu", () => {
     ).toBeUndefined();
   });
 
-  it("offers only the actors the visible rows carry", async () => {
+  it("offers the actors the inbox facets carry", async () => {
     renderMenu({
-      items: [
-        item("from-alice", "todo", "high", {
-          actor_type: "member",
-          actor_id: "alice",
-        }),
-        item("from-bob", "done", "low", {
-          actor_type: "agent",
-          actor_id: "bob",
-        }),
-      ],
+      getInboxFacets: vi.fn(async () => ({
+        ...ITEM_FACETS, actors: { "member:alice": 1, "agent:bob": 1 },
+      })),
     });
 
     await openSubmenu("From");
@@ -252,20 +258,18 @@ describe("InboxFilterMenu", () => {
     ).toEqual(["member:alice"]);
   });
 
-  it("hides the From submenu when no row carries an actor", async () => {
+  it("hides the From submenu when no group carries an actor", async () => {
     renderMenu();
 
     fireEvent.click(screen.getByRole("button", { name: "Filter inbox" }));
+    await screen.findByRole("menuitemcheckbox", { name: /Unread only.*2 notifications/ });
 
     expect(screen.queryByRole("menuitem", { name: /^From/ })).toBeNull();
   });
 
-  it("toggles unread only and counts the unread rows behind it", async () => {
+  it("toggles unread only and counts the unread groups behind it", async () => {
     renderMenu({
-      items: [
-        item("unread", "todo", "high"),
-        item("read", "done", "low", { read: true }),
-      ],
+      getInboxFacets: vi.fn(async () => ({ ...ITEM_FACETS, unreadCount: 1 })),
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Filter inbox" }));
@@ -282,24 +286,6 @@ describe("InboxFilterMenu", () => {
       expect(
         screen.getByRole("button", { name: "1 active filter" }),
       ).toHaveTextContent("1"),
-    );
-  });
-
-  it("hides priority and clears its filter for a legacy response", async () => {
-    useInboxFilterStore.getState().togglePriorityFilter("ws-1", "high");
-    renderMenu({
-      items: [item("legacy", "todo", undefined)],
-      priorityFilterSupport: "unsupported",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Filter inbox" }));
-    expect(
-      screen.queryByRole("menuitem", { name: /^Priority/ }),
-    ).toBeNull();
-    await waitFor(() =>
-      expect(
-        useInboxFilterStore.getState().filtersByWorkspace["ws-1"],
-      ).toBeUndefined(),
     );
   });
 });

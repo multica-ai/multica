@@ -1,18 +1,19 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
-import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import type { InboxItem, InboxPage, InboxWorkspaceUnread } from "../types";
+import { EMPTY_INBOX_FILTERS } from "./filter-store";
 import { useMarkInboxRead } from "./mutations";
 import {
   deduplicateInboxItems,
   inboxKeys,
-  inboxListOptions,
+  inboxPagesOptions,
   useInboxUnreadCount,
 } from "./queries";
 import {
@@ -61,7 +62,7 @@ function mulberry32(seed: number) {
 
 /**
  * A server with the grouping rule of CountUnreadInboxByWorkspace and
- * ListInboxItems. Each response is computed when the request ARRIVES but
+ * ListInboxPage. Each response is computed when the request ARRIVES but
  * handed back only when the scheduler releases it — the adversarial case,
  * where a response describing an older state lands after newer writes.
  */
@@ -107,6 +108,11 @@ class FakeServer {
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
+  // One issue group per row, newest first. The fixture never fills a page.
+  page(): InboxPage {
+    return { items: deduplicateInboxItems(this.list()), nextCursor: null, hasMore: false };
+  }
+
   unread(): number {
     return deduplicateInboxItems(this.list()).filter((r) => !r.read).length;
   }
@@ -147,7 +153,7 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
     };
 
     setApiInstance({
-      listInbox: vi.fn(() => deferred(() => server.list())),
+      listInboxPage: vi.fn(() => deferred(() => server.page())),
       getInboxUnreadSummary: vi.fn(() => deferred(() => server.summary())),
       markInboxRead: vi.fn((id: string) => {
         // Commit, then publish: the event exists before the response does.
@@ -173,7 +179,10 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
     );
     // The Inbox page: the list's only observer, so it comes and goes.
     const mountPage = () =>
-      renderHook(() => useQuery(inboxListOptions(WS)).data, { wrapper });
+      renderHook(
+        () => useInfiniteQuery(inboxPagesOptions(WS, EMPTY_INBOX_FILTERS)).data?.pages.flatMap((p) => p.items),
+        { wrapper },
+      );
     let page: ReturnType<typeof mountPage> | null = mountPage();
 
     try {
@@ -198,7 +207,7 @@ it.each(Array.from({ length: SEEDS }, (_, i) => i + 1))(
           if (page) {
             page.unmount();
             page = null;
-            qc.removeQueries({ queryKey: inboxKeys.list(WS), exact: true });
+            qc.removeQueries({ queryKey: inboxKeys.listPages(WS) });
           } else {
             page = mountPage();
           }

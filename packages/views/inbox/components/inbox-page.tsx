@@ -23,7 +23,8 @@ import {
 import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
-  inboxListOptions,
+  inboxPagesOptions,
+  inboxLookupOptions,
   archivedInboxPagesOptions,
   archivedInboxLookupOptions,
   deduplicateInboxItems,
@@ -43,9 +44,7 @@ import {
 } from "@multica/core/inbox/mutations";
 import {
   filterInboxItems,
-  inboxFiltersForPrioritySupport,
   inboxFilterCount,
-  inboxPriorityFilterSupport,
   useInboxFilters,
   useInboxFilterStore,
 } from "@multica/core/inbox/filter-store";
@@ -132,40 +131,54 @@ export function InboxPage() {
   const isArchivedView = view === "archived";
   const filters = useInboxFilters(wsId);
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
-  const { data: rawItems = [], isLoading: loading } = useQuery({
-    ...inboxListOptions(wsId), enabled: !isArchivedView,
+  // Both views page through issue groups on the server, which also applies the
+  // filters, so they hold across pages. Only the visible view fetches.
+  const activeQuery = useInfiniteQuery({
+    ...inboxPagesOptions(wsId, filters), enabled: !isArchivedView,
+    // A filter change starts a new query. Until it answers, keep this
+    // workspace's previous rows, re-filtered locally below, rather than a
+    // loading state: that state replaces the list header, closing the filter
+    // menu in the middle of a multi-value selection.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === wsId ? previous : undefined,
   });
-  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
+  const items = useMemo(() => deduplicateInboxItems(
+    activeQuery.data?.pages.flatMap((page) => page.items) ?? [],
+  ), [activeQuery.data]);
   const archiveQuery = useInfiniteQuery({
     ...archivedInboxPagesOptions(wsId, filters), enabled: isArchivedView,
   });
-  const fetchNextArchivedPage = archiveQuery.fetchNextPage;
-  const loadNextArchivedPage = useCallback(() => { void fetchNextArchivedPage(); }, [fetchNextArchivedPage]);
-  const archivedLoading = archiveQuery.isLoading;
-  const archivedError = archiveQuery.isError && !archiveQuery.data;
   const archivedItems = useMemo(() => deduplicateArchivedInboxItems(
     archiveQuery.data?.pages.flatMap((page) => page.items) ?? [],
   ), [archiveQuery.data]);
+  const viewQuery = isArchivedView ? archiveQuery : activeQuery;
+  const fetchNextViewPage = viewQuery.fetchNextPage;
+  // Never cancel a running refetch for the next page: that refetch is how an
+  // inbox event re-reads the loaded pages, and cancelling it would leave them
+  // stale. A request made meanwhile is dropped; the list footer offers it again.
+  const loadNextPage = useCallback(() => { void fetchNextViewPage({ cancelRefetch: false }); }, [fetchNextViewPage]);
+  const viewError = viewQuery.isError && !viewQuery.data;
   const viewItems = isArchivedView ? archivedItems : items;
-  // The paginated endpoint guarantees the projection, including on empty pages.
-  const priorityFilterSupport = isArchivedView ? "supported" : inboxPriorityFilterSupport(rawItems);
-  const effectiveFilters = useMemo(() => inboxFiltersForPrioritySupport(filters, priorityFilterSupport), [filters, priorityFilterSupport]);
-  const visibleItems = useMemo(() => filterInboxItems(viewItems, effectiveFilters), [viewItems, effectiveFilters]);
-  const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
+  // Re-applied locally so an optimistic patch (a row read under "unread
+  // only", an issue moved out of a status) leaves the list at once.
+  const visibleItems = useMemo(() => filterInboxItems(viewItems, filters), [viewItems, filters]);
+  const hasActiveFilters = inboxFilterCount(filters) > 0;
   const selectedOnPage = viewItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
   // A deep link can point beyond every loaded page. Resolve its group directly
   // without adding it to the cursor chain or mistaking a page miss for a 404.
   const lookup = useQuery({
-    ...archivedInboxLookupOptions(wsId, selectedKey),
-    enabled: isArchivedView && !!selectedKey && !selectedOnPage && !archivedLoading && !archivedError,
+    ...(isArchivedView ? archivedInboxLookupOptions(wsId, selectedKey) : inboxLookupOptions(wsId, selectedKey)),
+    enabled: !!selectedKey && !selectedOnPage && !viewQuery.isLoading && !viewError,
   });
-  const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
+  const lookupItems = useMemo(() => (isArchivedView ? deduplicateArchivedInboxItems : deduplicateInboxItems)(
+    lookup.data?.items ?? [],
+  ), [isArchivedView, lookup.data]);
   const selectionItems = useMemo(() => {
-    if (!isArchivedView || selectedOnPage) return visibleItems;
-    return [...visibleItems, ...filterInboxItems(lookupItems, effectiveFilters)];
-  }, [isArchivedView, selectedOnPage, visibleItems, lookupItems, effectiveFilters]);
+    if (selectedOnPage) return visibleItems;
+    return [...visibleItems, ...filterInboxItems(lookupItems, filters)];
+  }, [selectedOnPage, visibleItems, lookupItems, filters]);
   const selected = selectionItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
-  const selectedInView = selectedOnPage ?? (isArchivedView ? lookupItems.find((i) => (i.issue_id ?? i.id) === selectedKey) : null);
+  const selectedInView = selectedOnPage ?? lookupItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
   const selectionFilteredOut = !!selectedKey && !!selectedInView && !selected;
 
   // What the DETAIL pane shows, one React transition behind the click.
@@ -237,19 +250,19 @@ export function InboxPage() {
 
   // A targeted lookup must not hide pages that have already loaded. Its
   // pending/error states only block resolution of the off-page selection.
-  const viewLoading = isArchivedView ? archivedLoading : loading;
-  const needsLookup = isArchivedView && !!selectedKey && !selectedOnPage;
+  const viewLoading = viewQuery.isLoading;
+  const needsLookup = !!selectedKey && !selectedOnPage;
   const lookupLoading = needsLookup && lookup.isLoading;
   const lookupError = needsLookup && lookup.isError && !selected;
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
-  // user's inbox (archived, or never received). Fall back to the issue page
+  // view (archived, or never received). Fall back to the issue page
   // so the URL still resolves to something meaningful. But if the key was
   // previously resolvable (e.g. the issue was just deleted in another tab
   // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
   // too — clear the selection and stay on /inbox instead.
   useEffect(() => {
-    if (viewLoading || lookupLoading || lookupError || (isArchivedView && archivedError)) return;
+    if (viewLoading || lookupLoading || lookupError || viewError) return;
     if (!selectedKey) return;
     if (selected) return;
     if (selectionFilteredOut) return;
@@ -260,8 +273,7 @@ export function InboxPage() {
     replace(wsPaths.issueDetail(selectedKey));
   }, [
     viewLoading,
-    isArchivedView,
-    archivedError,
+    viewError,
     lookupLoading,
     lookupError,
     selectedKey,
@@ -513,7 +525,6 @@ export function InboxPage() {
       <InboxFilterMenu
         wsId={wsId}
         items={viewItems}
-        priorityFilterSupport={priorityFilterSupport}
         archived={isArchivedView}
       />
       {/* Batch actions are main-view only. Every entry archives from the MAIN
@@ -570,12 +581,16 @@ export function InboxPage() {
     </button>
   );
 
-  const list = isArchivedView && archivedError ? (
+  const list = viewError ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
-        <p className="text-body">{t(($) => $.errors.archived_load_failed)}</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => void archiveQuery.refetch()}>
+        {isArchivedView
+          ? <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
+          : <Inbox className="mb-3 h-8 w-8 text-faint-foreground" />}
+        <p className="text-body">
+          {isArchivedView ? t(($) => $.errors.archived_load_failed) : t(($) => $.errors.load_failed)}
+        </p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => void viewQuery.refetch()}>
           {t(($) => $.list.retry)}
         </Button>
       </div>
@@ -593,9 +608,9 @@ export function InboxPage() {
         items={visibleItems}
         view={view}
         selectedKey={selectedKey}
-        onLoadMore={isArchivedView && archiveQuery.hasNextPage ? loadNextArchivedPage : undefined}
-        loadingMore={archiveQuery.isFetchingNextPage}
-        loadMoreError={archiveQuery.isFetchNextPageError}
+        onLoadMore={viewQuery.hasNextPage ? loadNextPage : undefined}
+        loadingMore={viewQuery.isFetchingNextPage}
+        loadMoreError={viewQuery.isFetchNextPageError}
         onSelect={handleSelect}
         onAction={isArchivedView ? handleUnarchive : handleArchive}
         onOpenArchived={openArchived}
@@ -631,7 +646,7 @@ export function InboxPage() {
       {lookupError && (
         <div role="alert" className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
           <p className="flex-1 text-caption text-muted-foreground">
-            {t(($) => $.errors.archived_lookup_failed)}
+            {t(($) => $.errors.lookup_failed)}
           </p>
           <Button variant="outline" size="sm" disabled={lookup.isFetching} onClick={() => void lookup.refetch()}>
             {t(($) => $.list.retry)}

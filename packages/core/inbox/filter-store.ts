@@ -33,11 +33,6 @@ export function inboxActorKeyParts(key: string): { type: string; id: string } {
   return { type: key.slice(0, separator), id: key.slice(separator + 1) };
 }
 
-export type InboxPriorityFilterSupport =
-  | "unknown"
-  | "supported"
-  | "unsupported";
-
 export const EMPTY_INBOX_FILTERS: InboxFilters = Object.freeze({
   statuses: Object.freeze([]),
   priorities: Object.freeze([]),
@@ -56,7 +51,6 @@ interface InboxFilterState {
   togglePriorityFilter: (wsId: string, priority: IssuePriority) => void;
   toggleActorFilter: (wsId: string, actor: string) => void;
   toggleUnreadOnly: (wsId: string) => void;
-  clearPriorityFilters: (wsId: string) => void;
   clearFilters: (wsId: string) => void;
 }
 
@@ -114,23 +108,6 @@ export const useInboxFilterStore = create<InboxFilterState>()((set) => ({
         },
       };
     }),
-  clearPriorityFilters: (wsId) =>
-    set((state) => {
-      const current = state.filtersByWorkspace[wsId];
-      if (!current || current.priorities.length === 0) return state;
-      const next = { ...current, priorities: [] };
-      // Emptiness is asked of every dimension, not just statuses: dropping the
-      // entry while an actor or unread selection survived in it would clear a
-      // filter the user set and the backend never had a say in.
-      if (isEmptyInboxFilters(next)) {
-        const { [wsId]: _removed, ...filtersByWorkspace } =
-          state.filtersByWorkspace;
-        return { filtersByWorkspace };
-      }
-      return {
-        filtersByWorkspace: { ...state.filtersByWorkspace, [wsId]: next },
-      };
-    }),
   clearFilters: (wsId) =>
     set((state) => {
       if (!state.filtersByWorkspace[wsId]) return state;
@@ -146,35 +123,6 @@ export function useInboxFilters(wsId: string): InboxFilters {
     useInboxFilterStore((state) => state.filtersByWorkspace[wsId]) ??
     EMPTY_INBOX_FILTERS
   );
-}
-
-/**
- * Capability inferred from the parsed response, not from a version string.
- *
- * The new backend always serializes `issue_priority` for every Inbox row
- * (including `null` for notifications without an issue). An older backend
- * omits it. Requiring every returned row to carry a defined value also keeps a
- * priority cache patch from making a mixed rolling-deploy response look fully
- * supported.
- */
-export function inboxPriorityFilterSupport(
-  items: readonly InboxItem[],
-): InboxPriorityFilterSupport {
-  if (items.length === 0) return "unknown";
-  return items.every((item) => item.issue_priority !== undefined)
-    ? "supported"
-    : "unsupported";
-}
-
-/** Ignore a stale priority selection until the backend capability is proven. */
-export function inboxFiltersForPrioritySupport(
-  filters: InboxFilters,
-  support: InboxPriorityFilterSupport,
-): InboxFilters {
-  if (support === "supported" || filters.priorities.length === 0) {
-    return filters;
-  }
-  return { ...filters, priorities: [] };
 }
 
 /**

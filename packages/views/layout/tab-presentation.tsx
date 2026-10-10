@@ -26,7 +26,8 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { runtimeDisplayName } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
-  inboxListOptions,
+  inboxPagesOptions,
+  inboxLookupOptions,
   archivedInboxPagesOptions,
   archivedInboxLookupOptions,
 } from "@multica/core/inbox/queries";
@@ -79,16 +80,19 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
 function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
   const { t: chatT } = useT("chat");
 
-  // Read both inbox lists cache-only; the archived view keeps its own list, so
-  // an archived selection has to resolve against the archived cache — the same
-  // list the InboxPage populates when `?view=archived` is active.
-  const inboxList = useQuery({ ...inboxListOptions(wsId), enabled: false }).data;
+  // Read both inbox views cache-only; each keeps its own pages and deep-link
+  // lookups, so a selection has to resolve against the caches of its view —
+  // the same ones the InboxPage populates for it.
   const inboxFilters = useInboxFilters(wsId);
+  const selectedInboxKey = subject.kind === "inbox" ? subject.selectedKey ?? "" : "";
+  const inboxPages = useInfiniteQuery({ ...inboxPagesOptions(wsId, inboxFilters), enabled: false }).data;
+  const inboxLookup = useQuery({ ...inboxLookupOptions(wsId, selectedInboxKey), enabled: false }).data;
   const archivedPages = useInfiniteQuery({ ...archivedInboxPagesOptions(wsId, inboxFilters), enabled: false }).data;
-  const archivedLookup = useQuery({
-    ...archivedInboxLookupOptions(wsId, subject.kind === "inbox" ? subject.selectedKey ?? "" : ""),
-    enabled: false,
-  }).data;
+  const archivedLookup = useQuery({ ...archivedInboxLookupOptions(wsId, selectedInboxKey), enabled: false }).data;
+  const inboxList = useMemo(() => [
+    ...(inboxPages?.pages.flatMap((page) => page.items) ?? []),
+    ...(inboxLookup?.items ?? []),
+  ], [inboxPages, inboxLookup]);
   const archivedInboxList = useMemo(() => [
     ...(archivedPages?.pages.flatMap((page) => page.items) ?? []),
     ...(archivedLookup?.items ?? []),

@@ -1,6 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import {
+  InfiniteQueryObserver,
+  QueryClient,
+  type InfiniteData,
+  type QueryKey,
+} from "@tanstack/react-query";
 import {
   cancelInboxLists,
   onInboxInvalidate,
@@ -10,8 +15,15 @@ import {
   onInboxSummaryInvalidate,
   patchInboxIssueProjection,
 } from "./ws-updaters";
-import { inboxKeys } from "./queries";
-import type { InboxItem } from "../types";
+import { EMPTY_INBOX_FILTERS } from "./filter-store";
+import {
+  archivedInboxPagesOptions,
+  inboxCacheItems,
+  inboxKeys,
+  inboxPagesOptions,
+  type InboxCache,
+} from "./queries";
+import type { InboxItem, InboxPage } from "../types";
 
 const wsId = "ws-1";
 
@@ -41,6 +53,31 @@ function makeItem(
   };
 }
 
+const activePagesKey = inboxPagesOptions(wsId, EMPTY_INBOX_FILTERS).queryKey;
+const archivedPagesKey = archivedInboxPagesOptions(wsId, EMPTY_INBOX_FILTERS).queryKey;
+
+function pageOf(items: InboxItem[]): InboxPage {
+  return { items, nextCursor: null, hasMore: false };
+}
+
+// A view's pages cache after its first load: one page holding every row.
+function seedRows(qc: QueryClient, queryKey: QueryKey, items: InboxItem[]) {
+  qc.setQueryData<InfiniteData<InboxPage>>(queryKey, {
+    pages: [pageOf(items)],
+    pageParams: [null],
+  });
+}
+
+function rows(qc: QueryClient, queryKey: QueryKey): InboxItem[] | undefined {
+  const data = qc.getQueryData<InboxCache>(queryKey);
+  return data && inboxCacheItems(data);
+}
+
+// A single-page pages query whose requests the test controls.
+function pagesQuery(queryKey: QueryKey, queryFn: () => Promise<InboxPage>) {
+  return { queryKey, queryFn, initialPageParam: null, getNextPageParam: () => undefined };
+}
+
 describe("onInboxIssueDeleted", () => {
   it("removes all inbox items referencing the deleted issue", () => {
     const qc = new QueryClient();
@@ -50,34 +87,31 @@ describe("onInboxIssueDeleted", () => {
       makeItem("i3", "issue-b"),
       makeItem("i4", null),
     ];
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), items);
+    seedRows(qc, activePagesKey, items);
 
     onInboxIssueDeleted(qc, wsId, "issue-a");
 
-    const after = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-    expect(after?.map((i) => i.id)).toEqual(["i3", "i4"]);
+    expect(rows(qc, activePagesKey)?.map((i) => i.id)).toEqual(["i3", "i4"]);
   });
 
   it("also strips the issue from the archived list", () => {
     // Deleting an issue removes its rows whether they were archived or not, so
     // leaving them in the archived cache would render a row that 404s on tap.
     const qc = new QueryClient();
-    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+    seedRows(qc, archivedPagesKey, [
       makeItem("a1", "issue-a", { archived: true }),
       makeItem("a2", "issue-b", { archived: true }),
     ]);
 
     onInboxIssueDeleted(qc, wsId, "issue-a");
 
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.map((i) => i.id),
-    ).toEqual(["a2"]);
+    expect(rows(qc, archivedPagesKey)?.map((i) => i.id)).toEqual(["a2"]);
   });
 
   it("is a no-op when the inbox cache is empty", () => {
     const qc = new QueryClient();
     expect(() => onInboxIssueDeleted(qc, wsId, "issue-a")).not.toThrow();
-    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toBeUndefined();
+    expect(qc.getQueryCache().findAll({ queryKey: inboxKeys.all(wsId) })).toEqual([]);
   });
 
   it("refreshes the unread summary, which the dropped rows can change", async () => {
@@ -87,13 +121,11 @@ describe("onInboxIssueDeleted", () => {
     // focus — without this the badge stays lit over an empty inbox.
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
-      makeItem("i1", "issue-a", { read: false }),
-    ]);
+    seedRows(qc, activePagesKey, [makeItem("i1", "issue-a", { read: false })]);
 
     await onInboxIssueDeleted(qc, wsId, "issue-a");
 
-    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))).toEqual([]);
+    expect(rows(qc, activePagesKey)).toEqual([]);
     expect(spy).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() });
   });
 });
@@ -180,7 +212,7 @@ describe("onInboxSummaryInvalidate", () => {
     // cancel is aimed at the account-level summary alone.
     const qc = new QueryClient();
     const cancel = vi.spyOn(qc, "cancelQueries");
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [makeItem("i1", "issue-a")]);
+    seedRows(qc, activePagesKey, [makeItem("i1", "issue-a")]);
 
     await onInboxSummaryInvalidate(qc);
 
@@ -188,7 +220,7 @@ describe("onInboxSummaryInvalidate", () => {
     expect(cancel).not.toHaveBeenCalledWith({ queryKey: inboxKeys.list(wsId) });
     // The list cache entry is untouched (different key); only the summary
     // query is marked stale.
-    expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0]?.id).toBe("i1");
+    expect(rows(qc, activePagesKey)?.[0]?.id).toBe("i1");
   });
 });
 
@@ -199,37 +231,35 @@ describe("onInboxIssueStatusChanged", () => {
       makeItem("i1", "issue-a", { issue_status: "todo" }),
       makeItem("i2", "issue-b", { issue_status: "todo" }),
     ];
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), items);
+    seedRows(qc, activePagesKey, items);
 
     onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
 
-    const after = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+    const after = rows(qc, activePagesKey);
     expect(after?.find((i) => i.id === "i1")?.issue_status).toBe("done");
     expect(after?.find((i) => i.id === "i2")?.issue_status).toBe("todo");
   });
 
   it("patches archived rows too, which render the same status icon", () => {
     const qc = new QueryClient();
-    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+    seedRows(qc, archivedPagesKey, [
       makeItem("a1", "issue-a", { archived: true, issue_status: "todo" }),
     ]);
 
     onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
 
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.[0]?.issue_status,
-    ).toBe("done");
+    expect(rows(qc, archivedPagesKey)?.[0]?.issue_status).toBe("done");
   });
 });
 
 describe("patchInboxIssueProjection", () => {
   it("patches priority in both active and archived issue rows", () => {
     const qc = new QueryClient();
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
+    seedRows(qc, activePagesKey, [
       makeItem("i1", "issue-a", { issue_priority: "low" }),
       makeItem("i2", "issue-b", { issue_priority: "low" }),
     ]);
-    qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), [
+    seedRows(qc, archivedPagesKey, [
       makeItem("a1", "issue-a", {
         archived: true,
         issue_priority: "low",
@@ -239,36 +269,18 @@ describe("patchInboxIssueProjection", () => {
     patchInboxIssueProjection(qc, wsId, "issue-a", { priority: "urgent" });
 
     expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((item) =>
-        item.issue_priority,
-      ),
+      rows(qc, activePagesKey)?.map((item) => item.issue_priority),
     ).toEqual(["urgent", "low"]);
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.archived(wsId))?.[0]
-        ?.issue_priority,
-    ).toBe("urgent");
-  });
-
-  it("does not manufacture priority capability for legacy Inbox rows", () => {
-    const qc = new QueryClient();
-    qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), [
-      makeItem("legacy", "issue-a"),
-    ]);
-
-    patchInboxIssueProjection(qc, wsId, "issue-a", { priority: "urgent" });
-
-    expect(
-      qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.[0],
-    ).not.toHaveProperty("issue_priority");
+    expect(rows(qc, archivedPagesKey)?.[0]?.issue_priority).toBe("urgent");
   });
 });
 
 // The hook-level reproduction lives in use-realtime-sync-inbox.test.tsx.
-// These cases cover the partial writers and both list keys, including an
-// update to an issue absent from the cached list (setQueryData's no-op trap).
+// These cases cover the partial writers and both views' pages, including an
+// update to an issue absent from the cached rows (setQueryData's no-op trap).
 describe.each([
-  ["main", inboxKeys.list(wsId)],
-  ["archived", inboxKeys.archived(wsId)],
+  ["main", activePagesKey],
+  ["archived", archivedPagesKey],
 ] as const)("partial updates to an invalidated %s inbox", (view, queryKey) => {
   it.each([
     ["status", (qc: QueryClient) => onInboxIssueStatusChanged(qc, wsId, "issue-a", "done")],
@@ -277,7 +289,7 @@ describe.each([
     ["deletion", (qc: QueryClient) => onInboxIssueDeleted(qc, wsId, "issue-a")],
   ] as const)("preserves the pending refresh after %s", async (_label, update) => {
     const qc = new QueryClient();
-    qc.setQueryData(queryKey, [
+    seedRows(qc, queryKey, [
       makeItem("i1", "issue-a", {
         issue_priority: "low",
         archived: view === "archived",
@@ -295,14 +307,16 @@ describe.each([
 
 it("does not refetch fresh lists for issue projection changes", async () => {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  const queryFn = vi.fn(async () => [makeItem("i1", "issue-a")]);
-  const options = { queryKey: inboxKeys.list(wsId), queryFn };
-  await qc.fetchQuery(options);
-  const observer = new QueryObserver(qc, options);
+  const queryFn = vi.fn(async () => pageOf([makeItem("i1", "issue-a")]));
+  const options = pagesQuery(activePagesKey, queryFn);
+  await qc.fetchInfiniteQuery(options);
+  const observer = new InfiniteQueryObserver(qc, options);
   const unsubscribe = observer.subscribe(() => {});
   try {
     onInboxIssueStatusChanged(qc, wsId, "issue-a", "done");
-    expect(observer.getCurrentResult().data?.[0]?.issue_status).toBe("done");
+    expect(
+      observer.getCurrentResult().data?.pages[0]?.items[0]?.issue_status,
+    ).toBe("done");
     expect(queryFn).toHaveBeenCalledTimes(1);
     expect(qc.getQueryState(options.queryKey)?.isInvalidated).toBe(false);
   } finally {
@@ -314,29 +328,31 @@ it("does not refetch fresh lists for issue projection changes", async () => {
 // The mutation-level regression (the write re-reads what it interrupted) lives
 // in issues/mutations.test.tsx.
 describe.each([
-  ["main", inboxKeys.list(wsId)],
-  ["archived", inboxKeys.archived(wsId)],
+  ["main", activePagesKey],
+  ["archived", archivedPagesKey],
 ] as const)("cancelInboxLists on the %s inbox", (_view, queryKey) => {
   it("reports and cancels only a request that is in flight", async () => {
     const qc = new QueryClient();
-    const loaded = [makeItem("i1", "issue-a")];
-    let release!: (items: InboxItem[]) => void;
+    const loaded = pageOf([makeItem("i1", "issue-a")]);
+    const settled = { pages: [loaded], pageParams: [null] };
+    let release!: (page: InboxPage) => void;
     const queryFn = vi
-      .fn<() => Promise<InboxItem[]>>()
+      .fn<() => Promise<InboxPage>>()
       .mockResolvedValueOnce(loaded)
       .mockImplementationOnce(
         () => new Promise((resolve) => (release = resolve)),
       );
+    const options = pagesQuery(queryKey, queryFn);
     try {
-      await qc.fetchQuery({ queryKey, queryFn });
+      await qc.fetchInfiniteQuery(options);
       expect(cancelInboxLists(qc, wsId)).toBe(false);
 
-      const refetch = qc.fetchQuery({ queryKey, queryFn });
+      const refetch = qc.fetchInfiniteQuery(options);
       expect(cancelInboxLists(qc, wsId)).toBe(true);
       expect(qc.getQueryState(queryKey)?.fetchStatus).toBe("idle");
-      release([makeItem("i2", "issue-b"), ...loaded]);
-      await expect(refetch).resolves.toEqual(loaded);
-      expect(qc.getQueryData(queryKey)).toEqual(loaded);
+      release(pageOf([makeItem("i2", "issue-b"), ...loaded.items]));
+      await expect(refetch).resolves.toEqual(settled);
+      expect(qc.getQueryData(queryKey)).toEqual(settled);
     } finally {
       qc.clear();
     }
@@ -359,16 +375,16 @@ describe("inbox list refresh during the first load", () => {
     ["read / archive event", (qc: QueryClient) => onInboxInvalidate(qc, wsId)],
   ])("re-reads the list after a %s arrives mid-load", async (_label, signal) => {
     const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
-    let releaseFirst!: (rows: InboxItem[]) => void;
-    const firstResponse = new Promise<InboxItem[]>((resolve) => {
+    let releaseFirst!: (page: InboxPage) => void;
+    const firstResponse = new Promise<InboxPage>((resolve) => {
       releaseFirst = resolve;
     });
     let server: InboxItem[] = [makeItem("n1", "issue-a", { read: true })];
     const queryFn = vi
-      .fn<() => Promise<InboxItem[]>>()
+      .fn<() => Promise<InboxPage>>()
       .mockImplementationOnce(() => firstResponse)
-      .mockImplementation(async () => server);
-    const observer = new QueryObserver(qc, { queryKey: inboxKeys.list(wsId), queryFn });
+      .mockImplementation(async () => pageOf(server));
+    const observer = new InfiniteQueryObserver(qc, pagesQuery(activePagesKey, queryFn));
     const unsubscribe = observer.subscribe(() => {});
 
     try {
@@ -377,17 +393,14 @@ describe("inbox list refresh during the first load", () => {
       server = [makeItem("n2", "issue-b", { read: false }), ...server];
       await signal(qc);
       // ...and only then does the pre-change response land.
-      releaseFirst([makeItem("n1", "issue-a", { read: true })]);
+      releaseFirst(pageOf([makeItem("n1", "issue-a", { read: true })]));
 
       await vi.waitFor(() =>
-        expect(qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId))?.map((i) => i.id)).toEqual([
-          "n2",
-          "n1",
-        ]),
+        expect(rows(qc, activePagesKey)?.map((i) => i.id)).toEqual(["n2", "n1"]),
       );
       expect(queryFn.mock.calls.length).toBeGreaterThan(1);
     } finally {
-      releaseFirst([]);
+      releaseFirst(pageOf([]));
       unsubscribe();
       qc.clear();
     }

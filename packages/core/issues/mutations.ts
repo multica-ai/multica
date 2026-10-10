@@ -9,7 +9,7 @@ import {
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
-import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
+import type { InboxCache } from "../inbox/queries";
 import {
   cancelInboxLists,
   isInboxListRequestInFlight,
@@ -38,7 +38,7 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
-import type { InboxItem, Issue, IssueReaction } from "../types";
+import type { Issue, IssueReaction } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
@@ -548,8 +548,7 @@ export function useBatchUpdateIssues() {
         [QueryKey, IssueTableRowCache]
       >();
       const prevDetailById = new Map<string, Issue>();
-      let prevInboxList: InboxItem[] | undefined;
-      let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
+      let prevInboxCaches: [QueryKey, InboxCache | undefined][] | undefined;
       const staleKeys: QueryKey[] = [];
       for (const id of ids) {
         const base = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
@@ -574,14 +573,8 @@ export function useBatchUpdateIssues() {
           }
         }
         if (change.prevDetail) prevDetailById.set(id, change.prevDetail);
-        if (prevInboxList === undefined && change.prevInboxList !== undefined) {
-          prevInboxList = change.prevInboxList;
-        }
-        if (
-          prevArchivedInboxCaches === undefined &&
-          change.prevArchivedInboxCaches !== undefined
-        ) {
-          prevArchivedInboxCaches = change.prevArchivedInboxCaches;
+        if (prevInboxCaches === undefined && change.prevInboxCaches !== undefined) {
+          prevInboxCaches = change.prevInboxCaches;
         }
         staleKeys.push(...change.staleKeys);
       }
@@ -610,8 +603,7 @@ export function useBatchUpdateIssues() {
         prevFlatLists: [...prevFlatListByHash.values()],
         prevTableRows: [...prevTableRowByHash.values()],
         prevDetailById,
-        prevInboxList,
-        prevArchivedInboxCaches,
+        prevInboxCaches,
         inboxWrite,
         staleKeys,
         prevChildren,
@@ -639,10 +631,7 @@ export function useBatchUpdateIssues() {
           qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
         }
       }
-      if (ctx?.prevInboxList !== undefined) {
-        qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
-      }
-      for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) {
+      for (const [key, snapshot] of ctx?.prevInboxCaches ?? []) {
         qc.setQueryData(key, snapshot);
       }
       if (ctx?.prevChildren) {

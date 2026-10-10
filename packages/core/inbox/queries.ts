@@ -1,5 +1,5 @@
-import type { InfiniteData, QueryClient } from "@tanstack/react-query";
-import type { ArchivedInboxPage } from "../types/inbox";
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query";
+import type { InboxPage } from "../types/inbox";
 import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
 import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
@@ -7,7 +7,14 @@ import type { InboxItem, InboxWorkspaceUnread } from "../types";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
+  // Every cache of a view's rows nests under that view's prefix — the pages
+  // and the deep-link lookups — so one prefix patches or refreshes the whole
+  // view. Facets hold counts, not rows, so they sit
+  // outside both prefixes.
   list: (wsId: string) => [...inboxKeys.all(wsId), "list"] as const,
+  listPages: (wsId: string) => [...inboxKeys.list(wsId), "pages"] as const,
+  listLookup: (wsId: string) => [...inboxKeys.list(wsId), "lookup"] as const,
+  listFacets: (wsId: string) => [...inboxKeys.all(wsId), "list-facets"] as const,
   archived: (wsId: string) => [...inboxKeys.all(wsId), "archived"] as const,
   pages: (wsId: string) => [...inboxKeys.archived(wsId), "pages"] as const,
   lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
@@ -17,28 +24,41 @@ export const inboxKeys = {
   unreadSummary: () => ["inbox", "unread-summary"] as const,
 };
 
-export function inboxListOptions(wsId: string) {
-  return queryOptions({
-    queryKey: inboxKeys.list(wsId),
-    queryFn: () => api.listInbox(),
-  });
-}
-
-/**
- * @deprecated Legacy array endpoint, capped at 200 groups. New archive
- * consumers must use archivedInboxPagesOptions for the complete archive.
- * Retained for compatibility with legacy cache consumers.
- */
-export function archivedInboxListOptions(wsId: string) {
-  return queryOptions({
-    queryKey: inboxKeys.archived(wsId),
-    queryFn: () => api.listArchivedInbox(),
-  });
-}
-
 function normalizedInboxFilters(filters: InboxFilters): InboxFilters {
   return { statuses: [...filters.statuses].sort(), priorities: [...filters.priorities].sort(),
     actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
+}
+
+/**
+ * The active inbox, one issue group per row, loaded a page at a time. Filters
+ * are applied by the server, so they stay correct beyond the loaded pages.
+ */
+export function inboxPagesOptions(wsId: string, filters: InboxFilters) {
+  return infiniteQueryOptions({
+    queryKey: [...inboxKeys.listPages(wsId), normalizedInboxFilters(filters)],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => api.listInboxPage(filters, { cursor: pageParam, signal }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    retry: false,
+  });
+}
+
+/** One active group by key, for a selection beyond the loaded pages. */
+export function inboxLookupOptions(wsId: string, groupId: string, filters: InboxFilters = EMPTY_INBOX_FILTERS) {
+  return queryOptions({
+    queryKey: [...inboxKeys.listLookup(wsId), groupId, normalizedInboxFilters(filters)],
+    queryFn: ({ signal }) => api.listInboxPage(filters, { groupId, signal }),
+    enabled: !!groupId,
+    retry: false,
+  });
+}
+
+export function inboxFacetsOptions(wsId: string, filters: InboxFilters) {
+  return queryOptions({
+    queryKey: [...inboxKeys.listFacets(wsId), normalizedInboxFilters(filters)],
+    queryFn: ({ signal }) => api.getInboxFacets(filters, signal),
+    retry: false,
+  });
 }
 
 export function archivedInboxPagesOptions(wsId: string, filters: InboxFilters) {
@@ -68,18 +88,42 @@ export function archivedInboxFacetsOptions(wsId: string, filters: InboxFilters) 
   });
 }
 
-export type ArchivedInboxCache = InboxItem[] | ArchivedInboxPage | InfiniteData<ArchivedInboxPage>;
+/** Any cache of one view's rows: a lookup page, or the pages. */
+export type InboxCache = InboxPage | InfiniteData<InboxPage>;
 
-export function mapArchivedInboxCache(data: ArchivedInboxCache, patch: (items: InboxItem[]) => InboxItem[]): ArchivedInboxCache {
-  if (Array.isArray(data)) return patch(data);
-  if ("pages" in data) return { ...data, pages: data.pages.map((page) => ({ ...page, items: patch(page.items) })) };
-  return { ...data, items: patch(data.items) };
+/**
+ * Apply an items patch to any row cache. A patch that returns its input
+ * unchanged leaves the cache's identity intact, so an issue event that
+ * touches no loaded row re-renders nothing.
+ */
+export function mapInboxCache(data: InboxCache, patch: (items: InboxItem[]) => InboxItem[]): InboxCache {
+  if ("pages" in data) {
+    let changed = false;
+    const pages = data.pages.map((page) => {
+      const items = patch(page.items);
+      if (items === page.items) return page;
+      changed = true;
+      return { ...page, items };
+    });
+    return changed ? { ...data, pages } : data;
+  }
+  const items = patch(data.items);
+  return items === data.items ? data : { ...data, items };
 }
 
-export function patchArchivedInboxCaches(qc: QueryClient, wsId: string, patch: (items: InboxItem[]) => InboxItem[]) {
-  const snapshot = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
+/** Every loaded row of any row cache. */
+export function inboxCacheItems(data: InboxCache): InboxItem[] {
+  return "pages" in data ? data.pages.flatMap((page) => page.items) : data.items;
+}
+
+/**
+ * Patch every row cache under one view's prefix (`inboxKeys.list` or
+ * `inboxKeys.archived`) and return the snapshot to roll back to.
+ */
+export function patchInboxCaches(qc: QueryClient, prefix: QueryKey, patch: (items: InboxItem[]) => InboxItem[]) {
+  const snapshot = qc.getQueriesData<InboxCache>({ queryKey: prefix });
   for (const [key, data] of snapshot) {
-    if (data) qc.setQueryData(key, mapArchivedInboxCache(data, patch));
+    if (data) qc.setQueryData(key, mapInboxCache(data, patch));
   }
   return snapshot;
 }
@@ -139,7 +183,7 @@ export function unreadCountForWorkspace(
  * Read from the cross-workspace summary, NOT from the inbox list. The summary
  * is one small server-computed row per workspace and the sidebar already
  * fetches it for the workspace-switcher dot, so the badge costs no request of
- * its own; deriving it from `listInbox()` instead downloaded the entire
+ * its own; deriving it from the full inbox list instead downloaded the entire
  * unbounded inbox on every app start just to render a number (MUL-6967).
  *
  * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
