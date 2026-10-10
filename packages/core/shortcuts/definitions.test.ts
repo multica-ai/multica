@@ -102,6 +102,13 @@ describe("keyboard shortcut definitions", () => {
     expect(SHORTCUT_ACTION_BY_ID.archiveInboxItem.allowInEditable).toBe(false);
   });
 
+  it("keeps issue property picker defaults out of editable controls", () => {
+    expect(SHORTCUT_ACTION_BY_ID.openIssueStatus.defaultShortcut).toEqual(createShortcutChord("S"));
+    expect(SHORTCUT_ACTION_BY_ID.openIssuePriority.defaultShortcut).toEqual(createShortcutChord("P"));
+    expect(SHORTCUT_ACTION_BY_ID.openIssueStatus.allowInEditable).toBe(false);
+    expect(SHORTCUT_ACTION_BY_ID.openIssuePriority.allowInEditable).toBe(false);
+  });
+
   it("strictly distinguishes Command and Control on macOS", () => {
     const commandF = createShortcutChord("F", { primary: true });
     const controlF = createShortcutChord("F", { control: true });
