@@ -221,6 +221,7 @@ func init() {
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
 	agentTasksCmd.Flags().Int("limit", 200, "Maximum runs per page (1-200)")
 	agentTasksCmd.Flags().String("before", "", "Cursor from the previous page")
+	agentTasksCmd.Flags().Bool("with-cursor", false, "With --output json, wrap runs as {\"tasks\": [...], \"next_cursor\": ...} so scripts can detect a truncated page")
 
 	// agent avatar
 	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
@@ -908,11 +909,23 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list agent runs: %w", err)
 	}
-	if cursor := responseHeaders.Get("X-Agent-Tasks-Next-Cursor"); cursor != "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "More runs available; use --before %q to fetch the next page.\n", cursor)
+	nextCursor := responseHeaders.Get("X-Agent-Tasks-Next-Cursor")
+	if nextCursor != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "More runs available; use --before %q to fetch the next page.\n", nextCursor)
 	}
 
 	if output == "json" {
+		if withCursor, _ := cmd.Flags().GetBool("with-cursor"); withCursor {
+			// The bare array cannot express truncation, and a cursor rebuilt
+			// from the last row loses same-second runs (row created_at is
+			// second-precision, the cursor is not), so the lossless cursor
+			// from the response header goes on stdout when asked for.
+			wrapped := map[string]any{"tasks": tasks, "next_cursor": nil}
+			if nextCursor != "" {
+				wrapped["next_cursor"] = nextCursor
+			}
+			return cli.PrintJSON(os.Stdout, wrapped)
+		}
 		return cli.PrintJSON(os.Stdout, tasks)
 	}
 
