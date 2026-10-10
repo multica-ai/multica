@@ -1007,6 +1007,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for _, row := range vcsRows {
+		h.GongfengSync.onView(row)
 		resp := vcsPullRequestRowToResponse(row)
 		resp.LinkSource = prLinkSource(row.LinkedByType, identifier, row.Title, row.Branch.String)
 		out = append(out, resp)

@@ -62,6 +62,7 @@ import type {
   IssueTableRowsResponse,
   ListIssuesResponse,
   ListGitHubInstallationsResponse,
+  ListVCSConnectionsResponse,
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -357,6 +358,57 @@ export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsRe
   installations: [],
   configured: false,
   repository_browse_configured: false,
+  can_manage: false,
+};
+
+export const VCSConnectionSchema = z.object({
+  id: z.string().min(1),
+  workspace_id: z.string().min(1),
+  provider: z.string().min(1),
+  instance_url: z.string().min(1),
+  account_login: z.string().default(""),
+  webhook_url: z.string().default(""),
+  webhook_path: z.string().default(""),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListVCSConnectionsResponseSchema = z.object({
+  connections: z.array(VCSConnectionSchema).default([]),
+  available: z.boolean().default(true),
+  configured: z.boolean().default(false),
+  can_manage: z.boolean().default(false),
+}).loose();
+
+export const VCSConnectResponseSchema = VCSConnectionSchema.extend({
+  webhook_secret: z.string().min(1),
+});
+
+export const VCSDisconnectResponseSchema = z.object({ webhook_cleanup_error: z.string().default("") }).loose();
+
+export const GongfengRepositorySchema = z.object({
+  id: z.number().int().positive(),
+  path: z.string().min(1),
+  web_url: z.string().min(1),
+  clone_url: z.string().default(""),
+  description: z.string().default(""),
+  default_branch: z.string().default(""),
+  archived: z.boolean().default(false),
+  synced_at: z.string().nullable().default(null),
+  syncing: z.boolean().default(false),
+  sync_error: z.string().default(""),
+  webhook_configured: z.boolean().default(false),
+}).loose();
+
+export const GongfengRepositoriesResponseSchema = z.object({
+  repositories: z.array(GongfengRepositorySchema),
+  selected: z.array(GongfengRepositorySchema),
+  next_page: z.number().int().nonnegative().default(0),
+}).loose();
+
+export const EMPTY_LIST_VCS_CONNECTIONS_RESPONSE: ListVCSConnectionsResponse = {
+  connections: [],
+  available: false,
+  configured: false,
   can_manage: false,
 };
 

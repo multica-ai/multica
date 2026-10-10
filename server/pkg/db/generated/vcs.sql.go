@@ -25,6 +25,9 @@ cleared_links AS (
 cleared_statuses AS (
     DELETE FROM vcs_commit_status WHERE connection_id IN (SELECT target.id FROM target)
 ),
+cleared_repositories AS (
+    DELETE FROM gongfeng_repository WHERE connection_id IN (SELECT target.id FROM target)
+),
 cleared_prs AS (
     DELETE FROM vcs_pull_request WHERE connection_id IN (SELECT target.id FROM target)
 )
@@ -48,7 +51,7 @@ func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnecti
 }
 
 const findVCSPullRequestByURL = `-- name: FindVCSPullRequestByURL :one
-SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at FROM vcs_pull_request
+SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at, snapshot_head_sha, snapshot_fetched_at, snapshot, snapshot_error, snapshot_attempted_at FROM vcs_pull_request
 WHERE workspace_id = $1
   AND lower(rtrim(html_url, '/')) = lower($2::text)
 ORDER BY pr_updated_at DESC
@@ -87,6 +90,11 @@ func (q *Queries) FindVCSPullRequestByURL(ctx context.Context, arg FindVCSPullRe
 		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+		&i.Snapshot,
+		&i.SnapshotError,
+		&i.SnapshotAttemptedAt,
 	)
 	return i, err
 }
@@ -115,7 +123,7 @@ func (q *Queries) GetVCSConnectionByID(ctx context.Context, id pgtype.UUID) (Vcs
 }
 
 const getVCSPullRequestByKey = `-- name: GetVCSPullRequestByKey :one
-SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at FROM vcs_pull_request
+SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at, snapshot_head_sha, snapshot_fetched_at, snapshot, snapshot_error, snapshot_attempted_at FROM vcs_pull_request
 WHERE connection_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
 `
 
@@ -160,12 +168,17 @@ func (q *Queries) GetVCSPullRequestByKey(ctx context.Context, arg GetVCSPullRequ
 		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+		&i.Snapshot,
+		&i.SnapshotError,
+		&i.SnapshotAttemptedAt,
 	)
 	return i, err
 }
 
 const getVCSPullRequestInWorkspace = `-- name: GetVCSPullRequestInWorkspace :one
-SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at FROM vcs_pull_request
+SELECT id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at, snapshot_head_sha, snapshot_fetched_at, snapshot, snapshot_error, snapshot_attempted_at FROM vcs_pull_request
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -201,6 +214,11 @@ func (q *Queries) GetVCSPullRequestInWorkspace(ctx context.Context, arg GetVCSPu
 		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+		&i.Snapshot,
+		&i.SnapshotError,
+		&i.SnapshotAttemptedAt,
 	)
 	return i, err
 }
@@ -402,7 +420,7 @@ WITH checks AS (
     GROUP BY pr.id
 )
 SELECT
-    pr.id, pr.workspace_id, pr.connection_id, pr.provider, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.head_sha, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at,
+    pr.id, pr.workspace_id, pr.connection_id, pr.provider, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.head_sha, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at, pr.snapshot_head_sha, pr.snapshot_fetched_at, pr.snapshot, pr.snapshot_error, pr.snapshot_attempted_at,
     COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
@@ -416,34 +434,39 @@ ORDER BY pr.pr_created_at DESC
 `
 
 type ListVCSPullRequestsByIssueRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	ConnectionID    pgtype.UUID        `json:"connection_id"`
-	Provider        string             `json:"provider"`
-	RepoOwner       string             `json:"repo_owner"`
-	RepoName        string             `json:"repo_name"`
-	PrNumber        int32              `json:"pr_number"`
-	Title           string             `json:"title"`
-	State           string             `json:"state"`
-	HtmlUrl         string             `json:"html_url"`
-	Branch          pgtype.Text        `json:"branch"`
-	HeadSha         string             `json:"head_sha"`
-	AuthorLogin     pgtype.Text        `json:"author_login"`
-	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
-	MergedAt        pgtype.Timestamptz `json:"merged_at"`
-	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
-	PrCreatedAt     pgtype.Timestamptz `json:"pr_created_at"`
-	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
-	Additions       int32              `json:"additions"`
-	Deletions       int32              `json:"deletions"`
-	ChangedFiles    int32              `json:"changed_files"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	LinkedByType    string             `json:"linked_by_type"`
-	ChecksTotal     int64              `json:"checks_total"`
-	ChecksPassed    int64              `json:"checks_passed"`
-	ChecksFailed    int64              `json:"checks_failed"`
-	ChecksPending   int64              `json:"checks_pending"`
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ConnectionID        pgtype.UUID        `json:"connection_id"`
+	Provider            string             `json:"provider"`
+	RepoOwner           string             `json:"repo_owner"`
+	RepoName            string             `json:"repo_name"`
+	PrNumber            int32              `json:"pr_number"`
+	Title               string             `json:"title"`
+	State               string             `json:"state"`
+	HtmlUrl             string             `json:"html_url"`
+	Branch              pgtype.Text        `json:"branch"`
+	HeadSha             string             `json:"head_sha"`
+	AuthorLogin         pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl     pgtype.Text        `json:"author_avatar_url"`
+	MergedAt            pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt            pgtype.Timestamptz `json:"closed_at"`
+	PrCreatedAt         pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt         pgtype.Timestamptz `json:"pr_updated_at"`
+	Additions           int32              `json:"additions"`
+	Deletions           int32              `json:"deletions"`
+	ChangedFiles        int32              `json:"changed_files"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	SnapshotHeadSha     string             `json:"snapshot_head_sha"`
+	SnapshotFetchedAt   pgtype.Timestamptz `json:"snapshot_fetched_at"`
+	Snapshot            []byte             `json:"snapshot"`
+	SnapshotError       string             `json:"snapshot_error"`
+	SnapshotAttemptedAt pgtype.Timestamptz `json:"snapshot_attempted_at"`
+	LinkedByType        string             `json:"linked_by_type"`
+	ChecksTotal         int64              `json:"checks_total"`
+	ChecksPassed        int64              `json:"checks_passed"`
+	ChecksFailed        int64              `json:"checks_failed"`
+	ChecksPending       int64              `json:"checks_pending"`
 }
 
 // Aggregates each PR's commit statuses for its CURRENT head sha into
@@ -484,6 +507,11 @@ func (q *Queries) ListVCSPullRequestsByIssue(ctx context.Context, issueID pgtype
 			&i.ChangedFiles,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SnapshotHeadSha,
+			&i.SnapshotFetchedAt,
+			&i.Snapshot,
+			&i.SnapshotError,
+			&i.SnapshotAttemptedAt,
 			&i.LinkedByType,
 			&i.ChecksTotal,
 			&i.ChecksPassed,
@@ -669,17 +697,35 @@ ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     state             = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.state             ELSE vcs_pull_request.state             END,
     html_url          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.html_url          ELSE vcs_pull_request.html_url          END,
     branch            = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.branch            ELSE vcs_pull_request.branch            END,
-    author_login      = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.author_login      ELSE vcs_pull_request.author_login      END,
-    author_avatar_url = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.author_avatar_url ELSE vcs_pull_request.author_avatar_url END,
+    author_login      = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN COALESCE(EXCLUDED.author_login, vcs_pull_request.author_login) ELSE vcs_pull_request.author_login END,
+    author_avatar_url = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN COALESCE(EXCLUDED.author_avatar_url, vcs_pull_request.author_avatar_url) ELSE vcs_pull_request.author_avatar_url END,
     merged_at         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.merged_at         ELSE vcs_pull_request.merged_at         END,
     closed_at         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.closed_at         ELSE vcs_pull_request.closed_at         END,
     pr_updated_at     = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.pr_updated_at     ELSE vcs_pull_request.pr_updated_at     END,
     additions         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.additions         ELSE vcs_pull_request.additions         END,
     deletions         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.deletions         ELSE vcs_pull_request.deletions         END,
     changed_files     = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.changed_files     ELSE vcs_pull_request.changed_files     END,
-    head_sha          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.head_sha          ELSE vcs_pull_request.head_sha          END,
+    -- Gongfeng list responses can omit SHA. The same revision/branch is not
+    -- evidence of a new head; keep the known head and its checks in that case.
+    head_sha = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at
+        AND NOT (EXCLUDED.provider = 'gongfeng' AND EXCLUDED.head_sha = ''
+            AND EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at
+            AND EXCLUDED.branch IS NOT DISTINCT FROM vcs_pull_request.branch)
+        THEN EXCLUDED.head_sha ELSE vcs_pull_request.head_sha END,
+    -- A genuine new head may refresh immediately, even if the previous head
+    -- failed recently. Equal/stale redeliveries must retain the failure cooldown.
+    snapshot_attempted_at = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at
+        AND EXCLUDED.head_sha <> vcs_pull_request.head_sha
+        AND (EXCLUDED.head_sha <> '' OR EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at
+            OR EXCLUDED.branch IS DISTINCT FROM vcs_pull_request.branch)
+        THEN NULL ELSE vcs_pull_request.snapshot_attempted_at END,
+    snapshot_error = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at
+        AND EXCLUDED.head_sha <> vcs_pull_request.head_sha
+        AND (EXCLUDED.head_sha <> '' OR EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at
+            OR EXCLUDED.branch IS DISTINCT FROM vcs_pull_request.branch)
+        THEN '' ELSE vcs_pull_request.snapshot_error END,
     updated_at        = now()
-RETURNING id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at
+RETURNING id, workspace_id, connection_id, provider, repo_owner, repo_name, pr_number, title, state, html_url, branch, head_sha, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at, snapshot_head_sha, snapshot_fetched_at, snapshot, snapshot_error, snapshot_attempted_at
 `
 
 type UpsertVCSPullRequestParams struct {
@@ -762,6 +808,11 @@ func (q *Queries) UpsertVCSPullRequest(ctx context.Context, arg UpsertVCSPullReq
 		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SnapshotHeadSha,
+		&i.SnapshotFetchedAt,
+		&i.Snapshot,
+		&i.SnapshotError,
+		&i.SnapshotAttemptedAt,
 	)
 	return i, err
 }

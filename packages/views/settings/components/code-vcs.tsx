@@ -1,12 +1,14 @@
 "use client";
 
+import { GongfengRepositoryPicker } from "./gongfeng-repository-picker";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "lucide-react";
+import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug, Webhook } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { copyText } from "@multica/ui/lib/clipboard";
 import {
   Select,
   SelectContent,
@@ -42,30 +44,29 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { vcsConnectionsOptions } from "@multica/core/vcs";
 import { api } from "@multica/core/api";
-import type { ConnectVCSResponse, VCSProvider } from "@multica/core/types";
+import type { VCSConnection, VCSProvider } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { SettingsRow } from "./settings-layout";
 import { HostMark, HostStatus } from "./code-host";
 
-const PROVIDERS: VCSProvider[] = ["forgejo", "gitea", "gitlab"];
+const PROVIDERS: VCSProvider[] = ["forgejo", "gitea", "gitlab", "gongfeng"];
 const PROVIDER_LABELS: Record<VCSProvider, string> = {
   forgejo: "Forgejo",
   gitea: "Gitea",
   gitlab: "GitLab",
+  gongfeng: "Tencent Gongfeng",
 };
-const PROVIDER_OPTIONS = PROVIDERS.map((p) => ({
-  value: p,
-  label: PROVIDER_LABELS[p],
-}));
 
 /**
- * Self-hosted Forgejo / Gitea / GitLab connections, rendered as rows of the
+ * Token-based Git provider connections, rendered as rows of the
  * Code page's "Code hosting" card: one row per connected instance, then a row
- * to connect another. Connecting and rotating both end on the one-time webhook
- * secret, shown in a dialog the user has to dismiss.
+ * to connect another. Existing webhook addresses can be viewed without rotating
+ * secrets. Gongfeng configures hooks through repository selection.
  */
 export function VCSConnectionRows() {
   const { t } = useT("settings");
+  const providerLabels = { ...PROVIDER_LABELS, gongfeng: t(($) => $.vcs.gongfeng_label) };
+  const providerOptions = PROVIDERS.map((p) => ({ value: p, label: providerLabels[p] }));
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
 
@@ -74,12 +75,14 @@ export function VCSConnectionRows() {
   const configured = data?.configured === true;
   const canManage = data?.can_manage === true;
 
+  const [repositoryConnection, setRepositoryConnection] = useState<VCSConnection | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
   const [provider, setProvider] = useState<VCSProvider>("forgejo");
   const [instanceUrl, setInstanceUrl] = useState("");
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [webhook, setWebhook] = useState<ConnectVCSResponse | null>(null);
+  const [webhook, setWebhook] = useState<(VCSConnection & { webhook_secret?: string }) | null>(null);
+  const webhookSecret = webhook?.webhook_secret;
   const [rotateTarget, setRotateTarget] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -98,8 +101,10 @@ export function VCSConnectionRows() {
       setInstanceUrl("");
       setToken("");
       setConnectOpen(false);
-      setWebhook(resp);
+      if (resp.provider === "gongfeng") setRepositoryConnection(resp);
+      else setWebhook(resp);
     } catch (e) {
+      void qc.invalidateQueries({ queryKey: ["vcs", wsId] });
       toast.error(e instanceof Error ? e.message : t(($) => $.vcs.toast_connect_failed));
     } finally {
       setConnecting(false);
@@ -125,22 +130,23 @@ export function VCSConnectionRows() {
     if (!deleteTarget || deleting) return;
     setDeleting(true);
     try {
-      await api.deleteVCSConnection(wsId, deleteTarget);
+      const result = await api.deleteVCSConnection(wsId, deleteTarget);
       await qc.invalidateQueries({ queryKey: ["vcs", wsId] });
-      toast.success(t(($) => $.vcs.toast_disconnected));
+      if (result.webhook_cleanup_error) toast.warning(t(($) => $.vcs.gongfeng_cleanup_warning, { error: result.webhook_cleanup_error }));
+      else toast.success(t(($) => $.vcs.toast_disconnected));
       setDeleteTarget(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.vcs.toast_disconnect_failed));
+      void qc.invalidateQueries({ queryKey: ["vcs", wsId] });
     } finally {
       setDeleting(false);
     }
   }
 
   async function copy(value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       toast.success(t(($) => $.vcs.copied));
-    } catch {
+    } else {
       toast.error(t(($) => $.vcs.copy_failed));
     }
   }
@@ -172,7 +178,7 @@ export function VCSConnectionRows() {
               </HostMark>
               <span className="flex min-w-0 flex-wrap items-center gap-x-2">
                 <span className="break-all">
-                  {`${PROVIDER_LABELS[c.provider] ?? c.provider} · ${c.instance_url}`}
+                  {`${providerLabels[c.provider] ?? c.provider} · ${c.instance_url}`}
                 </span>
                 <HostStatus tone="success" label={t(($) => $.integrations.status_connected)} />
               </span>
@@ -198,6 +204,11 @@ export function VCSConnectionRows() {
                 <MoreHorizontal />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-auto">
+                {c.provider === "gongfeng" ? <DropdownMenuItem onClick={() => setRepositoryConnection(c)}><FolderGit2 />{t(($) => $.vcs.gongfeng_repositories)}</DropdownMenuItem> : null}
+                <DropdownMenuItem onClick={() => setWebhook(c)}>
+                  <Webhook />
+                  {t(($) => $.vcs.view_webhook)}
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setRotateTarget(c.id)}>
                   <RefreshCw />
                   {t(($) => $.vcs.regenerate_webhook)}
@@ -272,9 +283,15 @@ export function VCSConnectionRows() {
             <div className="space-y-1.5">
               <Label htmlFor="vcs-provider">{t(($) => $.vcs.form_provider_label)}</Label>
               <Select
-                items={PROVIDER_OPTIONS}
+                items={providerOptions}
                 value={provider}
-                onValueChange={(v) => setProvider(v as VCSProvider)}
+                onValueChange={(v) => {
+                  const next = v as VCSProvider;
+                  setProvider(next);
+                  if (!instanceUrl || instanceUrl === "https://git.code.tencent.com") {
+                    setInstanceUrl(next === "gongfeng" ? "https://git.code.tencent.com" : "");
+                  }
+                }}
               >
                 <SelectTrigger id="vcs-provider" className="w-full" disabled={connecting}>
                   <SelectValue />
@@ -282,7 +299,7 @@ export function VCSConnectionRows() {
                 <SelectContent>
                   {PROVIDERS.map((p) => (
                     <SelectItem key={p} value={p}>
-                      {PROVIDER_LABELS[p]}
+                      {providerLabels[p]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -292,7 +309,7 @@ export function VCSConnectionRows() {
               <Label htmlFor="vcs-url">{t(($) => $.vcs.form_instance_url_label)}</Label>
               <Input
                 id="vcs-url"
-                placeholder="https://forgejo.example.com"
+                placeholder={provider === "gongfeng" ? "https://git.code.tencent.com" : "https://forgejo.example.com"}
                 value={instanceUrl}
                 onChange={(e) => setInstanceUrl(e.target.value)}
                 disabled={connecting}
@@ -309,7 +326,9 @@ export function VCSConnectionRows() {
                 onChange={(e) => setToken(e.target.value)}
                 disabled={connecting}
               />
-              <p className="text-caption text-muted-foreground">{t(($) => $.vcs.form_token_hint)}</p>
+              <p className="text-caption text-muted-foreground">
+                {provider === "gongfeng" ? t(($) => $.vcs.gongfeng_token_hint) : t(($) => $.vcs.form_token_hint)}
+              </p>
             </div>
             <DialogFooter>
               <Button
@@ -340,8 +359,12 @@ export function VCSConnectionRows() {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{t(($) => $.vcs.webhook_setup_title)}</DialogTitle>
-            <DialogDescription>{t(($) => $.vcs.webhook_setup_description)}</DialogDescription>
+            <DialogTitle>{webhookSecret ? t(($) => $.vcs.webhook_setup_title) : t(($) => $.vcs.webhook_view_title)}</DialogTitle>
+            <DialogDescription>
+              {webhookSecret
+                ? webhook?.provider === "gongfeng" ? t(($) => $.vcs.gongfeng_webhook_setup_description) : t(($) => $.vcs.webhook_setup_description)
+                : webhook?.provider === "gongfeng" ? t(($) => $.vcs.gongfeng_webhook_view_description) : t(($) => $.vcs.webhook_view_description)}
+            </DialogDescription>
           </DialogHeader>
           {webhook ? (
             <div className="space-y-3">
@@ -352,22 +375,28 @@ export function VCSConnectionRows() {
                 onCopy={copy}
                 copyLabel={t(($) => $.vcs.copy)}
               />
-              <CopyField
-                id="vcs-webhook-secret"
-                label={t(($) => $.vcs.webhook_secret_label)}
-                value={webhook.webhook_secret}
-                onCopy={copy}
-                copyLabel={t(($) => $.vcs.copy)}
-                mono
-              />
-              <p className="text-caption text-warning">{t(($) => $.vcs.webhook_secret_warning)}</p>
+              {webhookSecret ? (
+                <>
+                  <CopyField
+                    id="vcs-webhook-secret"
+                    label={t(($) => $.vcs.webhook_secret_label)}
+                    value={webhookSecret}
+                    onCopy={copy}
+                    copyLabel={t(($) => $.vcs.copy)}
+                    mono
+                  />
+                  <p className="text-caption text-warning">{t(($) => $.vcs.webhook_secret_warning)}</p>
+                </>
+              ) : null}
             </div>
           ) : null}
           <DialogFooter>
-            <Button onClick={() => setWebhook(null)}>{t(($) => $.vcs.webhook_done)}</Button>
+            <Button onClick={() => { if (webhook?.provider === "gongfeng") setRepositoryConnection(webhook); setWebhook(null); }}>{webhook?.provider === "gongfeng" ? t(($) => $.vcs.gongfeng_repositories) : webhookSecret ? t(($) => $.vcs.webhook_done) : t(($) => $.vcs.webhook_close)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {repositoryConnection ? <GongfengRepositoryPicker wsId={wsId} connection={repositoryConnection} onClose={() => setRepositoryConnection(null)} /> : null}
 
       <AlertDialog
         open={!!rotateTarget}

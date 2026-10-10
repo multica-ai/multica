@@ -1085,6 +1085,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
 	}
+	cleanupGongfeng, unlockGongfeng, err := h.prepareGongfengWorkspaceDeletion(r.Context(), requester.WorkspaceID)
+	if err != nil {
+		failWorkspaceDelete(w, r, workspaceID, "prepare Gongfeng cleanup", err)
+		return
+	}
+	defer unlockGongfeng()
 
 	// Invalidate membership cache for all workspace members before deletion.
 	// After CASCADE deletes the member rows, cache entries become harmless
@@ -1350,6 +1356,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	for _, runtimeID := range runtimeIDs {
 		h.NotifyRuntimeGone(uuidToString(runtimeID))
 	}
+	cleanupGongfeng(r.Context())
 	h.deleteS3Objects(r.Context(), append(sourceContextAttachmentURLs, sourceContextIntentURLs...))
 
 	slog.Info("workspace deleted", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)

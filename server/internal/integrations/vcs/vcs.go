@@ -1,6 +1,6 @@
 // Package vcs is the provider abstraction for token-based Git providers that
-// Multica mirrors pull requests and CI status from: Forgejo, Gitea (Forgejo's
-// upstream, wire-identical), and GitLab. GitHub is intentionally NOT a vcs
+// Multica mirrors pull requests and, where supported, CI status from Forgejo, Gitea (Forgejo's
+// upstream, wire-identical), GitLab, and Tencent Gongfeng. GitHub is not a vcs
 // provider — its App/installation model and check_suite CI differ enough that
 // it keeps its own handler (server/internal/handler/github.go).
 //
@@ -22,15 +22,16 @@ import (
 type Kind string
 
 const (
-	KindForgejo Kind = "forgejo"
-	KindGitea   Kind = "gitea"
-	KindGitLab  Kind = "gitlab"
+	KindForgejo  Kind = "forgejo"
+	KindGitea    Kind = "gitea"
+	KindGitLab   Kind = "gitlab"
+	KindGongfeng Kind = "gongfeng"
 )
 
 // Valid reports whether k is a known provider kind.
 func (k Kind) Valid() bool {
 	switch k {
-	case KindForgejo, KindGitea, KindGitLab:
+	case KindForgejo, KindGitea, KindGitLab, KindGongfeng:
 		return true
 	}
 	return false
@@ -120,7 +121,7 @@ type Provider interface {
 	EventKind(h http.Header) EventKind
 	// VerifySignature authenticates the raw body against the connection's
 	// stored secret. Forgejo/Gitea use HMAC-SHA256 (X-Gitea-Signature);
-	// GitLab uses a plaintext token compare (X-Gitlab-Token).
+	// GitLab and Gongfeng compare a plaintext token (X-Gitlab-Token / X-Token).
 	VerifySignature(secret string, h http.Header, body []byte) bool
 	// ParsePullRequest decodes a pull/merge request webhook body.
 	ParsePullRequest(body []byte) (PullRequestEvent, error)

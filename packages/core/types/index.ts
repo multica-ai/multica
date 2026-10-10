@@ -215,6 +215,8 @@ export type {
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
+  GongfengRepository,
+  GongfengRepositoriesResponse,
 } from "./vcs";
 export type {
   LarkInstallation,

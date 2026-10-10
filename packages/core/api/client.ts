@@ -179,6 +179,8 @@ import type {
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
   ConnectVCSResponse,
+  GongfengRepository,
+  GongfengRepositoriesResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -430,6 +432,12 @@ import {
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
+  ListVCSConnectionsResponseSchema,
+  VCSConnectResponseSchema,
+  VCSDisconnectResponseSchema,
+  GongfengRepositorySchema,
+  GongfengRepositoriesResponseSchema,
+  EMPTY_LIST_VCS_CONNECTIONS_RESPONSE,
   ListGitHubRepositoriesResponseSchema,
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
@@ -4860,35 +4868,77 @@ export class ApiClient {
     );
   }
 
-  // VCS integration (Forgejo / Gitea / GitLab)
+  // VCS integration (Forgejo / Gitea / GitLab / Gongfeng)
   async listVCSConnections(workspaceId: string): Promise<ListVCSConnectionsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/vcs/connections`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/vcs/connections`);
+    return parseWithFallback(raw, ListVCSConnectionsResponseSchema, EMPTY_LIST_VCS_CONNECTIONS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/vcs/connections",
+    });
   }
 
   async connectVCS(
     workspaceId: string,
     body: ConnectVCSRequest,
   ): Promise<ConnectVCSResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/vcs/connections`, {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/vcs/connections`, {
       method: "POST",
       body: JSON.stringify(body),
     });
+    const parsed = parseWithFallback<ConnectVCSResponse | null>(raw, VCSConnectResponseSchema, null, {
+      endpoint: "POST /api/workspaces/:id/vcs/connections",
+      sensitive: true,
+    });
+    if (!parsed) throw new Error("Invalid provider response. Regenerate the webhook secret to finish setup.");
+    return parsed;
   }
 
-  async deleteVCSConnection(workspaceId: string, connectionId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}`, {
+  async deleteVCSConnection(workspaceId: string, connectionId: string): Promise<{ webhook_cleanup_error: string }> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}`, {
       method: "DELETE",
     });
+    // A successful 204 from older backends or other providers has no body.
+    const result = parseWithFallback<{ webhook_cleanup_error: string } | null>(raw ?? {}, VCSDisconnectResponseSchema, null, { endpoint: "DELETE /api/workspaces/:id/vcs/connections/:connectionId" });
+    if (!result) throw new Error("Invalid disconnect response. Reload connections to check their status.");
+    return result;
   }
 
   async rotateVCSWebhook(
     workspaceId: string,
     connectionId: string,
   ): Promise<ConnectVCSResponse> {
-    return this.fetch(
+    const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/rotate-webhook`,
       { method: "POST" },
     );
+    const parsed = parseWithFallback<ConnectVCSResponse | null>(raw, VCSConnectResponseSchema, null, {
+      endpoint: "POST /api/workspaces/:id/vcs/connections/:connectionId/rotate-webhook",
+      sensitive: true,
+    });
+    if (!parsed) throw new Error("Invalid provider response. Regenerate the webhook secret to finish setup.");
+    return parsed;
+  }
+
+  async listGongfengRepositories(workspaceId: string, connectionId: string, page = 1, search = ""): Promise<GongfengRepositoriesResponse> {
+    const params = new URLSearchParams({ page: String(page), search });
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/repositories?${params}`);
+    const result = parseWithFallback<GongfengRepositoriesResponse | null>(raw, GongfengRepositoriesResponseSchema, null, {
+      endpoint: "GET /api/workspaces/:id/vcs/connections/:connectionId/repositories",
+    });
+    if (!result) throw new Error("Invalid repository response. Retry loading repositories.");
+    return result;
+  }
+
+  async enableGongfengRepository(workspaceId: string, connectionId: string, projectId: number, retry = false): Promise<GongfengRepository> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/repositories/${projectId}${retry ? "/sync" : ""}`, { method: "POST" });
+    const result = parseWithFallback<GongfengRepository | null>(raw, GongfengRepositorySchema, null, {
+      endpoint: "POST /api/workspaces/:id/vcs/connections/:connectionId/repositories/:projectId",
+    });
+    if (!result) throw new Error("Invalid repository response. Reload repositories to check sync status.");
+    return result;
+  }
+
+  async disableGongfengRepository(workspaceId: string, connectionId: string, projectId: number): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}/repositories/${projectId}`, { method: "DELETE" });
   }
 
   // Lark integration

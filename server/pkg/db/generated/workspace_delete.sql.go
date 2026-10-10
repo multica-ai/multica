@@ -223,6 +223,11 @@ const deleteWorkspaceConnections = `-- name: DeleteWorkspaceConnections :exec
 WITH deleted_github_installations AS (
     DELETE FROM github_installation
     WHERE github_installation.workspace_id = $1
+), deleted_gongfeng_repositories AS (
+    DELETE FROM gongfeng_repository
+    USING vcs_connection
+    WHERE gongfeng_repository.connection_id = vcs_connection.id
+      AND vcs_connection.workspace_id = $1
 )
 DELETE FROM vcs_connection WHERE vcs_connection.workspace_id = $1
 `

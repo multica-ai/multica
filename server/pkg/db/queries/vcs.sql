@@ -49,6 +49,9 @@ cleared_links AS (
 cleared_statuses AS (
     DELETE FROM vcs_commit_status WHERE connection_id IN (SELECT target.id FROM target)
 ),
+cleared_repositories AS (
+    DELETE FROM gongfeng_repository WHERE connection_id IN (SELECT target.id FROM target)
+),
 cleared_prs AS (
     DELETE FROM vcs_pull_request WHERE connection_id IN (SELECT target.id FROM target)
 )
@@ -90,15 +93,33 @@ ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     state             = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.state             ELSE vcs_pull_request.state             END,
     html_url          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.html_url          ELSE vcs_pull_request.html_url          END,
     branch            = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.branch            ELSE vcs_pull_request.branch            END,
-    author_login      = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.author_login      ELSE vcs_pull_request.author_login      END,
-    author_avatar_url = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.author_avatar_url ELSE vcs_pull_request.author_avatar_url END,
+    author_login      = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN COALESCE(EXCLUDED.author_login, vcs_pull_request.author_login) ELSE vcs_pull_request.author_login END,
+    author_avatar_url = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN COALESCE(EXCLUDED.author_avatar_url, vcs_pull_request.author_avatar_url) ELSE vcs_pull_request.author_avatar_url END,
     merged_at         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.merged_at         ELSE vcs_pull_request.merged_at         END,
     closed_at         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.closed_at         ELSE vcs_pull_request.closed_at         END,
     pr_updated_at     = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.pr_updated_at     ELSE vcs_pull_request.pr_updated_at     END,
     additions         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.additions         ELSE vcs_pull_request.additions         END,
     deletions         = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.deletions         ELSE vcs_pull_request.deletions         END,
     changed_files     = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.changed_files     ELSE vcs_pull_request.changed_files     END,
-    head_sha          = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at THEN EXCLUDED.head_sha          ELSE vcs_pull_request.head_sha          END,
+    -- Gongfeng list responses can omit SHA. The same revision/branch is not
+    -- evidence of a new head; keep the known head and its checks in that case.
+    head_sha = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at
+        AND NOT (EXCLUDED.provider = 'gongfeng' AND EXCLUDED.head_sha = ''
+            AND EXCLUDED.pr_updated_at = vcs_pull_request.pr_updated_at
+            AND EXCLUDED.branch IS NOT DISTINCT FROM vcs_pull_request.branch)
+        THEN EXCLUDED.head_sha ELSE vcs_pull_request.head_sha END,
+    -- A genuine new head may refresh immediately, even if the previous head
+    -- failed recently. Equal/stale redeliveries must retain the failure cooldown.
+    snapshot_attempted_at = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at
+        AND EXCLUDED.head_sha <> vcs_pull_request.head_sha
+        AND (EXCLUDED.head_sha <> '' OR EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at
+            OR EXCLUDED.branch IS DISTINCT FROM vcs_pull_request.branch)
+        THEN NULL ELSE vcs_pull_request.snapshot_attempted_at END,
+    snapshot_error = CASE WHEN EXCLUDED.pr_updated_at >= vcs_pull_request.pr_updated_at
+        AND EXCLUDED.head_sha <> vcs_pull_request.head_sha
+        AND (EXCLUDED.head_sha <> '' OR EXCLUDED.pr_updated_at > vcs_pull_request.pr_updated_at
+            OR EXCLUDED.branch IS DISTINCT FROM vcs_pull_request.branch)
+        THEN '' ELSE vcs_pull_request.snapshot_error END,
     updated_at        = now()
 RETURNING *;
 

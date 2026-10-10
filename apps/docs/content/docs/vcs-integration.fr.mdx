@@ -1,6 +1,6 @@
 ---
-title: Fournisseurs Git auto-hébergés
-description: Connectez une instance Forgejo, Gitea ou GitLab auto-hébergée par espace de travail, afin que les pull/merge requests portant un identifiant de tâche dans leur nom de branche ou leur titre, ou après un mot-clé de clôture dans leur description, soient automatiquement associées à cette tâche, la fassent passer au statut choisi par l'espace de travail à la fusion et affichent le statut CI.
+title: Intégration des fournisseurs Git
+description: Connectez Forgejo, Gitea, GitLab ou Tencent Gongfeng pour associer les pull requests aux tâches et modifier leur statut après fusion.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -14,7 +14,7 @@ une instance Git sur votre propre réseau. Un opérateur du serveur doit l'activ
 la ligne n'apparaît pas dans Paramètres → Code.
 </Callout>
 
-Multica se connecte à un fournisseur Git auto-hébergé par espace de travail : **Forgejo**, **Gitea** ou **GitLab**. Une fois la connexion établie, toute pull request (GitLab : merge request) dont le nom de branche ou le titre contient un identifiant de tâche (par exemple `MUL-123`), ou dont la description en cite un après un mot-clé de clôture (`Closes MUL-123`), est **associée automatiquement** à cette [tâche](/issues), apparaît sous **Pull requests** dans la barre latérale de la tâche et — une fois toutes les PR associées fusionnées — fait passer la tâche au statut choisi par l'espace de travail (**Terminé** par défaut). La CI du commit de tête s'affiche sous forme de barre de vérifications sur la carte.
+Multica auto-hébergé connecte **Forgejo**, **Gitea**, **GitLab** ou le service officiel **Tencent Gongfeng** par espace de travail. Une fois la connexion établie, toute pull request (GitLab : merge request) dont le nom de branche ou le titre contient un identifiant de tâche (par exemple `MUL-123`), ou dont la description en cite un après un mot-clé de clôture (`Closes MUL-123`), est **associée automatiquement** à cette [tâche](/issues), apparaît sous **Pull requests** dans la barre latérale de la tâche et — une fois toutes les PR associées fusionnées — fait passer la tâche au statut choisi par l'espace de travail (**Terminé** par défaut). La CI Forgejo/Gitea et GitLab du commit de tête s'affiche sous forme de barre de vérifications sur la carte.
 
 Ces fournisseurs fonctionnent en parallèle de GitHub : un espace de travail peut les combiner librement.
 
@@ -51,7 +51,7 @@ Définissez `MULTICA_PUBLIC_URL` sur l'URL de base publique du serveur pour que 
 1. Chez votre fournisseur, créez un jeton d'accès disposant d'un accès en lecture aux dépôts que vous voulez refléter :
    - **Forgejo / Gitea** : Settings → Applications.
    - **GitLab** : un jeton d'accès personnel (ou de groupe/projet) avec la portée `read_api`.
-2. Dans Multica, ouvrez **Paramètres → Code**, puis cliquez sur **Connecter** sur la ligne **Git auto-hébergé**.
+2. Dans Multica, ouvrez **Paramètres → Code**, puis cliquez sur **Connecter** sur la ligne **Fournisseurs Git**.
 3. Choisissez le **Fournisseur**, saisissez l'URL de l'instance (par exemple `https://forgejo.example.com`) et le jeton d'accès, puis cliquez sur **Connecter**. Multica valide le jeton auprès de l'instance avant d'enregistrer.
 4. Copiez l'**URL du webhook** et le **Secret du webhook** affichés après la connexion.
 
@@ -93,3 +93,64 @@ Multica authentifie chaque livraison à l'aide du secret stocké : un webhook qu
 ## Agents qui ouvrent des pull requests
 
 La création de PR ne nécessite aucune configuration de fournisseur dans Multica. Les agents récupèrent les dépôts dans le runtime, puis poussent leurs branches et ouvrent les PR avec les identifiants Git propres à la machine du runtime. Pour permettre aux agents de travailler avec un fournisseur, assurez-vous que la machine du daemon peut s'y authentifier — par exemple avec une clé de déploiement SSH, ou un jeton dans le gestionnaire d'identifiants Git (credential helper) de la machine — et ajoutez l'URL du dépôt comme d'habitude. La récupération des dépôts fonctionne avec n'importe quelle URL Git : aucun câblage propre au fournisseur n'est nécessaire.
+
+## Tencent Gongfeng
+
+Choisissez **Tencent Gongfeng**, l’URL officielle `https://git.code.tencent.com`
+et un **Private Token** créé dans les paramètres du compte. Multica le valide
+via `/api/v3/user`.
+
+Après la connexion, choisissez **Dépôts Gongfeng**. Multica configure automatiquement le webhook MR et importe les MR existantes en arrière-plan. Le jeton doit pouvoir lire le dépôt et gérer ses webhooks. L’URL publique Multica doit être accessible depuis Gongfeng en HTTPS. **Ajouter un dépôt → Choisir depuis Gongfeng** ajoute aussi les URL de clonage aux dépôts des agents.
+
+Le sélecteur affiche la progression et les erreurs. **Relancer la synchronisation** réimporte tout l’historique et répare le webhook. La rotation du secret met à jour le webhook existant. Arrêter la synchronisation supprime le webhook enregistré et conserve les MR ; déconnecter supprime la connexion et ses données miroir. Si le jeton révoqué empêche de supprimer le webhook distant, Multica supprime la connexion et vous demande de retirer le webhook dans Gongfeng. Pour une configuration manuelle, régénérez le secret et activez **Merge request events** avec l’URL et le token fournis. Les livraisons utilisent `X-Event: Merge Request Hook` et `X-Token`.
+
+Les MR utilisent les règles de liaison ci-dessus et affichent l’`iid` local. Les requêtes de détail résolvent l’`id` global. Les actualisations API complètent l’auteur et récupèrent les événements manqués. La CI et les conflits sont actualisés par les événements, les visites et les scans périodiques. Les résultats concernent le commit source actuel, y compris les forks ; un nouveau commit invalide les anciens résultats. Une actualisation échouée marque les résultats connus comme périmés. Les approbations et politiques de fusion absentes ne sont pas déduites des conflits.
+
+Pour les agents, installez l’outil communautaire [gongfeng-cli](https://github.com/studyzy/gongfeng-cli)
+sur l’hôte du runtime et configurez son authentification séparément de Git.
+Le CLI officiel Multica `v0.6.1` reçoit les instructions Gongfeng dans le bundle
+`multica-platform` envoyé par le serveur ; aucun runtime personnalisé n’est requis.
+Sur Mac Apple silicon, l’exécution réelle avec Codex a couvert la création et la
+mise à jour des MR, la synchronisation des vérifications et la clôture de la tâche
+après fusion. Windows et les autres agents nécessitent encore une validation native.
+Téléchargez la version
+[v0.5.0](https://github.com/studyzy/gongfeng-cli/releases/tag/v0.5.0) du projet
+d’origine : les binaires macOS arm64, Linux x86_64 et Windows x86_64 ne nécessitent
+pas Go. Si Go est installé, utilisez la même version fixe :
+
+```sh
+go install github.com/studyzy/gongfeng-cli/cmd/gongfeng@v0.5.0
+```
+
+Configurez l’authentification CLI avec `GONGFENG_TOKEN` ou `~/.gongfeng.json`
+(jeton en clair ; permissions `0600` sur macOS/Linux ou ACL limitée à votre compte
+sur Windows), séparément des identifiants Git. Certains
+agents filtrent les variables d’environnement : vérifiez l’accès dans le runtime
+réel. Le jeton du serveur n’est pas transmis aux agents. Ne placez jamais de jeton
+dans les arguments de commande, les fichiers du dépôt ou les commentaires de tâche.
+
+La configuration du dépôt peut remplacer l’adresse API et les identifiants.
+Indiquez explicitement l’adresse officielle et vérifiez le compte avant toute écriture :
+
+```sh
+gongfeng --base-url https://git.code.tencent.com user me --json
+gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr list --json
+```
+
+Cette adresse explicite ne limite pas les redirections HTTP. Le chargement des
+identifiants et la gestion des redirections du CLI communautaire doivent être
+durcis avant de l’utiliser avec des dépôts non fiables.
+
+Consultez `gongfeng --base-url https://git.code.tencent.com --project-id <namespace/project> mr create --help`,
+puis indiquez `--source-branch`, `--target-branch`, `--title` et `--description`.
+Les commandes `show`, `update` et `accept` utilisent l’`id` global du MR :
+récupérez-le avec `mr list --json`, sans le confondre avec l’`iid` affiché.
+
+Les actions MR utilisent le compte CLI de l’hôte du runtime, sans basculer vers
+celui de l’auteur de la tâche. Plusieurs profils Multica sous le même compte
+système partagent les identifiants CLI. Pour attribuer les actions à chaque membre,
+utilisez des runtimes personnels isolés et des identifiants distincts. L’auteur
+des commits Git et l’identité SSH de push se configurent séparément.
+
+Multica lit les résultats des vérifications, mais n’exécute pas les tests du dépôt.
+Configurez un runner CI qui publie ses résultats pour le SHA du commit source actuel.

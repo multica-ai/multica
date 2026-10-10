@@ -49,7 +49,7 @@ const searchParamsRef = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: githubRef.current, ...githubQueryStateRef.current }),
+  useQuery: (options: { queryKey: readonly unknown[] }) => options.queryKey[0] === "vcs" ? { data: { connections: [], configured: true, can_manage: true } } : ({ data: githubRef.current, ...githubQueryStateRef.current }),
   useInfiniteQuery: () => ({
     data: {
       pages: [

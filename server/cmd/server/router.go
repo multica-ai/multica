@@ -1796,6 +1796,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/github/installations/{installationId}/repositories", h.ListGitHubInstallationRepositories)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 					// VCS connect / disconnect / webhook regeneration (admin-only).
+					r.Get("/vcs/connections/{connectionId}/repositories", h.ListGongfengRepositories)
+					r.Post("/vcs/connections/{connectionId}/repositories/{projectId}", h.AddGongfengRepository)
+					r.Post("/vcs/connections/{connectionId}/repositories/{projectId}/sync", h.RetryGongfengRepository)
+					r.Delete("/vcs/connections/{connectionId}/repositories/{projectId}", h.DeleteGongfengRepository)
 					r.Post("/vcs/connections", h.ConnectVCS)
 					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
 					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
