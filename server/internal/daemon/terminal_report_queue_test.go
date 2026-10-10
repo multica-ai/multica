@@ -28,6 +28,7 @@ func TestTerminalReportStoreRoundTripAndPermissions(t *testing.T) {
 	report := terminalTaskReport{
 		kind:                  terminalTaskReportComplete,
 		taskID:                "task-private",
+		claimGeneration:       claimGeneration{dispatchedAt: testClaimGeneration()},
 		output:                "private final answer",
 		branchName:            "agent/private",
 		sessionID:             "session-private",
@@ -84,7 +85,10 @@ func TestTerminalReportStoreRecoversFlushedTempFileAfterCrash(t *testing.T) {
 	if err := store.ensureDir(); err != nil {
 		t.Fatalf("prepare store: %v", err)
 	}
-	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "task-crash", output: "durable answer"}
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "task-crash", output: "durable answer",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
+	}
 	record, err := persistedTerminalReport(report, time.Now())
 	if err != nil {
 		t.Fatalf("build persisted report: %v", err)
@@ -93,7 +97,7 @@ func TestTerminalReportStoreRecoversFlushedTempFileAfterCrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal report: %v", err)
 	}
-	targetName := terminalReportFileName(report.taskID)
+	targetName := reportFileName(report)
 	temp, err := os.CreateTemp(store.dir, "."+strings.TrimSuffix(targetName, ".json")+"-*.tmp")
 	if err != nil {
 		t.Fatalf("create interrupted temp: %v", err)
@@ -167,6 +171,9 @@ func TestTerminalReportReplaysAfterClientRetryWindow(t *testing.T) {
 		sessionID:      "session-1",
 		workDir:        "/tmp/work",
 		durableWorkDir: "/tmp/project",
+		// Replay needs the claim generation the result belongs to: a record
+		// without one is retained instead of delivered.
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
 	}
 	if err := d.reportTerminalTask(context.Background(), report); err == nil {
 		t.Fatal("terminal report unexpectedly succeeded while server was offline")
@@ -209,6 +216,9 @@ func TestTerminalReportReplaysAfterDaemonRestart(t *testing.T) {
 		errorMessage:  "provider failed after doing useful work",
 		branchName:    "agent/partial-work",
 		failureReason: "agent_error.process_failure",
+		// Only a generation lets the daemon prove, after a restart, which claim
+		// this report may still settle.
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
 	}
 
 	beforeRestart := New(cfg, logger)
@@ -263,6 +273,7 @@ func TestTerminalReportEnqueueFailureStillAttemptsHTTP(t *testing.T) {
 	}
 	if err := d.reportTerminalTask(context.Background(), terminalTaskReport{
 		kind: terminalTaskReportComplete, taskID: "task-online", output: "deliver me",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
 	}); err != nil {
 		t.Fatalf("online delivery failed because enqueue failed: %v", err)
 	}
@@ -284,6 +295,7 @@ func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *te
 	report := terminalTaskReport{
 		kind: terminalTaskReportComplete, taskID: "task-rejected", output: "original successful answer",
 		branchName: "agent/original", sessionID: "session-original",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
 	}
 	var completeCalls, fallbackCalls atomic.Int32
 	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {
@@ -325,7 +337,7 @@ func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *te
 	if stats.PendingCount != 0 || stats.FailedCount != 1 || stats.FailedBytes == 0 {
 		t.Fatalf("queue stats = %+v, want one non-empty failed record", stats)
 	}
-	body, err := os.ReadFile(filepath.Join(d.terminalReports.failedDir(), terminalReportFileName(report.taskID)))
+	body, err := os.ReadFile(filepath.Join(d.terminalReports.failedDir(), reportFileName(report)))
 	if err != nil {
 		t.Fatalf("read failed terminal report: %v", err)
 	}
@@ -346,6 +358,68 @@ func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *te
 	// failed/ is not part of list(), so another replay pass cannot hot-loop it.
 	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 0 || delivered != 0 {
 		t.Fatalf("post-quarantine replay = pending:%d delivered:%d, want 0/0", pending, delivered)
+	}
+}
+
+func TestTerminalReportQuarantineMoveFailureKeepsPendingAndSkipsCompensation(t *testing.T) {
+	d := New(Config{
+		ServerBaseURL: "https://api.example.test", WorkspacesRoot: t.TempDir(), DaemonID: "daemon-move-failure",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	base := time.Date(2026, time.October, 4, 0, 0, 0, 0, time.UTC)
+	now := base
+	d.terminalReportNow = func() time.Time { return now }
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "task-move-failure", output: "original successful answer",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
+	}
+	var fallbackCalls atomic.Int32
+	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {
+		if got.kind == terminalTaskReportFail {
+			fallbackCalls.Add(1)
+			return nil
+		}
+		return &requestError{StatusCode: http.StatusForbidden, Body: "forbidden"}
+	}
+	if err := d.reportTerminalTask(context.Background(), report); err == nil {
+		t.Fatal("rejected completion unexpectedly succeeded")
+	}
+	// A file occupying failed/ prevents retirement on every platform.
+	if err := os.WriteFile(d.terminalReports.failedDir(), []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now = base.Add(terminalReportPermanentRejectionAge)
+	for attempt := 0; attempt < terminalReportPermanentRejectionLimit; attempt++ {
+		if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 1 || delivered != 0 {
+			t.Fatalf("blocked move replay = pending:%d delivered:%d, want 1/0", pending, delivered)
+		}
+	}
+	if got := fallbackCalls.Load(); got != 0 {
+		t.Fatalf("compensation before preserving the completion = %d, want 0", got)
+	}
+	items, err := d.terminalReports.list()
+	if err != nil || len(items) != 1 || items[0].report != report {
+		t.Fatalf("original pending payload = %+v, error=%v", items, err)
+	}
+	if err := os.Remove(d.terminalReports.failedDir()); err != nil {
+		t.Fatal(err)
+	}
+	if pending, delivered := d.replayPendingTerminalReports(context.Background()); pending != 0 || delivered != 0 {
+		t.Fatalf("recovered move replay = pending:%d delivered:%d, want 0/0", pending, delivered)
+	}
+	body, err := os.ReadFile(filepath.Join(d.terminalReports.failedDir(), reportFileName(report)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := decodePersistedTerminalReport(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved, err := record.terminalReport(); err != nil || preserved != report {
+		t.Fatalf("preserved completion = %+v, error=%v", preserved, err)
+	}
+	d.replayPendingTerminalReports(context.Background())
+	if got := fallbackCalls.Load(); got != 1 {
+		t.Fatalf("compensation after successful retirement = %d, want exactly 1", got)
 	}
 }
 
@@ -383,7 +457,10 @@ func TestTerminalReportForegroundAndReplayDoNotSendConcurrently(t *testing.T) {
 		WorkspacesRoot: t.TempDir(),
 		DaemonID:       "daemon-in-flight",
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "task-race", output: "once"}
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "task-race", output: "once",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
+	}
 	if err := d.terminalReports.enqueue(report); err != nil {
 		t.Fatalf("seed pending report: %v", err)
 	}
@@ -454,7 +531,10 @@ func TestTerminalReportFutureVersionIsRetainedAcrossDowngrade(t *testing.T) {
 	if err := store.ensureDir(); err != nil {
 		t.Fatalf("prepare terminal report queue: %v", err)
 	}
-	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "future-task", output: "future payload"}
+	report := terminalTaskReport{
+		kind: terminalTaskReportComplete, taskID: "future-task", output: "future payload",
+		claimGeneration: claimGeneration{dispatchedAt: testClaimGeneration()},
+	}
 	record, err := persistedTerminalReport(report, time.Now())
 	if err != nil {
 		t.Fatalf("build terminal report: %v", err)
@@ -464,7 +544,7 @@ func TestTerminalReportFutureVersionIsRetainedAcrossDowngrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal future report: %v", err)
 	}
-	path := filepath.Join(store.dir, terminalReportFileName(report.taskID))
+	path := filepath.Join(store.dir, reportFileName(report))
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("write future report: %v", err)
 	}
@@ -527,9 +607,13 @@ func TestRunBatchPollerReleasesSlotAfterTerminalRetryExhaustion(t *testing.T) {
 		case strings.HasSuffix(req.URL.Path, "/api/daemon/tasks/claim"):
 			switch {
 			case completeAttempts.Load() == 0:
-				_, _ = w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1"}]}`))
+				// A fence-capable claim carries the capability and the generation the
+				// server issued. Without both, the report is delivered but
+				// deliberately not stored, and this test is about the durable copy
+				// surviving an exhausted retry window.
+				_, _ = w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","terminal_report_generation_fence_v1":true,"dispatched_at":"2026-09-19T04:43:58.123456Z"}]}`))
 			case secondServed.CompareAndSwap(false, true):
-				_, _ = w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i2"}]}`))
+				_, _ = w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i2","terminal_report_generation_fence_v1":true,"dispatched_at":"2026-09-19T04:44:58.654321Z"}]}`))
 			default:
 				_, _ = w.Write([]byte(`{"tasks":[]}`))
 			}
