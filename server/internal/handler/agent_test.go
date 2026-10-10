@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1347,60 +1346,56 @@ func TestMergeAgentEnv_PureFunction(t *testing.T) {
 	}
 }
 
-// TestUpdateAgent_RedactsMcpConfigForAgentActor closes the second leg
-// of MUL-2600 review #2: an agent process with a task token (or with
-// the X-Actor-Source server marker) must not be able to scrape another
-// agent's mcp_config via an unrelated mutation response. Even when the
-// host PAT would otherwise satisfy canManageAgent, the response body
-// must come back with mcp_config redacted.
-func TestUpdateAgent_RedactsMcpConfigForAgentActor(t *testing.T) {
+// TestUpdateAgent_RejectsMachineActor is the regression for #8459: an
+// agent process holding a machine credential (mat_ task token / mcn_
+// cloud PAT) carries the runtime owner's stamped X-User-ID, so on an
+// admin-owned runtime it would otherwise satisfy canManageAgent and be
+// able to rewrite another member's agent's instructions. canManageAgent
+// now rejects machine and agent actors outright, so the mutation is
+// forbidden and the target is left untouched — a stronger guarantee than
+// the earlier redact-the-echo mitigation (MUL-2600 review #2), which ran
+// only after the write had already landed.
+func TestUpdateAgent_RejectsMachineActor(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
-	// The target agent has a populated mcp_config that historically would
-	// be leaked back via the UpdateAgent / ArchiveAgent / RestoreAgent
-	// HTTP response.
-	target := createHandlerTestAgent(t, "mut-mcp-target", []byte(`{"server":"secret-config"}`))
+	target := createHandlerTestAgent(t, "mut-target", []byte(`{"server":"secret-config"}`))
 
 	// A second agent acts as the "calling" agent process whose task
 	// token authenticated the request. It is registered in the same
 	// workspace so resolveActor recognises X-Agent-ID as valid.
-	caller := createHandlerTestAgent(t, "mut-mcp-caller", nil)
+	caller := createHandlerTestAgent(t, "mut-caller", nil)
 	taskID := insertHandlerTestTask(t, caller)
 
-	desc := "trivial mutation that should NOT leak target mcp_config"
 	req := newRequest(http.MethodPut, "/api/agents/"+target, map[string]any{
-		"description": desc,
+		"instructions": "attacker-chosen system prompt",
 	})
 	req = withURLParam(req, "id", target)
 	// Simulate a task-token-authenticated agent request. The auth
 	// middleware would normally set these; we mimic both the modern
-	// path (X-Actor-Source) and the legacy header pair so the test is
-	// resilient to either resolveActor branch.
+	// path (X-Actor-Source) and the legacy header pair so the test
+	// exercises both the isMachineCredentialActor and the resolveActor
+	// == "agent" guards.
 	req.Header.Set("X-Actor-Source", "task_token")
 	req.Header.Set("X-Agent-ID", caller)
 	req.Header.Set("X-Task-ID", taskID)
 	w := httptest.NewRecorder()
 	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateAgent by machine actor: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	// The write must not have landed: the target's instructions are
+	// unchanged from the empty value createHandlerTestAgent seeds.
+	var instructions string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT instructions FROM agent WHERE id = $1`, target,
+	).Scan(&instructions); err != nil {
+		t.Fatalf("read target instructions: %v", err)
 	}
-	// The response contract keeps `mcp_config` always-present so clients
-	// can distinguish "no config" vs "redacted" via the companion flag.
-	// `json.RawMessage` of a JSON null decodes to the literal bytes
-	// `null`, not Go nil — so check for "no secret-bearing content"
-	// rather than `!= nil`.
-	if len(resp.McpConfig) > 0 && !bytes.Equal(bytes.TrimSpace(resp.McpConfig), []byte("null")) {
-		t.Errorf("UpdateAgent response leaked mcp_config to agent actor: %s", string(resp.McpConfig))
-	}
-	if !resp.McpConfigRedacted {
-		t.Errorf("UpdateAgent response should set mcp_config_redacted=true for agent actor")
+	if instructions != "" {
+		t.Errorf("machine actor mutated target instructions: got %q, want empty", instructions)
 	}
 }
 
