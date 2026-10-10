@@ -1552,6 +1552,10 @@ type commentTriggerComputeOptions struct {
 	// (MUL-3963). Only consulted for AGENT actors — canInvokeAgent judges A2A
 	// by the originator, not the immediate agent principal. Members are their
 	// own originator so this may be empty for member-authored triggers.
+	// Completion-fallback handoffs never set it: the completed worker task is
+	// terminal and must not lend its persisted originator as a fresh generic
+	// A2A invocation token (GH #8719). The fallback resolver copies the
+	// worker's delegation lineage directly instead.
 	OriginatorUserID string
 }
 
@@ -2676,6 +2680,8 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 		// the conversation path, the replied-to comment's own authoring task
 		// for the thread-parent path. Gating on the source as well would keep
 		// the thread-parent path demoted for no reason (MUL-7006).
+		// Completion fallbacks use the TaskService dispatcher, not this generic
+		// comment enqueue path.
 		if trigger.Squad != nil {
 			_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID, service.OriginNamed)
 		} else {
