@@ -263,9 +263,12 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Transient mid-stream provider disconnect (MUL-4910): retryable, and
 		// resume-safe so the retry continues the truncated conversation.
 		{reason: "agent_error.provider_network", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
-		// Capacity/rate-limit failures keep their existing user-retry posture.
-		// Correcting a misleading auth label must not enable an automatic resend.
-		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		// Capacity/rate-limit failures are transient infrastructure flakiness:
+		// resume-safe (the retry continues the session) and retryable under the
+		// exponential backoff with Retry-After floor (issue #8911) so a provider
+		// 429 storm cools down instead of surfacing as a dead task or fanning out
+		// hidden CLI-side retries.
+		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
