@@ -45,6 +45,9 @@ type HealthResponse struct {
 	DeviceName string `json:"device_name"`
 	ServerURL  string `json:"server_url"`
 	CLIVersion string `json:"cli_version"`
+	// CLICommit belongs to this running process, not an installed replacement.
+	// Empty or unknown values do not attest a revision; never fall back to version.
+	CLICommit string `json:"cli_commit"`
 	// LaunchedBy is "desktop" when the Electron app spawned this daemon, empty
 	// for a standalone one. Already reported to the server on registration;
 	// surfaced here so `daemon status` can say who manages the daemon instead
@@ -353,6 +356,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			DeviceName:            d.cfg.DeviceName,
 			ServerURL:             d.cfg.ServerBaseURL,
 			CLIVersion:            d.cfg.CLIVersion,
+			CLICommit:             d.cfg.CLICommit,
 			ActiveTaskCount:       d.activeTasks.Load(),
 			RunningTaskCount:      d.runningTasks.Load(),
 			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),

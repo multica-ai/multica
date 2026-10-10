@@ -108,6 +108,7 @@ type Config struct {
 	DeviceName                     string
 	RuntimeName                    string
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
+	CLICommit                      string                // full build revision embedded in the running CLI; empty/unknown if unavailable
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)

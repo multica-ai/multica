@@ -16,6 +16,8 @@ var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
+	// Separate full revision metadata from the existing display commit.
+	buildCommit = "unknown"
 )
 
 // debugFlag is bound to the persistent --debug flag and, when set, makes
