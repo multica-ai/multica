@@ -158,6 +158,17 @@
       "dark": "深色",
       "system": "跟随系统"
     },
+    "mobile_font_size": {
+      "title": "移动端字体大小",
+      "small": "小",
+      "default": "默认",
+      "large": "大"
+    },
+    "mobile_content_width": {
+      "title": "移动端内容宽度",
+      "standard": "标准",
+      "full": "全宽"
+    },
     "language": {
       "title": "语言",
       "english": "English",

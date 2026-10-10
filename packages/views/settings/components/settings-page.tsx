@@ -428,13 +428,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:flex-row">
       <aside className="shrink-0 border-b border-surface-border md:flex md:w-60 md:flex-col md:border-b-0 md:border-r">
-        <div className="flex h-16 shrink-0 items-center gap-1 px-4 md:px-5">
+        <div className="flex h-16 shrink-0 items-center gap-1 px-(--page-chrome-gutter) md:px-5">
           <CollapsedNavTrigger />
           <h1 className="text-title font-semibold tracking-tight">
             {t(($) => $.page.title)}
           </h1>
         </div>
-        <div className="px-4 pb-4 md:hidden">
+        <div className="px-(--page-chrome-gutter) pb-4 md:hidden">
           <label className="sr-only" htmlFor="settings-navigation">
             {t(($) => $.page.navigate)}
           </label>
@@ -566,7 +566,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
       >
         <div
           className={cn(
-            "mx-auto w-full px-4 py-6 sm:px-6 md:px-10 md:py-8",
+            "mx-auto w-full px-(--page-chrome-gutter) py-6 sm:px-6 md:px-10 md:py-8",
             active.wide ? "max-w-5xl" : "max-w-4xl",
           )}
         >

@@ -361,3 +361,17 @@ describe("SettingsPage search", () => {
     expect(screen.getByText("No matching settings")).toBeInTheDocument();
   });
 });
+
+describe("SettingsPage mobile Full Width", () => {
+  it("reads the variable chrome inset for content and header, fixed values from sm up", () => {
+    renderWithI18n(<SettingsPage />);
+    const title = screen.getByRole("heading", { level: 1 });
+    expect(title.parentElement).toHaveClass("px-(--page-chrome-gutter)");
+    const content = document.querySelector('[class*="max-w-4xl"], [class*="max-w-5xl"]');
+    // Settings is mostly text on bare canvas, so Full Width keeps the small
+    // chrome inset here rather than putting headings on the screen edge.
+    expect(content).toHaveClass("px-(--page-chrome-gutter)", "sm:px-6", "md:px-10");
+    // Only the mobile gutter is variable; tablet and desktop stay fixed.
+    expect(content?.className).not.toMatch(/(^|\s)px-4(\s|$)/);
+  });
+});

@@ -158,6 +158,17 @@
       "dark": "다크",
       "system": "시스템"
     },
+    "mobile_font_size": {
+      "title": "모바일 글자 크기",
+      "small": "작게",
+      "default": "기본",
+      "large": "크게"
+    },
+    "mobile_content_width": {
+      "title": "모바일 콘텐츠 너비",
+      "standard": "표준",
+      "full": "전체 너비"
+    },
     "language": {
       "title": "언어",
       "english": "English",

@@ -53,7 +53,7 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_CHROME_GUTTER } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
 
 const COLUMN_KEYS: AgentColumnKey[] = [
@@ -204,7 +204,7 @@ export function AgentListToolbar({
   );
 
   return (
-    <div className={cn("h-12 shrink-0 overflow-x-auto [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
+    <div className={cn("h-12 shrink-0 overflow-x-auto [-webkit-overflow-scrolling:touch]", PAGE_CHROME_GUTTER)}>
       <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
         {/* Left: local search + scope buttons + result count. Scope mixes the
           ownership lens (mine/all) with the archived lifecycle stage. Button

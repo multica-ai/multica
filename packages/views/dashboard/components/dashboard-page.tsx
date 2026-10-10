@@ -26,7 +26,7 @@ import {
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_CHROME_GUTTER } from "../../layout/page-header";
 import { CollectionPageHeader } from "../../layout/collection-page";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
@@ -497,7 +497,7 @@ export function DashboardPage() {
           switching on the left, page-scoped filters on the right. Both tabs
           share the range and project filter, which is why the filters live
           here and not inside a tab. */}
-      <div className={cn("h-12 shrink-0 overflow-x-auto border-b [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
+      <div className={cn("h-12 shrink-0 overflow-x-auto border-b [-webkit-overflow-scrolling:touch]", PAGE_CHROME_GUTTER)}>
         <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
           <TabsList variant="line" className="gap-0 p-0 group-data-horizontal/tabs:h-full">
             <TabsTrigger

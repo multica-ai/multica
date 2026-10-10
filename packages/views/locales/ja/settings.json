@@ -158,6 +158,17 @@
       "dark": "ダーク",
       "system": "システム"
     },
+    "mobile_font_size": {
+      "title": "モバイルの文字サイズ",
+      "small": "小",
+      "default": "標準",
+      "large": "大"
+    },
+    "mobile_content_width": {
+      "title": "モバイルのコンテンツ幅",
+      "standard": "標準",
+      "full": "全幅"
+    },
     "language": {
       "title": "言語",
       "english": "English",

@@ -105,6 +105,7 @@ vi.mock("@multica/core/auth", async () => {
 
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useMobileAppearanceStore } from "@multica/core/appearance";
 import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
 import {
   DEFAULT_MANUAL_CREATE_FIELDS,
@@ -447,5 +448,64 @@ describe("PreferencesTab — Scope", () => {
     await user.click(preview);
     expect(useIssueOpeningStore.getState().openMode).toBe("peek");
     expect(preview).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+
+describe("PreferencesTab — Mobile appearance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    useMobileAppearanceStore.setState({ fontSize: "default", contentWidth: "standard" });
+    window.localStorage.clear();
+  });
+  afterEach(() => cleanup());
+
+  function renderTab() {
+    return render(<PreferencesTab />, { wrapper: I18nWrapper });
+  }
+
+  it("shows both controls in the device-scoped Appearance section with defaults selected", () => {
+    renderTab();
+    const fontGroup = screen.getByRole("group", { name: "Text size on mobile" });
+    const widthGroup = screen.getByRole("group", { name: "Content width on mobile" });
+    expect(within(fontGroup).getByRole("button", { name: "Default" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(fontGroup).getByRole("button", { name: "Small" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(widthGroup).getByRole("button", { name: "Standard" })).toHaveAttribute("aria-pressed", "true");
+    // Both rows sit in the Appearance section, whose badge marks it device-only.
+    const appearance = fontGroup.closest("section") as HTMLElement;
+    expect(appearance).toContainElement(widthGroup);
+    expect(within(appearance).getByText("This device only")).toBeInTheDocument();
+  });
+
+  it("applies a font size immediately with no save step", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const group = screen.getByRole("group", { name: "Text size on mobile" });
+    await user.click(within(group).getByRole("button", { name: "Large" }));
+    expect(useMobileAppearanceStore.getState().fontSize).toBe("large");
+    expect(within(group).getByRole("button", { name: "Large" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+  });
+
+  it("applies content width immediately", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const group = screen.getByRole("group", { name: "Content width on mobile" });
+    await user.click(within(group).getByRole("button", { name: "Full width" }));
+    expect(useMobileAppearanceStore.getState().contentWidth).toBe("full");
+    expect(within(group).getByRole("button", { name: "Full width" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("is device-only: never calls the backend", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(
+      within(screen.getByRole("group", { name: "Text size on mobile" })).getByRole("button", { name: "Small" }),
+    );
+    await user.click(
+      within(screen.getByRole("group", { name: "Content width on mobile" })).getByRole("button", { name: "Full width" }),
+    );
+    expect(mockUpdateMe).not.toHaveBeenCalled();
   });
 });

@@ -12,8 +12,19 @@ import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sideba
  * issues family at `px-4`, so switching tabs moved the title 4px. Import this
  * anywhere that edge matters instead of writing the class again; a page that
  * spells its own gutter is the bug coming back.
+ *
+ * The width reads `--page-gutter` (1rem, i.e. the old `px-4`) from tokens.css,
+ * which is where the mobile "Full width" preference zeroes it.
  */
-export const PAGE_GUTTER = "px-4";
+export const PAGE_GUTTER = "px-(--page-gutter)";
+
+/**
+ * `PAGE_GUTTER` for header and toolbar bands. Identical by default; under the
+ * mobile Full Width preference the page gutter collapses to zero but chrome
+ * keeps a small inset (tokens.css), so buttons and titles never sit on the
+ * screen edge. Use it on h-12 header/toolbar rows, not on page content.
+ */
+export const PAGE_CHROME_GUTTER = "px-(--page-chrome-gutter)";
 
 /**
  * The centred column a detail page reads inside: `runtimes`, and the agent and
@@ -43,7 +54,7 @@ export const PAGE_RAIL = "mx-auto w-full max-w-[1440px]";
  */
 export const PAGE_TOOLBAR = cn(
   "flex h-12 shrink-0 items-center justify-between gap-2",
-  PAGE_GUTTER,
+  PAGE_CHROME_GUTTER,
 );
 
 /**
@@ -107,7 +118,7 @@ export function PageHeader({ children, leading, className }: PageHeaderProps) {
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b",
         className,
-        PAGE_GUTTER,
+        PAGE_CHROME_GUTTER,
       )}
     >
       {leading ?? <CollapsedNavTrigger />}

@@ -159,6 +159,17 @@
       "dark": "Sombre",
       "system": "Système"
     },
+    "mobile_font_size": {
+      "title": "Taille du texte sur mobile",
+      "small": "Petite",
+      "default": "Par défaut",
+      "large": "Grande"
+    },
+    "mobile_content_width": {
+      "title": "Largeur du contenu sur mobile",
+      "standard": "Standard",
+      "full": "Pleine largeur"
+    },
     "language": {
       "title": "Langue",
       "english": "English",
