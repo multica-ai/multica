@@ -188,6 +188,29 @@ func TestClassifyRules(t *testing.T) {
 		{"402 boundary still quota", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"403 boundary still auth", "HTTP 403 Forbidden", ReasonAgentProviderAuthOrAccess},
 		{"429 boundary still capacity", "got 429 from provider", ReasonAgentProviderCapacityOrRateLimit},
+
+		// 16. Letter-boundary regression (#9146): hex IDs in workspace and
+		//     task paths embed digit runs like "429" between letters
+		//     ("...c429f4b..."), which the digit-only boundary guard let
+		//     through — every failure quoting such a path landed in the
+		//     provider capacity/auth/quota/server-error buckets and sent
+		//     users to check their provider accounts for a 429 no provider
+		//     ever returned. Letters must count as embedded context, same
+		//     as digits.
+		{"429 in hex id not capacity", "local_directory worktree: refusing to record branch agent/a/b: " +
+			"the delivered commit a806f863 no longer contains e8574f2b, the commit this turn started from; " +
+			"the task worktree is preserved at /Users/u/multica_workspaces_x/ws-0000c429f4b/b-1/worktree", ReasonAgentUnknown},
+		{"403 in hex id not auth", "refusing to write /users/u/ws-c403f1b9/worktree", ReasonAgentUnknown},
+		{"401 in hex id not auth", "artifact stored at /tmp/run-00be401d7c/output.log", ReasonAgentUnknown},
+		{"402 in hex id not quota", "cache dir /var/cache/ws-0000d402aa9f removed", ReasonAgentUnknown},
+		{"5xx in hex id not server error", "log at /ws/branch-c503ba4e/worktree", ReasonAgentUnknown},
+		// A model name carrying "500" before a letter is an identifier,
+		// not a status code — same widening, same rationale.
+		{"model name 500 suffix not server error", "artifact model-pack qwen3-500b saved", ReasonAgentUnknown},
+		// Widening must not dull real detection: a genuine status code
+		// next to hex IDs still classifies.
+		{"429 still capacity alongside hex ids", "commit e8574f2b retry failed: HTTP 429 too many requests", ReasonAgentProviderCapacityOrRateLimit},
+		{"503 still server error alongside letters", "model qwen3-500b request died with HTTP 503", ReasonAgentProviderServerError},
 	}
 
 	for _, c := range cases {

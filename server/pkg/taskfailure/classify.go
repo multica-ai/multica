@@ -6,33 +6,43 @@ import (
 )
 
 // providerHTTP5xxRe matches a 3-digit number starting with 5 (5xx HTTP
-// status code) that isn't surrounded by other digits. Mirrors the SQL
-// regex `(^|[^0-9])5[0-9][0-9]([^0-9]|$)` from MUL-1949 — keeps phrases
-// like "1500ms" or "1.5.0" from accidentally landing in
+// status code) that isn't embedded in a longer run of digits OR letters.
+// Adapted from the SQL regex `(^|[^0-9])5[0-9][0-9]([^0-9]|$)` from
+// MUL-1949 (with the boundary widened below) — keeps phrases like
+// "1500ms" or "1.5.0" from accidentally landing in
 // provider_server_error.
+//
+// The boundary excludes letters as well as digits (#9146): workspace and
+// task IDs are hex, so a path like "...c429f4b/worktree" embeds "429"
+// between letters, and the digit-only guard let it fire. Any offline
+// backfill SQL regenerated from MUL-1949 needs the same widened boundary
+// (`[^0-9a-z]`) to stay in lock-step.
 //
 // Compiled at package init: the classifier is on the in-flight write
 // path for every failed task, so paying the regex compile cost at
 // startup rather than per-call matters.
-var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9])5[0-9][0-9]([^0-9]|$)`)
+var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9a-z])5[0-9][0-9]([^0-9a-z]|$)`)
 
 // httpAuthCodeRe / httpQuotaCodeRe / httpCapacityCodeRe match specific 3-digit
-// HTTP status codes only when they are NOT embedded in a longer number, using
-// the same digit-boundary guard as providerHTTP5xxRe. Without this guard the
-// bare substrings "401"/"402"/"403"/"429"/"529" fire on unrelated numbers —
-// e.g. "402913 tokens", "15290ms", "exit status 4030" — misclassifying process
-// or unknown failures as provider billing / rate-limit errors. That pollutes
-// failure observability: a genuine process crash gets filed under a provider
-// bucket, masking the real cause on failure dashboards. (A misfire here still
-// can't cause a spurious retry: the auth / quota / capacity buckets these
-// regexes guard are all non-retryable. The only agent_error.* reason on
-// internal/service/task.go's retryableReasons allowlist is provider_network
-// — MUL-4910 — and these regexes never route into it.) The 5xx bucket was
-// already anchored for exactly this reason (MUL-1949); these codes were not.
+// HTTP status codes only when they are NOT embedded in a longer number or an
+// identifier, using the same alphanumeric-boundary guard as providerHTTP5xxRe.
+// Without this guard the bare substrings "401"/"402"/"403"/"429"/"529" fire on
+// unrelated numbers — e.g. "402913 tokens", "15290ms", "exit status 4030" —
+// misclassifying process or unknown failures as provider billing / rate-limit
+// errors. That pollutes failure observability: a genuine process crash gets
+// filed under a provider bucket, masking the real cause on failure dashboards.
+// (A misfire here still can't cause a spurious retry: the auth / quota /
+// capacity buckets these regexes guard are all non-retryable. The only
+// agent_error.* reason on internal/service/task.go's retryableReasons
+// allowlist is provider_network — MUL-4910 — and these regexes never route
+// into it.) The 5xx bucket was already anchored for exactly this reason
+// (MUL-1949); these codes were not. #9146 widened every boundary from
+// digits-only to alphanumerics because hex workspace IDs put these digit runs
+// between letters ("...c429f4b...").
 var (
-	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)
-	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9])402([^0-9]|$)`)
-	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9])(429|529)([^0-9]|$)`)
+	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9a-z])(401|403)([^0-9a-z]|$)`)
+	httpQuotaCodeRe    = regexp.MustCompile(`(^|[^0-9a-z])402([^0-9a-z]|$)`)
+	httpCapacityCodeRe = regexp.MustCompile(`(^|[^0-9a-z])(429|529)([^0-9a-z]|$)`)
 )
 
 // concurrentRequestLimitWitness is emitted by Anthropic-compatible providers
@@ -43,7 +53,7 @@ var (
 // member-facing recovery guidance describe the actual failure.
 const concurrentRequestLimitWitness = "concurrent request limit"
 
-var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9])403([^0-9]|$)`)
+var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9a-z])403([^0-9a-z]|$)`)
 
 // isUsageLimit403 is shared by Classify and NormalizeDaemonReason so new and
 // old daemons land on the same reason.
@@ -131,8 +141,9 @@ func Classify(rawError string) Reason {
 		return ReasonAgentMissingConfig
 
 	// 3. Auth / access. 401 / 403 / "Not logged in" / invalid token
-	//    / lacks access to the model. Status codes use a digit boundary
-	//    so "4030" / "1401ms" don't spuriously land here.
+	//    / lacks access to the model. Status codes use an alphanumeric
+	//    boundary so "4030" / "1401ms" / a hex ID containing "401"
+	//    don't spuriously land here.
 	case httpAuthCodeRe.MatchString(lower),
 		containsAny(lower,
 			"unauthorized",
