@@ -155,6 +155,14 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.RuntimeType = agent.ProfileRuntimeType(strings.TrimSpace(req.RuntimeType), req.ProtocolFamily)
+	// N3: muse is a builtin HTTP backend, not a CLI that can be wrapped
+	// in a custom profile. Reject it here with 400 instead of letting
+	// it hit the DB CHECK constraint (which doesn't list muse) and
+	// return a confusing 500.
+	if req.RuntimeType == "muse" {
+		writeError(w, http.StatusBadRequest, "runtime_type 'muse' is a builtin backend and cannot be used for custom profiles; create a builtin Muse agent instead")
+		return
+	}
 	family, supported := agent.RuntimeProtocolFamily(req.RuntimeType)
 	if !supported {
 		writeError(w, http.StatusBadRequest, "unsupported runtime_type: "+req.RuntimeType)
