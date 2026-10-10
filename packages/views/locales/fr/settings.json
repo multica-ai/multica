@@ -1219,6 +1219,15 @@
     "tabs": {
       "updates": "Mises à jour"
     },
+    "tab_bar": {
+      "pin": "Épingler l'onglet",
+      "unpin": "Désépingler l'onglet",
+      "close": "Fermer l'onglet",
+      "close_others": "Fermer les autres onglets",
+      "open_window": "Ouvrir dans une nouvelle fenêtre",
+      "new": "Nouvel onglet",
+      "pinned_name": "{{title}} (épinglé)"
+    },
     "updates": {
       "title": "Mises à jour",
       "current_version": "Version actuelle",
