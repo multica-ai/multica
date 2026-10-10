@@ -260,6 +260,21 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 	taskID := execResp.TaskID
 	logger.Info("muse task started", "task_id", taskID, "cwd", opts.Cwd, "model", opts.Model)
+	// The wire protocol has no model field; the worker runs as the user's
+	// personal Muse with its own context. Log ignored options explicitly
+	// (Hermes pattern) so silent drops are visible.
+	if opts.SystemPrompt != "" {
+		logger.Debug("muse ignoring ExecOptions.SystemPrompt; worker uses its own user context")
+	}
+	if opts.MaxTurns > 0 {
+		logger.Debug("muse ignoring ExecOptions.MaxTurns; wire protocol has no turn limit", "max_turns", opts.MaxTurns)
+	}
+	if len(opts.McpConfig) > 0 {
+		logger.Debug("muse ignoring ExecOptions.McpConfig; not applicable to remote worker")
+	}
+	if opts.ThinkingLevel != "" {
+		logger.Debug("muse ignoring ExecOptions.ThinkingLevel; not applicable to remote worker", "thinking_level", opts.ThinkingLevel)
+	}
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
