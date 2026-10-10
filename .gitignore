@@ -36,6 +36,10 @@ dist-electron
 # external users can run `pnpm ios:mobile:device:prod:release` against
 # multica.ai's production backend without copying templates first.
 !apps/mobile/.env.production
+# HarmonyOS staging/production configs are public for the same reasons as the
+# iOS mobile ones above (see apps/mobile-harmony/README.md).
+!apps/mobile-harmony/.env.staging
+!apps/mobile-harmony/.env.production
 
 # test coverage
 coverage
@@ -81,3 +85,6 @@ __pycache__/
 perf-report/
 # The production example is a tracked template; `.env*` above would hide it.
 !apps/mobile/.env.production.example
+
+# ZCode session artifacts (plans, agent state) — tool-internal, not project source
+.zcode/

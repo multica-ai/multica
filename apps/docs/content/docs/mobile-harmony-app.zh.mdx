@@ -1,0 +1,38 @@
+---
+title: 鸿蒙 App
+description: 在 DevEco 模拟器中运行 Multica 鸿蒙客户端。当前为垂直切片：登录、工作区与只读收件箱。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 鸿蒙客户端仍在积极开发中，尚未上架华为应用市场。当前交付的是**垂直切片**：邮箱验证码登录、工作区选择，以及带实时更新的只读收件箱。任务详情、编辑器和聊天尚未移植。
+
+<Callout type="info">
+  数据都保存在服务端。切片连接的后端与 Web、Desktop 和 iOS App 相同，直接使用已有账号登录即可。
+</Callout>
+
+## 准备工作
+
+- 一台装有 DevEco Studio 的 Mac（默认路径 `/Applications/DevEco-Studio.app`），并通过其设备管理器下载了手机模拟器镜像；
+- Node.js 22+、pnpm 和 Git。
+
+## 在模拟器中运行
+
+克隆仓库并安装依赖：
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+
+在 DevEco Studio 中启动手机模拟器，然后在仓库根目录执行：
+
+```bash
+pnpm harmony:mobile-harmony:staging
+pnpm dev:mobile-harmony:staging
+```
+
+第一条命令构建应用包并安装到模拟器；第二条启动 JS 打包服务。应用默认连接 staging 后端。修改 `apps/mobile-harmony/.env.*` 中的 `MULTICA_API_URL` 可切换后端（修改后需重启打包服务）。
+
+开发路线图见 [`apps/mobile-harmony/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile-harmony/README.md)。

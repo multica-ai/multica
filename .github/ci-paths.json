@@ -70,6 +70,7 @@
     "scripts/*.mjs",
     "scripts/check-ui-wildcard-exports.test.sh",
     ".github/workflows/mobile-verify.yml",
+    ".github/workflows/harmony-verify.yml",
     ".github/workflows/ci.yml",
     ".github/ci-paths.json"
   ],

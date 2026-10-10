@@ -1,0 +1,38 @@
+---
+title: HarmonyOS app
+description: Run the Multica HarmonyOS client in the DevEco simulator. Currently a vertical slice — sign-in, workspaces, and a read-only inbox.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The Multica HarmonyOS client is under active development and is not distributed through AppGallery yet. Today it ships as a **vertical slice**: sign-in with an email verification code, workspace selection, and a read-only inbox with realtime updates. Issue details, editors, and chat are not ported yet.
+
+<Callout type="info">
+  Data lives on the server. The slice talks to the same backend as web, Desktop, and the iOS app — sign in with your existing account.
+</Callout>
+
+## Prerequisites
+
+- a Mac with DevEco Studio installed (default path `/Applications/DevEco-Studio.app`) and a phone emulator image downloaded through its Device Manager;
+- Node.js 22+, pnpm, and Git.
+
+## Running in the simulator
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+
+Start the phone emulator from DevEco Studio, then from the repo root:
+
+```bash
+pnpm harmony:mobile-harmony:staging
+pnpm dev:mobile-harmony:staging
+```
+
+The first command builds and installs the app package on the emulator; the second starts the JS bundler. The app connects to the staging backend by default. Change `MULTICA_API_URL` in `apps/mobile-harmony/.env.*` to point it elsewhere (restart the bundler after changing it).
+
+See [`apps/mobile-harmony/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile-harmony/README.md) for the development roadmap.
