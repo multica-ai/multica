@@ -256,43 +256,55 @@ func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDe
 const updateProject = `-- name: UpdateProject :one
 UPDATE project SET
     title = COALESCE($2, title),
-    description = $3,
-    icon = $4,
-    status = COALESCE($5, status),
-    priority = COALESCE($6, priority),
-    lead_type = $7,
-    lead_id = $8,
-    start_date = $9,
-    due_date = $10,
+    description = CASE WHEN $3::boolean THEN $4 ELSE description END,
+    icon = CASE WHEN $5::boolean THEN $6 ELSE icon END,
+    status = COALESCE($7, status),
+    priority = COALESCE($8, priority),
+    lead_type = CASE WHEN $9::boolean THEN $10 ELSE lead_type END,
+    lead_id = CASE WHEN $11::boolean THEN $12 ELSE lead_id END,
+    start_date = CASE WHEN $13::boolean THEN $14 ELSE start_date END,
+    due_date = CASE WHEN $15::boolean THEN $16 ELSE due_date END,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
 `
 
 type UpdateProjectParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	StartDate   pgtype.Date `json:"start_date"`
-	DueDate     pgtype.Date `json:"due_date"`
+	ID             pgtype.UUID `json:"id"`
+	Title          pgtype.Text `json:"title"`
+	DescriptionSet bool        `json:"description_set"`
+	Description    pgtype.Text `json:"description"`
+	IconSet        bool        `json:"icon_set"`
+	Icon           pgtype.Text `json:"icon"`
+	Status         pgtype.Text `json:"status"`
+	Priority       pgtype.Text `json:"priority"`
+	LeadTypeSet    bool        `json:"lead_type_set"`
+	LeadType       pgtype.Text `json:"lead_type"`
+	LeadIDSet      bool        `json:"lead_id_set"`
+	LeadID         pgtype.UUID `json:"lead_id"`
+	StartDateSet   bool        `json:"start_date_set"`
+	StartDate      pgtype.Date `json:"start_date"`
+	DueDateSet     bool        `json:"due_date_set"`
+	DueDate        pgtype.Date `json:"due_date"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
 	row := q.db.QueryRow(ctx, updateProject,
 		arg.ID,
 		arg.Title,
+		arg.DescriptionSet,
 		arg.Description,
+		arg.IconSet,
 		arg.Icon,
 		arg.Status,
 		arg.Priority,
+		arg.LeadTypeSet,
 		arg.LeadType,
+		arg.LeadIDSet,
 		arg.LeadID,
+		arg.StartDateSet,
 		arg.StartDate,
+		arg.DueDateSet,
 		arg.DueDate,
 	)
 	var i Project
