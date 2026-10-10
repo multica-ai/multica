@@ -370,17 +370,40 @@
   font-style: italic;
 }
 
-.rich-text-editor blockquote p {
+.rich-text-editor blockquote p,
+.rich-text-editor .markdown-alert p {
   margin-top: 0.25rem;
   margin-bottom: 0.25rem;
 }
 
-.rich-text-editor blockquote > *:first-child {
+.rich-text-editor blockquote > *:first-child,
+.rich-text-editor .markdown-alert > *:first-child {
   margin-top: 0;
 }
 
-.rich-text-editor blockquote > *:last-child {
+.rich-text-editor blockquote > *:last-child,
+.rich-text-editor .markdown-alert > *:last-child {
   margin-bottom: 0;
+}
+
+/* Alert callouts (`> [!NOTE]` etc., rich-content/markdown-alert.tsx). Unlike a
+   quote, the body keeps full-strength upright text: a callout is there to be
+   read first. The bar and title colours come from per-type utility classes;
+   only the bar's width and style are set here so those classes win. :where()
+   keeps this below the first/last-child margin resets, which must still apply
+   to a callout that opens or closes the content, as they do to a quote. */
+.rich-text-editor :where(.markdown-alert) {
+  border-left-width: 3px;
+  border-left-style: solid;
+  padding: 0.125rem 0 0.125rem 0.75rem;
+  margin: 0.625rem 0;
+}
+
+.rich-text-editor .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
 }
 
 .rich-text-editor blockquote blockquote {

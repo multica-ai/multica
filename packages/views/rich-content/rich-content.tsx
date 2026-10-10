@@ -70,6 +70,7 @@ import { AttachmentDownloadProvider } from "../editor/attachment-download-contex
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFences, type ClosedFence } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
+import { RichBlockquote, rehypeMarkdownAlerts } from "./markdown-alert";
 import {
   CodeBlockShell,
   RichFenceBlock,
@@ -464,6 +465,7 @@ const COMPONENTS: Partial<Components> = {
     </div>
   ),
 
+  blockquote: RichBlockquote,
   code: RichCode,
   pre: RichPre,
 };
@@ -482,6 +484,7 @@ const REMARK_PLUGINS = [
 const REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
+  rehypeMarkdownAlerts,
   rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 

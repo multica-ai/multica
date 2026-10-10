@@ -115,6 +115,13 @@
     "show_source": "ソースを表示",
     "fullscreen": "全画面"
   },
+  "alert": {
+    "note": "注記",
+    "tip": "ヒント",
+    "important": "重要",
+    "warning": "警告",
+    "caution": "注意"
+  },
   "dynamic_block": {
     "preview": "プレビュー",
     "source": "ソース",
