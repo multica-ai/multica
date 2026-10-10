@@ -139,6 +139,12 @@ type museExecuteRequest struct {
 	// WorkspaceID is the workspace UUID. The worker passes it as a query
 	// param on API calls; CLI backends get it as MULTICA_WORKSPACE_ID.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// ProtocolVersion is the wire protocol version this backend speaks.
+	// The receptionist MUST validate it BEFORE creating the task and
+	// reject with 400 if incompatible. This prevents the "task accepted
+	// then rejected" race where a task is queued but the backend refuses
+	// to poll it.
+	ProtocolVersion int `json:"protocol_version"`
 }
 
 type museExecuteResponse struct {
@@ -252,13 +258,14 @@ func (b *museBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// callers without a health endpoint.)
 	var execResp museExecuteResponse
 	if err := b.postExecute(runCtx, mc, museExecuteRequest{
-		Prompt:      prompt,
-		SessionID:   opts.ResumeSessionID,
-		TimeoutS:    timeoutS,
-		WorkDir:     opts.Cwd,
-		TaskToken:   opts.TaskToken,
-		ServerURL:   opts.MulticaServerURL,
-		WorkspaceID: opts.MulticaWorkspaceID,
+		Prompt:          prompt,
+		SessionID:       opts.ResumeSessionID,
+		TimeoutS:        timeoutS,
+		WorkDir:         opts.Cwd,
+		TaskToken:       opts.TaskToken,
+		ServerURL:       opts.MulticaServerURL,
+		WorkspaceID:     opts.MulticaWorkspaceID,
+		ProtocolVersion: museProtocolVersion,
 	}, &execResp); err != nil {
 		// R2: Release the runContext on early failure. The success path
 		// hands ownership to the polling goroutine (which defers cancel).
@@ -496,10 +503,19 @@ func (b *museBackend) postExecute(ctx context.Context, mc museEndpointConfig, re
 		return err
 	}
 	// Go-B3: The receptionist reports its protocol version in the execute
-	// response. If it speaks a different version, fail fast instead of
-	// sending a task it can't handle. (Older receptionists omit the field;
-	// treat missing as v1 for backward compatibility during rollout.)
+	// response. If it speaks a different version, fail fast.
+	// The receptionist validates req.protocol_version BEFORE creating the
+	// task, so a mismatch here means either an old receptionist (no
+	// validation) or a race. If we got a task_id, try to cancel it —
+	// don't leave an orphaned task that we'll never poll.
 	if out.ProtocolVersion != 0 && out.ProtocolVersion != museProtocolVersion {
+		if out.TaskID != "" {
+			// Best-effort cleanup of the orphaned task. Use a separate
+			// bounded context; don't let cancel failure mask the skew error.
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = b.postCancel(cancelCtx, mc, out.TaskID)
+			cancel()
+		}
 		return fmt.Errorf("%w: receptionist speaks v%d, backend implements v%d",
 			ErrMuseProtocolSkew, out.ProtocolVersion, museProtocolVersion)
 	}
