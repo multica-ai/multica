@@ -14,9 +14,9 @@
  * `<NodeViewContent as="code" />` so the user can continue typing.
  */
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
-import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
+import { HtmlPreviewSurface } from "./html-preview-surface";
 import { useT } from "../i18n";
 import { CodeBlockIframe } from "./code-block-iframe";
 import {
@@ -123,6 +123,7 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
         title={title}
         source={html}
         error={error}
+        fullscreen={fullscreen}
         onFullscreen={() => setFullscreen(true)}
         preview={({ active }) => (
           <HtmlBlockBody
@@ -131,25 +132,12 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
             srcDoc={srcDoc}
             title={frameTitle}
             active={active}
+            fullscreen={fullscreen}
+            onFullscreenChange={setFullscreen}
             onError={setError}
           />
         )}
       />
-      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-        <DialogContent
-          className="!max-w-6xl !h-[min(90vh,calc(100vh-2rem))] w-full p-0 gap-0 overflow-hidden"
-          aria-label={t(($) => $.code_block.fullscreen)}
-        >
-          {srcDoc != null && (
-            <CodeBlockIframe
-              html={srcDoc}
-              title={frameTitle}
-              heightClassName="h-full"
-              className="rounded-none border-0"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -159,12 +147,16 @@ function HtmlBlockBody({
   srcDoc,
   title,
   active,
+  fullscreen,
+  onFullscreenChange,
   onError,
 }: {
   html: string;
   srcDoc: string | null;
   title: string;
   active: boolean;
+  fullscreen: boolean;
+  onFullscreenChange: (open: boolean) => void;
   onError: (error: DynamicBlockError) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -176,8 +168,9 @@ function HtmlBlockBody({
   // The listener is registered once; these refs give it the current values.
   const activeRef = useRef(active);
   const onErrorRef = useRef(onError);
-  useEffect(() => {
-    activeRef.current = active;
+  useLayoutEffect(() => {
+    // A full-size document's bridge must not overwrite its inline height.
+    activeRef.current = active && !fullscreen;
     onErrorRef.current = onError;
   });
 
@@ -221,25 +214,38 @@ function HtmlBlockBody({
   );
 
   return (
-    <div className="relative" style={{ height: bodyHeight }}>
-      {srcDoc != null && (
-        <CodeBlockIframe
-          ref={iframeRef}
-          html={srcDoc}
-          title={title}
-          heightClassName="h-full"
-          // The frame is the block's body, so it draws no border of its own.
-          // Transparent lets a document without a background sit on the
-          // block's surface.
-          className={cn("block rounded-none border-0 bg-transparent", !ready && "invisible")}
-          onLoad={() => setLoaded(true)}
-        />
-      )}
-      {!ready && (
-        <div className="absolute inset-0">
-          <DynamicBlockSkeleton />
-        </div>
-      )}
-    </div>
+    <HtmlPreviewSurface
+      open={fullscreen}
+      inlineHeight={active ? bodyHeight : 0}
+      onOpenChange={onFullscreenChange}
+      title={title}
+    >
+      <div
+        className="relative"
+        style={{ height: fullscreen ? "100%" : bodyHeight }}
+      >
+        {srcDoc != null && (
+          <CodeBlockIframe
+            ref={iframeRef}
+            html={srcDoc}
+            title={title}
+            heightClassName="h-full"
+            // The frame is the block's body, so it draws no border of its own.
+            // Transparent lets a document without a background sit on the
+            // block's surface.
+            className={cn(
+              "block rounded-none border-0 bg-transparent",
+              !ready && !fullscreen && "invisible",
+            )}
+            onLoad={() => setLoaded(true)}
+          />
+        )}
+        {!ready && !fullscreen && (
+          <div className="absolute inset-0">
+            <DynamicBlockSkeleton />
+          </div>
+        )}
+      </div>
+    </HtmlPreviewSurface>
   );
 }
