@@ -89,6 +89,7 @@ import type {
   WebhookDelivery,
   WorkspaceMcpServer,
 } from "../types";
+import type { PluginComposerCommand } from "../types/plugin";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
@@ -131,6 +132,20 @@ export const PluginResourceSchema = z.object({
   entry: z.string().default(""),
 }).loose();
 
+export const PluginComposerCommandSchema = z.object({
+  key: z.string().default(""),
+  label: z.string().default(""),
+  description: z.string().optional(),
+  contexts: z.array(z.enum([
+    "chat",
+    "issue_comment",
+    "issue_reply",
+    "issue_create",
+    "agent_create",
+  ])).default([]),
+  surface: z.string().default(""),
+}).loose() satisfies z.ZodType<PluginComposerCommand>;
+
 export const PluginInstallationSchema = z.object({
   id: z.string(),
   plugin_key: z.string().default(""),
@@ -146,6 +161,7 @@ export const PluginInstallationSchema = z.object({
   surfaces: z.array(PluginSurfaceSchema).default([]),
   hooks: z.array(PluginHookSchema).default([]),
   resources: z.array(PluginResourceSchema).default([]),
+  composer_commands: z.array(PluginComposerCommandSchema).default([]),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -256,6 +272,7 @@ export const PluginManifestSummarySchema = z.object({
         timezone: z.string().default(""),
       }).loose().optional(),
     }).loose()).default([]),
+    composer_commands: z.array(PluginComposerCommandSchema).default([]),
   }).loose().optional(),
 }).loose();
 

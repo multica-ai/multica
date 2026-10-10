@@ -12,6 +12,7 @@ describe("bridge message guards", () => {
   it("accepts the shapes both sides agreed on", () => {
     expect(isBridgeRequest({ id: "r1", kind: "action", method: "GET", path: "/context" })).toBe(true);
     expect(isBridgeRequest({ id: "r1", kind: "ui.resize", height: 200 })).toBe(true);
+    expect(isBridgeRequest({ id: "r2", kind: "composer.insert", format: "markdown", text: "hello" })).toBe(true);
     expect(isBridgeResponse({ id: "r1", ok: true, status: 200, data: {} })).toBe(true);
     expect(isBridgeResponse({ id: "r1", ok: false, status: 403, error: "nope" })).toBe(true);
     expect(isBridgeEvent({ kind: "theme", theme: {} })).toBe(true);
@@ -29,6 +30,8 @@ describe("bridge message guards", () => {
       { id: "r1", kind: "action", method: "GET" }, // no path
       { id: "r1", kind: "ui.resize" }, // no height
       { id: "r1", kind: "ui.resize", height: "200" }, // height must be a number
+      { id: "r2", kind: "composer.insert", format: "html", text: "<b>hello</b>" },
+      { id: "r2", kind: "composer.insert", format: "markdown", text: 42 },
       { id: "r1", kind: "navigate", url: "https://evil.test" }, // unknown kind
     ]) {
       expect(isBridgeRequest(value)).toBe(false);

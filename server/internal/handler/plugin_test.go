@@ -82,6 +82,19 @@ const scheduleHookTestManifest = `{
   }
 }`
 
+const composerCommandHandlerTestManifest = `{
+  "manifest_version": 1,
+  "key": "com.example.draft-helper",
+  "name": "Draft Helper",
+  "version": "1.0.0",
+  "author": { "name": "example" },
+  "scopes": ["issues:read"],
+  "contributes": {
+    "surfaces": [{ "key": "draft-ui", "type": "modal", "name": "Draft Helper", "entry": "ui/draft.js", "platforms": ["web", "desktop"] }],
+    "composer_commands": [{ "key": "draft", "label": "draft", "description": "Prepare a draft", "contexts": ["chat", "issue_comment", "issue_reply", "issue_create", "agent_create"], "surface": "draft-ui" }]
+  }
+}`
+
 func pluginHandlerRequest(method, path string, body []byte, params map[string]string) *http.Request {
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
 	request.Header.Set("X-User-ID", testUserID)
@@ -159,10 +172,11 @@ func withLocalPluginSourceIn(t *testing.T, root string, manifest string) string 
 	previousSecrets := testHandler.PluginService.Secrets
 	testHandler.PluginService.LocalDir = root
 	testHandler.PluginService.Host = plugincontract.Capabilities{
-		SurfaceTypes:  map[string]bool{plugincontract.SurfaceIssuePanel: true, plugincontract.SurfaceSidebarPanel: true, plugincontract.SurfaceModal: true},
-		HookTriggers:  map[string]bool{plugincontract.TriggerUI: true, plugincontract.TriggerManual: true, plugincontract.TriggerAgent: true, plugincontract.TriggerEvent: true, plugincontract.TriggerSchedule: true},
-		HookTransport: map[string]bool{plugincontract.TransportHTTP: true, plugincontract.TransportMCP: true},
-		ResourceTypes: map[string]bool{plugincontract.ResourceSkill: true},
+		SurfaceTypes:     map[string]bool{plugincontract.SurfaceIssuePanel: true, plugincontract.SurfaceSidebarPanel: true, plugincontract.SurfaceModal: true},
+		HookTriggers:     map[string]bool{plugincontract.TriggerUI: true, plugincontract.TriggerManual: true, plugincontract.TriggerAgent: true, plugincontract.TriggerEvent: true, plugincontract.TriggerSchedule: true},
+		HookTransport:    map[string]bool{plugincontract.TransportHTTP: true, plugincontract.TransportMCP: true},
+		ResourceTypes:    map[string]bool{plugincontract.ResourceSkill: true},
+		ComposerCommands: true,
 	}
 	box, err := secretbox.New(bytes.Repeat([]byte{7}, 32))
 	if err != nil {
@@ -423,6 +437,68 @@ func TestPluginPreviewShowsScopesWithoutInstalling(t *testing.T) {
 	}
 	if len(list.Plugins) != 0 {
 		t.Fatalf("preview created an installation: %v", list.Plugins)
+	}
+}
+
+func TestPluginComposerCommandsRoundTripThroughPreviewAndInstallation(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	versionID := withLocalPluginSource(t, composerCommandHandlerTestManifest)
+	// Publishing supports the contribution; preview still refuses a host whose
+	// composer runtime is disabled.
+	testHandler.PluginService.Host.ComposerCommands = false
+	previewBody, _ := json.Marshal(map[string]string{"version_id": versionID})
+	blockedPreview := httptest.NewRecorder()
+	testHandler.PreviewPlugin(blockedPreview, pluginHandlerRequest(http.MethodPost, "/plugins/preview", previewBody, map[string]string{"id": testWorkspaceID}))
+	if blockedPreview.Code != http.StatusUnprocessableEntity || !strings.Contains(blockedPreview.Body.String(), "composer commands") {
+		t.Fatalf("unsupported composer command preview status=%d body=%s", blockedPreview.Code, blockedPreview.Body.String())
+	}
+	// Enable the runtime only after asserting that preview refuses a host that
+	// cannot render the contribution.
+	testHandler.PluginService.Host.ComposerCommands = true
+
+	previewRecorder := httptest.NewRecorder()
+	testHandler.PreviewPlugin(previewRecorder, pluginHandlerRequest(http.MethodPost, "/plugins/preview", previewBody, map[string]string{"id": testWorkspaceID}))
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var preview service.PluginPreview
+	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if len(preview.Manifest.Contributes.ComposerCommands) != 1 || preview.Manifest.Contributes.ComposerCommands[0].Surface != "draft-ui" {
+		t.Fatalf("preview lost composer command contribution: %+v", preview.Manifest.Contributes.ComposerCommands)
+	}
+
+	installBody, _ := json.Marshal(map[string]any{
+		"version_id":     versionID,
+		"granted_scopes": []string{"issues:read"},
+	})
+	installRecorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(installRecorder, pluginHandlerRequest(http.MethodPost, "/plugins", installBody, map[string]string{"id": testWorkspaceID}))
+	if installRecorder.Code != http.StatusCreated {
+		t.Fatalf("install status=%d body=%s", installRecorder.Code, installRecorder.Body.String())
+	}
+
+	listRecorder := httptest.NewRecorder()
+	testHandler.ListPlugins(listRecorder, pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{"id": testWorkspaceID}))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var list struct {
+		Plugins []struct {
+			ComposerCommands []plugincontract.ComposerCommand `json:"composer_commands"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode plugin list: %v", err)
+	}
+	if len(list.Plugins) != 1 || len(list.Plugins[0].ComposerCommands) != 1 {
+		t.Fatalf("installation response lost composer commands: %+v", list)
+	}
+	command := list.Plugins[0].ComposerCommands[0]
+	if command.Key != "draft" || command.Surface != "draft-ui" || len(command.Contexts) != 5 {
+		t.Fatalf("unexpected installation composer command: %+v", command)
 	}
 }
 
