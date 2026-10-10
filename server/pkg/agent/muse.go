@@ -39,7 +39,10 @@ import (
 // Configuration comes from the daemon's own process environment so no CLI
 // discovery is involved:
 //
-//	MUSE_ENDPOINT  base URL of the receptionist, e.g. http://127.0.0.1:8765
+//	MUSE_ENDPOINT  base URL of the receptionist, e.g. http://127.0.0.1:8765.
+//	               Keep this on loopback: the bearer token is sent in the
+//	               clear over plain http, so a non-loopback http:// URL
+//	               would expose it on the network.
 //	MUSE_TOKEN     bearer token for the receptionist (optional; sent only when set)
 //	MUSE_MODEL     informational model label reported in the probe entry
 //
