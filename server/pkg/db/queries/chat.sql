@@ -34,7 +34,7 @@ WHERE cs.id = $1
     EXISTS (
       SELECT 1 FROM chat_message AS public_message
       WHERE public_message.chat_session_id = cs.id
-        AND public_message.message_kind != 'channel_command'
+        AND public_message.message_kind NOT IN ('channel_command', 'issue_callback')
     )
   );
 
@@ -57,7 +57,7 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
-     AND m.message_kind != 'channel_command'
+     AND m.message_kind NOT IN ('channel_command', 'issue_callback')
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
@@ -94,7 +94,7 @@ LEFT JOIN LATERAL (
   SELECT content, role, created_at, failure_reason, message_kind
     FROM chat_message m
    WHERE m.chat_session_id = cs.id
-     AND m.message_kind != 'channel_command'
+     AND m.message_kind NOT IN ('channel_command', 'issue_callback')
    ORDER BY m.created_at DESC
    LIMIT 1
 ) lm ON true
@@ -186,7 +186,7 @@ WHERE session.id = @id
     SELECT 1 FROM chat_message AS message
     WHERE message.chat_session_id = session.id
       AND message.role = 'user'
-      AND message.message_kind != 'channel_command'
+      AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   )
 RETURNING *;
 
@@ -203,7 +203,7 @@ WHERE session.id = @id
     SELECT 1 FROM chat_message AS message
     WHERE message.chat_session_id = session.id
       AND message.role = 'user'
-      AND message.message_kind != 'channel_command'
+      AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   )
 RETURNING *;
 
@@ -217,13 +217,13 @@ WHERE session.id = @id
     WHERE message.id = @message_id
       AND message.chat_session_id = session.id
       AND message.role = 'user'
-      AND message.message_kind != 'channel_command'
+      AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   )
   AND NOT EXISTS (
     SELECT 1 FROM chat_message AS other_message
     WHERE other_message.chat_session_id = session.id
       AND other_message.role = 'user'
-      AND other_message.message_kind != 'channel_command'
+      AND other_message.message_kind NOT IN ('channel_command', 'issue_callback')
       AND other_message.id != @message_id
   )
 RETURNING *;
@@ -396,6 +396,59 @@ FOR KEY SHARE;
 SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
+
+-- name: LockChatSessionForIssueCallback :one
+-- Resolves the return path for one Squad card leader run and takes the same
+-- first lock as direct chat enqueue. A leader may create an implementation
+-- card from a Spec/Ticket card that Mika originally created from chat, so walk
+-- that issue -> origin task -> parent issue chain back to the original chat.
+-- Eight parent cards is a cycle-safe bound well beyond the supported workflow.
+-- Ordinary issues, worker runs, and a different Squad leader deliberately have
+-- no callback target.
+WITH RECURSIVE origin_chain AS (
+  SELECT
+    source_task.agent_id AS source_agent_id,
+    source_issue.workspace_id AS source_workspace_id,
+    source_issue.origin_id AS origin_task_id,
+    0 AS depth
+  FROM agent_task_queue AS source_task
+  JOIN issue AS source_issue
+    ON source_issue.id = source_task.issue_id
+  WHERE source_task.id = $1
+    AND source_task.status IN ('dispatched', 'running', 'waiting_local_directory')
+    AND source_task.chat_session_id IS NULL
+    AND source_task.is_leader_task = TRUE
+    AND source_task.squad_id IS NOT NULL
+    AND source_issue.origin_type = 'agent_create'
+
+  UNION ALL
+
+  SELECT
+    chain.source_agent_id,
+    chain.source_workspace_id,
+    parent_issue.origin_id,
+    chain.depth + 1
+  FROM origin_chain AS chain
+  JOIN agent_task_queue AS current_origin_task
+    ON current_origin_task.id = chain.origin_task_id
+  JOIN issue AS parent_issue
+    ON parent_issue.id = current_origin_task.issue_id
+  WHERE current_origin_task.chat_session_id IS NULL
+    AND parent_issue.origin_type = 'agent_create'
+    AND parent_issue.workspace_id = chain.source_workspace_id
+    AND chain.depth < 8
+)
+SELECT callback_session.*
+FROM origin_chain AS chain
+JOIN agent_task_queue AS origin_task
+  ON origin_task.id = chain.origin_task_id
+JOIN chat_session AS callback_session
+  ON callback_session.id = origin_task.chat_session_id
+WHERE callback_session.workspace_id = chain.source_workspace_id
+  AND callback_session.agent_id = chain.source_agent_id
+ORDER BY chain.depth ASC
+LIMIT 1
+FOR UPDATE OF callback_session;
 
 -- name: LockChatSessionForEnqueue :one
 -- The chat-task enqueue's answer to archiving, and the one lock on this row
@@ -836,7 +889,7 @@ WHERE task_id = $1
 -- claimed during the backoff and then becomes the visible claimed head.
 SELECT message.* FROM chat_message AS message
 WHERE message.chat_session_id = $1
-  AND message.message_kind != 'channel_command'
+  AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -923,7 +976,7 @@ SELECT message.*
 FROM chat_message AS message
 LEFT JOIN agent_task_queue AS owner ON owner.id = message.task_id
 WHERE message.chat_session_id = @chat_session_id
-  AND message.message_kind != 'channel_command'
+  AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   AND (
       (
           message.role = 'user'
@@ -1085,7 +1138,7 @@ WHERE queued_input.chat_session_id = $1
 -- name: ListChatMessagesPage :many
 SELECT message.* FROM chat_message AS message
 WHERE message.chat_session_id = $1
-  AND message.message_kind != 'channel_command'
+  AND message.message_kind NOT IN ('channel_command', 'issue_callback')
   AND NOT (
     message.role = 'user'
     AND EXISTS (
@@ -1136,7 +1189,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, id
+    delegated_from_task_id, fire_at, channel_context_revision, id
 )
 SELECT
     $1, $2, NULL,
@@ -1150,6 +1203,7 @@ SELECT
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(delegated_from_task_id),
     sqlc.narg('fire_at')::timestamptz,
     sqlc.narg('channel_context_revision')::bigint,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
@@ -1354,6 +1408,7 @@ WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'wa
   -- they own no assistant turn and must not raise the StatusPill or disable the
   -- composer (MUL-5149 refresh follow-up).
   AND regenerate_quick_actions_for IS NULL
+  AND trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -1389,6 +1444,7 @@ LEFT JOIN LATERAL (
 WHERE task.chat_session_id = $1
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
   AND task.regenerate_quick_actions_for IS NULL
+  AND task.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
 ORDER BY
     CASE
       WHEN task.status IN ('dispatched', 'running', 'waiting_local_directory') THEN 0
@@ -1406,6 +1462,7 @@ WITH target AS MATERIALIZED (
   WHERE candidate.id = sqlc.arg('id')
     AND candidate.chat_session_id = sqlc.arg('chat_session_id')
     AND candidate.status = 'queued'
+    AND candidate.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     -- "Send now" is valid only while there is a visible claimed task for the
     -- client to cancel. If the visible head is still queued (or deferred), the
     -- selected row would otherwise replace it without any active_task_id.
@@ -1415,6 +1472,7 @@ WITH target AS MATERIALIZED (
       WHERE active.chat_session_id = sqlc.arg('chat_session_id')
         AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
         AND active.regenerate_quick_actions_for IS NULL
+        AND active.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     )
   FOR UPDATE
 ), demoted AS (
@@ -1440,6 +1498,7 @@ SELECT
     WHERE active.chat_session_id = sqlc.arg('chat_session_id')
       AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND active.regenerate_quick_actions_for IS NULL
+      AND active.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     ORDER BY active.created_at ASC, active.id ASC
     LIMIT 1
   )::uuid AS active_task_id
@@ -1465,6 +1524,7 @@ WHERE atq.chat_session_id IS NOT NULL
   -- Exclude background quick-actions regeneration passes: they own no assistant
   -- turn and must not surface as "running" chat work (MUL-5149 refresh follow-up).
   AND atq.regenerate_quick_actions_for IS NULL
+  AND atq.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
   AND cs.workspace_id = $1
   AND cs.creator_id = $2
 ORDER BY atq.created_at DESC;
@@ -1488,6 +1548,7 @@ SELECT EXISTS (
     -- Background quick-actions regeneration passes own no visible turn and must
     -- never light the FAB "running" indicator (MUL-5149 refresh follow-up).
     AND atq.regenerate_quick_actions_for IS NULL
+    AND atq.trigger_evidence_kind IS DISTINCT FROM 'issue_task_callback'
     AND cs.workspace_id = sqlc.arg(workspace_id)
     AND cs.creator_id = sqlc.arg(creator_id)
     AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
@@ -1515,7 +1576,7 @@ SELECT EXISTS (
     SELECT 1 FROM chat_message
     WHERE chat_session_id = $1
       AND role = 'user'
-      AND message_kind != 'channel_command'
+      AND message_kind NOT IN ('channel_command', 'issue_callback')
 ) AS has_public_user_message;
 
 -- name: CreateChatDraftRestore :one

@@ -336,6 +336,117 @@ func TestGetPendingChatTask_ReturnsActiveHeadAndFIFOQueue(t *testing.T) {
 	}
 }
 
+func TestIssueCallbackTaskIsHiddenFromQueueControls(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "HiddenIssueCallbackAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	activeID := insertPendingChatTask(t, agentID, sessionID, "running")
+	callbackID := insertPendingChatTask(t, agentID, sessionID, "queued")
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET trigger_evidence_kind = 'issue_task_callback',
+		    trigger_evidence_ref_id = $2,
+		    chat_input_task_id = id
+		WHERE id = $1
+	`, callbackID, uuid.New()); err != nil {
+		t.Fatalf("mark hidden issue callback: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id, message_kind)
+		VALUES ($1, 'user', 'hidden issue callback payload', $2, 'issue_callback')
+	`, sessionID, callbackID); err != nil {
+		t.Fatalf("insert hidden issue callback input: %v", err)
+	}
+
+	pendingReq := withURLParam(
+		newRequestAs(testUserID, http.MethodGet, "/api/chat/sessions/"+sessionID+"/pending-task", nil),
+		"sessionId", sessionID,
+	)
+	pendingW := httptest.NewRecorder()
+	testHandler.GetPendingChatTask(pendingW, chatPendingCtxAs(t, pendingReq, testUserID))
+	var pending PendingChatTaskResponse
+	if pendingW.Code != http.StatusOK {
+		t.Fatalf("get pending task status = %d: %s", pendingW.Code, pendingW.Body.String())
+	}
+	if err := json.Unmarshal(pendingW.Body.Bytes(), &pending); err != nil {
+		t.Fatalf("decode pending task: %v", err)
+	}
+	if pending.TaskID != activeID || len(pending.QueuedTasks) != 0 {
+		t.Fatalf("pending response exposed hidden callback %s: %+v", callbackID, pending)
+	}
+
+	listW := httptest.NewRecorder()
+	testHandler.ListPendingChatTasks(
+		listW,
+		chatPendingCtxAs(t, newRequestAs(testUserID, http.MethodGet, "/api/chat/pending-tasks", nil), testUserID),
+	)
+	listed := decodePendingTasks(t, listW)
+	if len(listed.Tasks) != 1 || listed.Tasks[0].TaskID != activeID {
+		t.Fatalf("aggregate pending list exposed hidden callback %s: %+v", callbackID, listed.Tasks)
+	}
+
+	prioritizeReq := withURLParams(
+		newRequestAs(testUserID, http.MethodPost, "/api/chat/sessions/"+sessionID+"/queued-tasks/"+callbackID+"/prioritize", nil),
+		"sessionId", sessionID,
+		"taskId", callbackID,
+	)
+	prioritizeW := httptest.NewRecorder()
+	testHandler.PrioritizeQueuedChatTask(prioritizeW, chatPendingCtxAs(t, prioritizeReq, testUserID))
+	if prioritizeW.Code != http.StatusConflict {
+		t.Fatalf("prioritize hidden callback status = %d, want 409: %s", prioritizeW.Code, prioritizeW.Body.String())
+	}
+
+	cancelW := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(
+		cancelW,
+		cancelQueuedTaskByUserRequest(t, testUserID, callbackID, sessionID, "remove"),
+	)
+	if cancelW.Code != http.StatusConflict {
+		t.Fatalf("cancel hidden callback status = %d, want 409: %s", cancelW.Code, cancelW.Body.String())
+	}
+	if got := taskStatus(t, callbackID); got != "queued" {
+		t.Fatalf("hidden callback status after direct cancel = %q, want queued", got)
+	}
+
+	clearReq := withURLParam(
+		newRequestAs(testUserID, http.MethodDelete, "/api/chat/sessions/"+sessionID+"/queued-tasks", nil),
+		"sessionId", sessionID,
+	)
+	clearW := httptest.NewRecorder()
+	testHandler.ClearQueuedChatTasks(clearW, chatPendingCtxAs(t, clearReq, testUserID))
+	if clearW.Code != http.StatusNoContent {
+		t.Fatalf("clear queued tasks status = %d: %s", clearW.Code, clearW.Body.String())
+	}
+	if got := taskStatus(t, callbackID); got != "queued" {
+		t.Fatalf("hidden callback status after clear = %q, want queued", got)
+	}
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, activeID); err != nil {
+		t.Fatalf("complete visible active task: %v", err)
+	}
+	pendingW = httptest.NewRecorder()
+	testHandler.GetPendingChatTask(pendingW, chatPendingCtxAs(t, pendingReq, testUserID))
+	pending = PendingChatTaskResponse{}
+	if err := json.Unmarshal(pendingW.Body.Bytes(), &pending); err != nil {
+		t.Fatalf("decode callback-only pending state: %v", err)
+	}
+	if pending.TaskID != "" || len(pending.QueuedTasks) != 0 {
+		t.Fatalf("callback-only session looked user-pending: %+v", pending)
+	}
+
+	hasW := httptest.NewRecorder()
+	testHandler.HasPendingChatTasks(
+		hasW,
+		chatPendingCtxAs(t, newRequestAs(testUserID, http.MethodGet, "/api/chat/pending-tasks/exists", nil), testUserID),
+	)
+	if decodeHasPending(t, hasW) {
+		t.Fatal("hidden issue callback lit the public pending indicator")
+	}
+}
+
 func TestListChatMessagesPage_QueuedFollowUpsDoNotConsumeLimit(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
