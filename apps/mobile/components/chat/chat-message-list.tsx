@@ -21,8 +21,8 @@
  *     through the markdown renderer and are de-duped out of the card list.
  *
  * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` (Copy / Select Text / Cancel). While the sheet is on
- * screen the targeted bubble's border highlights. The assistant branch
+ * `ActionSheetIOS` or an Android `Alert` (Copy / Select Text / Cancel).
+ * While the menu is on screen the targeted bubble's border highlights. The assistant branch
  * has no border baseline because its bubble has no shell — adding a 2px
  * baseline would shift layout per message. See `useChatMessageLongPress`
  * in `./message-long-press.tsx`.

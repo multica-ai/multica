@@ -15,9 +15,16 @@
     "ios:device:staging:release": "dotenv -e .env.staging -- cross-env APP_ENV=staging ./scripts/ios-run.sh --device --configuration Release",
     "ios:device:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device",
     "ios:device:prod:release": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device --configuration Release",
+    "android": "./scripts/android-run.sh",
+    "android:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging ./scripts/android-run.sh",
+    "android:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production ./scripts/android-run.sh",
+    "android:prod:release": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production NODE_ENV=production ./scripts/android-release.sh",
+    "android:device": "./scripts/android-run.sh --device",
+    "android:device:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging ./scripts/android-run.sh --device",
+    "android:device:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production ./scripts/android-run.sh --device",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && bash scripts/ios-run.test.sh"
+    "test": "vitest run && bash scripts/ios-run.test.sh && bash scripts/android-run.test.sh"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",

@@ -9,9 +9,9 @@
  * different layout — web shows recursive tree, mobile shows one bubble per
  * thread. Counts agree (no comment is dropped or duplicated).
  *
- * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` with the comment's actions (Reply, React…, Copy,
- * Select Text, Copy Link, Resolve, Delete). While the sheet is on screen
+ * Interaction: long-press inside a bubble opens the shared cross-platform
+ * action menu with comment actions (Reply, React…, Copy,
+ * Select Text, Copy Link, Resolve, Delete). While the menu is on screen
  * the targeted bubble's border highlights. See `useCommentLongPress` in
  * `./comment-context-menu.tsx`.
  *
@@ -61,6 +61,7 @@ import { useT } from "@/lib/i18n";
 import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import { ActionMenuModal } from "@/components/ui/action-menu-modal";
 
 interface Props {
   entry: TimelineEntry;
@@ -95,7 +96,7 @@ export function CommentCard({
   // on the root is the single source of truth for this card.
   const resolved = !!entry.resolved_at;
   const [expanded, setExpanded] = useState(false);
-  // Highlight ring while a long-press action sheet is on screen — child
+  // Highlight ring while a long-press action menu is on screen — child
   // CommentBody flips this via onPressChange so the outer bubble shell can
   // visually bind the sheet to the targeted entry.
   const [pressedEntryId, setPressedEntryId] = useState<string | null>(null);
@@ -303,7 +304,7 @@ function ResolvedThreadBar({
  * (`packages/views/issues/components/comment-card.tsx:519-532`).
  *
  * Tap collapses the thread back to the bar without firing the
- * <CommentBody> long-press action sheet (the row is a self-contained
+ * <CommentBody> long-press action menu (the row is a self-contained
  * Pressable, sits above CommentBody in the bubble's gap-3 layout).
  */
 function ResolvedIndicator({
@@ -425,6 +426,7 @@ function CommentBody({
   const isSelecting = useCommentSelectStore(
     (s) => s.selectingId === entry.id,
   );
+  const { t } = useT("issues");
   const { getName } = useActorLookup();
   const userId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -501,7 +503,7 @@ function CommentBody({
   //     inline-insert).
   // Mirrors web's split: comment-card.tsx:124 `AttachmentList`.
   //
-  // When NOT selecting: long-press fires the native ActionSheetIOS via
+  // When NOT selecting: long-press opens the cross-platform action menu via
   // useCommentLongPress. Markdown is non-selectable so the long-press
   // gesture doesn't race UIKit's text selection.
   //
@@ -576,9 +578,25 @@ function CommentBody({
   if (isSelecting) return body;
 
   return (
-    <Pressable onLongPress={longPress.onLongPress} delayLongPress={500}>
-      {body}
-    </Pressable>
+    <>
+      <Pressable onLongPress={longPress.onLongPress} delayLongPress={500}>
+        {body}
+      </Pressable>
+      <ActionMenuModal
+        visible={!!longPress.menu}
+        options={longPress.menu?.options ?? []}
+        cancelLabel={t("common:actions.cancel")}
+        onSelect={longPress.onSelect}
+        onCancel={longPress.onCancel}
+      />
+      <ActionMenuModal
+        visible={!!longPress.reactionMenu}
+        options={longPress.reactionMenu?.options ?? []}
+        cancelLabel={t("common:actions.cancel")}
+        onSelect={longPress.onSelectReaction}
+        onCancel={longPress.onCancel}
+      />
+    </>
   );
 }
 

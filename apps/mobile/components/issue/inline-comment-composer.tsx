@@ -4,7 +4,7 @@
  *
  *   - `onSubmit` → `useCreateComment(issueId).mutateAsync`
  *   - Reply target sourced from `useReplyTargetStore` (set by the
- *     comment long-press action sheet)
+ *     comment long-press action menu)
  *   - Mention picker path → `/[workspace]/mention-picker?mode=comment`
  *   - Upload context binds attachments to this issue
  *

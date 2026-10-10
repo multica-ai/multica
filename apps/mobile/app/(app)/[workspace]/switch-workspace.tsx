@@ -25,12 +25,12 @@ import {
   ScrollView,
   View,
 } from "react-native";
-import { Image as ExpoImage } from "expo-image";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { WorkspaceAvatar } from "@/components/workspace/workspace-avatar";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -132,10 +132,11 @@ function WorkspaceRow({
         {workspace.name}
       </Text>
       {active ? (
-        <ExpoImage
-          source="sf:checkmark"
-          tintColor={iconTint}
-          style={{ width: 16, height: 16 }}
+        <PlatformIcon
+          iosSymbol="checkmark"
+          fallback="check"
+          color={iconTint}
+          size={16}
         />
       ) : null}
     </Pressable>

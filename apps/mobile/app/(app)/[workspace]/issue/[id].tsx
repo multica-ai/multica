@@ -10,9 +10,8 @@
  * Stack.Screen with title "Issue". We override that here once the data
  * lands so the navigation bar shows `MUL-123` (Linear-style).
  */
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -25,6 +24,10 @@ import type { Issue } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import {
+  ActionMenuModal,
+  type ActionMenuOption,
+} from "@/components/ui/action-menu-modal";
 import { TimelineList } from "@/components/issue/timeline-list";
 import { AgentHeaderBadge } from "@/components/issue/agent-header-badge";
 import { InlineCommentComposer } from "@/components/issue/inline-comment-composer";
@@ -45,6 +48,9 @@ import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useT } from "@/lib/i18n";
 
 export default function IssueDetail() {
+  const [actionMenuOptions, setActionMenuOptions] = useState<
+    ActionMenuOption[]
+  >([]);
   // `highlight` + `h` come from inbox deep-link (apps/mobile/app/(app)/
   // [workspace]/(tabs)/inbox.tsx). `highlight` is the target comment id;
   // `h` is a per-tap nonce so re-tapping the same row re-fires the
@@ -81,7 +87,7 @@ export default function IssueDetail() {
   // Screen-scoped composer state — clear on unmount so re-entering the
   // issue starts from a clean slate (no stale text-selection comment id,
   // no stale "Replying to X" target). Both stores are singletons used by
-  // the long-press action sheet.
+  // the long-press action menu.
   useEffect(() => {
     return () => {
       useCommentSelectStore.getState().clear();
@@ -109,7 +115,7 @@ export default function IssueDetail() {
 
   // Three-dot menu: Pin/Unpin / Copy link / Open on web (if web URL set) /
   // Delete. Mirrors apps/mobile/app/(app)/[workspace]/project/[id].tsx — same
-  // ActionSheetIOS + Alert.alert confirm pattern. Property edits (status,
+  // Action menu + Alert.alert confirm pattern. Property edits (status,
   // priority, assignee, due_date) live on the IssueHeaderCard chips inside
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
@@ -118,43 +124,38 @@ export default function IssueDetail() {
     const issueLink = webUrl
       ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
       : null;
-    const actions = ["cancel", "pin"];
-    if (isPinned) actions[1] = "unpin";
-    actions.push("edit");
-    if (issueLink) actions.push("copy_link");
-    if (issueLink) actions.push("open_web");
-    actions.push("delete");
-    const options = actions.map((action) =>
-      action === "cancel"
-        ? t("common:actions.cancel")
-        : action === "pin"
-          ? t("menu.pin")
-          : action === "unpin"
-            ? t("menu.unpin")
-            : action === "edit"
-              ? t("menu.edit_details")
-              : action === "copy_link"
-                ? t("menu.copy_link")
-                : action === "open_web"
-                  ? t("menu.open_web")
-                  : t("menu.delete_issue"),
-    );
-    const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    const options: ActionMenuOption[] = [
       {
-        options,
-        cancelButtonIndex: 0,
-        destructiveButtonIndex: destructiveIndex,
-        title: issue.identifier,
+        id: isPinned ? "unpin" : "pin",
+        label: t(isPinned ? "menu.unpin" : "menu.pin"),
       },
-      (i) => {
-        const action = actions[i];
+      { id: "edit", label: t("menu.edit_details") },
+      ...(issueLink
+        ? [
+            { id: "copy_link", label: t("menu.copy_link") },
+            { id: "open_web", label: t("menu.open_web") },
+          ]
+        : []),
+      { id: "delete", label: t("menu.delete_issue"), destructive: true },
+    ];
+    setActionMenuOptions(options);
+  }, [issue, wsSlug, isPinned, t]);
+
+  const onActionMenuSelect = useCallback(
+    (action: string) => {
+      setActionMenuOptions([]);
+      if (!issue || !wsSlug) return;
+      setTimeout(() => {
+        const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+        const issueLink = webUrl
+          ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
+          : null;
         if (action === "pin") {
           createPin.mutate({ item_type: "issue", item_id: issue.id });
         } else if (action === "unpin") {
           deletePin.mutate({ itemType: "issue", itemId: issue.id });
         } else if (action === "edit") {
-          if (wsSlug) router.push(`/${wsSlug}/issue/${issue.id}/edit`);
+          router.push(`/${wsSlug}/issue/${issue.id}/edit`);
         } else if (action === "copy_link" && issueLink) {
           Clipboard.setStringAsync(issueLink);
         } else if (action === "open_web" && issueLink) {
@@ -166,9 +167,10 @@ export default function IssueDetail() {
             }),
           );
         }
-      },
-    );
-  }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin, t]);
+      }, 200);
+    },
+    [issue, wsSlug, createPin, deletePin, deleteIssue, t],
+  );
 
   return (
     <View className="flex-1 bg-background">
@@ -192,6 +194,14 @@ export default function IssueDetail() {
               )
             : undefined,
         }}
+      />
+      <ActionMenuModal
+        visible={actionMenuOptions.length > 0}
+        title={issue?.identifier}
+        options={actionMenuOptions}
+        cancelLabel={t("common:actions.cancel")}
+        onSelect={onActionMenuSelect}
+        onCancel={() => setActionMenuOptions([])}
       />
       {detail.isLoading ? (
         <View className="flex-1 items-center justify-center">

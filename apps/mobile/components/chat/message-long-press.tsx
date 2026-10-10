@@ -16,7 +16,7 @@
  * native alternative" threshold in apps/mobile/CLAUDE.md.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS } from "react-native";
+import { ActionSheetIOS, Alert, Platform } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import type { ChatMessage } from "@multica/core/types";
@@ -55,28 +55,43 @@ export function useChatMessageLongPress(
 
     const cancelButtonIndex = options.length - 1;
 
-    ActionSheetIOS.showActionSheetWithOptions(
-      { options, cancelButtonIndex },
-      (i) => {
-        setIsPressed(false);
-        const action = actions[i];
-        if (!action || action.kind === "cancel") return;
+    const onSelect = (index: number) => {
+      setIsPressed(false);
+      const action = actions[index];
+      if (!action || action.kind === "cancel") return;
 
-        switch (action.kind) {
-          case "copy":
-            if (message.content) {
-              Clipboard.setStringAsync(message.content);
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success,
-              ).catch(() => {});
-            }
-            return;
-          case "select":
-            useChatSelectStore.getState().setSelecting(message.id);
-            return;
-        }
-      },
-    );
+      switch (action.kind) {
+        case "copy":
+          if (message.content) {
+            Clipboard.setStringAsync(message.content);
+            Haptics.notificationAsync(
+              Haptics.NotificationFeedbackType.Success,
+            ).catch(() => {});
+          }
+          return;
+        case "select":
+          useChatSelectStore.getState().setSelecting(message.id);
+          return;
+      }
+    };
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex },
+        onSelect,
+      );
+    } else {
+      Alert.alert(
+        t("comments.message_actions"),
+        undefined,
+        options.map((text, index) => ({
+          text,
+          style: actions[index]?.kind === "cancel" ? "cancel" : "default",
+          onPress: () => onSelect(index),
+        })),
+        { cancelable: true, onDismiss: () => setIsPressed(false) },
+      );
+    }
   }, [message, t]);
 
   return { onLongPress, isPressed };

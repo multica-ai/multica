@@ -1,8 +1,8 @@
 /**
  * Profile edit subscreen — name + avatar.
  *
- * Avatar tap opens an iOS native ActionSheet (Take Photo / Choose from Library
- * / Remove). Mirrors the avatar upload flow in
+ * Avatar tap opens a menu (Take Photo / Choose from Library / Remove).
+ * Mirrors the avatar upload flow in
  * packages/views/settings/components/account-tab.tsx but the picker uses
  * native APIs per CLAUDE.md "iOS native > RNR > discuss" waterfall.
  *
@@ -12,14 +12,18 @@
  */
 import { useEffect, useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   ActivityIndicator,
-  Pressable,
   ScrollView,
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
@@ -59,38 +63,6 @@ export default function ProfileSettingsScreen() {
   }, [user]);
 
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
-
-  const handleAvatarPick = () => {
-    const actions = ["camera", "library"];
-    if (user?.avatar_url) actions.push("remove");
-    actions.push("cancel");
-    const removeIndex = user?.avatar_url ? 2 : -1;
-    const cancelIndex = actions.length - 1;
-    const visibleOptions = actions.map((action) =>
-      action === "camera"
-        ? t("avatar.take")
-        : action === "library"
-          ? t("avatar.library")
-          : action === "remove"
-            ? t("avatar.remove")
-            : t("common:actions.cancel"),
-    );
-
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options: visibleOptions,
-        cancelButtonIndex: cancelIndex,
-        destructiveButtonIndex: removeIndex >= 0 ? removeIndex : undefined,
-      },
-      async (index) => {
-        if (index === cancelIndex) return;
-        const action = actions[index];
-        if (action === "camera") await pickFromCamera();
-        else if (action === "library") await pickFromLibrary();
-        else if (action === "remove") await removeAvatar();
-      },
-    );
-  };
 
   const pickFromCamera = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -190,18 +162,41 @@ export default function ProfileSettingsScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <View className="items-center gap-3">
-        <Pressable onPress={handleAvatarPick} disabled={uploading}>
-          <Avatar alt={user?.name ?? t("profile.name")} className="size-24">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="rounded-full"
+            disabled={uploading}
+            accessibilityRole="button"
+            accessibilityLabel={t("avatar.change_hint")}
+          >
+            <Avatar alt={user?.name ?? t("profile.name")} className="size-24">
+              {user?.avatar_url ? (
+                <AvatarImage source={{ uri: user.avatar_url }} />
+              ) : null}
+              <AvatarFallback>
+                <Text className="text-2xl font-semibold text-muted-foreground">
+                  {initialsOf(user?.name)}
+                </Text>
+              </AvatarFallback>
+            </Avatar>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-56">
+            <DropdownMenuItem onPress={pickFromCamera}>
+              <Text>{t("avatar.take")}</Text>
+            </DropdownMenuItem>
+            <DropdownMenuItem onPress={pickFromLibrary}>
+              <Text>{t("avatar.library")}</Text>
+            </DropdownMenuItem>
             {user?.avatar_url ? (
-              <AvatarImage source={{ uri: user.avatar_url }} />
+              <DropdownMenuItem
+                onPress={removeAvatar}
+                variant="destructive"
+              >
+                <Text>{t("avatar.remove")}</Text>
+              </DropdownMenuItem>
             ) : null}
-            <AvatarFallback>
-              <Text className="text-2xl font-semibold text-muted-foreground">
-                {initialsOf(user?.name)}
-              </Text>
-            </AvatarFallback>
-          </Avatar>
-        </Pressable>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {uploading ? (
           <ActivityIndicator />
         ) : (

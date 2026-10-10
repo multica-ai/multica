@@ -1,6 +1,6 @@
-# Multica Mobile (iOS)
+# Multica Mobile (iOS and Android)
 
-Expo + React Native iOS client for Multica. Independent from web/desktop — shares types and pure utilities from `@multica/core/`. See [`AGENTS.md`](./AGENTS.md) for mobile architecture and development rules; `package.json` records the current dependency versions.
+Expo + React Native client for Multica. Independent from web/desktop — shares types and pure utilities from `@multica/core/`. Android support starts at Android 10 (API 29). See [`AGENTS.md`](./AGENTS.md) for mobile architecture and development rules; `package.json` records the current dependency versions.
 
 ## Just want to use it on your phone? (no development)
 
@@ -49,8 +49,19 @@ Everything below is for app developers — you can ignore the rest if you only w
 | `pnpm ios:mobile:device:staging:release` | Full rebuild + install on **USB iPhone**, Release (standalone) | staging |
 | `pnpm ios:mobile:device:prod` | Full rebuild + install on **USB iPhone**, Debug | production |
 | `pnpm ios:mobile:device:prod:release` | Full rebuild + install on **USB iPhone**, Release (standalone) | production |
+| `pnpm android:mobile` | Full rebuild + install on **Android emulator**, Debug | local |
+| `pnpm android:mobile:staging` | Full rebuild + install on **Android emulator**, Debug | staging |
+| `pnpm android:mobile:prod` | Full rebuild + install on **Android emulator**, Debug | production |
+| `pnpm android:mobile:prod:release` | Build Android Release APK with embedded production JS bundle (no device install) | production |
+| `pnpm android:mobile:device` | Full rebuild + install on **USB Android device**, Debug | local |
+| `pnpm android:mobile:device:staging` | Full rebuild + install on **USB Android device**, Debug | staging |
+| `pnpm android:mobile:device:prod` | Full rebuild + install on **USB Android device**, Debug | production |
 
-`dev:*` runs Metro only — assumes the matching variant is already installed. `ios:mobile*` does a full native rebuild + install.
+`dev:*` runs Metro only — assumes the matching variant is already installed. `ios:mobile*` and `android:mobile*` do a full native rebuild + install.
+
+For a standalone Android QA APK that starts without Expo Dev Client or Metro, run `pnpm android:mobile:prod:release`. It creates a Release APK at `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`; the current generated Gradle project signs it with the debug keystore, so it is for controlled QA only and is not a publishable release.
+
+For Android, install the Android Studio SDK and build tools, configure `ANDROID_HOME`/`ANDROID_SDK_ROOT`, and create or connect an Android 10+ device. `android:mobile*` also runs Expo prebuild before Gradle, so changes to app config are applied to the generated native project. Local, staging, and production variants have distinct application IDs and can coexist.
 
 Bundle id and display name switch on `APP_ENV` (see `app.config.ts`), so Dev / Staging / Production variants can coexist on the same device or simulator.
 

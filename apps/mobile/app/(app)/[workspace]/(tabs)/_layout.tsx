@@ -22,7 +22,6 @@
  */
 import { useRef } from "react";
 import { Tabs } from "expo-router";
-import { Image } from "expo-image";
 import { View } from "react-native";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -33,6 +32,7 @@ import {
   useChatUnreadMessageCount,
 } from "@/lib/unread-counts";
 import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 import { useT } from "@/lib/i18n";
 
 // Only override backgroundColor — @react-navigation/elements Badge internally
@@ -83,10 +83,11 @@ export default function TabsLayout() {
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <PlatformIcon
+                iosSymbol={focused ? "tray.fill" : "tray"}
+                fallback={focused ? "inbox" : "inbox-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -95,11 +96,12 @@ export default function TabsLayout() {
           name="my-issues"
           options={{
             title: t("tabs.my_issues"),
-            tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+            tabBarIcon: ({ color, size }) => (
+              <PlatformIcon
+                iosSymbol="checklist"
+                fallback="format-list-checks"
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -111,10 +113,11 @@ export default function TabsLayout() {
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <PlatformIcon
+                iosSymbol={focused ? "bubble.left.fill" : "bubble.left"}
+                fallback={focused ? "chat" : "chat-outline"}
+                color={color}
+                size={size}
               />
             ),
           }}
@@ -124,10 +127,11 @@ export default function TabsLayout() {
           options={{
             title: t("tabs.more"),
             tabBarIcon: ({ color, size }) => (
-              <Image
-                source="sf:ellipsis"
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <PlatformIcon
+                iosSymbol="ellipsis"
+                fallback="dots-horizontal"
+                color={color}
+                size={size}
               />
             ),
           }}

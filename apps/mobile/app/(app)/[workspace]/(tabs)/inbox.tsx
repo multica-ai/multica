@@ -1,10 +1,5 @@
 import { useMemo } from "react";
-import {
-  ActionSheetIOS,
-  Alert,
-  FlatList,
-  View,
-} from "react-native";
+import { Alert, FlatList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,8 +8,14 @@ import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Header } from "@/components/ui/header";
-import { IconButton } from "@/components/ui/icon-button";
 import { HeaderActions } from "@/components/ui/app-header-actions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SwipeableInboxRow } from "@/components/inbox/swipeable-inbox-row";
 import { inboxListOptions } from "@/data/queries/inbox";
 import {
@@ -67,44 +68,18 @@ export default function Inbox() {
     if (target) router.push(target);
   };
 
-  // Trailing batch menu — mirrors web's dropdown
-  // (packages/views/inbox/components/inbox-page.tsx). "Mark all read" is
-  // first (most common batch op); "Archive all" is destructive so it gets
-  // the iOS red treatment + Alert confirm.
-  const onPressMenu = () => {
-    const options = [
-      t("common:actions.cancel"),
-      t("actions.mark_all_read"),
-      t("actions.archive_all_read"),
-      t("actions.archive_completed"),
-      t("actions.archive_all"),
-    ];
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options,
-        cancelButtonIndex: 0,
-        destructiveButtonIndex: 4,
-        title: t("title"),
-      },
-      (i) => {
-        if (i === 1) markAllRead.mutate();
-        else if (i === 2) archiveAllRead.mutate();
-        else if (i === 3) archiveCompleted.mutate();
-        else if (i === 4) {
-          Alert.alert(
-            t("archive.confirm_title"),
-            t("archive.confirm_body"),
-            [
-              { text: t("common:actions.cancel"), style: "cancel" },
-              {
-                text: t("actions.archive_all"),
-                style: "destructive",
-                onPress: () => archiveAll.mutate(),
-              },
-            ],
-          );
-        }
-      },
+  const confirmArchiveAll = () => {
+    Alert.alert(
+      t("archive.confirm_title"),
+      t("archive.confirm_body"),
+      [
+        { text: t("common:actions.cancel"), style: "cancel" },
+        {
+          text: t("actions.archive_all"),
+          style: "destructive",
+          onPress: () => archiveAll.mutate(),
+        },
+      ],
     );
   };
 
@@ -114,11 +89,37 @@ export default function Inbox() {
         title={t("title")}
         right={
           <>
-            <IconButton
-              name="ellipsis-horizontal"
-              onPress={onPressMenu}
-              accessibilityLabel={t("actions.inbox_actions")}
-            />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="h-10 w-10 items-center justify-center rounded-md active:bg-accent"
+                accessibilityRole="button"
+                accessibilityLabel={t("actions.inbox_actions")}
+              >
+                <Ionicons
+                  name="ellipsis-horizontal"
+                  size={20}
+                  color={THEME[colorScheme].foreground}
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56">
+                <DropdownMenuItem onPress={() => markAllRead.mutate()}>
+                  <Text>{t("actions.mark_all_read")}</Text>
+                </DropdownMenuItem>
+                <DropdownMenuItem onPress={() => archiveAllRead.mutate()}>
+                  <Text>{t("actions.archive_all_read")}</Text>
+                </DropdownMenuItem>
+                <DropdownMenuItem onPress={() => archiveCompleted.mutate()}>
+                  <Text>{t("actions.archive_completed")}</Text>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onPress={confirmArchiveAll}
+                  variant="destructive"
+                >
+                  <Text>{t("actions.archive_all")}</Text>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <HeaderActions />
           </>
         }

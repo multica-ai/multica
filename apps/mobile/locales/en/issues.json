@@ -185,6 +185,7 @@
   "comments": {
     "reply": "Reply",
     "react": "React...",
+    "message_actions": "Message actions",
     "copy": "Copy",
     "select_text": "Select Text",
     "copy_link": "Copy Link",

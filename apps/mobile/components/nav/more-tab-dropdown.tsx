@@ -23,8 +23,8 @@
  * leaves the real tab button entirely alone.
  *
  * Visual conventions inside the popover (apps/mobile/CLAUDE.md):
- *   - All glyphs are SF Symbols rendered via expo-image (`sf:` source),
- *     so they share the visual language of the bottom tab bar icons.
+ *   - Glyphs share the tab bar's platform-aware icon mapping: SF Symbols on
+ *     iOS and bundled Material Community glyphs on Android.
  *   - All colours route through THEME tokens (foreground /
  *     mutedForeground / secondary), so dark mode is automatic.
  *   - Workspace is collapsed to a single `<WorkspaceCard>` row (icon +
@@ -36,7 +36,6 @@
  */
 import { useMemo } from "react";
 import { Image, Pressable, View } from "react-native";
-import { Image as ExpoImage } from "expo-image";
 import { router, usePathname } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,6 +50,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Text } from "@/components/ui/text";
 import { WorkspaceAvatar } from "@/components/workspace/workspace-avatar";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -68,7 +68,7 @@ const TAB_BAR_HEIGHT = 49;
 
 interface NavItem {
   labelKey: "more_menu.pinned" | "more_menu.issues" | "more_menu.projects";
-  /** SF Symbol name, rendered via expo-image `source: "sf:<name>"`. */
+  /** iOS SF Symbol name; Android uses the paired Material Community glyph. */
   icon: string;
   /** Path under /:slug/ — final href is `/${slug}${path}`. */
   path: string;
@@ -160,10 +160,17 @@ export function MoreTabDropdownAnchor({
                 isActive(item.path) && "bg-secondary",
               )}
             >
-              <ExpoImage
-                source={`sf:${item.icon}`}
-                tintColor={theme.foreground}
-                style={{ width: 18, height: 18 }}
+              <PlatformIcon
+                iosSymbol={item.icon}
+                fallback={
+                  item.path === "/more/pins"
+                    ? "pin"
+                    : item.path === "/more/issues"
+                      ? "format-list-bulleted"
+                      : "view-grid-outline"
+                }
+                color={theme.foreground}
+                size={18}
               />
               <Text className="text-sm text-foreground">{t(item.labelKey)}</Text>
             </DropdownMenuItem>
@@ -225,10 +232,11 @@ function UserCard({
           </Text>
         ) : null}
       </View>
-      <ExpoImage
-        source="sf:chevron.right"
-        tintColor={chevronTint}
-        style={{ width: 12, height: 12 }}
+      <PlatformIcon
+        iosSymbol="chevron.right"
+        fallback="chevron-right"
+        color={chevronTint}
+        size={12}
       />
     </DropdownMenuItem>
   );
@@ -289,10 +297,11 @@ function WorkspaceCard({
         </Text>
       </View>
       {canSwitch ? (
-        <ExpoImage
-          source="sf:chevron.right"
-          tintColor={chevronTint}
-          style={{ width: 12, height: 12 }}
+        <PlatformIcon
+          iosSymbol="chevron.right"
+          fallback="chevron-right"
+          color={chevronTint}
+          size={12}
         />
       ) : null}
     </DropdownMenuItem>

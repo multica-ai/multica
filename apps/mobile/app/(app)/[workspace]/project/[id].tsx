@@ -9,13 +9,11 @@
  * Per-record realtime: `useProjectRealtime(id, onDeleted=back)` subscribes
  * to `project:updated` (full replace) and `project:deleted` (pop back).
  *
- * Right-top "…" menu (ActionSheetIOS) → Edit / Delete. Delete asks for
- * confirmation via `Alert.alert` per iOS HIG (destructive actions need
- * a second tap).
+ * Right-top "…" menu → Edit / Delete. Delete asks for confirmation via
+ * `Alert.alert` (destructive actions need a second tap).
  */
 import { useCallback } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -26,9 +24,17 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "@react-navigation/native";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ProjectHeaderCard } from "@/components/project/project-header-card";
 import { ProjectPropertiesSection } from "@/components/project/project-properties-section";
 import { ProjectRelatedIssues } from "@/components/project/project-related-issues";
@@ -70,6 +76,7 @@ export default function ProjectDetail() {
   }, [detail, qc, wsId, id]);
 
   const project = detail.data;
+  const { colors } = useTheme();
 
   // EMPTY_PROJECT carries an empty id — parseWithFallback returned the
   // fallback because the response shape drifted. Treat as "not found".
@@ -85,57 +92,6 @@ export default function ProjectDetail() {
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const { t } = useT("projects");
-
-  const onPressMore = () => {
-    if (!project) return;
-    const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
-    const actions = ["cancel", isPinned ? "unpin" : "pin", "edit"];
-    if (wsUrl) actions.push("open_web");
-    actions.push("delete");
-    const options = actions.map((action) =>
-      action === "cancel"
-        ? t("common:actions.cancel")
-        : action === "pin"
-          ? t("menu.pin")
-          : action === "unpin"
-            ? t("menu.unpin")
-            : action === "edit"
-              ? t("menu.edit_details")
-              : action === "open_web"
-                ? t("menu.open_web")
-                : t("common:actions.delete"),
-    );
-    const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options,
-        cancelButtonIndex: 0,
-        destructiveButtonIndex: destructiveIndex,
-      },
-      (i) => {
-        const action = actions[i];
-        if (action === "pin") {
-          createPin.mutate({ item_type: "project", item_id: project.id });
-          return;
-        }
-        if (action === "unpin") {
-          deletePin.mutate({ itemType: "project", itemId: project.id });
-          return;
-        }
-        if (action === "edit") {
-          if (wsSlug) router.push(`/${wsSlug}/project/${id}/edit`);
-          return;
-        }
-        if (action === "open_web" && wsUrl) {
-          Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
-          return;
-        }
-        if (i === destructiveIndex) {
-          onDelete();
-        }
-      },
-    );
-  };
 
   const onDelete = () => {
     Alert.alert(
@@ -164,11 +120,61 @@ export default function ProjectDetail() {
           headerBackTitle: t("common:actions.back"),
           headerRight: project
             ? () => (
-                <IconButton
-                  name="ellipsis-horizontal"
-                  onPress={onPressMore}
-                  accessibilityLabel={t("menu.project_actions")}
-                />
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className="h-10 w-10 items-center justify-center rounded-md active:bg-accent"
+                    accessibilityRole="button"
+                    accessibilityLabel={t("menu.project_actions")}
+                  >
+                    <Ionicons
+                      name="ellipsis-horizontal"
+                      size={20}
+                      color={colors.text}
+                    />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-56">
+                    <DropdownMenuItem
+                      onPress={() =>
+                        isPinned
+                          ? deletePin.mutate({
+                              itemType: "project",
+                              itemId: project.id,
+                            })
+                          : createPin.mutate({
+                              item_type: "project",
+                              item_id: project.id,
+                            })
+                      }
+                    >
+                      <Text>{isPinned ? t("menu.unpin") : t("menu.pin")}</Text>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onPress={() =>
+                        wsSlug && router.push(`/${wsSlug}/project/${id}/edit`)
+                      }
+                    >
+                      <Text>{t("menu.edit_details")}</Text>
+                    </DropdownMenuItem>
+                    {process.env.EXPO_PUBLIC_WEB_URL ? (
+                      <DropdownMenuItem
+                        onPress={() =>
+                          Linking.openURL(
+                            `${process.env.EXPO_PUBLIC_WEB_URL}/${wsSlug}/projects/${id}`,
+                          )
+                        }
+                      >
+                        <Text>{t("menu.open_web")}</Text>
+                      </DropdownMenuItem>
+                    ) : null}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onPress={onDelete}
+                      variant="destructive"
+                    >
+                      <Text>{t("common:actions.delete")}</Text>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )
             : undefined,
         }}

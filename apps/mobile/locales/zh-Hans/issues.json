@@ -183,6 +183,7 @@
   "comments": {
     "reply": "回复",
     "react": "回应...",
+    "message_actions": "消息操作",
     "copy": "复制",
     "select_text": "选择文本",
     "copy_link": "复制链接",

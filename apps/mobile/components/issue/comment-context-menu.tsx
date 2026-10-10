@@ -1,24 +1,16 @@
 /**
- * Long-press handler for a comment bubble. Exposes `onLongPress` (drives a
- * native iOS ActionSheetIOS) and `isPressed` (drives the caller's highlight
- * ring while the sheet is on screen).
- *
- * iOS-native first per apps/mobile/CLAUDE.md §UI components → waterfall step
- * 1: `ActionSheetIOS.showActionSheetWithOptions`. Zero custom layout, zero
- * animation, zero overflow math, zero new deps.
+ * Long-press handler for a comment bubble. Opens a shared action menu on both
+ * iOS and Android while keeping the caller's pressed highlight in sync.
  *
  * Item set (conditional, mirrors web's comment context menu):
- *   Reply (stub) · React… (opens nested sheet) · Copy · Select Text ·
- *   Copy Link · Resolve/Unresolve Thread (root only) · Delete (own only) ·
- *   Cancel
+ *   Reply (stub) · React… (opens nested menu) · Copy · Select Text ·
+ *   Copy Link · Resolve/Unresolve Thread (root only) · Delete (own only)
  *
- * The nested React… sheet (5 quick emojis + More reactions… + Cancel) is
- * fired from INSIDE the outer sheet's completion callback rather than
- * inline, because iOS will refuse to present a second ActionSheet while the
- * first is still dismissing — the callback runs after dismissal completes.
+ * The nested React… menu (5 quick emojis + More reactions…) opens after the
+ * first modal dismisses so two native modals are never presented together.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS, Alert } from "react-native";
+import { Alert } from "react-native";
 import { router } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -37,7 +29,17 @@ import {
 } from "@/data/mutations/issues";
 import { appConfigOptions } from "@/data/queries/billing";
 import { QUICK_EMOJIS } from "@/lib/quick-emojis";
-import { i18n, useT } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
+import type { ActionMenuOption } from "@/components/ui/action-menu-modal";
+
+type CommentAction =
+  | { kind: "reply" }
+  | { kind: "react" }
+  | { kind: "copy" }
+  | { kind: "select" }
+  | { kind: "copyLink" }
+  | { kind: "resolve" }
+  | { kind: "delete" };
 
 const QUICK_ROW_SIZE = 5;
 
@@ -45,8 +47,24 @@ export function useCommentLongPress(
   entry: TimelineEntry,
   issueId: string,
   issueIdentifier: string | undefined,
-): { onLongPress: () => void; isPressed: boolean } {
+): {
+  onLongPress: () => void;
+  isPressed: boolean;
+  menu: { options: ActionMenuOption[]; actions: CommentAction[] } | null;
+  reactionMenu: { options: ActionMenuOption[]; reactions: Reaction[] } | null;
+  onSelect: (actionId: string) => void;
+  onSelectReaction: (reactionId: string) => void;
+  onCancel: () => void;
+} {
   const [isPressed, setIsPressed] = useState(false);
+  const [pendingMenu, setPendingMenu] = useState<{
+    options: ActionMenuOption[];
+    actions: CommentAction[];
+  } | null>(null);
+  const [pendingReactionMenu, setPendingReactionMenu] = useState<{
+    options: ActionMenuOption[];
+    reactions: Reaction[];
+  } | null>(null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
   const toggleReaction = useToggleCommentReaction(issueId);
@@ -68,25 +86,17 @@ export function useCommentLongPress(
     const hasContent = !!entry.content;
     const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
     const canCopyLink = !!(webUrl && wsSlug && issueIdentifier);
-    const reactions = (entry.reactions ?? []) as Reaction[];
-
     Haptics.selectionAsync().catch(() => {});
     setIsPressed(true);
 
-    type Action =
-      | { kind: "reply" }
-      | { kind: "react" }
-      | { kind: "copy" }
-      | { kind: "select" }
-      | { kind: "copyLink" }
-      | { kind: "resolve" }
-      | { kind: "delete" }
-      | { kind: "cancel" };
-
-    const options: string[] = [];
-    const actions: Action[] = [];
-    const push = (label: string, action: Action) => {
-      options.push(label);
+    const options: ActionMenuOption[] = [];
+    const actions: CommentAction[] = [];
+    const push = (label: string, action: CommentAction) => {
+      options.push({
+        id: action.kind,
+        label,
+        ...(action.kind === "delete" ? { destructive: true } : {}),
+      });
       actions.push(action);
     };
 
@@ -103,32 +113,28 @@ export function useCommentLongPress(
       });
     }
     if (isOwn) push(t("common:actions.delete"), { kind: "delete" });
-    push(t("common:actions.cancel"), { kind: "cancel" });
+    setPendingMenu({ options, actions });
+  }, [
+    entry,
+    issueIdentifier,
+    userId,
+    wsSlug,
+    t,
+  ]);
 
-    const cancelButtonIndex = options.length - 1;
-    const destructiveButtonIndex = isOwn
-      ? actions.findIndex((a) => a.kind === "delete")
-      : undefined;
+  const onSelect = useCallback(
+    (actionId: string) => {
+      const action = pendingMenu?.actions.find(
+        (item) => item.kind === actionId,
+      );
+      setPendingMenu(null);
+      setIsPressed(false);
+      if (!action) return;
 
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options,
-        cancelButtonIndex,
-        ...(destructiveButtonIndex !== undefined &&
-        destructiveButtonIndex >= 0
-          ? { destructiveButtonIndex }
-          : {}),
-      },
-      (i) => {
-        setIsPressed(false);
-        const action = actions[i];
-        if (!action || action.kind === "cancel") return;
-
+      // Let the modal's fade-out finish before presenting another route/dialog.
+      setTimeout(() => {
         switch (action.kind) {
           case "reply": {
-            // Set the reply target — the InlineCommentComposer subscribes
-            // to this store, auto-expands, and threads the next submit
-            // under entry.id via useCreateComment's `parentId`.
             const actorName =
               entry.actor_name ||
               getName(
@@ -142,23 +148,20 @@ export function useCommentLongPress(
             });
             return;
           }
-          case "react":
-            // Present the nested React sheet from inside this completion
-            // callback — see file header for why.
-            presentReactSheet({
-              entry,
-              reactions,
-              userId,
-              wsSlug,
-              issueId,
-              toggle: (emoji, existing) =>
-                toggleReaction.mutate({
-                  commentId: entry.id,
-                  emoji,
-                  existing,
-                }),
+          case "react": {
+            const emojis = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE);
+            setPendingReactionMenu({
+              options: [
+                ...emojis.map((emoji, index) => ({
+                  id: `emoji-${index}`,
+                  label: emoji,
+                })),
+                { id: "more", label: t("comments.more_reactions") },
+              ],
+              reactions: (entry.reactions ?? []) as Reaction[],
             });
             return;
+          }
           case "copy":
             if (entry.content) {
               Clipboard.setStringAsync(entry.content);
@@ -171,7 +174,8 @@ export function useCommentLongPress(
             useCommentSelectStore.getState().setSelecting(entry.id);
             return;
           case "copyLink": {
-            if (!canCopyLink) return;
+            const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+            if (!webUrl || !wsSlug || !issueIdentifier) return;
             const url = `${webUrl}/${wsSlug}/issue/${issueIdentifier}#comment-${entry.id}`;
             Clipboard.setStringAsync(url);
             Haptics.notificationAsync(
@@ -188,8 +192,6 @@ export function useCommentLongPress(
           case "delete":
             Alert.alert(
               t("comments.delete_title"),
-              // Promise kept replies only when the server declares it (#8296);
-              // older servers delete the replies too.
               keepReplies
                 ? t("comments.delete_keep_replies")
                 : t("comments.delete_with_replies"),
@@ -204,69 +206,68 @@ export function useCommentLongPress(
             );
             return;
         }
-      },
-    );
-  }, [
-    entry,
-    issueId,
-    issueIdentifier,
-    userId,
-    wsSlug,
-    toggleReaction,
-    deleteComment,
-    resolveComment,
-    getName,
-    keepReplies,
-    t,
-  ]);
-
-  return { onLongPress, isPressed };
-}
-
-function presentReactSheet(args: {
-  entry: TimelineEntry;
-  reactions: Reaction[];
-  userId: string | undefined;
-  wsSlug: string | null;
-  issueId: string;
-  toggle: (emoji: string, existing: Reaction | undefined) => void;
-}) {
-  const { entry, reactions, userId, wsSlug, issueId, toggle } = args;
-  const emojis = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE);
-  const t = i18n.t.bind(i18n);
-  const options = [
-    ...emojis,
-    t("issues:comments.more_reactions"),
-    t("common:actions.cancel"),
-  ];
-  const cancelButtonIndex = options.length - 1;
-
-  ActionSheetIOS.showActionSheetWithOptions(
-    { options, cancelButtonIndex },
-    (i) => {
-      if (i === cancelButtonIndex) return;
-      if (i === emojis.length) {
-        if (!wsSlug) return;
-        router.push({
-          pathname:
-            "/[workspace]/issue/[id]/comment/[commentId]/emoji-picker",
-          params: {
-            workspace: wsSlug,
-            id: issueId,
-            commentId: entry.id,
-          },
-        });
-        return;
-      }
-      const emoji = emojis[i];
-      if (!emoji) return;
-      const existing = reactions.find(
-        (r) =>
-          r.emoji === emoji &&
-          r.actor_type === "member" &&
-          r.actor_id === userId,
-      );
-      toggle(emoji, existing);
+      }, 200);
     },
+    [
+      pendingMenu,
+      entry,
+      getName,
+      t,
+      wsSlug,
+      issueIdentifier,
+      resolveComment,
+      keepReplies,
+      deleteComment,
+    ],
   );
+
+  const onCancel = useCallback(() => {
+    setPendingMenu(null);
+    setPendingReactionMenu(null);
+    setIsPressed(false);
+  }, []);
+
+  const onSelectReaction = useCallback(
+    (reactionId: string) => {
+      const menu = pendingReactionMenu;
+      setPendingReactionMenu(null);
+      if (!menu) return;
+      setTimeout(() => {
+        if (reactionId === "more") {
+          if (!wsSlug) return;
+          router.push({
+            pathname:
+              "/[workspace]/issue/[id]/comment/[commentId]/emoji-picker",
+            params: {
+              workspace: wsSlug,
+              id: issueId,
+              commentId: entry.id,
+            },
+          });
+          return;
+        }
+        const index = Number(reactionId.replace("emoji-", ""));
+        const emoji = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE)[index];
+        if (!emoji) return;
+        const existing = menu.reactions.find(
+          (reaction) =>
+            reaction.emoji === emoji &&
+            reaction.actor_type === "member" &&
+            reaction.actor_id === userId,
+        );
+        toggleReaction.mutate({ commentId: entry.id, emoji, existing });
+      }, 200);
+    },
+    [pendingReactionMenu, wsSlug, issueId, entry.id, userId, toggleReaction],
+  );
+
+  return {
+    onLongPress,
+    isPressed,
+    menu: pendingMenu,
+    reactionMenu: pendingReactionMenu,
+    onSelect,
+    onSelectReaction,
+    onCancel,
+  };
 }
