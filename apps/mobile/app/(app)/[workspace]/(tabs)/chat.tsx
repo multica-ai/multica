@@ -120,6 +120,7 @@ export default function ChatTab() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [starterRequestId, setStarterRequestId] = useState(0);
 
   // Bridge to the chat-sessions formSheet route. Mirror local
   // activeSessionId into the store so the picker can render the current
@@ -540,7 +541,10 @@ export default function ChatTab() {
           loading={messagesLoading}
           hasSessions={sessions.length > 0}
           agent={currentAgent}
-          onPickPrompt={(text) => setDraft(draftKey, text)}
+          onPickPrompt={(text) => {
+            setDraft(draftKey, text);
+            setStarterRequestId((id) => id + 1);
+          }}
           onQuickAction={(action) =>
             handleSend(action.prompt, [], { clearDraft: false })
           }
@@ -566,6 +570,7 @@ export default function ChatTab() {
           allowStop={pendingTask?.status !== "queued"}
           disabled={disabled}
           disabledReason={disabledReason}
+          expandTrigger={starterRequestId ? String(starterRequestId) : null}
         />
       </KeyboardAvoidingView>
 

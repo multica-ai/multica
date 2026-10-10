@@ -66,6 +66,10 @@ import {
   type MentionChip,
 } from "@/components/issue/composer-attachment-row";
 import { useT } from "@/lib/i18n";
+import {
+  shouldCollapseAfterBlur,
+  shouldWaitForInputLayout,
+} from "@/lib/composer-focus-trigger";
 
 export interface MessageComposerReplyTarget {
   actorName: string;
@@ -185,6 +189,13 @@ export function MessageComposer({
   const [internalText, setInternalText] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachmentItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const focusAfterInputLayout = useRef(false);
+  const triggerRevision = useRef(0);
+  const previousExpandTrigger = useRef(expandTrigger ?? null);
+  if (previousExpandTrigger.current !== (expandTrigger ?? null)) {
+    previousExpandTrigger.current = expandTrigger ?? null;
+    triggerRevision.current += 1;
+  }
 
   // Hybrid controlled / uncontrolled pattern (React-canonical). Chat
   // passes `value`/`onChangeText` for cross-session draft persistence;
@@ -215,18 +226,28 @@ export function MessageComposer({
     };
   }, [clearMentions]);
 
-  // Auto-expand + focus when an `expandTrigger` changes. Comment uses
-  // this to react to the long-press → reply flow setting a reply target.
+  // Auto-expand + focus when an `expandTrigger` changes. Wait for the
+  // newly-mounted input to complete native layout before requesting focus;
+  // Android can accept focus before its input view is ready without showing
+  // the soft keyboard.
   const triggerSeen = useRef<string | null>(null);
-  if (
-    expandTrigger &&
-    triggerSeen.current !== expandTrigger &&
-    !disabled
-  ) {
+  useEffect(() => {
+    if (!expandTrigger || triggerSeen.current === expandTrigger || disabled) {
+      return;
+    }
     triggerSeen.current = expandTrigger;
+    focusAfterInputLayout.current = shouldWaitForInputLayout(expanded);
     setExpanded(true);
+    if (expanded) {
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [expandTrigger, disabled, expanded]);
+
+  const handleInputLayout = useCallback(() => {
+    if (!focusAfterInputLayout.current) return;
+    focusAfterInputLayout.current = false;
     requestAnimationFrame(() => inputRef.current?.focus());
-  }
+  }, []);
 
   const hasInFlightUpload = attachments.some((a) => a.status === "uploading");
   const canSend =
@@ -449,12 +470,20 @@ export function MessageComposer({
    *  IconButton tap (which briefly resigns first responder) doesn't
    *  trigger a collapse before its onPress runs. */
   const onBlur = useCallback(() => {
+    const triggerRevisionAtBlur = triggerRevision.current;
     setTimeout(() => {
-      const empty =
+      const isEmpty =
         text.trim().length === 0 &&
         attachments.length === 0 &&
         mentions.length === 0;
-      if (empty && !inputRef.current?.isFocused()) {
+      if (
+        shouldCollapseAfterBlur({
+          isEmpty,
+          isFocused: !!inputRef.current?.isFocused(),
+          triggerRevisionAtBlur,
+          currentTriggerRevision: triggerRevision.current,
+        })
+      ) {
         setExpanded(false);
         onClearReplyTarget?.();
       }
@@ -547,6 +576,7 @@ export function MessageComposer({
 
         <TextInput
           ref={inputRef}
+          onLayout={handleInputLayout}
           value={text}
           onChangeText={setText}
           onBlur={onBlur}
