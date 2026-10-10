@@ -109,6 +109,27 @@ To regenerate a worktree env file:
 FORCE=1 make worktree-env
 ```
 
+### Accessing a Remote Development Server
+
+Next.js development binds to all interfaces by default. Set `FRONTEND_HOST=localhost`
+in your environment file for local-only access, or `FRONTEND_HOST=0.0.0.0` to allow
+access from another machine. `FRONTEND_PORT` controls the listening port.
+
+For example, when accessing a worktree at `http://ph0x:13973`, set these values in
+`.env.worktree` (use `.env` for the main checkout), then restart `make start`:
+
+```bash
+FRONTEND_HOST=0.0.0.0
+FRONTEND_PORT=13973
+FRONTEND_ORIGIN=http://ph0x:13973
+CORS_ALLOWED_ORIGINS=http://ph0x:13973
+```
+
+Keep full origins, including non-default ports, in `CORS_ALLOWED_ORIGINS` for the
+backend. The web config extracts hostnames for Next.js development asset and HMR
+checks. For multiple browser origins, use a comma-separated list. These variables
+also pass through Turbo when running `pnpm dev:web` with an exported environment.
+
 ## Environments
 
 An environment is the database, ports, CLI profile and processes that belong to
