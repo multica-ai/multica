@@ -1321,3 +1321,47 @@ func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
 		t.Fatalf("unrelated custom arg was dropped: %v", args)
 	}
 }
+
+func TestBuildClaudeArgsFilteredPluginsOnResume(t *testing.T) {
+	t.Parallel()
+	opts := ExecOptions{
+		ClaudePluginDirs:   []string{"/task/plugin one", "/task/plugin-two"},
+		ClaudeSettingsPath: "/task/settings.json",
+		ResumeSessionID:    "prior-session",
+		CustomArgs:         []string{"--max-turns", "7"},
+	}
+	args := buildClaudeArgs(opts, slog.Default())
+	var paths []string
+	for i, arg := range args {
+		if arg == "--plugin-dir" && i+1 < len(args) {
+			paths = append(paths, args[i+1])
+		}
+	}
+	if len(paths) != 2 || paths[0] != opts.ClaudePluginDirs[0] || paths[1] != opts.ClaudePluginDirs[1] {
+		t.Fatalf("filtered plugin argv = %v", args)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--resume prior-session") {
+		t.Fatalf("resume missing: %v", args)
+	}
+}
+
+func TestClaudePluginCopyArgsRejectConflictingSources(t *testing.T) {
+	t.Parallel()
+	for _, flag := range []string{"--plugin-dir", "--plugin-dir=/custom", "--plugin-url=https://example.invalid/plugin.zip", "--setting-sources=project", "--bare"} {
+		for _, extra := range []bool{false, true} {
+			opts := ExecOptions{ClaudePluginDirs: []string{"/task/plugin"}}
+			if extra {
+				opts.ExtraArgs = []string{flag}
+			} else {
+				opts.CustomArgs = []string{flag}
+			}
+			if err := validateClaudePluginCopyArgs(opts); err == nil {
+				t.Fatalf("accepted conflicting source %s", flag)
+			}
+			opts.ClaudePluginDirs = nil
+			if err := validateClaudePluginCopyArgs(opts); err != nil {
+				t.Fatalf("changed unfiltered task: %v", err)
+			}
+		}
+	}
+}
