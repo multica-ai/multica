@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -161,8 +162,9 @@ func TestWakeupConditionPullRequestChecksWaitForNewResult(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
 	ctx := context.Background()
 	var pr string
+	var prNumber int32
 	if err := f.Pool.QueryRow(ctx, `INSERT INTO github_pull_request(workspace_id,installation_id,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,snapshot_head_sha,checks_rollup_state)
-		VALUES($1,1,'multica-ai','wakeup-test',(extract(epoch from clock_timestamp())*1000)::bigint % 100000,'PR','open','https://example.test/pr',now(),now(),'aaa','SUCCESS') RETURNING id`, f.WorkspaceID).Scan(&pr); err != nil {
+		VALUES($1,1,'multica-ai','wakeup-test',(extract(epoch from clock_timestamp())*1000)::bigint % 100000,'PR','open','https://example.test/pr',now(),now(),'aaa','SUCCESS') RETURNING id,pr_number`, f.WorkspaceID).Scan(&pr, &prNumber); err != nil {
 		t.Fatal(err)
 	}
 	f.Cleanup(t, "DELETE FROM github_pull_request WHERE id=$1", pr)
@@ -170,7 +172,14 @@ func TestWakeupConditionPullRequestChecksWaitForNewResult(t *testing.T) {
 	f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
 	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Look at CI",
 		Condition: condition(t, map[string]any{"type": "pull_request", "event": "checks_finished"})})
-	// Finished checks from before registration belong to an older push.
+	// Finished checks from before registration belong to an older push. Preserve
+	// the released GitHub fingerprint format so existing rules do not fire once
+	// just because a self-hosted provider was added to the evaluator.
+	var baseline string
+	f.QueryRow(t, "SELECT condition_state FROM issue_wakeup WHERE id=$1", w.ID).Scan(&baseline)
+	if baseline != fmt.Sprintf("pr:%d@aaa:SUCCESS", prNumber) {
+		t.Fatalf("GitHub condition baseline changed: %q", baseline)
+	}
 	wakeTick(t, f, s, w.ID)
 	f.Exec(t, "UPDATE github_pull_request SET snapshot_head_sha='bbb',checks_rollup_state='PENDING' WHERE id=$1", pr)
 	wakeTick(t, f, s, w.ID)
@@ -188,6 +197,82 @@ func TestWakeupConditionPullRequestChecksWaitForNewResult(t *testing.T) {
 	}
 	if !strings.Contains(task.HandoffNote.String, `"checks":"failure"`) || !strings.Contains(task.HandoffNote.String, `"head_sha":"bbb"`) {
 		t.Fatalf("PR facts missing: %s", task.HandoffNote.String)
+	}
+}
+
+func TestWakeupConditionVCSPullRequestChecksWaitForNewResult(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	var connectionID, prID string
+	if err := f.Pool.QueryRow(ctx, `INSERT INTO vcs_connection(workspace_id,provider,instance_url,account_login,access_token_encrypted,webhook_secret_encrypted)
+		VALUES($1,'gitlab','https://gitlab.example.test','fixture','unused','unused') RETURNING id`, f.WorkspaceID).Scan(&connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Pool.QueryRow(ctx, `INSERT INTO vcs_pull_request(workspace_id,connection_id,provider,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,head_sha)
+		VALUES($1,$2,'gitlab','acme','wakeup-test',485,'MR','open','https://gitlab.example.test/acme/wakeup-test/-/merge_requests/485',now(),now(),'aaa') RETURNING id`, f.WorkspaceID, connectionID).Scan(&prID); err != nil {
+		t.Fatal(err)
+	}
+	f.Cleanup(t, "DELETE FROM vcs_commit_status WHERE connection_id=$1", connectionID)
+	f.Cleanup(t, "DELETE FROM issue_vcs_pull_request WHERE pull_request_id=$1", prID)
+	f.Cleanup(t, "DELETE FROM vcs_pull_request WHERE id=$1", prID)
+	f.Cleanup(t, "DELETE FROM vcs_connection WHERE id=$1", connectionID)
+	f.Exec(t, "INSERT INTO issue_vcs_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, prID)
+	f.Exec(t, "INSERT INTO vcs_commit_status(connection_id,sha,context,state) VALUES($1,'aaa','gitlab/pipeline','passed')", connectionID)
+
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Look at GitLab CI",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "checks_finished"})})
+	wakeTick(t, f, s, w.ID)
+	f.Exec(t, "UPDATE vcs_pull_request SET head_sha='bbb' WHERE id=$1", prID)
+	f.Exec(t, "INSERT INTO vcs_commit_status(connection_id,sha,context,state) VALUES($1,'bbb','gitlab/pipeline','pending')", connectionID)
+	wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("stale or pending GitLab checks started %d runs", n)
+	}
+	f.Exec(t, "UPDATE vcs_commit_status SET state='failed',updated_at=now() WHERE connection_id=$1 AND sha='bbb' AND context='gitlab/pipeline'", connectionID)
+	got := wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("finished GitLab checks started %d runs, want 1", n)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"checks":"failure"`) || !strings.Contains(task.HandoffNote.String, `"head_sha":"bbb"`) || !strings.Contains(task.HandoffNote.String, `"provider":"gitlab"`) {
+		t.Fatalf("GitLab MR facts missing: %s", task.HandoffNote.String)
+	}
+}
+
+func TestWakeupConditionVCSPullRequestMerged(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	var connectionID, prID string
+	if err := f.Pool.QueryRow(ctx, `INSERT INTO vcs_connection(workspace_id,provider,instance_url,account_login,access_token_encrypted,webhook_secret_encrypted)
+		VALUES($1,'gitlab','https://gitlab-merged.example.test','fixture','unused','unused') RETURNING id`, f.WorkspaceID).Scan(&connectionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Pool.QueryRow(ctx, `INSERT INTO vcs_pull_request(workspace_id,connection_id,provider,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,head_sha)
+		VALUES($1,$2,'gitlab','acme','wakeup-test',486,'MR','open','https://gitlab-merged.example.test/acme/wakeup-test/-/merge_requests/486',now(),now(),'ccc') RETURNING id`, f.WorkspaceID, connectionID).Scan(&prID); err != nil {
+		t.Fatal(err)
+	}
+	f.Cleanup(t, "DELETE FROM issue_vcs_pull_request WHERE pull_request_id=$1", prID)
+	f.Cleanup(t, "DELETE FROM vcs_pull_request WHERE id=$1", prID)
+	f.Cleanup(t, "DELETE FROM vcs_connection WHERE id=$1", connectionID)
+	f.Exec(t, "INSERT INTO issue_vcs_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, prID)
+
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Continue after merge",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "merged"})})
+	wakeTick(t, f, s, w.ID)
+	f.Exec(t, "UPDATE vcs_pull_request SET state='merged',merged_at=now(),pr_updated_at=now() WHERE id=$1", prID)
+	got := wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("merged GitLab MR started %d runs, want 1", n)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"state":"merged"`) || !strings.Contains(task.HandoffNote.String, `"provider":"gitlab"`) {
+		t.Fatalf("merged GitLab MR facts missing: %s", task.HandoffNote.String)
 	}
 }
 
