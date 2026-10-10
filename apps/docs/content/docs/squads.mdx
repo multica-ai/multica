@@ -51,21 +51,24 @@ On each squad-leader run, three blocks are appended to the leader's instructions
 
 ## Leader re-trigger rules
 
-After the first dispatch, the leader is woken up automatically by **most subsequent comments** on the issue. The exact rules:
+After the first dispatch, a plain human comment on the assigned issue can
+re-trigger the leader. Agent-authored comments need a server-recorded worker
+task delegated by this squad's leader on the same issue. Only a normal
+comment from that task is treated as an implicit result delivery.
 
 | Event | Leader triggered? |
 |---|---|
-| A non-member (human reporter, external agent) posts a comment | **Yes** |
-| A squad member posts a progress update with no `@mention` | **Yes** — the leader re-evaluates whether the next step is needed |
-| Anyone posts a comment that explicitly `@`-mentions another agent / member / squad / `@all` | **No** — the explicit `@` is the routing signal; the leader gets out of the way |
-| The leader's own comment (self-trigger) | **No** — guarded to prevent a loop |
-| A comment containing only an issue cross-reference (`[MUL-123](mention://issue/...)`) | **Yes** — issue references aren't routing |
+| A human posts a plain comment | **Yes**, subject to issue status and normal routing |
+| A worker posts a normal result comment from a verified leader delegation | **Yes** |
+| A worker posts a progress_update | **No** |
+| An unrelated agent or platform failure notice posts a plain comment | **No** |
+| A comment explicitly @-mentions an agent or squad | The named target is considered directly; the implicit leader fallback does not also run |
+| The leader's own plain comment | **No** |
 
-Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
-
-<Callout type="info">
-**Why the leader doesn't trigger when a member posts an `@`-mention.** Once a squad member directly `@`s someone, that comment is a deliberate hand-off — having the leader wake up to "observe" the routing would just produce a no-op turn and clutter the timeline. Agent-authored comments are the exception: when an agent posts a result that `@`s another agent, the leader still wakes up so it can coordinate the thread.
-</Callout>
+Use progress_update for interim worker notes and /note for a comment that
+must not trigger any agent. An explicit @ is the way to request a new agent
+turn when there is no verified delegated result. Dedup applies to accepted
+triggers when the leader already has a pending run.
 
 ## Assigning vs. @-mentioning a squad
 
