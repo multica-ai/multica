@@ -523,7 +523,7 @@ func mirrorSharedHermesHome(sharedHome, hermesHome string, logger *slog.Logger) 
 		}
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(hermesHome, name)
-		if err := linkSharedHermesEntry(src, dst); err != nil {
+		if err := linkSharedHermesEntry(src, dst, logger); err != nil {
 			return fmt.Errorf("mirror %s: %w", name, err)
 		}
 		mirrored[name] = struct{}{}
@@ -587,13 +587,13 @@ func prepareHermesTaskLocalState(hermesHome string) error {
 	return writeFileAtomic(marker, []byte("task-local Hermes state\n"), 0o600)
 }
 
-// linkSharedHermesEntry symlinks dst → src, idempotent across Reuse: an existing
+// linkSharedHermesEntry links dst → src, idempotent across Reuse: an existing
 // link already pointing at src is left alone; anything else is removed and
 // recreated so the overlay never drifts from the shared home. A dangling source
 // (a broken symlink in the user's home) is skipped, not failed. Directories use
-// createDirLink and files createFileLink so the Windows copy fallbacks match the
-// entry kind.
-func linkSharedHermesEntry(src, dst string) error {
+// createDirLink and files createFileLink so the Windows fallbacks (junction,
+// hard link, copy) match the entry kind.
+func linkSharedHermesEntry(src, dst string, logger *slog.Logger) error {
 	if fi, err := os.Lstat(dst); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			if target, err := os.Readlink(dst); err == nil && target == src {
@@ -615,7 +615,7 @@ func linkSharedHermesEntry(src, dst string) error {
 	if info.IsDir() {
 		return createDirLink(src, dst)
 	}
-	return createFileLink(src, dst)
+	return createFileLink(src, dst, logger)
 }
 
 // writeDerivedHermesConfig writes the task-local config.yaml: the user's config

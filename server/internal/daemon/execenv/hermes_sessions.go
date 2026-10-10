@@ -166,10 +166,11 @@ func mountHermesSessionDB(hermesHome, storeDir string, logger *slog.Logger) (her
 	}
 
 	// Prove the host can link BEFORE anything destructive. A real symlink,
-	// never a copy: createFileLink falls back to copying on a Windows host that
-	// cannot symlink, and a copied SQLite database would absorb every write of
-	// this turn into a file the next task throws away — worse than staying
-	// task-local, because it looks like it worked.
+	// never a copy: createFileLink can degrade to a copy on a Windows host
+	// that cannot symlink and cannot hard-link across volumes, and a copied
+	// SQLite database would absorb every write of this turn into a file the
+	// next task throws away — worse than staying task-local, because it looks
+	// like it worked.
 	staged := filepath.Join(hermesHome, hermesSessionLinkStagingEntry)
 	if err := os.RemoveAll(staged); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("clear stale session link staging %s: %w", staged, err)
