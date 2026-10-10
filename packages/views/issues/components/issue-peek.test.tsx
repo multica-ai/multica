@@ -22,12 +22,14 @@ vi.mock("./issue-detail", () => ({
     leadingAction,
     trailingActions,
     onDelete,
+    onDone,
   }: {
     issueId: string;
     variant: string;
     leadingAction: ReactNode;
     trailingActions: ReactNode;
     onDelete: () => void;
+    onDone: () => void;
   }) => {
     if (issueId === "boom") throw new Error("Could not render this issue");
     return (
@@ -38,6 +40,7 @@ vi.mock("./issue-detail", () => ({
       <button type="button" onClick={onDelete}>
         delete
       </button>
+      <button type="button" onClick={onDone}>done</button>
     </div>
     );
   },
@@ -190,6 +193,14 @@ describe("IssuePeekHost", () => {
     fireEvent.keyDown(editor, { key: "j" });
     expect(screen.getByTestId("detail")).toHaveTextContent("i-1");
     editor.remove();
+  });
+
+  it("closes the preview when the detail finishes marking Done", async () => {
+    renderHost();
+    openCard("i-1");
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+    await waitForClosed();
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
 
   it("closes from the close button and when the issue is deleted", async () => {

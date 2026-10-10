@@ -116,6 +116,8 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
+const mockBackOrReplace = vi.hoisted(() => vi.fn());
+
 // Mock navigation
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (
@@ -128,7 +130,7 @@ vi.mock("../../navigation", () => ({
     pathname: "/issues/issue-1",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
-  useBackOrReplace: () => vi.fn(),
+  useBackOrReplace: () => mockBackOrReplace,
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -630,12 +632,12 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(issueId = "issue-1", onDone?: () => void) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} onDone={onDone} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -715,6 +717,7 @@ describe("IssueDetail (shared)", () => {
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.updateIssue.mockReset().mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
@@ -736,6 +739,47 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+  });
+
+  it("shows Done on a regular detail page and closes only after saving", async () => {
+    let finish!: (issue: Issue) => void;
+    mockApiObj.updateIssue.mockReturnValue(new Promise<Issue>((resolve) => { finish = resolve; }));
+    renderIssueDetail();
+    const button = await screen.findByRole("button", { name: "Mark as done" });
+    fireEvent.click(button);
+    await waitFor(() => expect(mockApiObj.updateIssue).toHaveBeenCalled());
+    expect(mockApiObj.updateIssue.mock.calls[0]?.[1]).toMatchObject({ status: "done" });
+    expect(button).toBeDisabled();
+    expect(mockBackOrReplace).not.toHaveBeenCalled();
+    await act(async () => { finish({ ...mockIssue, status: "done" }); });
+    await waitFor(() => expect(mockBackOrReplace).toHaveBeenCalledWith("/test/issues"));
+  });
+
+  it("closes its hosting card after saving Done", async () => {
+    const onDone = vi.fn();
+    mockApiObj.updateIssue.mockResolvedValue({ ...mockIssue, status: "done" });
+    renderIssueDetail("issue-1", onDone);
+    fireEvent.click(await screen.findByRole("button", { name: "Mark as done" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledOnce());
+    expect(mockBackOrReplace).not.toHaveBeenCalled();
+  });
+
+  it("closes an already completed issue without writing its status again", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "done" });
+    renderIssueDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "Mark as done" }));
+    expect(mockApiObj.updateIssue).not.toHaveBeenCalled();
+    expect(mockBackOrReplace).toHaveBeenCalledWith("/test/issues");
+  });
+
+  it("keeps the card open when marking Done fails", async () => {
+    mockApiObj.updateIssue.mockRejectedValue(new Error("Save failed"));
+    renderIssueDetail();
+    const button = await screen.findByRole("button", { name: "Mark as done" });
+    fireEvent.click(button);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Save failed"));
+    expect(mockBackOrReplace).not.toHaveBeenCalled();
+    await waitFor(() => expect(button).not.toBeDisabled());
   });
 
   it("counts comment files as deliverables, a re-upload once as v2, never the description's (MUL-7649)", async () => {
