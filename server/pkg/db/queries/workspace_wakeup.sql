@@ -1,7 +1,7 @@
 -- name: ListWorkspaceWakeups :one
 -- Counts, filter choices, and page share one snapshot and the same access scope.
 WITH base AS MATERIALIZED (
- SELECT w.id,w.issue_id,i.title AS issue_title,ws.issue_prefix||'-'||i.number AS issue_identifier,
+ SELECT w.id,w.issue_id,i.title AS issue_title,i.identifier_prefix||'-'||i.number AS issue_identifier,
   w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,w.filter_actor_type,
  (CASE WHEN actor_agent.id IS NOT NULL OR actor_member.user_id IS NOT NULL THEN w.filter_actor_id END)::uuid AS filter_actor_id,
  COALESCE(actor_agent.name,actor_user.name,'')::text AS filter_actor_name,
@@ -41,7 +41,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  -- The child-done system rule of each open parent that still waits for a
  -- sub-issue: every child when unstaged, else its lowest unfinished stage.
  -- Its target is the parent's assignee (a squad's leader) at the moment.
- SELECT w.id,w.issue_id,p.title,ws.issue_prefix||'-'||p.number,
+ SELECT w.id,w.issue_id,p.title,p.identifier_prefix||'-'||p.number,
   COALESCE(ta.id,leader.id),COALESCE(ta.name,leader.name,''),w.kind,w.mode,w.event_types,NULL::text,
   NULL::uuid,''::text,NULL::uuid,NULL::text,NULL::uuid,
   NULL::bigint,NULL::text,w.timezone,

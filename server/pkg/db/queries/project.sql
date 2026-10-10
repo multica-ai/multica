@@ -26,9 +26,9 @@ FOR UPDATE;
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, start_date, due_date
+    lead_type, lead_id, priority, start_date, due_date, issue_prefix
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, sqlc.narg('issue_prefix')
 ) RETURNING *;
 
 -- name: UpdateProject :one
@@ -42,6 +42,7 @@ UPDATE project SET
     lead_id = sqlc.narg('lead_id'),
     start_date = sqlc.narg('start_date'),
     due_date = sqlc.narg('due_date'),
+    issue_prefix = CASE WHEN sqlc.arg('set_issue_prefix')::boolean THEN sqlc.narg('issue_prefix') ELSE issue_prefix END,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

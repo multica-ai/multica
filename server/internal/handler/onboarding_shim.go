@@ -248,7 +248,13 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
+		workspace, err := qtx.GetWorkspace(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load workspace issue prefix")
+			return
+		}
+		identifierPrefix := workspace.IssuePrefix
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, identifierPrefix, issueCountPolicy)
 		if err != nil {
 			if writeIssueLimitReached(w, err) {
 				return
@@ -261,20 +267,21 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			description = req.StarterPrompt
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   wsUUID,
-			Title:         onboardingIssueTitle,
-			Description:   strOrNullText(description),
-			Status:        "todo",
-			Priority:      "high",
-			AssigneeType:  pgtype.Text{String: "agent", Valid: true},
-			AssigneeID:    assistant.ID,
-			CreatorType:   "member",
-			CreatorID:     parseUUID(userID),
-			ParentIssueID: emptyUUID,
-			Position:      0,
-			Number:        issueNumber,
-			ProjectID:     emptyUUID,
+			ID:               dbid.NewV7(),
+			WorkspaceID:      wsUUID,
+			Title:            onboardingIssueTitle,
+			Description:      strOrNullText(description),
+			Status:           "todo",
+			Priority:         "high",
+			AssigneeType:     pgtype.Text{String: "agent", Valid: true},
+			AssigneeID:       assistant.ID,
+			CreatorType:      "member",
+			CreatorID:        parseUUID(userID),
+			ParentIssueID:    emptyUUID,
+			Position:         0,
+			Number:           issueNumber,
+			IdentifierPrefix: identifierPrefix,
+			ProjectID:        emptyUUID,
 		})
 		if err != nil {
 			slog.Warn("bootstrap onboarding (shim): create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -416,7 +423,13 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
+		workspace, err := qtx.GetWorkspace(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load workspace issue prefix")
+			return
+		}
+		identifierPrefix := workspace.IssuePrefix
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, identifierPrefix, issueCountPolicy)
 		if err != nil {
 			if writeIssueLimitReached(w, err) {
 				return
@@ -425,20 +438,21 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   wsUUID,
-			Title:         noRuntimeIssueTitle,
-			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
-			Status:        "todo",
-			Priority:      "high",
-			AssigneeType:  pgtype.Text{String: "member", Valid: true},
-			AssigneeID:    parseUUID(userID),
-			CreatorType:   "member",
-			CreatorID:     parseUUID(userID),
-			ParentIssueID: emptyUUID,
-			Position:      0,
-			Number:        issueNumber,
-			ProjectID:     emptyUUID,
+			ID:               dbid.NewV7(),
+			WorkspaceID:      wsUUID,
+			Title:            noRuntimeIssueTitle,
+			Description:      strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
+			Status:           "todo",
+			Priority:         "high",
+			AssigneeType:     pgtype.Text{String: "member", Valid: true},
+			AssigneeID:       parseUUID(userID),
+			CreatorType:      "member",
+			CreatorID:        parseUUID(userID),
+			ParentIssueID:    emptyUUID,
+			Position:         0,
+			Number:           issueNumber,
+			IdentifierPrefix: identifierPrefix,
+			ProjectID:        emptyUUID,
 		})
 		if err != nil {
 			slog.Warn("bootstrap no-runtime onboarding (shim): create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)

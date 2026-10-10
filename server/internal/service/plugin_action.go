@@ -163,7 +163,7 @@ func (s *PluginService) BuildPluginContext(caller PluginActionCaller, workspace 
 	if issue != nil {
 		payload.Issue = &PluginContextIssue{
 			ID:         uuidString(issue.ID),
-			Identifier: IssueIdentifier(workspace.IssuePrefix, issue.Number),
+			Identifier: IssueIdentifier(issue.IdentifierPrefix, issue.Number),
 			Title:      issue.Title,
 		}
 	}

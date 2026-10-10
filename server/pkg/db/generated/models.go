@@ -846,6 +846,7 @@ type Issue struct {
 	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
 	TriageState        pgtype.Text        `json:"triage_state"`
 	DuplicateOfIssueID pgtype.UUID        `json:"duplicate_of_issue_id"`
+	IdentifierPrefix   string             `json:"identifier_prefix"`
 }
 
 type IssueChildEvent struct {
@@ -865,6 +866,15 @@ type IssueDependency struct {
 	IssueID          pgtype.UUID `json:"issue_id"`
 	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
 	Type             string      `json:"type"`
+}
+
+type IssueIdentifierSeries struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Prefix      string             `json:"prefix"`
+	NextNumber  int32              `json:"next_number"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	IssuedAt    pgtype.Timestamptz `json:"issued_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueLabel struct {
@@ -1333,6 +1343,7 @@ type Project struct {
 	Priority    string             `json:"priority"`
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
+	IssuePrefix pgtype.Text        `json:"issue_prefix"`
 }
 
 type ProjectResource struct {

@@ -433,9 +433,5 @@ func lookupIssueIdentifier(ctx context.Context, queries *db.Queries, workspaceID
 	if err != nil {
 		return "", false
 	}
-	ws, err := queries.GetWorkspace(ctx, row.WorkspaceID)
-	if err != nil {
-		return "", false
-	}
-	return service.IssueIdentifier(ws.IssuePrefix, row.Number), true
+	return service.IssueIdentifier(row.IdentifierPrefix, row.Number), true
 }

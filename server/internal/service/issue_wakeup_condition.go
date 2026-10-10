@@ -187,7 +187,7 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 			return nil, nil, badCondition("state must be done, ended or in_review")
 		}
 		var identifier string
-		err = tx.QueryRow(ctx, "SELECT ws.issue_prefix||'-'||i.number FROM issue i JOIN workspace ws ON ws.id=i.workspace_id WHERE i.workspace_id=$1 AND i.id=$2", ws, id).Scan(&identifier)
+		err = tx.QueryRow(ctx, "SELECT i.identifier_prefix||'-'||i.number FROM issue i WHERE i.workspace_id=$1 AND i.id=$2", ws, id).Scan(&identifier)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, badCondition("unknown issue")
 		}

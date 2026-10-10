@@ -518,8 +518,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // on user input, never on render, so it adds no query hook to this widely
     // used component. It reads the current workspace from the query cache (via
     // the slug ref) and returns null outside a workspace, for non-identifier
-    // tokens, or when the prefix can't match this workspace, so no network call
-    // happens for those; the exact-match filter enforces correctness.
+    // tokens. The server owns prefix resolution because a workspace can have
+    // several durable project series; exact lookup enforces correctness.
     const resolveIssueIdentifierRef = useRef<IssueIdentifierResolver | undefined>(
       undefined,
     );
@@ -530,13 +530,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       const workspaces = await queryClient.fetchQuery(workspaceListOptions());
       const ws = workspaces.find((w) => w.slug === slug);
       if (!ws) return null;
-      const prefix = ws.issue_prefix;
-      if (
-        prefix &&
-        !identifier.toUpperCase().startsWith(`${prefix.toUpperCase()}-`)
-      ) {
-        return null;
-      }
       const issue = await queryClient.fetchQuery(
         issueIdentifierOptions(ws.id, identifier),
       );

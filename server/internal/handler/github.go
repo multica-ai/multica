@@ -969,12 +969,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
-		return
-	}
-	identifier := fmt.Sprintf("%s-%d", issuePrefixForWorkspace(ws), issue.Number)
+	identifier := fmt.Sprintf("%s-%d", issue.IdentifierPrefix, issue.Number)
 	rows, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -1016,6 +1011,11 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	})
 	// The one auto-complete decision the issue page renders, so the UI never
 	// re-derives the rule on its own.
+	ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workspace")
+		return
+	}
 	decision, err := h.decidePRAutoComplete(r.Context(), ws, issue, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -1397,15 +1397,15 @@ func (h *Handler) resolvePRLinkPolicy(ctx context.Context, insts []db.GithubInst
 		if !githubFeaturesEnabled(ws) {
 			continue
 		}
-		prefix := issuePrefixForWorkspace(ws)
 		for _, id := range idents {
-			number, ok := issueNumberForPrefix(id, prefix)
-			if !ok {
+			parts := splitIdentifier(id)
+			if parts == nil {
 				continue
 			}
-			if _, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-				WorkspaceID: inst.WorkspaceID,
-				Number:      number,
+			if _, err := h.Queries.GetIssueByIdentifier(ctx, db.GetIssueByIdentifierParams{
+				WorkspaceID:      inst.WorkspaceID,
+				IdentifierPrefix: strings.ToUpper(parts.prefix),
+				Number:           parts.number,
 			}); err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					continue
@@ -1672,9 +1672,8 @@ func (h *Handler) reconcileAutoLinks(ctx context.Context, ws db.Workspace, prID 
 	linked := make([]string, 0)
 	claimed := map[pgtype.UUID]struct{}{}
 	ambiguousIssues := map[pgtype.UUID]struct{}{}
-	prefix := issuePrefixForWorkspace(ws)
 	for _, id := range in.idents {
-		issue, ok := h.lookupIssueByIdentifier(ctx, ws.ID, prefix, id)
+		issue, ok := h.lookupIssueByIdentifier(ctx, ws.ID, "", id)
 		if !ok {
 			continue
 		}
@@ -1919,14 +1918,15 @@ func issueNumberForPrefix(identifier, prefix string) (int32, bool) {
 // lookupIssueByIdentifier looks up an issue in the given workspace by its
 // "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
 // the workspace's configured prefix and the number resolves to a real issue.
-func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
-	number, ok := issueNumberForPrefix(identifier, prefix)
-	if !ok {
+func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, _ string, identifier string) (db.Issue, bool) {
+	parts := splitIdentifier(identifier)
+	if parts == nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-		WorkspaceID: workspaceID,
-		Number:      number,
+	issue, err := h.Queries.GetIssueByIdentifier(ctx, db.GetIssueByIdentifierParams{
+		WorkspaceID:      workspaceID,
+		IdentifierPrefix: strings.ToUpper(parts.prefix),
+		Number:           parts.number,
 	})
 	if err != nil {
 		return db.Issue{}, false

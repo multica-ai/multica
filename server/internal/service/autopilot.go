@@ -715,7 +715,28 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, issueCountPolicy)
+	identifierPrefix := ""
+	if projectID.Valid {
+		project, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID:          projectID,
+			WorkspaceID: ap.WorkspaceID,
+		})
+		if err != nil {
+			return fmt.Errorf("load autopilot project issue prefix: %w", err)
+		}
+		if project.IssuePrefix.Valid {
+			identifierPrefix = project.IssuePrefix.String
+		}
+	}
+	if identifierPrefix == "" {
+		workspace, err := qtx.GetWorkspace(ctx, ap.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("load workspace issue prefix: %w", err)
+		}
+		identifierPrefix = workspace.IssuePrefix
+	}
+
+	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, identifierPrefix, issueCountPolicy)
 	if err != nil {
 		var limitErr *IssueLimitReachedError
 		if errors.As(err, &limitErr) {
@@ -746,16 +767,17 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		// is captured separately via origin_type=autopilot + origin_id. For
 		// squad-assigned autopilots, the creator is the resolved leader —
 		// the same agent the issue listener will end up enqueueing.
-		CreatorType:   "agent",
-		CreatorID:     leader.ID,
-		ParentIssueID: pgtype.UUID{},
-		Position:      newPosition,
-		StartDate:     pgtype.Date{},
-		DueDate:       pgtype.Date{},
-		Number:        issueNumber,
-		ProjectID:     projectID,
-		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
-		OriginID:      ap.ID,
+		CreatorType:      "agent",
+		CreatorID:        leader.ID,
+		ParentIssueID:    pgtype.UUID{},
+		Position:         newPosition,
+		StartDate:        pgtype.Date{},
+		DueDate:          pgtype.Date{},
+		Number:           issueNumber,
+		IdentifierPrefix: identifierPrefix,
+		ProjectID:        projectID,
+		OriginType:       pgtype.Text{String: "autopilot", Valid: true},
+		OriginID:         ap.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("create issue: %w", err)
