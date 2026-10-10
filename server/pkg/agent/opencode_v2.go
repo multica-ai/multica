@@ -31,11 +31,11 @@ import (
 // servers and without a working cancel. Handling them together is what keeps
 // fixing the loud failure from exposing the quiet ones.
 //
-// Everything else the backend relies on was checked against 2.0.10 and is
-// unchanged across the two majors — the `--format json` event vocabulary,
-// `--session` resume, `.opencode/skills/` discovery, AGENTS.md, and
-// `--dangerously-skip-permissions` (still accepted and still honoured) — so
-// none of it is branched on here.
+// The event names remain the same, but 2.0.18 can omit the final step_finish
+// (see opencode_v2_completion.go), and errors carry type/message instead of
+// name/data.message. The backend handles both error shapes. `--session` resume,
+// `.opencode/skills/` discovery, AGENTS.md, and
+// `--dangerously-skip-permissions` remain unchanged across the two majors.
 
 // opencodeInterruptTimeout bounds the session-interrupt call made while a run
 // is being cancelled. It is deliberately short: the interrupt is an extra step

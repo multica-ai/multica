@@ -1007,7 +1007,17 @@ func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string
 	if outcome.failure != nil {
 		return entry, d.agentVersion(provider), fmt.Errorf("resolve agent executable %q for launch: %w", entry.Path, outcome.failure)
 	}
-	if outcome.adopted.path != "" {
+	if provider == "opencode" {
+		// An in-place 1.x -> 2.x upgrade leaves the pinned path intact, but
+		// changes argv, cancellation and completion contracts. Registration's
+		// asynchronous version cache cannot select those contracts at launch.
+		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
+		if err != nil {
+			return resolved, "", fmt.Errorf("detect opencode version for launch: %w", err)
+		}
+		if err := checkAgentMinVersion(provider, version); err != nil {
+			return resolved, "", fmt.Errorf("validate opencode version for launch: %w", err)
+		}
 		return resolved, version, nil
 	}
 	return resolved, version, nil
