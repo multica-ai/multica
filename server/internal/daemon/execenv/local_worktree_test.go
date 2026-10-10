@@ -2262,3 +2262,122 @@ func TestIsolatedPrepareKeepsTheReadOnlyBranchDrop(t *testing.T) {
 		t.Error("a turn that changed nothing left its branch behind")
 	}
 }
+
+// A cleanup failure can leave the task worktree in place after the two-ref
+// fast-forward CAS succeeded. Retrying Finalize must not replace a checkpoint
+// that another actor wrote in the meantime.
+func TestFinalizeSameTipRetryRejectsConcurrentCheckpoint(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	before := gitRun(t, repo, "rev-parse", wt.Branch)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+
+	if err := wt.recordFastForwardState(before, delivered, worktreeTestLogger()); err != nil {
+		t.Fatalf("first CAS: %v", err)
+	}
+	checkpointAfterCAS, err := readUserStateRef(repo, wt.Branch)
+	if err != nil || wt.preparedStateRef != checkpointAfterCAS {
+		t.Fatalf("prepared checkpoint = %s, read = %s, err = %v", wt.preparedStateRef, checkpointAfterCAS, err)
+	}
+
+	otherSnapshot := gitRun(t, repo, "commit-tree", wt.userState+"^{tree}", "-m", "concurrent snapshot")
+	concurrentState, err := writeBranchRecord(repo, wt.Branch, otherSnapshot, delivered, wt.owner)
+	if err != nil {
+		t.Fatalf("concurrent checkpoint: %v", err)
+	}
+	if concurrentState == checkpointAfterCAS {
+		t.Fatal("concurrent checkpoint did not change")
+	}
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("same-tip retry overwrote a concurrently changed checkpoint")
+	}
+	if outcome.Branch != "" {
+		t.Errorf("Branch = %q, want no claimed delivery", outcome.Branch)
+	}
+	if outcome.PreservedPath != wt.Path {
+		t.Errorf("PreservedPath = %q, want %q", outcome.PreservedPath, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != delivered {
+		t.Errorf("branch = %s, want delivered %s", got, delivered)
+	}
+	if got, err := readUserStateRef(repo, wt.Branch); err != nil || got != concurrentState {
+		t.Errorf("checkpoint = %s, err = %v; want %s", got, err, concurrentState)
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Errorf("worktree not preserved: %v", err)
+	}
+}
+
+// Repeating Finalize with unchanged refs should complete the previously
+// interrupted cleanup instead of rejecting the transaction as stale.
+func TestFinalizeSameTipRetryAfterFastForwardSucceeds(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	before := gitRun(t, repo, "rev-parse", wt.Branch)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+	if err := wt.recordFastForwardState(before, delivered, worktreeTestLogger()); err != nil {
+		t.Fatalf("first CAS: %v", err)
+	}
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("same-tip retry: %v", err)
+	}
+	if outcome.PreservedPath != "" {
+		t.Errorf("unexpected preserved worktree: %s", outcome.PreservedPath)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != delivered {
+		t.Errorf("branch = %s, want %s", got, delivered)
+	}
+}
+
+// A same-tip retry must also reject a branch that moved after the first CAS,
+// even if its checkpoint was not modified by the other writer.
+func TestFinalizeSameTipRetryRejectsConcurrentBranchMove(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-8541", turnOneTask)
+	before := gitRun(t, repo, "rev-parse", wt.Branch)
+	gitRun(t, wt.Path, "checkout", "-b", "repo/task-branch")
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "off-branch delivery\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "agent delivery")
+	delivered := gitRun(t, wt.Path, "rev-parse", "HEAD")
+	if err := wt.recordFastForwardState(before, delivered, worktreeTestLogger()); err != nil {
+		t.Fatalf("first CAS: %v", err)
+	}
+	checkpointAfterCAS, err := readUserStateRef(repo, wt.Branch)
+	if err != nil {
+		t.Fatalf("readUserStateRef: %v", err)
+	}
+	moved := gitRun(t, repo, "commit-tree", delivered+"^{tree}", "-p", delivered, "-m", "concurrent branch move")
+	gitRun(t, repo, "update-ref", "refs/heads/"+wt.Branch, moved, delivered)
+
+	outcome, err := wt.Finalize(worktreeTestLogger())
+	if err == nil {
+		t.Fatal("same-tip retry accepted a concurrently moved conversation branch")
+	}
+	if outcome.Branch != "" || outcome.PreservedPath != wt.Path {
+		t.Errorf("failed delivery = %+v, want no branch and preserved worktree %q", outcome, wt.Path)
+	}
+	if got := gitRun(t, repo, "rev-parse", wt.Branch); got != moved {
+		t.Errorf("branch = %s, want concurrent tip %s", got, moved)
+	}
+	if got, err := readUserStateRef(repo, wt.Branch); err != nil || got != checkpointAfterCAS {
+		t.Errorf("checkpoint = %s, err = %v; want unchanged %s", got, err, checkpointAfterCAS)
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Errorf("worktree not preserved: %v", err)
+	}
+}

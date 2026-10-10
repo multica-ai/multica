@@ -679,12 +679,10 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 		if advanceFrom != "" {
 			recErr = w.recordFastForwardState(advanceFrom, tip, logger)
 		} else {
-			recErr = w.recordState(tip, logger)
+			recErr = w.recordFinalizedState(tip)
 		}
 		if recErr != nil {
-			if advanceFrom != "" {
-				outcome.Branch = "" // The conversation ref was not advanced.
-			}
+			outcome.Branch = "" // Without a recorded checkpoint, no delivery can be claimed.
 			outcome.PreservedPath = w.Path
 			if logger != nil {
 				logger.Error("execenv: could not record the delivered task branch; keeping the worktree",
@@ -1524,10 +1522,39 @@ func (w *LocalWorktree) recordFastForwardState(from, tip string, logger *slog.Lo
 		return fmt.Errorf("atomically fast-forward branch %s from %s to %s and record its checkpoint: %s: %w",
 			w.Branch, shortID(from), shortID(tip), strings.TrimSpace(out), err)
 	}
+	w.preparedStateRef = record
 	if logger != nil {
 		logger.Warn("execenv: worktree delivered on another branch; fast-forwarded the conversation branch",
 			"path", w.Path, "branch", w.Branch, "from", from, "to", tip)
 	}
+	return nil
+}
+
+// recordFinalizedState handles a delivery whose HEAD already equals the
+// conversation tip. This includes a retry after a successful fast-forward CAS
+// when removing the worktree failed. Do not fall back to unconditional
+// update-ref: that would erase a checkpoint written by another process.
+func (w *LocalWorktree) recordFinalizedState(tip string) error {
+	if w == nil || !w.tracksState || w.Branch == "" || w.userState == "" {
+		return nil
+	}
+	if w.preparedStateRef == "" {
+		return fmt.Errorf("branch %s has no prepared checkpoint to finalize safely", w.Branch)
+	}
+	record, err := createBranchRecord(w.GitRoot, w.Branch, w.userState, tip, w.owner)
+	if err != nil {
+		return err
+	}
+	// Verify the branch tip and compare-and-swap the checkpoint atomically.
+	// This rejects both a concurrent branch move and a checkpoint rewrite.
+	input := fmt.Sprintf("start\nverify %s %s\nupdate %s %s %s\nprepare\ncommit\n",
+		"refs/heads/"+w.Branch, tip, userStateRef(w.Branch), record, w.preparedStateRef)
+	out, err := runGitInput(w.GitRoot, input, "update-ref", "--stdin")
+	if err != nil {
+		return fmt.Errorf("finalize branch %s checkpoint with CAS: %s: %w",
+			w.Branch, strings.TrimSpace(out), err)
+	}
+	w.preparedStateRef = record
 	return nil
 }
 
