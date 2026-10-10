@@ -69,11 +69,13 @@ type mediaTestEnv struct {
 	store    *fakeStorage
 	ledger   *fakeLedger
 	resolves *atomic.Int32
+	notices  chan string
 }
 
 func newMediaTestEnv(t *testing.T, files map[string][]byte) *mediaTestEnv {
 	t.Helper()
 	var resolves atomic.Int32
+	notices := make(chan string, 10)
 	fileHost := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		code := strings.TrimPrefix(r.URL.Path, "/f/")
 		data, ok := files[code]
@@ -86,6 +88,15 @@ func newMediaTestEnv(t *testing.T, files map[string][]byte) *mediaTestEnv {
 	t.Cleanup(fileHost.Close)
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case pathSendP2P, pathSendGroup:
+			var body struct {
+				MsgParam string `json:"msgParam"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			notices <- body.MsgParam
+			_, _ = w.Write([]byte(`{"processQueryKey":"sent"}`))
 		case accessTokenPath:
 			_, _ = w.Write([]byte(`{"accessToken":"tok","expireIn":7200}`))
 		case messageFilesDownloadPath:
@@ -107,7 +118,7 @@ func newMediaTestEnv(t *testing.T, files map[string][]byte) *mediaTestEnv {
 	ledger := &fakeLedger{}
 	resolver := NewMediaResolver(NewClient(nil, api.URL), nil, store, ledger, nil).(*mediaResolver)
 	resolver.fetch.Transport = fileHost.Client().Transport
-	return &mediaTestEnv{resolver: resolver, store: store, ledger: ledger, resolves: &resolves}
+	return &mediaTestEnv{resolver: resolver, store: store, ledger: ledger, resolves: &resolves, notices: notices}
 }
 
 func mediaFixture(resources ...dingtalkMediaResource) (engine.ResolvedInstallation, pgtype.UUID, channel.InboundMessage) {
@@ -358,7 +369,7 @@ func TestMediaResolver_DownloadErrorDoesNotExposeSignedURL(t *testing.T) {
 	client := server.Client()
 	server.Close()
 	resolver := &mediaResolver{fetch: client}
-	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image?token=supersecret")
+	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image?token=supersecret", channel.MsgTypeImage)
 	if err == nil {
 		t.Fatal("expected the closed server download to fail")
 	}
@@ -376,7 +387,7 @@ func TestMediaResolver_AcceptsProviderIssuedHTTPURL(t *testing.T) {
 	// Bypass the production public-network dialer only for this loopback test;
 	// fetchBytes still exercises the real URL validation and response handling.
 	resolver.fetch.Transport = server.Client().Transport
-	data, contentType, err := resolver.fetchBytes(context.Background(), server.URL+"/image?token=supersecret")
+	data, contentType, err := resolver.fetchBytes(context.Background(), server.URL+"/image?token=supersecret", channel.MsgTypeImage)
 	if err != nil || contentType != "image/png" || !bytes.Equal(data, pngBytes) {
 		t.Fatalf("HTTP download: type=%q bytes=%d err=%v", contentType, len(data), err)
 	}
@@ -384,7 +395,7 @@ func TestMediaResolver_AcceptsProviderIssuedHTTPURL(t *testing.T) {
 
 func TestMediaResolver_RejectsUnsupportedDownloadURLScheme(t *testing.T) {
 	resolver := &mediaResolver{fetch: http.DefaultClient}
-	_, _, err := resolver.fetchBytes(context.Background(), "ftp://files.example/image?token=supersecret")
+	_, _, err := resolver.fetchBytes(context.Background(), "ftp://files.example/image?token=supersecret", channel.MsgTypeImage)
 	if err == nil || strings.Contains(err.Error(), "supersecret") || strings.Contains(err.Error(), "files.example") {
 		t.Fatalf("unsupported URL error = %v", err)
 	}
@@ -396,7 +407,7 @@ func TestMediaResolver_ProductionDialerBlocksLoopback(t *testing.T) {
 	}))
 	defer server.Close()
 	resolver := NewMediaResolver(nil, nil, nil, nil, nil).(*mediaResolver)
-	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image?token=supersecret")
+	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image?token=supersecret", channel.MsgTypeImage)
 	if err == nil || !strings.Contains(err.Error(), "blocked non-public download target") || strings.Contains(err.Error(), "supersecret") {
 		t.Fatalf("loopback download error = %v", err)
 	}
@@ -442,7 +453,7 @@ func TestMediaResolver_RejectsCrossOriginHTTPRedirect(t *testing.T) {
 	defer source.Close()
 	resolver := NewMediaResolver(nil, nil, nil, nil, nil).(*mediaResolver)
 	resolver.fetch.Transport = source.Client().Transport
-	_, _, err := resolver.fetchBytes(context.Background(), source.URL+"/image")
+	_, _, err := resolver.fetchBytes(context.Background(), source.URL+"/image", channel.MsgTypeImage)
 	if err == nil || !strings.Contains(err.Error(), "cross-origin HTTP") || strings.Contains(err.Error(), "supersecret") {
 		t.Fatalf("cross-origin redirect error = %v", err)
 	}
@@ -462,7 +473,7 @@ func TestMediaResolver_AllowsSameOriginHTTPRedirectWithoutReferer(t *testing.T) 
 	defer server.Close()
 	resolver := NewMediaResolver(nil, nil, nil, nil, nil).(*mediaResolver)
 	resolver.fetch.Transport = server.Client().Transport
-	data, contentType, err := resolver.fetchBytes(context.Background(), server.URL+"/start?token=supersecret")
+	data, contentType, err := resolver.fetchBytes(context.Background(), server.URL+"/start?token=supersecret", channel.MsgTypeImage)
 	if err != nil || contentType != "image/png" || !bytes.Equal(data, pngBytes) {
 		t.Fatalf("same-origin redirect: type=%q bytes=%d err=%v", contentType, len(data), err)
 	}
@@ -475,7 +486,7 @@ func TestMediaResolver_RejectsHTTPSDowngradeRedirect(t *testing.T) {
 	defer server.Close()
 	resolver := NewMediaResolver(nil, nil, nil, nil, nil).(*mediaResolver)
 	resolver.fetch.Transport = server.Client().Transport
-	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image")
+	_, _, err := resolver.fetchBytes(context.Background(), server.URL+"/image", channel.MsgTypeImage)
 	if err == nil || strings.Contains(err.Error(), "supersecret") {
 		t.Fatalf("downgrade redirect error = %v", err)
 	}
