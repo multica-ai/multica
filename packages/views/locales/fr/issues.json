@@ -688,13 +688,17 @@
     "empty_hover": "Aucun agent au travail pour l'instant",
     "unknown_hover": "Agents au travail : pas encore chargé",
     "filter_active_label": "Affichage des tâches avec des agents au travail",
+    "filter_active_label_not_working": "Affichage des tâches sans agent au travail",
     "tasks_count_one": "{{count}} exécution",
     "tasks_count_other": "{{count}} exécutions",
     "chip_agents_working_one": "{{count}} agent au travail",
     "chip_agents_working_other": "{{count}} agents au travail",
     "issues_count_one": "{{count}} tâche",
     "issues_count_other": "{{count}} tâches",
-    "chip_agents_working_unknown": "Agents au travail : —"
+    "chip_agents_working_unknown": "Agents au travail : —",
+    "chip_state_all": "toutes les tâches affichées",
+    "chip_state_working": "seules les tâches avec des agents au travail sont affichées",
+    "chip_state_not_working": "seules les tâches sans agent au travail sont affichées"
   },
   "filtered_empty": {
     "title": "Aucune tâche ne correspond à ces filtres",

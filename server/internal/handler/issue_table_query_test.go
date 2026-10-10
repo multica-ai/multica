@@ -273,6 +273,115 @@ func TestIssueTableWorkingIssueIDsAreExplicitAndAssigneeIndependent(t *testing.T
 	}
 }
 
+func TestIssueTableNotWorkingIssueIDsComplementThePositiveFilter(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	base := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "workspace"},
+		Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+	compile := func(spec issueTableQuerySpec) (issueTableSQL, *httptest.ResponseRecorder, bool) {
+		w := httptest.NewRecorder()
+		compiled, ok := testHandler.compileIssueTableQuery(
+			w,
+			newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+			spec,
+		)
+		return compiled, w, ok
+	}
+
+	t.Run("non-empty ids compile to a NOT membership predicate", func(t *testing.T) {
+		spec := base
+		spec.Filters.NotWorkingIssueIDs = []string{"00000000-0000-4000-8000-000000000001"}
+		compiled, w, ok := compile(spec)
+		if !ok {
+			t.Fatalf("compile: %d %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(compiled.where, "NOT (i.id = ANY(") {
+			t.Errorf("predicate = %q, want NOT (i.id = ANY(...))", compiled.where)
+		}
+		if strings.Contains(compiled.where, "FALSE") {
+			t.Errorf("negative filter must never match nothing: %q", compiled.where)
+		}
+	})
+
+	t.Run("an explicit empty list means every issue qualifies", func(t *testing.T) {
+		spec := base
+		spec.Filters.NotWorkingIssueIDs = []string{}
+		compiled, w, ok := compile(spec)
+		if !ok {
+			t.Fatalf("compile: %d %s", w.Code, w.Body.String())
+		}
+		unfiltered, _, _ := compile(base)
+		if compiled.where != unfiltered.where {
+			t.Errorf("empty not_working_issue_ids predicate = %q, want the unfiltered %q", compiled.where, unfiltered.where)
+		}
+	})
+
+	t.Run("the positive empty list still matches nothing", func(t *testing.T) {
+		spec := base
+		spec.Filters.WorkingIssueIDs = []string{}
+		compiled, w, ok := compile(spec)
+		if !ok {
+			t.Fatalf("compile: %d %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(compiled.where, "FALSE") {
+			t.Errorf("explicit empty working_issue_ids predicate = %q, want FALSE", compiled.where)
+		}
+	})
+
+	t.Run("positive and negative working ids are rejected", func(t *testing.T) {
+		for name, positive := range map[string][]string{
+			"empty positive":     {},
+			"non-empty positive": {"00000000-0000-4000-8000-000000000002"},
+		} {
+			spec := base
+			spec.Filters.WorkingIssueIDs = positive
+			spec.Filters.NotWorkingIssueIDs = []string{"00000000-0000-4000-8000-000000000001"}
+			_, w, ok := compile(spec)
+			if ok || w.Code != http.StatusBadRequest {
+				t.Errorf("%s: ok=%v status=%d, want 400", name, ok, w.Code)
+			}
+		}
+	})
+
+	t.Run("an empty negative list does not conflict with a positive filter", func(t *testing.T) {
+		spec := base
+		spec.Filters.WorkingIssueIDs = []string{"00000000-0000-4000-8000-000000000002"}
+		spec.Filters.NotWorkingIssueIDs = []string{}
+		if _, w, ok := compile(spec); !ok {
+			t.Fatalf("compile: %d %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("malformed ids are rejected", func(t *testing.T) {
+		spec := base
+		spec.Filters.NotWorkingIssueIDs = []string{"not-a-uuid"}
+		if _, w, ok := compile(spec); ok || w.Code != http.StatusBadRequest {
+			t.Errorf("ok=%v status=%d, want 400", ok, w.Code)
+		}
+	})
+
+	t.Run("the inverse filter has its own cursor fingerprint", func(t *testing.T) {
+		a := base
+		b := base
+		b.Filters.NotWorkingIssueIDs = []string{"00000000-0000-4000-8000-000000000001"}
+		fa, err := canonicalIssueTableFingerprint(testWorkspaceID, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fb, err := canonicalIssueTableFingerprint(testWorkspaceID, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fa == fb {
+			t.Error("not_working_issue_ids must change the cursor fingerprint")
+		}
+	})
+}
+
 func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -366,7 +475,7 @@ func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testin
 		}
 	}
 
-	listRows := func(issueIDs []string) issueTableRowsResponse {
+	listRowsFor := func(filters map[string]any) issueTableRowsResponse {
 		t.Helper()
 		recorder := httptest.NewRecorder()
 		testHandler.ListIssueTableRows(
@@ -374,12 +483,10 @@ func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testin
 			newRequest(http.MethodPost, "/api/issues/table/rows", map[string]any{
 				"query": map[string]any{
 					"scope": map[string]any{"kind": "workspace"},
-					"filters": map[string]any{
-						// A map intentionally preserves [] in JSON. Marshaling
-						// issueTableFiltersRequest directly would apply its
-						// omitempty tag and turn the match-none case into no filter.
-						"working_issue_ids": issueIDs,
-					},
+					// A map intentionally preserves [] in JSON. Marshaling
+					// issueTableFiltersRequest directly would apply its
+					// omitempty tag and turn the match-none case into no filter.
+					"filters": filters,
 					"sort": map[string]any{
 						"field":     "position",
 						"direction": "asc",
@@ -398,6 +505,10 @@ func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testin
 			t.Fatalf("decode rows: %v", err)
 		}
 		return response
+	}
+	listRows := func(issueIDs []string) issueTableRowsResponse {
+		t.Helper()
+		return listRowsFor(map[string]any{"working_issue_ids": issueIDs})
 	}
 
 	response := listRows(workingIssueIDs)
@@ -421,6 +532,26 @@ func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testin
 	empty := listRows([]string{})
 	if empty.Total != 0 || len(empty.Rows) != 0 {
 		t.Fatalf("explicit empty working-issue filter returned total=%d rows=%d", empty.Total, len(empty.Rows))
+	}
+
+	// The inverse filter is the exact complement of the positive one over the
+	// same visible working-issue ids: working + not-working = everything, and
+	// the assigned-only issue (no running task) is on the not-working side.
+	all := listRowsFor(map[string]any{})
+	notWorking := listRowsFor(map[string]any{"not_working_issue_ids": workingIssueIDs})
+	if notWorking.Total != all.Total-int64(len(workingIssueIDs)) {
+		t.Errorf("not-working total = %d, want %d (all %d minus %d working)",
+			notWorking.Total, all.Total-int64(len(workingIssueIDs)), all.Total, len(workingIssueIDs))
+	}
+	for _, row := range notWorking.Rows {
+		if row.Issue.ID == editedIssueID || row.Issue.ID == otherAgentIssueID {
+			t.Errorf("not-working rows include running issue %s", row.Issue.ID)
+		}
+	}
+	// A loaded projection with zero running issues: nothing is excluded.
+	noneRunning := listRowsFor(map[string]any{"not_working_issue_ids": []string{}})
+	if noneRunning.Total != all.Total {
+		t.Errorf("empty not_working_issue_ids total = %d, want all %d", noneRunning.Total, all.Total)
 	}
 }
 

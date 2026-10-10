@@ -665,10 +665,14 @@
     "empty_hover": "当前没有智能体在工作",
     "unknown_hover": "工作中的智能体：尚未加载",
     "filter_active_label": "正在查看有智能体在工作的任务",
+    "filter_active_label_not_working": "正在查看没有智能体在工作的任务",
     "tasks_count_other": "{{count}} 次运行",
     "chip_agents_working_other": "{{count}} 个智能体工作中",
     "issues_count_other": "{{count}} 个任务",
-    "chip_agents_working_unknown": "工作中的智能体：—"
+    "chip_agents_working_unknown": "工作中的智能体：—",
+    "chip_state_all": "显示全部任务",
+    "chip_state_working": "仅显示有智能体在工作的任务",
+    "chip_state_not_working": "仅显示没有智能体在工作的任务"
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",

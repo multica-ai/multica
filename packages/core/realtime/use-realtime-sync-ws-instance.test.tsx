@@ -415,9 +415,10 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     const { emit } = mountRealtime();
     const untouched: QueryKey[] = [workingFacet("ws-2")];
     const affected: QueryKey[] = [workingFacet(), workspaceWorkingAgentsKeys.list("ws-1", "issue")];
-    // Test both server membership forms, including an explicit empty id set,
+    // Test every server membership form (positive and inverse), including an
+    // explicit empty id set,
     // across rows, descriptors and ordinary facets such as status counts.
-    const filterCases: IssueTableQuerySpec["filters"][] = [{}, { working_only: false }, { working_only: true }, { working_issue_ids: [] }, { working_issue_ids: ["i1"] }];
+    const filterCases: IssueTableQuerySpec["filters"][] = [{}, { working_only: false }, { working_only: true }, { working_issue_ids: [] }, { working_issue_ids: ["i1"] }, { not_working_issue_ids: [] }, { not_working_issue_ids: ["i1"] }];
     for (const filters of filterCases) {
       const query = { ...spec, filters };
       const keys = [
@@ -425,13 +426,32 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
         issueKeys.tableGroups("ws-1", query, { kind: "status" }),
         issueKeys.tableFacets("ws-1", { query, facets: [{ kind: "status" }] }),
       ];
-      (filters.working_only || filters.working_issue_ids ? affected : untouched).push(...keys);
+      (filters.working_only || filters.working_issue_ids || filters.not_working_issue_ids ? affected : untouched).push(...keys);
     }
     for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);
     emit("task:completed");
     await vi.advanceTimersByTimeAsync(1_000);
     for (const key of affected) expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
     for (const key of untouched) expect(qc.getQueryState(key)?.isInvalidated).toBe(false);
+  });
+
+  it("re-fetches an inverse-filtered query when a run starts and when it stops", async () => {
+    const { emit } = mountRealtime();
+    const inverse = { ...spec, filters: { not_working_issue_ids: ["i1"] } };
+    const rows = issueKeys.tableRows("ws-1", inverse, { kind: "none" }, null, false, null);
+    const groups = issueKeys.tableGroups("ws-1", inverse, { kind: "status" });
+    qc.setQueryData(rows, []);
+    qc.setQueryData(groups, []);
+    // A run STARTING moves the issue out of Not working, so the inverse query
+    // has to be re-fetched as much as it does when a run stops.
+    for (const event of ["task:dispatch", "task:completed", "task:failed", "task:cancelled"]) {
+      qc.setQueryData(rows, []);
+      qc.setQueryData(groups, []);
+      emit(event);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(qc.getQueryState(rows)?.isInvalidated, `${event} rows`).toBe(true);
+      expect(qc.getQueryState(groups)?.isInvalidated, `${event} groups`).toBe(true);
+    }
   });
 
   it("coalesces a continuous lifecycle stream and eventually clears the final completed run", async () => {

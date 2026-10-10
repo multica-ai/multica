@@ -1,5 +1,5 @@
 import type { Issue, IssueStatus, IssuePriority, IssueAssigneeGroup, ProjectStatus, PropertyFilterValue, PropertyOperatorFilter } from "@multica/core/types";
-import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { ActorFilterValue, AgentWorkingMode } from "@multica/core/issues/stores/view-store";
 import type { IssueActivityState } from "../surface/activity";
 
 export interface IssueFilters {
@@ -26,10 +26,12 @@ export interface IssueFilters {
   /** Custom-property filters: definition id → selected values (OR within
    *  a definition, AND across definitions; checkbox uses "true"/"false"). */
   propertyFilters?: Record<string, PropertyFilterValue[]>;
-  // When `agentRunningFilter` is true, only keep issues whose id is in
-  // `runningIssueIds`. The surface derives this set from the independent
-  // `/api/working-agents` projection so filter.ts stays free of fetching.
-  agentRunningFilter?: boolean;
+  // "working" keeps only issues whose id is in `runningIssueIds`;
+  // "not_working" keeps exactly the rest. The surface derives the set from the
+  // independent `/api/working-agents` projection so filter.ts stays free of
+  // fetching. `runningIssueIds` is undefined while that projection is
+  // unresolved — see `issueMatchesWorkingMode`.
+  agentWorkingMode?: AgentWorkingMode;
   runningIssueIds?: ReadonlySet<string>;
   // "Show sub-issues" display toggle. When explicitly `false`, hide issues
   // that have a parent so only top-level issues remain. Undefined / true keeps
@@ -52,7 +54,7 @@ export interface IssueFilterState {
   projectStatusFilters?: ProjectStatus[];
   labelFilters: string[];
   propertyFilters?: Record<string, PropertyFilterValue[]>;
-  workingOnly: boolean;
+  workingMode: AgentWorkingMode;
   /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
   showSubIssues?: boolean;
 }
@@ -186,6 +188,30 @@ function issueIsWorking(issueId: string, context: IssueFilterContext) {
 }
 
 /**
+ * Whether an issue passes the agents-working quick filter.
+ *
+ * "Not working" is the exact complement of "working" over the same visible
+ * running-issue projection. It must never be answered from an unresolved
+ * projection: an unknown set would put every issue — including the ones an
+ * agent is running on right now — under "Not working". `runningIssueIds`
+ * undefined with no activity map means "unknown", so nothing matches; a loaded
+ * projection with zero running issues is an empty Set, and every issue
+ * qualifies.
+ */
+export function issueMatchesWorkingMode(
+  issueId: string,
+  mode: AgentWorkingMode | undefined,
+  context: Pick<IssueFilterContext, "activityByIssueId" | "runningIssueIds">,
+): boolean {
+  if (mode === undefined || mode === "all") return true;
+  const known =
+    context.activityByIssueId !== undefined || context.runningIssueIds !== undefined;
+  if (!known) return false;
+  const working = issueIsWorking(issueId, context);
+  return mode === "working" ? working : !working;
+}
+
+/**
  * Filter issues using positive selection model.
  * Empty arrays = no filter (show all). Non-empty = show only matching.
  *
@@ -199,7 +225,7 @@ export function applyIssueFilters(
   filters: IssueFilterState,
   context: IssueFilterContext = {},
 ): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingMode } = filters;
   const hasAssigneeFilter =
     filters.assigneeFilterActive === true ||
     assigneeFilters.length > 0 ||
@@ -212,14 +238,14 @@ export function applyIssueFilters(
   const projectStatusCatalog = context.projectStatusById;
   const hasProjectStatusFilter =
     projectStatusFilters.length > 0 && projectStatusCatalog !== undefined;
-  // Empty set passed without `agentRunningFilter` is a no-op. When the
-  // filter is on but the set is missing/empty, hide everything — the
-  // user opted into "only running" and there is nothing running.
-  const applyWorkingOnly = workingOnly === true;
+  // Empty set passed with mode "all" is a no-op. With "working" and a
+  // missing/empty set, hide everything — the user opted into "only running"
+  // and there is nothing running. "not_working" is the exact complement.
+  const applyWorkingMode = workingMode !== "all";
   const hideSubIssues = filters.showSubIssues === false;
 
   return issues.filter((issue) => {
-    if (applyWorkingOnly && !issueIsWorking(issue.id, context))
+    if (applyWorkingMode && !issueMatchesWorkingMode(issue.id, workingMode, context))
       return false;
 
     if (hideSubIssues && issue.parent_issue_id) return false;
@@ -305,7 +331,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       projectStatusFilters: filters.projectStatusFilters,
       labelFilters: filters.labelFilters,
       propertyFilters: filters.propertyFilters,
-      workingOnly: filters.agentRunningFilter === true,
+      workingMode: filters.agentWorkingMode ?? "all",
       showSubIssues: filters.showSubIssues,
     },
     {
@@ -327,12 +353,12 @@ export function filterAssigneeGroups(
   groups: IssueAssigneeGroup[] | undefined,
   filters: {
     showSubIssues?: boolean;
-    agentRunningFilter?: boolean;
+    agentWorkingMode?: AgentWorkingMode;
     runningIssueIds?: ReadonlySet<string>;
     propertyFilters?: Record<string, PropertyFilterValue[]>;
   },
 ): IssueAssigneeGroup[] | undefined {
-  const applyRunning = filters.agentRunningFilter === true;
+  const applyRunning = (filters.agentWorkingMode ?? "all") !== "all";
   const hideSubIssues = filters.showSubIssues === false;
   const hasPropertyFilters = Object.values(filters.propertyFilters ?? {}).some(
     (selected) => selected.length > 0,
@@ -343,7 +369,10 @@ export function filterAssigneeGroups(
   return groups
     .map((group) => {
       const issues = group.issues.filter((issue) => {
-        if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
+        if (
+          applyRunning &&
+          !issueMatchesWorkingMode(issue.id, filters.agentWorkingMode, { runningIssueIds })
+        )
           return false;
         if (hideSubIssues && issue.parent_issue_id) return false;
         if (hasPropertyFilters && !issueMatchesPropertyFilters(issue, filters.propertyFilters))
