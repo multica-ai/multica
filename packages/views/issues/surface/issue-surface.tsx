@@ -35,6 +35,7 @@ import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
+import { MindmapView } from "../components/mindmap-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
@@ -268,6 +269,7 @@ function IssueSurfaceContent({
             scopedIssues={controller.surfaceIssues}
             workingAgents={controller.workingAgents}
             allowGantt={controller.allowGantt}
+            allowMindmap={controller.allowMindmap}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
               controller.facetCountsExact
@@ -367,6 +369,14 @@ function IssueSurfaceContent({
                 onCreateIssue={openCreateIssue}
                 exportIssues={controller.exportTableIssues}
                 resolveExportLookups={controller.resolveTableExportLookups}
+              />
+            )}
+            {controller.viewMode === "mindmap" && (
+              <MindmapView
+                serverQuery={controller.tableQuerySpec}
+                exportIssues={controller.exportTableIssues}
+                search={controller.tableSearch}
+                onSearchChange={controller.setTableSearch}
               />
             )}
             {controller.viewMode === "gantt" && (

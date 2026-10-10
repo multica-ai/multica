@@ -12,6 +12,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  GitBranch,
   Rows3,
   SignalHigh,
   SlidersHorizontal,
@@ -1199,6 +1200,7 @@ export function IssuesHeader({
   scopedIssues,
   workingAgents,
   allowGantt = false,
+  allowMindmap = false,
   dateFilter = null,
   onDateFilterChange,
   isRefreshing,
@@ -1212,6 +1214,7 @@ export function IssuesHeader({
    *  behind the agents-working chip. */
   workingAgents: WorkingAgentSummary[] | undefined;
   allowGantt?: boolean;
+  allowMindmap?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   /** Omit when the page title already displays refresh feedback. */
@@ -1388,6 +1391,7 @@ export function IssuesHeader({
           <IssueDisplayControls
             scopedIssues={scopedIssues}
             allowGantt={allowGantt}
+            allowMindmap={allowMindmap}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
             facetCountsExact={facetCountsExact}
@@ -1428,6 +1432,7 @@ export function IssuesHeader({
         open={saveViewOpen}
         onOpenChange={setSaveViewOpen}
         scope={dialogScope}
+        allowMindmap={allowMindmap}
         editView={editTarget?.view ?? null}
         seedFromDefinition={editTarget?.fromDefinition ?? false}
       />
@@ -1890,6 +1895,7 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  allowMindmap = false,
   dateFilter = null,
   onDateFilterChange,
   facetCountsExact = true,
@@ -1908,6 +1914,7 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  allowMindmap?: boolean;
   /**
    * Whether `scopedIssues` covers the surface's full window. Table does not
    * use loaded rows for counts; server-paged List, Board, and Swimlane follow
@@ -2180,7 +2187,7 @@ export function IssueDisplayControls({
         )}
 
         {/* Display settings */}
-        <Popover>
+        {viewMode !== "mindmap" && <Popover>
           <Tooltip>
             <PopoverTrigger
               render={
@@ -2394,7 +2401,7 @@ export function IssueDisplayControls({
               )}
             </div>
           </PopoverContent>
-        </Popover>
+        </Popover>}
 
         {/* View toggle. If a store has `viewMode === "gantt"` persisted but
             this surface doesn't render Gantt, fall back to "list" so the
@@ -2413,6 +2420,8 @@ export function IssueDisplayControls({
                           <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
+                        ) : viewMode === "mindmap" ? (
+                          <GitBranch className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-3.5" />
                         ) : (
@@ -2425,6 +2434,8 @@ export function IssueDisplayControls({
                             ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
+                            : viewMode === "mindmap"
+                            ? t(($) => $.view.mindmap)
                             : viewMode === "gantt" && allowGantt
                             ? t(($) => $.view.gantt)
                             : t(($) => $.view.list)}
@@ -2441,6 +2452,8 @@ export function IssueDisplayControls({
                   ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
+                  : viewMode === "mindmap"
+                  ? t(($) => $.view.tooltip_mindmap)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
                   : t(($) => $.view.tooltip_list)}
@@ -2473,6 +2486,12 @@ export function IssueDisplayControls({
                   <Waves />
                   {t(($) => $.view.swimlane)}
                 </DropdownMenuRadioItem>
+                {allowMindmap && (
+                  <DropdownMenuRadioItem value="mindmap">
+                    <GitBranch />
+                    {t(($) => $.view.mindmap)}
+                  </DropdownMenuRadioItem>
+                )}
                 {allowGantt && (
                   <DropdownMenuRadioItem value="gantt">
                     <ChartGantt />
