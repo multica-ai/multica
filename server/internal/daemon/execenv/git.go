@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -115,46 +114,6 @@ func removeGitWorktree(gitRoot, worktreePath, branchName string, logger *slog.Lo
 			logger.Warn("execenv: git branch delete failed", "branch", branchName, "output", strings.TrimSpace(string(out)), "error", err)
 		}
 	}
-}
-
-// excludeFromGit adds a pattern to the worktree's .git/info/exclude file.
-func excludeFromGit(worktreePath, pattern string) error {
-	// Resolve the actual git dir for this worktree.
-	cmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--git-dir")
-
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("resolve git dir: %w", err)
-	}
-
-	gitDir := strings.TrimSpace(string(out))
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreePath, gitDir)
-	}
-
-	excludePath := filepath.Join(gitDir, "info", "exclude")
-
-	// Ensure the info directory exists.
-	if err := os.MkdirAll(filepath.Dir(excludePath), 0o755); err != nil {
-		return fmt.Errorf("create info dir: %w", err)
-	}
-
-	// Check if pattern is already present.
-	existing, _ := os.ReadFile(excludePath)
-	if strings.Contains(string(existing), pattern) {
-		return nil
-	}
-
-	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open exclude file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "\n%s\n", pattern); err != nil {
-		return fmt.Errorf("write exclude pattern: %w", err)
-	}
-	return nil
 }
 
 // repoNameFromURL extracts a short directory name from a git remote URL.
