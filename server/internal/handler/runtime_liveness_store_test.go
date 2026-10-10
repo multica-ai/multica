@@ -2,9 +2,49 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"github.com/multica-ai/multica/server/internal/service"
 	"testing"
 	"time"
 )
+
+func TestRedisOwnerGateRejectsLateHeartbeatAndPendingClaim(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	h := &Handler{LivenessStore: NewRedisLivenessStore(rdb)}
+	key := runtimeOwnerGateKey("workspace", "daemon", "codex", "")
+	store := NewRedisUpdateStore(rdb)
+	request, err := store.Create(ctx, "runtime-owner-test", "v1", "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.advanceRuntimeOwner(ctx, key, fenceOwnerA); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.touchRuntimeOwner(ctx, "runtime-owner-test", key, fenceOwnerA); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.advanceRuntimeOwner(ctx, key, fenceOwnerB); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.touchRuntimeOwner(ctx, "runtime-owner-test", key, fenceOwnerA); !errors.Is(err, service.ErrStaleRuntimeOwner) {
+		t.Fatalf("late touch: %v", err)
+	}
+	if _, err := store.PopPending(withPendingOwner(ctx, nil, key, fenceOwnerA), "runtime-owner-test"); !errors.Is(err, service.ErrStaleRuntimeOwner) {
+		t.Fatalf("late claim: %v", err)
+	}
+	if current, err := store.Get(ctx, request.ID); err != nil || current.Status != UpdatePending {
+		t.Fatalf("late claim changed request: %+v, %v", current, err)
+	}
+	claimed, err := store.PopPending(withPendingOwner(ctx, nil, key, fenceOwnerB), "runtime-owner-test")
+	if err != nil || claimed == nil || claimed.ID != request.ID {
+		t.Fatalf("new owner claim: %+v, %v", claimed, err)
+	}
+	alive, ok := h.LivenessStore.(*RedisLivenessStore).IsAliveOwnerBatch(ctx, map[string]string{"runtime-owner-test": fenceOwnerB})
+	if !ok || alive["runtime-owner-test"] {
+		t.Fatalf("old generation liveness survived takeover: %v, %v", alive, ok)
+	}
+}
 
 func TestRedisLivenessStore_TouchAndIsAlive(t *testing.T) {
 	rdb := newRedisTestClient(t)

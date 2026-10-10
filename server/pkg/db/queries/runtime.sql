@@ -33,11 +33,17 @@ WHERE id = ANY(@ids::uuid[]);
 -- name: GetAgentRuntimeHeartbeatLeases :many
 -- Narrow connection-time and heartbeat-reconciliation projection. The daemon
 -- WebSocket authenticates its whole runtime set in one round trip and then
--- keeps these immutable ownership fields plus liveness state in its connection
--- lease, avoiding a GetAgentRuntime call on every heartbeat.
-SELECT id, workspace_id, daemon_id, status, last_seen_at
+-- keeps these ownership fields plus liveness state in its connection lease;
+-- each heartbeat checks the captured generation against the current row.
+SELECT id, workspace_id, daemon_id, provider, profile_id, status, last_seen_at,
+       COALESCE(metadata->>'owner_generation', '')::text AS owner_generation
 FROM agent_runtime
 WHERE id = ANY(@ids::uuid[]);
+
+-- name: GetAgentRuntimeHeartbeatState :one
+SELECT status, last_seen_at, workspace_id,
+       COALESCE(metadata->>'owner_generation', '')::text AS owner_generation
+FROM agent_runtime WHERE id = $1;
 
 -- name: LockAgentRuntime :one
 -- Acquires a row-level exclusive lock on the runtime row. Used at the
@@ -90,6 +96,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpsertAgentRuntimeWithProfile :one
@@ -124,6 +134,10 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE COALESCE(agent_runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+   OR EXCLUDED.metadata->>'owner_generation' = agent_runtime.metadata->>'owner_generation'
+   OR (EXCLUDED.metadata->>'owner_generation' LIKE 'g%'
+       AND split_part(EXCLUDED.metadata->>'owner_generation', ':', 1) > split_part(agent_runtime.metadata->>'owner_generation', ':', 1))
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeVisibility :one
@@ -192,6 +206,12 @@ UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
 
+-- name: TouchAgentRuntimeLastSeenIfOwner :execrows
+UPDATE agent_runtime SET last_seen_at = now()
+WHERE id = @id AND status = 'online'
+  AND (COALESCE(metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR metadata->>'owner_generation' = @owner_generation::text);
+
 -- name: TouchAgentRuntimesLastSeenBatch :many
 -- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
 -- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a
@@ -206,6 +226,14 @@ UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = ANY(@ids::uuid[]) AND status = 'online'
 RETURNING id;
+
+-- name: TouchAgentRuntimesLastSeenBatchIfOwner :many
+UPDATE agent_runtime AS runtime SET last_seen_at = now()
+FROM jsonb_each_text(@receipts::jsonb) AS receipt(id, generation)
+WHERE runtime.id = receipt.id::uuid AND runtime.status = 'online'
+  AND (COALESCE(runtime.metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR runtime.metadata->>'owner_generation' = receipt.generation)
+RETURNING runtime.id;
 
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
@@ -225,10 +253,34 @@ UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1 AND status <> 'online';
 
+-- name: MarkAgentRuntimeOnlineIfOwner :one
+UPDATE agent_runtime SET status = 'online', last_seen_at = now(), updated_at = now()
+WHERE id = @id
+  AND (COALESCE(metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR metadata->>'owner_generation' = @owner_generation::text)
+RETURNING *;
+
+-- name: MarkAgentRuntimeOnlineIfOfflineAndOwner :execrows
+UPDATE agent_runtime SET status = 'online', last_seen_at = now(), updated_at = now()
+WHERE id = @id AND status <> 'online'
+  AND (COALESCE(metadata->>'owner_generation', '') NOT LIKE 'g%'
+       OR metadata->>'owner_generation' = @owner_generation::text);
+
 -- name: SetAgentRuntimeOffline :exec
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1;
+
+-- name: SetAgentRuntimeOfflineIfOwner :execrows
+-- A delayed deregister from a prior local owner must not take the replacement
+-- owner's registration offline. The compare and write are one DB statement.
+UPDATE agent_runtime
+SET status = 'offline',
+    metadata = COALESCE(metadata, '{}'::jsonb) ||
+        CASE WHEN sqlc.narg('offline_reason')::jsonb IS NULL THEN '{}'::jsonb
+             ELSE jsonb_build_object('offline_reason', sqlc.narg('offline_reason')::jsonb) END,
+    updated_at = now()
+WHERE id = @id AND metadata->>'owner_generation' = @owner_generation::text;
 
 -- name: SetAgentRuntimeOfflineWithReason :exec
 -- Takes a runtime offline and records WHY, for the one class of cause the user
@@ -251,7 +303,8 @@ WHERE id = $1;
 -- sweeper uses this as a candidate set, then optionally filters via the
 -- LivenessStore before flipping rows to offline (a fresh Redis liveness
 -- record means the DB row is just lagging, not actually dead).
-SELECT id, workspace_id, owner_id, daemon_id, provider FROM agent_runtime
+SELECT id, workspace_id, owner_id, daemon_id, provider,
+       COALESCE(metadata->>'owner_generation', '')::text AS owner_generation FROM agent_runtime
 WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision);
 

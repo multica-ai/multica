@@ -52,6 +52,9 @@ const (
 // Either the ZREM and the SET both happen or neither does — Redis executes
 // a Lua script as a single atomic unit.
 var claimPendingScript = redis.NewScript(`
+if ARGV[4] ~= '@bypass' and redis.call('GET', KEYS[3]) ~= ARGV[4] then
+    return -1
+end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
 if removed == 0 then
     return 0
@@ -211,13 +214,17 @@ func (s *RedisLocalSkillListStore) PopPending(ctx context.Context, runtimeID str
 			return nil, fmt.Errorf("marshal list request: %w", err)
 		}
 
+		ownerKey, ownerGeneration := redisPendingOwner(ctx)
 		result, err := claimPendingScript.Run(
 			ctx, s.rdb,
-			[]string{pendingKey, localSkillListKey(id)},
-			id, data, int(runtimeLocalSkillStoreRetention.Seconds()),
+			[]string{pendingKey, localSkillListKey(id), ownerKey},
+			id, data, int(runtimeLocalSkillStoreRetention.Seconds()), ownerGeneration,
 		).Int64()
 		if err != nil {
 			return nil, fmt.Errorf("claim pending: %w", err)
+		}
+		if err := pendingClaimError(result); err != nil {
+			return nil, err
 		}
 		if result == 0 {
 			// Another node won the race. The record still says pending and is
@@ -430,13 +437,17 @@ func (s *RedisLocalSkillImportStore) PopPending(ctx context.Context, runtimeID s
 			return nil, err
 		}
 
+		ownerKey, ownerGeneration := redisPendingOwner(ctx)
 		result, err := claimPendingScript.Run(
 			ctx, s.rdb,
-			[]string{pendingKey, localSkillImportKey(id)},
-			id, data, int(runtimeLocalSkillStoreRetention.Seconds()),
+			[]string{pendingKey, localSkillImportKey(id), ownerKey},
+			id, data, int(runtimeLocalSkillStoreRetention.Seconds()), ownerGeneration,
 		).Int64()
 		if err != nil {
 			return nil, fmt.Errorf("claim pending: %w", err)
+		}
+		if err := pendingClaimError(result); err != nil {
+			return nil, err
 		}
 		if result == 0 {
 			continue
@@ -485,13 +496,17 @@ func (s *RedisLocalSkillImportStore) PopPendingBatch(ctx context.Context, runtim
 			return result, err
 		}
 
+		ownerKey, ownerGeneration := redisPendingOwner(ctx)
 		claimed, err := claimPendingScript.Run(
 			ctx, s.rdb,
-			[]string{pendingKey, localSkillImportKey(id)},
-			id, data, int(runtimeLocalSkillStoreRetention.Seconds()),
+			[]string{pendingKey, localSkillImportKey(id), ownerKey},
+			id, data, int(runtimeLocalSkillStoreRetention.Seconds()), ownerGeneration,
 		).Int64()
 		if err != nil {
 			return result, fmt.Errorf("claim pending batch: %w", err)
+		}
+		if err := pendingClaimError(claimed); err != nil {
+			return result, err
 		}
 		if claimed == 1 {
 			result = append(result, req)

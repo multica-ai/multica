@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // stubLookPath swaps the package-level lookPath indirection used by
@@ -91,10 +93,15 @@ func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
 // configurable set of runtime profiles and captures the runtimes array sent
 // to /api/daemon/register.
 type profileRegisterFixture struct {
-	daemon       *Daemon
-	server       *httptest.Server
-	sentRuntimes []map[string]any
-	sentFailures []map[string]any
+	daemon          *Daemon
+	server          *httptest.Server
+	sentRuntimes    []map[string]any
+	sentFailures    []map[string]any
+	registerCount   int
+	registerStatus  int
+	onRegister      func()
+	online          bool
+	ownerGeneration string
 }
 
 func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profilesStatus int) *profileRegisterFixture {
@@ -108,8 +115,26 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 				FailedProfiles []map[string]any `json:"failed_profiles"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.registerCount++
 			fx.sentRuntimes = body.Runtimes
 			fx.sentFailures = body.FailedProfiles
+			if fx.onRegister != nil {
+				fx.onRegister()
+			}
+			if fx.registerStatus != 0 {
+				w.WriteHeader(fx.registerStatus)
+				return
+			}
+			for _, rt := range body.Runtimes {
+				if rt["profile_id"] != nil {
+					fx.online = true
+					fx.ownerGeneration, _ = rt["owner_generation"].(string)
+				}
+			}
+			for _, failed := range body.FailedProfiles {
+				fx.online = false
+				fx.ownerGeneration, _ = failed["owner_generation"].(string)
+			}
 			// Echo back a Runtime row per requested runtime, threading
 			// profile_id so the caller can populate runtimeIndex from it.
 			var resp RegisterResponse
@@ -147,6 +172,118 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 	fx.daemon = d
 	fx.server = srv
 	return fx
+}
+
+func TestRegisterRuntimes_FailedProfileWaitsForSiblingOwnership(t *testing.T) {
+	isolate := t.TempDir()
+	t.Setenv("HOME", isolate)
+	t.Setenv("USERPROFILE", isolate)
+	commandPaths := map[string]string{"company-codex": "/opt/bin/company-codex"}
+	stubLookPath(t, commandPaths)
+	t.Cleanup(stubAgentVersion(t))
+	profiles := []RuntimeProfile{{ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex", ProtocolFamily: "codex", CommandName: "company-codex", Enabled: true}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	lockDir := scopeLockDirForTest(t, "failed-profile-owner")
+	owner := fx.daemon
+	owner.scopeLocks = execenv.NewScopeLocks(lockDir)
+	owner.runtimeOwners = newRuntimeOwners()
+	standby := freshDaemon(fx.server.URL)
+	standby.scopeLocks = execenv.NewScopeLocks(lockDir)
+	standby.runtimeOwners = newRuntimeOwners()
+	standby.profileLaunchSpecs = make(map[string]profileLaunchSpec)
+	target := runtimeOwnerTarget("ws-1", "", "prof-1")
+
+	if _, _, err := owner.registerRuntimesForWorkspaceBatchLocked(t.Context(), "ws-1", nil); err != nil {
+		t.Fatalf("owner register: %v", err)
+	}
+	firstToken := fx.ownerGeneration
+	if !fx.online || firstToken == "" || !owner.ownsTarget(target) {
+		t.Fatalf("owner did not register the custom runtime online with a fencing token")
+	}
+
+	delete(commandPaths, "company-codex")
+	if _, _, err := standby.registerRuntimesForWorkspaceBatchLocked(t.Context(), "ws-1", nil); err != errAllRuntimesPeerOwned {
+		t.Fatalf("sibling failure while owner is live: %v, want standby", err)
+	}
+	if !fx.online || fx.ownerGeneration != firstToken || fx.registerCount != 1 || !standby.workspaceHasStandbyRuntime("ws-1") {
+		t.Fatalf("sibling mutated the owner: online=%v token=%q calls=%d standby=%v", fx.online, fx.ownerGeneration, fx.registerCount, standby.workspaceHasStandbyRuntime("ws-1"))
+	}
+
+	owner.releaseRuntimeOwnership(target)
+	if _, _, err := standby.registerRuntimesForWorkspaceBatchLocked(t.Context(), "ws-1", nil); err != nil {
+		t.Fatalf("failure register after takeover: %v", err)
+	}
+	if fx.online || fx.ownerGeneration == "" || fx.ownerGeneration == firstToken || fx.registerCount != 2 || len(fx.sentFailures) != 1 || standby.workspaceHasStandbyRuntime("ws-1") {
+		t.Fatalf("takeover failure was not published: online=%v token=%q calls=%d failures=%v", fx.online, fx.ownerGeneration, fx.registerCount, fx.sentFailures)
+	}
+	if standby.ownsTarget(target) {
+		t.Fatal("failed profile retained runtime ownership after Register")
+	}
+}
+
+func TestRegisterRuntimes_FailedProfileReleasesOwnershipForRunnableSibling(t *testing.T) {
+	isolate := t.TempDir()
+	t.Setenv("HOME", isolate)
+	t.Setenv("USERPROFILE", isolate)
+	commandPaths := map[string]string{}
+	stubLookPath(t, commandPaths)
+	t.Cleanup(stubAgentVersion(t))
+	profiles := []RuntimeProfile{{ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex", ProtocolFamily: "codex", CommandName: "company-codex", Enabled: true}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	lockDir := scopeLockDirForTest(t, "failed-profile-first")
+	failed := fx.daemon
+	failed.scopeLocks = execenv.NewScopeLocks(lockDir)
+	failed.runtimeOwners = newRuntimeOwners()
+	runnable := freshDaemon(fx.server.URL)
+	runnable.scopeLocks = execenv.NewScopeLocks(lockDir)
+	runnable.runtimeOwners = newRuntimeOwners()
+	runnable.profileLaunchSpecs = make(map[string]profileLaunchSpec)
+	target := runtimeOwnerTarget("ws-1", "", "prof-1")
+	fx.onRegister = func() {
+		if len(fx.sentFailures) == 1 && (fx.sentFailures[0]["owner_generation"] == "" || !failed.ownsTarget(target)) {
+			t.Error("failed profile must own target with a generation during Register")
+		}
+	}
+	if _, _, err := failed.registerRuntimesForWorkspaceBatchLocked(t.Context(), "ws-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	firstToken := fx.ownerGeneration
+	if fx.online || firstToken == "" || failed.ownsTarget(target) {
+		t.Fatalf("failure registration: online=%v token=%q still owns=%v", fx.online, firstToken, failed.ownsTarget(target))
+	}
+	commandPaths["company-codex"] = "/opt/bin/company-codex"
+	if _, _, err := runnable.registerRuntimesForWorkspaceBatchLocked(t.Context(), "ws-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !fx.online || fx.ownerGeneration == "" || fx.ownerGeneration == firstToken || !runnable.ownsTarget(target) || runnable.workspaceHasStandbyRuntime("ws-1") {
+		t.Fatalf("runnable sibling could not take over: online=%v token=%q owns=%v", fx.online, fx.ownerGeneration, runnable.ownsTarget(target))
+	}
+}
+
+func TestRegisterRuntimes_FailedProfileReleasesOwnershipOnRegisterError(t *testing.T) {
+	isolate := t.TempDir()
+	t.Setenv("HOME", isolate)
+	t.Setenv("USERPROFILE", isolate)
+	stubLookPath(t, nil)
+	t.Cleanup(stubAgentVersion(t))
+	profiles := []RuntimeProfile{{ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex", ProtocolFamily: "codex", CommandName: "company-codex", Enabled: true}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	failed := fx.daemon
+	failed.scopeLocks = execenv.NewScopeLocks(scopeLockDirForTest(t, "failed-profile-error"))
+	failed.runtimeOwners = newRuntimeOwners()
+	target := runtimeOwnerTarget("ws-1", "", "prof-1")
+	fx.registerStatus = http.StatusInternalServerError
+	fx.onRegister = func() {
+		if len(fx.sentFailures) != 1 || fx.sentFailures[0]["owner_generation"] == "" || !failed.ownsTarget(target) {
+			t.Error("failed profile lost mutation guard before Register finished")
+		}
+	}
+	if _, _, err := failed.registerRuntimesForWorkspaceBatchLocked(t.Context(), "ws-1", nil); err == nil {
+		t.Fatal("Register unexpectedly succeeded")
+	}
+	if failed.ownsTarget(target) {
+		t.Fatal("failed Register leaked temporary failure ownership")
+	}
 }
 
 // TestRegisterRuntimes_AppendsProfileRuntime verifies that a custom profile

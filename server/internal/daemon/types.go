@@ -23,10 +23,11 @@ type AgentEntry struct {
 
 // Runtime represents a registered daemon runtime.
 type Runtime struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Status   string `json:"status"`
+	ID              string `json:"id"`
+	OwnerGeneration string `json:"owner_generation,omitempty"`
+	Name            string `json:"name"`
+	Provider        string `json:"provider"`
+	Status          string `json:"status"`
 	// ProfileID is non-empty when this runtime was registered from a
 	// workspace custom runtime profile (MUL-3284). It links the runtime row
 	// back to the profile so the daemon can resolve the profile's

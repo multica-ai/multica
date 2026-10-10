@@ -551,7 +551,7 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 	var installWaits []dshInstallWait
 	// Grouped per workspace because the cleanup below has to run under each
 	// workspace's register lock — see deregisterDroppedRuntimes.
-	demotedByWorkspace := make(map[string][]string)
+	demotedByWorkspace := make(map[string][]droppedRuntime)
 	demotedProviders := make(map[string]string)
 	offlineReasons := make(map[string]RuntimeOfflineReason)
 	for workspaceID, ws := range d.workspaces {
@@ -573,7 +573,15 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 			}
 			delete(d.runtimeIndex, rid)
 			demoted = append(demoted, rid)
-			demotedByWorkspace[workspaceID] = append(demotedByWorkspace[workspaceID], rid)
+			// A demoted provider is one this process stops serving until the CLI
+			// is usable again, so its logical runtime claim goes with the row —
+			// with the target captured before the row is dropped from the index
+			// (GH #8280). When the provider recovers, converge re-registers it
+			// and takes the claim back under a new generation.
+			demotedByWorkspace[workspaceID] = append(demotedByWorkspace[workspaceID], droppedRuntime{
+				ID:     rid,
+				Target: runtimeOwnerTargetForRuntime(rt, workspaceID),
+			})
 			demotedProviders[rt.Provider] = cause.reason
 			// Carried to the server per runtime row: a client asking "why is my
 			// agent offline" reads it from there, and only this side knows both
@@ -586,6 +594,7 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 				if cause.offline.Installing {
 					installWaits = append(installWaits, dshInstallWait{
 						workspaceID: workspaceID, runtimeID: rid, reason: *cause.offline,
+						ownerGeneration: d.runtimeOwnerToken(runtimeOwnerTargetForRuntime(rt, workspaceID)),
 					})
 				}
 			}
@@ -634,9 +643,10 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 // dshInstallWait is one runtime row whose offline reason claims an automatic
 // profile install will bring it back.
 type dshInstallWait struct {
-	workspaceID string
-	runtimeID   string
-	reason      RuntimeOfflineReason
+	workspaceID     string
+	runtimeID       string
+	reason          RuntimeOfflineReason
+	ownerGeneration string
 }
 
 // withdrawDshInstallWait rewrites the offline reason of every runtime that was
@@ -678,12 +688,14 @@ func (d *Daemon) withdrawDshInstallWait(ctx context.Context) {
 		_ = d.withWorkspaceRegisterLock(workspaceID, func() error {
 			runtimeIDs := make([]string, 0, len(byWorkspace[workspaceID]))
 			reasons := make(map[string]RuntimeOfflineReason, len(byWorkspace[workspaceID]))
+			generations := make(map[string]string, len(byWorkspace[workspaceID]))
 			for _, wait := range byWorkspace[workspaceID] {
 				reason := wait.reason
 				reason.Installing = false
 				reason.Detail = dshInstallGaveUpReason
 				runtimeIDs = append(runtimeIDs, wait.runtimeID)
 				reasons[wait.runtimeID] = reason
+				generations[wait.runtimeID] = wait.ownerGeneration
 			}
 			// Same tracking re-check every deregistration path makes: a
 			// register that brought the runtime back between the demotion and
@@ -695,7 +707,7 @@ func (d *Daemon) withdrawDshInstallWait(ctx context.Context) {
 			}
 			d.logger.Warn("automatic DSH profile install gave up; withdrawing the wait from its runtimes",
 				"workspace_id", workspaceID, "runtime_ids", runtimeIDs)
-			if err := d.client.Deregister(ctx, runtimeIDs, reasons); err != nil {
+			if err := d.client.Deregister(ctx, runtimeIDs, reasons, generations); err != nil {
 				d.logger.Warn("withdrawing the DSH install wait failed",
 					"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "error", err)
 			}
@@ -733,9 +745,17 @@ func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID stri
 	// metadata, so the reason the demotion stored is gone and the server would
 	// otherwise be left with a bare "offline" — which reads as "wait for the
 	// machine" on every admission path (MUL-6164).
-	if err := d.client.Deregister(ctx, runtimeIDs, revived.reasonsFor(runtimeIDs)); err != nil {
+	if err := d.client.Deregister(ctx, runtimeIDs, revived.reasonsFor(runtimeIDs), revived.ownerGenerations); err != nil {
 		d.logger.Warn("deregister of revived demoted runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "error", err)
+	}
+	// Only now, and only for the rows actually sent: a row that is
+	// tracked again was re-created by a newer register and its claim belongs to
+	// that decision instead. The claim is released by logical target because
+	// runtime IDs rotate when the server deletes and recreates a row, and these
+	// rows were never indexed locally (GH #8280).
+	for _, rid := range runtimeIDs {
+		d.releaseRuntimeOwnership(revived.targets[rid])
 	}
 }
 
@@ -752,14 +772,34 @@ func (d *Daemon) deregisterRevivedRuntimes(ctx context.Context, workspaceID stri
 //
 // Best-effort: the daemon has already stopped heartbeating these rows, so the
 // server's stale-heartbeat sweep is the backstop if the call fails.
-func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID string, runtimeIDs []string, reason string, offlineReasons map[string]RuntimeOfflineReason) {
+func (d *Daemon) deregisterDroppedRuntimes(ctx context.Context, workspaceID string, dropped []droppedRuntime, reason string, offlineReasons map[string]RuntimeOfflineReason) {
+	if len(dropped) == 0 {
+		return
+	}
+	targets := make(map[string]string, len(dropped))
+	runtimeIDs := make([]string, 0, len(dropped))
+	for _, entry := range dropped {
+		targets[entry.ID] = entry.Target
+		runtimeIDs = append(runtimeIDs, entry.ID)
+	}
 	runtimeIDs = d.untrackedRuntimeIDs(runtimeIDs)
 	if len(runtimeIDs) == 0 {
 		return
 	}
-	if err := d.client.Deregister(ctx, runtimeIDs, offlineReasons); err != nil {
+	generations := d.ownerGenerations(runtimeIDs, targets)
+	for _, entry := range dropped {
+		if entry.Generation != "" {
+			generations[entry.ID] = entry.Generation
+		}
+	}
+	if err := d.client.Deregister(ctx, runtimeIDs, offlineReasons, generations); err != nil {
 		d.logger.Warn("deregister of dropped runtimes failed",
 			"workspace_id", workspaceID, "runtime_ids", runtimeIDs, "reason", reason, "error", err)
+	}
+	// Release after the bounded attempt. A request that lands after takeover is
+	// fenced by owner_generation in the server's atomic offline update.
+	for _, rid := range runtimeIDs {
+		d.releaseRuntimeOwnership(targets[rid])
 	}
 }
 

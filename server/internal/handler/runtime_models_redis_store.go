@@ -209,13 +209,17 @@ func (s *RedisModelListStore) PopPending(ctx context.Context, runtimeID string) 
 			return nil, err
 		}
 
+		ownerKey, ownerGeneration := redisPendingOwner(ctx)
 		result, err := claimPendingScript.Run(
 			ctx, s.rdb,
-			[]string{pendingKey, modelListKey(id)},
-			id, data, int(modelListStoreRetention.Seconds()),
+			[]string{pendingKey, modelListKey(id), ownerKey},
+			id, data, int(modelListStoreRetention.Seconds()), ownerGeneration,
 		).Int64()
 		if err != nil {
 			return nil, fmt.Errorf("claim pending: %w", err)
+		}
+		if err := pendingClaimError(result); err != nil {
+			return nil, err
 		}
 		if result == 0 {
 			// Another node won the race. The record is owned by the winner;
