@@ -742,21 +742,25 @@ type WorktreeParams struct {
 	// unpushed commits. Without it, an existing checkout that holds work or is
 	// already on this task's branch is kept as it is.
 	Fresh bool
+	// Full disables a sparse checkout for this request. Existing sparse trees
+	// are otherwise kept as-is unless Fresh asks for a new checkout.
+	Full bool
 }
 
 // WorktreeResult describes a successfully created worktree.
 type WorktreeResult struct {
 	Path       string `json:"path"`        // absolute path to the worktree
 	BranchName string `json:"branch_name"` // branch checked out; empty for a kept checkout on a detached HEAD
-	// Kept is set when an existing checkout was left exactly as it was — not
-	// reset, cleaned, switched, or pruned — and only its remote refs were
-	// fetched. It names why: KeptTaskBranch or KeptLocalWork.
+	// Kept means the branch and local work were preserved; an explicit --full
+	// may still widen its sparse selection. It names why: KeptTaskBranch or
+	// KeptLocalWork.
 	Kept string `json:"kept,omitempty"`
 	// UncommittedFiles and UnpushedCommits describe a kept checkout: the paths
 	// `git status` reports, untracked files included, and the commits on HEAD
 	// that no remote-tracking ref reaches.
-	UncommittedFiles int `json:"uncommitted_files,omitempty"`
-	UnpushedCommits  int `json:"unpushed_commits,omitempty"`
+	UncommittedFiles int  `json:"uncommitted_files,omitempty"`
+	UnpushedCommits  int  `json:"unpushed_commits,omitempty"`
+	SparseWidened    bool `json:"sparse_widened,omitempty"`
 }
 
 // Reasons CreateWorktree keeps an existing checkout, reported in
@@ -867,13 +871,28 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
 	worktreePath := filepath.Join(params.WorkDir, dirName)
+	existingIsolated := isIsolatedCheckoutContext(ctx, worktreePath)
+	existingLinked := isGitWorktree(worktreePath)
+	manageSparse := params.Fresh || (!existingIsolated && !existingLinked)
+	profile := ""
+	if manageSparse && !params.Full {
+		profile, err = sparseProfileAtRef(ctx, barePath, baseRef)
+		if err != nil {
+			return nil, err
+		}
+		if profile != "" {
+			if err := enableWorktreeConfigContext(ctx, barePath); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Once a workdir has moved to isolated metadata, keep using that safer
 	// shape even if a later task comes from an older CLI or a different runtime
 	// that omits the mode hint. This also makes provider transitions on a reused
 	// workdir backward compatible.
-	if params.IsolatedGitMetadata || isIsolatedCheckoutContext(ctx, worktreePath) {
-		result, err := c.createOrUpdateIsolatedCheckoutContext(
+	if params.IsolatedGitMetadata || existingIsolated {
+		result, err := c.createOrUpdateIsolatedCheckoutWithProfileContext(
 			ctx,
 			barePath,
 			params.RepoURL,
@@ -881,6 +900,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			branchName,
 			baseRef,
 			params.Fresh,
+			profile,
+			params.Full,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create isolated checkout: %w", err)
@@ -903,10 +924,21 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 
 	// If worktree already exists (reused environment from a prior task),
 	// reuse it instead of creating a new one.
-	if isGitWorktree(worktreePath) {
+	if existingLinked {
 		result, err := updateExistingCheckoutContext(ctx, worktreePath, branchName, baseRef, params.Fresh)
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
+		}
+		if params.Full || params.Fresh {
+			if params.Full {
+				result.SparseWidened, err = sparseCheckoutEnabledContext(ctx, worktreePath)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if err := setSparseCheckoutContext(ctx, worktreePath, profile); err != nil {
+				return nil, err
+			}
 		}
 
 		for _, pattern := range agentGitExcludePatterns {
@@ -933,7 +965,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
 	// collisions with stale per-task refs left over from previous runs.
-	actualBranch, err := createWorktreeContext(ctx, barePath, worktreePath, branchName, baseRef)
+	actualBranch, err := createWorktreeWithProfileContext(ctx, barePath, worktreePath, branchName, baseRef, profile)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
@@ -980,6 +1012,7 @@ func (c *Cache) logCheckoutReady(msg, repoURL, baseRef string, result *WorktreeR
 			"reason", result.Kept,
 			"uncommitted_files", result.UncommittedFiles,
 			"unpushed_commits", result.UnpushedCommits,
+			"sparse_widened", result.SparseWidened,
 		)
 		return
 	}
@@ -1009,6 +1042,10 @@ func (c *Cache) createOrUpdateIsolatedCheckout(barePath, repoURL, checkoutPath, 
 }
 
 func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef string, fresh bool) (*WorktreeResult, error) {
+	return c.createOrUpdateIsolatedCheckoutWithProfileContext(ctx, barePath, repoURL, checkoutPath, branchName, baseRef, fresh, "", false)
+}
+
+func (c *Cache) createOrUpdateIsolatedCheckoutWithProfileContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef string, fresh bool, profile string, full bool) (*WorktreeResult, error) {
 	baseCommit, err := resolveCommitContext(ctx, barePath, baseRef)
 	if err != nil {
 		return nil, err
@@ -1032,8 +1069,22 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 			return nil, err
 		}
 		result, err := updateExistingCheckoutContext(ctx, checkoutPath, branchName, baseCommit, fresh)
-		if err != nil || result.Kept != "" {
+		if err != nil {
 			return result, err
+		}
+		if full || fresh {
+			if full {
+				result.SparseWidened, err = sparseCheckoutEnabledContext(ctx, checkoutPath)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if err := setSparseCheckoutContext(ctx, checkoutPath, profile); err != nil {
+				return nil, err
+			}
+		}
+		if result.Kept != "" {
+			return result, nil
 		}
 		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
 		// new local branch on every checkout. Non-fatal: leftover branches are
@@ -1052,6 +1103,8 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 	// tree, not commits, and left in the shared cache the branch would be
 	// out of the agent's reach and dropped by the next GC.
 	var carryBranch string
+	migrationProfile := profile
+	migrationCone := false
 	if isGitWorktree(checkoutPath) {
 		state, err := inspectCheckoutContext(ctx, checkoutPath)
 		if err != nil {
@@ -1065,6 +1118,12 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 		if state.BranchName != "" && state.UnpushedCommits > 0 {
 			carryBranch = state.BranchName
 		}
+		if !fresh && !full {
+			migrationProfile, migrationCone, err = currentSparseCheckoutContext(ctx, checkoutPath)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := removeLinkedWorktreeContext(ctx, barePath, checkoutPath); err != nil {
 			return nil, err
 		}
@@ -1075,7 +1134,7 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 		return nil, fmt.Errorf("stat checkout path: %w", err)
 	}
 
-	actualBranch, err := createIsolatedCheckoutContext(ctx, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch)
+	actualBranch, err := createIsolatedCheckoutWithProfileContext(ctx, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch, migrationProfile, migrationCone)
 	if err != nil {
 		return nil, err
 	}
@@ -1149,6 +1208,10 @@ func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef
 }
 
 func createIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch string) (_ string, retErr error) {
+	return createIsolatedCheckoutWithProfileContext(ctx, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch, "", false)
+}
+
+func createIsolatedCheckoutWithProfileContext(ctx context.Context, barePath, repoURL, checkoutPath, branchName, baseRef, baseCommit, carryBranch, profile string, cone bool) (_ string, retErr error) {
 	if out, err := runGitCombinedOutputContext(
 		ctx,
 		localCloneArgs(runtime.GOOS, barePath, checkoutPath)...,
@@ -1190,6 +1253,11 @@ func createIsolatedCheckoutContext(ctx context.Context, barePath, repoURL, check
 	// cache refs and selected base before trying to check it out.
 	if err := syncIsolatedCheckoutRefsContext(ctx, barePath, checkoutPath, baseRef); err != nil {
 		return "", err
+	}
+	if profile != "" {
+		if err := setSparseCheckoutModeContext(ctx, checkoutPath, profile, cone); err != nil {
+			return "", err
+		}
 	}
 
 	if out, err := runGitCombinedOutputContext(ctx, "-C", checkoutPath, "checkout", "--detach", baseCommit); err != nil {
@@ -1449,6 +1517,10 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 }
 
 func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchName, baseRef string) (string, error) {
+	return createWorktreeWithProfileContext(ctx, gitRoot, worktreePath, branchName, baseRef, "")
+}
+
+func createWorktreeWithProfileContext(ctx context.Context, gitRoot, worktreePath, branchName, baseRef, profile string) (string, error) {
 	// Pre-check: if the worktree path already exists we would get a confusing
 	// "already exists" error from `git worktree add` — which used to be
 	// misclassified as a branch collision, causing the retry to leak branches
@@ -1458,11 +1530,18 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
 	}
 
-	err := runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
+	if profile != "" {
+		// Sparse settings must live in config.worktree, never in the mirror's
+		// shared config. Do this before Git creates the linked worktree.
+		if err := enableWorktreeConfigContext(ctx, gitRoot); err != nil {
+			return "", err
+		}
+	}
+	err := runWorktreeAddWithProfileContext(ctx, gitRoot, worktreePath, branchName, baseRef, profile)
 	if err != nil && isBranchCollisionError(err) {
 		// Branch name collision: append timestamp and retry once.
 		branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
-		err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
+		err = runWorktreeAddWithProfileContext(ctx, gitRoot, worktreePath, branchName, baseRef, profile)
 	}
 	if err != nil {
 		return "", err
@@ -1478,6 +1557,30 @@ func runWorktreeAddContext(ctx context.Context, gitRoot, worktreePath, branchNam
 	if out, err := runGitCombinedOutputContext(ctx, "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef); err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+	return nil
+}
+
+func runWorktreeAddWithProfileContext(ctx context.Context, gitRoot, worktreePath, branchName, baseRef, profile string) error {
+	if profile == "" {
+		return runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
+	}
+	if out, err := runGitCombinedOutputContext(ctx, "-C", gitRoot, "worktree", "add", "--no-checkout", "-b", branchName, worktreePath, baseRef); err != nil {
+		return fmt.Errorf("git worktree add --no-checkout: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = runGitContext(context.Background(), "-C", gitRoot, "worktree", "remove", "--force", worktreePath)
+			_ = runGitContext(context.Background(), "-C", gitRoot, "branch", "-D", branchName)
+		}
+	}()
+	if err := setSparseCheckoutContext(ctx, worktreePath, profile); err != nil {
+		return err
+	}
+	if out, err := runGitCombinedOutputContext(ctx, "-C", worktreePath, "checkout", branchName); err != nil {
+		return fmt.Errorf("checkout sparse worktree: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	cleanup = false
 	return nil
 }
 
