@@ -791,6 +791,7 @@
     "updated_ago": "{{time}} に更新"
   },
   "actions": {
+    "rename_issue": "タスク名を変更",
     "status": "ステータス",
     "priority": "優先度",
     "assignee": "担当者",

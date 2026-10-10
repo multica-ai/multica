@@ -791,6 +791,7 @@
     "updated_ago": "{{time}} 수정됨"
   },
   "actions": {
+    "rename_issue": "태스크 이름 변경",
     "status": "상태",
     "priority": "우선순위",
     "assignee": "담당자",

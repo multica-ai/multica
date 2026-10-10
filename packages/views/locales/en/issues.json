@@ -830,6 +830,7 @@
     "updated_ago": "Updated {{time}}"
   },
   "actions": {
+    "rename_issue": "Rename issue",
     "status": "Status",
     "priority": "Priority",
     "assignee": "Assignee",

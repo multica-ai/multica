@@ -791,6 +791,7 @@
     "updated_ago": "更新于 {{time}}"
   },
   "actions": {
+    "rename_issue": "重命名任务",
     "status": "状态",
     "priority": "优先级",
     "assignee": "负责人",

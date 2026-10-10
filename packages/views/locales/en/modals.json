@@ -19,6 +19,16 @@
     "toast_deleted": "Issue deleted",
     "toast_delete_failed": "Failed to delete issue"
   },
+  "rename_issue": {
+    "title": "Rename issue",
+    "placeholder": "Issue title",
+    "input_aria_label": "Rename {{identifier}}",
+    "submit": "Save",
+    "saving": "Saving...",
+    "title_required": "Enter a title",
+    "toast_renamed": "Issue renamed",
+    "toast_failed": "Failed to rename issue"
+  },
   "feedback": {
     "title": "Feedback",
     "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",
