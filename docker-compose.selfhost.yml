@@ -61,6 +61,11 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      # Read-only mount of the host repo root, used by the code-changes
+      # endpoint to diff local_directory task branches inside the container.
+      # Set MULTICA_HOST_REPO_ROOT (host path) and MULTICA_HOST_REPO_MOUNT
+      # (container path) in .env; the default mounts this compose directory.
+      - ${MULTICA_HOST_REPO_ROOT:-.}:/host-repos:ro
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       DATABASE_SEARCH_WORK_MEM_MB: ${DATABASE_SEARCH_WORK_MEM_MB:-64}
@@ -216,6 +221,11 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      # Host repo mount used by the code-changes endpoint: how to translate a
+      # local_directory resource's host path (e.g. D:\Multica) into the
+      # container path (/host-repos) where that repo is mounted read-only.
+      MULTICA_HOST_REPO_ROOT: ${MULTICA_HOST_REPO_ROOT:-}
+      MULTICA_HOST_REPO_MOUNT: ${MULTICA_HOST_REPO_MOUNT:-/host-repos}
     restart: unless-stopped
 
   frontend:

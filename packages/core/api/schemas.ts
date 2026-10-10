@@ -449,6 +449,43 @@ export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   auto_complete: null,
 };
 
+// Local code changes (local_directory projects): the issue's latest task
+// branch diffed against the repository default branch by the backend. The
+// backend reports available=false when the deployment has no host repo mount,
+// the issue has no project/local repo/task branch, or git is missing in the
+// server container — the UI hides the section in those cases.
+export const CodeChangeFileSchema = z.object({
+  path: z.string().default(""),
+  status: z.string().default("M"),
+  additions: z.number().default(0),
+  deletions: z.number().default(0),
+  diff: z.string().default(""),
+  truncated: z.boolean().default(false),
+}).loose();
+
+export const CodeChangesResponseSchema = z.object({
+  available: z.boolean().default(false),
+  reason: z.string().optional().default(""),
+  repo_path: z.string().optional().default(""),
+  base_ref: z.string().optional().default(""),
+  head_ref: z.string().optional().default(""),
+  summary: z.string().optional().default(""),
+  files: z.array(CodeChangeFileSchema).default([]),
+}).loose();
+
+export type CodeChangesResponse = z.infer<typeof CodeChangesResponseSchema>;
+export type CodeChangeFile = z.infer<typeof CodeChangeFileSchema>;
+
+export const EMPTY_CODE_CHANGES_RESPONSE: CodeChangesResponse = {
+  available: false,
+  reason: "",
+  repo_path: "",
+  base_ref: "",
+  head_ref: "",
+  summary: "",
+  files: [],
+};
+
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
 // while defaulting fields that predate scoped label catalogs.

@@ -173,6 +173,7 @@ import type {
   PluginInstallRequest,
   PluginConfigRequest,
   IssuePullRequestsResponse,
+  CodeChangesResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -422,6 +423,8 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
+  CodeChangesResponseSchema,
+  EMPTY_CODE_CHANGES_RESPONSE,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -4812,6 +4815,22 @@ export class ApiClient {
       IssuePullRequestsResponseSchema,
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/pull-requests" },
+    );
+  }
+
+  /**
+   * Local code changes for an issue whose project works on a local_directory
+   * repository. Returns available=false (never throws) when the deployment
+   * cannot produce a diff — no host repo mount, no task branch, or git
+   * missing in the server container.
+   */
+  async getIssueCodeChanges(issueId: string): Promise<CodeChangesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/code-changes`);
+    return parseWithFallback(
+      raw,
+      CodeChangesResponseSchema,
+      EMPTY_CODE_CHANGES_RESPONSE,
+      { endpoint: "GET /api/issues/:id/code-changes" },
     );
   }
 
