@@ -571,6 +571,25 @@ SELECT
 FROM agent_task_queue p
 WHERE p.id = $1
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  -- A retry inherits the parent's wakeup_id/wakeup_revision, but claim time
+  -- (ClaimAgentTask) only accepts a wakeup task while its rule is still
+  -- enabled at the recorded revision, CancelUnstartedWakeupTasks only cancels
+  -- runs that existed when the rule was disabled/edited, and
+  -- ExpireStaleQueuedTasks skips rows with a wakeup_id. A retry created after
+  -- the rule was disabled or edited could therefore never be claimed and
+  -- would sit queued forever (#9017). Enforce the same rule condition here:
+  -- a doomed retry writes zero rows, which callers already treat as
+  -- "no retry was created" and commit the parent's failed status — the
+  -- failure then takes the terminal path and posts on the issue.
+  AND (
+        p.context->>'wakeup_id' IS NULL
+        OR EXISTS (
+            SELECT 1 FROM issue_wakeup w
+            WHERE w.id = (p.context->>'wakeup_id')::uuid
+              AND w.disabled_at IS NULL
+              AND w.revision = (p.context->>'wakeup_revision')::bigint
+        )
+      )
 ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
