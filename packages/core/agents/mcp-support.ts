@@ -19,6 +19,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "kiro",
   "opencode",
   "openclaw",
+  "pi",
   "qoder",
   "qoderclicn",
   "qwen",

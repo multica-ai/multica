@@ -416,6 +416,24 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 	}
 
+	extensionPath, err := b.preparePiMcpExtension(opts.McpConfig)
+	if err != nil {
+		releasePiSessionFileLock(sessionLock)
+		return nil, fmt.Errorf("%s mcp extension: %w", label, err)
+	}
+	// Execute owns the temp extension until the process is running. The
+	// reader goroutine takes ownership after start so a launch failure still
+	// deletes the directory, and a running process can read it until exit.
+	releaseExtension := func() { removePiMcpExtension(extensionPath) }
+	defer func() {
+		if releaseExtension != nil {
+			releaseExtension()
+		}
+	}()
+	if extensionPath != "" {
+		opts.piMcpExtensionPath = extensionPath
+	}
+
 	runCtx, cancel := runContext(ctx, timeout)
 	processCtx, cancelProcess := context.WithCancel(runCtx)
 
@@ -528,7 +546,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		closePiReadPipe(stderrRead)
 	}()
 
+	releaseExtension = nil
 	go func() {
+		defer removePiMcpExtension(extensionPath)
 		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancelProcess()
 		defer cancel()
@@ -1004,6 +1024,8 @@ var piBlockedArgs = map[string]blockedArgMode{
 	"--mode":     blockedWithValue,  // "json" event stream protocol
 	"--session":  blockedWithValue,  // daemon manages the session path
 	"--thinking": blockedWithValue,  // owned by agent.thinking_level
+	"--approve":  blockedStandalone, // would trust the whole project .pi directory
+	"-a":         blockedStandalone,
 }
 
 // piCustomArgModes mirrors Pi 0.83's built-in parser closely enough to
@@ -1112,7 +1134,132 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	// inlining the same runtime brief would duplicate it on every turn.
 	// Verified against Pi 0.67.2 (MUL-5392).
 	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
+	// The extension is explicit, so Pi loads it without trusting the project.
+	// It stays after custom args, which are not allowed to supply their own.
+	if opts.piMcpExtensionPath != "" {
+		args = append(args, "--extension", opts.piMcpExtensionPath)
+	}
 	return args
+}
+
+const piMcpExtensionDirPrefix = "multica-pi-mcp-"
+
+// preparePiMcpExtension writes Pi's own temporary extension. omp shares this
+// backend but keeps its project mcp.json, so it never gets this file.
+func (b *piBackend) preparePiMcpExtension(raw json.RawMessage) (string, error) {
+	if b.providerLabel == "omp" || !hasManagedMcpConfig(raw) {
+		return "", nil
+	}
+	return writePiMcpExtension(raw, b.cfg.Logger)
+}
+
+// writePiMcpExtension writes mcp-extension.mjs under a multica-pi-mcp-*
+// directory. An empty server list after filtering returns an empty path and
+// leaves no directory behind. The caller deletes the directory with
+// removePiMcpExtension.
+func writePiMcpExtension(raw json.RawMessage, logger *slog.Logger) (string, error) {
+	if !hasManagedMcpConfig(raw) {
+		return "", nil
+	}
+	servers, err := piMcpExtensionServers(raw, logger)
+	if err != nil {
+		return "", err
+	}
+	if len(servers) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(servers)
+	if err != nil {
+		return "", err
+	}
+	literal, err := json.Marshal(string(encoded))
+	if err != nil {
+		return "", err
+	}
+	script := "const servers = JSON.parse(" + string(literal) + ");\n" +
+		"export default function (pi) {\n" +
+		"  for (const [name, config] of Object.entries(servers)) {\n" +
+		"    pi.registerMcpServer(name, config);\n" +
+		"  }\n" +
+		"}\n"
+	dir, err := os.MkdirTemp("", piMcpExtensionDirPrefix)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-extension.mjs")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		removePiMcpExtension(path)
+		return "", err
+	}
+	return path, nil
+}
+
+// removePiMcpExtension deletes the temporary extension directory. It refuses
+// any path whose parent is not a multica-pi-mcp-* directory.
+func removePiMcpExtension(path string) {
+	if path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if !strings.HasPrefix(filepath.Base(dir), piMcpExtensionDirPrefix) {
+		return
+	}
+	_ = os.RemoveAll(dir)
+}
+
+func piMcpExtensionServers(raw json.RawMessage, logger *slog.Logger) (map[string]json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse mcp_config: %w", err)
+	}
+	rawServers, ok := doc["mcpServers"]
+	if !ok || bytes.Equal(bytes.TrimSpace(rawServers), []byte("null")) {
+		return nil, nil
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(rawServers, &servers); err != nil {
+		return nil, fmt.Errorf("parse mcp_config mcpServers: %w", err)
+	}
+	kept := make(map[string]json.RawMessage, len(servers))
+	for name, entry := range servers {
+		if !piMcpServerNameOK(name) {
+			piMcpSkip(logger, name, "invalid name")
+			continue
+		}
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(entry, &cfg); err != nil || cfg == nil {
+			piMcpSkip(logger, name, "server config is not an object")
+			continue
+		}
+		if typ, ok := cfg["type"]; ok {
+			var typeName string
+			if err := json.Unmarshal(typ, &typeName); err == nil && strings.EqualFold(typeName, "sse") {
+				piMcpSkip(logger, name, "legacy sse transport is not supported")
+				continue
+			}
+		}
+		kept[name] = entry
+	}
+	return kept, nil
+}
+
+func piMcpServerNameOK(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if !isPiToolNameByte(name[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func piMcpSkip(logger *slog.Logger, name, reason string) {
+	if logger == nil {
+		return
+	}
+	logger.Warn("pi mcp: skipping server", "name", name, "reason", reason)
 }
 
 // filterPiCustomArgs removes @file and positional message inputs from

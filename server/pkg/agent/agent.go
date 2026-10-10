@@ -133,6 +133,9 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// piMcpExtensionPath is set by piBackend.Execute after it writes the
+	// temporary MCP extension. The daemon does not fill it.
+	piMcpExtensionPath string
 }
 
 // runContext derives the execution context for an agent subprocess from the

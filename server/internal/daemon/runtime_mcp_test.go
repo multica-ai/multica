@@ -113,6 +113,59 @@ func TestListRuntimeLocalMcpServersUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalMcpServersPi(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"mcpServers":{"native":{"command":"native-server","enabled":false}}}`
+	if err := os.WriteFile(filepath.Join(configDir, "mcp.json"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(servers) != 1 {
+		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+	if servers[0].Name != "native" || servers[0].Transport != "stdio" || servers[0].Enabled {
+		t.Fatalf("native summary = %#v", servers[0])
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigPiLeavesUserFileAlone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "mcp.json"), []byte(`{"mcpServers":{"runtime-only":{"command":"runtime-server"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("pi", json.RawMessage(`{"mcpServers":{"agent":{"command":"agent-server"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		McpServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(merged, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := document.McpServers["runtime-only"]; ok {
+		t.Fatalf("user server was copied into the task config: %#v", document.McpServers)
+	}
+	if document.McpServers["agent"]["command"] != "agent-server" {
+		t.Fatalf("merged servers = %#v", document.McpServers)
+	}
+}
+
 func TestMergeRuntimeAndAgentMcpConfigOmpUsesAgentConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	merged, err := mergeRuntimeAndAgentMcpConfig("omp", json.RawMessage(`{"mcpServers":{"agent":{"command":"agent-server"}}}`))
