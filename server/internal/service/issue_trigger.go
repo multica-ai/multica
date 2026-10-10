@@ -30,6 +30,9 @@ const (
 // is never duplicated or sunk into the service layer. Preview passes the real
 // gate so it never leaks a private agent's readiness to a member who cannot
 // see it. A nil func is treated as allow-all.
+// CanInvokeOnStatus gates status-only triggers, where no assignee validation
+// runs. It prevents a status write from invoking another member's private
+// agent; preview and write pass the same actor-aware check.
 //
 // IsSelfLoop reports whether promoting this issue out of backlog would be the
 // calling agent re-triggering its own running task. Only the status source
@@ -42,6 +45,7 @@ const (
 // target remain runnable. A nil func means "do not suppress".
 type IssueTriggerProbe struct {
 	CanAccessAgent               func(agent db.Agent) bool
+	CanInvokeOnStatus            func(agent db.Agent) bool
 	IsSelfLoop                   func() bool
 	SuppressActiveSelfAssignment func(agentID pgtype.UUID) bool
 }
@@ -69,6 +73,22 @@ type IssueRunTrigger struct {
 
 func allowAllAgents(db.Agent) bool { return true }
 
+func isResumeStatus(previous, current string) bool {
+	return current == issuestatus.Todo &&
+		(previous == issuestatus.Blocked || previous == issuestatus.Done || previous == issuestatus.InReview)
+}
+
+// IsResumeTransition identifies an explicit hand-back to the built-in todo
+// status. Custom terminal statuses inherit done behavior; custom started and
+// unstarted statuses have no blocked/review/todo behavior in this status model.
+func (s *IssueService) IsResumeTransition(ctx context.Context, issue db.Issue, prevStatus string, statusChanged bool) bool {
+	if !statusChanged || issue.Status != issuestatus.Todo {
+		return false
+	}
+	previous := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, prevStatus)
+	return isResumeStatus(previous, issue.Status)
+}
+
 // WillEnqueueRun is the single predicate answering "will this issue write
 // start an agent run, and for whom". It is the one source of truth shared by
 // the issue update / batch-update write paths and the preview endpoint,
@@ -83,12 +103,14 @@ func allowAllAgents(db.Agent) bool { return true }
 // The decision must equal the real enqueue conditions so preview never claims
 // a net-new run that the write path then drops. The write enqueues through
 // CreateAgentTask, guarded by the (issue_id, agent_id) partial unique index
-// over pending (queued/dispatched) tasks; the pending check below mirrors that
-// guard, and only the status source needs it:
+// over pending (queued/dispatched) tasks; only the status source checks
+// existing work before enqueue:
 //   - status source (backlog → active) can re-fire against an assignee that
 //     already holds a pending task (e.g. one a @mention raised while the issue
 //     sat in backlog); the check keeps preview from promising a run the unique
 //     index would coalesce away.
+//   - explicit resume (blocked/done/in_review -> todo) also checks running
+//     tasks; a return to todo is not a request for parallel duplicate work.
 //   - assign source (create / assignee change) skips the check: a create
 //     targets a fresh issue with no prior task, and a reassignment no longer
 //     cancels existing tasks (#4963 / MUL-4113) — in the rare case the new
@@ -106,8 +128,8 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 
 	// Only the fixed backlog key parks work. Leaving it for another unstarted
 	// or started status can enqueue a run; custom statuses do not inherit parking.
-	// Effective preserves built-in behavior and resolves custom terminal categories
-	// so moving to done/closed cannot start work.
+	// Effective also maps custom terminal statuses to done/cancelled, so a
+	// completed issue can be explicitly returned to todo for rework.
 	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
 
@@ -124,6 +146,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	}
 
 	var source RunEnqueueSource
+	resume := in.StatusChanged && isResumeStatus(prevStatus, currentStatus)
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
 		// Backlog is the parking lot: assigning into backlog never starts a run.
@@ -131,9 +154,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && prevStatus == "backlog" &&
-		currentStatus != "backlog" &&
-		currentStatus != "done" && currentStatus != "cancelled":
+	case in.StatusChanged && ((prevStatus == issuestatus.Backlog &&
+		currentStatus != issuestatus.Backlog &&
+		currentStatus != issuestatus.Done && currentStatus != issuestatus.Cancelled) || resume):
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}
@@ -151,11 +174,16 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(agent) {
 			return IssueRunTrigger{}, false
 		}
+		if source == RunSourceStatus && probe.CanInvokeOnStatus != nil && !probe.CanInvokeOnStatus(agent) {
+			return IssueRunTrigger{}, false
+		}
 		if source == RunSourceAssign && !in.IsCreate && probe.SuppressActiveSelfAssignment != nil &&
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
+		if source == RunSourceStatus &&
+			((resume && s.hasActiveRun(ctx, issue.ID, issue.AssigneeID)) ||
+				(!resume && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID))) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -190,7 +218,12 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(leader) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
+		if source == RunSourceStatus && probe.CanInvokeOnStatus != nil && !probe.CanInvokeOnStatus(leader) {
+			return IssueRunTrigger{}, false
+		}
+		if source == RunSourceStatus &&
+			((resume && s.hasActiveRun(ctx, issue.ID, squad.LeaderID)) ||
+				(!resume && s.hasPendingRun(ctx, issue.ID, squad.LeaderID))) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -201,6 +234,18 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 	}
 	return IssueRunTrigger{}, false
+}
+
+// hasActiveRun prevents an explicit resume from dispatching a second run while
+// the current executor already has queued or running work for the issue. It is
+// intentionally head-independent: a resume is an issue lifecycle action, not
+// a fresh PR-head review. Lookup errors fail closed against duplicate work.
+func (s *IssueService) hasActiveRun(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	active, err := s.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	return active || err != nil
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched
