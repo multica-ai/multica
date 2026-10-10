@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -51,14 +51,7 @@ export function parseCommentHighlightHash(hash: string): string | undefined {
 }
 
 function useCommentHighlightHash(): { hash: string; commentId?: string } {
-  const read = () => typeof window === "undefined" ? "" : window.location.hash;
-  const [hash, setHash] = useState(read);
-
-  useEffect(() => {
-    const onHashChange = () => setHash(read());
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  const { hash } = useNavigation();
 
   return { hash, commentId: parseCommentHighlightHash(hash) };
 }
