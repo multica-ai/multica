@@ -97,3 +97,32 @@ func antigravityResultUsageTotal(result Result) int64 {
 	}
 	return total
 }
+
+// TestAntigravityRealStdinLocalCommand checks the real stdin parser without a
+// model request: stream-json rejects the CLI-local /model command. Authentication
+// is still required by agy before it reads the message. This deliberately does
+// not claim to verify a successful model turn or its usage.
+func TestAntigravityRealStdinLocalCommand(t *testing.T) {
+	requireRealAgentSmoke(t)
+	execPath, err := exec.LookPath("agy")
+	if err != nil {
+		t.Skipf("agy is not installed: %v", err)
+	}
+	backend, err := New("antigravity", Config{ExecutablePath: execPath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	prompt := "/model " + strings.Repeat("x", 34000) + "\n中文😀 \"quoted\" \\path\n"
+	session, err := backend.Execute(ctx, prompt, ExecOptions{Cwd: t.TempDir(), Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "/model") || !strings.Contains(result.Error, "unavailable with --input-format stream-json") {
+		t.Fatalf("expected local command rejection after stdin parsing; status=%s error=%s", result.Status, result.Error)
+	}
+}
