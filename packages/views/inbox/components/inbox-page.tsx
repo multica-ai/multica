@@ -231,9 +231,15 @@ export function InboxPage() {
   // Applying a filter can remove the open row from the list. Clear that local
   // selection instead of treating it as a broken deep link and redirecting to
   // the issue page; the notification still exists, it is simply filtered out.
+  // Only a filter change may clear it: under the unread filter, the click
+  // that opens a row also marks it read, which drops the row from the list
+  // without the filters moving (#9077) — the detail must stay up.
+  const prevFiltersRef = useRef<unknown>(null);
   useEffect(() => {
-    if (selectionFilteredOut) setSelectedKey("");
-  }, [selectionFilteredOut, setSelectedKey]);
+    const filtersChanged = prevFiltersRef.current !== effectiveFilters;
+    prevFiltersRef.current = effectiveFilters;
+    if (filtersChanged && selectionFilteredOut) setSelectedKey("");
+  }, [effectiveFilters, selectionFilteredOut, setSelectedKey]);
 
   // A targeted lookup must not hide pages that have already loaded. Its
   // pending/error states only block resolution of the off-page selection.

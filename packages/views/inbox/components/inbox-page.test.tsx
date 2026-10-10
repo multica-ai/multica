@@ -973,4 +973,54 @@ describe("InboxPage", () => {
     expect(replace).toHaveBeenCalledWith("/acme/issues/issue-404");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
+
+  it("keeps the detail open when opening a row under the unread filter marks it read", () => {
+    // Opening a notification marks it read, and the unread filter then drops
+    // the row from the list. The drop is the click's own effect, not a filter
+    // change, so the detail pane must keep showing the clicked notification
+    // instead of collapsing (#9077).
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [item({ id: "n1", issue_id: "issue-1", read: false })];
+    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+
+    const { rerender } = render(<InboxPage />);
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId("row"));
+    expect(markReadMutate).toHaveBeenCalledWith("n1", expect.anything());
+
+    // Server truth arrives: the opened notification is now read, so the
+    // unread filter hides its row. The drop is the click's own doing, so the
+    // page must not rewrite the URL dropping the issue param (that would
+    // collapse the detail pane once the deferred render commits).
+    listData.active = [item({ id: "n1", issue_id: "issue-1", read: true })];
+    rerender(<InboxPage />);
+
+    expect(screen.queryByTestId("row")).toBeNull();
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+    expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-1" });
+  });
+
+  it("still clears the selection when the user applies a filter that hides the open row", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "keep-open", issue_id: "issue-1", read: true }),
+      item({ id: "other", issue_id: "issue-2", read: false }),
+    ];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByText("keep-open"));
+    expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-1" });
+
+    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+    rerender(<InboxPage />);
+
+    // A user-applied filter clears the local selection: the URL drops the
+    // issue param. (The detail pane's props lag behind via useDeferredValue
+    // and never commit the cleared render in this environment, so the URL is
+    // the observable here.)
+    expect(replace).toHaveBeenCalledWith("/acme/inbox");
+  });
 });
