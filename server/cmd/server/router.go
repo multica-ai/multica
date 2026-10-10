@@ -1556,6 +1556,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
 
+		r.Get("/runtimes/{runtimeId}/worktree-readiness", h.ListDaemonWorktreeResources)
+		r.Post("/runtimes/{runtimeId}/worktree-readiness", h.ReportDaemonWorktreeReadiness)
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
 		r.Post("/heartbeat", h.DaemonHeartbeat)

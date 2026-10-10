@@ -114,6 +114,22 @@ export interface ProjectResource {
   position: number;
   created_at: string;
   created_by: string | null;
+  worktree_readiness?: WorktreeReadiness;
+}
+
+/** Daemon measurements of the saved resource configuration, projected by the server. */
+export interface WorktreeReadiness {
+  status: "checking" | "ready" | "blocked" | "unavailable";
+  reason_code?: string;
+  checked_at?: string;
+  expires_at?: string;
+  file_count?: number;
+  total_bytes?: number;
+  max_files?: number;
+  max_bytes?: number;
+  symlink_count?: number;
+  largest_paths?: { path: string; file_count: number; total_bytes: number }[];
+  message?: string;
 }
 
 export interface CreateProjectResourceRequest {

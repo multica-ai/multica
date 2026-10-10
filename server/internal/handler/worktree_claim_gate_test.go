@@ -552,9 +552,9 @@ func TestWorktreeClaimGateCancelPersistsReason(t *testing.T) {
 func seedWorktreeGateClaimFixture(t *testing.T, ctx context.Context, label, daemonID, cliVersion string) (runtimeID, taskID string) {
 	t.Helper()
 
-	metadata := "{}"
+	metadata := `{"capabilities":["local-worktree-readiness-v1"]}`
 	if cliVersion != "" {
-		metadata = `{"cli_version":"` + cliVersion + `"}`
+		metadata = `{"cli_version":"` + cliVersion + `","capabilities":["local-worktree-readiness-v1"]}`
 	}
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
@@ -598,6 +598,15 @@ func seedWorktreeGateClaimFixture(t *testing.T, ctx context.Context, label, daem
 	}
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM project_resource WHERE project_id = $1`, projectID)
+	})
+
+	// This fixture tests the capability gate independently of readiness.
+	if _, err := testPool.Exec(ctx, `INSERT INTO local_worktree_readiness(resource_id,resource_ref,checked_at,expires_at,status,measurement)
+ SELECT id,resource_ref,now(),now()+interval '90 seconds','ready','{}' FROM project_resource WHERE project_id=$1`, projectID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM local_worktree_readiness WHERE resource_id IN (SELECT id FROM project_resource WHERE project_id=$1)`, projectID)
 	})
 
 	var issueID string

@@ -1187,7 +1187,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	// Preserve the existing HTTP response shape: the runtime_id field is new
 	// in the WS path and would be redundant noise on the HTTP path where the
 	// caller already knows which runtime it asked about.
-	resp := map[string]any{"status": ack.Status}
+	resp := map[string]any{"status": ack.Status, "worktree_readiness_supported": ack.WorktreeReadinessSupported}
 	if ack.PendingUpdate != nil {
 		resp["pending_update"] = ack.PendingUpdate
 	}
@@ -1377,9 +1377,10 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
 	ack := &protocol.DaemonHeartbeatAckPayload{
-		RuntimeID:          runtimeID,
-		Status:             "ok",
-		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
+		WorktreeReadinessSupported: true,
+		RuntimeID:                  runtimeID,
+		Status:                     "ok",
+		ServerCapabilities:         []string{protocol.DaemonCapabilityRPCV1},
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)

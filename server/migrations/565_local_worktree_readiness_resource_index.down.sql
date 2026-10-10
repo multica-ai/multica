@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS local_worktree_readiness_resource_id_idx;

@@ -857,6 +857,7 @@ export function AgentTranscriptDialog({
     !!task.branch_name ||
     !!reasonLabel ||
     !!task.error ||
+    !!task.wait_reason ||
     !!createdLabel ||
     !!startedLabel ||
     !!completedLabel ||
@@ -1029,12 +1030,12 @@ export function AgentTranscriptDialog({
                           over untranslated content — rather than shown as the
                           run's reason (#7411). Still the place where "which
                           worktree holds my preserved work" is readable. */}
-                      {task.error && (
+                      {(task.error || (task.status === "waiting_local_directory" && task.wait_reason)) && (
                         <>
                           <div className="my-2 h-px bg-border" />
                           <RunDetailRow
                             label={t(($) => $.transcript.details_diagnostics)}
-                            value={task.error}
+                            value={task.error || task.wait_reason || ""}
                             mono
                           />
                         </>

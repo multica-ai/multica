@@ -1158,6 +1158,15 @@ type LarkUserBinding struct {
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
 }
 
+type LocalWorktreeReadiness struct {
+	ResourceID  pgtype.UUID        `json:"resource_id"`
+	ResourceRef []byte             `json:"resource_ref"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	Status      string             `json:"status"`
+	Measurement []byte             `json:"measurement"`
+}
+
 type MaintenanceJob struct {
 	ID             pgtype.UUID        `json:"id"`
 	JobType        string             `json:"job_type"`

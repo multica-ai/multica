@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -55,8 +56,8 @@ const (
 	// unusual amount of untracked-but-not-ignored content, and snapshotting it
 	// would write every byte of it into the user's own object database. The
 	// task refuses instead, naming the fix.
-	maxUntrackedFiles = 2000
-	maxUntrackedBytes = 200 << 20 // 200 MiB
+	maxUntrackedFiles = protocol.WorktreeReplayMaxFiles
+	maxUntrackedBytes = protocol.WorktreeReplayMaxBytes // 200 MiB
 
 	// snapshotIndexFileName is the private index captureUserSnapshot builds the
 	// user's snapshot in. It lives in the task's env root, never in the user's
@@ -1587,49 +1588,11 @@ func pruneOrphanedStateRefs(gitRoot string, logger *slog.Logger) {
 // the user can see, and this replay does not decide whether to reproduce the
 // link or its target, including targets outside the repo.
 func checkUntrackedReplayable(gitRoot string, logger *slog.Logger) error {
-	out, err := runGitStdout(gitRoot, "ls-files", "--others", "--exclude-standard", "-z")
+	check, err := InspectUntrackedReplay(context.Background(), gitRoot)
 	if err != nil {
-		return fmt.Errorf("execenv: could not list the untracked files in %q: %w", gitRoot, err)
+		return err
 	}
-	var (
-		files   int
-		budget  int64 = maxUntrackedBytes
-		skipped int
-	)
-	for _, rel := range strings.Split(out, "\x00") {
-		if rel == "" || isMulticaSidecarPath(rel) {
-			continue
-		}
-		info, statErr := os.Lstat(filepath.Join(gitRoot, rel))
-		if statErr != nil {
-			// Listed a moment ago, unreadable now: the tree changed under us.
-			// git will simply not find it either, so this is not a refusal.
-			continue
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			skipped++
-			if logger != nil {
-				logger.Warn("execenv: untracked symlink cannot be replayed into a worktree", "file", rel)
-			}
-			continue
-		}
-		if !info.Mode().IsRegular() {
-			// Sockets, FIFOs, devices: not content, and git will not add them.
-			continue
-		}
-		files++
-		budget -= info.Size()
-		if files > maxUntrackedFiles || budget < 0 {
-			skipped++
-		}
-	}
-	if skipped == 0 {
-		return nil
-	}
-	return fmt.Errorf("execenv: cannot replay every untracked file from %q into a task worktree "+
-		"(%d left over; the replay covers regular files up to %d files / %d MiB and does not follow symlinks) "+
-		"— gitignore or clean up the untracked files, or switch the resource back to in_place",
-		gitRoot, skipped, maxUntrackedFiles, maxUntrackedBytes>>20)
+	return check.Err()
 }
 
 // multicaSidecarDirNames are the directories Prepare writes into a workdir. A

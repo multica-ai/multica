@@ -209,6 +209,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityAgentSkillV1,
 		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
+		protocol.DaemonCapabilityWorktreeReadinessV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
@@ -529,9 +530,7 @@ func (c *Client) StartTask(ctx context.Context, task Task, capabilities ...strin
 // but the path mutex is held by another in-flight task. reason is a short
 // human-readable hint (e.g. "<path>") surfaced by the UI alongside the
 // status. Idempotent on the daemon's side — calling twice with the same
-// reason is a no-op once the row is already waiting_local_directory (the
-// underlying SQL filters on status='dispatched', so the second call is a
-// 400 the daemon swallows and proceeds to wait).
+// A changed reason refreshes a waiting row; running and terminal rows are refused.
 func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reason string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
 		"reason": reason,

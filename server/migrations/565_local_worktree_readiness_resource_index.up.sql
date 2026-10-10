@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS local_worktree_readiness_resource_id_idx ON local_worktree_readiness(resource_id);

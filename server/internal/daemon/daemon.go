@@ -654,7 +654,8 @@ type Daemon struct {
 	// on-disk path run sequentially; the second blocks on the lock and is
 	// surfaced via the server-side waiting_local_directory status while it
 	// waits. See MUL-2663.
-	localPathLocks *LocalPathLocker
+	localPathLocks          *LocalPathLocker
+	worktreeReadinessSweeps sync.Map
 
 	// bgSyncs tracks background goroutines started by registerTaskRepos so
 	// callers (notably tests using t.TempDir-backed cache roots) can wait for
@@ -4565,6 +4566,9 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 // Each action is dispatched in its own goroutine so a slow handler cannot
 // block subsequent heartbeats.
 func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
+	if resp != nil && resp.WorktreeReadinessSupported {
+		go d.refreshWorktreeReadiness(ctx, runtimeID)
+	}
 	if resp == nil {
 		return
 	}
@@ -6117,8 +6121,8 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	// validation above still applies — git needs to write worktree
 	// registrations into the user's repo.
 	if assignment.UsesWorktree() {
-		taskLog.Info("local_directory: worktree mode, skipping path mutex")
-		return nil, false
+		taskLog.Info("local_directory: worktree mode, checking source before preparation")
+		return nil, d.waitForWorktreeReplay(ctx, task, assignment, taskLog)
 	}
 
 	// A conversation is not a second writer. Everything above still applied —

@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { useT } from "../../i18n/use-t";
+import { WorktreeReadinessNotice, type WorktreeReadinessNoticeProps } from "./worktree-readiness";
 
 /**
  * Why the worktree option may be unavailable.
@@ -48,6 +49,7 @@ interface LocalDirectoryModeDialogProps {
   /** Confirm label differs between adding a resource and editing one. */
   confirmLabel: string;
   onConfirm: (mode: LocalDirectoryExecutionMode) => void;
+  readiness?: WorktreeReadinessNoticeProps;
 }
 
 /**
@@ -69,6 +71,7 @@ export function LocalDirectoryModeDialog({
   saving = false,
   confirmLabel,
   onConfirm,
+  readiness,
 }: LocalDirectoryModeDialogProps) {
   const { t } = useT("projects");
   const [selected, setSelected] = useState<LocalDirectoryExecutionMode>(value);
@@ -98,6 +101,10 @@ export function LocalDirectoryModeDialog({
           onChange={setSelected}
           unavailableReason={unavailableReason}
         />
+
+        {selected === "worktree" && (
+          <WorktreeReadinessNotice saved={false} {...readiness} />
+        )}
 
         {errorMessage && (
           <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-caption text-destructive">

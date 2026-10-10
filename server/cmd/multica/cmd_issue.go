@@ -2797,6 +2797,11 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	for _, run := range runs {
+		if reason := strVal(run, "wait_reason"); strVal(run, "status") == "waiting_local_directory" && reason != "" {
+			fmt.Fprintf(os.Stdout, "\n%s: %s\n", displayID(strVal(run, "id"), fullID), reason)
+		}
+	}
 	return nil
 }
 

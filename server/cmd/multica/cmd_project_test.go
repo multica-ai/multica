@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -384,4 +387,32 @@ func TestBuildResourceRefFromFlagsLocalDirectoryExecutionMode(t *testing.T) {
 			t.Errorf("expected execution_mode cleared, got %v", ref["execution_mode"])
 		}
 	})
+}
+
+func TestProjectResourcesShowPreTaskReadiness(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const projectID = "1881a167-4bb6-4602-944b-f40ce4192fe6"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/projects/"+projectID+"/resources" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"resources": []any{map[string]any{"id": "resource", "resource_type": "local_directory", "worktree_readiness": map[string]any{"status": "blocked", "checked_at": "2026-10-06T14:00:00Z", "file_count": 234, "total_bytes": 1258291200, "max_files": 2000, "max_bytes": 209715200, "symlink_count": 0, "message": "Ignore debug to resume.", "largest_paths": []any{map[string]any{"path": "debug", "file_count": 234, "total_bytes": 1258291200}}}}}})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	cmd := &cobra.Command{Use: "resources"}
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("full-id", false, "")
+	out, err := captureStdout(t, func() error { return runProjectResourceList(cmd, []string{projectID}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"worktree blocked", "1258291200 bytes", "209715200 bytes", "debug"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q: %s", want, out)
+		}
+	}
 }

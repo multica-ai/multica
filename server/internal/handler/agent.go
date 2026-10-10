@@ -406,6 +406,7 @@ type AgentTaskResponse struct {
 	CompletedAt          *string               `json:"completed_at"`
 	Result               any                   `json:"result"`
 	Error                *string               `json:"error"`
+	WaitReason           string                `json:"wait_reason,omitempty"`
 	FailureReason        string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
 	Attempt              int32                 `json:"attempt"`
 	MaxAttempts          int32                 `json:"max_attempts"`
@@ -847,6 +848,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,
+		WaitReason:             waitReasonForStatus(t.Status, t.WaitReason),
 		BranchName:             branchName,
 		Attempt:                t.Attempt,
 		MaxAttempts:            t.MaxAttempts,

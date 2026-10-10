@@ -78,7 +78,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const deleteProject = `-- name: DeleteProject :exec
-DELETE FROM project WHERE id = $1 AND workspace_id = $2
+WITH readiness_removed AS (DELETE FROM local_worktree_readiness WHERE resource_id IN (SELECT pr.id FROM project_resource pr WHERE pr.project_id = $1 AND pr.workspace_id = $2))
+DELETE FROM project p WHERE p.id = $1 AND p.workspace_id = $2
 `
 
 type DeleteProjectParams struct {

@@ -338,6 +338,7 @@ export interface AgentTask {
   // predates. TaskFailureReason stays in the union for autocomplete on the
   // coarse values; `string & {}` admits the rest without collapsing the
   // hints.
+  wait_reason?: string;
   failure_reason?: TaskFailureReason | (string & {}) | "";
   /** The input comment was edited or deleted, invalidating this run. */
   cancelled_by_comment_change?: boolean;

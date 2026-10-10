@@ -965,6 +965,14 @@ describe("AgentTranscriptDialog — cancel reason", () => {
 // persisted text answers "what exactly did the runner say" for whoever
 // debugs it. Merging them is what made #7411 unfixable by translation alone.
 describe("AgentTranscriptDialog — reason vs raw diagnostics", () => {
+  it("shows a waiting source preflight diagnostic without a failed run", async () => {
+    const waitReason = 'debug: 209715201 bytes exceeds 200 MiB; ignore or remove to resume';
+    renderDialog(items, { task: { ...baseTask, status: "waiting_local_directory", error: null, wait_reason: waitReason } });
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText(waitReason)).toBeInTheDocument();
+    expect(screen.getByText("Technical details")).toBeInTheDocument();
+  });
+
   const rawError =
     "opencode stream ended on an empty step (no text, no tool call, no reported usage)";
 
