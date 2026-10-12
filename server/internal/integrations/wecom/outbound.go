@@ -841,7 +841,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if ws, err := o.q.GetWorkspace(ctx, workspaceID); err == nil {
 		slug = ws.Slug
 	}
-	content := buildInboxMarkdown(item, workspaceIDStr, slug, cp)
+	content := buildInboxMarkdown(enrichInboxItem(ctx, o.q, item, cp), workspaceIDStr, slug, cp)
 	if content == "" {
 		return false
 	}

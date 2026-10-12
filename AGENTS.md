@@ -2,6 +2,8 @@
 
 Multica is a task management platform where people and agents collaborate on issues. These instructions apply to all coding agents working in this repository.
 
+注意：本项目为开源项目的fork版本，修改时请尽量选择与上游减少冲突的方式，以便与上游进行更新合并。
+
 ## Scope and Reading Order
 
 - Before changing `apps/mobile/`, also read [apps/mobile/AGENTS.md](apps/mobile/AGENTS.md), even if your tool does not load nested instructions automatically. Platform-specific sections below apply only to the named platform.

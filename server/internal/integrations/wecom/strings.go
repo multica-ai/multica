@@ -199,6 +199,20 @@ type copyPack struct {
 	InboxDetailLink   string
 	InboxTypeLabels   map[string]string
 	InboxTypeFallback string
+
+	// StatusFieldLabel / AssigneeFieldLabel name the field on the change-
+	// detail body line that buildInboxMarkdown emits for inbox types with a
+	// from/to delta. They sit next to InboxTypeLabels because both are the
+	// adapter's own copy about the same inbox type — the label is the CARD
+	// HEADER category (状态变更), the field label is the BODY line's field
+	// name (状态). Without the field label the card says "something changed"
+	// with no idea what changed, which is the exact gap the enrichment step
+	// fills (see inbox_enrichment.go). UnassignedValue is the target string
+	// shown when either side of an assignee delta has no user, so an unassign
+	// and a new-assign read the same shape as an assignee change.
+	StatusFieldLabel   string
+	AssigneeFieldLabel string
+	UnassignedValue    string
 	// MediaSendFailed / MediaSendUnknown / MediaLookupFailed go the other way:
 	// the agent produced a file and it did not plainly reach the chat. The
 	// answer is already on screen and may well point at the file, so silence
@@ -227,6 +241,23 @@ func (c copyPack) label(t string) string {
 		return l
 	}
 	return c.InboxTypeFallback
+}
+
+// changeFieldLabel returns the field name to prefix the change-detail body
+// line with, for the types this adapter renders as a from/to delta. Returns
+// "" for types that don't get a detail line — the enrichment step treats
+// that as "nothing to add" and the card falls back to its title-only shape.
+// Kept on copyPack next to label because both are per-locale text tables over
+// the same type vocabulary.
+func (c copyPack) changeFieldLabel(t string) string {
+	switch t {
+	case "status_changed":
+		return c.StatusFieldLabel
+	case "assignee_changed", "unassigned", "issue_assigned":
+		return c.AssigneeFieldLabel
+	default:
+		return ""
+	}
 }
 
 // issueCreated renders the /issue confirmation.
@@ -311,6 +342,10 @@ var copyPacks = map[Locale]copyPack{
 			"start_date_changed": "开始日期变更",
 		},
 		InboxTypeFallback: "新消息",
+
+		StatusFieldLabel:   "状态",
+		AssigneeFieldLabel: "指派人",
+		UnassignedValue:    "未指派",
 	},
 	LocaleEn: {
 		AgentOffline:         "⚠️ The agent is offline right now. Your message was received and will be handled once it's back.",
@@ -353,5 +388,9 @@ var copyPacks = map[Locale]copyPack{
 			"start_date_changed": "Start date changed",
 		},
 		InboxTypeFallback: "Notification",
+
+		StatusFieldLabel:   "Status",
+		AssigneeFieldLabel: "Assignee",
+		UnassignedValue:    "Unassigned",
 	},
 }

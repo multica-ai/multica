@@ -3,6 +3,7 @@ dist
 *.log
 .DS_Store
 .envrc
+.omo/
 
 # build outputs
 .turbo

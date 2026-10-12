@@ -17,6 +17,7 @@ COPY packages/eslint-config/package.json packages/eslint-config/
 RUN corepack enable && \
     PNPM_VERSION="$(node -p 'require("./package.json").packageManager')" && \
     corepack prepare "$PNPM_VERSION" --activate
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 RUN pnpm install --frozen-lockfile
 
 # --- Build ---
