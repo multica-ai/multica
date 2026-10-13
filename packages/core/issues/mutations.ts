@@ -975,23 +975,18 @@ export function useUpdateComment(issueId: string) {
   });
 }
 
-/** A comment id, or a thread root to delete together with all its replies. */
-export type DeleteCommentInput = string | { commentId: string; thread: boolean };
-
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     // The capability is read when the delete runs, so the route matches the
     // copy the confirmation showed. Older servers delete the replies too.
-    // A thread delete removes the replies by request; callers offer it only
-    // when the server declares `commentDeleteThreadSupported`.
-    mutationFn: async (input: DeleteCommentInput) => {
-      if (typeof input !== "string" && input.thread) {
-        await api.deleteCommentThread(input.commentId);
+    // `thread` deletes the root together with every reply.
+    mutationFn: async ({ commentId, thread = false }: { commentId: string; thread?: boolean }) => {
+      if (thread) {
+        await api.deleteCommentThread(commentId);
         return false;
       }
-      const commentId = typeof input === "string" ? input : input.commentId;
       const keepReplies = configStore.getState().commentDeleteKeepRepliesSupported;
       await api.deleteComment(commentId, { keepReplies });
       return keepReplies;
@@ -1000,8 +995,7 @@ export function useDeleteComment(issueId: string) {
     // depends on replies only the server sees for certain (#8296). Once it
     // confirms, mirror its outcome; realtime events and the settle refetch
     // reconcile the rest.
-    onSuccess: (keptReplies, input) => {
-      const commentId = typeof input === "string" ? input : input.commentId;
+    onSuccess: (keptReplies, { commentId }) => {
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
         if (!old) return old;
         return keptReplies

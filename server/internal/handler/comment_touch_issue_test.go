@@ -181,7 +181,7 @@ func TestUpdateAndDeleteCommentBumpIssueActivity(t *testing.T) {
 	}
 
 	setBase()
-	deleted, err := testHandler.deleteComment(ctx, comment.ID, parseUUID(testWorkspaceID))
+	deleted, err := testHandler.deleteComment(ctx, comment.ID, parseUUID(testWorkspaceID), false)
 	if err != nil || len(deleted.RemovedIDs) != 1 {
 		t.Fatalf("deleteComment = (%+v, %v), want the comment removed", deleted, err)
 	}
@@ -314,7 +314,7 @@ func TestDeleteCommentLosingRaceDoesNotTouchIssue(t *testing.T) {
 
 	lockDone := make(chan error, 1)
 	go func() {
-		_, deleteErr := testHandler.deleteComment(context.Background(), parseUUID(commentID), parseUUID(testWorkspaceID))
+		_, deleteErr := testHandler.deleteComment(context.Background(), parseUUID(commentID), parseUUID(testWorkspaceID), false)
 		if deleteErr == nil {
 			lockDone <- errors.New("losing delete unexpectedly changed a row")
 			return
@@ -373,7 +373,7 @@ func TestCommentMutationsFollowIssueTeardownLockOrder(t *testing.T) {
 			name:      "delete",
 			queryName: "LockCommentForDelete",
 			mutate: func(ctx context.Context, commentID string) error {
-				_, err := testHandler.deleteComment(ctx, parseUUID(commentID), parseUUID(testWorkspaceID))
+				_, err := testHandler.deleteComment(ctx, parseUUID(commentID), parseUUID(testWorkspaceID), false)
 				if errors.Is(err, pgx.ErrNoRows) {
 					return nil
 				}

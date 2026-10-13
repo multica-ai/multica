@@ -340,39 +340,6 @@ func (q *Queries) DeleteAttachmentsBySourceContext(ctx context.Context, arg Dele
 	return items, nil
 }
 
-const deleteCommentAttachments = `-- name: DeleteCommentAttachments :many
-DELETE FROM attachment
-WHERE comment_id = $1 AND workspace_id = $2
-RETURNING url
-`
-
-type DeleteCommentAttachmentsParams struct {
-	CommentID   pgtype.UUID `json:"comment_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Part of the comment delete transaction: removes the deleted comment's
-// attachments and returns their storage URLs for cleanup after commit.
-func (q *Queries) DeleteCommentAttachments(ctx context.Context, arg DeleteCommentAttachmentsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, deleteCommentAttachments, arg.CommentID, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var url string
-		if err := rows.Scan(&url); err != nil {
-			return nil, err
-		}
-		items = append(items, url)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const deleteCommentsAttachments = `-- name: DeleteCommentsAttachments :many
 DELETE FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
@@ -384,7 +351,8 @@ type DeleteCommentsAttachmentsParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
 }
 
-// DeleteCommentAttachments for every comment of a deleted thread.
+// Part of the comment delete transaction: removes the deleted comments'
+// attachments and returns their storage URLs for cleanup after commit.
 func (q *Queries) DeleteCommentsAttachments(ctx context.Context, arg DeleteCommentsAttachmentsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, deleteCommentsAttachments, arg.CommentIds, arg.WorkspaceID)
 	if err != nil {

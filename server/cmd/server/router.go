@@ -2376,6 +2376,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// a rollback, or self-hosted — fails instead of deleting the
 				// replies with the comment.
 				r.Delete("/keep-replies", h.DeleteComment)
+				// Its own path for the same reason: an older server must not
+				// delete only the root of a thread it was asked to remove.
+				r.Delete("/thread", h.DeleteCommentThread)
 				r.Post("/resolve", h.ResolveComment)
 				r.Delete("/resolve", h.UnresolveComment)
 				r.Post("/reactions", h.AddReaction)

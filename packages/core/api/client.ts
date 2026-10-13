@@ -1866,11 +1866,11 @@ export class ApiClient {
 
   /**
    * Deletes a thread root with every reply, whoever wrote them. Older servers
-   * ignore `delete_thread` and delete only the root, so call this only when
-   * the server declared `comment_delete_thread_supported`.
+   * do not route the path, so the request fails there instead of deleting only
+   * the root.
    */
   async deleteCommentThread(rootId: string): Promise<void> {
-    await this.fetch(`/api/comments/${rootId}?delete_thread=true`, { method: "DELETE" });
+    await this.fetch(`/api/comments/${rootId}/thread`, { method: "DELETE" });
   }
 
   async resolveComment(commentId: string): Promise<Comment> {

@@ -81,7 +81,7 @@ func (f threadTaskFixture) queueTask(t *testing.T, triggerCommentID string) stri
 }
 
 func (f threadTaskFixture) deleteThreadRequest() *http.Request {
-	return withURLParam(newRequest(http.MethodDelete, "/api/comments/"+f.root+"?delete_thread=true", nil), "commentId", f.root)
+	return withURLParam(newRequest(http.MethodDelete, "/api/comments/"+f.root+"/thread", nil), "commentId", f.root)
 }
 
 func TestDeleteCommentThread_CancelsTaskAdmittedAfterCancellationPass(t *testing.T) {
@@ -95,7 +95,7 @@ func TestDeleteCommentThread_CancelsTaskAdmittedAfterCancellationPass(t *testing
 	var taskID string
 	h := *testHandler
 	h.TxStarter = &admitTaskBeforeDeleteTxStarter{delegate: testPool, admit: func() { taskID = f.queueTask(t, f.reply) }}
-	testutil.Call(t, h.DeleteComment, f.deleteThreadRequest()).Want(http.StatusNoContent)
+	testutil.Call(t, h.DeleteCommentThread, f.deleteThreadRequest()).Want(http.StatusNoContent)
 
 	var status string
 	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
@@ -116,7 +116,7 @@ func TestDeleteCommentThread_CancellationFailureKeepsThread(t *testing.T) {
 	h.TxStarter = starter
 	h.TaskService = &service.TaskService{Queries: testHandler.Queries, TxStarter: starter}
 	w := httptest.NewRecorder()
-	h.DeleteComment(w, f.deleteThreadRequest())
+	h.DeleteCommentThread(w, f.deleteThreadRequest())
 	if w.Code == http.StatusNoContent {
 		t.Fatalf("thread deleted although its task could not be cancelled")
 	}
@@ -143,8 +143,8 @@ func TestDeleteCommentThread_AfterRootWasDeleted(t *testing.T) {
 	root := dbfx.Comment(t, issue, "", testutil.Cols{"deleted_at": time.Now()})
 	dbfx.Comment(t, issue, "reply", testutil.Cols{"parent_id": root})
 
-	req := withURLParam(newRequest(http.MethodDelete, "/api/comments/"+root+"?delete_thread=true", nil), "commentId", root)
-	testutil.Call(t, testHandler.DeleteComment, req).Want(http.StatusNoContent)
+	req := withURLParam(newRequest(http.MethodDelete, "/api/comments/"+root+"/thread", nil), "commentId", root)
+	testutil.Call(t, testHandler.DeleteCommentThread, req).Want(http.StatusNoContent)
 
 	entries, status := fetchTimeline(t, issue)
 	if status != http.StatusOK {

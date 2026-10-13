@@ -2779,7 +2779,7 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 	var cancelled []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		var err error
-		cancelled, err = qtx.CancelAgentTasksByTriggerComment(ctx, commentID)
+		cancelled, err = qtx.CancelAgentTasksByTriggerComments(ctx, []pgtype.UUID{commentID})
 		if err != nil {
 			return err
 		}

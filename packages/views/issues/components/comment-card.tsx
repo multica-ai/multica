@@ -173,11 +173,18 @@ function DeleteCommentDialog({
   onOpenChange,
   onConfirm,
   hasReplies,
+  thread,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
   hasReplies?: boolean;
+  /** Confirms deleting the whole thread rather than the comment alone. */
+  thread?: {
+    replyCount: number;
+    /** True when someone other than the viewer wrote any comment in the thread. */
+    includesOthers: boolean;
+  };
 }) {
   const { t } = useT("issues");
   // Only a server that declares it keeps the replies (#8296); an older one
@@ -187,56 +194,25 @@ function DeleteCommentDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t(($) => $.comment.delete_title)}</AlertDialogTitle>
+          <AlertDialogTitle>
+            {thread ? t(($) => $.comment.delete_thread_action) : t(($) => $.comment.delete_title)}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            {!hasReplies
-              ? t(($) => $.comment.delete_desc)
-              : keepsReplies
-                ? t(($) => $.comment.delete_desc_replies_kept)
-                : t(($) => $.comment.delete_desc_with_replies)}
+            {thread
+              ? thread.includesOthers
+                ? t(($) => $.comment.delete_thread_desc_others, { count: thread.replyCount })
+                : t(($) => $.comment.delete_thread_desc, { count: thread.replyCount })
+              : !hasReplies
+                ? t(($) => $.comment.delete_desc)
+                : keepsReplies
+                  ? t(($) => $.comment.delete_desc_replies_kept)
+                  : t(($) => $.comment.delete_desc_with_replies)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            {t(($) => $.comment.delete_action)}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function DeleteThreadDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  replyCount,
-  includesOthers,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-  replyCount: number;
-  /** True when someone other than the viewer wrote any comment in the thread. */
-  includesOthers: boolean;
-}) {
-  const { t } = useT("issues");
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t(($) => $.comment.delete_thread_title)}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {includesOthers
-              ? t(($) => $.comment.delete_thread_desc_others, { count: replyCount })
-              : t(($) => $.comment.delete_thread_desc, { count: replyCount })}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            {t(($) => $.comment.delete_thread_action)}
+            {thread ? t(($) => $.comment.delete_thread_action) : t(($) => $.comment.delete_action)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -1185,6 +1161,8 @@ function CommentCardImpl({
   );
 
   const replyCount = visibleReplies.length;
+  // The only action a deleted root keeps, so the replies it kept can still go.
+  const canDeleteThread = canDeleteEntry && replyCount > 0;
   const repliedToIds = new Set(allNestedReplies.map((reply) => reply.parent_id));
   const deleted = isDeletedComment(entry);
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -1341,7 +1319,7 @@ function CommentCardImpl({
                     </Button>
                   }
                 />
-                {open && (!deleted || (canDeleteEntry && replyCount > 0)) && <>
+                {open && (!deleted || canDeleteThread) && <>
                   {!deleted && !edit.editing && <QuickEmojiPicker
                     onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
                     ariaLabel={t(($) => $.comment.add_reaction)}
@@ -1412,22 +1390,18 @@ function CommentCardImpl({
                           </DropdownMenuItem>
                         )}
                       </>}
-                      {canDeleteEntry && (
-                        <>
-                          {!deleted && <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
-                              <Trash2 className="h-3.5 w-3.5" />
-                              {t(($) => $.comment.delete_action)}
-                            </DropdownMenuItem>
-                          </>}
-                          {replyCount > 0 && (
-                            <DropdownMenuItem onClick={() => setConfirmDeleteThread(true)} variant="destructive">
-                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                              {t(($) => $.comment.delete_thread_action)}
-                            </DropdownMenuItem>
-                          )}
-                        </>
+                      {canDeleteEntry && !deleted && <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => setConfirmDelete(true)} variant="destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          {t(($) => $.comment.delete_action)}
+                        </DropdownMenuItem>
+                      </>}
+                      {canDeleteThread && (
+                        <DropdownMenuItem onClick={() => setConfirmDeleteThread(true)} variant="destructive">
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          {t(($) => $.comment.delete_thread_action)}
+                        </DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -1437,14 +1411,16 @@ function CommentCardImpl({
                     onConfirm={() => onDelete(entry.id)}
                     hasReplies={replyCount > 0}
                   />
-                  <DeleteThreadDialog
+                  <DeleteCommentDialog
                     open={confirmDeleteThread}
                     onOpenChange={setConfirmDeleteThread}
                     onConfirm={() => onDelete(entry.id, { thread: true })}
-                    replyCount={replyCount}
-                    includesOthers={[entry, ...visibleReplies].some(
-                      (e) => !(e.actor_type === "member" && e.actor_id === currentUserId),
-                    )}
+                    thread={{
+                      replyCount,
+                      includesOthers: [entry, ...visibleReplies].some(
+                        (e) => !(e.actor_type === "member" && e.actor_id === currentUserId),
+                      ),
+                    }}
                   />
                 </>}
               </div>

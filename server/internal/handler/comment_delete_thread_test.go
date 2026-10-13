@@ -7,8 +7,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-// Whole-thread deletion is an explicit opt-in; ordinary DELETE must keep replies.
-// Proposed API contract: DELETE /api/comments/{rootId}?delete_thread=true.
+// Whole-thread deletion has its own route; ordinary DELETE must keep replies.
 func TestDeleteCommentThread(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -45,13 +44,13 @@ func TestDeleteCommentThread(t *testing.T) {
 			untouched := dbfx.Comment(t, issue, "other thread")
 			untouchedReply := dbfx.Comment(t, issue, "other thread reply", testutil.Cols{"parent_id": untouched})
 
-			path := "/api/comments/" + root
+			path, handle := "/api/comments/"+root, testHandler.DeleteComment
 			if tt.thread {
-				path += "?delete_thread=true"
+				path, handle = path+"/thread", testHandler.DeleteCommentThread
 			}
 			req := withURLParam(newRequest(http.MethodDelete, path, nil), "commentId", root)
 			req.Header.Set("X-User-ID", tt.actor)
-			testutil.Call(t, testHandler.DeleteComment, req).Want(tt.status)
+			testutil.Call(t, handle, req).Want(tt.status)
 
 			// Read through the public timeline, including tombstones, rather than
 			// inspecting storage: a deleted thread must disappear, not just blank.

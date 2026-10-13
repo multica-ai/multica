@@ -694,21 +694,11 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
 WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
--- name: CancelAgentTasksByTriggerComment :many
--- Cancels active tasks whose planned batch contains the edited/deleted comment.
+-- name: CancelAgentTasksByTriggerComments :many
+-- Cancels active tasks whose planned batch contains an edited/deleted comment.
 -- The body may already have been embedded as either the primary trigger or a
 -- coalesced input; cancellation prevents an agent from acting on a stale or
 -- deleted version. Must run before deletion clears trigger_comment_id.
-UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
-    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL,
-    context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('comment_change_cancelled_task_id', id::text)
-WHERE (trigger_comment_id = $1 OR $1 = ANY(coalesced_comment_ids))
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING *;
-
--- name: CancelAgentTasksByTriggerComments :many
--- CancelAgentTasksByTriggerComment for every comment of a deleted thread.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
     cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL,
