@@ -126,13 +126,15 @@ func TestCreateComment_GuestSquadWorkerRouting_GH8301(t *testing.T) {
 				dbfx.Exec(t, `UPDATE agent SET owner_id = $2 WHERE id = $1`, guestLeaderID, outsiderID)
 			case "deleted":
 				dbfx.Comment(t, issueID, "keep delegation reply tree", testutil.Cols{"parent_id": delegationID})
-				deleted, err := testHandler.deleteComment(context.Background(), parseUUID(delegationID), parseUUID(testWorkspaceID))
-				if err != nil {
-					t.Fatal(err)
+				// Routing from a tombstone while the worker is still running is
+				// the state under test. Real deletion also cancels the worker.
+				dbfx.Exec(t, `UPDATE comment SET content = '', deleted_at = now() WHERE id = $1`, delegationID)
+				if got := dbfx.Count(t, `SELECT count(*) FROM comment WHERE id = $1 AND deleted_at IS NOT NULL AND content = ''`, delegationID); got != 1 {
+					t.Fatal("routing fixture must retain a tombstoned delegation")
 				}
-				if deleted.Tombstone == nil {
-					t.Fatal("delegation with replies was removed instead of tombstoned")
-				}
+			}
+			if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE id = $1 AND status = 'running' AND trigger_comment_id = $2`, workerTaskID, delegationID); got != 1 {
+				t.Fatal("routing fixture must retain the running worker and its delegation trigger")
 			}
 
 			r := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{

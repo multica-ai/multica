@@ -485,7 +485,7 @@ func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[1:2])
 }
 
-func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
+func TestDeleteComment_FailureLeavesTaskAndBatchUntouched(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -512,10 +512,10 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	if existing != 1 {
 		t.Fatalf("failed delete unexpectedly removed trigger")
 	}
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+	assertUnchangedCommentBatch(t, fixture)
 }
 
-func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *testing.T) {
+func TestDeleteComment_ConcurrentNoOpIsReportedAndLeavesTaskAndBatchUntouched(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -535,7 +535,33 @@ func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *test
 		t.Fatalf("DeleteComment no-op: got %d: %s", w.Code, w.Body.String())
 	}
 
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+	assertUnchangedCommentBatch(t, fixture)
+}
+
+func assertUnchangedCommentBatch(t *testing.T, fixture commentDeliveryFixture) {
+	t.Helper()
+	var status, trigger string
+	var coalesced, delivered []string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status, trigger_comment_id::text, coalesced_comment_ids::text[], delivered_comment_ids::text[]
+		FROM agent_task_queue WHERE id = $1
+	`, fixture.taskID).Scan(&status, &trigger, &coalesced, &delivered); err != nil {
+		t.Fatalf("load original task after failed delete: %v", err)
+	}
+	if status != "queued" || trigger != fixture.commentID[2] {
+		t.Fatalf("original task changed: status=%s trigger=%s", status, trigger)
+	}
+	if !slices.Equal(coalesced, []string{fixture.commentID[1], fixture.commentID[0]}) || len(delivered) != 0 {
+		t.Fatalf("original batch changed: coalesced=%v delivered=%v", coalesced, delivered)
+	}
+	if got := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, fixture.issueID); got != 1 {
+		t.Fatalf("failed delete created replacement tasks: got %d tasks, want 1", got)
+	}
+	for i, id := range fixture.commentID {
+		if got := dbfx.Count(t, `SELECT count(*) FROM comment WHERE id = $1 AND content = $2 AND deleted_at IS NULL`, id, fixture.content[i]); got != 1 {
+			t.Fatalf("failed delete changed batch comment %s", id)
+		}
+	}
 }
 
 func assertRepairedCommentBatch(t *testing.T, fixture commentDeliveryFixture, wantTrigger string, wantCoalesced []string) {
