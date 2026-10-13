@@ -3825,17 +3825,18 @@ var errTaskSupplementInFlight = errors.New("additional message is still being de
 // that is left without replies. Nothing here relies on the parent_id cascade.
 //
 // Tasks built from the comment are cancelled in the same transaction, so the
-// delete and the cancellation commit together or not at all. Cancelling under
-// the issue lock also fences task admission. Every task insert takes the
-// issue row through lock_task_owner_rows and waits for this transaction; once
-// it commits, the trigger_comment_id foreign key rejects a task for a removed
-// comment. A merge into a pending task (MergeCommentIntoPendingTask) or an
-// active one (RegisterPlannedCommentForActiveTask) is an update of a task row:
-// if it commits first the cancellation sees it, and if it waits on a row this
-// cancels, it re-checks the row and finds it cancelled, or fails the same
-// foreign key. Cancelling must precede the delete, because a removed row
-// would null trigger_comment_id through ON DELETE SET NULL and orphan its
-// tasks in queued.
+// delete and the cancellation commit together or not at all. Cancelling must
+// precede the delete, because a removed row would null trigger_comment_id
+// through ON DELETE SET NULL and orphan its tasks in queued.
+//
+// Admission is fenced only when the row is removed. Every task insert takes
+// the issue row through lock_task_owner_rows and waits for this transaction,
+// and a merge into a pending task (MergeCommentIntoPendingTask) that waits on
+// a row this cancels re-points trigger_comment_id; once this commits, the
+// foreign key rejects either for a removed comment. A tombstone keeps its row,
+// so a waiting insert or merge that names it still succeeds after commit and
+// queues a task for the deleted comment. deleteCommentThread removes every row
+// it locks and has no such gap.
 //
 // Locks are taken issue -> comment -> task -> task_supplement. Issue teardown
 // shares the issue -> comment prefix, and task terminal transitions settle
