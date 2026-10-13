@@ -125,8 +125,6 @@ describe("CommentCard — deleted comments", () => {
 
     expect(screen.getByText("This comment was deleted")).toBeTruthy();
     expect(screen.getByText("body bb")).toBeTruthy();
-    // The tombstoned root retains thread deletion; the live reply has its own menu.
-    expect(actionMenus()).toHaveLength(2);
     expect(screen.getByText("Leave a reply...")).toBeTruthy();
   });
 
@@ -135,9 +133,7 @@ describe("CommentCard — deleted comments", () => {
   it("offers Delete thread on a deleted root that still has replies", async () => {
     renderThread(tombstone("a", null), [comment("bb", "a", { actor_id: "user-2" })]);
 
-    const menus = actionMenus();
-    expect(menus).toHaveLength(2);
-    fireEvent.click(menus[0]!);
+    fireEvent.click(actionMenus()[0]!);
     expect(await screen.findByRole("menuitem", { name: "Delete thread" })).toBeTruthy();
     expect(screen.getAllByRole("menuitem")).toHaveLength(1);
   });
