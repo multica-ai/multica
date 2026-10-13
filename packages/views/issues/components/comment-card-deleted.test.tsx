@@ -129,6 +129,17 @@ describe("CommentCard — deleted comments", () => {
     expect(screen.getByText("Leave a reply...")).toBeTruthy();
   });
 
+  // Deleting a root normally keeps its replies, so its author must still be
+  // able to remove the rest of the thread afterwards.
+  it("offers Delete thread on a deleted root that still has replies", async () => {
+    renderThread(tombstone("a", null), [comment("bb", "a", { actor_id: "user-2" })]);
+
+    const menus = actionMenus();
+    expect(menus).toHaveLength(2);
+    fireEvent.click(menus[0]!);
+    expect(await screen.findByRole("menuitem", { name: "Delete thread" })).toBeTruthy();
+  });
+
   it("tells the user the replies are kept when the server keeps them", async () => {
     configStore.getState().setCommentDeleteKeepRepliesSupported(true);
     onTestFinished(() => configStore.getState().setCommentDeleteKeepRepliesSupported(false));
