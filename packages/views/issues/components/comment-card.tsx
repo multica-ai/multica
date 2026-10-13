@@ -139,7 +139,8 @@ interface CommentCardProps {
   onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
   onReplyAccepted?: (commentId: string) => void;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
-  onDelete: (commentId: string) => void;
+  /** `thread` deletes the root together with every reply, whoever wrote them. */
+  onDelete: (commentId: string, opts?: { thread?: boolean }) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
@@ -206,6 +207,44 @@ function DeleteCommentDialog({
   );
 }
 
+function DeleteThreadDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  replyCount,
+  includesOthers,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+  replyCount: number;
+  /** True when someone other than the viewer wrote any comment in the thread. */
+  includesOthers: boolean;
+}) {
+  const { t } = useT("issues");
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.comment.delete_thread_title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {includesOthers
+              ? t(($) => $.comment.delete_thread_desc_others, { count: replyCount })
+              : t(($) => $.comment.delete_thread_desc, { count: replyCount })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm}>
+            {t(($) => $.comment.delete_thread_action)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Standalone attachment list — renders attachments not already in the markdown
 
 export function AttachmentList({
@@ -1081,6 +1120,7 @@ function CommentCardImpl({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDeleteThread, setConfirmDeleteThread] = useState(false);
 
   const allNestedReplies = replies;
   // What the thread shows. Tombstones are excluded from display and counts but
@@ -1377,6 +1417,12 @@ function CommentCardImpl({
                             <Trash2 className="h-3.5 w-3.5" />
                             {t(($) => $.comment.delete_action)}
                           </DropdownMenuItem>
+                          {replyCount > 0 && (
+                            <DropdownMenuItem onClick={() => setConfirmDeleteThread(true)} variant="destructive">
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                              {t(($) => $.comment.delete_thread_action)}
+                            </DropdownMenuItem>
+                          )}
                         </>
                       )}
                     </DropdownMenuContent>
@@ -1386,6 +1432,15 @@ function CommentCardImpl({
                     onOpenChange={setConfirmDelete}
                     onConfirm={() => onDelete(entry.id)}
                     hasReplies={replyCount > 0}
+                  />
+                  <DeleteThreadDialog
+                    open={confirmDeleteThread}
+                    onOpenChange={setConfirmDeleteThread}
+                    onConfirm={() => onDelete(entry.id, { thread: true })}
+                    replyCount={replyCount}
+                    includesOthers={[entry, ...visibleReplies].some(
+                      (e) => !(e.actor_type === "member" && e.actor_id === currentUserId),
+                    )}
                   />
                 </>}
               </div>

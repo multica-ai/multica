@@ -1043,6 +1043,10 @@ export interface AppConfigResponse {
    * DELETE /api/comments/{id}/keep-replies. Older servers deleted the replies
    * too, so absent must be treated as false (#8296). */
   comment_delete_keep_replies_supported?: boolean;
+  /** Whether DELETE /api/comments/{id}?delete_thread=true removes a thread
+   * root with every reply. Older servers ignore the parameter and delete only
+   * the root, so absent must be treated as false. */
+  comment_delete_thread_supported?: boolean;
   server_version?: string;
 }
 
@@ -1313,6 +1317,7 @@ export const AppConfigSchema = z.object({
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
+  comment_delete_thread_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1336,6 +1341,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   issue_create_properties_supported: false,
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
+  // Fail closed: old servers delete only the root of a thread.
+  comment_delete_thread_supported: false,
   feature_flags: {},
 };
 

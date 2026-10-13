@@ -43,6 +43,7 @@ import {
 } from "@multica/core/issues/comment-trigger-outcomes";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { removeCommentSubtree } from "@multica/core/issues/comment-deletion";
+import { configStore } from "@multica/core/config";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { blockedShortReasonLabel } from "../blocked-trigger-copy";
@@ -401,9 +402,14 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
   );
 
   const deleteComment = useCallback(
-    async (commentId: string) => {
+    async (commentId: string, opts?: { thread?: boolean }) => {
+      if (opts?.thread && !configStore.getState().commentDeleteThreadSupported) {
+        // An older server would delete only the root and keep the replies.
+        toast.error(t(($) => $.comment.delete_thread_unsupported));
+        return;
+      }
       try {
-        await deleteCommentAsync(commentId);
+        await deleteCommentAsync(opts?.thread ? { commentId, thread: true } : commentId);
       } catch (err) {
         toast.error(
           err instanceof Error && err.message

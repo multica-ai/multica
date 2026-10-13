@@ -117,6 +117,11 @@ export function AuthInitializer({
           .setCommentDeleteKeepRepliesSupported(
             cfg.comment_delete_keep_replies_supported === true,
           );
+        configStore
+          .getState()
+          .setCommentDeleteThreadSupported(
+            cfg.comment_delete_thread_supported === true,
+          );
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,
