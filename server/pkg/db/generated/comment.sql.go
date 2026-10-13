@@ -339,6 +339,40 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 	return i, err
 }
 
+const deleteCommentsByIDs = `-- name: DeleteCommentsByIDs :many
+DELETE FROM comment
+WHERE workspace_id = $1 AND id = ANY($2::uuid[])
+RETURNING id
+`
+
+type DeleteCommentsByIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Ids         []pgtype.UUID `json:"ids"`
+}
+
+// Removes a whole thread at once. The caller lists the rows inside the delete
+// transaction, after LockCommentForDelete froze the thread, and clears their
+// attachments, reactions and receipts first.
+func (q *Queries) DeleteCommentsByIDs(ctx context.Context, arg DeleteCommentsByIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, deleteCommentsByIDs, arg.WorkspaceID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteLeafComment = `-- name: DeleteLeafComment :one
 DELETE FROM comment
 WHERE comment.id = $1 AND comment.workspace_id = $2
@@ -993,6 +1027,45 @@ func (q *Queries) ListCommentThreadHistory(ctx context.Context, arg ListCommentT
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCommentThreadIDs = `-- name: ListCommentThreadIDs :many
+WITH RECURSIVE thread AS (
+    SELECT comment.id FROM comment
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+    UNION
+    SELECT child.id FROM comment child
+    JOIN thread ON child.parent_id = thread.id
+    WHERE child.workspace_id = $2
+)
+SELECT thread.id FROM thread
+`
+
+type ListCommentThreadIDsParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The comment and every descendant, for deleting a whole thread. UNION, not
+// UNION ALL, so a malformed parent cycle cannot recurse forever.
+func (q *Queries) ListCommentThreadIDs(ctx context.Context, arg ListCommentThreadIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCommentThreadIDs, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

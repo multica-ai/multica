@@ -753,6 +753,27 @@ WHERE comment.id = @id AND comment.workspace_id = @workspace_id
   AND NOT EXISTS (SELECT 1 FROM comment child WHERE child.parent_id = comment.id)
 RETURNING comment.id, comment.parent_id;
 
+-- name: ListCommentThreadIDs :many
+-- The comment and every descendant, for deleting a whole thread. UNION, not
+-- UNION ALL, so a malformed parent cycle cannot recurse forever.
+WITH RECURSIVE thread AS (
+    SELECT comment.id FROM comment
+    WHERE comment.id = @id AND comment.workspace_id = @workspace_id
+    UNION
+    SELECT child.id FROM comment child
+    JOIN thread ON child.parent_id = thread.id
+    WHERE child.workspace_id = @workspace_id
+)
+SELECT thread.id FROM thread;
+
+-- name: DeleteCommentsByIDs :many
+-- Removes a whole thread at once. The caller lists the rows inside the delete
+-- transaction, after LockCommentForDelete froze the thread, and clears their
+-- attachments, reactions and receipts first.
+DELETE FROM comment
+WHERE workspace_id = @workspace_id AND id = ANY(@ids::uuid[])
+RETURNING id;
+
 -- name: TouchIssueForCommentDelete :one
 -- A delete counts as activity on its issue, like CreateComment and
 -- UpdateComment. Runs inside the delete transaction after the comment rows

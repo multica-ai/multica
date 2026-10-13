@@ -322,3 +322,12 @@ FOR UPDATE;
 -- name: DeleteTaskSupplementByComment :exec
 DELETE FROM task_supplement
 WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
+
+-- name: LockTaskSupplementsByComments :many
+SELECT * FROM task_supplement
+WHERE comment_id = ANY(@comment_ids::uuid[]) AND workspace_id = @workspace_id
+FOR UPDATE;
+
+-- name: DeleteTaskSupplementsByComments :exec
+DELETE FROM task_supplement
+WHERE comment_id = ANY(@comment_ids::uuid[]) AND workspace_id = @workspace_id;

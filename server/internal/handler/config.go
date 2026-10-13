@@ -101,6 +101,12 @@ type AppConfig struct {
 	// replies unless it is declared.
 	CommentDeleteKeepRepliesSupported bool `json:"comment_delete_keep_replies_supported"`
 
+	// CommentDeleteThreadSupported tells clients that
+	// DELETE /api/comments/{id}?delete_thread=true removes a thread root with
+	// every reply. Older servers ignore the parameter and delete only the root,
+	// so clients must not offer whole-thread deletion unless it is declared.
+	CommentDeleteThreadSupported bool `json:"comment_delete_thread_supported"`
+
 	// ServerVersion is the running API build version, so self-hosted
 	// operators can confirm what's deployed and include it in bug reports.
 	// Only emitted on self-hosted deployments — omitted on the managed cloud,
@@ -121,6 +127,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		AgentConversationStartersSupported: true,
 		IssueCreatePropertiesSupported:     true,
 		CommentDeleteKeepRepliesSupported:  true,
+		CommentDeleteThreadSupported:       true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",

@@ -373,6 +373,38 @@ func (q *Queries) DeleteCommentAttachments(ctx context.Context, arg DeleteCommen
 	return items, nil
 }
 
+const deleteCommentsAttachments = `-- name: DeleteCommentsAttachments :many
+DELETE FROM attachment
+WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
+RETURNING url
+`
+
+type DeleteCommentsAttachmentsParams struct {
+	CommentIds  []pgtype.UUID `json:"comment_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+// DeleteCommentAttachments for every comment of a deleted thread.
+func (q *Queries) DeleteCommentsAttachments(ctx context.Context, arg DeleteCommentsAttachmentsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteCommentsAttachments, arg.CommentIds, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, err
+		}
+		items = append(items, url)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteSourceContextAttachmentsByWorkspace = `-- name: DeleteSourceContextAttachmentsByWorkspace :exec
 DELETE FROM attachment
 WHERE workspace_id = $1

@@ -470,6 +470,21 @@ func (q *Queries) GetRunningTaskForAgentOnIssue(ctx context.Context, arg GetRunn
 	return id, err
 }
 
+const deleteTaskSupplementsByComments = `-- name: DeleteTaskSupplementsByComments :exec
+DELETE FROM task_supplement
+WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
+`
+
+type DeleteTaskSupplementsByCommentsParams struct {
+	CommentIds  []pgtype.UUID `json:"comment_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+func (q *Queries) DeleteTaskSupplementsByComments(ctx context.Context, arg DeleteTaskSupplementsByCommentsParams) error {
+	_, err := q.db.Exec(ctx, deleteTaskSupplementsByComments, arg.CommentIds, arg.WorkspaceID)
+	return err
+}
+
 const getTaskSupplementByRequest = `-- name: GetTaskSupplementByRequest :one
 SELECT s.task_id, s.workspace_id, s.issue_id, s.comment_id, s.author_id, s.client_request_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
 FROM task_supplement s
@@ -724,6 +739,50 @@ type LockTaskSupplementsByCommentParams struct {
 
 func (q *Queries) LockTaskSupplementsByComment(ctx context.Context, arg LockTaskSupplementsByCommentParams) ([]TaskSupplement, error) {
 	rows, err := q.db.Query(ctx, lockTaskSupplementsByComment, arg.CommentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskSupplement{}
+	for rows.Next() {
+		var i TaskSupplement
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.AuthorID,
+			&i.ClientRequestID,
+			&i.Status,
+			&i.FailureReason,
+			&i.AttemptCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockTaskSupplementsByComments = `-- name: LockTaskSupplementsByComments :many
+SELECT task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at FROM task_supplement
+WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockTaskSupplementsByCommentsParams struct {
+	CommentIds  []pgtype.UUID `json:"comment_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+func (q *Queries) LockTaskSupplementsByComments(ctx context.Context, arg LockTaskSupplementsByCommentsParams) ([]TaskSupplement, error) {
+	rows, err := q.db.Query(ctx, lockTaskSupplementsByComments, arg.CommentIds, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
