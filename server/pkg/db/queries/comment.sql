@@ -663,7 +663,9 @@ WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id
 -- later statements start from a fresh snapshot taken after the locks, which is
 -- what makes their reply check exact.
 --
--- A tombstone is excluded: deleting an already-deleted comment finds nothing.
+-- A tombstone is excluded unless allow_deleted is set: deleting an
+-- already-deleted comment finds nothing, but deleting the thread below a
+-- tombstoned root still has replies to remove.
 WITH locked_issue AS MATERIALIZED (
     SELECT issue.id
     FROM issue
@@ -681,7 +683,7 @@ SELECT comment.*
 FROM comment
 CROSS JOIN issue_fence
 WHERE comment.id = @id AND comment.workspace_id = @workspace_id
-  AND comment.deleted_at IS NULL
+  AND (comment.deleted_at IS NULL OR @allow_deleted::bool)
   AND issue_fence.locked_count >= 0
 FOR UPDATE OF comment;
 
@@ -769,7 +771,7 @@ SELECT thread.id FROM thread;
 -- name: DeleteCommentsByIDs :many
 -- Removes a whole thread at once. The caller lists the rows inside the delete
 -- transaction, after LockCommentForDelete froze the thread, and clears their
--- attachments, reactions and receipts first.
+-- tasks, attachments, reactions and receipts first.
 DELETE FROM comment
 WHERE workspace_id = @workspace_id AND id = ANY(@ids::uuid[])
 RETURNING id;

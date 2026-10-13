@@ -352,7 +352,7 @@ type DeleteCommentsByIDsParams struct {
 
 // Removes a whole thread at once. The caller lists the rows inside the delete
 // transaction, after LockCommentForDelete froze the thread, and clears their
-// attachments, reactions and receipts first.
+// tasks, attachments, reactions and receipts first.
 func (q *Queries) DeleteCommentsByIDs(ctx context.Context, arg DeleteCommentsByIDsParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, deleteCommentsByIDs, arg.WorkspaceID, arg.Ids)
 	if err != nil {
@@ -2070,14 +2070,15 @@ SELECT comment.id, comment.issue_id, comment.author_type, comment.author_id, com
 FROM comment
 CROSS JOIN issue_fence
 WHERE comment.id = $1 AND comment.workspace_id = $2
-  AND comment.deleted_at IS NULL
+  AND (comment.deleted_at IS NULL OR $3::bool)
   AND issue_fence.locked_count >= 0
 FOR UPDATE OF comment
 `
 
 type LockCommentForDeleteParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	AllowDeleted bool        `json:"allow_deleted"`
 }
 
 // First statement of the comment delete transaction (#8296). Defense-in-depth:
@@ -2091,9 +2092,11 @@ type LockCommentForDeleteParams struct {
 // later statements start from a fresh snapshot taken after the locks, which is
 // what makes their reply check exact.
 //
-// A tombstone is excluded: deleting an already-deleted comment finds nothing.
+// A tombstone is excluded unless allow_deleted is set: deleting an
+// already-deleted comment finds nothing, but deleting the thread below a
+// tombstoned root still has replies to remove.
 func (q *Queries) LockCommentForDelete(ctx context.Context, arg LockCommentForDeleteParams) (Comment, error) {
-	row := q.db.QueryRow(ctx, lockCommentForDelete, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, lockCommentForDelete, arg.ID, arg.WorkspaceID, arg.AllowDeleted)
 	var i Comment
 	err := row.Scan(
 		&i.ID,
