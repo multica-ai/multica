@@ -76,7 +76,7 @@ function comment(
 function renderThread(
   root: TimelineEntry,
   replies: TimelineEntry[],
-  { resolvable = true }: { resolvable?: boolean } = {},
+  { resolvable = true, canModerate = false }: { resolvable?: boolean; canModerate?: boolean } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
@@ -86,6 +86,7 @@ function renderThread(
         entry={root}
         replies={replies}
         currentUserId="user-1"
+        canModerate={canModerate}
         onReply={vi.fn().mockResolvedValue(true)}
         onEdit={vi.fn().mockResolvedValue(undefined)}
         onDelete={vi.fn()}
@@ -113,6 +114,23 @@ async function openMenuLayout(index: number): Promise<string[]> {
 const agentAuthor = { actor_type: "agent", actor_id: "agent-1" } as const;
 
 describe("CommentCard — actions menu layout", () => {
+  it.each([
+    { viewer: "root author", author: { actor_type: "member", actor_id: "user-1" } as const, canModerate: false, allowed: true },
+    { viewer: "workspace moderator", author: agentAuthor, canModerate: true, allowed: true },
+    { viewer: "unrelated member", author: { actor_type: "member", actor_id: "user-2" } as const, canModerate: false, allowed: false },
+  ])("offers whole-thread deletion only when authorized as $viewer", async ({ author, canModerate, allowed }) => {
+    // A root author can delete the thread even when its descendants have other
+    // authors. Ordinary Delete must remain a separate, comment-only action.
+    renderThread(comment("root", null, author), [
+      comment("reply", "root", agentAuthor),
+      comment("nested", "reply", { actor_type: "member", actor_id: "user-2" }),
+    ], { canModerate });
+
+    const menu = await openMenuLayout(0);
+    expect(menu.includes("Delete thread")).toBe(allowed);
+    expect(menu.includes("Delete")).toBe(allowed);
+  });
+
   it("groups the author's root menu as edit/resolve, copy/derive, delete", async () => {
     renderThread(comment("root", null), []);
 
