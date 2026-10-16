@@ -27,6 +27,9 @@ export type AgentSortField = "lastActive" | "name" | "runs" | "created";
 
 export type AgentSortDirection = "asc" | "desc";
 
+/** Agents list layout mode: the traditional table grid or the new card/row views. */
+export type AgentViewMode = "table" | "grid" | "rows";
+
 /** Per-field direction applied when the user switches TO that field. */
 export const AGENT_SORT_DEFAULT_DIRECTION: Record<
   AgentSortField,
@@ -89,6 +92,7 @@ export interface AgentsViewState {
   sortDirection: AgentSortDirection;
   hiddenColumns: AgentColumnKey[];
   filters: AgentListFilters;
+  viewMode: AgentViewMode;
   setScope: (scope: AgentsScope) => void;
   /** Header click: toggles direction on the active field, otherwise switches
    *  to the field with its default direction. */
@@ -99,6 +103,7 @@ export interface AgentsViewState {
   toggleColumn: (key: AgentColumnKey) => void;
   toggleFilter: (key: keyof AgentListFilters, value: string) => void;
   clearFilters: () => void;
+  setViewMode: (mode: AgentViewMode) => void;
 }
 
 const DEFAULTS = {
@@ -108,6 +113,9 @@ const DEFAULTS = {
   sortField: "lastActive" as AgentSortField,
   sortDirection: AGENT_SORT_DEFAULT_DIRECTION.lastActive,
   hiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
+  // "table" (the original ListGrid) stays the default so existing users
+  // don't get a surprise layout change on first load after upgrade.
+  viewMode: "table" as AgentViewMode,
   filters: EMPTY_AGENT_FILTERS,
 };
 
@@ -160,6 +168,7 @@ export const useAgentsViewStore = create<AgentsViewState>()(
           return { scope, filters: { ...state.filters, [key]: next } };
         }),
       clearFilters: () => set({ filters: EMPTY_AGENT_FILTERS }),
+      setViewMode: (mode) => set({ viewMode: mode }),
     }),
     {
       name: "multica_agents_view",
@@ -172,6 +181,7 @@ export const useAgentsViewStore = create<AgentsViewState>()(
         sortDirection: state.sortDirection,
         hiddenColumns: state.hiddenColumns,
         filters: state.filters,
+        viewMode: state.viewMode,
       }),
       // On rehydrate, if the new workspace has no persisted value, reset to
       // the defaults instead of leaving the previous workspace's in-memory
@@ -187,6 +197,7 @@ export const useAgentsViewStore = create<AgentsViewState>()(
           ...current,
           ...p,
           filters: { ...EMPTY_AGENT_FILTERS, ...(p.filters ?? {}) },
+          viewMode: p.viewMode ?? DEFAULTS.viewMode,
         };
       },
     },

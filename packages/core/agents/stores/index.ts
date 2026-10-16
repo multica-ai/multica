@@ -10,6 +10,7 @@ export {
   type AgentSortDirection,
   type AgentColumnKey,
   type AgentListFilters,
+  type AgentViewMode,
 } from "./view-store";
 export {
   useTranscriptViewStore,

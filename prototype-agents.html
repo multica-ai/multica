@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agents Page — Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* ===== Multica Design Tokens (from tokens.css) ===== */
+:root {
+  --radius: 0.5rem;
+  --radius-xs: calc(var(--radius) * 0.375);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+
+  --text-micro: 11px;
+  --text-caption: 12px;
+  --text-label: 13px;
+  --text-body: 14px;
+  --text-body-lg: 15px;
+  --text-title-sm: 16px;
+  --text-title: 18px;
+  --text-title-lg: 20px;
+  --text-display-sm: 24px;
+  --text-display: 36px;
+
+  --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+  --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+  --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
+}
+
+/* Dark theme (Multica default) */
+.dark {
+  --app-shell: oklch(0.21 0.006 285.885);
+  --page-canvas: oklch(0.18 0.005 286);
+  --surface: oklch(0.225 0.006 286);
+  --surface-raised: oklch(0.25 0.006 286);
+  --surface-hover: oklch(0.265 0.006 286);
+  --surface-selected: oklch(0.28 0.008 286);
+  --surface-border: oklch(0.3 0.008 286);
+  --surface-border-subtle: oklch(0.26 0.006 286);
+
+  --foreground: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.68 0.015 286);
+  --faint-foreground: oklch(0.5 0.015 286);
+
+  --primary: oklch(0.97 0 0);
+  --primary-foreground: oklch(0.18 0.005 286);
+  --brand: oklch(0.62 0.19 256);
+  --brand-foreground: oklch(0.97 0 0);
+  --destructive: oklch(0.65 0.22 27);
+  --success: oklch(0.62 0.16 145);
+  --warning: oklch(0.78 0.16 85);
+  --info: oklch(0.62 0.18 250);
+
+  --accent: oklch(0.28 0.008 286);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--page-canvas);
+  color: var(--foreground);
+  font-size: var(--text-body);
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== Layout ===== */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--surface-border-subtle);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.page-header-left { display: flex; align-items: center; gap: 12px; }
+
+.page-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.page-count {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  background: var(--surface-hover);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-body);
+  font-weight: 500;
+  font-family: var(--font-sans);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.btn-primary:hover { filter: brightness(1.1); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted-foreground);
+  border: 1px solid var(--surface-border);
+}
+.btn-ghost:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.btn-ghost.active {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* ===== Toolbar ===== */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--surface-border-subtle);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  max-width: 320px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface-border);
+  background: var(--page-canvas);
+  color: var(--foreground);
+  font-size: var(--text-body);
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.search-input:focus { border-color: var(--brand); }
+.search-input::placeholder { color: var(--faint-foreground); }
+
+.scope-group { display: flex; gap: 2px; }
+
+.divider-v { width: 1px; height: 20px; background: var(--surface-border); margin: 0 4px; }
+
+/* ===== View Toggle (top right) ===== */
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--page-canvas);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  padding: 2px;
+}
+
+.view-toggle-btn {
+  padding: 4px 12px;
+  border-radius: calc(var(--radius-lg) - 2px);
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.view-toggle-btn.active {
+  background: var(--surface-raised);
+  color: var(--foreground);
+  box-shadow: var(--surface-shadow);
+}
+
+/* ===== Content Area ===== */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+/* ========================================
+   PROTOTYPE A: CARD GRID
+   ======================================== */
+.proto-a { display: none; }
+.proto-a.active { display: block; }
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.agent-card {
+  background: var(--surface);
+  border: 1px solid var(--surface-border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-card:hover {
+  border-color: var(--surface-border);
+  box-shadow: var(--surface-shadow);
+  transform: translateY(-1px);
+}
+
+.agent-card.online::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--success), transparent);
+  opacity: 0.6;
+}
+
+.agent-card.unstable::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--warning), transparent);
+  opacity: 0.6;
+}
+
+/* Card Header: Avatar + Name */
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.avatar-lg {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.avatar-emoji { font-size: 28px; }
+
+.status-dot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 3px solid var(--surface);
+}
+
+.status-dot.online { background: var(--success); }
+.status-dot.unstable { background: var(--warning); }
+.status-dot.offline { background: var(--faint-foreground); }
+
+.status-dot.online::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid var(--success);
+  opacity: 0;
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.agent-name {
+  font-size: var(--text-title-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 22px;
+  margin-bottom: 2px;
+}
+
+.agent-desc {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+  line-height: 16px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Runtime Block */
+.runtime-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--page-canvas);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--surface-border-subtle);
+}
+
+.runtime-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.runtime-label {
+  font-size: var(--text-micro);
+  color: var(--faint-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.runtime-cli {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.cli-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-hover);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.cli-badge .cli-icon { width: 14px; height: 14px; opacity: 0.8; }
+
+.model-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+/* Concurrency meter */
+.concurrency-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.concurrency-meter {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-hover);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.concurrency-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.concurrency-fill.active { background: var(--success); }
+.concurrency-fill.idle { background: var(--faint-foreground); opacity: 0.3; }
+
+.concurrency-text {
+  font-size: var(--text-micro);
+  font-family: var(--font-mono);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* Running Tasks */
+.running-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.running-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: oklch(0.62 0.16 145 / 0.15);
+  border: 1px solid oklch(0.62 0.16 145 / 0.25);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--success);
+}
+
+.running-pill .live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.idle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  font-size: var(--text-caption);
+  color: var(--faint-foreground);
+}
+
+.task-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.task-chip {
+  font-size: var(--text-micro);
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-hover);
+  color: var(--muted-foreground);
+  border: 1px solid var(--surface-border-subtle);
+}
+
+/* Card Footer (de-emphasized) */
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--surface-border-subtle);
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.owner-mini {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-micro);
+  color: var(--faint-foreground);
+}
+
+.owner-mini .avatar-xs {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.access-tag {
+  font-size: var(--text-micro);
+  color: var(--faint-foreground);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.runs-stat {
+  font-size: var(--text-micro);
+  color: var(--faint-foreground);
+  font-family: var(--font-mono);
+}
+
+.runs-stat strong {
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+
+/* ========================================
+   PROTOTYPE B: ENHANCED ROWS
+   ======================================== */
+.proto-b { display: none; }
+.proto-b.active { display: block; }
+
+.agent-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-row {
+  display: grid;
+  grid-template-columns: 56px minmax(180px, 1fr) auto auto 120px;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border-subtle);
+  border-radius: var(--radius-lg);
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-row:hover {
+  border-color: var(--surface-border);
+  background: var(--surface-hover);
+}
+
+.agent-row.online {
+  border-left: 3px solid var(--success);
+}
+.agent-row.unstable {
+  border-left: 3px solid var(--warning);
+}
+.agent-row.offline {
+  border-left: 3px solid var(--surface-border);
+}
+
+/* Row: Avatar */
+.row-avatar-wrap {
+  position: relative;
+}
+
+.avatar-md {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.row-status-dot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2.5px solid var(--surface);
+}
+
+/* Row: Identity */
+.row-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.row-name {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 20px;
+}
+
+.row-desc {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Row: Runtime badges */
+.row-runtime {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.runtime-badge.cli {
+  background: var(--surface-hover);
+  color: var(--foreground);
+  border: 1px solid var(--surface-border-subtle);
+}
+
+.runtime-badge.model {
+  background: oklch(0.62 0.18 250 / 0.1);
+  color: oklch(0.72 0.16 250);
+  border: 1px solid oklch(0.62 0.18 250 / 0.2);
+}
+
+.runtime-badge .badge-icon { width: 13px; height: 13px; opacity: 0.7; }
+
+/* Row: Running indicator */
+.row-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.running-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.running-bar-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.running-count {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--success);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.running-count .live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+.running-idle {
+  font-size: var(--text-caption);
+  color: var(--faint-foreground);
+}
+
+.mini-bar {
+  height: 4px;
+  background: var(--surface-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--success);
+  transition: width 0.4s ease;
+}
+
+/* Row: Right (de-emphasized) */
+.row-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.row-owner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-micro);
+  color: var(--faint-foreground);
+}
+
+.row-owner .avatar-xs {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.row-access {
+  font-size: var(--text-micro);
+  color: var(--faint-foreground);
+  opacity: 0.7;
+}
+
+.row-runs {
+  font-size: var(--text-micro);
+  font-family: var(--font-mono);
+  color: var(--faint-foreground);
+}
+
+/* ===== Shared avatar bg colors ===== */
+.bg-1 { background: oklch(0.55 0.19 256); color: white; }
+.bg-2 { background: oklch(0.55 0.16 145); color: white; }
+.bg-3 { background: oklch(0.6 0.2 30); color: white; }
+.bg-4 { background: oklch(0.55 0.18 310); color: white; }
+.bg-5 { background: oklch(0.5 0.15 200); color: white; }
+.bg-6 { background: oklch(0.58 0.16 145); color: white; }
+.bg-7 { background: oklch(0.52 0.18 250); color: white; }
+
+.owner-bg-1 { background: oklch(0.5 0.15 200); color: white; }
+.owner-bg-2 { background: oklch(0.55 0.18 310); color: white; }
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .agent-grid { grid-template-columns: 1fr; }
+  .agent-row {
+    grid-template-columns: 48px 1fr;
+    grid-template-rows: auto auto;
+  }
+  .row-runtime, .row-running, .row-right {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Scrollbar */
+.content::-webkit-scrollbar { width: 8px; }
+.content::-webkit-scrollbar-track { background: transparent; }
+.content::-webkit-scrollbar-thumb {
+  background: var(--surface-border);
+  border-radius: 4px;
+}
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- Page Header -->
+  <header class="page-header">
+    <div class="page-header-left">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--muted-foreground)">
+        <rect x="3" y="11" width="18" height="10" rx="2" />
+        <circle cx="12" cy="5" r="2" />
+        <path d="M12 7v4" />
+        <line x1="8" y1="16" x2="8" y2="16" />
+        <line x1="16" y1="16" x2="16" y2="16" />
+      </svg>
+      <span class="page-title">Agents</span>
+      <span class="page-count">8</span>
+    </div>
+    <button class="btn btn-primary">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      New Agent
+    </button>
+  </header>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <input class="search-input" placeholder="Search agents..." />
+    <div class="scope-group">
+      <button class="btn btn-ghost active">All <span style="opacity:0.6;margin-left:4px">8</span></button>
+      <button class="btn btn-ghost">Mine <span style="opacity:0.6;margin-left:4px">3</span></button>
+      <button class="btn btn-ghost">Archived <span style="opacity:0.6;margin-left:4px">2</span></button>
+    </div>
+    <div class="divider-v"></div>
+    <button class="btn btn-ghost">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+      </svg>
+      Filter
+    </button>
+    <div style="flex:1"></div>
+    <div class="view-toggle">
+      <button class="view-toggle-btn active" onclick="switchView('a')">Card Grid</button>
+      <button class="view-toggle-btn" onclick="switchView('b')">Enhanced Rows</button>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- ===== PROTOTYPE A: CARD GRID ===== -->
+    <div class="proto-a active" id="protoA">
+      <div class="agent-grid">
+
+        <!-- Card 1: Code Reviewer (online, active) -->
+        <div class="agent-card online">
+          <div class="card-header">
+            <div class="avatar-wrap">
+              <div class="avatar-lg bg-1">
+                <span class="avatar-emoji">🔍</span>
+              </div>
+              <div class="status-dot online"></div>
+            </div>
+            <div style="flex:1; min-width:0">
+              <div class="agent-name">Code Reviewer</div>
+              <div class="agent-desc">Reviews pull requests for code quality, security, and best practices across the monorepo.</div>
+            </div>
+          </div>
+
+          <div class="runtime-block">
+            <div class="runtime-row">
+              <span class="runtime-label">Runtime</span>
+              <span class="cli-badge">
+                <svg class="cli-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                opencode
+              </span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Model</span>
+              <span class="model-name">claude-sonnet-4-20250514</span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Load</span>
+              <div class="concurrency-wrap" style="flex:1">
+                <div class="concurrency-meter">
+                  <div class="concurrency-fill active" style="width: 67%"></div>
+                </div>
+                <span class="concurrency-text">2 / 3</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="running-section">
+            <div class="running-pill">
+              <span class="live-dot"></span>
+              2 running
+            </div>
+            <div class="task-chips">
+              <span class="task-chip">SHAR-41</span>
+              <span class="task-chip">SHAR-38</span>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="footer-left">
+              <div class="owner-mini">
+                <div class="avatar-xs owner-bg-1">M</div>
+                Mike
+              </div>
+              <span class="access-tag">· Workspace</span>
+            </div>
+            <div class="footer-right">
+              <span class="runs-stat"><strong>47</strong> runs · 30d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Visual QA (online, active) -->
+        <div class="agent-card online">
+          <div class="card-header">
+            <div class="avatar-wrap">
+              <div class="avatar-lg bg-2">
+                <span class="avatar-emoji">👁️</span>
+              </div>
+              <div class="status-dot online"></div>
+            </div>
+            <div style="flex:1; min-width:0">
+              <div class="agent-name">Visual QA</div>
+              <div class="agent-desc">Visual regression testing and UI screenshot comparison against design specs.</div>
+            </div>
+          </div>
+
+          <div class="runtime-block">
+            <div class="runtime-row">
+              <span class="runtime-label">Runtime</span>
+              <span class="cli-badge">
+                <svg class="cli-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                codebuddy
+              </span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Model</span>
+              <span class="model-name">gpt-4o-2024-12-01</span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Load</span>
+              <div class="concurrency-wrap" style="flex:1">
+                <div class="concurrency-meter">
+                  <div class="concurrency-fill active" style="width: 50%"></div>
+                </div>
+                <span class="concurrency-text">1 / 2</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="running-section">
+            <div class="running-pill">
+              <span class="live-dot"></span>
+              1 running
+            </div>
+            <div class="task-chips">
+              <span class="task-chip">SHAR-39</span>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="footer-left">
+              <div class="owner-mini">
+                <div class="avatar-xs owner-bg-2">A</div>
+                Alice
+              </div>
+              <span class="access-tag">· Specific people</span>
+            </div>
+            <div class="footer-right">
+              <span class="runs-stat"><strong>23</strong> runs · 30d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Bug Hunter (unstable) -->
+        <div class="agent-card unstable">
+          <div class="card-header">
+            <div class="avatar-wrap">
+              <div class="avatar-lg bg-3">
+                <span class="avatar-emoji">🐛</span>
+              </div>
+              <div class="status-dot unstable"></div>
+            </div>
+            <div style="flex:1; min-width:0">
+              <div class="agent-name">Bug Hunter</div>
+              <div class="agent-desc">Hunts down bugs by analyzing stack traces, logs, and running diagnostics.</div>
+            </div>
+          </div>
+
+          <div class="runtime-block">
+            <div class="runtime-row">
+              <span class="runtime-label">Runtime</span>
+              <span class="cli-badge">
+                <svg class="cli-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                tracli
+              </span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Model</span>
+              <span class="model-name">deepseek-v3-0324</span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Load</span>
+              <div class="concurrency-wrap" style="flex:1">
+                <div class="concurrency-meter">
+                  <div class="concurrency-fill" style="width: 0%; background: var(--warning)"></div>
+                </div>
+                <span class="concurrency-text" style="color: var(--warning)">0 / 1</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="running-section">
+            <div class="idle-pill">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Unstable — last seen 3m ago
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="footer-left">
+              <div class="owner-mini">
+                <div class="avatar-xs owner-bg-1">M</div>
+                Mike
+              </div>
+              <span class="access-tag">· Workspace</span>
+            </div>
+            <div class="footer-right">
+              <span class="runs-stat"><strong>12</strong> runs · 30d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Doc Writer (offline) -->
+        <div class="agent-card">
+          <div class="card-header">
+            <div class="avatar-wrap">
+              <div class="avatar-lg bg-4">
+                <span class="avatar-emoji">📝</span>
+              </div>
+              <div class="status-dot offline"></div>
+            </div>
+            <div style="flex:1; min-width:0">
+              <div class="agent-name">Doc Writer</div>
+              <div class="agent-desc">Generates and maintains documentation from code comments and specs.</div>
+            </div>
+          </div>
+
+          <div class="runtime-block">
+            <div class="runtime-row">
+              <span class="runtime-label">Runtime</span>
+              <span class="cli-badge" style="opacity:0.5">
+                <svg class="cli-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                pi
+              </span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Model</span>
+              <span class="model-name" style="opacity:0.5">qwen-max-0921</span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Load</span>
+              <div class="concurrency-wrap" style="flex:1">
+                <div class="concurrency-meter">
+                  <div class="concurrency-fill idle" style="width: 0%"></div>
+                </div>
+                <span class="concurrency-text">0 / 2</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="running-section">
+            <div class="idle-pill">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+              Offline — needs runtime
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="footer-left">
+              <div class="owner-mini">
+                <div class="avatar-xs owner-bg-2">A</div>
+                Alice
+              </div>
+              <span class="access-tag">· Owner only</span>
+            </div>
+            <div class="footer-right">
+              <span class="runs-stat"><strong>5</strong> runs · 30d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5: Test Runner (online, busy) -->
+        <div class="agent-card online">
+          <div class="card-header">
+            <div class="avatar-wrap">
+              <div class="avatar-lg bg-5">
+                <span class="avatar-emoji">⚡</span>
+              </div>
+              <div class="status-dot online"></div>
+            </div>
+            <div style="flex:1; min-width:0">
+              <div class="agent-name">Test Runner</div>
+              <div class="agent-desc">Runs test suites, reports failures, and suggests fixes with high concurrency.</div>
+            </div>
+          </div>
+
+          <div class="runtime-block">
+            <div class="runtime-row">
+              <span class="runtime-label">Runtime</span>
+              <span class="cli-badge">
+                <svg class="cli-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                opencode
+              </span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Model</span>
+              <span class="model-name">claude-haiku-3.5</span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Load</span>
+              <div class="concurrency-wrap" style="flex:1">
+                <div class="concurrency-meter">
+                  <div class="concurrency-fill active" style="width: 60%"></div>
+                </div>
+                <span class="concurrency-text">3 / 5</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="running-section">
+            <div class="running-pill">
+              <span class="live-dot"></span>
+              3 running
+            </div>
+            <div class="task-chips">
+              <span class="task-chip">SHAR-42</span>
+              <span class="task-chip">SHAR-43</span>
+              <span class="task-chip">SHAR-44</span>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="footer-left">
+              <div class="owner-mini">
+                <div class="avatar-xs owner-bg-1">M</div>
+                Mike
+              </div>
+              <span class="access-tag">· Workspace</span>
+            </div>
+            <div class="footer-right">
+              <span class="runs-stat"><strong>89</strong> runs · 30d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 6: Security Scanner (offline) -->
+        <div class="agent-card">
+          <div class="card-header">
+            <div class="avatar-wrap">
+              <div class="avatar-lg bg-6">
+                <span class="avatar-emoji">🛡️</span>
+              </div>
+              <div class="status-dot offline"></div>
+            </div>
+            <div style="flex:1; min-width:0">
+              <div class="agent-name">Security Scanner</div>
+              <div class="agent-desc">Scans dependencies and code for known vulnerabilities and CVEs.</div>
+            </div>
+          </div>
+
+          <div class="runtime-block">
+            <div class="runtime-row">
+              <span class="runtime-label">Runtime</span>
+              <span class="cli-badge" style="opacity:0.5">
+                <svg class="cli-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                opencode
+              </span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Model</span>
+              <span class="model-name" style="opacity:0.5">claude-sonnet-4</span>
+            </div>
+            <div class="runtime-row">
+              <span class="runtime-label">Load</span>
+              <div class="concurrency-wrap" style="flex:1">
+                <div class="concurrency-meter">
+                  <div class="concurrency-fill idle" style="width: 0%"></div>
+                </div>
+                <span class="concurrency-text">0 / 2</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="running-section">
+            <div class="idle-pill">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+              Offline
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="footer-left">
+              <div class="owner-mini">
+                <div class="avatar-xs owner-bg-2">A</div>
+                Alice
+              </div>
+              <span class="access-tag">· Workspace</span>
+            </div>
+            <div class="footer-right">
+              <span class="runs-stat"><strong>31</strong> runs · 30d</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ===== PROTOTYPE B: ENHANCED ROWS ===== -->
+    <div class="proto-b" id="protoB">
+      <div class="agent-rows">
+
+        <!-- Row 1: Code Reviewer -->
+        <div class="agent-row online">
+          <div class="row-avatar-wrap">
+            <div class="avatar-md bg-1"><span>🔍</span></div>
+            <div class="row-status-dot" style="background: var(--success)"></div>
+          </div>
+          <div class="row-identity">
+            <div class="row-name">Code Reviewer</div>
+            <div class="row-desc">Reviews pull requests for code quality and security</div>
+          </div>
+          <div class="row-runtime">
+            <span class="runtime-badge cli">
+              <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              opencode
+            </span>
+            <span class="runtime-badge model">claude-sonnet-4</span>
+          </div>
+          <div class="row-running">
+            <div class="running-bar-wrap">
+              <div class="running-bar-top">
+                <span class="running-count"><span class="live-dot"></span> 2 running</span>
+                <span style="font-size: var(--text-micro); color: var(--faint-foreground); font-family: var(--font-mono)">· 2/3</span>
+              </div>
+              <div class="mini-bar"><div class="mini-bar-fill" style="width: 67%"></div></div>
+            </div>
+          </div>
+          <div class="row-right">
+            <div class="row-owner">
+              <div class="avatar-xs owner-bg-1">M</div>
+              Mike · Workspace
+            </div>
+            <div class="row-runs">47 runs · 30d</div>
+          </div>
+        </div>
+
+        <!-- Row 2: Visual QA -->
+        <div class="agent-row online">
+          <div class="row-avatar-wrap">
+            <div class="avatar-md bg-2"><span>👁️</span></div>
+            <div class="row-status-dot" style="background: var(--success)"></div>
+          </div>
+          <div class="row-identity">
+            <div class="row-name">Visual QA</div>
+            <div class="row-desc">Visual regression testing and screenshot comparison</div>
+          </div>
+          <div class="row-runtime">
+            <span class="runtime-badge cli">
+              <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              codebuddy
+            </span>
+            <span class="runtime-badge model">gpt-4o</span>
+          </div>
+          <div class="row-running">
+            <div class="running-bar-wrap">
+              <div class="running-bar-top">
+                <span class="running-count"><span class="live-dot"></span> 1 running</span>
+                <span style="font-size: var(--text-micro); color: var(--faint-foreground); font-family: var(--font-mono)">· 1/2</span>
+              </div>
+              <div class="mini-bar"><div class="mini-bar-fill" style="width: 50%"></div></div>
+            </div>
+          </div>
+          <div class="row-right">
+            <div class="row-owner">
+              <div class="avatar-xs owner-bg-2">A</div>
+              Alice · Specific people
+            </div>
+            <div class="row-runs">23 runs · 30d</div>
+          </div>
+        </div>
+
+        <!-- Row 3: Bug Hunter (unstable) -->
+        <div class="agent-row unstable">
+          <div class="row-avatar-wrap">
+            <div class="avatar-md bg-3"><span>🐛</span></div>
+            <div class="row-status-dot" style="background: var(--warning)"></div>
+          </div>
+          <div class="row-identity">
+            <div class="row-name">Bug Hunter</div>
+            <div class="row-desc">Analyzes stack traces, logs, and runs diagnostics</div>
+          </div>
+          <div class="row-runtime">
+            <span class="runtime-badge cli" style="border-color: oklch(0.78 0.16 85 / 0.3); color: var(--warning)">
+              <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              tracli
+            </span>
+            <span class="runtime-badge model">deepseek-v3</span>
+          </div>
+          <div class="row-running">
+            <div class="running-bar-wrap">
+              <div class="running-bar-top">
+                <span style="font-size: var(--text-caption); color: var(--warning); display:flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  Unstable
+                </span>
+                <span style="font-size: var(--text-micro); color: var(--faint-foreground); font-family: var(--font-mono)">· 0/1</span>
+              </div>
+              <div class="mini-bar"><div class="mini-bar-fill" style="width: 0%; background: var(--warning)"></div></div>
+            </div>
+          </div>
+          <div class="row-right">
+            <div class="row-owner">
+              <div class="avatar-xs owner-bg-1">M</div>
+              Mike · Workspace
+            </div>
+            <div class="row-runs">12 runs · 30d</div>
+          </div>
+        </div>
+
+        <!-- Row 4: Doc Writer (offline) -->
+        <div class="agent-row offline">
+          <div class="row-avatar-wrap">
+            <div class="avatar-md bg-4" style="opacity:0.6"><span>📝</span></div>
+            <div class="row-status-dot" style="background: var(--faint-foreground)"></div>
+          </div>
+          <div class="row-identity">
+            <div class="row-name" style="color: var(--muted-foreground)">Doc Writer</div>
+            <div class="row-desc">Generates documentation from code comments and specs</div>
+          </div>
+          <div class="row-runtime">
+            <span class="runtime-badge cli" style="opacity:0.4">
+              <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              pi
+            </span>
+            <span class="runtime-badge model" style="opacity:0.4">qwen-max</span>
+          </div>
+          <div class="row-running">
+            <div class="running-bar-wrap">
+              <div class="running-bar-top">
+                <span class="running-idle">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -1px"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                  Offline
+                </span>
+                <span style="font-size: var(--text-micro); color: var(--faint-foreground); font-family: var(--font-mono)">· 0/2</span>
+              </div>
+              <div class="mini-bar"><div class="mini-bar-fill" style="width: 0%"></div></div>
+            </div>
+          </div>
+          <div class="row-right">
+            <div class="row-owner">
+              <div class="avatar-xs owner-bg-2">A</div>
+              Alice · Owner only
+            </div>
+            <div class="row-runs">5 runs · 30d</div>
+          </div>
+        </div>
+
+        <!-- Row 5: Test Runner (online, busy) -->
+        <div class="agent-row online">
+          <div class="row-avatar-wrap">
+            <div class="avatar-md bg-5"><span>⚡</span></div>
+            <div class="row-status-dot" style="background: var(--success)"></div>
+          </div>
+          <div class="row-identity">
+            <div class="row-name">Test Runner</div>
+            <div class="row-desc">Runs test suites and reports failures with high concurrency</div>
+          </div>
+          <div class="row-runtime">
+            <span class="runtime-badge cli">
+              <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              opencode
+            </span>
+            <span class="runtime-badge model">claude-haiku-3.5</span>
+          </div>
+          <div class="row-running">
+            <div class="running-bar-wrap">
+              <div class="running-bar-top">
+                <span class="running-count"><span class="live-dot"></span> 3 running</span>
+                <span style="font-size: var(--text-micro); color: var(--faint-foreground); font-family: var(--font-mono)">· 3/5</span>
+              </div>
+              <div class="mini-bar"><div class="mini-bar-fill" style="width: 60%"></div></div>
+            </div>
+          </div>
+          <div class="row-right">
+            <div class="row-owner">
+              <div class="avatar-xs owner-bg-1">M</div>
+              Mike · Workspace
+            </div>
+            <div class="row-runs">89 runs · 30d</div>
+          </div>
+        </div>
+
+        <!-- Row 6: Security Scanner (offline) -->
+        <div class="agent-row offline">
+          <div class="row-avatar-wrap">
+            <div class="avatar-md bg-6" style="opacity:0.6"><span>🛡️</span></div>
+            <div class="row-status-dot" style="background: var(--faint-foreground)"></div>
+          </div>
+          <div class="row-identity">
+            <div class="row-name" style="color: var(--muted-foreground)">Security Scanner</div>
+            <div class="row-desc">Scans dependencies and code for vulnerabilities and CVEs</div>
+          </div>
+          <div class="row-runtime">
+            <span class="runtime-badge cli" style="opacity:0.4">
+              <svg class="badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              opencode
+            </span>
+            <span class="runtime-badge model" style="opacity:0.4">claude-sonnet-4</span>
+          </div>
+          <div class="row-running">
+            <div class="running-bar-wrap">
+              <div class="running-bar-top">
+                <span class="running-idle">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -1px"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                  Offline
+                </span>
+                <span style="font-size: var(--text-micro); color: var(--faint-foreground); font-family: var(--font-mono)">· 0/2</span>
+              </div>
+              <div class="mini-bar"><div class="mini-bar-fill" style="width: 0%"></div></div>
+            </div>
+          </div>
+          <div class="row-right">
+            <div class="row-owner">
+              <div class="avatar-xs owner-bg-2">A</div>
+              Alice · Workspace
+            </div>
+            <div class="row-runs">31 runs · 30d</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function switchView(view) {
+  const protoA = document.getElementById('protoA');
+  const protoB = document.getElementById('protoB');
+  const btns = document.querySelectorAll('.view-toggle-btn');
+
+  if (view === 'a') {
+    protoA.classList.add('active');
+    protoB.classList.remove('active');
+    btns[0].classList.add('active');
+    btns[1].classList.remove('active');
+  } else {
+    protoA.classList.remove('active');
+    protoB.classList.add('active');
+    btns[0].classList.remove('active');
+    btns[1].classList.add('active');
+  }
+}
+</script>
+
+</body>
+</html>

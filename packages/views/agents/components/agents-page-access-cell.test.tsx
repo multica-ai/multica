@@ -46,6 +46,7 @@ function makeRow(
     owner: null,
     isOwnedByMe: false,
     canManage: false,
+    runningTasks: [],
   };
 }
 

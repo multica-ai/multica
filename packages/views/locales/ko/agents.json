@@ -85,7 +85,12 @@
     "fallback_runtime_cloud": "클라우드",
     "fallback_runtime_local": "로컬",
     "actions_aria": "행 작업",
-    "task_count_other": "실행 {{count}}개"
+    "task_count_other": "실행 {{count}}개",
+    "running_count": "{{count}}개 실행 중",
+    "idle": "유휴",
+    "concurrency": "부하",
+    "runtime": "런타임",
+    "runs_suffix": "회 실행 · 30일"
   },
   "activity_tooltip": {
     "created_today": "오늘 생성됨",
@@ -678,6 +683,7 @@
       "owner_only": "소유자만"
     },
     "trigger_members_count": "{{count}}명",
+    "tooltip_private_agent": "비공개 에이전트",
     "trigger_members_empty": "특정 사용자",
     "trigger_team": "팀",
     "private_title": "비공개",

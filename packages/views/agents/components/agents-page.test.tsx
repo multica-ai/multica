@@ -94,6 +94,7 @@ vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   agentRunCounts30dOptions: () => ({ queryKey: ["agent-run-counts"] }),
+  agentTaskSnapshotOptions: () => ({ queryKey: ["agent-task-snapshot"] }),
   useWorkspaceActivityMap: () => mocks.activity,
   useWorkspacePresenceMap: () => mocks.presence,
   VISIBILITY_TOOLTIP: { private: "Private", workspace: "Workspace" },

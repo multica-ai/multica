@@ -5,6 +5,9 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  LayoutGrid,
+  List,
+  Rows3,
   Search,
   X,
 } from "lucide-react";
@@ -23,6 +26,7 @@ import {
   type AgentsScope,
   type AgentSortDirection,
   type AgentSortField,
+  type AgentViewMode,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -112,6 +116,8 @@ export function AgentListToolbar({
   allRows,
   members,
   visibleCount,
+  viewMode,
+  onViewModeChange,
 }: {
   scope: AgentsScope;
   onScopeChange: (scope: AgentsScope) => void;
@@ -134,6 +140,8 @@ export function AgentListToolbar({
   members: MemberWithUser[];
   /** Rows surviving the filters — shown as "n / total" when narrowed. */
   visibleCount: number;
+  viewMode: AgentViewMode;
+  onViewModeChange: (mode: AgentViewMode) => void;
 }) {
   const { t } = useT("agents");
 
@@ -284,6 +292,31 @@ export function AgentListToolbar({
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {/* View mode toggle */}
+        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-surface-border bg-surface p-0.5">
+          {([
+            { mode: "table", icon: List, label: "Table" },
+            { mode: "grid", icon: LayoutGrid, label: "Cards" },
+            { mode: "rows", icon: Rows3, label: "Rows" },
+          ] as const).map(({ mode, icon: Icon, label }) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={viewMode === mode}
+              title={label}
+              onClick={() => onViewModeChange(mode)}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-[calc(var(--radius-lg)-2px)] transition-colors",
+                viewMode === mode
+                  ? "bg-surface-raised text-foreground shadow-[var(--surface-shadow)]"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5" />
+            </button>
+          ))}
+        </div>
+
         {/* Filter */}
         <DropdownMenu>
           <DropdownMenuTrigger

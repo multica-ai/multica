@@ -85,7 +85,12 @@
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
     "actions_aria": "行操作",
-    "task_count_other": "{{count}} 次运行"
+    "task_count_other": "{{count}} 次运行",
+    "running_count": "{{count}} 个运行中",
+    "idle": "空闲",
+    "concurrency": "负载",
+    "runtime": "运行时",
+    "runs_suffix": "次运行 · 30 天"
   },
   "activity_tooltip": {
     "created_today": "今天创建",
@@ -772,6 +777,7 @@
       "owner_only": "仅所有者"
     },
     "trigger_members_count": "{{count}} 人",
+    "tooltip_private_agent": "私有智能体",
     "trigger_members_empty": "指定成员",
     "trigger_team": "团队",
     "private_title": "仅自己",

@@ -88,7 +88,12 @@
     "fallback_runtime_local": "Local",
     "actions_aria": "Row actions",
     "task_count_one": "{{count}} run",
-    "task_count_other": "{{count}} runs"
+    "task_count_other": "{{count}} runs",
+    "running_count": "{{count}} running",
+    "idle": "Idle",
+    "concurrency": "Load",
+    "runtime": "Runtime",
+    "runs_suffix": "runs · 30d"
   },
   "activity_tooltip": {
     "created_today": "Created today",
@@ -787,6 +792,7 @@
       "owner_only": "Owner only"
     },
     "trigger_members_count": "{{count}} people",
+    "tooltip_private_agent": "Private agent",
     "trigger_members_empty": "Specific people",
     "trigger_team": "Team",
     "private_title": "Only me",

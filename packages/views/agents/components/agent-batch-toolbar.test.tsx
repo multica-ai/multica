@@ -85,6 +85,7 @@ function makeRow(
       : null,
     isOwnedByMe: ownerId === "user-1",
     canManage: ownerId === "user-1",
+    runningTasks: [],
   };
 }
 

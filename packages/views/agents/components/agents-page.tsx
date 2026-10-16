@@ -12,9 +12,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   Agent,
   AgentRuntime,
+  AgentTask,
   MemberWithUser,
 } from "@multica/core/types";
 import {
+  agentTaskSnapshotOptions,
   type AgentActivity,
   agentRunCounts30dOptions,
   effectiveAccessScope,
@@ -70,6 +72,8 @@ import {
 } from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
+import { AgentCardGrid } from "./agent-card-grid";
+import { AgentEnhancedRows } from "./agent-enhanced-rows";
 import {
   AgentListToolbar,
   countActiveFilterDimensions,
@@ -150,6 +154,10 @@ export interface AgentListRow {
   owner: MemberWithUser | null;
   isOwnedByMe: boolean;
   canManage: boolean;
+  /** Active (running/dispatched) tasks for this agent, from the workspace
+   *  task snapshot. Used by the grid/row views to render clickable task chips
+   *  with a tooltip showing the trigger summary. */
+  runningTasks: AgentTask[];
 }
 
 // Most recent activity bucket with runs, as "days ago" (0 = today).
@@ -793,6 +801,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap, loading: activityLoading } =
     useWorkspaceActivityMap(wsId);
+  // Task snapshot is already fetched by useWorkspacePresenceMap; this shares
+  // the same TanStack Query cache (no duplicate network call). We read it
+  // here to extract per-agent running task details (issue_id, trigger_summary)
+  // for the grid/row view task chips.
+  const { data: taskSnapshot = [] } = useQuery(
+    agentTaskSnapshotOptions(wsId),
+  );
 
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
@@ -812,6 +827,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const toggleColumn = useAgentsViewStore((s) => s.toggleColumn);
   const toggleFilter = useAgentsViewStore((s) => s.toggleFilter);
   const clearFilters = useAgentsViewStore((s) => s.clearFilters);
+  const viewMode = useAgentsViewStore((s) => s.viewMode);
+  const setViewMode = useAgentsViewStore((s) => s.setViewMode);
 
   const isColVisible = (key: AgentColumnKey) => !hiddenColumns.includes(key);
 
@@ -880,6 +897,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     return inScope.map((agent) => {
       const isOwner = !!currentUser?.id && agent.owner_id === currentUser.id;
       const activity = activityMap.get(agent.id) ?? null;
+      const activeStatuses = new Set(["queued", "dispatched", "waiting_local_directory", "running"]);
+      const runningTasks = taskSnapshot
+        .filter((t) => t.agent_id === agent.id && activeStatuses.has(t.status))
+        .slice(0, 5); // cap at 5 chips
       return {
         agent,
         runtime: runtimesById.get(agent.runtime_id) ?? null,
@@ -890,6 +911,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         owner: agent.owner_id ? membersById.get(agent.owner_id) ?? null : null,
         isOwnedByMe: isOwner,
         canManage: isWorkspaceAdmin || isOwner,
+        runningTasks,
       };
     });
   }, [
@@ -902,6 +924,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     activityMap,
     runCountsById,
     isWorkspaceAdmin,
+    taskSnapshot,
   ]);
 
   // Visible rows: local search + filters, then sort.
@@ -1069,11 +1092,34 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             allRows={scopeRows}
             members={members}
             visibleCount={rows.length}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
           />
           <div
             ref={listScrollRef}
             className="min-h-0 flex-1 overflow-auto @container"
           >
+            {viewMode === "grid" ? (
+              <div className="p-4">
+                {rows.length === 0 ? (
+                  <div className="py-16 text-center text-body text-muted-foreground">
+                    {noMatchText}
+                  </div>
+                ) : (
+                  <AgentCardGrid rows={rows} locale={locale} />
+                )}
+              </div>
+            ) : viewMode === "rows" ? (
+              <div className="p-4">
+                {rows.length === 0 ? (
+                  <div className="py-16 text-center text-body text-muted-foreground">
+                    {noMatchText}
+                  </div>
+                ) : (
+                  <AgentEnhancedRows rows={rows} locale={locale} />
+                )}
+              </div>
+            ) : (
             <ListGrid
               className={`${GRID_COLS} @2xl:min-w-[var(--agc-minw)]`}
               style={columnTrackVars(isColVisible)}
@@ -1183,6 +1229,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                 })}
               </ListGridBody>
             </ListGrid>
+            )}
           </div>
         </>
       )}

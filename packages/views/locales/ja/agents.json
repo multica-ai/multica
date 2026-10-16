@@ -77,7 +77,12 @@
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
     "actions_aria": "行の操作",
-    "task_count_other": "{{count}} 件の実行"
+    "task_count_other": "{{count}} 件の実行",
+    "running_count": "{{count}} 件実行中",
+    "idle": "待機中",
+    "concurrency": "負荷",
+    "runtime": "ランタイム",
+    "runs_suffix": "回実行 · 30日"
   },
   "activity_tooltip": {
     "created_today": "今日作成",
@@ -670,6 +675,7 @@
       "owner_only": "オーナーのみ"
     },
     "trigger_members_count": "{{count}} 人",
+    "tooltip_private_agent": "プライベートエージェント",
     "trigger_members_empty": "特定のメンバー",
     "trigger_team": "チーム",
     "private_title": "プライベート",

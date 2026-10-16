@@ -88,7 +88,12 @@
     "fallback_runtime_local": "Local",
     "actions_aria": "Actions de la ligne",
     "task_count_one": "{{count}} exécution",
-    "task_count_other": "{{count}} exécutions"
+    "task_count_other": "{{count}} exécutions",
+    "running_count": "{{count}} en cours",
+    "idle": "Inactif",
+    "concurrency": "Charge",
+    "runtime": "Runtime",
+    "runs_suffix": "exécutions · 30 j"
   },
   "activity_tooltip": {
     "created_today": "Créé aujourd'hui",
@@ -787,6 +792,7 @@
       "owner_only": "Propriétaire uniquement"
     },
     "trigger_members_count": "{{count}} personnes",
+    "tooltip_private_agent": "Agent privé",
     "trigger_members_empty": "Personnes précises",
     "trigger_team": "Équipe",
     "private_title": "Moi uniquement",
