@@ -498,6 +498,29 @@ files without changing a pre-existing sibling plugin or global config. Verify
 managed task retention and subsequent reuse/GC cleanup separately. Never include authorization
 headers or generated credential-bearing config files in logs or PR evidence.
 
+The opt-in dual-transport fixture runs `Prepare`, launches the Antigravity
+backend in its generated task directory, and verifies server-side initialize,
+tools/list and tools/call audits (including tool name, arguments, response and
+HTTP session headers). Each task probe has an independent timeout; failed or
+timed-out launches fail the test. It also checks a separately prepared task,
+managed config retention, `Reuse` replacement/removal and explicit environment
+cleanup. It does not exercise the daemon's complete task orchestration,
+local-worktree finalization or scheduled GC; those still need acceptance evidence.
+With an authenticated CLI and explicit authorization to make model requests:
+
+```sh
+cd server
+MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration -p 1 \
+  -count=1 -v -timeout 180s ./internal/daemon/execenv \
+  -run '^TestAntigravityLiveDualTrackE2E$'
+```
+
+This requires `agy`, `python3` and `git` on PATH, uses the CLI's default model,
+and logs the exact checkout SHA, CLI version, task directory and synthetic MCP
+audit records. Keep the checkout clean when collecting evidence for a commit.
+Without both the build tag and opt-in, this test never resolves or executes
+the installed CLI. Default regression tests use only test-owned executables.
+
 #### `mcp_config` on ACP runtimes
 
 ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.
