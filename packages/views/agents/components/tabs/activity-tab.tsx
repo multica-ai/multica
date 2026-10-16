@@ -35,6 +35,7 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
+import { ProjectChip } from "../../../projects/components/project-chip";
 import { taskStatusConfig } from "../../config";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
@@ -715,6 +716,11 @@ function TaskRow({
                   ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
                   : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)))}
             </span>
+          )}
+          {/* Project tag: only when the resolved issue belongs to a project,
+              so the row reads "what project, which item" at a glance. */}
+          {issue?.project_id && (
+            <ProjectChip projectId={issue.project_id} className="shrink-0" />
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
