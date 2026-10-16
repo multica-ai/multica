@@ -1,15 +1,19 @@
+//go:build agentintegration
+
 package execenv
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -17,274 +21,254 @@ import (
 )
 
 func TestAntigravityLiveDualTrackE2E(t *testing.T) {
+	if os.Getenv("MULTICA_RUN_REAL_AGENT_SMOKE") != "1" {
+		t.Skip("set MULTICA_RUN_REAL_AGENT_SMOKE=1 to authorize real agent execution")
+	}
 	agyPath, err := exec.LookPath("agy")
 	if err != nil {
-		t.Skip("agy CLI not found on host, skipping live E2E test")
+		t.Fatal("authorized live test requires agy on PATH")
 	}
-
-	// 1. Prepare test directories
-	testRoot := t.TempDir()
-	taskDir := filepath.Join(testRoot, "task-managed-1")
-	if err := os.MkdirAll(taskDir, 0o755); err != nil {
-		t.Fatal(err)
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal("live stdio fixture requires python3")
 	}
-
-	// Stdio server script in testRoot
-	stdioScript := filepath.Join(testRoot, "stdio_server.py")
-	stdioContent := `import sys, json
-
-for line in sys.stdin:
-    line = line.strip()
-    if not line: continue
-    msg = json.loads(line)
-    msg_id = msg.get("id")
-    method = msg.get("method")
-    if method == "initialize":
-        resp = {"jsonrpc":"2.0","id":msg_id,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"stdio-test","version":"1.0"}}}
-    elif method == "notifications/initialized":
-        continue
-    elif method == "tools/list":
-        resp = {"jsonrpc":"2.0","id":msg_id,"result":{"tools":[{"name":"calc_square","description":"Squares an integer via stdio","inputSchema":{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}}]}}
-    elif method == "tools/call":
-        n = msg.get("params",{}).get("arguments",{}).get("n", 0)
-        resp = {"jsonrpc":"2.0","id":msg_id,"result":{"content":[{"type":"text","text":f"SQUARE_SUCCESS:{n*n}"}]}}
-    else:
-        resp = {"jsonrpc":"2.0","id":msg_id,"result":{}}
-    sys.stdout.write(json.dumps(resp)+"\n")
-    sys.stdout.flush()
-`
-	if err := os.WriteFile(stdioScript, []byte(stdioContent), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// 2. Start Streamable HTTP server
-	var mu sync.Mutex
-	var httpRequests []string
-	var recordedSessionID string
-	const sessionToken = "session-test-e2e-888"
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer metadataCancel()
+	revision, err := exec.CommandContext(metadataCtx, "git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverPort := listener.Addr().(*net.TCPAddr).Port
-	httpURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", serverPort)
+	version, err := exec.CommandContext(metadataCtx, agyPath, "--version").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := exec.CommandContext(metadataCtx, "git", "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("revision=%s dirty=%t platform=%s/%s agy=%s", strings.TrimSpace(string(revision)), len(changes) != 0, runtime.GOOS, runtime.GOARCH, strings.TrimSpace(string(version)))
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
+	testRoot := t.TempDir()
+	stdioAuditPath := filepath.Join(testRoot, "stdio-audit.jsonl")
+	stdioScript := filepath.Join(testRoot, "stdio_server.py")
+	stdioContent := `import sys, json
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    event = {"method": method}
+    result = {}
+    if method == "initialize":
+        result = {"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"stdio-test","version":"1.0"}}
+    elif method == "tools/list":
+        result = {"tools":[{"name":"calc_square","description":"Squares an integer via stdio","inputSchema":{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}}]}
+    elif method == "tools/call":
+        params = msg.get("params", {})
+        n = params.get("arguments", {}).get("n")
+        event.update(name=params.get("name"), argument=n)
+        if params.get("name") == "calc_square" and type(n) is int:
+            text = f"SQUARE_SUCCESS:{n*n}"
+            event["result"] = text
+            result = {"content":[{"type":"text","text":text}]}
+        else:
+            result = {"isError":True,"content":[{"type":"text","text":"invalid tool call"}]}
+    with open(sys.argv[1], "a", encoding="utf-8") as audit:
+        audit.write(json.dumps(event)+"\n")
+    if "id" in msg:
+        sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":result})+"\n")
+        sys.stdout.flush()
+`
+	if err := os.WriteFile(stdioScript, []byte(stdioContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-		sessHdr := r.Header.Get("Mcp-Session-Id")
-		if sessHdr != "" {
-			recordedSessionID = sessHdr
-		}
-		var buf bytes.Buffer
-		buf.ReadFrom(r.Body)
-		bodyStr := buf.String()
-		httpRequests = append(httpRequests, fmt.Sprintf("%s %s (Session: %s): %s", r.Method, r.URL.Path, sessHdr, bodyStr))
-
-		var msg map[string]any
-		json.Unmarshal([]byte(bodyStr), &msg)
-		method, _ := msg["method"].(string)
-		msgID := msg["id"]
-
-		var resp map[string]any
-		switch method {
-		case "server/discover":
-			resp = map[string]any{
-				"jsonrpc": "2.0",
-				"id":      msgID,
-				"result": map[string]any{
-					"protocolVersion": "2025-03-26",
-					"capabilities":    map[string]any{"tools": map[string]any{}},
-					"serverInfo":      map[string]any{"name": "http-test", "version": "1.0"},
-				},
-			}
-		case "initialize":
-			resp = map[string]any{
-				"jsonrpc": "2.0",
-				"id":      msgID,
-				"result": map[string]any{
-					"protocolVersion": "2025-03-26",
-					"capabilities":    map[string]any{"tools": map[string]any{}},
-					"serverInfo":      map[string]any{"name": "http-test", "version": "1.0"},
-				},
-			}
-		case "notifications/initialized":
-			w.Header().Set("Mcp-Session-Id", sessionToken)
-			w.WriteHeader(http.StatusOK)
+	var mu sync.Mutex
+	var httpEvents []antigravityMCPEvent
+	const sessionToken = "session-test-e2e-888"
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			writer.WriteHeader(http.StatusMethodNotAllowed)
 			return
-		case "tools/list":
-			resp = map[string]any{
-				"jsonrpc": "2.0",
-				"id":      msgID,
-				"result": map[string]any{
-					"tools": []any{
-						map[string]any{
-							"name":        "calc_cube",
-							"description": "Cubes an integer via Streamable HTTP",
-							"inputSchema": map[string]any{
-								"type":       "object",
-								"properties": map[string]any{"n": map[string]any{"type": "integer"}},
-								"required":   []any{"n"},
-							},
-						},
-					},
-				},
-			}
-		case "tools/call":
-			params, _ := msg["params"].(map[string]any)
-			args, _ := params["arguments"].(map[string]any)
-			nFloat, _ := args["n"].(float64)
-			n := int(nFloat)
-			cube := n * n * n
-			resp = map[string]any{
-				"jsonrpc": "2.0",
-				"id":      msgID,
-				"result": map[string]any{
-					"content": []any{
-						map[string]any{"type": "text", "text": fmt.Sprintf("CUBE_SUCCESS:%d", cube)},
-					},
-				},
-			}
-		default:
-			resp = map[string]any{"jsonrpc": "2.0", "id": msgID, "result": map[string]any{}}
 		}
-
-		data, _ := json.Marshal(resp)
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Mcp-Session-Id", sessionToken)
-		w.WriteHeader(http.StatusOK)
-		w.Write(data)
+		var message struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Name      string `json:"name"`
+				Arguments struct {
+					Number int `json:"n"`
+				} `json:"arguments"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(io.LimitReader(request.Body, 1<<20)).Decode(&message); err != nil {
+			http.Error(writer, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		event := antigravityMCPEvent{Method: message.Method, Session: request.Header.Get("Mcp-Session-Id")}
+		result := map[string]any{}
+		switch message.Method {
+		case "server/discover", "initialize":
+			result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "http-test", "version": "1.0"}}
+		case "tools/list":
+			result["tools"] = []any{map[string]any{
+				"name": "calc_cube", "description": "Cubes an integer via Streamable HTTP",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"n": map[string]string{"type": "integer"}}, "required": []string{"n"}},
+			}}
+		case "tools/call":
+			event.Name, event.Argument = message.Params.Name, message.Params.Arguments.Number
+			if event.Name == "calc_cube" {
+				event.Result = fmt.Sprintf("CUBE_SUCCESS:%d", event.Argument*event.Argument*event.Argument)
+			} else {
+				result["isError"] = true
+			}
+			result["content"] = []any{map[string]string{"type": "text", "text": event.Result}}
+		}
+		mu.Lock()
+		httpEvents = append(httpEvents, event)
+		mu.Unlock()
+		if message.Method == "initialize" || event.Session == sessionToken {
+			writer.Header().Set("Mcp-Session-Id", sessionToken)
+		}
+		if len(message.ID) == 0 {
+			writer.WriteHeader(http.StatusAccepted)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(writer).Encode(map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": result}); err != nil {
+			t.Errorf("write HTTP fixture response: %v", err)
+		}
+	}))
+	t.Cleanup(func() {
+		httpServer.CloseClientConnections()
+		httpServer.Close()
 	})
 
-	httpServer := &http.Server{Handler: mux}
-	go httpServer.Serve(listener)
-	defer httpServer.Shutdown(context.Background())
+	raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"local_stdio": map[string]any{"command": pythonPath, "args": []string{stdioScript, stdioAuditPath}},
+		"remote_http": map[string]any{"url": httpServer.URL + "/mcp"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := PrepareParams{WorkspacesRoot: testRoot, WorkspaceID: "ws", TaskID: "task", Provider: "antigravity", McpConfig: raw}
+	env, err := Prepare(params, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := env.Cleanup(true); err != nil {
+			t.Error(err)
+		}
+	})
+	configPath := filepath.Join(env.WorkDir, ".agents", "plugins", "multica", "mcp_config.json")
+	t.Logf("Prepare task workdir=%s", env.WorkDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	output, runErr := runAntigravityProbe(ctx, agyPath, env.WorkDir, "Use calc_square with n=12, and use calc_cube with n=7. Output exactly the tool result text strings.")
+	cancel()
+	if runErr != nil {
+		t.Fatalf("managed task launch: %v", runErr)
+	}
+	if !strings.Contains(output, "SQUARE_SUCCESS:144") || !strings.Contains(output, "CUBE_SUCCESS:343") {
+		t.Fatal("agent output missing expected tool results")
+	}
+	stdioFile, err := os.Open(stdioAuditPath)
+	if err != nil {
+		t.Fatalf("stdio server audit missing: %v", err)
+	}
+	defer stdioFile.Close()
+	var stdioEvents []antigravityMCPEvent
+	scanner := bufio.NewScanner(stdioFile)
+	for scanner.Scan() {
+		var event antigravityMCPEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatal(err)
+		}
+		stdioEvents = append(stdioEvents, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	firstHTTPEvents := append([]antigravityMCPEvent(nil), httpEvents...)
+	mu.Unlock()
+	for _, audit := range []struct {
+		name, session, result string
+		argument              int
+		events                []antigravityMCPEvent
+	}{
+		{"calc_square", "", "SQUARE_SUCCESS:144", 12, stdioEvents},
+		{"calc_cube", sessionToken, "CUBE_SUCCESS:343", 7, firstHTTPEvents},
+	} {
+		data, err := json.Marshal(audit.events)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%s server-side audit: %s", audit.name, data)
+		if err := validateAntigravityMCPAudit(audit.events, audit.session, audit.name, audit.argument, audit.result); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	// 3. Prepare MCP config via Multica's prepareAntigravityMcpConfig
-	manifest := &sidecarManifest{}
-	mcpConfigRaw := json.RawMessage(fmt.Sprintf(`{
-		"mcpServers": {
-			"local_stdio": {
-				"command": "python3",
-				"args": ["%s"]
-			},
-			"remote_http": {
-				"url": "%s",
-				"headers": {"Authorization": "Bearer test-e2e-token"}
+	params.TaskID, params.McpConfig = "isolated", nil
+	isolated, err := Prepare(params, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := isolated.Cleanup(true); err != nil {
+			t.Error(err)
+		}
+	})
+	isolationCtx, isolationCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	isolatedOutput, isolationErr := runAntigravityProbe(isolationCtx, agyPath, isolated.WorkDir, "List available MCP tools named calc_square or calc_cube. If neither is available, reply exactly NONE. Do not read other task directories.")
+	isolationCancel()
+	if isolationErr != nil {
+		t.Fatalf("isolated task launch: %v", isolationErr)
+	}
+	if strings.TrimSpace(isolatedOutput) != "NONE" {
+		t.Fatal("isolated task did not explicitly confirm absence of fixture tools")
+	}
+	mu.Lock()
+	requestCount := len(httpEvents)
+	mu.Unlock()
+	stdioAfterIsolation, err := os.ReadFile(stdioAuditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != len(firstHTTPEvents) || len(strings.Split(strings.TrimSpace(string(stdioAfterIsolation)), "\n")) != len(stdioEvents) {
+		t.Fatal("isolated task accessed the first task's MCP fixture")
+	}
+
+	env.ReleaseLock()
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("managed config must remain available for reuse: %v", err)
+	}
+	for _, replacement := range []json.RawMessage{json.RawMessage(`{"mcpServers":{"replacement":{"command":"unused-fixture-command"}}}`), nil} {
+		reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "antigravity", McpConfig: replacement}, testLogger())
+		if reused == nil {
+			t.Fatal("Reuse failed")
+		}
+		reused.ReleaseLock()
+		if replacement == nil {
+			if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+				t.Fatalf("Reuse did not remove cancelled MCP config: %v", err)
+			}
+		} else {
+			var config struct {
+				Servers map[string]any `json:"mcpServers"`
+			}
+			readAntigravityJSON(t, configPath, &config)
+			if len(config.Servers) != 1 || config.Servers["replacement"] == nil {
+				t.Fatal("Reuse did not replace the MCP server set")
 			}
 		}
-	}`, stdioScript, httpURL))
-
-	if err := prepareAntigravityMcpConfig(taskDir, "antigravity", mcpConfigRaw, manifest); err != nil {
-		t.Fatalf("prepareAntigravityMcpConfig failed: %v", err)
 	}
-
-	// Verify plugin sidecars exist
-	pluginManifestPath := filepath.Join(taskDir, ".agents", "plugins", "multica", "plugin.json")
-	mcpConfigFile := filepath.Join(taskDir, ".agents", "plugins", "multica", "mcp_config.json")
-	if _, err := os.Stat(pluginManifestPath); err != nil {
-		t.Fatalf("plugin.json missing: %v", err)
-	}
-	if _, err := os.Stat(mcpConfigFile); err != nil {
-		t.Fatalf("mcp_config.json missing: %v", err)
-	}
-
-	// Verify serverUrl and url both exist in mcp_config.json
-	configBytes, _ := os.ReadFile(mcpConfigFile)
-	var generatedCfg struct {
-		McpServers map[string]map[string]any `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(configBytes, &generatedCfg); err != nil {
-		t.Fatalf("unmarshal generated mcp_config: %v", err)
-	}
-	remoteCfg := generatedCfg.McpServers["remote_http"]
-	if remoteCfg["url"] != httpURL || remoteCfg["serverUrl"] != httpURL {
-		t.Fatalf("remote_http url/serverUrl mismatch: %v", remoteCfg)
-	}
-	t.Logf("Generated mcp_config validated: url=%s, serverUrl=%s", remoteCfg["url"], remoteCfg["serverUrl"])
-
-	// 4. Run real agy CLI in taskDir with dangerously-skip-permissions
-	cmdCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-
-	prompt := "Use calc_square with n=12, and use calc_cube with n=7. Output exactly the tool result text strings."
-	agyCmd := exec.CommandContext(cmdCtx, agyPath, "-p", prompt, "--dangerously-skip-permissions", "--model", "gemini-3.8-flash-low")
-	agyCmd.Dir = taskDir
-	var outBuf, errBuf bytes.Buffer
-	agyCmd.Stdout = &outBuf
-	agyCmd.Stderr = &errBuf
-
-	t.Logf("Executing: agy -p %q (dir=%s)", prompt, taskDir)
-	runErr := agyCmd.Run()
-	output := outBuf.String()
-	stderr := errBuf.String()
-
-	t.Logf("agy stdout:\n%s", output)
-	if stderr != "" {
-		t.Logf("agy stderr:\n%s", stderr)
-	}
-	if runErr != nil {
-		t.Fatalf("agy execution failed: %v", runErr)
-	}
-
-	// Verify tool results
-	if !strings.Contains(output, "144") || !strings.Contains(output, "SQUARE_SUCCESS") {
-		t.Errorf("output missing SQUARE_SUCCESS:144, got: %s", output)
-	}
-	if !strings.Contains(output, "343") || !strings.Contains(output, "CUBE_SUCCESS") {
-		t.Errorf("output missing CUBE_SUCCESS:343, got: %s", output)
-	}
-
-	// 5. Verify HTTP handshake and Mcp-Session-Id
-	mu.Lock()
-	reqCount := len(httpRequests)
-	sessID := recordedSessionID
-	mu.Unlock()
-
-	if reqCount < 3 {
-		t.Errorf("expected at least 3 HTTP requests (init, tools/list, tools/call), got %d", reqCount)
-	}
-	if sessID != sessionToken {
-		t.Errorf("expected agy to pass Mcp-Session-Id %q, got %q", sessionToken, sessID)
-	}
-	t.Logf("Verified %d HTTP MCP requests with session %s", reqCount, sessID)
-
-	// 6. Test Multi-Task Isolation: Run agy in an isolated directory taskDir2 without MCP
-	taskDir2 := filepath.Join(testRoot, "task-isolated-2")
-	if err := os.MkdirAll(taskDir2, 0o755); err != nil {
+	if err := env.Cleanup(true); err != nil {
 		t.Fatal(err)
 	}
-	agyCmd2 := exec.CommandContext(cmdCtx, agyPath, "-p", "List available tools from MCP. If none, reply NONE.", "--dangerously-skip-permissions", "--model", "gemini-3.8-flash-low")
-	agyCmd2.Dir = taskDir2
-	var out2 bytes.Buffer
-	agyCmd2.Stdout = &out2
-	if err := agyCmd2.Run(); err == nil {
-		outStr := out2.String()
-		t.Logf("Isolated taskDir2 output: %s", outStr)
-		if strings.Contains(outStr, "calc_square") || strings.Contains(outStr, "calc_cube") {
-			t.Errorf("isolated taskDir2 leaked MCP tools: %s", outStr)
-		}
+	if _, err := os.Stat(env.RootDir); !os.IsNotExist(err) {
+		t.Fatalf("full environment cleanup failed: %v", err)
 	}
-
-	// 7. Test Teardown / CleanupSidecars
-	envRoot := filepath.Join(testRoot, "env-root")
-	if err := os.MkdirAll(envRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeSidecarManifest(envRoot, manifest); err != nil {
-		t.Fatalf("writeSidecarManifest failed: %v", err)
-	}
-	if err := CleanupSidecars(envRoot); err != nil {
-		t.Fatalf("CleanupSidecars failed: %v", err)
-	}
-	if _, err := os.Stat(pluginManifestPath); !os.IsNotExist(err) {
-		t.Errorf("plugin.json was not cleaned up: %v", err)
-	}
-	if _, err := os.Stat(mcpConfigFile); !os.IsNotExist(err) {
-		t.Errorf("mcp_config.json was not cleaned up: %v", err)
-	}
-	t.Log("CleanupSidecars successfully purged all managed sidecars")
+	t.Log("PASS: backend launch, audited tools/list and tools/call on both transports, independent-task isolation, managed retention, Reuse refresh/removal and explicit full cleanup; daemon task orchestration and scheduled GC are not exercised")
 }
