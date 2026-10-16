@@ -5,12 +5,13 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-// Projects is the one dual-view list: a dense table (compact) and a card
-// grid (comfortable), toggled by viewMode. Sort + filters feed both views;
-// hiddenColumns only applies to the table. No scope (lead is optional and
-// often an agent, so there's no strong personal axis; status is a 5-value
-// lifecycle better expressed as a filter). Search stays session-local.
-export type ProjectViewMode = "compact" | "comfortable";
+// Projects is a tri-view list: a dense table (compact), a card grid
+// (comfortable), and enhanced rows (rows) showing resources inline, all
+// toggled by viewMode. Sort + filters feed all three views; hiddenColumns
+// only applies to the table. No scope (lead is optional and often an agent,
+// so there's no strong personal axis; status is a 5-value lifecycle better
+// expressed as a filter). Search stays session-local.
+export type ProjectViewMode = "compact" | "comfortable" | "rows";
 
 export type ProjectSortField = "name" | "priority" | "status" | "progress" | "created";
 

@@ -185,7 +185,7 @@ interface RunningTasksSectionProps {
   presence: AgentPresenceDetail | null;
 }
 
-/** Running pill (green, blinking dot) + clickable task chips, or a quiet idle line. */
+/** Running pill (green, blinking dot) + clickable task chips on one line, or a quiet idle line. */
 function RunningTasksSection({ tasks, presence }: RunningTasksSectionProps) {
   const running = presence?.runningCount ?? 0;
   const hasRunning = running > 0;
@@ -210,9 +210,9 @@ function RunningTasksSection({ tasks, presence }: RunningTasksSectionProps) {
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       {hasRunning && (
-        <span className="inline-flex items-center gap-1.5 rounded-sm border border-success/25 bg-success/15 px-2.5 py-1 text-caption font-medium text-success">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-success/25 bg-success/15 px-2.5 py-1 text-caption font-medium text-success">
           <span className="size-1.5 animate-pulse rounded-full bg-success" />
           {running} running
         </span>

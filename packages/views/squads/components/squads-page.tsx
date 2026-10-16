@@ -30,11 +30,10 @@ import { useModalStore } from "@multica/core/modals";
 import {
   useSquadsViewStore,
   SQUAD_SCOPES,
-  SQUAD_DEFAULT_HIDDEN_COLUMNS,
-  type SquadColumnKey,
   type SquadListFilters,
   type SquadsScope,
   type SquadSortField,
+  type SquadSortDirection,
 } from "@multica/core/squads/stores";
 import type { Agent, MemberWithUser, Squad } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -60,21 +59,11 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
-  ListGrid,
-  ListGridCell,
-  ListGridHeader,
-  ListGridHeaderCell,
-  ListGridRow,
-  LIST_GRID_BOTTOM_CLEARANCE,
-  type ListGridSortDirection,
-} from "@multica/ui/components/ui/list-grid";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
@@ -83,7 +72,7 @@ import {
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { useIntentNavigate, useRowLink } from "../../navigation";
+import { useIntentNavigate } from "../../navigation";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
@@ -91,58 +80,13 @@ import {
 } from "../../layout/collection-page";
 import { useLocale, useT } from "../../i18n";
 import { PAGE_TOOLBAR } from "../../layout/page-header";
-
-// Column template — the simplest member of the ListGrid family (squads are
-// the fewest entity, 1-5 rows): subgrid template + var tracks + two-zone
-// responsiveness + single scroll container, but NO virtualization, checkbox,
-// or batch. Identity two-line rows (avatar + name + description, 64px) like
-// the agents list. Name + leader are the core set (<@2xl); members / creator
-// / created are @2xl. The kebab track collapses when the viewer can't manage
-// any squad (workspace admin only).
-const GRID_COLS =
-  "grid-cols-[0.75rem_minmax(120px,1fr)_var(--sqc-leader)_var(--sqc-kebab)_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_minmax(200px,1fr)_var(--sqc-leader)_var(--sqc-members)_var(--sqc-creator)_var(--sqc-created)_var(--sqc-kebab)_0.75rem]";
-
-const LEADER_WIDTH = 160;
-const COLUMN_WIDTHS: Record<SquadColumnKey, number> = {
-  members: 120,
-  creator: 144,
-  created: 104,
-};
-
-// Fixed tracks (edges 12+12, name min 200, leader 160) plus the 7 gap-x-3
-// gaps between the wide template's 8 tracks (zero-width tracks still carry
-// gaps).
-const FIXED_TRACKS_WIDTH = 224 + LEADER_WIDTH + 7 * 12;
-
-function columnTrackVars(
-  isVisible: (key: SquadColumnKey) => boolean,
-  showActions: boolean,
-): React.CSSProperties {
-  const width = (key: SquadColumnKey) =>
-    isVisible(key) ? `${COLUMN_WIDTHS[key]}px` : "0px";
-  const minWidth =
-    FIXED_TRACKS_WIDTH +
-    (Object.keys(COLUMN_WIDTHS) as SquadColumnKey[]).reduce(
-      (sum, key) => sum + (isVisible(key) ? COLUMN_WIDTHS[key] : 0),
-      0,
-    ) +
-    (showActions ? 28 : 0);
-  return {
-    "--sqc-leader": `${LEADER_WIDTH}px`,
-    "--sqc-members": width("members"),
-    "--sqc-creator": width("creator"),
-    "--sqc-created": width("created"),
-    "--sqc-kebab": showActions ? "1.75rem" : "0px",
-    "--sqc-minw": `${minWidth}px`,
-  } as React.CSSProperties;
-}
+import { SquadEnhancedRows } from "./squad-enhanced-rows";
 
 // ---------------------------------------------------------------------------
 // Cells
 // ---------------------------------------------------------------------------
 
-function SquadAvatar({ squad }: { squad: Squad }) {
+export function SquadAvatar({ squad }: { squad: Squad }) {
   const initials = squad.name
     .split(" ")
     .map((w) => w[0])
@@ -168,83 +112,6 @@ function SquadAvatar({ squad }: { squad: Squad }) {
       size="lg"
       className="shrink-0"
     />
-  );
-}
-
-// Two-line identity cell — same form as the agents list.
-function NameCell({ squad }: { squad: Squad }) {
-  return (
-    <ListGridCell className="gap-3">
-      <SquadAvatar squad={squad} />
-      <div className="min-w-0 flex-1">
-        <span className="block min-w-0 truncate text-body font-medium">
-          {squad.name}
-        </span>
-        {squad.description ? (
-          <span className="block min-w-0 truncate text-caption text-muted-foreground">
-            {squad.description}
-          </span>
-        ) : null}
-      </div>
-    </ListGridCell>
-  );
-}
-
-function LeaderCell({
-  leaderId,
-  leader,
-}: {
-  leaderId: string;
-  leader: Agent | undefined;
-}) {
-  return (
-    <ListGridCell className="gap-1.5">
-      <ActorAvatar actorType="agent" actorId={leaderId} size="sm" />
-      <span className="min-w-0 truncate text-caption text-muted-foreground">
-        {leader?.name ?? leaderId.slice(0, 8)}
-      </span>
-    </ListGridCell>
-  );
-}
-
-// Polymorphic member avatar stack (agent + human members), driven by the
-// list payload's member_preview / member_count. NOT AgentAvatarStack, which
-// is agent-only.
-function MembersCell({ squad }: { squad: Squad }) {
-  const preview = squad.member_preview ?? [];
-  const count = squad.member_count ?? preview.length;
-  if (count === 0) {
-    return (
-      <ListGridCell className="hidden @2xl:flex">
-        <span className="text-caption text-faint-foreground">—</span>
-      </ListGridCell>
-    );
-  }
-  const visible = preview.slice(0, 3);
-  const overflow = count - visible.length;
-  return (
-    <ListGridCell className="hidden @2xl:flex">
-      <div className="flex items-center -space-x-1.5">
-        {visible.map((m) => (
-          <span
-            key={`${m.member_type}-${m.member_id}`}
-            className="inline-flex rounded-full ring-2 ring-background"
-          >
-            <ActorAvatar
-              actorType={m.member_type}
-              actorId={m.member_id}
-              size="md"
-              enableHoverCard={m.member_type === "agent"}
-            />
-          </span>
-        ))}
-        {overflow > 0 && (
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-muted text-caption font-medium text-muted-foreground ring-2 ring-background">
-            +{overflow}
-          </span>
-        )}
-      </div>
-    </ListGridCell>
   );
 }
 
@@ -317,7 +184,7 @@ function ArchiveSquadDialog({
   );
 }
 
-function SquadRowActions({ squad }: { squad: Squad }) {
+export function SquadRowActions({ squad }: { squad: Squad }) {
   const { t } = useT("squads");
   const { t: tCommon } = useT("common");
   const p = useWorkspacePaths();
@@ -376,62 +243,6 @@ function SquadRowActions({ squad }: { squad: Squad }) {
 // Header + toolbar
 // ---------------------------------------------------------------------------
 
-function SquadListHeader({
-  sortField,
-  sortDirection,
-  onSort,
-  isColVisible,
-}: {
-  sortField: SquadSortField;
-  sortDirection: ListGridSortDirection;
-  onSort: (field: SquadSortField) => void;
-  isColVisible: (key: SquadColumnKey) => boolean;
-}) {
-  const { t } = useT("squads");
-  const sorted = (field: SquadSortField) =>
-    sortField === field ? sortDirection : false;
-  return (
-    <ListGridHeader>
-      <ListGridHeaderCell sorted={sorted("name")} onSort={() => onSort("name")}>
-        {t(($) => $.page.table.name)}
-      </ListGridHeaderCell>
-      <ListGridHeaderCell>{t(($) => $.page.table.leader)}</ListGridHeaderCell>
-      {isColVisible("members") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("members")}
-          onSort={() => onSort("members")}
-        >
-          {t(($) => $.page.table.members)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("creator") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.page.table.creator)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("created") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          sorted={sorted("created")}
-          onSort={() => onSort("created")}
-        >
-          {t(($) => $.page.table.created)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {/* kebab track placeholder (track width collapses when no actions) */}
-      <span aria-hidden="true" />
-    </ListGridHeader>
-  );
-}
-
-const COLUMN_KEYS: SquadColumnKey[] = ["members", "creator", "created"];
 const SORT_FIELDS: SquadSortField[] = ["name", "members", "created"];
 
 interface ActorOption {
@@ -455,8 +266,6 @@ function SquadListToolbar({
   sortDirection,
   onSortFieldChange,
   onSortDirectionChange,
-  hiddenColumns,
-  onToggleColumn,
 }: {
   scope: SquadsScope;
   onScopeChange: (scope: SquadsScope) => void;
@@ -469,11 +278,9 @@ function SquadListToolbar({
   visibleCount: number;
   totalCount: number;
   sortField: SquadSortField;
-  sortDirection: ListGridSortDirection;
+  sortDirection: SquadSortDirection;
   onSortFieldChange: (field: SquadSortField) => void;
-  onSortDirectionChange: (direction: ListGridSortDirection) => void;
-  hiddenColumns: SquadColumnKey[];
-  onToggleColumn: (key: SquadColumnKey) => void;
+  onSortDirectionChange: (direction: SquadSortDirection) => void;
 }) {
   const { t } = useT("squads");
   const activeFilterCount =
@@ -490,11 +297,6 @@ function SquadListToolbar({
   const SORT_LABELS: Record<SquadSortField, string> = {
     name: t(($) => $.page.table.name),
     members: t(($) => $.page.table.members),
-    created: t(($) => $.page.table.created),
-  };
-  const COLUMN_LABELS: Record<SquadColumnKey, string> = {
-    members: t(($) => $.page.table.members),
-    creator: t(($) => $.page.table.creator),
     created: t(($) => $.page.table.created),
   };
   const sortLabel = SORT_LABELS[sortField];
@@ -739,26 +541,6 @@ function SquadListToolbar({
               </Button>
             </div>
           </div>
-          <div className="px-3 py-2.5">
-            <span className="text-caption font-medium text-muted-foreground">
-              {t(($) => $.toolbar.section_columns)}
-            </span>
-            <div className="mt-2 space-y-2">
-              {COLUMN_KEYS.map((key) => (
-                <label
-                  key={key}
-                  className="flex cursor-pointer items-center justify-between"
-                >
-                  <span className="text-body">{COLUMN_LABELS[key]}</span>
-                  <Switch
-                    size="sm"
-                    checked={!hiddenColumns.includes(key)}
-                    onCheckedChange={() => onToggleColumn(key)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
         </PopoverContent>
       </Popover>
       </div>
@@ -775,8 +557,6 @@ export function SquadsPage() {
   const locale = useLocale();
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
-  const p = useWorkspacePaths();
-  const rowLink = useRowLink();
   const currentUser = useAuthStore((s) => s.user);
 
   const { data: squads = [], isLoading } = useQuery({
@@ -808,16 +588,11 @@ export function SquadsPage() {
   const setScope = useSquadsViewStore((s) => s.setScope);
   const sortField = useSquadsViewStore((s) => s.sortField);
   const sortDirection = useSquadsViewStore((s) => s.sortDirection);
-  const hiddenColumns = useSquadsViewStore((s) => s.hiddenColumns);
-  const handleSort = useSquadsViewStore((s) => s.toggleSort);
   const handleSortFieldSelect = useSquadsViewStore((s) => s.setSortField);
   const setSortDirection = useSquadsViewStore((s) => s.setSortDirection);
-  const toggleColumn = useSquadsViewStore((s) => s.toggleColumn);
   const filters = useSquadsViewStore((s) => s.filters);
   const toggleFilter = useSquadsViewStore((s) => s.toggleFilter);
   const clearFilters = useSquadsViewStore((s) => s.clearFilters);
-
-  const isColVisible = (key: SquadColumnKey) => !hiddenColumns.includes(key);
 
   const scopeCounts = useMemo<Record<SquadsScope, number>>(() => {
     let mine = 0;
@@ -957,76 +732,23 @@ export function SquadsPage() {
             sortDirection={sortDirection}
             onSortFieldChange={handleSortFieldSelect}
             onSortDirectionChange={setSortDirection}
-            hiddenColumns={hiddenColumns}
-            onToggleColumn={toggleColumn}
           />
-          <div className="min-h-0 flex-1 overflow-auto @container">
-            <ListGrid
-              className={`${GRID_COLS} @2xl:min-w-[var(--sqc-minw)]`}
-              style={{
-                ...columnTrackVars(isColVisible, canManageAnyRow),
-                paddingBottom: LIST_GRID_BOTTOM_CLEARANCE,
-              }}
-            >
-              <SquadListHeader
-                sortField={sortField}
-                sortDirection={sortDirection}
-                onSort={handleSort}
-                isColVisible={isColVisible}
+          <div className="min-h-0 flex-1 overflow-auto p-1">
+            {rows.length === 0 ? (
+              <div className="py-16 text-center text-body text-muted-foreground">
+                {t(($) => $.page.no_matches)}
+              </div>
+            ) : (
+              <SquadEnhancedRows
+                squads={rows}
+                agentsById={agentsById}
+                membersById={membersById}
+                locale={locale}
+                isWorkspaceAdmin={isWorkspaceAdmin}
+                currentUserId={currentUser?.id}
+                canManageAnyRow={canManageAnyRow}
               />
-              {rows.length === 0 ? (
-                <div className="col-span-full py-16 text-center text-body text-muted-foreground">
-                  {t(($) => $.page.no_matches)}
-                </div>
-              ) : (
-                rows.map((squad) => (
-                  <ListGridRow
-                    key={squad.id}
-                    className="cursor-pointer"
-                    {...rowLink(p.squadDetail(squad.id), squad.name)}
-                  >
-                    <NameCell squad={squad} />
-                    <LeaderCell
-                      leaderId={squad.leader_id}
-                      leader={agentsById.get(squad.leader_id)}
-                    />
-                    {isColVisible("members") ? (
-                      <MembersCell squad={squad} />
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("creator") ? (
-                      <ListGridCell className="hidden gap-1.5 @2xl:flex">
-                        <ActorAvatar
-                          actorType="member"
-                          actorId={squad.creator_id}
-                          size="sm"
-                        />
-                        <span className="min-w-0 truncate text-caption text-muted-foreground">
-                          {membersById.get(squad.creator_id)?.name ??
-                            squad.creator_id.slice(0, 8)}
-                        </span>
-                      </ListGridCell>
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    {isColVisible("created") ? (
-                      <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                        {new Date(squad.created_at).toLocaleDateString(locale)}
-                      </ListGridCell>
-                    ) : (
-                      <ListGridCell className="hidden px-0 @2xl:flex" />
-                    )}
-                    <ListGridCell className="justify-end px-0">
-                      {isWorkspaceAdmin ||
-                      (!!currentUser && squad.creator_id === currentUser.id) ? (
-                        <SquadRowActions squad={squad} />
-                      ) : null}
-                    </ListGridCell>
-                  </ListGridRow>
-                ))
-              )}
-            </ListGrid>
+            )}
           </div>
         </>
       )}
@@ -1036,50 +758,42 @@ export function SquadsPage() {
 
 function LoadingSkeleton() {
   return (
-    <div className="min-h-0 flex-1 overflow-auto @container">
-      <ListGrid
-        className={GRID_COLS}
-        style={columnTrackVars(
-          (key) => !SQUAD_DEFAULT_HIDDEN_COLUMNS.includes(key),
-          true,
-        )}
-      >
-        <ListGridHeader>
-          <ListGridHeaderCell>
-            <Skeleton className="h-3 w-12" />
-          </ListGridHeaderCell>
-          <ListGridHeaderCell>
-            <Skeleton className="h-3 w-12" />
-          </ListGridHeaderCell>
-          <ListGridHeaderCell className="hidden @2xl:flex">
-            <Skeleton className="h-3 w-12" />
-          </ListGridHeaderCell>
-          <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-          <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-          <span aria-hidden="true" />
-        </ListGridHeader>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <ListGridRow key={i} className="h-16 hover:bg-transparent">
-            <ListGridCell className="gap-3">
+    <div className="flex flex-col gap-2 p-1">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div
+          key={i}
+          className="grid items-center gap-4 rounded-lg border border-surface-border bg-surface px-5 py-3.5"
+        >
+          <div className="grid w-full grid-cols-[56px_minmax(220px,1.2fr)_auto_auto_minmax(140px,auto)] items-center gap-4">
+            <Skeleton className="size-8 rounded-full" />
+            <div className="flex flex-col gap-1.5">
+              <Skeleton className="h-3.5 w-32 max-w-full" />
+              <Skeleton className="h-3 w-48 max-w-full" />
+            </div>
+            <div className="flex items-center gap-2">
               <Skeleton className="size-8 rounded-full" />
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <Skeleton className="h-3.5 w-32 max-w-full" />
-                <Skeleton className="h-3 w-48 max-w-full" />
+              <div className="flex flex-col gap-1">
+                <Skeleton className="h-2.5 w-10" />
+                <Skeleton className="h-3 w-16" />
               </div>
-            </ListGridCell>
-            <ListGridCell className="gap-1.5">
-              <Skeleton className="size-5 rounded-full" />
-              <Skeleton className="h-3 w-16" />
-            </ListGridCell>
-            <ListGridCell className="hidden @2xl:flex">
-              <Skeleton className="h-5 w-16" />
-            </ListGridCell>
-            <ListGridCell className="hidden px-0 @2xl:flex" />
-            <ListGridCell className="hidden px-0 @2xl:flex" />
-            <span aria-hidden="true" />
-          </ListGridRow>
-        ))}
-      </ListGrid>
+            </div>
+            <div className="flex items-center -space-x-1.5">
+              <Skeleton className="size-5 rounded-full ring-2 ring-surface" />
+              <Skeleton className="size-5 rounded-full ring-2 ring-surface" />
+              <Skeleton className="size-5 rounded-full ring-2 ring-surface" />
+            </div>
+            <div className="flex items-center justify-end gap-3">
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-1">
+                  <Skeleton className="size-4 rounded-full" />
+                  <Skeleton className="h-2.5 w-12" />
+                </div>
+                <Skeleton className="h-2.5 w-16" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

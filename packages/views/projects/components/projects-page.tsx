@@ -9,6 +9,7 @@ import {
   Filter,
   FolderKanban,
   LayoutGrid,
+  List,
   MoreHorizontal,
   Pin,
   PinOff,
@@ -41,7 +42,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useModalStore } from "@multica/core/modals";
-import { AppLink, useIntentNavigate, useRowLink } from "../../navigation";
+import { useIntentNavigate, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -60,9 +61,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -104,6 +103,8 @@ import {
   CollectionPageState,
 } from "../../layout/collection-page";
 import { ProjectIcon } from "./project-icon";
+import { ProjectCardGrid } from "./project-card-grid";
+import { ProjectEnhancedRows } from "./project-enhanced-rows";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
@@ -189,7 +190,7 @@ function columnTrackVars(
   } as React.CSSProperties;
 }
 
-function ProgressRing({ project }: { project: Project }) {
+export function ProgressRing({ project }: { project: Project }) {
   if (project.issue_count === 0) {
     return <span className="text-caption text-faint-foreground">—</span>;
   }
@@ -221,7 +222,7 @@ function ProgressRing({ project }: { project: Project }) {
 
 // Compact rows own whole-row navigation; callers stop propagation around this
 // menu so action clicks do not bubble into the rowLink handler.
-function ProjectRowActions({
+export function ProjectRowActions({
   project,
   pinned,
   canDelete,
@@ -569,104 +570,6 @@ function ProjectTableHeader({
       )}
       <span aria-hidden="true" />
     </ListGridHeader>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Card (comfortable) view — kept from the prior page.
-// ---------------------------------------------------------------------------
-
-function ProjectCard({
-  project,
-  pinned,
-  canDelete,
-}: {
-  project: Project;
-  pinned: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useT("projects");
-  const wsPaths = useWorkspacePaths();
-  const formatRelativeDate = useFormatRelativeDate();
-  const updateProject = useUpdateProject();
-  const handleUpdate = useCallback(
-    (data: UpdateProjectRequest) => updateProject.mutate({ id: project.id, ...data }),
-    [project.id, updateProject],
-  );
-  const progressPercent =
-    project.issue_count > 0
-      ? Math.round((project.done_count / project.issue_count) * 100)
-      : 0;
-
-  return (
-    <div className="group/card group/row flex flex-col rounded-md border bg-card transition-colors hover:border-primary/50">
-      <div className="p-3 pb-2">
-        <div className="flex items-center gap-2">
-          <AppLink
-            href={wsPaths.projectDetail(project.id)}
-            className="flex min-w-0 flex-1 items-center gap-2"
-          >
-            <ProjectIcon project={project} size="sm" />
-            <h3 className="truncate text-body font-medium">{project.title}</h3>
-          </AppLink>
-          <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
-          <ProjectStatusBadge project={project} handleUpdate={handleUpdate} triggerClassName="shrink-0" />
-        </div>
-
-        {project.issue_count > 0 ? (
-          <div className="flex items-center justify-end gap-1.5 pt-2">
-            <div className="relative h-4 w-4">
-              <svg className="h-4 w-4 -rotate-90" viewBox="0 0 16 16">
-                <circle className="text-muted" strokeWidth="2" stroke="currentColor" fill="none" r="6" cx="8" cy="8" />
-                <circle
-                  className="text-emerald-500"
-                  strokeWidth="2"
-                  stroke="currentColor"
-                  fill="none"
-                  r="6"
-                  cx="8"
-                  cy="8"
-                  strokeDasharray={`${progressPercent * 0.377} 37.7`}
-                  strokeLinecap="round"
-                />
-              </svg>
-            </div>
-            <span className="text-micro tabular-nums text-muted-foreground">
-              {project.done_count}/{project.issue_count}
-            </span>
-          </div>
-        ) : (
-          <span className="flex justify-end pt-2 text-micro text-muted-foreground">
-            {t(($) => $.detail.no_issues_yet)}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-0 flex items-center justify-between border-t px-3 pb-3 pt-2">
-        <ProjectLeadPicker
-          project={project}
-          handleUpdate={handleUpdate}
-          renderTrigger={(leadName) => (
-            <button type="button" className="-mx-1.5 flex items-center gap-1.5 rounded-xs px-1.5 py-0.5 transition-colors hover:bg-accent/60">
-              {project.lead_type && project.lead_id ? (
-                <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard />
-              ) : (
-                <span className="inline-flex h-5 w-5 rounded-full border border-dashed border-muted-foreground/30" />
-              )}
-              <span className="max-w-[60px] truncate text-micro text-muted-foreground">
-                {leadName ?? t(($) => $.lead.no_lead)}
-              </span>
-            </button>
-          )}
-        />
-        <div className="flex items-center gap-2">
-          <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
-          <span className="text-micro text-muted-foreground">
-            {formatRelativeDate(project.created_at)}
-          </span>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1172,67 +1075,43 @@ export function ProjectsPage() {
                   </PopoverContent>
                 </Popover>
 
-              {/* View selector — a dropdown menu to pick the list view,
-                  aligned with the issue list's view menu. The trigger shows
-                  the active view; the menu carries every mode so new views
-                  can be added as menu items. Pure presentation. */}
-              <DropdownMenu>
-                <Tooltip>
-                  <DropdownMenuTrigger
-                    render={
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                          >
-                            {isCompact ? (
-                              <Rows3 className="size-3.5" />
-                            ) : (
-                              <LayoutGrid className="size-3.5" />
-                            )}
-                            <span className="hidden md:inline">
-                              {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
-                            </span>
-                          </Button>
-                        }
-                      />
-                    }
-                  />
-                  <TooltipContent side="bottom">{t(($) => $.toolbar.view)}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>{t(($) => $.toolbar.view)}</DropdownMenuLabel>
-                  </DropdownMenuGroup>
-                  <DropdownMenuRadioGroup
-                    value={viewMode}
-                    onValueChange={(v) => setViewMode(v as ProjectViewMode)}
+              {/* View mode toggle — 3-button icon toggle (Table/Cards/Rows),
+                  mirroring the agents page toolbar. Pure presentation. */}
+              <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-surface-border bg-surface p-0.5">
+                {([
+                  { mode: "compact", icon: List, label: t(($) => $.page.view_table) },
+                  { mode: "comfortable", icon: LayoutGrid, label: t(($) => $.page.view_cards) },
+                  { mode: "rows", icon: Rows3, label: t(($) => $.page.view_rows) },
+                ] as const).map(({ mode, icon: Icon, label }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={viewMode === mode}
+                    title={label}
+                    onClick={() => setViewMode(mode)}
+                    className={cn(
+                      "flex h-7 w-7 items-center justify-center rounded-[calc(var(--radius-lg)-2px)] transition-colors",
+                      viewMode === mode
+                        ? "bg-surface-raised text-foreground shadow-[var(--surface-shadow)]"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
                   >
-                    <DropdownMenuRadioItem value="compact">
-                      <Rows3 />
-                      {t(($) => $.page.view_table)}
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="comfortable">
-                      <LayoutGrid />
-                      {t(($) => $.page.view_cards)}
-                    </DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <Icon className="size-3.5" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
           {/* Body */}
           {isLoading ? (
-            <LoadingState isCompact={isCompact} />
+            <LoadingState viewMode={viewMode} />
           ) : visible.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center py-24 text-muted-foreground">
               <Search className="mb-3 h-10 w-10 opacity-30" />
               <p className="text-body">{t(($) => $.page.no_matches)}</p>
             </div>
-          ) : isCompact ? (
+          ) : viewMode === "compact" ? (
             <div className="min-h-0 flex-1 overflow-auto @container">
               <ListGrid
                 className={`${GRID_COLS} @2xl:min-w-[var(--pjc-minw)]`}
@@ -1265,22 +1144,18 @@ export function ProjectsPage() {
                 ))}
               </ListGrid>
             </div>
+          ) : viewMode === "comfortable" ? (
+            <ProjectCardGrid
+              projects={visible}
+              pinnedIds={pinnedProjectIds}
+              canDelete={isWorkspaceAdmin}
+            />
           ) : (
-            <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4", PAGE_GUTTER)}>
-              <div
-                className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
-                style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
-              >
-                {visible.map((project) => (
-                  <ProjectCard
-                    key={project.id}
-                    project={project}
-                    pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
-                  />
-                ))}
-              </div>
-            </div>
+            <ProjectEnhancedRows
+              projects={visible}
+              pinnedIds={pinnedProjectIds}
+              canDelete={isWorkspaceAdmin}
+            />
           )}
 
           <ProjectBatchToolbar
@@ -1295,8 +1170,8 @@ export function ProjectsPage() {
   );
 }
 
-function LoadingState({ isCompact }: { isCompact: boolean }) {
-  if (isCompact) {
+function LoadingState({ viewMode }: { viewMode: ProjectViewMode }) {
+  if (viewMode === "compact") {
     return (
       <div className={cn("min-h-0 flex-1 overflow-auto pt-4", PAGE_GUTTER)}>
         <div className="space-y-2">
@@ -1307,10 +1182,21 @@ function LoadingState({ isCompact }: { isCompact: boolean }) {
       </div>
     );
   }
+  if (viewMode === "rows") {
+    return (
+      <div className={cn("min-h-0 flex-1 overflow-y-auto pt-4", PAGE_GUTTER)}>
+        <div className="space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={cn("grid grid-cols-1 gap-3 pt-4 sm:grid-cols-2 lg:grid-cols-4", PAGE_GUTTER)}>
+    <div className={cn("grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4", PAGE_GUTTER)}>
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
+        <div key={i} className="flex flex-col gap-2 rounded-xl border border-surface-border bg-surface p-5">
           <div className="flex items-center gap-2">
             <Skeleton className="h-8 w-8 rounded-xs" />
             <Skeleton className="h-4 w-3/4" />
