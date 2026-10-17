@@ -495,14 +495,15 @@ type ChannelTypingReaction struct {
 }
 
 type ChannelUserBinding struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	ChannelType    string             `json:"channel_type"`
-	ChannelUserID  string             `json:"channel_user_id"`
-	Config         []byte             `json:"config"`
-	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID        pgtype.UUID        `json:"multica_user_id"`
+	InstallationID       pgtype.UUID        `json:"installation_id"`
+	ChannelType          string             `json:"channel_type"`
+	ChannelUserID        string             `json:"channel_user_id"`
+	Config               []byte             `json:"config"`
+	BoundAt              pgtype.Timestamptz `json:"bound_at"`
+	IsNotificationTarget bool               `json:"is_notification_target"`
 }
 
 type ChatDraftRestore struct {

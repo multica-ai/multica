@@ -564,6 +564,30 @@ WHERE b.workspace_id = sqlc.arg('workspace_id')
 ORDER BY b.bound_at DESC
 LIMIT 1;
 
+-- name: FindNotificationBindingForMember :one
+-- Outbound NOTIFICATION lookup (SHAR-146 B1): same filters as
+-- FindChannelBindingForMember, but the tiebreak serves notification routing
+-- rather than account reuse. A member's explicit notification target — the
+-- binding they flagged via the settings API (is_notification_target) — wins;
+-- with no target set, the OLDEST binding is used. Oldest, not newest, is the
+-- fallback because it is the binding the member had before any later bot
+-- appeared: a newly-bound bot must never silently inherit the notification
+-- stream (the hijack this replaces — the old lookup's newest-wins did exactly
+-- that). Only the WeCom outbound inbox path reads this today; Slack/Lark/
+-- DingTalk adapters still use their own addressing and are out of scope.
+--
+-- FindChannelBindingForMember is deliberately left untouched: its
+-- newest-wins tiebreak is paired with FindReusableChannelUserBinding's and is
+-- intentional for that chain.
+SELECT b.* FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+  AND ci.status = 'active'
+ORDER BY b.is_notification_target DESC, b.bound_at ASC
+LIMIT 1;
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already
@@ -606,6 +630,69 @@ WHERE workspace_id = $1 AND multica_user_id = $2;
 -- dead rows from accumulating.
 DELETE FROM channel_user_binding
 WHERE installation_id = $1;
+
+-- name: GetChannelUserBindingByID :one
+-- Single-binding lookup by row id, scoped to a workspace (the scope the
+-- settings API and the notification-target owner check both need). The
+-- workspace filter is what enforces "a member may only manage bindings in a
+-- workspace they belong to" without leaking rows across workspaces when two
+-- workspaces happen to share a multica_user_id.
+SELECT * FROM channel_user_binding
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id');
+
+-- name: ListChannelUserBindingsForMember :many
+-- Settings-API read: every active-installation binding a member holds in a
+-- workspace for one channel_type, with the installation's agent id and
+-- status so the UI can name the bot behind the binding and skip bindings
+-- whose installation has been revoked. Scoped by channel_type because a
+-- member's WeCom bindings and Slack bindings are different surfaces.
+SELECT b.*, ci.agent_id, ci.status AS installation_status
+FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+ORDER BY b.bound_at ASC;
+
+-- name: ClearChannelUserBindingNotificationTarget :exec
+-- Radio-semantic clear, half of SetChannelUserBindingNotificationTarget:
+-- drop the target flag from every other binding the member holds under the
+-- same (workspace, channel_type) scope, so at most one binding carries it at
+-- a time. Run in the same transaction as the set below; the partial unique
+-- index (workspace_id, multica_user_id, channel_type) WHERE
+-- is_notification_target guarantees the constraint even if two callers race
+-- (the second's set trips the index instead of silently producing two
+-- targets).
+UPDATE channel_user_binding
+SET is_notification_target = FALSE
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND multica_user_id = sqlc.arg('multica_user_id')
+  AND channel_type = sqlc.arg('channel_type')
+  AND is_notification_target = TRUE;
+
+-- name: SetChannelUserBindingNotificationTarget :exec
+-- Radio-semantic set, the other half: flip the chosen binding on. Paired
+-- with ClearChannelUserBindingNotificationTarget in one transaction it
+-- gives radio semantics — setting one target clears the others — without
+-- the caller having to read-modify-write the rows. The workspace_id filter
+-- is the scope guard: a binding the caller does not own is never touched
+-- even though it carries the flag on.
+UPDATE channel_user_binding
+SET is_notification_target = TRUE
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id');
+
+-- name: UnsetChannelUserBindingNotificationTarget :exec
+-- Unset: flip the chosen binding off. The workspace_id filter keeps the
+-- scope; is_notification_target = TRUE in the predicate makes the no-op
+-- (unsetting a binding that is not a target) a zero-row update the caller
+-- can ignore.
+UPDATE channel_user_binding
+SET is_notification_target = FALSE
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND is_notification_target = TRUE;
 
 -- =====================
 -- channel_chat_session_binding

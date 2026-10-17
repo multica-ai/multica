@@ -541,6 +541,34 @@ func (q *Queries) ClearChannelInstallationBotScopedRows(ctx context.Context, ins
 	return i, err
 }
 
+const clearChannelUserBindingNotificationTarget = `-- name: ClearChannelUserBindingNotificationTarget :exec
+UPDATE channel_user_binding
+SET is_notification_target = FALSE
+WHERE workspace_id = $1
+  AND multica_user_id = $2
+  AND channel_type = $3
+  AND is_notification_target = TRUE
+`
+
+type ClearChannelUserBindingNotificationTargetParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+// Radio-semantic clear, half of SetChannelUserBindingNotificationTarget:
+// drop the target flag from every other binding the member holds under the
+// same (workspace, channel_type) scope, so at most one binding carries it at
+// a time. Run in the same transaction as the set below; the partial unique
+// index (workspace_id, multica_user_id, channel_type) WHERE
+// is_notification_target guarantees the constraint even if two callers race
+// (the second's set trips the index instead of silently producing two
+// targets).
+func (q *Queries) ClearChannelUserBindingNotificationTarget(ctx context.Context, arg ClearChannelUserBindingNotificationTargetParams) error {
+	_, err := q.db.Exec(ctx, clearChannelUserBindingNotificationTarget, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	return err
+}
+
 const closeChannelReplyDeliveryTurn = `-- name: CloseChannelReplyDeliveryTurn :one
 INSERT INTO channel_reply_delivery (
     turn_id, task_id, attempt_depth, binding_id, installation_id, channel_type, chat_id,
@@ -1058,7 +1086,7 @@ ON CONFLICT (installation_id, channel_user_id) DO UPDATE SET
     config   = channel_user_binding.config || jsonb_strip_nulls(EXCLUDED.config),
     bound_at = now()
 WHERE channel_user_binding.multica_user_id = EXCLUDED.multica_user_id
-RETURNING id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at
+RETURNING id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at, is_notification_target
 `
 
 type CreateChannelUserBindingParams struct {
@@ -1100,6 +1128,7 @@ func (q *Queries) CreateChannelUserBinding(ctx context.Context, arg CreateChanne
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+		&i.IsNotificationTarget,
 	)
 	return i, err
 }
@@ -1341,7 +1370,7 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 }
 
 const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
-SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at, b.is_notification_target FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
 WHERE b.workspace_id = $1
   AND b.multica_user_id = $2
@@ -1378,6 +1407,7 @@ func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChann
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+		&i.IsNotificationTarget,
 	)
 	return i, err
 }
@@ -1442,8 +1472,56 @@ func (q *Queries) FindLiveChannelBindingToken(ctx context.Context, arg FindLiveC
 	return i, err
 }
 
+const findNotificationBindingForMember = `-- name: FindNotificationBindingForMember :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at, b.is_notification_target FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+  AND ci.status = 'active'
+ORDER BY b.is_notification_target DESC, b.bound_at ASC
+LIMIT 1
+`
+
+type FindNotificationBindingForMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+// Outbound NOTIFICATION lookup (SHAR-146 B1): same filters as
+// FindChannelBindingForMember, but the tiebreak serves notification routing
+// rather than account reuse. A member's explicit notification target — the
+// binding they flagged via the settings API (is_notification_target) — wins;
+// with no target set, the OLDEST binding is used. Oldest, not newest, is the
+// fallback because it is the binding the member had before any later bot
+// appeared: a newly-bound bot must never silently inherit the notification
+// stream (the hijack this replaces — the old lookup's newest-wins did exactly
+// that). Only the WeCom outbound inbox path reads this today; Slack/Lark/
+// DingTalk adapters still use their own addressing and are out of scope.
+//
+// FindChannelBindingForMember is deliberately left untouched: its
+// newest-wins tiebreak is paired with FindReusableChannelUserBinding's and is
+// intentional for that chain.
+func (q *Queries) FindNotificationBindingForMember(ctx context.Context, arg FindNotificationBindingForMemberParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findNotificationBindingForMember, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+		&i.IsNotificationTarget,
+	)
+	return i, err
+}
+
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
-SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at, b.is_notification_target FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
 WHERE b.workspace_id = $1
   AND b.channel_type = $2
@@ -1491,6 +1569,7 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+		&i.IsNotificationTarget,
 	)
 	return i, err
 }
@@ -1957,8 +2036,41 @@ func (q *Queries) GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID
 	return i, err
 }
 
+const getChannelUserBindingByID = `-- name: GetChannelUserBindingByID :one
+SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at, is_notification_target FROM channel_user_binding
+WHERE id = $1
+  AND workspace_id = $2
+`
+
+type GetChannelUserBindingByIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Single-binding lookup by row id, scoped to a workspace (the scope the
+// settings API and the notification-target owner check both need). The
+// workspace filter is what enforces "a member may only manage bindings in a
+// workspace they belong to" without leaking rows across workspaces when two
+// workspaces happen to share a multica_user_id.
+func (q *Queries) GetChannelUserBindingByID(ctx context.Context, arg GetChannelUserBindingByIDParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelUserBindingByID, arg.ID, arg.WorkspaceID)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+		&i.IsNotificationTarget,
+	)
+	return i, err
+}
+
 const getChannelUserBindingByUserID = `-- name: GetChannelUserBindingByUserID :one
-SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at FROM channel_user_binding
+SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at, is_notification_target FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2
 `
 
@@ -1983,6 +2095,7 @@ func (q *Queries) GetChannelUserBindingByUserID(ctx context.Context, arg GetChan
 		&i.ChannelUserID,
 		&i.Config,
 		&i.BoundAt,
+		&i.IsNotificationTarget,
 	)
 	return i, err
 }
@@ -2335,6 +2448,73 @@ func (q *Queries) ListChannelOutboundMessagesByIDs(ctx context.Context, arg List
 			&i.TaskID,
 			&i.OutboundKind,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelUserBindingsForMember = `-- name: ListChannelUserBindingsForMember :many
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at, b.is_notification_target, ci.agent_id, ci.status AS installation_status
+FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+ORDER BY b.bound_at ASC
+`
+
+type ListChannelUserBindingsForMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+type ListChannelUserBindingsForMemberRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID        pgtype.UUID        `json:"multica_user_id"`
+	InstallationID       pgtype.UUID        `json:"installation_id"`
+	ChannelType          string             `json:"channel_type"`
+	ChannelUserID        string             `json:"channel_user_id"`
+	Config               []byte             `json:"config"`
+	BoundAt              pgtype.Timestamptz `json:"bound_at"`
+	IsNotificationTarget bool               `json:"is_notification_target"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	InstallationStatus   string             `json:"installation_status"`
+}
+
+// Settings-API read: every active-installation binding a member holds in a
+// workspace for one channel_type, with the installation's agent id and
+// status so the UI can name the bot behind the binding and skip bindings
+// whose installation has been revoked. Scoped by channel_type because a
+// member's WeCom bindings and Slack bindings are different surfaces.
+func (q *Queries) ListChannelUserBindingsForMember(ctx context.Context, arg ListChannelUserBindingsForMemberParams) ([]ListChannelUserBindingsForMemberRow, error) {
+	rows, err := q.db.Query(ctx, listChannelUserBindingsForMember, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelUserBindingsForMemberRow{}
+	for rows.Next() {
+		var i ListChannelUserBindingsForMemberRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.MulticaUserID,
+			&i.InstallationID,
+			&i.ChannelType,
+			&i.ChannelUserID,
+			&i.Config,
+			&i.BoundAt,
+			&i.IsNotificationTarget,
+			&i.AgentID,
+			&i.InstallationStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -3266,6 +3446,29 @@ func (q *Queries) SetChannelInstallationStatus(ctx context.Context, arg SetChann
 	return err
 }
 
+const setChannelUserBindingNotificationTarget = `-- name: SetChannelUserBindingNotificationTarget :exec
+UPDATE channel_user_binding
+SET is_notification_target = TRUE
+WHERE id = $1
+  AND workspace_id = $2
+`
+
+type SetChannelUserBindingNotificationTargetParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Radio-semantic set, the other half: flip the chosen binding on. Paired
+// with ClearChannelUserBindingNotificationTarget in one transaction it
+// gives radio semantics — setting one target clears the others — without
+// the caller having to read-modify-write the rows. The workspace_id filter
+// is the scope guard: a binding the caller does not own is never touched
+// even though it carries the flag on.
+func (q *Queries) SetChannelUserBindingNotificationTarget(ctx context.Context, arg SetChannelUserBindingNotificationTargetParams) error {
+	_, err := q.db.Exec(ctx, setChannelUserBindingNotificationTarget, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const settleChannelReplyDelivery = `-- name: SettleChannelReplyDelivery :execrows
 UPDATE channel_reply_delivery
 SET phase = 'settled', settled_reason = $3, owner_token = NULL, owner_expires_at = NULL, updated_at = now()
@@ -3334,6 +3537,28 @@ func (q *Queries) TombstoneChannelMediaPendingObject(ctx context.Context, arg To
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const unsetChannelUserBindingNotificationTarget = `-- name: UnsetChannelUserBindingNotificationTarget :exec
+UPDATE channel_user_binding
+SET is_notification_target = FALSE
+WHERE id = $1
+  AND workspace_id = $2
+  AND is_notification_target = TRUE
+`
+
+type UnsetChannelUserBindingNotificationTargetParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Unset: flip the chosen binding off. The workspace_id filter keeps the
+// scope; is_notification_target = TRUE in the predicate makes the no-op
+// (unsetting a binding that is not a target) a zero-row update the caller
+// can ignore.
+func (q *Queries) UnsetChannelUserBindingNotificationTarget(ctx context.Context, arg UnsetChannelUserBindingNotificationTargetParams) error {
+	_, err := q.db.Exec(ctx, unsetChannelUserBindingNotificationTarget, arg.ID, arg.WorkspaceID)
+	return err
 }
 
 const updateChannelChatSessionBindingReplyTarget = `-- name: UpdateChannelChatSessionBindingReplyTarget :exec
