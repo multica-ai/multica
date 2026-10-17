@@ -339,7 +339,6 @@ type workspaceState struct {
 	taskRepoURLs    map[string]struct{}
 	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
 	settings        json.RawMessage              // workspace settings (JSONB)
-	lastRepoSyncErr string
 	repoRefreshMu   contextLock
 	// coAuthorPublishMu serializes publication of the Co-authored-by verdict
 	// for this workspace. Unlike the fields above it is NOT guarded by
@@ -417,6 +416,10 @@ type Daemon struct {
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
+
+	// gitCALastErr is the last applyGitCACerts failure, so a persistent one
+	// (e.g. on Windows) is logged once rather than on every repo refresh.
+	gitCALastErr atomic.Pointer[string]
 
 	// terminalReports is the durable outbox for complete/fail callbacks. The
 	// sender hook is production-wired through Client and overridable in focused
@@ -3177,14 +3180,6 @@ func repoAllowlist(repos []RepoData) map[string]struct{} {
 	return allowed
 }
 
-func (d *Daemon) setWorkspaceRepoSyncError(workspaceID, syncErr string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if ws, ok := d.workspaces[workspaceID]; ok {
-		ws.lastRepoSyncErr = syncErr
-	}
-}
-
 func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -3238,16 +3233,6 @@ func (d *Daemon) repoBarePathIsLive(barePath string) bool {
 		}
 	}
 	return false
-}
-
-func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	ws, ok := d.workspaces[workspaceID]
-	if !ok {
-		return ""
-	}
-	return ws.lastRepoSyncErr
 }
 
 // workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
@@ -3395,12 +3380,16 @@ func (d *Daemon) waitBackgroundSyncs() {
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
-	d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
+	_ = d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
 }
 
-func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) {
+// syncWorkspaceReposContext returns the sync error to its caller rather than
+// recording it per workspace: background syncs of other repos run
+// concurrently, and a shared slot let a later successful sync erase the
+// failure before a checkout could report it.
+func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) error {
 	if d.repoCache == nil {
-		return
+		return nil
 	}
 	var err error
 	if cache, ok := d.repoCache.(interface {
@@ -3411,11 +3400,9 @@ func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID stri
 		err = d.repoCache.Sync(workspaceID, repoDataToInfo(repos))
 	}
 	if err != nil {
-		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
-		return
 	}
-	d.setWorkspaceRepoSyncError(workspaceID, "")
+	return err
 }
 
 func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {
@@ -3426,6 +3413,7 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	if err != nil {
 		return nil, err
 	}
+	d.applyGitCACerts(resp.CACerts)
 
 	d.mu.Lock()
 	if ws, ok := d.workspaces[workspaceID]; ok {
@@ -3913,7 +3901,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
+	syncErr := d.syncWorkspaceReposContext(ctx, workspaceID, resp.Repos)
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
 	}
@@ -3922,8 +3910,8 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	if syncErr := d.workspaceLastRepoSyncErr(workspaceID); syncErr != "" {
-		return fmt.Errorf("repo is configured but not synced: %s", syncErr)
+	if syncErr != nil {
+		return fmt.Errorf("repo is configured but not synced: %w", syncErr)
 	}
 
 	return fmt.Errorf("repo is configured but not synced")
@@ -4306,6 +4294,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			continue
 		}
 
+		d.applyGitCACerts(resp.CACerts)
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
 		}

@@ -238,6 +238,25 @@ Things to know:
 - **The CA applies to the whole backend process**, not only the Git provider
   integration: every outbound TLS client in the backend that uses the system
   trust store trusts it too.
+- **Daemons get the CA for git too.** Daemons clone and fetch workspace
+  repositories with the `git` installed on their machine, which never sees the
+  backend's `SSL_CERT_DIR`. The backend therefore sends the certificates from
+  the directories you added to `SSL_CERT_DIR` (the system directories
+  `/etc/ssl/certs` and `/etc/pki/tls/certs` are left out) to every daemon with
+  the workspace repositories. The daemon writes them, after its machine's
+  system CA bundle, into a bundle file of its own and points git at that file
+  for its own clone and fetch and for the git commands agents run in their
+  checkouts; the system trust store itself is not changed. Nothing needs to be installed on the
+  daemon's machine. Things to know about it:
+  - Daemons pick up an added, replaced, or removed CA the next time they
+    refresh the workspace repositories, which happens before every checkout;
+    they do not need a restart. The backend still does.
+  - The daemon's git trusts the CA for every host it talks to, not only the
+    one that needs it.
+  - A `GIT_SSL_CAINFO`, or an `http.<url>.sslCAInfo` for the host, configured
+    on the daemon's machine still takes precedence.
+  - Daemons on Windows do not apply it: Git for Windows verifies certificates
+    against the Windows certificate store by default, so add the CA there.
 - **Only the trust problem is fixed.** An expired certificate, or one that does
   not cover the host name in the URL, is still rejected; fix the certificate
   itself.

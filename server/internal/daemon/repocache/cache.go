@@ -47,12 +47,21 @@ func gitEnv() []string {
 	}
 
 	idx := strconv.Itoa(existing)
-	return append(base,
+	env := append(base,
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
 		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
 		"GIT_CONFIG_VALUE_"+idx+"=*",
 	)
+	count := existing + 1
+	if bundle := currentCABundle(); bundle != "" {
+		caIdx := strconv.Itoa(count)
+		env = append(env,
+			"GIT_CONFIG_KEY_"+caIdx+"="+caBundleConfigKey,
+			"GIT_CONFIG_VALUE_"+caIdx+"="+bundle,
+		)
+		count++
+	}
+	return append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(count))
 }
 
 var agentGitExcludePatterns = []string{
@@ -173,6 +182,7 @@ type Cache struct {
 	// worktree admin dirs) don't tolerate parallel mutations on the same
 	// repo. Separate repos are independent and run concurrently.
 	repoLocks sync.Map // barePath -> *repoLock
+	caMu      sync.Mutex
 }
 
 // ErrRepoBusy means a foreground checkout could not acquire its repository
@@ -379,6 +389,7 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 		if isBareRepo(barePath) {
 			// Already cached — fetch latest.
 			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
+			c.configureRepoCABundleLogged(ctx, barePath)
 			if err := gitFetchContext(ctx, barePath); err != nil {
 				c.logger.Warn("repo cache: fetch failed", "url", repo.URL, "error", err)
 				if firstErr == nil {
@@ -393,6 +404,8 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 				if firstErr == nil {
 					firstErr = err
 				}
+			} else {
+				c.configureRepoCABundleLogged(ctx, barePath)
 			}
 		}
 		repoLock.Unlock()
@@ -815,6 +828,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// ultimately succeeds. Stamping only on success would let a repo whose
 	// checkouts keep failing age out from under the tasks still trying to use it.
 	MarkUsed(barePath, c.logger)
+	c.configureRepoCABundleLogged(ctx, barePath)
 
 	// Fetch latest from origin. This also migrates the bare cache's refspec
 	// to the modern remote-tracking layout on first run, so subsequent fetches
@@ -885,6 +899,7 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		if err != nil {
 			return nil, fmt.Errorf("create isolated checkout: %w", err)
 		}
+		c.configureRepoCABundleLogged(ctx, worktreePath)
 
 		for _, pattern := range agentGitExcludePatterns {
 			_ = excludeFromGitContext(ctx, worktreePath, pattern)
