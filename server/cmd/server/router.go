@@ -1838,6 +1838,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
 					r.Get("/wecom/installations", h.ListWecomInstallations)
+					// SHAR-146 B1: the calling member's own WeCom bindings and
+					// their notification-target choice. Member-scoped — no
+					// admin surface for another member's target.
+					r.Get("/wecom/bindings", h.ListWecomBindings)
+					r.Put("/wecom/bindings/{bindingId}/notification-target", h.SetWecomBindingNotificationTarget)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
