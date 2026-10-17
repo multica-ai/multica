@@ -51,9 +51,10 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 		wantFireAt      bool
 		wantMaxAttempts int32
 	}{
-		// Final tier: deferred, and the effective budget (3) written into the row
-		// so it self-describes as attempt=3/max_attempts=3, not attempt=3/max=2.
-		{"deferred final tier persists budget", pgtype.Timestamptz{Time: time.Now().Add(5 * time.Second), Valid: true}, pgtype.Int4{Int32: 3, Valid: true}, "deferred", true, 3},
+		// Final tier: deferred with the three-minute backoff, and the effective
+		// budget (3) written into the row so it self-describes as
+		// attempt=3/max_attempts=3, not attempt=3/max=2.
+		{"deferred final tier persists budget", pgtype.Timestamptz{Time: time.Now().Add(3 * time.Minute), Valid: true}, pgtype.Int4{Int32: 3, Valid: true}, "deferred", true, 3},
 		// NULL max_attempts inherits the parent's column (COALESCE fallback).
 		{"queued immediate tier inherits budget", pgtype.Timestamptz{}, pgtype.Int4{}, "queued", false, 2},
 	}
@@ -70,6 +71,11 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 			}
 			if child.FireAt.Valid != tc.wantFireAt {
 				t.Errorf("fire_at valid = %v, want %v", child.FireAt.Valid, tc.wantFireAt)
+			}
+			if tc.wantFireAt {
+				if delta := child.FireAt.Time.Sub(tc.fireAt.Time); delta < -time.Second || delta > time.Second {
+					t.Errorf("fire_at = %v, want %v (three-minute backoff preserved)", child.FireAt.Time, tc.fireAt.Time)
+				}
 			}
 			if child.Attempt != 3 {
 				t.Errorf("attempt = %d, want 3 (parent attempt 2 + 1)", child.Attempt)
@@ -168,6 +174,102 @@ func TestRuntimeOfflineRetryWaitsForHealthyRuntime(t *testing.T) {
 			got = util.UUIDToString(claimed.ID)
 		}
 		t.Fatalf("claimed task = %s, want retry child %s", got, util.UUIDToString(childID))
+	}
+}
+
+// TestProviderNetworkRetryWaitsForFreshHeartbeat covers a link outage that
+// leaves the runtime row online. The final provider_network attempt stays
+// deferred, a stale heartbeat cannot promote or claim it once fire_at is due,
+// and a fresh heartbeat releases that same attempt without spending another.
+func TestProviderNetworkRetryWaitsForFreshHeartbeat(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `UPDATE agent_runtime SET status='online', last_seen_at=now() WHERE id=$1`, runtimeID)
+	})
+
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, 2, 2, 'src-session', '/tmp/src-workdir')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert parent task: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+	})
+
+	svc := NewTaskService(q, pool, nil, events.New())
+	if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "", "agent_error.provider_network", false, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+
+	var childID pgtype.UUID
+	var childStatus string
+	var childAttempt, childMax int32
+	var fireAt pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `
+		SELECT id, status, attempt, max_attempts, fire_at FROM agent_task_queue WHERE parent_task_id = $1
+	`, parentID).Scan(&childID, &childStatus, &childAttempt, &childMax, &fireAt); err != nil {
+		t.Fatalf("read retry child: %v", err)
+	}
+	if childStatus != "deferred" || !fireAt.Valid {
+		t.Fatalf("provider_network child = status:%q fire_at_valid:%v, want deferred with fire_at", childStatus, fireAt.Valid)
+	}
+	if childAttempt != 3 || childMax != 3 {
+		t.Fatalf("child attempt/max = %d/%d, want 3/3", childAttempt, childMax)
+	}
+	delay := time.Until(fireAt.Time)
+	const slack = 30 * time.Second
+	if delay < 3*time.Minute-slack || delay > 3*time.Minute+slack {
+		t.Fatalf("fire_at delay = %s, want ~3m", delay)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET fire_at=now() - interval '1 second' WHERE id=$1`, childID); err != nil {
+		t.Fatalf("make retry due: %v", err)
+	}
+	// Still online, but older than RuntimeClaimFreshnessSeconds.
+	if _, err := pool.Exec(ctx, `UPDATE agent_runtime SET status='online', last_seen_at=now() - interval '10 minutes' WHERE id=$1`, runtimeID); err != nil {
+		t.Fatalf("stale runtime heartbeat: %v", err)
+	}
+
+	claimed, err := svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("claim while heartbeat stale: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("stale runtime claimed retry %s", util.UUIDToString(claimed.ID))
+	}
+	if err := pool.QueryRow(ctx, `SELECT status, attempt FROM agent_task_queue WHERE id=$1`, childID).Scan(&childStatus, &childAttempt); err != nil {
+		t.Fatalf("read child after stale claim: %v", err)
+	}
+	if childStatus != "deferred" || childAttempt != 3 {
+		t.Fatalf("stale claim changed child to status %q attempt %d, want deferred attempt 3", childStatus, childAttempt)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE agent_runtime SET status='online', last_seen_at=now() WHERE id=$1`, runtimeID); err != nil {
+		t.Fatalf("refresh runtime heartbeat: %v", err)
+	}
+	claimed, err = svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("claim after fresh heartbeat: %v", err)
+	}
+	if claimed == nil || claimed.ID != childID {
+		got := "nil"
+		if claimed != nil {
+			got = util.UUIDToString(claimed.ID)
+		}
+		t.Fatalf("claimed task = %s, want retry child %s", got, util.UUIDToString(childID))
+	}
+	if claimed.Attempt != 3 || claimed.MaxAttempts != 3 {
+		t.Fatalf("claimed attempt/max = %d/%d, want 3/3 (promotion must not consume another attempt)", claimed.Attempt, claimed.MaxAttempts)
 	}
 }
 
@@ -285,6 +387,7 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 
 	cases := []struct {
 		name         string
+		reason       string
 		attempt      int32
 		maxAttempts  int32
 		wantChild    bool
@@ -293,12 +396,16 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 		wantDeferred bool
 	}{
 		// Default budget, failing on the 2nd attempt → deferred final tier that
-		// records attempt=3 AND max_attempts=3 (no contradictory row).
-		{"final tier persists raised budget", 2, 2, true, 3, 3, true},
+		// records attempt=3 AND max_attempts=3 (no contradictory row), with a
+		// three-minute fire_at.
+		{"final tier persists raised budget", "agent_error.provider_network", 2, 2, true, 3, 3, true},
 		// Default budget, failing on the 1st attempt → immediate 2nd tier.
-		{"first retry is immediate", 1, 2, true, 2, 3, false},
+		{"first retry is immediate", "agent_error.provider_network", 1, 2, true, 2, 3, false},
 		// max_attempts=1 disables auto-retry — even provider_network gets none.
-		{"disabled budget is never revived", 1, 1, false, 0, 0, false},
+		{"disabled budget is never revived", "agent_error.provider_network", 1, 1, false, 0, 0, false},
+		// Unrelated retryable reasons keep the generic immediate schedule and
+		// do not inherit the provider_network ceiling.
+		{"timeout stays immediate", "timeout", 1, 2, true, 2, 2, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -314,7 +421,7 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
 			})
 
-			if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "", "agent_error.provider_network", false, "", ""); err != nil {
+			if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "", tc.reason, false, "", ""); err != nil {
 				t.Fatalf("FailTask: %v", err)
 			}
 
@@ -322,9 +429,10 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 				childAttempt, childMax int32
 				childStatus            string
 				n                      int
+				fireAt                 pgtype.Timestamptz
 			)
-			row := pool.QueryRow(ctx, `SELECT count(*), coalesce(max(attempt),0), coalesce(max(max_attempts),0), coalesce(max(status),'') FROM agent_task_queue WHERE parent_task_id = $1`, parentID)
-			if err := row.Scan(&n, &childAttempt, &childMax, &childStatus); err != nil {
+			row := pool.QueryRow(ctx, `SELECT count(*), coalesce(max(attempt),0), coalesce(max(max_attempts),0), coalesce(max(status),''), max(fire_at) FROM agent_task_queue WHERE parent_task_id = $1`, parentID)
+			if err := row.Scan(&n, &childAttempt, &childMax, &childStatus, &fireAt); err != nil {
 				t.Fatalf("read child: %v", err)
 			}
 			if !tc.wantChild {
@@ -345,6 +453,18 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 			gotDeferred := childStatus == "deferred"
 			if gotDeferred != tc.wantDeferred {
 				t.Errorf("child status = %q, want deferred=%v", childStatus, tc.wantDeferred)
+			}
+			if tc.wantDeferred {
+				if !fireAt.Valid {
+					t.Fatal("deferred child missing fire_at")
+				}
+				delay := time.Until(fireAt.Time)
+				const slack = 30 * time.Second
+				if delay < 3*time.Minute-slack || delay > 3*time.Minute+slack {
+					t.Errorf("fire_at delay = %s, want ~3m", delay)
+				}
+			} else if fireAt.Valid {
+				t.Errorf("immediate child fire_at = %v, want NULL", fireAt.Time)
 			}
 		})
 	}

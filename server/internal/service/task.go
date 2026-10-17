@@ -4886,8 +4886,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
 			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
 			// Defer this attempt when the reason's schedule calls for a backoff
-			// (provider_network's final attempt waits ~5s); a zero delay leaves
-			// fire_at NULL so the child is created immediately-claimable.
+			// (provider_network's final attempt waits three minutes); a zero
+			// delay leaves fire_at NULL so the child is created immediately-claimable.
 			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
 				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 			}
@@ -5271,14 +5271,18 @@ var retryableReasons = map[string]bool{
 // authoritative.
 //
 // Transient provider stream cuts (provider_network) get a bespoke three-tier
-// schedule (MUL-4910): first run + immediate retry + one retry deferred ~5s.
-// A blip that survives the immediate retry gets a short cooldown before the
-// final attempt instead of firing back-to-back. Every other retryable reason
-// keeps the task's generic max_attempts ceiling and retries immediately.
+// schedule (MUL-4910): first run + immediate retry + one retry deferred three
+// minutes. A blip that survives the immediate retry gets a bounded cooldown
+// before the final attempt instead of firing back-to-back, long enough to
+// outlast a short link outage. The child stays deferred until fire_at, and
+// PromoteDueDeferredTasksForRuntime still requires an online runtime with a
+// fresh heartbeat, so a stale-but-still-online runtime does not promote the
+// retry during the outage. Every other retryable reason keeps the task's
+// generic max_attempts ceiling and retries immediately.
 const (
 	runtimeOfflineRetryDeferral   = time.Second
 	providerNetworkMaxAttempts    = 3
-	providerNetworkFinalRetryWait = 5 * time.Second
+	providerNetworkFinalRetryWait = 3 * time.Minute
 )
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
@@ -5305,9 +5309,9 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // retryDelayForAttempt reports how long to defer the NEXT attempt after a
 // failure at failedAttempt. runtime_offline always gets a positive fire_at so
 // it waits for the health-gated promotion path. provider_network's final
-// attempt is deferred ~5s; every other retry remains immediate (zero delay →
-// the child is created 'queued', claimable at once). Callers pass the returned
-// delay to CreateRetryTask via fire_at.
+// attempt is deferred three minutes; every other retry remains immediate
+// (zero delay → the child is created 'queued', claimable at once). Callers
+// pass the returned delay to CreateRetryTask via fire_at.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
@@ -5491,9 +5495,9 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 	}
 	// Mirror FailTask's in-tx backoff + effective-budget persistence: defer the
-	// final provider_network attempt ~5s via fire_at (zero delay leaves fire_at
-	// NULL for an immediate child), and write the reason-aware ceiling into the
-	// child's max_attempts so the retry chain stays self-consistent.
+	// final provider_network attempt three minutes via fire_at (zero delay
+	// leaves fire_at NULL for an immediate child), and write the reason-aware
+	// ceiling into the child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
 	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}

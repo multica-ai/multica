@@ -177,9 +177,9 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 
 // TestProviderNetworkRetrySchedule locks in the three-tier schedule for a
 // transient provider stream cut (MUL-4910): first run + immediate retry + one
-// retry deferred ~5s. runtime_offline uses a separate deferred marker so its
-// retry waits for a healthy runtime; other retryable reasons keep their generic
-// max_attempts=2 (single, immediate retry).
+// retry deferred three minutes. runtime_offline uses a separate deferred
+// marker so its retry waits for a healthy runtime; other retryable reasons
+// keep their generic max_attempts=2 (single, immediate retry).
 func TestProviderNetworkRetrySchedule(t *testing.T) {
 	const provNet = "agent_error.provider_network"
 
@@ -209,9 +209,10 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		failedAttempt int32
 		want          time.Duration
 	}{
-		{provNet, 1, 0}, // first failure → immediate retry
-		{provNet, 2, providerNetworkFinalRetryWait}, // second failure → 5s-deferred retry
+		{provNet, 1, 0},               // first failure → immediate retry
+		{provNet, 2, 3 * time.Minute}, // second failure → three-minute deferred retry
 		{"runtime_offline", 1, runtimeOfflineRetryDeferral},
+		{"timeout", 1, 0}, // unrelated reason, first failure → immediate
 		{"timeout", 2, 0}, // unrelated reason → never deferred
 	}
 	for _, tc := range delayCases {
