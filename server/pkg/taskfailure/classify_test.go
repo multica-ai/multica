@@ -1,6 +1,10 @@
 package taskfailure
 
-import "testing"
+import (
+	"os/exec"
+	"runtime"
+	"testing"
+)
 
 // TestClassifyEmptyAndWhitespace pins the empty/whitespace contract.
 // Daemon callers should never hand us empty error text — but if they
@@ -39,7 +43,7 @@ func TestClassifyRules(t *testing.T) {
 		{"maximum context", "Maximum context window of 200000 tokens has been exceeded", ReasonAgentContextOverflow},
 		{"prompt is too long", "API Error: prompt is too long: 250000 tokens > 200000 maximum", ReasonAgentContextOverflow},
 		{"context size has been exceeded", "context size has been exceeded; consider /compact", ReasonAgentContextOverflow},
-		{"token limit", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+		{"ambiguous token limit", "Hit the token limit for this conversation", ReasonAgentUnknown},
 		// GH #6360, verbatim from Claude Code 2.1.x. The turn is not
 		// rejected with a 400 — the response comes back with stop_reason
 		// "model_context_window_exceeded" and the CLI prints this line.
@@ -211,11 +215,11 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		in   string
 		want Reason
 	}{
-		// "token limit" mentions both "context-ish" tokens AND
-		// "limit". The context_overflow rule must win because the
-		// quota-limit rule's "limit" trigger would otherwise swallow
-		// it.
-		{"token limit beats quota", "you exceeded the token limit", ReasonAgentContextOverflow},
+		// Token budgets alone do not prove context overflow.
+		{"ambiguous token limit", "you exceeded the token limit", ReasonAgentUnknown},
+		{"quota token budget", "launcher: provider quota exhausted: usage limit reached, token budget 0 left", ReasonAgentProviderQuotaLimit},
+		{"token rate limit", "429 tokens per minute limit reached", ReasonAgentProviderCapacityOrRateLimit},
+		{"token auth limit", "401 access token invalid; retry limit reached", ReasonAgentProviderAuthOrAccess},
 
 		// 401 + missing api_key: the missing_config rule runs before
 		// auth precisely so we don't classify a config error as an
@@ -642,5 +646,18 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 
 	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
 		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
+	}
+}
+
+func TestClassifyPrelaunchQuotaWrapper(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("synthetic POSIX launcher")
+	}
+	output, err := exec.Command("sh", "-c", "echo 'launcher: provider quota exhausted: usage limit reached, token budget 0 left' >&2; exit 1").CombinedOutput()
+	if err == nil {
+		t.Fatal("launcher must refuse to start")
+	}
+	if got := Classify(string(output)); got != ReasonAgentProviderQuotaLimit {
+		t.Fatalf("Classify(%q) = %q, want %q", output, got, ReasonAgentProviderQuotaLimit)
 	}
 }

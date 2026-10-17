@@ -56,17 +56,11 @@ func isUsageLimit403(lower string) bool {
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
 // empty input.
 //
-// The rule order mirrors the SQL CASE expression in MUL-1949
-// (db-boy's offline backfill query). The SQL is the source of truth:
-// when the two diverge, this Go classifier is wrong and should be
-// updated to match. Keeping them in lock-step is required so that
-// in-flight rows and historically backfilled rows share the same
-// taxonomy.
-//
+// The taxonomy originated in the MUL-1949 offline backfill. Keep explicit
+// context-overflow witnesses ahead of generic provider failures, but do not
+// infer context overflow from token budgets: quota, rate, and authentication
+// errors can all mention both "token" and "limit".
 // Matching is case-insensitive substring against the lowercased input.
-// More-specific rules come before more-generic ones (e.g.
-// context_overflow before provider_quota_limit, because "token limit"
-// would otherwise be claimed by the quota bucket via "limit").
 //
 // Why a substring classifier rather than structured error codes: the
 // 11 backend wrappers (server/pkg/agent/*) all surface upstream API
@@ -100,9 +94,7 @@ func Classify(rawError string) Reason {
 	case isUsageLimit403(lower):
 		return ReasonAgentProviderQuotaLimit
 
-	// 1. Context / token window overflow. Checked early so "token
-	//    limit" doesn't get swallowed by the broader "limit" / "quota"
-	//    rule below.
+	// 1. Context overflow requires explicit context or prompt wording.
 	case containsAny(lower,
 		"context length",
 		"context_length_exceeded",
@@ -110,13 +102,7 @@ func Classify(rawError string) Reason {
 		"prompt is too long",
 		"context size has been exceeded",
 	),
-		containsAny(lower, contextWindowExceededWitnesses...),
-		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
-		// approximate with both substrings present, which catches
-		// "token limit", "tokens per minute limit", etc., without the
-		// false positives a naive `Contains("token") || Contains("limit")`
-		// would generate.
-		strings.Contains(lower, "token") && strings.Contains(lower, "limit"):
+		containsAny(lower, contextWindowExceededWitnesses...):
 		return ReasonAgentContextOverflow
 
 	// 2. Missing config / API key. Checked before auth because

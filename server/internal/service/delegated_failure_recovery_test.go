@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
@@ -1258,5 +1260,93 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 	}
 	if n := recoveryTasks(); n != 1 {
 		t.Fatalf("recovery tasks after accept = %d, want 1", n)
+	}
+}
+
+func TestDelegatedCapacityFailureDoesNotWakeCoordinator(t *testing.T) {
+	for _, reason := range []string{"agent_error.provider_quota_limit", "agent_error.provider_capacity_or_rate_limit"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			f, svc := seedDelegatedFailureFixture(t)
+			failedID := f.insertWorkerTask(t, "failed", "comment", 1, 2)
+			dbfx.New(f.pool, f.workspaceID, f.userID).Exec(t, `UPDATE agent_task_queue SET failure_reason = $2 WHERE id = $1`, failedID, reason)
+			target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+			if err != nil || target == nil || !created {
+				t.Fatalf("create notice: created=%v err=%v", created, err)
+			}
+			if !strings.Contains(target.comment.Content, "Retry manually after") || strings.Contains(target.comment.Content, "Resume coordination") {
+				t.Fatalf("capacity notice must explain manual recovery: %s", target.comment.Content)
+			}
+			// Exercise direct recovery and completion reconciliation, including replays.
+			for i := 0; i < 2; i++ {
+				if handled, err := svc.recoverDelegatedTaskFailure(ctx, target.failed); err != nil || !handled {
+					t.Fatalf("recover: %v %v", handled, err)
+				}
+				if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, target.comment, pgtype.UUID{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !f.settled(t, target.comment.ID) {
+				t.Fatal("capacity notice must leave the recovery outbox")
+			}
+			if _, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("capacity refusal queued %d coordinator tasks", count)
+			}
+		})
+	}
+}
+
+// Any query other than settlement panics through the nil embedded DBTX: capacity
+// failures must not reach coordinator lookup, task creation, or pending-task merge.
+type capacityRecoveryDB struct {
+	db.DBTX
+	t         *testing.T
+	commentID pgtype.UUID
+	calls     int
+	err       error
+}
+
+func (d *capacityRecoveryDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	d.t.Helper()
+	if !strings.Contains(query, "-- name: SettleDelegatedFailureRecoveryComment") || len(args) != 1 || args[0] != d.commentID {
+		d.t.Fatalf("unexpected recovery write: %s %v", query, args)
+	}
+	d.calls++
+	return pgconn.NewCommandTag("UPDATE 1"), d.err
+}
+
+func TestDelegatedCapacityRecoveryDispatch(t *testing.T) {
+	for _, reason := range []string{"agent_error.provider_quota_limit", "agent_error.provider_capacity_or_rate_limit"} {
+		for _, settleErr := range []error{nil, errors.New("database unavailable")} {
+			t.Run(reason+"/"+fmt.Sprint(settleErr), func(t *testing.T) {
+				target := &delegatedFailureRecoveryTarget{
+					failed:  db.AgentTaskQueue{FailureReason: pgtype.Text{String: reason, Valid: true}},
+					comment: db.Comment{ID: util.MustParseUUID("00000000-0000-0000-0000-000000000001")},
+				}
+				stub := &capacityRecoveryDB{t: t, commentID: target.comment.ID, err: settleErr}
+				svc := &TaskService{Queries: db.New(stub)}
+				outcome, err := svc.dispatchDelegatedFailureRecovery(context.Background(), target, pgtype.UUID{})
+				if outcome != delegatedFailureRecoveryCovered || !errors.Is(err, settleErr) || stub.calls != 1 {
+					t.Fatalf("dispatch = %v, %v; settlement calls=%d", outcome, err, stub.calls)
+				}
+				content := delegatedFailureRecoveryContent(target.failed, target.source)
+				if !strings.Contains(content, "Retry manually after") || strings.Contains(content, "Resume coordination") {
+					t.Fatalf("capacity notice: %s", content)
+				}
+			})
+		}
+	}
+	for _, reason := range []string{"", "agent_error.process_failure", "agent_error.context_overflow", "agent_error.provider_network"} {
+		failed := db.AgentTaskQueue{FailureReason: pgtype.Text{String: reason, Valid: true}}
+		if delegatedFailureNeedsCapacity(failed) || !strings.Contains(delegatedFailureRecoveryContent(failed, db.AgentTaskQueue{}), "Resume coordination") {
+			t.Fatalf("ordinary failure %q must retain coordinator recovery", reason)
+		}
 	}
 }
