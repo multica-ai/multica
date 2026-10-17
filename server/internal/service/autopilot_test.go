@@ -154,6 +154,18 @@ func TestBuildIssueDescription_WithWebhookPayload(t *testing.T) {
 	}
 }
 
+func TestBuildIssueDescription_WebhookSlackSource(t *testing.T) {
+	s := &AutopilotService{}
+	ap := db.Autopilot{Description: pgtype.Text{String: "diagnose alerts", Valid: true}}
+	payload := []byte(`{"event":"zentapi.alert","eventPayload":{"event_id":"alert-1","slack_channel":"C123","slack_thread_ts":"1700000000.000100","message":"error rate high"}}`)
+	run := db.AutopilotRun{Source: "webhook", TriggerPayload: payload, TriggeredAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}}
+
+	got := s.buildIssueDescription(ap, run, "UTC")
+	if !strings.Contains(got.String, "Chat source: slack:C123:1700000000.000100") {
+		t.Fatalf("description should retain the originating Slack thread: %q", got.String)
+	}
+}
+
 func TestBuildIssueDescription_WebhookSourceMissingEnvelope(t *testing.T) {
 	// Defensive: if a future caller stuffs a non-envelope JSON object into
 	// trigger_payload, we should still emit a webhook block with sensible

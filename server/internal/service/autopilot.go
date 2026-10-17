@@ -1788,6 +1788,10 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 	if run.Source == "webhook" && len(run.TriggerPayload) > 0 {
 		event := "webhook.received"
 		var payloadJSON []byte
+		var slackSource struct {
+			Channel string `json:"slack_channel"`
+			Thread  string `json:"slack_thread_ts"`
+		}
 		var env struct {
 			Event        string          `json:"event"`
 			EventPayload json.RawMessage `json:"eventPayload"`
@@ -1797,6 +1801,7 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 				event = env.Event
 			}
 			if len(env.EventPayload) > 0 {
+				_ = json.Unmarshal(env.EventPayload, &slackSource)
 				if pretty, err := prettifyJSON(env.EventPayload); err == nil {
 					payloadJSON = pretty
 				}
@@ -1808,6 +1813,12 @@ func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.Autopil
 			} else {
 				payloadJSON = run.TriggerPayload
 			}
+		}
+		if slackSource.Channel != "" && slackSource.Thread != "" {
+			b.WriteString("\n\nChat source: slack:")
+			b.WriteString(slackSource.Channel)
+			b.WriteByte(':')
+			b.WriteString(slackSource.Thread)
 		}
 		b.WriteString("\n\nWebhook event: ")
 		b.WriteString(event)
