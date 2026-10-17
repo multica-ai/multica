@@ -1125,7 +1125,16 @@
     "byo_credentials_rejected": "WeCom rejected this Bot ID and secret. Check both on the WeCom admin console, and that it is a smart bot with the long connection enabled.",
     "byo_credentials_unverifiable": "Couldn't reach WeCom to verify this bot. Your credentials were not changed — try again in a moment.",
     "byo_install_failed": "Couldn't save this bot — something went wrong on our side. Your credentials were not changed; try again, and contact support if it keeps failing.",
-    "byo_failed_toast": "Could not connect the WeCom bot"
+    "byo_failed_toast": "Could not connect the WeCom bot",
+    "notifications_title": "Task notifications",
+    "notifications_description": "Pick which of your connected bots receives your task notifications (new comments, status changes, assignee changes). Only one bot at a time; the oldest binding is used until you pick one.",
+    "notifications_radio_label": "Send task notifications to this bot",
+    "notifications_none_label": "Using the oldest binding (no explicit target set)",
+    "notifications_loading": "Loading your WeCom bindings…",
+    "notifications_empty": "You have no WeCom bindings yet. Connect a bot from an agent's Integrations tab, then link your account from the bot's chat prompt.",
+    "notifications_set_toast": "Task notifications will be sent to this bot",
+    "notifications_unset_toast": "This bot will no longer receive task notifications",
+    "notifications_set_failed": "Could not update the notification target"
   },
   "telegram": {
     "section_title": "Telegram",

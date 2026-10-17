@@ -200,6 +200,8 @@ import type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  WecomBindingListResponse,
+  WecomBindingNotificationTargetResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RegisterTelegramRequest,
@@ -374,9 +376,13 @@ import {
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
+  WecomBindingListResponseSchema,
+  WecomBindingNotificationTargetResponseSchema,
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  EMPTY_WECOM_BINDING_LIST_RESPONSE,
+  EMPTY_WECOM_BINDING_NOTIFICATION_TARGET_RESPONSE,
   TelegramInstallationSchema,
   ListTelegramInstallationsResponseSchema,
   RedeemTelegramBindingTokenResponseSchema,
@@ -5176,6 +5182,45 @@ export class ApiClient {
       RedeemWecomBindingTokenResponseSchema,
       EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/wecom/binding/redeem" },
+    );
+  }
+
+  // SHAR-146 B1: the calling member's WeCom bindings (one per bound bot) and
+  // the member's explicit choice of which one receives their task-
+  // notification pushes. Both endpoints are session-scoped — there is no
+  // member_id parameter, and an admin cannot list or set another member's
+  // target.
+  async listWecomBindings(workspaceId: string): Promise<WecomBindingListResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/wecom/bindings`);
+    return parseWithFallback(
+      raw,
+      WecomBindingListResponseSchema,
+      EMPTY_WECOM_BINDING_LIST_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/wecom/bindings" },
+    );
+  }
+
+  // setWecomBindingNotificationTarget sets (radio) or clears the member's
+  // notification target. The radio semantics live server-side: setting one
+  // binding clears every other one in the same (workspace, channel_type)
+  // scope inside one transaction.
+  async setWecomBindingNotificationTarget(
+    workspaceId: string,
+    bindingId: string,
+    isNotificationTarget: boolean,
+  ): Promise<WecomBindingNotificationTargetResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/bindings/${bindingId}/notification-target`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ is_notification_target: isNotificationTarget }),
+      },
+    );
+    return parseWithFallback(
+      raw,
+      WecomBindingNotificationTargetResponseSchema,
+      EMPTY_WECOM_BINDING_NOTIFICATION_TARGET_RESPONSE,
+      { endpoint: "PUT /api/workspaces/:id/wecom/bindings/:bindingId/notification-target" },
     );
   }
 

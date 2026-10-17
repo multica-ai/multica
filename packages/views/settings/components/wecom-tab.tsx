@@ -31,10 +31,14 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { wecomInstallationsOptions, wecomKeys } from "@multica/core/wecom";
+import {
+  wecomInstallationsOptions,
+  wecomBindingsOptions,
+  wecomKeys,
+} from "@multica/core/wecom";
 import { errorCode } from "@multica/core/api";
 import { api } from "@multica/core/api";
-import type { WecomInstallation } from "@multica/core/types";
+import type { WecomInstallation, WecomBinding } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
@@ -88,6 +92,7 @@ export function WecomTab() {
 
   return (
     <div className="space-y-8">
+      <WecomNotificationTargetSection />
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
@@ -176,6 +181,134 @@ export function WecomTab() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+// WecomNotificationTargetSection is the member-facing half of SHAR-146 B1:
+// it lists the calling member's WeCom bindings and lets them pick which one
+// receives their task-notification pushes. A single radio per binding; the
+// "unset" affordance is the same control — clicking the active target again
+// sends a PUT with is_notification_target: false, which the server treats as
+// "clear this binding" (the "clear others" step is a no-op on the way back
+// to the default, since no target is set afterwards). The list itself is
+// bound_at ASC, which is also the server's fallback order when no explicit
+// target is set, so the default-state label is accurate.
+function WecomNotificationTargetSection() {
+  const { t } = useT("settings");
+  const wsId = useWorkspaceId();
+  const qc = useQueryClient();
+  const { getAgentName } = useActorName();
+
+  const { data, isLoading } = useQuery({
+    ...wecomBindingsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const bindings: WecomBinding[] = data?.bindings ?? [];
+  const activeBindings = bindings.filter((b) => b.installation_status === "active");
+
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  async function toggleTarget(binding: WecomBinding) {
+    if (pendingId || !wsId) return;
+    setPendingId(binding.id);
+    const isNotificationTarget = !binding.is_notification_target;
+    try {
+      await api.setWecomBindingNotificationTarget(wsId, binding.id, isNotificationTarget);
+      // Invalidate the whole bindings namespace so the radio state refreshes
+      // in every place it shows (the list, and any other tab that reads it).
+      await qc.invalidateQueries({ queryKey: wecomKeys.bindings(wsId) });
+      toast.success(
+        isNotificationTarget
+          ? t(($) => $.wecom.notifications_set_toast)
+          : t(($) => $.wecom.notifications_unset_toast),
+      );
+    } catch (e) {
+      let message: string;
+      switch (errorCode(e)) {
+        case "wecom_binding_not_found":
+        case "wecom_binding_wrong_channel":
+        case "wecom_binding_foreign":
+          message = t(($) => $.wecom.notifications_set_failed);
+          break;
+        default:
+          message =
+            e instanceof Error
+              ? e.message
+              : t(($) => $.wecom.notifications_set_failed);
+      }
+      toast.error(message);
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent>
+          <p className="text-body text-muted-foreground">
+            {t(($) => $.wecom.notifications_loading)}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activeBindings.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="space-y-1">
+        <h2 className="text-body font-semibold">
+          {t(($) => $.wecom.notifications_title)}
+        </h2>
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.wecom.notifications_description)}
+        </p>
+      </div>
+      <Card>
+        <CardContent className="divide-y">
+          {activeBindings.map((binding) => {
+            const isPending = pendingId === binding.id;
+            return (
+              <div
+                key={binding.id}
+                className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0"
+              >
+                <div className="space-y-0.5">
+                  <p className="text-body font-medium">
+                    {getAgentName(binding.agent_id)}
+                    {!binding.is_notification_target && activeBindings.every((b) => !b.is_notification_target) && (
+                      <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                        {t(($) => $.wecom.notifications_none_label)}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-micro text-muted-foreground">
+                    {t(($) => $.wecom.bot_id_label, {
+                      botId: binding.channel_user_id,
+                    })}
+                  </p>
+                </div>
+                <Button
+                  variant={binding.is_notification_target ? "default" : "outline"}
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => toggleTarget(binding)}
+                  data-testid={`wecom-notification-target-${binding.id}`}
+                >
+                  {binding.is_notification_target
+                    ? t(($) => $.wecom.notifications_radio_label)
+                    : t(($) => $.wecom.notifications_radio_label)}
+                </Button>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </section>
   );
 }
 

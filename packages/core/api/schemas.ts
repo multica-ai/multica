@@ -41,6 +41,9 @@ import type {
   WecomInstallation,
   ListWecomInstallationsResponse,
   RedeemWecomBindingTokenResponse,
+  WecomBinding,
+  WecomBindingListResponse,
+  WecomBindingNotificationTargetResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
@@ -3339,6 +3342,38 @@ export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenR
   workspace_id: "",
   installation_id: "",
   wecom_user_id: "",
+};
+
+// SHAR-146 B1: the calling member's WeCom bindings + their notification-
+// target choice. Mirrors `WecomBindingResponse` /
+// `WecomBindingListResponse` in `channel_binding_notification.go`.
+export const WecomBindingSchema = z.object({
+  id: z.string(),
+  installation_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  installation_status: z.string().default("revoked"),
+  channel_user_id: z.string().default(""),
+  is_notification_target: z.boolean().default(false),
+}).loose();
+
+export const WecomBindingListResponseSchema = z.object({
+  bindings: z.array(WecomBindingSchema).default([]),
+  channel_type: z.string().default("wecom"),
+}).loose();
+
+export const EMPTY_WECOM_BINDING_LIST_RESPONSE: WecomBindingListResponse = {
+  bindings: [],
+  channel_type: "wecom",
+};
+
+export const WecomBindingNotificationTargetResponseSchema = z.object({
+  id: z.string(),
+  is_notification_target: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_WECOM_BINDING_NOTIFICATION_TARGET_RESPONSE: WecomBindingNotificationTargetResponse = {
+  id: "",
+  is_notification_target: false,
 };
 
 export const TelegramInstallationSchema = z.object({

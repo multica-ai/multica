@@ -249,6 +249,10 @@ export type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  WecomBinding,
+  WecomBindingListResponse,
+  SetWecomBindingNotificationTargetRequest,
+  WecomBindingNotificationTargetResponse,
 } from "./wecom";
 export type {
   TelegramInstallation,

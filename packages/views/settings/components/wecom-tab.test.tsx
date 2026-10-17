@@ -71,13 +71,28 @@ vi.mock("@multica/core/wecom", () => ({
     queryKey: ["wecom", "installations"],
     queryFn: vi.fn(),
   }),
-  wecomKeys: { installations: (wsId: string) => ["wecom", "installations", wsId] },
+  wecomBindingsOptions: () => ({
+    queryKey: ["wecom", "bindings"],
+    queryFn: vi.fn(),
+  }),
+  wecomKeys: {
+    installations: (wsId: string) => ["wecom", "installations", wsId],
+    bindings: (wsId: string) => ["wecom", "bindings", wsId],
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
   api: {
     registerWecomBYO: mockRegisterBYO,
     deleteWecomInstallation: mockDeleteInstallation,
+    // The notification-target section calls these; return an empty list so
+    // the section renders its null state and the rest of the panel's tests
+    // are unaffected by its presence.
+    listWecomBindings: vi.fn().mockResolvedValue({
+      bindings: [] as unknown[],
+      channel_type: "wecom",
+    }),
+    setWecomBindingNotificationTarget: vi.fn(),
   },
   // The real one digs the code out of an ApiError body; the fake reads it off
   // whatever the test threw, so a test can drive one branch of the switch.

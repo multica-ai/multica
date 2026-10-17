@@ -51,3 +51,35 @@ export interface RedeemWecomBindingTokenResponse {
   installation_id: string;
   wecom_user_id: string;
 }
+
+/** One of the calling member's WeCom bindings, as returned by
+ * GET /api/workspaces/{id}/wecom/bindings. Mirrors `WecomBindingResponse`
+ * in `server/internal/handler/channel_binding_notification.go`. The
+ * `is_notification_target` flag is the member's explicit choice of which
+ * bot receives their task-notification pushes (SHAR-146 B1). */
+export interface WecomBinding {
+  id: string;
+  installation_id: string;
+  agent_id: string;
+  installation_status: "active" | "revoked" | string;
+  channel_user_id: string;
+  is_notification_target: boolean;
+}
+
+export interface WecomBindingListResponse {
+  bindings: WecomBinding[];
+  channel_type: string;
+}
+
+/** PUT body for setting / unsetting a binding as the notification target.
+ * `is_notification_target: true` sets it (radio: clears any other in scope);
+ * `false` clears it. */
+export interface SetWecomBindingNotificationTargetRequest {
+  is_notification_target: boolean;
+}
+
+/** Response echo after a set/unset, so the UI can confirm without a re-read. */
+export interface WecomBindingNotificationTargetResponse {
+  id: string;
+  is_notification_target: boolean;
+}

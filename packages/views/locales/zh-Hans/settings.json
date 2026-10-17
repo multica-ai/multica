@@ -1120,7 +1120,16 @@
     "byo_credentials_rejected": "企业微信拒绝了这组 Bot ID 和密钥。请在企业微信管理后台核对这两项，并确认它是已开启长连接的智能机器人。",
     "byo_credentials_unverifiable": "没能连上企业微信来校验这个机器人。你的凭据没有被改动，请稍后重试。",
     "byo_install_failed": "没能保存这个机器人，是我们这边出了问题。你的凭据没有被改动，请重试；如果一直失败，请联系支持。",
-    "byo_failed_toast": "无法连接企业微信机器人"
+    "byo_failed_toast": "无法连接企业微信机器人",
+    "notifications_title": "任务通知",
+    "notifications_description": "选择用你连接的哪个机器人接收任务通知（新评论、状态变更、指派人变更）。同时只能选一个；在指定之前，会默认发送到你最早绑定的机器人。",
+    "notifications_radio_label": "把任务通知发送到该机器人",
+    "notifications_none_label": "当前使用最早的绑定（未显式指定）",
+    "notifications_loading": "正在加载你的企业微信绑定…",
+    "notifications_empty": "你还没有企业微信绑定。先在某个智能体的「集成」页连接机器人，再从机器人聊天里绑定你的账号。",
+    "notifications_set_toast": "任务通知将发送到该机器人",
+    "notifications_unset_toast": "该机器人不再接收任务通知",
+    "notifications_set_failed": "更新通知目标失败"
   },
   "telegram": {
     "section_title": "Telegram",
