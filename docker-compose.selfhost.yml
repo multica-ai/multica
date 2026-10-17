@@ -216,6 +216,7 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      MULTICA_SHARECRM_SECRET_KEY: ${MULTICA_SHARECRM_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/integrations/sharecrm"
 )
 
 // Claim must report the chat session's real channel type for EVERY registered
@@ -91,10 +93,11 @@ func seedChannelTaskDelivery(t *testing.T, ctx context.Context, taskID, sessionI
 
 // claimedChatChannel is the channel-awareness slice of a claim response.
 type claimedChatChannel struct {
-	ChannelType   string `json:"chat_channel_type"`
-	ChatType      string `json:"chat_type"`
-	InThread      bool   `json:"chat_in_thread"`
-	DeliversFiles bool   `json:"chat_channel_delivers_files"`
+	ChannelType       string `json:"chat_channel_type"`
+	ChatType          string `json:"chat_type"`
+	ExternalSessionID string `json:"external_session_id"`
+	InThread          bool   `json:"chat_in_thread"`
+	DeliversFiles     bool   `json:"chat_channel_delivers_files"`
 }
 
 // claimChatChannelFields claims the queued task for runtimeID and returns the
@@ -120,6 +123,64 @@ func claimChatChannelFields(t *testing.T, runtimeID string) claimedChatChannel {
 		t.Fatal("expected a claimed task")
 	}
 	return *resp.Task
+}
+
+func TestClaim_ShareCRMExternalSessionIDIsTaskScoped(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	testHandler.RegisterChannelExternalSessionIDResolver(string(sharecrm.TypeShareCRM), sharecrm.ExternalSessionIDFromBindingConfig)
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "sharecrm-backed chat")
+	seedChannelBinding(t, ctx, agentID, sessionID, "sharecrm", "msg-1", "msg-1")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE channel_chat_session_binding
+		SET config = $1
+		WHERE chat_session_id = $2
+	`, []byte(`{"chat_id":"C-TEST-sharecrm","session_id":"gateway-session-1"}`), sessionID); err != nil {
+		t.Fatalf("set ShareCRM binding config: %v", err)
+	}
+	taskID := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	seedChannelTaskDelivery(t, ctx, taskID, sessionID)
+	requeueTaskForClaim(t, ctx, sessionID)
+
+	claimed := claimChatChannelFields(t, runtimeID)
+	if claimed.ExternalSessionID != "gateway-session-1" {
+		t.Fatalf("external_session_id = %q, want gateway-session-1", claimed.ExternalSessionID)
+	}
+}
+
+func TestClaim_RegisteredExternalSessionResolverIsGeneric(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	testHandler.RegisterChannelExternalSessionIDResolver("custom-channel", func(config []byte) string {
+		var payload struct {
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal(config, &payload); err != nil {
+			return ""
+		}
+		return payload.Value
+	})
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "custom external session chat")
+	seedChannelBinding(t, ctx, agentID, sessionID, "custom-channel", "msg-1", "msg-1")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE channel_chat_session_binding
+		SET config = $1
+		WHERE chat_session_id = $2
+	`, []byte(`{"value":"custom-session-1"}`), sessionID); err != nil {
+		t.Fatalf("set custom binding config: %v", err)
+	}
+	taskID := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	seedChannelTaskDelivery(t, ctx, taskID, sessionID)
+	requeueTaskForClaim(t, ctx, sessionID)
+
+	claimed := claimChatChannelFields(t, runtimeID)
+	if claimed.ExternalSessionID != "custom-session-1" {
+		t.Fatalf("external_session_id = %q, want custom-session-1", claimed.ExternalSessionID)
+	}
 }
 
 func TestClaim_FeishuBoundSessionReportsChannelType(t *testing.T) {

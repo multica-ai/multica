@@ -192,6 +192,9 @@ func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, w
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+	if id := strings.TrimSpace(task.ExternalSessionID); id != "" {
+		env["MULTICA_EXTERNAL_SESSION_ID"] = id
+	}
 	if runtime.GOOS != "windows" {
 		return env
 	}
