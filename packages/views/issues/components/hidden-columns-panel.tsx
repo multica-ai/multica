@@ -19,6 +19,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink } from "../../navigation";
 import { useWorkflowPermissions } from "../../workflows/permissions";
 
+export const HIDDEN_COLUMNS_PANEL_WIDTH = 240;
+
 /**
  * Single source of truth for the "Hidden columns" side panel rendered by
  * the kanban-style views (board and swimlane).
@@ -40,7 +42,7 @@ export function HiddenColumnsPanel({
   const viewerHidden = useViewStore((s) => s.hiddenStatuses);
   const outsideWorkflow = hiddenStatuses.some((status) => !viewerHidden.includes(status));
   return (
-    <div className="flex w-[240px] shrink-0 flex-col">
+    <div style={{ width: HIDDEN_COLUMNS_PANEL_WIDTH }} className="flex shrink-0 flex-col">
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="text-body font-medium text-muted-foreground">
           {t(($) => $.board.hidden_columns_label)}

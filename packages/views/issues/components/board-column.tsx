@@ -21,6 +21,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { BOARD_COLUMN_DEFAULT_WIDTH } from "@multica/core/issues/stores/view-store";
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
@@ -41,7 +42,7 @@ import type { IssueCreateDefaults } from "../surface/types";
 // cannot be faithfully replicated in JavaScript (ICU/V8). Showing an
 // inaccurate indicator is worse than showing none.
 
-export const BOARD_COL_WIDTH = 280;
+export const BOARD_COL_WIDTH = BOARD_COLUMN_DEFAULT_WIDTH;
 export const BOARD_CARD_WIDTH = BOARD_COL_WIDTH - 16 - 8; // col(280) - col p-2(16) - droppable p-1(8)
 
 // Board cards are ~90-140px tall, so ~10 fill a column viewport — unlike the
@@ -198,8 +199,8 @@ export const BoardColumn = memo(function BoardColumn({
 
   return (
     <div
-      style={{ width: BOARD_COL_WIDTH }}
-      className={`group/column relative flex shrink-0 flex-col rounded-xl bg-muted/40 p-2 ${
+      style={{ width: `var(--board-column-width, ${BOARD_COL_WIDTH}px)` }}
+      className={`group/column relative flex min-w-0 shrink-0 flex-col rounded-xl bg-muted/40 p-2 ${
         hint ? "ring-2 ring-brand/30" : ""
       }`}
     >
@@ -216,7 +217,7 @@ export const BoardColumn = memo(function BoardColumn({
           </span>
         </div>
       )}
-      <div className="mb-2 flex items-center justify-between gap-2 px-1.5">
+      <div className="mb-2 flex min-w-0 items-center justify-between gap-1 px-1.5">
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
         {/* Right: step handler + add + menu */}

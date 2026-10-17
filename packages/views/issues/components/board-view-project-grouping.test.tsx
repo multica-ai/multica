@@ -8,15 +8,36 @@
  * as the "no assignee" column.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
+import type { DragStartEvent } from "@dnd-kit/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
+import { issueWorkflowKeys } from "@multica/core/issue-workflows";
+import { projectKeys } from "@multica/core/projects/queries";
 import type { Issue, Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../actions/issue-actions-context-menu";
 import type { IssueGroupBranches } from "../surface/use-issue-group-branches";
 import { BoardView } from "./board-view";
+
+const dragHarness = vi.hoisted(() => ({
+  start: undefined as ((event: DragStartEvent) => void) | undefined,
+}));
+
+vi.mock("@dnd-kit/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@dnd-kit/core")>();
+  return {
+    ...actual,
+    DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
+      dragHarness.start = props.onDragStart;
+      return <actual.DndContext {...props} />;
+    },
+    DragOverlay: ({ children }: { children: React.ReactNode }) => (
+      <div data-testid="drag-preview">{children}</div>
+    ),
+  };
+});
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 
@@ -58,7 +79,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
 });
 
 vi.mock("../../navigation", () => ({
-  AppLink: ({ children, ...props }: React.ComponentProps<"a">) => (
+  AppLink: ({ children, newTabTitle: _newTabTitle, ...props }: React.ComponentProps<"a"> & { newTabTitle?: string }) => (
     <a {...props}>{children}</a>
   ),
   useNavigation: () => ({
@@ -186,6 +207,8 @@ describe("Board grouped by project", () => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
+    queryClient.setQueryData(issueWorkflowKeys.list("ws-1"), { workflows: [], total: 0 });
+    queryClient.setQueryData(projectKeys.list("ws-1"), { projects: [] });
   });
 
   afterEach(() => {
@@ -196,14 +219,18 @@ describe("Board grouped by project", () => {
   function render({
     descriptors = [NO_PROJECT_DESCRIPTOR, ...PROJECT_DESCRIPTORS],
     issues = ISSUES,
+    grouping = "project",
+    visibleStatuses = ["todo"],
   }: {
     descriptors?: IssueGroupBranches["descriptors"];
     issues?: Issue[];
+    grouping?: "project" | "status";
+    visibleStatuses?: string[];
   } = {}) {
     const store = getIssueSurfaceViewStore(
       `board-project-${Math.floor(Math.random() * 1e9)}`,
     );
-    store.getState().setGrouping("project");
+    store.getState().setGrouping(grouping);
     // Cards carry their own project chip by default, which would put the same
     // title in two places and make "the column header says X" unprovable.
     if (store.getState().cardProperties.project) {
@@ -215,7 +242,7 @@ describe("Board grouped by project", () => {
           <IssueContextMenuProvider>
           <BoardView
             issues={issues}
-            visibleStatuses={["todo"]}
+            visibleStatuses={visibleStatuses}
             hiddenStatuses={[]}
             onMoveIssue={() => {}}
             projectMap={
@@ -227,7 +254,68 @@ describe("Board grouped by project", () => {
         </ViewStoreProvider>
       </QueryClientProvider>,
     );
+    return store;
   }
+
+  it.each([
+    [200, false, 176, null],
+    [200, false, 176, 256],
+    [280, true, 193, null],
+  ] as const)("keeps the drag preview at the card's current width (%s px columns, fit=%s)",
+    (columnWidth, fit, cardWidth, cachedWidth) => {
+      const store = render();
+      act(() => {
+        store.getState().setBoardColumnWidth(columnWidth);
+        store.getState().setBoardFitToScreen(fit);
+      });
+      const card = screen.getByText("MUL-acme").closest<HTMLElement>("[data-board-card]")!;
+      vi.spyOn(card, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, cardWidth, 100));
+      const activatorEvent = new MouseEvent("pointerdown");
+      Object.defineProperty(activatorEvent, "target", { value: card.querySelector("a") });
+      act(() => dragHarness.start?.({
+        activatorEvent,
+        active: {
+          id: ISSUES.find((issue) => issue.project_id === ACME_ID)!.id,
+          data: { current: undefined },
+          rect: { current: { initial: cachedWidth === null ? null : new DOMRect(0, 0, cachedWidth, 100), translated: null } },
+        },
+      }));
+      expect(screen.getByTestId("drag-preview").firstElementChild).toHaveStyle({ width: `${cardWidth}px` });
+    },
+  );
+
+  it("preserves workflow drop restrictions when columns and drag previews are resized", () => {
+    const project = { ...makeProject(ACME_ID, "Acme Corp", "🚀"), workflow_id: "workflow-1" };
+    queryClient.setQueryData(projectKeys.list("ws-1"), { projects: [project] });
+    queryClient.setQueryData(issueWorkflowKeys.list("ws-1"), {
+      workflows: [{
+        id: "workflow-1",
+        workspace_id: "ws-1",
+        name: "Planning",
+        is_default: false,
+        steps: [{ status_key: "todo", handler: { type: "none" }, instructions: "" }],
+      }],
+      total: 1,
+    });
+    const store = render({ grouping: "status", visibleStatuses: ["todo", "in_progress"], issues: [ISSUES[0]!] });
+    act(() => store.getState().setBoardColumnWidth(200));
+    const card = screen.getByText("MUL-acme").closest<HTMLElement>("[data-board-card]")!;
+    vi.spyOn(card, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 176, 100));
+    const activatorEvent = new MouseEvent("pointerdown");
+    Object.defineProperty(activatorEvent, "target", { value: card.querySelector("a") });
+    act(() => dragHarness.start?.({
+      activatorEvent,
+      active: {
+        id: "acme",
+        data: { current: undefined },
+        rect: { current: { initial: null, translated: null } },
+      },
+    }));
+    expect(screen.getByText("Not in the Planning workflow")).toBeTruthy();
+    expect(card.closest(".group\\/column")).toHaveStyle({ width: "var(--board-column-width, 280px)" });
+    expect(card.closest("[data-board-scroller]")).toHaveStyle({ "--board-column-width": "200px" });
+    expect(screen.getByTestId("drag-preview").firstElementChild).toHaveStyle({ width: "176px" });
+  });
 
   it("titles each column with its project, never with its id", () => {
     render();

@@ -10,6 +10,16 @@ import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "..
 import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
+export const BOARD_COLUMN_DEFAULT_WIDTH = 280;
+export const BOARD_COLUMN_MIN_WIDTH = 200;
+export const BOARD_COLUMN_MAX_WIDTH = 480;
+
+function normalizeBoardColumnWidth(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(BOARD_COLUMN_MAX_WIDTH, Math.max(BOARD_COLUMN_MIN_WIDTH, Math.round(value)))
+    : BOARD_COLUMN_DEFAULT_WIDTH;
+}
+
 export type GanttZoom = "day" | "week" | "month";
 /**
  * Board grouping. Besides the three built-ins, a select-type custom property
@@ -238,6 +248,8 @@ export function normalizeSortForGrouping(
 
 export interface IssueViewState {
   viewMode: ViewMode;
+  boardColumnWidth: number;
+  boardFitToScreen: boolean;
   grouping: IssueGrouping;
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
@@ -312,6 +324,8 @@ export interface IssueViewState {
   tableHierarchy: boolean;
   tableCalculation: TableCalculation;
   setViewMode: (mode: ViewMode) => void;
+  setBoardColumnWidth: (width: number) => void;
+  setBoardFitToScreen: (fit: boolean) => void;
   setGanttZoom: (zoom: GanttZoom) => void;
   toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
@@ -363,6 +377,8 @@ export interface IssueViewState {
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
   viewMode: "board",
+  boardColumnWidth: BOARD_COLUMN_DEFAULT_WIDTH,
+  boardFitToScreen: false,
   grouping: "status",
   statusFilters: [],
   priorityFilters: [],
@@ -405,6 +421,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         state.sortDirection,
       ),
     })),
+  setBoardColumnWidth: (width) => set({ boardColumnWidth: normalizeBoardColumnWidth(width) }),
+  setBoardFitToScreen: (fit) => set({ boardFitToScreen: fit }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
   toggleGanttShowCompleted: () =>
     set((state) => ({ ganttShowCompleted: !state.ganttShowCompleted })),
@@ -666,6 +684,8 @@ export const viewStorePersistOptions = (name: string) => ({
     // `dateFilter` is also intentionally not persisted: relative presets such
     // as Today would otherwise become stale after a calendar-day rollover.
     viewMode: state.viewMode,
+    boardColumnWidth: state.boardColumnWidth,
+    boardFitToScreen: state.boardFitToScreen,
     grouping: state.grouping,
     statusFilters: state.statusFilters,
     priorityFilters: state.priorityFilters,
@@ -762,6 +782,12 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   const merged = {
     ...current,
     ...p,
+    boardColumnWidth: p.boardColumnWidth === undefined
+      ? current.boardColumnWidth
+      : normalizeBoardColumnWidth(p.boardColumnWidth),
+    boardFitToScreen: typeof p.boardFitToScreen === "boolean"
+      ? p.boardFitToScreen
+      : current.boardFitToScreen,
     hiddenStatuses: statusesFromStorage(p.hiddenStatuses ?? legacy?.hiddenStatusCategories, current.hiddenStatuses, p.hiddenStatuses === undefined),
     listCollapsedStatuses: statusesFromStorage(p.listCollapsedStatuses, current.listCollapsedStatuses, p.hiddenStatuses === undefined),
     cardProperties: {

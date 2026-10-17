@@ -291,6 +291,8 @@ vi.mock("@multica/core/api", () => ({
 // Mock view store
 const mockViewState = {
   viewMode: "board" as "board" | "list",
+  boardColumnWidth: 280,
+  boardFitToScreen: false,
   grouping: "status" as "status" | "assignee",
   statusFilters: [] as string[],
   priorityFilters: [] as string[],
@@ -317,6 +319,8 @@ const mockViewState = {
   listCollapsedStatuses: [] as string[],
   hiddenStatuses: [] as string[],
   setViewMode: vi.fn(),
+  setBoardColumnWidth: vi.fn(),
+  setBoardFitToScreen: vi.fn(),
   setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),
   togglePriorityFilter: vi.fn(),
@@ -337,7 +341,8 @@ const mockViewState = {
   toggleListCollapsed: vi.fn(),
 };
 
-vi.mock("@multica/core/issues/stores/view-store", () => ({
+vi.mock("@multica/core/issues/stores/view-store", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issues/stores/view-store")>()),
   useClearFiltersOnWorkspaceChange: () => {},
   PROPERTY_VIEW_PREFIX: "property:",
   propertyIdFromViewKey: (key: string) =>

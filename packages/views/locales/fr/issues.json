@@ -201,6 +201,9 @@
     "chip_save_as": "Enregistrer sous"
   },
   "display": {
+    "column_width": "Largeur",
+    "column_width_value": "{{width}} px",
+    "fit_to_screen": "Adapter à l’écran",
     "tooltip": "Paramètres d'affichage",
     "button": "Affichage",
     "grouping_section": "Regroupement",

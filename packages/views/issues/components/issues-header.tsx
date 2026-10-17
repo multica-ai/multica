@@ -56,6 +56,7 @@ import {
   SelectItem,
 } from "@multica/ui/components/ui/select";
 import { Toggle } from "@multica/ui/components/ui/toggle";
+import { BoardWidthControls } from "./board-width-controls";
 import {
   PRIORITY_DISPLAY_ORDER,
 } from "@multica/core/issues/config";
@@ -2183,6 +2184,7 @@ export function IssueDisplayControls({
               {/* Caption label left, control right; multi-control sections
                   (Ordering, Card properties) stack the label on top. Spacing
                   separates sections — no dividers (see UI rules). */}
+              {viewMode === "board" && <BoardWidthControls />}
               {viewMode === "board" && (
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-caption font-medium text-muted-foreground">

@@ -197,6 +197,9 @@
     "chip_save_as": "另存"
   },
   "display": {
+    "column_width": "列宽",
+    "column_width_value": "{{width}} 像素",
+    "fit_to_screen": "适应屏幕",
     "tooltip": "显示设置",
     "button": "显示",
     "grouping_section": "分组",

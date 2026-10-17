@@ -197,6 +197,9 @@
     "chip_save_as": "別名で保存"
   },
   "display": {
+    "column_width": "列の幅",
+    "column_width_value": "{{width}} px",
+    "fit_to_screen": "画面に合わせる",
     "tooltip": "表示設定",
     "button": "表示",
     "grouping_section": "グループ化",

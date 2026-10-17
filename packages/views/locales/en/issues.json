@@ -201,6 +201,9 @@
     "chip_save_as": "Save as"
   },
   "display": {
+    "column_width": "Column width",
+    "column_width_value": "{{width}} px",
+    "fit_to_screen": "Fit to screen",
     "tooltip": "Display settings",
     "button": "Display",
     "grouping_section": "Grouping",
