@@ -18,6 +18,11 @@
  * top-level navigation. Here the iframe also reports its scroll position so a
  * desktop tab switch puts the reader back where they were.
  *
+ * That same opaque origin puts the document out of reach of the browser's
+ * native find, so the frame injects a find shim and renders an in-app find
+ * bar (MUL-7551): Ctrl/Cmd+F opens it whether focus is on the page or inside
+ * the iframe, and match counts come back over postMessage.
+ *
  * The route is workspace-scoped (`/{slug}/attachments/{id}/preview`) for
  * tenancy isolation; the attachment endpoints themselves are auth-checked, so
  * the slug is purely a URL contract.
@@ -27,7 +32,7 @@
  * view state, so a tab switch comes back to the same screen.
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { api } from "@multica/core/api";
@@ -40,6 +45,15 @@ import {
 import type { HtmlPreviewLocation } from "../editor/hooks/use-html-preview-location";
 import { normalizeHtmlPreviewAddress } from "../editor/utils/iframe-location-bridge";
 import { useHtmlPreviewScrollRestore } from "./use-html-preview-scroll-restore";
+import {
+  withFindShim,
+  FIND_RESULT,
+  FIND_OPEN,
+} from "../editor/utils/iframe-find";
+import {
+  HtmlPreviewFindBar,
+  type FindResult,
+} from "../editor/html-preview-find-bar";
 
 /** View-state key the page keeps an HTML file's address under. */
 export const HTML_PREVIEW_ADDRESS_KEY = "html-preview-address";
@@ -130,23 +144,83 @@ function PageHtmlFrame({
   const { contentKey, buildSrcDoc, iframeRef, onLoad } =
     useHtmlPreviewScrollRestore(html);
   const { frameRef } = location;
+
+  // Two of the three consumers own callback refs; the find bar needs an
+  // object ref to postMessage into the same iframe. Fan the element out.
+  const frameEl = useRef<HTMLIFrameElement | null>(null);
   const setFrame = useCallback(
     (el: HTMLIFrameElement | null) => {
+      frameEl.current = el;
       iframeRef(el);
       frameRef(el);
     },
     [iframeRef, frameRef],
   );
+
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findResult, setFindResult] = useState<FindResult | null>(null);
+
+  // Intercept Ctrl/Cmd+F so it opens the in-app find bar instead of the
+  // browser's native find, which cannot reach the opaque-origin iframe
+  // anyway. The shim posts FIND_OPEN when the iframe itself has focus.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        setFindOpen(true);
+      } else if (e.key === "Escape" && findOpen) {
+        setFindOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [findOpen]);
+
+  // Receive match counts / open requests from the injected shim. Only trust
+  // messages from THIS iframe's window and carrying our own source tag.
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.source !== frameEl.current?.contentWindow) return;
+      const d = e.data as
+        | { source?: string; found?: boolean; total?: number; current?: number }
+        | undefined;
+      if (!d || typeof d !== "object") return;
+      if (d.source === FIND_RESULT) {
+        setFindResult({
+          found: !!d.found,
+          total: d.total ?? 0,
+          current: d.current ?? 0,
+        });
+      } else if (d.source === FIND_OPEN) {
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
   return (
-    <iframe
-      key={`${contentKey}:${location.frameKey}`}
-      ref={setFrame}
-      onLoad={onLoad}
-      srcDoc={location.withAddress(buildSrcDoc(html))}
-      sandbox="allow-scripts"
-      title={title}
-      className="h-full w-full border-0 bg-background"
-    />
+    <div className="relative h-full w-full">
+      <iframe
+        key={`${contentKey}:${location.frameKey}`}
+        ref={setFrame}
+        onLoad={onLoad}
+        srcDoc={withFindShim(location.withAddress(buildSrcDoc(html)))}
+        sandbox="allow-scripts"
+        title={title}
+        className="h-full w-full border-0 bg-background"
+      />
+      {findOpen && (
+        <HtmlPreviewFindBar
+          iframeRef={frameEl}
+          result={findResult}
+          query={findQuery}
+          onQueryChange={setFindQuery}
+          onClose={() => setFindOpen(false)}
+        />
+      )}
+    </div>
   );
 }
 
