@@ -269,6 +269,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
+	// Meta Muse Code (`muse`) exposes its session protocol (MSP) through
+	// `muse serve`. The launcher script installs and updates the real binary
+	// under ~/.local/bin, so the PATH entry is what a host actually has.
+	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
+		agents["muse"] = e
+	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
 	// on PATH; users install it separately, often via an npm global prefix).
 	// It must go through probe() like every other provider so the login-shell

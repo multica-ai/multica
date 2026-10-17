@@ -915,6 +915,20 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
+	// muse takes Meta Muse Code's closed MSP vocabulary, declared on the
+	// `reasoningEffort` field of `turn/start`. The host re-validates the tier
+	// against the session model before it samples, so this list is the
+	// provider universe, not a per-model promise.
+	"muse": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+		"ultra":   true,
+	},
 	// omp (Oh-My-Pi) dispatches to the pi backend (see BuiltinRuntimes), so it
 	// inherits pi's fixed CLI vocabulary; discoverOmpModels narrows it to each
 	// model's advertised efforts before execution. `auto` is deliberately absent

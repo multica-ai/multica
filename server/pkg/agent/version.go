@@ -24,6 +24,7 @@ var MinVersions = map[string]string{
 	"qwen":        "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
 	"dim":         "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
 	"mcode":       "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
+	"muse":        "1.4.10",  // MSP stable surface: session/start, turn/start, item stream
 	"zeroclaw":    "0.8.0",   // persistent ACP sessions and session/resume were added in 0.8.0
 	// opencode: honors TMPDIR/TMP/TEMP from 1.1.54. Earlier builds ignore all
 	// three when their embedded Bun runtime extracts a native module, writing
