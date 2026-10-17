@@ -85,7 +85,13 @@ type outboundQueries interface {
 	// roundTaker's taskLookup.
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
-	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
+	// FindNotificationBindingForMember addresses an inbox push (SHAR-146 B1).
+	// Distinct from FindChannelBindingForMember: it prefers the member's
+	// explicit notification target and otherwise falls back to their OLDEST
+	// binding, so a newly-bound bot never silently takes over their
+	// notifications. FindChannelBindingForMember's newest-wins tiebreak is
+	// paired with the account-reuse chain and is deliberately left alone.
+	FindNotificationBindingForMember(ctx context.Context, arg db.FindNotificationBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 	// Which language this round's bubble is closed in: a 1:1 reads the asker's
@@ -813,7 +819,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if err != nil || !workspaceID.Valid {
 		return false
 	}
-	binding, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+	binding, err := o.q.FindNotificationBindingForMember(ctx, db.FindNotificationBindingForMemberParams{
 		WorkspaceID:   workspaceID,
 		MulticaUserID: recipientID,
 		ChannelType:   channelTypeWecom,

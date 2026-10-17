@@ -223,7 +223,7 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID p
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.installation, f.installErr
 }
-func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
+func (f *fakeOutboundQueries) FindNotificationBindingForMember(context.Context, db.FindNotificationBindingForMemberParams) (db.ChannelUserBinding, error) {
 	return f.memberBinding, f.memberErr
 }
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
