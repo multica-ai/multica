@@ -1369,6 +1369,43 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const findActiveChannelInstallationByAgent = `-- name: FindActiveChannelInstallationByAgent :one
+SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND channel_type = $3
+  AND status = 'active'
+`
+
+type FindActiveChannelInstallationByAgentParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+// The sender-routed inbox push (SHAR-155) rule 1: does the agent that authored
+// a comment own a wecom bot in this workspace? The PK (workspace_id, agent_id,
+// channel_type) admits at most one row, so :one with no ordering is exact.
+func (q *Queries) FindActiveChannelInstallationByAgent(ctx context.Context, arg FindActiveChannelInstallationByAgentParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, findActiveChannelInstallationByAgent, arg.WorkspaceID, arg.AgentID, arg.ChannelType)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at, b.is_notification_target FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id
@@ -1748,43 +1785,6 @@ func (q *Queries) GetChannelChatSessionBindingBySessionAny(ctx context.Context, 
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
-	)
-	return i, err
-}
-
-const findActiveChannelInstallationByAgent = `-- name: FindActiveChannelInstallationByAgent :one
-SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
-WHERE workspace_id = $1
-  AND agent_id = $2
-  AND channel_type = $3
-  AND status = 'active'
-`
-
-type FindActiveChannelInstallationByAgentParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AgentID     pgtype.UUID `json:"agent_id"`
-	ChannelType string      `json:"channel_type"`
-}
-
-// The sender-routed inbox push (SHAR-155) rule 1: does the agent that authored
-// a comment own a wecom bot in this workspace? The PK (workspace_id, agent_id,
-// channel_type) admits at most one row, so :one with no ordering is exact.
-func (q *Queries) FindActiveChannelInstallationByAgent(ctx context.Context, arg FindActiveChannelInstallationByAgentParams) (ChannelInstallation, error) {
-	row := q.db.QueryRow(ctx, findActiveChannelInstallationByAgent, arg.WorkspaceID, arg.AgentID, arg.ChannelType)
-	var i ChannelInstallation
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.AgentID,
-		&i.ChannelType,
-		&i.Config,
-		&i.Status,
-		&i.WsLeaseToken,
-		&i.WsLeaseExpiresAt,
-		&i.InstallerUserID,
-		&i.InstalledAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }

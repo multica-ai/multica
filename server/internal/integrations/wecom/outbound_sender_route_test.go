@@ -216,6 +216,87 @@ func TestTryDeliverInbox_ProjectLeadMissFallsToMemberBinding(t *testing.T) {
 	}
 }
 
+// TestTryDeliverInbox_LeadUnboundFallsToMemberBinding: rule 2 reaches a member
+// lead but the lead has no wecom binding at all (FindChannelBindingForMember
+// runs and returns pgx.ErrNoRows), so the push falls through to the
+// recipient's own binding. This is the boundary deliverable 4 names as "lead
+// 未绑定" — distinct from "no lead" (tested above) and "agent lead" (below).
+func TestTryDeliverInbox_LeadUnboundFallsToMemberBinding(t *testing.T) {
+	t.Parallel()
+	instRecipient := mustTestUUID(t)
+	q := &fakeOutboundQueries{
+		senderInstallErr: pgx.ErrNoRows, // the author has no wecom bot
+		issueProjectLead: db.GetIssueProjectLeadRow{
+			LeadType: pgtype.Text{String: "member", Valid: true},
+			LeadID:   pgtype.UUID{Bytes: leadBytes, Valid: true},
+		},
+		leadErr:       pgx.ErrNoRows, // the lead member is not bound to wecom
+		memberBinding: db.ChannelUserBinding{InstallationID: instRecipient, ChannelUserID: "T_USER_1"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, conns := newOutboundWithConns(t, q, instRecipient)
+	item := routeItem(ptrTo("agent"))
+	if !o.tryDeliverInbox(context.Background(), item, recipient, workspace) {
+		t.Fatal("tryDeliverInbox returned false; expected delivery via the recipient's own binding")
+	}
+	body := conns[uuidStringPub(instRecipient)].sendBody(t, 0)
+	if body["chatid"] != "T_USER_1" {
+		t.Errorf("chatid = %v, want the recipient's own bound userid", body["chatid"])
+	}
+	if q.projectLeadGets != 1 {
+		t.Errorf("project lead lookup ran %d times; want 1", q.projectLeadGets)
+	}
+	if q.leadBindingGets != 1 {
+		t.Errorf("lead binding lookup ran %d times; want 1 (rule 2 reached it)", q.leadBindingGets)
+	}
+	if q.memberBindingGets != 1 {
+		t.Errorf("rule-3 binding lookup ran %d times; want 1 (fell through to it)", q.memberBindingGets)
+	}
+}
+
+// TestTryDeliverInbox_RecipientUnboundInLeadBotFallsToMemberBinding: the
+// lead IS bound (rule 2 names their bot) but the RECIPIENT was never bound
+// inside that bot, so the reverse lookup misses and the push falls through to
+// the recipient's own binding. This is the "收件人在发送方 installation 无绑定"
+// boundary at rule 2 — WeCom cannot address a member who has not talked to
+// that bot.
+func TestTryDeliverInbox_RecipientUnboundInLeadBotFallsToMemberBinding(t *testing.T) {
+	t.Parallel()
+	insts := distinctTestUUIDs(t, 2)
+	instLead, instRecipient := insts[0], insts[1]
+	q := &fakeOutboundQueries{
+		senderInstallErr: pgx.ErrNoRows, // the author has no wecom bot
+		issueProjectLead: db.GetIssueProjectLeadRow{
+			LeadType: pgtype.Text{String: "member", Valid: true},
+			LeadID:   pgtype.UUID{Bytes: leadBytes, Valid: true},
+		},
+		leadBinding: db.ChannelUserBinding{InstallationID: instLead, ChannelUserID: "T_LEAD"},
+		// The lead bot has NO entry for the recipient: the reverse lookup
+		// misses and rule 2 declines.
+		installationMemberErr: pgx.ErrNoRows,
+		memberBinding:         db.ChannelUserBinding{InstallationID: instRecipient, ChannelUserID: "T_USER_1"},
+		workspace:             db.Workspace{Slug: "acme"},
+	}
+	o, conns := newOutboundWithConns(t, q, instLead, instRecipient)
+	item := routeItem(ptrTo("agent"))
+	if !o.tryDeliverInbox(context.Background(), item, recipient, workspace) {
+		t.Fatal("tryDeliverInbox returned false; expected delivery via the recipient's own binding")
+	}
+	if n := len(conns[uuidStringPub(instLead)].sendFrames()); n != 0 {
+		t.Errorf("lead bot received %d frame(s); expected 0 when the recipient is unbound in it", n)
+	}
+	body := conns[uuidStringPub(instRecipient)].sendBody(t, 0)
+	if body["chatid"] != "T_USER_1" {
+		t.Errorf("chatid = %v, want the recipient's own bound userid", body["chatid"])
+	}
+	if q.leadBindingGets != 1 {
+		t.Errorf("lead binding lookup ran %d times; want 1", q.leadBindingGets)
+	}
+	if q.memberBindingGets != 1 {
+		t.Errorf("rule-3 binding lookup ran %d times; want 1", q.memberBindingGets)
+	}
+}
+
 // TestTryDeliverInbox_AgentLeadDoesNotReRoute: rule 2 only fires when the
 // project lead is a MEMBER. An agent lead is skipped, and the push falls
 // through to the recipient's own binding. This pins "agent-authored comment

@@ -92,6 +92,31 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 	return err
 }
 
+const getIssueProjectLead = `-- name: GetIssueProjectLead :one
+SELECT p.lead_type, p.lead_id
+FROM issue i
+JOIN project p ON p.id = i.project_id
+WHERE i.id = $1
+`
+
+type GetIssueProjectLeadRow struct {
+	LeadType pgtype.Text `json:"lead_type"`
+	LeadID   pgtype.UUID `json:"lead_id"`
+}
+
+// SHAR-155 routing rule 2: the project a notification's issue belongs to and
+// its lead, so a sender-routed inbox push can fall back to the lead member's
+// wecom binding. A project with no lead (lead_type/lead_id NULL) or an
+// agent lead returns a row with NULL lead fields — the caller reads
+// lead_type='member' to decide whether to use it at all. issue.project_id is
+// SET NULL on project delete, so a missing row is the "no project" case.
+func (q *Queries) GetIssueProjectLead(ctx context.Context, issueID pgtype.UUID) (GetIssueProjectLeadRow, error) {
+	row := q.db.QueryRow(ctx, getIssueProjectLead, issueID)
+	var i GetIssueProjectLeadRow
+	err := row.Scan(&i.LeadType, &i.LeadID)
+	return i, err
+}
+
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
 SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
 WHERE id = $1 AND workspace_id = $2
@@ -120,35 +145,6 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.StartDate,
 		&i.DueDate,
 	)
-	return i, err
-}
-
-const getIssueProjectLead = `-- name: GetIssueProjectLead :one
-SELECT p.lead_type, p.lead_id
-FROM issue i
-JOIN project p ON p.id = i.project_id
-WHERE i.id = $1
-`
-
-type GetIssueProjectLeadParams struct {
-	IssueID pgtype.UUID `json:"issue_id"`
-}
-
-type GetIssueProjectLeadRow struct {
-	LeadType pgtype.Text `json:"lead_type"`
-	LeadID   pgtype.UUID `json:"lead_id"`
-}
-
-// SHAR-155 routing rule 2: the project a notification's issue belongs to and
-// its lead, so a sender-routed inbox push can fall back to the lead member's
-// wecom binding. A project with no lead (lead_type/lead_id NULL) or an
-// agent lead returns a row with NULL lead fields — the caller reads
-// lead_type='member' to decide whether to use it at all. issue.project_id is
-// SET NULL on project delete, so a missing row is the "no project" case.
-func (q *Queries) GetIssueProjectLead(ctx context.Context, arg GetIssueProjectLeadParams) (GetIssueProjectLeadRow, error) {
-	row := q.db.QueryRow(ctx, getIssueProjectLead, arg.IssueID)
-	var i GetIssueProjectLeadRow
-	err := row.Scan(&i.LeadType, &i.LeadID)
 	return i, err
 }
 

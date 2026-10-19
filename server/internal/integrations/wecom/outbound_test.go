@@ -279,7 +279,7 @@ func (f *fakeOutboundQueries) FindChannelUserBindingByInstallationAndMember(_ co
 	b.MulticaUserID = arg.MulticaUserID
 	return b, nil
 }
-func (f *fakeOutboundQueries) GetIssueProjectLead(context.Context, db.GetIssueProjectLeadParams) (db.GetIssueProjectLeadRow, error) {
+func (f *fakeOutboundQueries) GetIssueProjectLead(context.Context, pgtype.UUID) (db.GetIssueProjectLeadRow, error) {
 	f.projectLeadGets++
 	return f.issueProjectLead, f.issueProjectErr
 }

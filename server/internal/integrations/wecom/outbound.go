@@ -107,7 +107,7 @@ type outboundQueries interface {
 	FindChannelUserBindingByInstallationAndMember(ctx context.Context, arg db.FindChannelUserBindingByInstallationAndMemberParams) (db.ChannelUserBinding, error)
 	// GetIssueProjectLead is SHAR-155 rule 2: the project an issue belongs to
 	// and its lead. A missing row is an issue with no project.
-	GetIssueProjectLead(ctx context.Context, arg db.GetIssueProjectLeadParams) (db.GetIssueProjectLeadRow, error)
+	GetIssueProjectLead(ctx context.Context, issueID pgtype.UUID) (db.GetIssueProjectLeadRow, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 	// Which language this round's bubble is closed in: a 1:1 reads the asker's
@@ -954,7 +954,7 @@ func (o *Outbound) projectLeadBinding(ctx context.Context, item map[string]any, 
 	if err != nil || !issueID.Valid {
 		return db.ChannelUserBinding{}, false
 	}
-	lead, err := o.q.GetIssueProjectLead(ctx, db.GetIssueProjectLeadParams{IssueID: issueID})
+	lead, err := o.q.GetIssueProjectLead(ctx, issueID)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			o.logger.WarnContext(ctx, "wecom outbound: project lead lookup failed",
