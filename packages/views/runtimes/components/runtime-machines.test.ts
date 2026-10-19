@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "@multica/core/types";
 import {
   buildRuntimeMachines,
+  deriveRuntimeDisplayHealth,
   filterRuntimeMachines,
   runtimeMachineCounts,
   runtimeRowLabel,
@@ -105,6 +106,132 @@ describe("runtime machine grouping", () => {
     // Not shared across all runtimes on the machine, so it must not stand in
     // for the whole machine's name — the device name wins instead.
     expect(machines[0]?.title).toBe("dev-machine.local");
+  });
+
+  it("does not show a zero-binding runtime as online (SHAR-188/C6 #1)", () => {
+    // The disabled Trae runtime heartbeats, but no agent is bound to it. It
+    // must not read as "online" — nothing can be dispatched to it — while the
+    // bound Claude runtime on the same machine keeps its real state.
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-claude", provider: "claude" }),
+        makeRuntime({
+          id: "rt-trae",
+          provider: "trae",
+          name: "Trae (dev-machine.local)",
+        }),
+      ],
+      {
+        now: NOW,
+        workloadByRuntimeId: new Map([
+          ["rt-claude", { runningCount: 0, queuedCount: 0, boundAgentCount: 1 }],
+        ]),
+      },
+    );
+
+    expect(machines[0]).toMatchObject({
+      onlineCount: 1,
+      unboundCount: 1,
+      issueCount: 1,
+      degradedCount: 1,
+      health: "online",
+    });
+    expect(machines[0]?.problems).toEqual([
+      { id: "rt-trae", label: "Trae", health: "unbound" },
+    ]);
+    expect(
+      deriveRuntimeDisplayHealth(
+        makeRuntime({ id: "rt-trae", provider: "trae" }),
+        NOW,
+        0,
+      ),
+    ).toBe("unbound");
+  });
+
+  it("reports an entirely unbound machine as unbound, not online", () => {
+    const machines = buildRuntimeMachines(
+      [makeRuntime({ id: "rt-trae", provider: "trae" })],
+      { now: NOW, workloadByRuntimeId: new Map() },
+    );
+
+    expect(machines[0]).toMatchObject({
+      onlineCount: 0,
+      unboundCount: 1,
+      issueCount: 1,
+      degradedCount: 0,
+      health: "unbound",
+    });
+    expect(filterRuntimeMachines(machines, "", "online")).toHaveLength(0);
+    expect(filterRuntimeMachines(machines, "", "issues")).toHaveLength(1);
+  });
+
+  it("keeps reachability when binding counts are unknown", () => {
+    // Callers without the agent list pass no workload map; a missing map is
+    // "unknown", not "zero", so the raw state must survive.
+    const machines = buildRuntimeMachines(
+      [makeRuntime({ id: "rt-claude", provider: "claude" })],
+      { now: NOW },
+    );
+
+    expect(machines[0]).toMatchObject({
+      onlineCount: 1,
+      unboundCount: 0,
+      issueCount: 0,
+      health: "online",
+    });
+  });
+
+  it("surfaces a single abnormal runtime on an otherwise online machine (SHAR-188/C6 #2)", () => {
+    // Three healthy runtimes must not hide the fourth one being offline: the
+    // machine row keeps "online" (it is reachable) but carries the anomaly.
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-a", provider: "claude" }),
+        makeRuntime({ id: "rt-b", provider: "codex" }),
+        makeRuntime({ id: "rt-c", provider: "copilot" }),
+        makeRuntime({
+          id: "rt-offline",
+          provider: "trae",
+          name: "Trae (dev-machine.local)",
+          status: "offline",
+          last_seen_at: new Date(NOW - 10 * 60_000).toISOString(),
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines[0]).toMatchObject({
+      onlineCount: 3,
+      issueCount: 1,
+      degradedCount: 1,
+      health: "online",
+    });
+    expect(machines[0]?.problems).toEqual([
+      { id: "rt-offline", label: "Trae", health: "offline" },
+    ]);
+    expect(runtimeMachineCounts(machines)).toEqual({
+      all: 1,
+      online: 1,
+      issues: 1,
+    });
+  });
+
+  it("reports no problems on a fully healthy machine", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({ id: "rt-a", provider: "claude" }),
+        makeRuntime({ id: "rt-b", provider: "codex" }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines[0]).toMatchObject({
+      onlineCount: 2,
+      issueCount: 0,
+      degradedCount: 0,
+      health: "online",
+      problems: [],
+    });
   });
 
   it("counts machines with any offline runtime as issues", () => {

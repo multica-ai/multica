@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ChevronRight,
   Cloud,
   Loader2,
@@ -153,7 +154,10 @@ export function RuntimesPage({
     });
   }, [machines, runtimeProfiles]);
 
-  if (isAuthLoading || runtimesLoading || profilesLoading) {
+  // The machine aggregation needs the agent list: an unloaded (empty) list
+  // would make every runtime look zero-bound, so hold the skeleton until the
+  // binding signal is real.
+  if (isAuthLoading || runtimesLoading || profilesLoading || agentsLoading) {
     return <RuntimesPageSkeleton />;
   }
 
@@ -484,9 +488,22 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
         </span>
       </span>
 
-      <span className="hidden w-36 shrink-0 items-center gap-1.5 text-caption md:flex">
+      <span className="hidden w-44 shrink-0 items-center gap-1.5 text-caption md:flex">
         <HealthIcon health={machine.health} />
-        <span>{healthLabel(machine.health)}</span>
+        <span className="truncate">{healthLabel(machine.health)}</span>
+        {machine.degradedCount > 0 && (
+          <span
+            className="inline-flex shrink-0 items-center gap-0.5 text-warning"
+            title={machine.problems
+              .map((problem) => `${problem.label} · ${healthLabel(problem.health)}`)
+              .join("\n")}
+          >
+            <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+            {t(($) => $.machine.metrics.health_issues, {
+              count: machine.degradedCount,
+            })}
+          </span>
+        )}
       </span>
       <span className="hidden w-40 shrink-0 flex-col gap-1 lg:flex">
         <span className="text-caption text-muted-foreground">

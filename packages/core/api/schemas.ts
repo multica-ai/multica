@@ -41,7 +41,6 @@ import type {
   WecomInstallation,
   ListWecomInstallationsResponse,
   RedeemWecomBindingTokenResponse,
-  WecomBinding,
   WecomBindingListResponse,
   WecomBindingNotificationTargetResponse,
   TelegramInstallation,

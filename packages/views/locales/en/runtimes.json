@@ -106,6 +106,10 @@
     "long_offline": {
       "label": "Long offline",
       "description": "No heartbeat for 6+ days. If this host will stay offline, rebind its agents to another runtime or delete this runtime."
+    },
+    "unbound": {
+      "label": "Unbound",
+      "description": "No agent is bound to this runtime, so no runs can be dispatched to it. Bind an agent to bring it online."
     }
   },
   "detail": {

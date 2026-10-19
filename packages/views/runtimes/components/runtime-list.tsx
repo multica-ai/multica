@@ -28,7 +28,6 @@ import {
 } from "@multica/core/workspace/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
-  deriveRuntimeHealth,
   isRuntimeUsableForUser,
   runtimeProfileListOptions,
   runtimeUsageOptions,
@@ -65,7 +64,7 @@ import {
   computeCostInWindow,
   pctChange,
 } from "../utils";
-import { runtimeRowLabel } from "./runtime-machines";
+import { deriveRuntimeDisplayHealth, runtimeRowLabel } from "./runtime-machines";
 import {
   customRuntimeRegistrationFailure,
   isDisabledCustomRuntime,
@@ -131,12 +130,14 @@ function columnTrackVars(
 
 interface RuntimeWorkload {
   agentIds: string[];
+  boundAgentCount: number;
   runningCount: number;
   queuedCount: number;
 }
 
 const EMPTY_WORKLOAD: RuntimeWorkload = {
   agentIds: [],
+  boundAgentCount: 0,
   runningCount: 0,
   queuedCount: 0,
 };
@@ -166,10 +167,12 @@ export function buildWorkloadIndex(
     const entry =
       result.get(a.runtime_id) ?? {
         agentIds: [],
+        boundAgentCount: 0,
         runningCount: 0,
         queuedCount: 0,
       };
     entry.agentIds.push(a.id);
+    entry.boundAgentCount = entry.agentIds.length;
     result.set(a.runtime_id, entry);
   }
   for (const t of tasks) {
@@ -342,20 +345,28 @@ function HealthCell({
     );
   }
 
-  const health = deriveRuntimeHealth(runtime, now);
+  // A reachable runtime with no agent bound to it cannot run anything, so it
+  // reads as "unbound" instead of "online" (SHAR-188/C6 #1).
+  const health = deriveRuntimeDisplayHealth(runtime, now, workload.boundAgentCount);
   const offline = health === "offline" || health === "long_offline";
+  const unbound = health === "unbound";
   const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
   const active = workload.runningCount + workload.queuedCount;
 
   return (
     <ListGridCell className="gap-1.5">
       <HealthIcon health={health} />
-      <span className="block min-w-0 truncate text-caption">
+      <span
+        className="block min-w-0 truncate text-caption"
+        title={
+          unbound ? t(($) => $.health.unbound.description) : undefined
+        }
+      >
         {labelOf(health)}
-        {health !== "online" && lastSeen && (
+        {!unbound && health !== "online" && lastSeen && (
           <span className="text-muted-foreground"> · {lastSeen}</span>
         )}
-        {!offline && active > 0 && (
+        {!offline && !unbound && active > 0 && (
           <span className="text-muted-foreground">
             {" · "}
             {tAgents(($) => $.row.task_count, { count: active })}

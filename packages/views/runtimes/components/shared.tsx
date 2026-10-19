@@ -1,6 +1,6 @@
-import { Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
+import { CircleDashed, Cloud, Monitor, Wifi, WifiHigh, WifiOff } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
-import type { RuntimeHealth } from "@multica/core/runtimes";
+import type { RuntimeDisplayHealth } from "@multica/core/runtimes";
 import { ProviderLogo } from "./provider-logo";
 import { useT } from "../../i18n";
 
@@ -28,18 +28,20 @@ export function ProviderChip({ provider }: { provider: string }) {
 // muted-foreground/destructive) instead of introducing runtime-specific
 // colours — keeps the palette small and consistent with Skills.
 // Labels flow through useT — see useHealthLabel below.
-const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
+const HEALTH_VISUAL: Record<RuntimeDisplayHealth, { dot: string; tone: string }> = {
   online: { dot: "bg-success", tone: "bg-success/10 text-success" },
   recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
   offline: { dot: "bg-muted-foreground/40", tone: "bg-muted text-muted-foreground" },
   long_offline: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
+  // Reachable but nothing is bound to it — neutral, not an outage.
+  unbound: { dot: "bg-muted-foreground/30", tone: "bg-muted text-muted-foreground" },
 };
 
 export function HealthDot({
   health,
   className = "",
 }: {
-  health: RuntimeHealth | "loading";
+  health: RuntimeDisplayHealth | "loading";
   className?: string;
 }) {
   if (health === "loading") {
@@ -66,20 +68,22 @@ export function HealthDot({
 //   offline       → WifiOff (slashed, muted) — long unreachable
 //   long_offline  → WifiOff (slashed, destructive) — prolonged outage
 const HEALTH_ICON: Record<
-  RuntimeHealth,
+  RuntimeDisplayHealth,
   { Icon: typeof Wifi; tone: string }
 > = {
   online: { Icon: Wifi, tone: "text-success" },
   recently_lost: { Icon: WifiHigh, tone: "text-warning" },
   offline: { Icon: WifiOff, tone: "text-muted-foreground" },
   long_offline: { Icon: WifiOff, tone: "text-destructive" },
+  // Hollow ring: the runtime is there, but no agent is wired to it.
+  unbound: { Icon: CircleDashed, tone: "text-muted-foreground" },
 };
 
 export function HealthIcon({
   health,
   className = "h-3 w-3",
 }: {
-  health: RuntimeHealth | "loading";
+  health: RuntimeDisplayHealth | "loading";
   className?: string;
 }) {
   if (health === "loading") {
@@ -92,21 +96,24 @@ export function HealthIcon({
 // English-only fallback. Pure function form for non-component callers
 // (e.g. column factory builders). Translated call sites should use the
 // `useHealthLabel` hook below instead.
-const HEALTH_LABEL_EN: Record<RuntimeHealth, string> = {
+const HEALTH_LABEL_EN: Record<RuntimeDisplayHealth, string> = {
   online: "Online",
   recently_lost: "Recently lost",
   offline: "Offline",
   long_offline: "Long offline",
+  unbound: "Unbound",
 };
 
-export function healthLabel(health: RuntimeHealth | "loading"): string {
+export function healthLabel(health: RuntimeDisplayHealth | "loading"): string {
   if (health === "loading") return "—";
   return HEALTH_LABEL_EN[health];
 }
 
 // Hook form: usable inside React components (preferred for new call sites
 // that aren't running in non-component contexts).
-export function useHealthLabel(): (health: RuntimeHealth | "loading") => string {
+export function useHealthLabel(): (
+  health: RuntimeDisplayHealth | "loading",
+) => string {
   const { t } = useT("runtimes");
   return (health) => {
     if (health === "loading") return "—";
@@ -117,7 +124,7 @@ export function useHealthLabel(): (health: RuntimeHealth | "loading") => string 
 export function HealthBadge({
   health,
 }: {
-  health: RuntimeHealth | "loading";
+  health: RuntimeDisplayHealth | "loading";
 }) {
   const labelOf = useHealthLabel();
   if (health === "loading") {

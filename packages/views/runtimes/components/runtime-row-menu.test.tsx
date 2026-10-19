@@ -142,7 +142,12 @@ function makeRow(
     runtime,
     profile,
     ownerMember: null,
-    workload: { agentIds: [], runningCount: 0, queuedCount: 0 },
+    workload: {
+      agentIds: [],
+      boundAgentCount: 0,
+      runningCount: 0,
+      queuedCount: 0,
+    },
     canDelete,
   };
 }

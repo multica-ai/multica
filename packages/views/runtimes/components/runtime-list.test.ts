@@ -66,6 +66,7 @@ describe("buildWorkloadIndex", () => {
 
     expect(workload).toEqual({
       agentIds: [activeAgent.id],
+      boundAgentCount: 1,
       runningCount: 1,
       queuedCount: 0,
     });

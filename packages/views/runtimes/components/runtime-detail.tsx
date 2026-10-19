@@ -21,10 +21,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
-  deriveRuntimeHealth,
   isRuntimeUsableForUser,
   runtimeDisplayName,
   runtimeProfileListOptions,
+  type RuntimeDisplayHealth,
 } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -46,7 +46,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
-import { runtimeRowLabel } from "./runtime-machines";
+import { deriveRuntimeDisplayHealth, runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -100,14 +100,15 @@ export function RuntimeDetail({
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: agents = [], isLoading: agentsLoading } = useQuery(
+    agentListOptions(wsId),
+  );
   const { data: profiles = [] } = useQuery(runtimeProfileListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const health = deriveRuntimeHealth(runtime, now);
   const ownerMember = runtime.owner_id
     ? members.find((m) => m.user_id === runtime.owner_id) ?? null
     : null;
@@ -131,6 +132,14 @@ export function RuntimeDetail({
 
   const servingAgents = agents.filter(
     (a) => a.runtime_id === runtime.id && !a.archived_at,
+  );
+
+  // Reachable but unbound is not "online" — there is nobody to dispatch to.
+  // Withhold the binding signal while the agent list is still loading.
+  const health: RuntimeDisplayHealth = deriveRuntimeDisplayHealth(
+    runtime,
+    now,
+    agentsLoading ? undefined : servingAgents.length,
   );
 
   const deleteDestination = afterDeleteHref ?? paths.runtimes();
@@ -261,7 +270,7 @@ function HeroCard({
 }: {
   runtime: AgentRuntime;
   runtimeName: string;
-  health: ReturnType<typeof deriveRuntimeHealth>;
+  health: RuntimeDisplayHealth;
   lastSeen: string;
   ownerMember: MemberWithUser | null;
   cliVersion: string | null;

@@ -106,6 +106,10 @@
     "long_offline": {
       "label": "Hors ligne depuis longtemps",
       "description": "Aucun signal depuis au moins 6 jours. Si cette machine doit rester hors ligne, associez ses agents à un autre runtime ou supprimez celui-ci."
+    },
+    "unbound": {
+      "label": "Non associé",
+      "description": "Aucun agent n'est associé à ce runtime : aucune exécution ne peut lui être envoyée. Associez un agent pour le remettre en ligne."
     }
   },
   "detail": {

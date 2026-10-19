@@ -1,4 +1,8 @@
-import { deriveRuntimeHealth, type RuntimeHealth } from "@multica/core/runtimes";
+import {
+  deriveRuntimeHealth,
+  type RuntimeDisplayHealth,
+  type RuntimeHealth,
+} from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
 import { formatDeviceInfo } from "../utils";
 
@@ -8,6 +12,21 @@ export type RuntimeMachineFilter = "all" | "online" | "issues";
 export interface RuntimeWorkloadSummary {
   runningCount: number;
   queuedCount: number;
+  /**
+   * How many agents are bound to this runtime. Callers that know the agent
+   * list always set it (0 included); when the whole workload map is absent
+   * the binding state is unknown and no zero-binding override applies.
+   */
+  boundAgentCount?: number;
+}
+
+// One runtime that is not doing its job, carried on the machine so the
+// machine row can name it instead of collapsing to a single aggregate state
+// (SHAR-188/C6 #2).
+export interface RuntimeMachineIssue {
+  id: string;
+  label: string;
+  health: RuntimeDisplayHealth;
 }
 
 export interface RuntimeMachine {
@@ -21,10 +40,19 @@ export interface RuntimeMachine {
   mode: AgentRuntime["runtime_mode"];
   section: RuntimeMachineSection;
   isCurrent: boolean;
-  health: RuntimeHealth;
+  health: RuntimeDisplayHealth;
   runtimes: AgentRuntime[];
   onlineCount: number;
   issueCount: number;
+  /** Runtimes that are not online, with the state they display as. */
+  problems: RuntimeMachineIssue[];
+  /**
+   * Non-online runtimes while at least one peer is online — the count the
+   * machine row must surface so a single bad runtime isn't drowned out by
+   * its healthy peers.
+   */
+  degradedCount: number;
+  unboundCount: number;
   runningCount: number;
   queuedCount: number;
   providerNames: string[];
@@ -68,6 +96,38 @@ const HEALTH_SEVERITY: Record<RuntimeHealth, number> = {
   offline: 2,
   long_offline: 3,
 };
+
+// A reachable runtime with no agent bound to it serves nobody: dispatches
+// to it are lost, so it must not present as "online". Only an explicit zero
+// overrides reachability — `undefined` means the caller did not load the
+// agent list and the raw state stays authoritative (SHAR-188/C6 #1).
+function withBindingState(
+  health: RuntimeHealth,
+  boundAgentCount: number | undefined,
+): RuntimeDisplayHealth {
+  if (health === "online" && boundAgentCount === 0) return "unbound";
+  return health;
+}
+
+export function deriveRuntimeDisplayHealth(
+  runtime: Pick<AgentRuntime, "status" | "last_seen_at">,
+  now: number,
+  boundAgentCount?: number,
+): RuntimeDisplayHealth {
+  return withBindingState(deriveRuntimeHealth(runtime, now), boundAgentCount);
+}
+
+function boundAgentCountOf(
+  runtime: AgentRuntime,
+  options: RuntimeMachineOptions,
+): number | undefined {
+  const index = options.workloadByRuntimeId;
+  // No map at all means "bindings unknown" (e.g. the caller only has the
+  // runtime list). A map without an entry means no agent references the
+  // runtime — an actual zero.
+  if (!index) return undefined;
+  return index.get(runtime.id)?.boundAgentCount ?? 0;
+}
 
 export function splitRuntimeName(name: string): {
   base: string;
@@ -142,6 +202,9 @@ function placeholderLocalMachine(
     runtimes: [],
     onlineCount: 0,
     issueCount: 0,
+    problems: [],
+    degradedCount: 0,
+    unboundCount: 0,
     runningCount: 0,
     queuedCount: 0,
     providerNames: [],
@@ -225,18 +288,45 @@ function finalizeRuntimeMachine(
     mode: draft.mode,
   });
   const healthByRuntime = runtimes.map((runtime) =>
-    deriveRuntimeHealth(runtime, options.now),
+    withBindingState(
+      deriveRuntimeHealth(runtime, options.now),
+      boundAgentCountOf(runtime, options),
+    ),
   );
   const onlineCount = healthByRuntime.filter((h) => h === "online").length;
+  const unboundCount = healthByRuntime.filter((h) => h === "unbound").length;
+  // Every runtime that isn't online is a problem — including a reachable but
+  // unbound one, which cannot take a dispatch.
   const issueCount = runtimes.length - onlineCount;
-  const health =
+  // A machine is only "all good" when every runtime is online. Keeping the
+  // machine "online" while a peer is not, hid single-runtime failures behind
+  // healthy ones, so the row now carries `degradedCount` + `problems` and the
+  // UI renders them (SHAR-188/C6 #2).
+  const health: RuntimeDisplayHealth =
     onlineCount > 0
       ? "online"
-      : healthByRuntime.reduce<RuntimeHealth>(
-          (worst, current) =>
-            HEALTH_SEVERITY[current] > HEALTH_SEVERITY[worst] ? current : worst,
-          "recently_lost",
-        );
+      : unboundCount === runtimes.length
+        ? "unbound"
+        : healthByRuntime
+            .filter((state) => state !== "unbound")
+            .reduce<RuntimeHealth>(
+              (worst, current) =>
+                HEALTH_SEVERITY[current] > HEALTH_SEVERITY[worst]
+                  ? current
+                  : worst,
+              "recently_lost",
+            );
+  const problems: RuntimeMachineIssue[] = runtimes.flatMap((runtime, index) => {
+    const state = healthByRuntime[index];
+    if (!state || state === "online") return [];
+    return [
+      {
+        id: runtime.id,
+        label: runtimeRowLabel(runtime, title),
+        health: state,
+      },
+    ];
+  });
   const workload = runtimes.reduce(
     (sum, runtime) => {
       const entry = options.workloadByRuntimeId?.get(runtime.id);
@@ -263,6 +353,9 @@ function finalizeRuntimeMachine(
     runtimes,
     onlineCount,
     issueCount,
+    problems,
+    degradedCount: onlineCount > 0 ? issueCount : 0,
+    unboundCount,
     runningCount: workload.runningCount,
     queuedCount: workload.queuedCount,
     providerNames,

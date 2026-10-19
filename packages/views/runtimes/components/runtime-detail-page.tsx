@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Cloud, Monitor, Pencil, Plus, Server } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Cloud,
+  Monitor,
+  Pencil,
+  Plus,
+  Server,
+} from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -95,7 +103,9 @@ export function RuntimeDetailPage({
   const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((state) => state.user?.id);
   const { data: runtimes = [], isLoading } = useQuery(runtimeListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: agents = [], isLoading: agentsLoading } = useQuery(
+    agentListOptions(wsId),
+  );
   const { data: tasks = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: runtimeProfiles = [] } = useQuery(
@@ -177,7 +187,7 @@ export function RuntimeDetailPage({
     };
   }, [machine, isAdmin, currentUserId]);
 
-  if (isLoading) return <MachineDetailSkeleton />;
+  if (isLoading || agentsLoading) return <MachineDetailSkeleton />;
 
   if (!machine) {
     return (
@@ -238,6 +248,22 @@ export function RuntimeDetailPage({
                     <HealthIcon health={machine.health} />
                     {healthLabel(machine.health)}
                   </span>
+                  {machine.degradedCount > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-xs bg-warning/10 px-1.5 py-0.5 text-micro font-medium text-warning"
+                      title={machine.problems
+                        .map(
+                          (problem) =>
+                            `${problem.label} · ${healthLabel(problem.health)}`,
+                        )
+                        .join("\n")}
+                    >
+                      <AlertTriangle aria-hidden="true" className="h-3 w-3" />
+                      {t(($) => $.machine.metrics.health_issues, {
+                        count: machine.degradedCount,
+                      })}
+                    </span>
+                  )}
                   {machine.isCurrent && (
                     <span className="rounded-xs bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
                       {t(($) => $.machine.this_machine)}
