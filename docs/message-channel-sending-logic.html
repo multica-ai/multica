@@ -37,7 +37,7 @@
   <li>SHAR-146 修复的「新 bot 静默劫持全部通知」根因：旧 <code>FindChannelBindingForMember</code> 用 <code>bound_at DESC</code>（最新胜）。其函数当前已无出站调用方，被 <code>FindNotificationBindingForMember</code> 取代。</li>
 </ul>
 
-<div class="warn"><b>调研基线提示：</b>本文结论基于分支 <code>task/shar-146-notification-target-bot</code>（含 SHAR-146 改动）。调研时 SHAR-146 <b>尚未合并</b> <code>origin/main</code>：<code>FindNotificationBindingForMember</code> / <code>is_notification_target</code> 在 <code>origin/main</code> 中不存在。若以未合并前的 <code>main</code> 为准，则通知仍为 <code>FindChannelBindingForMember</code> 的「最新 bot 胜」劫持逻辑。</div>
+<div class="warn"><b>调研基线提示：</b>本文结论基于分支 <code>task/shar-146-notification-target-bot</code>（含 SHAR-146 改动）。SHAR-146 已于 2026-10-19 合并 <code>origin/main</code>（快进，HEAD <code>d9a036fec</code>）；本文基线即当前 main。</div>
 
 <h2>2. 信息类型全景</h2>
 <table>
@@ -117,7 +117,7 @@
 
 <h3>4.2 跨渠道多绑定（WeCom + DingTalk + Lark + Slack）</h3>
 <ul>
-  <li><b>通知 bot push 仅 WeCom 订阅 <code>EventInboxNew</code></b>（全仓库唯一订阅方 <code>wecom/outbound.go:218</code>；Slack/Lark/DingTalk/Telegram 均无该订阅，已核实）。因此 DingTalk/Lark/Slack 成员<b>不会</b>收到 bot 推送通知，仅应用内 inbox。</li>
+  <li><b>通知 bot push 仅 WeCom 订阅 <code>EventInboxNew</code></b>（全仓库唯一<b>对外 bot 渠道</b>订阅方 <code>wecom/outbound.go:218</code>；<code>server/cmd/server/listeners.go:108</code> 亦订阅该事件，但属应用内 WebSocket 实时广播，非渠道 bot 推送；Slack/Lark/DingTalk/Telegram 均无 bot 渠道订阅，已核实）。因此 DingTalk/Lark/Slack 成员<b>不会</b>收到 bot 推送通知，仅应用内 inbox。</li>
   <li><b>回复</b>：各渠道在各自 bot 回答时回写各自 <code>delivery row</code>，互不影响、互不重复。</li>
   <li>通知目标 API 仅 WeCom 提供（<code>channel_binding_notification.go</code>），其余渠道无对应设置入口，也不参与 <code>FindNotificationBindingForMember</code>。</li>
 </ul>
@@ -126,7 +126,7 @@
 <ul>
   <li>用途：<b>入站身份解析</b>。Slack 用户在未绑定的 installation 发消息，但同一 <code>(workspace, Slack team)</code> 已绑定另一 installation → 复用该链接，免重新授权（<code>slack/resolvers.go:266</code>，<code>channel.sql:591</code>，<code>bound_at DESC</code> 最新胜）。</li>
   <li>与<b>发送寻址</b>的交互：复用只在「入站」产生/确认绑定，<b>不改变</b>出站通知寻址（出站用 <code>FindNotificationBindingForMember</code> / <code>delivery row</code>）。即：Slack 复用可在另一 installation 落一条绑定，但该绑定仅在「被提问」或「被设为通知目标」时才参与出站。注意 <code>FindReusableChannelUserBinding</code> 仅 Slack 调用（<code>channel.sql:606</code> 注释明确 Slack-only）。</li>
-  <li>配对关系：<code>FindChannelBindingForMember</code> 的 <code>bound_at DESC</code> 与 <code>FindReusableChannelUserBinding</code> 一致（<code>channel.sql:557,600</code>），但 <code>FindChannelBindingForMember</code> 当前<b>无出站调用方</b>（被 SHAR-146 的 <code>FindNotificationBindingForMember</code> 取代，见 §6 风险 5）。</li>
+  <li>配对关系：<code>FindChannelBindingForMember</code> 的 <code>bound_at DESC</code> 与 <code>FindReusableChannelUserBinding</code> 一致（<code>channel.sql:564,612</code>），但 <code>FindChannelBindingForMember</code> 当前<b>无出站调用方</b>（被 SHAR-146 的 <code>FindNotificationBindingForMember</code> 取代，见 §6 风险 5）。</li>
 </ul>
 
 <h2>5. 逻辑通路图</h2>
@@ -238,8 +238,8 @@
   <tr><th>#</th><th>风险 / 问题</th><th>代码事实</th><th>影响</th></tr>
   <tr>
     <td>1</td>
-    <td>SHAR-146 未合并 <code>origin/main</code></td>
-    <td>调研时 <code>FindNotificationBindingForMember</code>/<code>is_notification_target</code> 仅存在于 <code>task/shar-146-notification-target-bot</code>；<code>origin/main</code> 无此函数（已 <code>git merge-base --is-ancestor</code> 核实）</td>
+    <td>SHAR-146 未合并 main（已解决）</td>
+    <td>2026-10-19 已快进合并；线上部署已运行 <code>b6402a06d</code></td>
     <td>线上若未合并，通知仍是 <code>FindChannelBindingForMember</code> 的「最新 bot 胜」劫持逻辑</td>
   </tr>
   <tr>
@@ -257,7 +257,7 @@
   <tr>
     <td>4</td>
     <td>显式目标 installation 被撤销后静默降级</td>
-    <td><code>FindNotificationBindingForMember</code> 过滤 <code>ci.status='active'</code>（<code>channel.sql:584</code>）；撤销后 <code>ErrNoRows</code> → 无 bot push（<code>outbound.go:827</code>）</td>
+    <td><code>FindNotificationBindingForMember</code> 过滤 <code>ci.status='active'</code>（<code>channel.sql:587</code>）；撤销后 <code>ErrNoRows</code> → 无 bot push（<code>outbound.go:827</code>）</td>
     <td>用户所选目标失效时不会收到任何提示，通知仅落应用内 inbox</td>
   </tr>
   <tr>
@@ -309,7 +309,7 @@
   <li><code>server/internal/handler/channel_binding_notification.go:135</code> 通知目标设置 API</li>
 </ul>
 
-<p class="small">说明：本文为只读调研，未改动业务代码、未发外部消息。结论均取自上述代码位置；与 issue 描述不一致处以代码事实为准（重点：SHAR-146 合入状态）。</p>
+<p class="small">说明：本文为只读调研，未改动业务代码、未发外部消息。结论均取自上述代码位置；与 issue 描述不一致处以代码事实为准（SHAR-146 已于 2026-10-19 合并 main）。</p>
 
 </body>
 </html>
