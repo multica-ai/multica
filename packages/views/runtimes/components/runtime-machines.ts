@@ -295,30 +295,34 @@ function finalizeRuntimeMachine(
   );
   const onlineCount = healthByRuntime.filter((h) => h === "online").length;
   const unboundCount = healthByRuntime.filter((h) => h === "unbound").length;
-  // Every runtime that isn't online is a problem — including a reachable but
-  // unbound one, which cannot take a dispatch.
-  const issueCount = runtimes.length - onlineCount;
-  // A machine is only "all good" when every runtime is online. Keeping the
-  // machine "online" while a peer is not, hid single-runtime failures behind
-  // healthy ones, so the row now carries `degradedCount` + `problems` and the
-  // UI renders them (SHAR-188/C6 #2).
+  // Exceptions are the runtimes in a broken (non-online, non-unbound) state.
+  // A reachable-but-unbound runtime is idle, not broken: it props up nothing
+  // but is not an anomaly either (SHAR-188/C6, PR #3 semantics).
+  const exceptionStates = healthByRuntime.filter(
+    (state) => state !== "online" && state !== "unbound",
+  );
+  const issueCount = exceptionStates.length;
+  // A single broken runtime must not be masked by healthy peers: the machine
+  // reports the WORST exception instead of staying "online" while a peer is
+  // down (SHAR-188/C6 #2, PR #3 semantics). The row still carries
+  // `degradedCount` + `problems` so the UI can name the culprits.
   const health: RuntimeDisplayHealth =
-    onlineCount > 0
-      ? "online"
-      : unboundCount === runtimes.length
-        ? "unbound"
-        : healthByRuntime
-            .filter((state) => state !== "unbound")
-            .reduce<RuntimeHealth>(
-              (worst, current) =>
-                HEALTH_SEVERITY[current] > HEALTH_SEVERITY[worst]
-                  ? current
-                  : worst,
-              "recently_lost",
-            );
+    exceptionStates.length > 0
+      ? exceptionStates.reduce<RuntimeHealth>(
+          (worst, current) =>
+            HEALTH_SEVERITY[current] > HEALTH_SEVERITY[worst]
+              ? current
+              : worst,
+          "recently_lost",
+        )
+      : onlineCount > 0
+        ? "online"
+        : unboundCount > 0
+          ? "unbound"
+          : "offline";
   const problems: RuntimeMachineIssue[] = runtimes.flatMap((runtime, index) => {
     const state = healthByRuntime[index];
-    if (!state || state === "online") return [];
+    if (!state || state === "online" || state === "unbound") return [];
     return [
       {
         id: runtime.id,

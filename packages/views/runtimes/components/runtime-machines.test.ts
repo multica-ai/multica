@@ -132,13 +132,13 @@ describe("runtime machine grouping", () => {
     expect(machines[0]).toMatchObject({
       onlineCount: 1,
       unboundCount: 1,
-      issueCount: 1,
-      degradedCount: 1,
+      // Idle, not broken: the unbound runtime is not an anomaly (PR #3
+      // semantics), so it counts neither as an issue nor toward degraded.
+      issueCount: 0,
+      degradedCount: 0,
       health: "online",
     });
-    expect(machines[0]?.problems).toEqual([
-      { id: "rt-trae", label: "Trae", health: "unbound" },
-    ]);
+    expect(machines[0]?.problems).toEqual([]);
     expect(
       deriveRuntimeDisplayHealth(
         makeRuntime({ id: "rt-trae", provider: "trae" }),
@@ -157,12 +157,12 @@ describe("runtime machine grouping", () => {
     expect(machines[0]).toMatchObject({
       onlineCount: 0,
       unboundCount: 1,
-      issueCount: 1,
+      issueCount: 0,
       degradedCount: 0,
       health: "unbound",
     });
     expect(filterRuntimeMachines(machines, "", "online")).toHaveLength(0);
-    expect(filterRuntimeMachines(machines, "", "issues")).toHaveLength(1);
+    expect(filterRuntimeMachines(machines, "", "issues")).toHaveLength(0);
   });
 
   it("keeps reachability when binding counts are unknown", () => {
@@ -181,9 +181,39 @@ describe("runtime machine grouping", () => {
     });
   });
 
+  it("does not let a zero-binding online runtime prop up the machine (SHAR-188/C6 ①)", () => {
+    // A disabled CLI (e.g. Trae) still reports online but no agent is bound
+    // to it — it must not make the machine look online (PR #3 semantics).
+    const bound = makeRuntime({ id: "rt-bound", provider: "claude" });
+    const unbound = makeRuntime({ id: "rt-unbound", provider: "trae" });
+    const withBindings = buildRuntimeMachines([bound, unbound], {
+      now: NOW,
+      workloadByRuntimeId: new Map([
+        ["rt-bound", { runningCount: 0, queuedCount: 0, boundAgentCount: 1 }],
+      ]),
+    });
+    expect(withBindings[0]).toMatchObject({
+      health: "online",
+      onlineCount: 1,
+      issueCount: 0,
+    });
+
+    const onlyUnbound = buildRuntimeMachines([unbound], {
+      now: NOW,
+      workloadByRuntimeId: new Map(),
+    });
+    expect(onlyUnbound[0]).toMatchObject({ onlineCount: 0, issueCount: 0 });
+
+    // Without the workload index binding is unknown — the runtime's own
+    // status stays authoritative.
+    const withoutIndex = buildRuntimeMachines([unbound], { now: NOW });
+    expect(withoutIndex[0]).toMatchObject({ health: "online" });
+  });
+
   it("surfaces a single abnormal runtime on an otherwise online machine (SHAR-188/C6 #2)", () => {
     // Three healthy runtimes must not hide the fourth one being offline: the
-    // machine row keeps "online" (it is reachable) but carries the anomaly.
+    // machine takes the WORST runtime state instead of staying "online"
+    // (PR #3 semantics), and the row's degraded badge names the culprit.
     const machines = buildRuntimeMachines(
       [
         makeRuntime({ id: "rt-a", provider: "claude" }),
@@ -204,7 +234,7 @@ describe("runtime machine grouping", () => {
       onlineCount: 3,
       issueCount: 1,
       degradedCount: 1,
-      health: "online",
+      health: "offline",
     });
     expect(machines[0]?.problems).toEqual([
       { id: "rt-offline", label: "Trae", health: "offline" },
