@@ -79,7 +79,10 @@
       "cancelled": "진행하지 않기로 함."
     },
     "pr_auto_complete_badge": "PR 병합 시 자동 설정",
-    "built_in_locked": "기본 상태는 시스템 동작에 쓰이므로 편집하거나 보관할 수 없습니다. 순서는 바꿀 수 있습니다."
+    "built_in_locked": "기본 상태는 시스템 동작에 쓰이므로 편집하거나 보관할 수 없습니다. 순서는 바꿀 수 있습니다.",
+    "builtin_badge": "기본 제공",
+    "workflow_usage_other": "워크플로 {{count}}개에서 사용 중",
+    "workflow_usage_none": "사용하는 워크플로 없음"
   },
   "wakeups": {
     "description": "모든 태스크에 적용되는 플랫폼 규칙입니다. 각 태스크의 깨우기 섹션에서 따로 바꿀 수 있습니다.",
@@ -405,7 +408,8 @@
       "billing": "결제 및 요금제",
       "code": "코드",
       "channels": "메신저",
-      "apps": "연결된 앱"
+      "apps": "연결된 앱",
+      "workflows": "워크플로"
     },
     "groups": {
       "personal": "개인",

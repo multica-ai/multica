@@ -45,6 +45,9 @@ type HealthResponse struct {
 	DeviceName string `json:"device_name"`
 	ServerURL  string `json:"server_url"`
 	CLIVersion string `json:"cli_version"`
+	// CLICommit belongs to this running process, not an installed replacement.
+	// Empty or unknown values do not attest a revision; never fall back to version.
+	CLICommit string `json:"cli_commit"`
 	// LaunchedBy is "desktop" when the Electron app spawned this daemon, empty
 	// for a standalone one. Already reported to the server on registration;
 	// surfaced here so `daemon status` can say who manages the daemon instead
@@ -91,13 +94,12 @@ type healthWorkspace struct {
 	Runtimes []string `json:"runtimes"`
 }
 
-// listenHealth binds the health port. Returns the listener or an error if
-// another daemon is already running (port taken).
+// listenHealth binds the health port for callers without a prebound listener.
 func (d *Daemon) listenHealth() (net.Listener, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", d.cfg.HealthPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("another daemon is already running on %s: %w", addr, err)
+		return nil, fmt.Errorf("bind health port %s: %w", addr, err)
 	}
 	return ln, nil
 }
@@ -353,6 +355,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			DeviceName:            d.cfg.DeviceName,
 			ServerURL:             d.cfg.ServerBaseURL,
 			CLIVersion:            d.cfg.CLIVersion,
+			CLICommit:             d.cfg.CLICommit,
 			ActiveTaskCount:       d.activeTasks.Load(),
 			RunningTaskCount:      d.runningTasks.Load(),
 			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),

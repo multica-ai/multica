@@ -23,7 +23,7 @@ import (
 // from every future session lookup.
 func TestRunTaskPiBusyRetryDoesNotRetireHealthySession(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 
 	priorSessionID := filepath.Join(t.TempDir(), "busy-session.jsonl")
 	claim, err := os.OpenFile(priorSessionID, os.O_CREATE|os.O_RDWR, 0o600)

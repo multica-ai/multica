@@ -106,10 +106,6 @@
       "other_placeholder": "e.g. study group coordination"
     }
   },
-  "option_card": {
-    "other_label": "Other",
-    "other_aria": "Describe something else"
-  },
   "step_question": {
     "hint_pick": "You can skip this."
   },
@@ -135,28 +131,7 @@
     "success_toast": "You're on the list. We'll email when cloud runtimes are live.",
     "failed_toast": "Failed to join waitlist"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "Setting up your workspace…",
-      "title": "Welcome to Multica!",
-      "subtitle": "We've added one issue to help you connect a runtime. When it's ready, start with Mika from Runtimes.",
-      "got_it": "Got it",
-      "status_in_progress": "In progress",
-      "error_title": "We couldn't set that up",
-      "error_body": "The runtime guide didn't get created. You can try again, or connect a runtime from the Runtimes page whenever you're ready.",
-      "retry": "Try again",
-      "dismiss": "Not now",
-      "cards": {
-        "install_runtime": {
-          "title": "Connect a runtime",
-          "subtitle": "Install Codex or Kimi, then start the guided Mika chat from Runtimes."
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "Your first workspace",
-    "eyebrow_resume": "Pick up or start fresh",
     "headline_first": "Name your workspace.",
     "headline_resume": "Continue with {{name}}, or start another.",
     "lede_first": "A workspace is where your issues, agents, and projects live. You can invite teammates or spin up more workspaces later.",
@@ -186,11 +161,9 @@
     "slug_reserved_error": "That workspace URL is reserved and cannot be used.",
     "slug_conflict_toast": "Choose a different workspace URL",
     "create_failed_toast": "Failed to create workspace",
-    "creation_disabled_eyebrow": "Workspace creation is disabled",
     "creation_disabled_headline": "Ask your administrator for an invitation.",
     "creation_disabled_lede": "This Multica instance does not allow new workspaces to be created. Once an administrator invites you to a workspace, accept the invitation and refresh to continue.",
     "creation_disabled_logout": "Log out",
-    "creation_disabled_eyebrow_resume": "Your workspace",
     "creation_disabled_headline_resume": "Continue with {{name}}.",
     "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace."
   },
@@ -204,8 +177,6 @@
     "status_all_online": "all online",
     "status_none_online": "none online",
     "status_n_online": "{{count}} online",
-    "online_label": "online",
-    "offline_label": "offline",
     "empty_headline": "No agent runtime found on this computer yet.",
     "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
     "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
@@ -224,7 +195,6 @@
     "continue": "Start with Mika"
   },
   "step_platform": {
-    "eyebrow": "Connect a computer",
     "headline": "Connect a computer to run your agent.",
     "lede": "Connect a computer so Mika can start working.",
     "hint_default": "You can connect later.",
@@ -239,7 +209,6 @@
     "cloud_action": "Coming soon",
     "cli_dialog_title": "Connect from the terminal",
     "cli_dialog_pick_hint": "Pick a computer above.",
-    "cli_dialog_connect": "Connect & continue",
     "runtimes_connected_one": "{{count}} computer connected",
     "runtimes_connected_other": "{{count}} computers connected",
     "live_listening": "Live · Waiting for your computer",
@@ -255,6 +224,7 @@
   },
   "errors": {
     "skip_failed": "Failed to finish onboarding",
+    "guide_failed": "The runtime guide didn't get created. Please try again.",
     "mika_setup_failed": "Couldn't start your Mika workspace"
   },
   "mika_intro": {

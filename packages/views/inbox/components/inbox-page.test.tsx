@@ -24,7 +24,9 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
 const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
+const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => queryClient,
   useQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
     return ({
@@ -277,7 +279,7 @@ function reset() {
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
-  markReadMutate.mockClear();
+  markReadMutate.mockReset();
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
   unarchiveMutate.mockClear();
@@ -684,6 +686,30 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
 
     expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("keeps an unread-filtered notification open after it is marked read", () => {
+    // Opening a row marks it read. With the unread filter on, that would drop
+    // the row before its detail renders and clear the selection, so the click
+    // looked like it only made the notification disappear.
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a", read: false }),
+    ];
+    useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
+    markReadMutate.mockImplementation((id: string) => {
+      listData.active = listData.active.map((current) =>
+        current.id === id ? { ...current, read: true } : current,
+      );
+    });
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    rerender(<InboxPage />);
+
+    expect(screen.getByTestId("row")).toHaveTextContent("inbox-a");
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
   it("keeps an explicitly unread row unread while it stays open", () => {

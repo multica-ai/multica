@@ -56,10 +56,8 @@ import {
   reconcileIssueFullSnapshotRevision,
 } from "./ws-updaters";
 
-// ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
 // useMutationState consumers to keep the type assertion in sync.
-// ---------------------------------------------------------------------------
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -81,13 +79,9 @@ export type UpdateIssueMutationInput = {
   move_intent?: Pick<MoveIssueRequest, "before_id" | "after_id">;
 } & UpdateIssueRequest;
 
-// ---------------------------------------------------------------------------
 // Per-status pagination
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
 // Issue CRUD
-// ---------------------------------------------------------------------------
 
 // Shared by the single and batch update hooks, so the inbox re-read can wait
 // for the last of them (see `owedInboxRereads`).
@@ -206,6 +200,8 @@ export function useUpdateIssue() {
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
@@ -318,6 +314,8 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
@@ -503,9 +501,30 @@ export function useDeleteIssue() {
   });
 }
 
+interface BatchUpdateSnapshots {
+  prevLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevFlatLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevTableRows?: Iterable<readonly [QueryKey, unknown]>;
+  prevDetailById?: Iterable<readonly [string, unknown]>;
+  prevInboxList?: unknown;
+  prevArchivedInboxCaches?: Iterable<readonly [QueryKey, unknown]>;
+  prevChildren?: Iterable<readonly [string, unknown]>;
+}
+
 export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const rollback = (ctx: BatchUpdateSnapshots | undefined) => {
+    for (const [key, snapshot] of ctx?.prevLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevFlatLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevTableRows ?? []) qc.setQueryData(key, snapshot);
+    for (const [id, snapshot] of ctx?.prevDetailById ?? []) qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
+    if (ctx?.prevInboxList !== undefined) qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
+    for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) qc.setQueryData(key, snapshot);
+    for (const [parentId, snapshot] of ctx?.prevChildren ?? []) {
+      qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+    }
+  };
   return useMutation({
     mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({
@@ -522,6 +541,8 @@ export function useBatchUpdateIssues() {
       // until a refetch returns the committed result.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
         ...patch
@@ -618,38 +639,18 @@ export function useBatchUpdateIssues() {
         affectedParentIds,
       };
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prevLists) {
-        for (const [key, snapshot] of ctx.prevLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevFlatLists) {
-        for (const [key, snapshot] of ctx.prevFlatLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevTableRows) {
-        for (const [key, snapshot] of ctx.prevTableRows) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevDetailById) {
-        for (const [id, snapshot] of ctx.prevDetailById) {
-          qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
-        }
-      }
-      if (ctx?.prevInboxList !== undefined) {
-        qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
-      }
-      for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) {
-        qc.setQueryData(key, snapshot);
-      }
-      if (ctx?.prevChildren) {
-        for (const [parentId, snapshot] of ctx.prevChildren) {
-          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
-        }
-      }
+    onError: (_err, _vars, ctx) => rollback(ctx),
+    // The server skips items its per-issue guards refuse (a status the
+    // issue's workflow does not list, an assignee it cannot take) and reports
+    // only how many it wrote. Which ones were skipped is unknown, so the
+    // optimistic writes are undone and the affected caches refetched.
+    onSuccess: (data, { ids }, ctx) => {
+      if (data.updated >= ids.length) return;
+      rollback(ctx);
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      for (const id of ids) qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
     },
     onSettled: (_data, err, _vars, ctx) => {
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
@@ -816,9 +817,7 @@ export function useBatchDeleteIssues() {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Comments / Timeline
-// ---------------------------------------------------------------------------
 
 type TimelineCache = TimelineEntry[];
 
@@ -1091,9 +1090,7 @@ export function useToggleCommentReaction(issueId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Issue-level Reactions
-// ---------------------------------------------------------------------------
 
 export function useToggleIssueReaction(issueId: string) {
   const qc = useQueryClient();
@@ -1119,9 +1116,7 @@ export function useToggleIssueReaction(issueId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Issue Subscribers
-// ---------------------------------------------------------------------------
 
 export function useToggleIssueSubscriber(issueId: string) {
   const qc = useQueryClient();

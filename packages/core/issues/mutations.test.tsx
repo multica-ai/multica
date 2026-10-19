@@ -734,6 +734,27 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     });
   });
 
+  it("rolls back and refetches when the server skips some issues", async () => {
+    batchUpdateIssues.mockResolvedValue({ updated: 0 });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ ids: ["issue-1"], updates: { status: "in_progress" } });
+    });
+
+    for (const key of [wsKey, myKey]) {
+      expect(bucketIds(key, "unstarted")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "started")).toEqual([]);
+    }
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.list(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.detail(WS_ID, "issue-1"));
+  });
+
   it("rolls both caches back when the request fails", async () => {
     batchUpdateIssues.mockRejectedValue(new Error("boom"));
 

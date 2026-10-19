@@ -142,6 +142,50 @@ describe("push", () => {
     expect(getActiveTab(s)?.url).toBe("/butter/inbox");
   });
 
+  // The workspace switchers (sidebar dropdown, Mod+K palette) push the
+  // target's Issues root, which is where web lands. On desktop that resumes
+  // the workspace where the user left it instead. NoAccessPage recovers with
+  // replace() to the same kind of path, so both methods are covered.
+  it.each(["push", "replace"] as const)(
+    "%s to another workspace's Issues root restores its last active tab",
+    (method) => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("butter", "/butter/projects");
+      store.switchWorkspace("acme");
+      const getAdapter = renderProvider();
+
+      getAdapter()[method]("/butter/issues");
+
+      const s = useTabStore.getState();
+      expect(s.activeWorkspaceSlug).toBe("butter");
+      expect(getActiveTab(s)?.url).toBe("/butter/projects");
+      expect(s.byWorkspace.butter.tabs.map((t) => t.url)).toEqual([
+        "/butter/projects",
+      ]);
+    },
+  );
+
+  it("lands on Issues when switching to a workspace with no tabs yet", () => {
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/butter/issues");
+
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/butter/issues");
+  });
+
+  it("still opens a deeper cross-workspace path under Issues", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("butter", "/butter/projects");
+    store.switchWorkspace("acme");
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/butter/issues/BUT-1");
+
+    expect(getActiveTab(useTabStore.getState())?.url).toBe(
+      "/butter/issues/BUT-1",
+    );
+  });
+
   it("logs out instead of navigating for /login", () => {
     const getAdapter = renderProvider();
 

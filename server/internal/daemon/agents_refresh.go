@@ -351,56 +351,18 @@ func (d *Daemon) refreshAgentAvailability() []string {
 	return gained
 }
 
-// refreshAgentVersions re-probes every installed agent CLI and re-registers the
-// built-in runtimes whenever the server has not been told a version this daemon
-// has already detected, so what the server reports matches what is on disk.
+// refreshAgentVersions re-probes installed CLIs and re-registers workspaces
+// whose last acknowledged versions differ, without restarting running tasks.
+// Failed probes retain previous values and retry on a later round.
 //
-// This is the agent-CLI counterpart to trySelfReload, and it deliberately does
-// NOT restart. What a user needs when codex or claude upgrades is that
-// subsequent tasks run the new CLI under the new version's rules — not that
-// Multica's availability tracks a third party's release cadence. An in-place
-// POSIX upgrade changes the binary behind the pinned path; a Windows installer
-// upgrade retargets the stable junction resolved by resolveAgentEntry. The two
-// things left stale are the cached version (which keys version-sensitive policy
-// such as the Codex sandbox) and the version the server displays. Both are
-// refreshed here with running tasks untouched.
+// Compare against each workspace's accepted registration, not the shared version
+// cache: another probe path may update that cache first, and an older registration
+// may arrive after a refresh. Per-workspace acknowledgements let the next round
+// repair either ordering.
 //
-// detectBuiltinRuntimes does the probing, which buys three properties for free:
-// probes fan out, a fast failure is retried (runtimeVersionProbeAttempts), and
-// the minimum-version gate still applies. A provider whose probe fails this
-// round keeps its previous version and is retried next round — a failed probe
-// never looks like a version change.
-//
-// What to send is decided per WORKSPACE, from workspaceState.builtinVersions —
-// the versions the last register call the server accepted for that workspace
-// actually carried — never from a before/after diff of the shared version
-// cache. The cache is written by every path that probes, so a diff only sees a
-// change when this round happens to be the first writer: a converge round, a
-// new workspace registering, or a self-heal at task launch will all move it
-// first and leave this round seeing nothing to do — while the workspaces those
-// paths did not touch keep the old version indefinitely.
-//
-// The acknowledgement is per-workspace rather than a global pending set for
-// the same reason in reverse: registration entry points are not serialized, so
-// a register that probed BEFORE an upgrade can land AFTER a refresh round has
-// updated every workspace it could see. A global "done" flag cleared at that
-// moment would strand the late workspace on the old version forever. Scoped to
-// the workspace, the late-landing call simply records what it sent, the record
-// disagrees with the next probe round, and that round re-registers exactly the
-// workspace that fell behind.
-//
-// Re-registration carries the whole built-in set because that is the shape the
-// register endpoint upserts, so one provider's upgrade re-sends its neighbours
-// too. That is safe rather than disruptive: the unchanged entries upsert
-// identically, and mergeBuiltinRegisterResponse swaps a server-side ID rotation
-// in place instead of accumulating a duplicate — the workspace still holds
-// exactly one runtime per provider, and no running task is touched.
-// This runs unconditionally rather than yielding when the converge half has
-// work to do, even though the two occasionally probe in the same window. A
-// provider that is permanently below the minimum supported version never leaves
-// providersMissingRuntimes — that is by design, so it recovers on its own after
-// an upgrade — so yielding to it would let one stuck CLI silently disable version
-// refresh for every healthy provider on the machine, forever.
+// Send the full built-in set and reconcile IDs in place. Run even when runtime
+// convergence has pending providers so one below-minimum CLI cannot starve version
+// updates for healthy providers.
 func (d *Daemon) refreshAgentVersions(ctx context.Context) {
 	// Nothing has ever been version-detected: the daemon is still starting up,
 	// and initial registration is the sync path's job.

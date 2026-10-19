@@ -1,49 +1,13 @@
 package wecom
 
-// outbound.go — the WeCom EventChatDone / EventInboxNew subscriber. An agent's
-// answer leaves this process the way every other WeCom write does: over the
-// aibot WebSocket held in the sendersRegistry. aibot has no outbound REST path,
-// so there is nothing else to fall back on.
+// Send WeCom completions and inbox events through the lease-holding WebSocket.
+// Seal the task's existing stream bubble when available, including for empty
+// completions; otherwise send an addressed plain message from the delivery row.
 //
-// Two shapes of write, tried in this order. A round that opened a bubble when
-// the question arrived has its answer written INTO that bubble and the bubble
-// sealed — that is the whole point of the streaming reply, and it is why an
-// empty completion still has to reach this far: a spinner nobody closes is
-// worse than a short answer (stream_store.go, typing_indicator.go). A round
-// with no bubble left — a restart mid-run, a stream past its window, a frame
-// the server refused — gets an ordinary message addressed by the task's own
-// delivery row.
-//
-// REPLICA TOPOLOGY: EventChatDone / EventInboxNew are dispatched on the
-// in-process events.Bus, so the replica that publishes an event is not
-// necessarily the one holding the bot's WS lease (Slack/Lark are immune —
-// their outbound is stateless HTTP any replica can perform).
-//
-// With a sharded/dual realtime relay running, a reply or inbox push produced
-// off-lease is forwarded to the lease holder over the relay
-// (relay_outbound.go) and the single-replica constraint no longer applies to
-// routing. Without a relay — legacy mode, or no REDIS_URL — the constraint
-// stands: run the WeCom-enabled backend as a single replica. In every mode, a
-// delivery produced while NO replica holds a live connection (all of them
-// mid-reconnect) is still lost; that residual window is a durability problem
-// the relay deliberately does not solve. Boot logs which of the two regimes is
-// in effect. See router.go.
-//
-// The bubble path and the relay never contend for the same turn. A bubble is
-// writable only on the replica that painted it, which is the replica holding
-// the socket; a round whose bubble lives elsewhere finds none here and takes
-// the addressed path, which is where the relay is.
-//
-// They MEET on the replica that takes a relayed reply. That replica is by
-// definition the one holding the socket, which is the one that painted the
-// bubble — a bubble is writable only where it was painted — so the frame
-// carries the task id and deliverRelayed seals the round with it instead of
-// pushing a second message underneath (relay_outbound.go). A relayed reply
-// whose round is gone, or whose seal is refused, takes the ordinary addressed
-// path, which is what a single-replica answer does too.
-//
-// Sessions with no wecom binding are ignored so this coexists with the Slack /
-// Lark subscribers on the shared bus.
+// Off-lease events require Redis relay. Without it, deployments need one backend
+// replica; no live connection can still lose a delivery. Relayed replies carry
+// task IDs so the receiver seals the original bubble instead of duplicating it.
+// Ignore sessions without a WeCom binding.
 
 import (
 	"context"
@@ -85,6 +49,10 @@ type outboundQueries interface {
 	// roundTaker's taskLookup.
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	// The two member lookups the inbox push picks its bot with, in the order it
+	// tries them: the acting agent's own bot first, then the recipient-wide one
+	// as the fallback. See memberBindingFor.
+	FindChannelBindingForMemberOnAgentInstallation(ctx context.Context, arg db.FindChannelBindingForMemberOnAgentInstallationParams) (db.ChannelUserBinding, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
@@ -529,7 +497,9 @@ func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (rou
 	}, "", true, nil
 }
 
-// routeFrame hands a frame to the relay, and answers false when there is none.
+// routeFrame hands a frame to the relay and answers what that produced. A
+// caller with no second route reads it through relayPublish.routed; the inbox
+// push reads all four states, because only it can fall back to another bot.
 //
 // THE NIL CHECK IS HERE BECAUSE THE FIELD IS AN INTERFACE. It used to be a
 // *RelayOutbound, whose publish begins with `if r == nil`, so a call through a
@@ -537,11 +507,23 @@ func taskAddress(ctx context.Context, q deliveryLookup, taskID pgtype.UUID) (rou
 // A nil interface has no receiver to run that guard, so widening the field
 // silently removed the safety three call sites were standing on. One place to
 // check it, so the next call site cannot forget.
-func (o *Outbound) routeFrame(f relayFrame, eventID string) bool {
+func (o *Outbound) routeFrame(f relayFrame, eventID string) relayPublish {
 	if o.relay == nil {
-		return false
+		return relayNotWired
 	}
 	return o.relay.publish(f, eventID)
+}
+
+// routeFrameAwaiting is routeFrame plus the acceptance wait: it asks the relay
+// whether a replica actually took the frame, bounded by ctx. Only the inbox
+// push asks, and only for the attempt that has a second route behind it -- see
+// RelayOutbound.publishAwaitingHolder for why that distinction is worth a
+// second entry point.
+func (o *Outbound) routeFrameAwaiting(ctx context.Context, f relayFrame, eventID string) relayPublish {
+	if o.relay == nil {
+		return relayNotWired
+	}
+	return o.relay.publishAwaitingHolder(ctx, f, eventID)
 }
 
 // relaySeal asks whichever replica holds this round to close it. Routed by
@@ -626,7 +608,7 @@ func (o *Outbound) sendAsMessage(ctx context.Context, e events.Event, taskID pgt
 			WorkspaceID:    e.WorkspaceID,
 			SessionID:      e.ChatSessionID,
 			CarriesFiles:   carriesFiles,
-		}, relayEventID(e, taskID)) {
+		}, relayEventID(e, taskID)).routed() {
 			o.logger.DebugContext(ctx, "wecom outbound: routed to the replica holding the socket",
 				"installation_id", util.UUIDToString(addr.InstallationID), "chat_session_id", e.ChatSessionID)
 			return answerOutcome{addr: addr, routed: true}, nil
@@ -804,6 +786,17 @@ func (o *Outbound) handleInboxNew(e events.Event) {
 
 // tryDeliverInbox is the delivery core. Returns true iff the bot pushed
 // the notification.
+//
+// The bot is chosen by memberBindingFor, which prefers the acting agent's own
+// bot. Preferring it must not make the notification LESS deliverable than the
+// recipient-wide route was, so when the preferred bot provably put nothing on
+// the wire — no live socket for it anywhere in the fleet, or a write that
+// failed before a byte could leave — the recipient-wide binding is tried too.
+// That is the route this notification took before the agent's own bot was
+// preferred, and keeping it is what preserves the guarantee PR #7136 named:
+// nothing a member used to receive stops arriving. An uncertain or partial send
+// is deliberately NOT retried, because the card may already be in the member's
+// chat and a second copy is worse than a late one.
 func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, recipientIDStr, workspaceIDStr string) bool {
 	recipientID, err := util.ParseUUID(recipientIDStr)
 	if err != nil || !recipientID.Valid {
@@ -813,11 +806,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if err != nil || !workspaceID.Valid {
 		return false
 	}
-	binding, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
-		WorkspaceID:   workspaceID,
-		MulticaUserID: recipientID,
-		ChannelType:   channelTypeWecom,
-	})
+	binding, actingAgentBot, err := o.memberBindingFor(ctx, item, workspaceID, recipientID)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			o.logger.WarnContext(ctx, "wecom outbound: lookup member binding failed",
@@ -828,7 +817,6 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if o.senders == nil {
 		return false
 	}
-	sender := o.senders.get(binding.InstallationID)
 
 	// Resolve slug for the link. Best-effort — a missing slug just falls
 	// back to the workspace UUID in the URL.
@@ -845,25 +833,107 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if content == "" {
 		return false
 	}
-	// Smart-bot inbox notifications are 1:1 pushes to the bound user. The
-	// binding row's channel_user_id is the bot-scoped T-* userid — WeCom
-	// treats that as the chatid for a single (chat_type=1) send.
+
+	// awaitHolder is actingAgentBot and nothing else: only the agent-attributed
+	// attempt has a second route behind it, so only that one may wait to hear
+	// whether nobody took the frame. A member-authored notification has no
+	// fallback at all, and the fallback below has nothing behind it, so both
+	// keep the relay's non-blocking publish -- the wait happens on the request's
+	// own goroutine, and a verdict nobody can act on is not worth holding it for.
+	delivered, provenMiss := o.pushInbox(ctx, item, binding, recipientIDStr, content, actingAgentBot)
+	if delivered {
+		return true
+	}
+	// Only the preferred-and-agent-attributed bot needs a second route: a
+	// recipient-wide binding answering false has nowhere else to go, and a
+	// retry is owed only when the agent's bot provably delivered nothing.
+	if !provenMiss || !actingAgentBot {
+		return false
+	}
+
+	// The acting agent's bot could not have delivered, so fall back to the
+	// binding the recipient-wide lookup names — the route this notification
+	// took before the agent's own bot was preferred. A miss here is reported the
+	// way the old path reported it: no bot push, and the in-app inbox still
+	// carries the notification.
+	fallback, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: recipientID,
+		ChannelType:   channelTypeWecom,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			o.logger.WarnContext(ctx, "wecom outbound: fallback member binding lookup failed",
+				"error", err, "workspace_id", workspaceIDStr, "recipient_id", recipientIDStr)
+		}
+		return false
+	}
+	if fallback.InstallationID == binding.InstallationID {
+		// The recipient-wide answer names the same bot; sending again would only
+		// repeat the miss, not route around it.
+		return false
+	}
+	o.logger.DebugContext(ctx, "wecom outbound: inbox push falls back to the recipient-wide bot",
+		"agent_installation_id", uuidStringPub(binding.InstallationID),
+		"installation_id", uuidStringPub(fallback.InstallationID))
+	delivered, _ = o.pushInbox(ctx, item, fallback, recipientIDStr, content, false)
+	return delivered
+}
+
+// pushInbox attempts one delivery of an already-rendered inbox card through one
+// binding. provenMiss is true only when the attempt PROVES the card did not
+// reach WeCom at all — no live socket for the binding anywhere in the fleet, or
+// a send that failed before a byte could leave — which is the one case another
+// binding may be tried. A partial or uncertain send answers false, because the
+// card may already be in the member's chat and a retry would duplicate it.
+// awaitHolder asks the relay to report relayNoHolder, which costs the
+// acceptance window and is only worth paying where the caller has a second
+// route to try (see tryDeliverInbox). Everything else about the attempt is the
+// same either way.
+func (o *Outbound) pushInbox(ctx context.Context, item map[string]any, binding db.ChannelUserBinding, recipientIDStr, content string, awaitHolder bool) (delivered, provenMiss bool) {
+	sender := o.senders.get(binding.InstallationID)
 	if sender == nil {
 		// No socket here. Same shape as the reply path: hand it to the replica
 		// that holds one. An inbox push is as user-visible as an answer, and
 		// leaving it local was the reason the single-replica constraint had to
 		// stay even with replies routed.
-		if o.routeFrame(relayFrame{
+		frame := relayFrame{
 			Kind:           relayKindInbox,
 			InstallationID: util.UUIDToString(binding.InstallationID),
 			ChatID:         binding.ChannelUserID,
 			ChatType:       chatTypeSingleInt,
 			Content:        content,
-		}, relayInboxEventID(itemIDOf(item), recipientIDStr)) {
+		}
+		eventID := relayInboxEventID(itemIDOf(item), recipientIDStr, util.UUIDToString(binding.InstallationID))
+		var verdict relayPublish
+		if awaitHolder {
+			verdict = o.routeFrameAwaiting(ctx, frame, eventID)
+		} else {
+			verdict = o.routeFrame(frame, eventID)
+		}
+		switch verdict {
+		case relayAccepted:
 			o.logger.DebugContext(ctx, "wecom outbound: routed an inbox push to the replica holding the socket",
 				"installation_id", uuidStringPub(binding.InstallationID))
-			return true
+			return true, false
+		case relayUncertain:
+			// The bus call failed, or the claim store could not answer. A
+			// frame that may have been accepted and may already be on its way
+			// to the member's chat must NOT be re-routed: a duplicate card is
+			// worse than a late one.
+			o.logger.WarnContext(ctx, "wecom outbound: inbox push routed but its acceptance is unknown; not re-routing",
+				"installation_id", uuidStringPub(binding.InstallationID),
+				"recipient_id", recipientIDStr)
+			return false, false
+		case relayNotWired, relayNoHolder:
+			// Proven not delivered; the shared warn and the proven-miss
+			// return below carry it out.
 		}
+		// relayNotWired (no relay attached) and relayNoHolder (the frame was
+		// published, but across the acceptance window no replica took the
+		// delivery claim, so nobody holds this bot's socket) both prove the
+		// push did not reach WeCom; the caller may offer it to the
+		// recipient-wide binding.
 		// Logged, not counted on the reply counters. Their documented unit is
 		// AGENT REPLIES, and an inbox notification recorded there would show up
 		// as a reply this adapter owed somebody and failed to deliver — the
@@ -875,23 +945,179 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 		o.logger.WarnContext(ctx, "wecom outbound: inbox push not delivered and not routable",
 			"installation_id", uuidStringPub(binding.InstallationID),
 			"recipient_id", recipientIDStr)
-		return false // supervisor down or reconnecting — no live connection
+		// No replica holds a socket for this bot, so the push provably did not
+		// reach WeCom and the caller may offer it to the recipient-wide binding.
+		return false, true
 	}
 	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
 		o.logger.WarnContext(ctx, "wecom outbound: inbox push failed",
 			"error", err, "installation_id", uuidStringPub(binding.InstallationID),
 			"recipient_id", recipientIDStr)
-		return false // send failed → no bot delivery
+		// Only a failure that proves nothing left the process may be tried on
+		// another bot; anything past the write may already be in the chat.
+		return false, provablyNotSent(err)
 	}
 	o.logger.DebugContext(ctx, "wecom outbound: inbox delivered via bot",
 		"installation_id", uuidStringPub(binding.InstallationID),
 		"recipient_id", recipientIDStr,
 		"inbox_type", item["type"])
-	return true
+	return true, false
+}
+
+// memberBindingFor resolves which of the recipient's WeCom bots carries this
+// notification, and reports whether that bot is the acting agent's own.
+//
+// The recipient-wide lookup is deliberately no longer the only answer.
+// FindChannelBindingForMember keys on the RECIPIENT and on nothing else, so in
+// a multi-bot org — one bot per agent, one person bound to several of them —
+// the member reads every agent's activity through whichever bot they bound
+// most recently, and the bot↔agent mapping they set up disappears.
+// When the notification names an AGENT as its actor, the bot that agent owns
+// is the one the recipient talks to about that agent's work, so the agent's
+// bot is tried first, through the recipient's binding ON it.
+//
+// The recipient-wide lookup answers when the agent's bot has no binding for
+// this member (and always for a member-authored notification, which names no
+// agent). tryDeliverInbox additionally re-tries the recipient-wide binding when
+// the agent's bot provably delivered nothing, so preferring the agent's bot
+// narrows WHERE a push is carried rather than WHETHER it is carried.
+func (o *Outbound) memberBindingFor(ctx context.Context, item map[string]any, workspaceID, recipientID pgtype.UUID) (db.ChannelUserBinding, bool, error) {
+	if agentID, ok := inboxActorAgent(item); ok {
+		binding, err := o.q.FindChannelBindingForMemberOnAgentInstallation(ctx, db.FindChannelBindingForMemberOnAgentInstallationParams{
+			WorkspaceID:   workspaceID,
+			MulticaUserID: recipientID,
+			ChannelType:   channelTypeWecom,
+			AgentID:       agentID,
+		})
+		switch {
+		case err == nil:
+			o.logger.DebugContext(ctx, "wecom outbound: inbox push follows the acting agent's bot",
+				"agent_id", uuidStringPub(agentID),
+				"installation_id", uuidStringPub(binding.InstallationID))
+			return binding, true, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			// A read failure must not silence a notification the fallback can
+			// still deliver: the fallback's own error is the one the caller
+			// reports and counts, and it is the same query the old path made.
+			o.logger.WarnContext(ctx, "wecom outbound: agent-bot binding lookup failed",
+				"error", err, "agent_id", uuidStringPub(agentID))
+		}
+	}
+	binding, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: recipientID,
+		ChannelType:   channelTypeWecom,
+	})
+	return binding, false, err
+}
+
+// inboxActorAgent reads the agent an inbox notification names as its actor,
+// when it names one. The payload is the map inboxItemToResponse builds, whose
+// actor fields are pointers (util.TextToPtr / util.UUIDToPtr) and nil for a
+// notification a member authored. Both spellings are accepted, the same
+// defensive shape itemIDOf uses, so a payload that was re-encoded on its way
+// here reads like a native one.
+func inboxActorAgent(item map[string]any) (pgtype.UUID, bool) {
+	if inboxStringField(item["actor_type"]) != "agent" {
+		return pgtype.UUID{}, false
+	}
+	id := inboxStringField(item["actor_id"])
+	if id == "" {
+		return pgtype.UUID{}, false
+	}
+	agentID, err := util.ParseUUID(id)
+	if err != nil || !agentID.Valid {
+		return pgtype.UUID{}, false
+	}
+	return agentID, true
+}
+
+// inboxStringField reads one payload string that may arrive plain or behind a
+// pointer — which is how the two publishers of an inbox item spell the actor
+// fields. Anything else, including a nil pointer, reads as absent.
+func inboxStringField(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case *string:
+		if s != nil {
+			return *s
+		}
+	case pgtype.Text:
+		if s.Valid {
+			return s.String
+		}
+	}
+	return ""
 }
 
 // uuidStringPub renders a pgtype.UUID for a log line without depending on
 // engine.uuidString (a different package).
 func uuidStringPub(u pgtype.UUID) string {
 	return util.UUIDToString(u)
+}
+
+// installationCheck is what one permission read established. Three outcomes,
+// because collapsing them is how the first version of this gate lost answers:
+// a lookup that failed and a row that says revoked are the same refusal for THIS
+// attempt and opposite facts about every later one.
+type installationCheck int
+
+const (
+	// installationOK — active. Write.
+	installationOK installationCheck = iota
+	// installationGone — revoked, or the row is not there. Final: nobody may
+	// write to it again, and an answer held for it is not owed to anyone.
+	installationGone
+	// installationUnreadable — the read itself failed. Nothing is established.
+	// Refuse this attempt either way; what differs is what the caller owes
+	// afterwards. An answer must NOT be reported finished — it is still the only
+	// copy and still this subscriber's to deliver. An attachment has nowhere to
+	// report to and nothing to lose by waiting: the file stays in object storage
+	// and the user can ask again, so the delivery simply stops.
+	installationUnreadable
+)
+
+// String names the outcomes for the log, so a line saying a delivery stopped
+// also says whether anything is coming back — gone is final, unreadable is this
+// read and no more. Same reason deliveryState carries one (outbound_media.go).
+func (c installationCheck) String() string {
+	switch c {
+	case installationOK:
+		return "ok"
+	case installationGone:
+		return "gone"
+	case installationUnreadable:
+		return "unreadable"
+	default:
+		return "invalid"
+	}
+}
+
+// mayStillWrite reads the installation's permission for one attempt.
+//
+// The three-way split follows the convention the rest of this file already
+// keeps: pgx.ErrNoRows is a fact, every other error is a failed question. The
+// gate that preceded this returned a bool and answered "no" to both, so a
+// database blip on one attempt confirmed a one-shot chat:done as handled and
+// threw the answer away.
+func (o *Outbound) mayStillWrite(ctx context.Context, id pgtype.UUID) installationCheck {
+	if !id.Valid {
+		return installationGone
+	}
+	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          id,
+		ChannelType: channelTypeWecom,
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, pgx.ErrNoRows):
+		return installationGone
+	default:
+		return installationUnreadable
+	}
+	if inst.Status != string(InstallationActive) {
+		return installationGone
+	}
+	return installationOK
 }

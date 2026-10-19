@@ -86,6 +86,8 @@ interface DynamicBlockProps {
   error?: DynamicBlockError | null;
   /** Shows the fullscreen button when set. */
   onFullscreen?: () => void;
+  /** Reveals the mounted preview while its surface is enlarged. */
+  fullscreen?: boolean;
   /** Focus returns here when the kind's fullscreen surface closes. */
   fullscreenButtonRef?: Ref<HTMLButtonElement>;
   /**
@@ -102,6 +104,7 @@ export function DynamicBlock({
   source,
   error,
   onFullscreen,
+  fullscreen = false,
   fullscreenButtonRef,
   preview,
   className,
@@ -203,15 +206,20 @@ export function DynamicBlock({
           </Button>
         </div>
       </div>
-      <TabsContent value="preview" keepMounted>
-        {error && (
+      <TabsContent
+        value="preview"
+        keepMounted
+        hidden={!fullscreen && view !== "preview"}
+        inert={!fullscreen && view !== "preview"}
+      >
+        {error && view === "preview" && (
           <DynamicBlockErrorPanel
             kind={kind}
             error={error}
             onViewSource={() => setView("source")}
           />
         )}
-        <div hidden={!!error}>
+        <div hidden={!!error && !fullscreen}>
           <CollapsibleBody>{preview({ active: view === "preview" && !error })}</CollapsibleBody>
         </div>
       </TabsContent>

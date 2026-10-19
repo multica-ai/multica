@@ -471,58 +471,16 @@ type SubscriptionFacts struct {
 	OriginRootSource Source
 }
 
-// DelegatedSubscriber resolves the human who should be auto-subscribed to an
-// agent-created issue, and the reason label to record.
+// DelegatedSubscriber resolves a directly requesting human for subscription.
+// Use the originator copied through delegation, but require proof that the chain
+// began with SourceDirectHuman. A schedule/webhook's authorization principal is
+// not a request to receive notifications. Unproven roots, degraded attribution,
+// and autopilot-origin issues receive no inferred subscription.
 //
-// It deliberately mirrors ClassifyDirect's origin branch rather than inventing
-// a second notion of "whose behalf is this" — the whole defect this fixes was
-// attribution and notification disagreeing about that (MUL-5483). The waterfall
-// is narrower than ClassifyDirect's on purpose:
-//
-//   - OriginOriginator valid AND the chain root is a DIRECT human act →
-//     subscribe. Because attribution COPIES the accountable human across every
-//     agent hop rather than chaining it (see SourceDelegation), the originator
-//     resolves the ORIGINAL human at any depth, and the delivery tier — not a
-//     depth cutoff — is what bounds the noise a deep chain makes. The root check
-//     is what keeps "has a human" from being read as "a human asked", see below.
-//
-//     WHO the human is therefore has no depth limit; proving the chain BEGAN
-//     with them does: the caller reads the root by walking the lineage, and that
-//     walk stops after 32 hops (GetDelegatedSubscriptionFacts). Past that the
-//     root is reported as unproven and nobody is subscribed, which is a real
-//     truncation and not a formality — accepted deliberately (MUL-7051, Bohan's
-//     call) because no observed chain approaches it. Raising it is a one-number
-//     change; moving the root onto the run at enqueue time would remove the
-//     limit outright.
-//
-//   - quick_create → reason 'creator', agent_create → reason 'delegated'. The
-//     quick-create human asked for THAT issue by name, so it is direct intent and
-//     keeps full notifications; an agent_create child is the agent's own decision
-//     made under a broader mandate, so it takes the reduced delegated tier.
-//
-//   - Anything else → no subscription. Notably origin_type='autopilot' is
-//     excluded: an autopilot already has an explicitly configured
-//     autopilot_subscriber template, and that list — not the member who happened
-//     to arm the trigger — is the intended audience for its issues. Degraded
-//     attribution (owner_fallback / unattributed) is excluded for the same
-//     reason it is degraded: we do not fabricate a human to notify.
-//
-// WHY the root source is checked at all (MUL-7051). This rule was written when
-// SourceDirectHuman was the only root that left an originator behind, so "the
-// origin run carries a human" and "a human asked for this work" were the same
-// statement and only the first had to be tested. MUL-6951 separated them: an
-// armed schedule/webhook trigger now runs with its created_by principal's
-// authorization (SourceTriggerOwner), and that human is copied down the whole
-// chain exactly like a requester would be. The untested half of the old
-// equivalence is what broke — every issue an autopilot's agent filed started
-// subscribing whoever armed the trigger, which is the case the
-// origin_type='autopilot' exclusion above already says must not happen, arriving
-// one hop lower.
-//
-// So the condition is stated as what it means — the chain BEGAN with a member
-// acting — and it is a whitelist. A future root that resolves a human some other
-// way stays silent here until someone decides it should subscribe people, rather
-// than turning this rule on for a population nobody chose.
+// Quick-create keeps the creator tier; agent-created work uses the reduced
+// delegated tier. Lineage lookup is bounded to 32 hops; exceeding it leaves the
+// root unproven and subscribes nobody. New root-source kinds require an explicit
+// decision before they can opt people into notifications.
 func DelegatedSubscriber(f SubscriptionFacts) (pgtype.UUID, string, bool) {
 	if f.CreatorType != "agent" || !f.OriginOriginator.Valid {
 		return pgtype.UUID{}, "", false

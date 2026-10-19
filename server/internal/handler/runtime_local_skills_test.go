@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,6 +232,45 @@ func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
 	}
 	if got.Error == "" {
 		t.Fatal("expected timeout error")
+	}
+}
+
+func TestFailLocalSkillImportInternalRedactsCause(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryLocalSkillImportStore()
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-xyz",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	h := Handler{LocalSkillImportStore: store}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/daemon/local-skills/import/result", nil)
+	const leak = "postgres://secret@internal.example/skills"
+	h.failLocalSkillImportInternal(w, r, req.ID, "failed to create skill", errors.New(leak))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if strings.Contains(w.Body.String(), leak) {
+		t.Fatalf("daemon response leaked internal error: %s", w.Body.String())
+	}
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected stored import result")
+	}
+	if got.Error != "failed to create skill" {
+		t.Fatalf("stored error = %q, want stable public message", got.Error)
+	}
+	if strings.Contains(got.Error, leak) {
+		t.Fatalf("stored error leaked internal cause: %q", got.Error)
 	}
 }
 

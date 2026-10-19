@@ -230,47 +230,14 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 	return os.WriteFile(filepath.Join(envRoot, sidecarManifestFile), data, 0o644)
 }
 
-// CleanupSidecars rolls the user's workdir back to its pre-Prepare
-// state by removing every file the manifest at envRoot records and
-// then rmdir-ing every directory it records, deepest first.
+// CleanupSidecars removes manifest-owned files, then directories deepest first.
+// Missing paths are already clean; nonempty directories belong to the user and
+// remain. Surface real I/O and parse errors while continuing other cleanup.
+// Determine nonempty directories by reading them after a failed rmdir rather
+// than treating every removal failure as nonempty.
 //
-// Two failure modes the function deliberately swallows:
-//
-//   - ENOENT on a recorded path. The file or directory was already
-//     gone — either the user removed it during the task, or a prior
-//     Cleanup run on the same envRoot already cleared it. Either
-//     way there is nothing left for this call to do.
-//   - Non-empty directory on rmdir. The user has populated a
-//     directory we created (added a sibling file under .claude/
-//     skills/, for example) and rmdir-ing would destroy that
-//     content. We detect this by re-reading the directory after
-//     rmdir fails: a non-empty listing means "user owns this — stop
-//     here." This is the must-fix from PR #3444 review — the
-//     previous version swallowed ANY non-ENOENT rmdir error as
-//     "non-empty," which silently dropped real I/O failures
-//     (EACCES, EPERM, EBUSY) and made cleanup look successful when
-//     it wasn't.
-//
-// All other errors — ReadFile failure, JSON parse failure, real
-// EACCES/EPERM/EIO during file deletion, real EACCES/EPERM/EIO
-// during dir removal — are captured into firstErr and surfaced to
-// the caller. Cleanup still continues for the remaining manifest
-// entries so a single bad path does not strand the rest of the
-// rollback.
-//
-// The function is a no-op when:
-//   - envRoot is empty (no daemon scratch for this task),
-//   - the manifest file is missing (older build, or Prepare did not run).
-//
-// Pair this with CleanupRuntimeConfig on the local_directory cleanup
-// path: that function handles the runtime brief inside CLAUDE.md /
-// AGENTS.md, this one handles the sidecar tree
-// (.agent_context/, .multica/, .claude/skills/, .github/skills/,
-// .opencode/skills/, .codeartsdoer/skills/, skills/, .pi/skills/,
-// .omp/mcp.json, .omp/skills/, .cursor/skills/,
-// .kimi/skills/, .reasonix/skills/, .kiro/skills/, .agents/skills/, fallback
-// .agent_context/skills/). The two together restore the workdir to
-// byte-exact pre-task state.
+// An empty envRoot or missing manifest is a no-op. Pair with CleanupRuntimeConfig,
+// which restores the runtime brief; this function handles the sidecar tree.
 func CleanupSidecars(envRoot string) error {
 	if envRoot == "" {
 		return nil

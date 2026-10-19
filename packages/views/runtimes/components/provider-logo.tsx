@@ -332,6 +332,16 @@ function McodeLogo({ className }: { className: string }) {
   );
 }
 
+// Muse Code SDK docs favicon: https://meta-models.github.io/muse-code-sdk/next/favicon.svg
+function MuseLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 64 64" className={className}>
+      <rect width="64" height="64" rx="12" fill="#5b45e0" />
+      <path d="M14 46V18h8l10 15 10-15h8v28h-8V31L32 46 22 31v15z" fill="white" />
+    </svg>
+  );
+}
+
 // DeepSeek Harness — official mark copied from deepseek-ai/deepseek-harness
 // (apps/web/public/favicon.svg, MIT — Copyright 2026 DeepSeek). Upstream picks
 // its colour with a prefers-color-scheme block; inlining the path lets
@@ -429,6 +439,8 @@ export function ProviderLogo({
       return <QwenPawLogo className={className} />;
     case "mcode":
       return <McodeLogo className={className} />;
+    case "muse":
+      return <MuseLogo className={className} />;
     case "dsh":
       return <DshLogo className={className} />;
     case "dim":

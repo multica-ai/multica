@@ -6,6 +6,7 @@ export type { StoredAgentDraft };
 export function toStoredAgentDraft(
   draft: AgentDraft,
   appliedMessageId: string | null,
+  dismissedMessageId: string | null = null,
 ): StoredAgentDraft {
   return {
     name: draft.name,
@@ -21,6 +22,7 @@ export function toStoredAgentDraft(
     member_ids: [...draft.memberIds],
     team_ids: [...draft.teamIds],
     applied_message_id: appliedMessageId,
+    ...(dismissedMessageId ? { dismissed_message_id: dismissedMessageId } : {}),
   };
 }
 

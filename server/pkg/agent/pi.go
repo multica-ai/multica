@@ -416,6 +416,24 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 	}
 
+	extensionPath, err := b.preparePiMcpExtension(opts.McpConfig)
+	if err != nil {
+		releasePiSessionFileLock(sessionLock)
+		return nil, fmt.Errorf("%s mcp extension: %w", label, err)
+	}
+	// Execute owns the temp extension until the process is running. The
+	// reader goroutine takes ownership after start so a launch failure still
+	// deletes the directory, and a running process can read it until exit.
+	releaseExtension := func() { removePiMcpExtension(extensionPath) }
+	defer func() {
+		if releaseExtension != nil {
+			releaseExtension()
+		}
+	}()
+	if extensionPath != "" {
+		opts.piMcpExtensionPath = extensionPath
+	}
+
 	runCtx, cancel := runContext(ctx, timeout)
 	processCtx, cancelProcess := context.WithCancel(runCtx)
 
@@ -528,7 +546,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		closePiReadPipe(stderrRead)
 	}()
 
+	releaseExtension = nil
 	go func() {
+		defer removePiMcpExtension(extensionPath)
 		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancelProcess()
 		defer cancel()
@@ -1112,7 +1132,139 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	// inlining the same runtime brief would duplicate it on every turn.
 	// Verified against Pi 0.67.2 (MUL-5392).
 	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
+	// The extension is explicit, so Pi loads it without trusting the project.
+	// It stays after custom args so the managed path cannot be mistaken for the
+	// value of an extension-defined flag. A user-provided --approve remains
+	// independent and continues to opt into all project-local Pi resources.
+	if opts.piMcpExtensionPath != "" {
+		args = append(args, "--extension", opts.piMcpExtensionPath)
+	}
 	return args
+}
+
+const (
+	piMcpExtensionDirPrefix = "multica-pi-mcp-"
+	// Pi 0.99.0 introduced the built-in MCP extension and the
+	// registerMcpServer API used by the task-local adapter below. This is a
+	// capability floor, not a global Pi floor: older Pi installations keep
+	// working for agents without managed MCP configuration.
+	piMcpMinVersion = "0.99.0"
+)
+
+// preparePiMcpExtension writes Pi's own temporary extension. omp shares this
+// backend but keeps its project mcp.json, so it never gets this file.
+func (b *piBackend) preparePiMcpExtension(raw json.RawMessage) (string, error) {
+	if b.providerLabel == "omp" || !hasManagedMcpConfig(raw) {
+		return "", nil
+	}
+	servers, err := piMcpExtensionServers(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(servers) == 0 {
+		return "", nil
+	}
+	if err := b.validatePiMcpVersion(); err != nil {
+		return "", err
+	}
+	return writePiMcpExtension(raw)
+}
+
+func (b *piBackend) validatePiMcpVersion() error {
+	// Custom runtime profiles only promise Pi's JSON protocol, not the vendor's
+	// version scheme. Their explicit extension load remains the capability
+	// probe; applying Pi's vendor floor would reject compatible wrappers.
+	if !b.cfg.BuiltinRuntime {
+		return nil
+	}
+	detected, err := parseSemver(b.cfg.CLIVersion)
+	if err != nil {
+		return fmt.Errorf("pi MCP requires a newer version: %s or later; could not verify detected version %q; upgrade Pi or remove the MCP configuration", piMcpMinVersion, b.cfg.CLIVersion)
+	}
+	minimum, _ := parseSemver(piMcpMinVersion)
+	if detected.lessThan(minimum) {
+		return fmt.Errorf("pi MCP requires a newer version: %s or later (detected %s); upgrade Pi or remove the MCP configuration", piMcpMinVersion, b.cfg.CLIVersion)
+	}
+	return nil
+}
+
+// writePiMcpExtension writes mcp-extension.mjs under a multica-pi-mcp-*
+// directory. An empty server list returns an empty path and leaves no
+// directory behind. The caller deletes the directory with
+// removePiMcpExtension. Pi validates each server; the generated extension
+// isolates those errors so one malformed entry cannot suppress valid servers.
+func writePiMcpExtension(raw json.RawMessage) (string, error) {
+	if !hasManagedMcpConfig(raw) {
+		return "", nil
+	}
+	servers, err := piMcpExtensionServers(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(servers) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(servers)
+	if err != nil {
+		return "", err
+	}
+	literal, err := json.Marshal(string(encoded))
+	if err != nil {
+		return "", err
+	}
+	script := "const servers = JSON.parse(" + string(literal) + ");\n" +
+		"export default function (pi) {\n" +
+		"  if (typeof pi.registerMcpServer !== \"function\") {\n" +
+		"    throw new Error(\"Multica MCP delivery requires Pi " + piMcpMinVersion + " or newer\");\n" +
+		"  }\n" +
+		"  for (const [name, config] of Object.entries(servers)) {\n" +
+		"    try {\n" +
+		"      pi.registerMcpServer(name, config);\n" +
+		"    } catch (error) {\n" +
+		"      const reason = error instanceof Error ? error.message : String(error);\n" +
+		"      console.error(\"[multica] could not register MCP server \" + JSON.stringify(name) + \": \" + reason);\n" +
+		"    }\n" +
+		"  }\n" +
+		"}\n"
+	dir, err := os.MkdirTemp("", piMcpExtensionDirPrefix)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-extension.mjs")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		removePiMcpExtension(path)
+		return "", err
+	}
+	return path, nil
+}
+
+// removePiMcpExtension deletes the temporary extension directory. It refuses
+// any path whose parent is not a multica-pi-mcp-* directory.
+func removePiMcpExtension(path string) {
+	if path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if !strings.HasPrefix(filepath.Base(dir), piMcpExtensionDirPrefix) {
+		return
+	}
+	_ = os.RemoveAll(dir)
+}
+
+func piMcpExtensionServers(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse mcp_config: %w", err)
+	}
+	rawServers, ok := doc["mcpServers"]
+	if !ok || bytes.Equal(bytes.TrimSpace(rawServers), []byte("null")) {
+		return nil, nil
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(rawServers, &servers); err != nil {
+		return nil, fmt.Errorf("parse mcp_config mcpServers: %w", err)
+	}
+	return servers, nil
 }
 
 // filterPiCustomArgs removes @file and positional message inputs from

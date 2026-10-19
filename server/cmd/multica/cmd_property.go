@@ -459,9 +459,7 @@ func makePropertyArchiveRun(archive bool) func(*cobra.Command, []string) error {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // issue property {list|set|unset}
-// ---------------------------------------------------------------------------
 
 // memberDirectory serves every member lookup in one command from a single
 // request. An actor --property filter, an actor --value and
@@ -1034,9 +1032,7 @@ func runIssuePropertyUnset(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // issue list --property / --sort property:<ref>
-// ---------------------------------------------------------------------------
 
 // propertyNoValueSentinel is the server's reserved filter value meaning "the
 // property is not set" (see parsePropertiesFilterParam in

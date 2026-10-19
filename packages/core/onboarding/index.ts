@@ -26,10 +26,6 @@ export {
   type MikaOnboardingLanguage,
 } from "./use-bootstrap-mika";
 export {
-  useWelcomeStore,
-  type WelcomeSignal,
-} from "./welcome-store";
-export {
   MIKA_SYSTEM_KEY,
   isMikaAgent,
   memberNeedsMikaSetup,

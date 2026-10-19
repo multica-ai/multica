@@ -156,10 +156,8 @@ function columnTrackVars(
 export type SortField = SkillSortField;
 export { rowMatchesFilters, type SkillRow } from "./skill-list-filter";
 
-// ---------------------------------------------------------------------------
 // Page header bar — uses shared PageHeader so the mobile sidebar trigger and
 // h-12 chrome stay consistent with every other dashboard list page.
-// ---------------------------------------------------------------------------
 
 function PageHeaderBar({
   totalCount,
@@ -190,9 +188,7 @@ function PageHeaderBar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 // Hover-revealed multi-select checkbox. Same pattern as SkillPickerList:
 // the shadcn Checkbox is presentational only (`pointer-events-none`, so the
@@ -397,9 +393,7 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Empty state
-// ---------------------------------------------------------------------------
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT("skills");
@@ -418,9 +412,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // List
-// ---------------------------------------------------------------------------
 
 function SkillListHeader({
   sortField,
@@ -573,9 +565,7 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export default function SkillsPage() {
   const { t } = useT("skills");

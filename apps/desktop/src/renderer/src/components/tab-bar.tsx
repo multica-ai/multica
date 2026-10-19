@@ -47,33 +47,11 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
-// Chrome-style merged tab: the active tab shares the content surface's fill and
-// flares into it through concave bottom corners. Each flare is a small square
-// whose radial gradient carves a quarter-circle notch (transparent, so the
-// strip behind the flare shows through), strokes a 1px arc that continues the
-// tab's side border into the content card's top ring, and fills the rest with
-// the surface colour. The 0.4px spread on either side of the --surface-border
-// pair anti-aliases that arc.
-//
-// That background-color is load-bearing, not decoration: the flare's bottom row
-// overlaps the content card's top ring, and in dark mode --surface-border is
-// translucent (oklch(1 0 0 / 10%)), so without an opaque layer beneath it the
-// arc would composite over the ring instead of replacing it and the two keylines
-// would stack into a markedly lighter line right where the straight ring meets
-// the curve. It therefore has to be the strip's real backdrop — the sidebar
-// wrapper's fill, which is conditional and not this file's to re-derive.
-// SIDEBAR_WRAPPER_FILL_CLASS reads it off the wrapper itself.
-//
-// The backing may only reach as far as it is needed, though. A flare hangs 9px
-// past the tab's edge, over the neighbouring tab, so an opaque square there
-// prints over whatever that neighbour draws: its hover pill lost the whole
-// corner it shares with the flare and read as a dark bite (MUL-6160). Masking
-// the notch away removes the backing exactly where the gradient is transparent
-// anyway, so the notch is a hole rather than a painted-on copy of the strip and
-// shows whatever is actually behind it — bare strip usually, the neighbour's
-// pill where it reaches in. The mask is opaque again by the radius where the
-// arc's anti-aliasing starts, so every pixel the arc and the canvas fill cover
-// keeps its backing.
+// Concave tab flares need an opaque backing beneath translucent border arcs
+// to avoid compositing a second keyline over the content ring. Read that backdrop
+// from SIDEBAR_WRAPPER_FILL_CLASS rather than duplicating the wrapper's fill rule.
+// Mask the transparent notch so the backing cannot paint over a neighboring hover
+// pill, while retaining backing beneath the arc's antialiasing.
 const TAB_FLARE_RADIUS = 10;
 const tabFlareGradient = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;

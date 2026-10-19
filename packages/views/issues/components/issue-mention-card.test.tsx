@@ -9,6 +9,10 @@ import {
   CurrentIssueRenderContextProvider,
   type CurrentIssueRenderContextValue,
 } from "../current-issue-render-context";
+import {
+  IssuePeekActionsContext,
+  type IssuePeekActions,
+} from "../surface/peek-context";
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -48,24 +52,33 @@ function makeAdapter(
   };
 }
 
+function makePeek(): IssuePeekActions {
+  return { open: vi.fn(), toggle: vi.fn(), close: vi.fn(), publishColumns: vi.fn() };
+}
+
 function renderCard(
   adapter: NavigationAdapter,
   context?: CurrentIssueRenderContextValue,
   issueId = "issue-1",
+  peek?: IssuePeekActions,
 ) {
-  const card = (
+  let card = (
     <IssueMentionCard issueId={issueId} fallbackLabel="MUL-7" />
   );
+  if (context) {
+    card = (
+      <CurrentIssueRenderContextProvider value={context}>
+        {card}
+      </CurrentIssueRenderContextProvider>
+    );
+  }
+  if (peek) {
+    card = (
+      <IssuePeekActionsContext.Provider value={peek}>{card}</IssuePeekActionsContext.Provider>
+    );
+  }
   return renderWithI18n(
-    <NavigationProvider value={adapter}>
-      {context ? (
-        <CurrentIssueRenderContextProvider value={context}>
-          {card}
-        </CurrentIssueRenderContextProvider>
-      ) : (
-        card
-      )}
-    </NavigationProvider>,
+    <NavigationProvider value={adapter}>{card}</NavigationProvider>,
   );
 }
 
@@ -151,5 +164,62 @@ describe("IssueMentionCard", () => {
     renderCard(makeAdapter(), { id: "issue-2", identifier: "MUL-7" });
 
     expect(screen.getByTestId("issue-chip")).toHaveAttribute("data-current", "false");
+  });
+
+  describe("inside a peek host", () => {
+    it("shift-click opens the mentioned issue in the side peek instead of navigating", () => {
+      const push = vi.fn();
+      const openInNewTab = vi.fn();
+      const peek = makePeek();
+      renderCard(makeAdapter({ push, openInNewTab }), undefined, "issue-1", peek);
+
+      const defaultNotPrevented = fireEvent.click(screen.getByTestId("issue-chip"), {
+        shiftKey: true,
+      });
+      expect(defaultNotPrevented).toBe(false);
+      expect(peek.toggle).toHaveBeenCalledWith("issue-1");
+      expect(push).not.toHaveBeenCalled();
+      expect(openInNewTab).not.toHaveBeenCalled();
+    });
+
+    it("keeps shift-mousedown from extending the text selection", () => {
+      renderCard(makeAdapter(), undefined, "issue-1", makePeek());
+
+      expect(
+        fireEvent.mouseDown(screen.getByTestId("issue-chip"), { shiftKey: true }),
+      ).toBe(false);
+      expect(fireEvent.mouseDown(screen.getByTestId("issue-chip"))).toBe(true);
+    });
+
+    it("plain click still navigates to the issue page", () => {
+      const push = vi.fn();
+      const peek = makePeek();
+      renderCard(makeAdapter({ push }), undefined, "issue-1", peek);
+
+      fireEvent.click(screen.getByTestId("issue-chip"));
+      expect(push).toHaveBeenCalledWith("/acme/issues/issue-1");
+      expect(peek.toggle).not.toHaveBeenCalled();
+    });
+
+    it("cmd+shift-click still opens a tab, not the peek", () => {
+      const openInNewTab = vi.fn();
+      const peek = makePeek();
+      renderCard(makeAdapter({ openInNewTab }), undefined, "issue-1", peek);
+
+      fireEvent.click(screen.getByTestId("issue-chip"), { shiftKey: true, metaKey: true });
+      expect(openInNewTab).toHaveBeenCalled();
+      expect(peek.toggle).not.toHaveBeenCalled();
+    });
+  });
+
+  it("shift-click outside a peek host keeps the browser's own handling (web)", () => {
+    const push = vi.fn();
+    renderCard(makeAdapter({ push }));
+
+    const defaultNotPrevented = fireEvent.click(screen.getByTestId("issue-chip"), {
+      shiftKey: true,
+    });
+    expect(defaultNotPrevented).toBe(true);
+    expect(push).not.toHaveBeenCalled();
   });
 });

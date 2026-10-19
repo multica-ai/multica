@@ -70,7 +70,22 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(execenv.BuildOnBehalfOfBlock(task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
+	b.WriteString(buildProjectWorkflowBlock(task))
 	return b.String()
+}
+
+// buildProjectWorkflowBlock carries the issue's project workflow and current
+// step (MUL-7420). It varies by project and by step, so it lives here and not
+// in the cached brief (MUL-5377).
+func buildProjectWorkflowBlock(task Task) string {
+	if task.ProjectWorkflow == nil {
+		return ""
+	}
+	brief := strings.TrimSpace(task.ProjectWorkflow.Brief)
+	if brief == "" {
+		return ""
+	}
+	return "[Project workflow]\n" + brief + "\n\n"
 }
 
 // buildJoinedWakeupsBlock carries wakeups that fired while this run was
@@ -245,7 +260,10 @@ func buildPromptBody(task Task, provider string) string {
 	// per-turn prompt rather than the cached runtime brief (MUL-5377).
 	if task.HandoffNote != "" {
 		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
-		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
+		for _, line := range strings.Split(strings.TrimSpace(task.HandoffNote), "\n") {
+			fmt.Fprintf(&b, "> %s\n", line)
+		}
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	// Workflow step 2 owns the catch-up rule for every issue turn; this line

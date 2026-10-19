@@ -121,7 +121,7 @@ export function createKoDict(
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -197,7 +197,7 @@ export function createKoDict(
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -278,6 +278,69 @@ export function createKoDict(
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.6.3",
+          date: "2026-10-16",
+          title: "실행별 비용 상세, 더 짧아진 온보딩, 떠난 멤버의 접근 차단, 더 안정적인 실행",
+          changes: [],
+          features: [
+            "실행 로그에서 실행마다 비용 막대와 함께 토큰, 소요 시간, 모델을 볼 수 있습니다.",
+            "실행 상세에서 비용, 토큰, 소요 시간별로 실행을 비교하고 누적 보기로 바꿀 수 있습니다.",
+            "실행을 펼치면 토큰과 비용 내역을 볼 수 있습니다.",
+          ],
+          improvements: [
+            "온보딩에서 런타임 설정을 건너뛰면 설치 안내 Issue가 바로 열립니다.",
+          ],
+          fixes: [
+            "워크스페이스를 떠나거나 제외된 멤버는 알림과 실시간 업데이트를 더 이상 받지 않습니다.",
+            "에이전트 빌더의 초안 형식이 조금 어긋나도 설정에 채워집니다.",
+            "에이전트 빌더의 재시도 안내는 닫거나 직접 수정하면 다시 뜨지 않습니다.",
+            "받아 간 뒤 전달되지 못한 태스크가 대기열로 돌아가 멈춰 있지 않습니다.",
+            "로컬 폴더에서 이어갈 때 커밋된 변경을 초안으로 다시 적용하지 않고, 다른 초안도 남깁니다.",
+            "캐시 정리 시 저장소가 추적하는 .next 같은 폴더나 그 안의 Git 저장소를 지우지 않습니다.",
+            "Claude Sonnet 5.5와 Haiku 5.5 실행도 예상 비용이 표시됩니다.",
+            "아랍어, 히브리어처럼 오른쪽에서 왼쪽으로 쓰는 글에 영어가 섞여도 올바른 순서로 읽힙니다.",
+          ],
+        },
+        {
+          version: "0.6.2",
+          date: "2026-10-13",
+          title: "텍스트·링크 목록 속성, Cmd+K 워크스페이스 전환, 원클릭 대화 스타터, 더 안정적인 실행",
+          changes: [],
+          features: [
+            "사용자 지정 속성에 텍스트나 링크 목록을 저장하고, 값으로 정확히 필터링할 수 있습니다.",
+            "Cmd/Ctrl+K로 다른 워크스페이스로 전환할 수 있습니다.",
+            "데스크톱에서 워크스페이스를 바꾸면 그곳에서 마지막으로 연 탭으로 돌아갑니다.",
+            "빈 채팅에서 대화 스타터를 누르면 바로 전송되고, 초안은 덮어쓰지 않습니다.",
+            "명령줄에서 로컬 데몬의 로그인 시 자동 실행을 켤 수 있습니다. 기본값은 꺼짐입니다.",
+          ],
+          improvements: [
+            "Issue 목록의 첫 페이지가 더 빨리 열립니다.",
+            "데스크톱의 내비게이션과 탭 바가 가지런히 정렬됩니다.",
+          ],
+          fixes: [
+            "Codex의 긴 스레드가 로컬 폴더를 넘나들며 이어지고, 속도 제한에도 멈추지 않습니다.",
+            "ChatGPT.app 안의 Codex CLI도 감지됩니다.",
+            "Pi 태스크에서 설정한 MCP 서버를 쓸 수 있습니다.",
+            "Pi와 Kimi 실행이 실패하면 조용히 끝나지 않고 실패로 표시됩니다.",
+            "Antigravity는 마지막에 연결이 끊겨도 답변을 남깁니다.",
+            "CodeBuddy 시작 오류가 진행 중인 실행을 멈추지 않습니다.",
+            "Oh My Pi는 새 세션이 필요할 때 이전 세션을 잇지 않고 새로 시작합니다.",
+            "Windows 태스크가 시스템 임시 폴더를 정상적으로 씁니다.",
+            "컴퓨터가 절전에서 깨어난 뒤에도 태스크가 응답 없음으로 끊기지 않습니다.",
+            "상태 확인 포트가 사용 중이어도 로컬 데몬이 복구됩니다.",
+            "Hermes가 로컬 폴더를 넘나들며 이전 세션을 이어갑니다.",
+            "자주 실행되는 Autopilot이 멈추지 않고, 실행도 Autopilot 연결을 유지합니다.",
+            "PR 깨우기가 변경을 놓치지 않고, 복구 가능한 문제는 이유를 알려 줍니다.",
+            "태스크가 끝나면 Lark의 '입력 중' 반응이 지워집니다.",
+            "WeCom Issue 알림이 실제로 작업한 에이전트의 봇에서 옵니다.",
+            "숫자가 들어간 Issue 접두사로도 검색됩니다.",
+            "프로젝트를 동시에 편집해도 다른 사람이 바꾼 항목을 덮어쓰지 않습니다.",
+            "채팅이 불러오는 중에 보낸 후속 메시지가 사라지지 않습니다.",
+            "일반 첨부 파일 다운로드 링크가 동작하고, 실행 상세의 텍스트 단계도 바르게 표시됩니다.",
+            "서버 오류 시 내부 오류 내용이 더 이상 노출되지 않습니다.",
+          ],
+        },
         {
           version: "0.6.1",
           date: "2026-10-01",

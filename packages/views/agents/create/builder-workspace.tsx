@@ -25,6 +25,7 @@ import {
   mergeBuilderDraft,
   parseBuilderDraft,
   stripBuilderDraft,
+  type AgentDraft,
 } from "@multica/core/agents";
 import {
   runtimeDisplayLabel,
@@ -181,32 +182,58 @@ export function BuilderWorkspace({
   // Realtime chat updates can mutate the cached messages array in place. Use
   // the latest structured message's scalar identity/content as effect inputs
   // so a draft is still applied when the array reference itself is unchanged.
+  // These are durable replies from chat:done/history, not streaming chunks.
+  // Wait until the active turn settles before recovering an unclosed block.
+  const completed = !builder.pending && !builder.messagesLoading;
+  const latestMessage = builder.messages.at(-1);
+  const {
+    restored,
+    appliedMessageId,
+    markApplied,
+    dismissedMessageId,
+    markDismissed,
+  } = draftSync;
+  const draftReplyInvalid =
+    restored &&
+    completed &&
+    latestMessage?.role === "assistant" &&
+    latestMessage.id !== dismissedMessageId &&
+    !latestMessage.failure_reason &&
+    latestMessage.message_kind !== "no_response" &&
+    latestMessage.content.includes("<agent_draft>") &&
+    !parseBuilderDraft(latestMessage.content, { completed });
   const latestDraftMessage = [...builder.messages]
     .reverse()
     .find(
       (message) =>
-        message.role === "assistant" && parseBuilderDraft(message.content),
+        message.role === "assistant" &&
+        !message.failure_reason &&
+        parseBuilderDraft(message.content, { completed }),
     );
   const latestDraftMessageId = latestDraftMessage?.id;
   const latestDraftMessageContent = latestDraftMessage?.content;
 
-  const { restored, markApplied } = draftSync;
-  const appliedRef = useRef<string | null>(null);
-  appliedRef.current = draftSync.appliedMessageId;
+  const acknowledgeInvalidDraft = () => {
+    if (draftReplyInvalid && latestMessage) markDismissed(latestMessage.id);
+  };
+  const handleDraftChange = (next: AgentDraft) => {
+    acknowledgeInvalidDraft();
+    setDraft(next);
+  };
 
   useEffect(() => {
     // Gated on the restore: merging a reply into the form before the stored
     // configuration lands would be overwritten a tick later, and the merge
     // would have been computed against an empty draft.
-    if (!restored) return;
+    if (!restored || !completed) return;
     if (
       !latestDraftMessageId ||
       !latestDraftMessageContent ||
-      latestDraftMessageId === appliedRef.current
+      latestDraftMessageId === appliedMessageId
     ) {
       return;
     }
-    const payload = parseBuilderDraft(latestDraftMessageContent);
+    const payload = parseBuilderDraft(latestDraftMessageContent, { completed });
     if (!payload) return;
     markApplied(latestDraftMessageId);
     setDraft((current) =>
@@ -221,6 +248,8 @@ export function BuilderWorkspace({
   }, [
     latestDraftMessageContent,
     latestDraftMessageId,
+    appliedMessageId,
+    completed,
     markApplied,
     memberIdSet,
     restored,
@@ -258,6 +287,7 @@ export function BuilderWorkspace({
     if (!runtimeId || runtimeId === draft.runtimeId) return;
     const bound = await builder.switchRuntime(runtimeId);
     if (!bound) return;
+    acknowledgeInvalidDraft();
     // Model ids are per-runtime; clear it — with the per-model thinking /
     // speed overrides — so the new runtime resolves its own defaults instead
     // of keeping values it may not serve.
@@ -312,7 +342,17 @@ export function BuilderWorkspace({
             onStop={() => void builder.stop()}
             restoreDraftRequest={builder.restoreDraftRequest}
             onRestoreDraftApplied={builder.handleRestoreDraftApplied}
-            error={builder.error}
+            error={
+              builder.error ||
+              (draftReplyInvalid
+                ? t(($) => $.creation_studio.builder.draft_parse_failed)
+                : null)
+            }
+            onDismissError={
+              !builder.error && draftReplyInvalid
+                ? acknowledgeInvalidDraft
+                : undefined
+            }
           />
         </ResizablePanel>
         <ResizableHandle />
@@ -338,7 +378,8 @@ export function BuilderWorkspace({
                 <AgentConfigurationPanel
                   compact
                   draft={draft}
-                  onChange={setDraft}
+                  onChange={handleDraftChange}
+                  onAutomaticChange={setDraft}
                   runtimes={form.runtimes}
                   runtimesLoading={form.runtimesLoading}
                   members={form.members}
@@ -346,6 +387,7 @@ export function BuilderWorkspace({
                   nameError={submit.nameError}
                   onNameChange={(name) => {
                     submit.clearNameError();
+                    acknowledgeInvalidDraft();
                     setDraft((current) => ({ ...current, name }));
                   }}
                   onRuntimeSelect={(runtimeId) => {

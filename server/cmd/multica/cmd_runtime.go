@@ -100,9 +100,7 @@ func init() {
 	runtimeDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Runtime commands
-// ---------------------------------------------------------------------------
 
 func runRuntimeList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)

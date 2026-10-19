@@ -457,9 +457,17 @@ func TestAFailureOnAReplicaWithNoSocketIsRoutedToTheOneThatHasIt(t *testing.T) {
 // would have been handed to the replica holding the socket.
 type recordingRelay struct{ frames []relayFrame }
 
-func (r *recordingRelay) publish(f relayFrame, _ string) bool {
+func (r *recordingRelay) publish(f relayFrame, _ string) relayPublish {
 	r.frames = append(r.frames, f)
-	return true
+	return relayAccepted
+}
+
+// publishAwaitingHolder is the seam's waiting half. The routes that use it are
+// the inbox push's, and this seam is used by the typing indicator's, so it
+// answers the same way publish does: the bus took it.
+func (r *recordingRelay) publishAwaitingHolder(_ context.Context, f relayFrame, _ string) relayPublish {
+	r.frames = append(r.frames, f)
+	return relayAccepted
 }
 
 // ---- the answer path's gate has to hand the bubble back too ----

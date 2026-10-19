@@ -120,6 +120,27 @@ func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog,
 	return i, err
 }
 
+const getLastIssueStatusChange = `-- name: GetLastIssueStatusChange :one
+SELECT actor_type, actor_id FROM activity_log
+WHERE issue_id = $1 AND action = 'status_changed'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLastIssueStatusChangeRow struct {
+	ActorType pgtype.Text `json:"actor_type"`
+	ActorID   pgtype.UUID `json:"actor_id"`
+}
+
+// Who last changed an issue's status, and to what: names the mover when an
+// agent's status change is refused because the issue left its step (MUL-7420).
+func (q *Queries) GetLastIssueStatusChange(ctx context.Context, issueID pgtype.UUID) (GetLastIssueStatusChangeRow, error) {
+	row := q.db.QueryRow(ctx, getLastIssueStatusChange, issueID)
+	var i GetLastIssueStatusChangeRow
+	err := row.Scan(&i.ActorType, &i.ActorID)
+	return i, err
+}
+
 const hasSquadLeaderNoActionEvaluationForTask = `-- name: HasSquadLeaderNoActionEvaluationForTask :one
 SELECT EXISTS (
   SELECT 1

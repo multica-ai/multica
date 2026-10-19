@@ -104,7 +104,7 @@ export function createZhDict(
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 26 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 27 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -119,7 +119,7 @@ export function createZhDict(
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 26 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 27 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -139,7 +139,7 @@ export function createZhDict(
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 26 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 27 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -196,7 +196,7 @@ export function createZhDict(
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 26 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 27 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -507,6 +507,69 @@ export function createZhDict(
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.6.3",
+        date: "2026-10-16",
+        title: "单次运行花费明细、更短的上手引导、离开工作区后的访问撤销、任务运行更稳",
+        changes: [],
+        features: [
+          "执行记录里每次运行一根花费柱，还能看到 token、耗时和模型。",
+          "运行详情可以按花费、token 或耗时对比各次运行，也能切回累计视图。",
+          "展开任意一次运行，就能看到它的 token 和花费明细。",
+        ],
+        improvements: [
+          "上手时跳过运行时设置，会直接打开安装指南 Issue。",
+        ],
+        fixes: [
+          "离开或被移出工作区的成员，不再收到该工作区的通知和实时更新。",
+          "智能体构建器的草稿格式略有出入时，也能填入配置。",
+          "智能体构建器的重试提示关掉或手动修改后，不会再次弹出。",
+          "已领取但没送到本机的任务会回到队列，不再卡住。",
+          "本地目录续接不再把已提交的改动当成草稿重放，其他草稿也会保留。",
+          "清理缓存时，仓库跟踪的 .next 等目录和其中的 Git 仓库不再被误删。",
+          "Claude Sonnet 5.5 和 Haiku 5.5 的运行也能估算花费了。",
+          "阿拉伯语、希伯来语等从右到左的文字夹着英文时，阅读顺序也正确。",
+        ],
+      },
+      {
+        version: "0.6.2",
+        date: "2026-10-13",
+        title: "文本与链接列表属性、Cmd+K 切换工作区、开场建议一键发送、任务运行更稳",
+        changes: [],
+        features: [
+          "自定义属性可以保存文本列表或链接列表，也能按值精确筛选。",
+          "按 Cmd/Ctrl+K 就能切换到其他工作区。",
+          "桌面端切换工作区时，会回到你上次在那里打开的标签页。",
+          "空白聊天里点击开场建议会直接发送，不会覆盖已有草稿。",
+          "命令行可以为本机守护进程开启开机自启，默认关闭。",
+        ],
+        improvements: [
+          "Issues 列表首屏加载更快。",
+          "桌面端导航栏和标签栏现在对齐了。",
+        ],
+        fixes: [
+          "Codex 长线程能跨本地目录续接，遇到限流也不再卡住。",
+          "装在 ChatGPT.app 里的 Codex CLI 也能被识别。",
+          "Pi 任务能用上你配置的 MCP 服务器。",
+          "Pi 和 Kimi 运行失败时会显示为失败，不再悄悄结束。",
+          "Antigravity 在连接最后断开时也能保住回答。",
+          "CodeBuddy 启动出错不再中断正在进行的运行。",
+          "Oh My Pi 需要新会话时会新建，不再接着旧会话。",
+          "Windows 上的任务能正常使用系统临时目录。",
+          "电脑休眠唤醒后，任务不再被误判为无响应而中止。",
+          "健康检查端口被占用时，本机守护进程也能恢复。",
+          "Hermes 在不同本地目录间也能接着之前的会话。",
+          "频繁触发的 Autopilot 不再悄悄停摆，运行也保留来源。",
+          "PR 唤醒不再漏掉变化，遇到可恢复的问题会说明原因。",
+          "任务结束后，Lark 上的「正在输入」表情会被清掉。",
+          "企业微信的 Issue 通知由实际干活的智能体机器人发送。",
+          "带数字的 Issue 前缀也能被搜索到。",
+          "多人同时编辑项目时，不再覆盖别人改过的字段。",
+          "聊天还在加载时发出的后续消息不再丢失。",
+          "普通附件下载链接可用，运行详情的文字步骤标注正确。",
+          "服务端出错时不再暴露内部错误细节。",
+        ],
+      },
       {
         version: "0.6.1",
         date: "2026-10-01",

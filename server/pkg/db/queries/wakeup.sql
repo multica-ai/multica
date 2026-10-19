@@ -70,19 +70,63 @@ WHERE issue_id= @issue_id AND disabled_at IS NULL AND system_rule IS NULL;
 -- name: CancelUnstartedIssueWakeupTasks :many
 UPDATE agent_task_queue SET status='cancelled',completed_at=now(),error='Issue closed; wakeup disabled'
 WHERE issue_id= @issue_id AND context->>'wakeup_id' IS NOT NULL AND status IN ('queued','deferred') AND started_at IS NULL RETURNING *;
--- name: ListReadyWakeups :many
+-- name: ListInputWakeups :many
+-- Scheduler lane 1: rules with unprocessed inputs (subscribed events,
+-- condition hints, "wake now"). Deliberately not filtered by enabled: a once
+-- rule that stopped still delivers the inputs it captured before stopping.
+-- The subquery reads only pending rows (issue_wakeup_receipt_pending_idx).
+-- Rules already visited in this pass are skipped.
+SELECT w.* FROM issue_wakeup w
+WHERE w.id IN (SELECT r.wakeup_id FROM issue_wakeup_receipt r WHERE r.processed_at IS NULL)
+  AND (sqlc.narg('workspace_ids')::uuid[] IS NULL OR w.workspace_id = ANY(sqlc.narg('workspace_ids')::uuid[]))
+  AND NOT (w.id = ANY(@skip_ids::uuid[]))
+ORDER BY w.updated_at,w.id LIMIT @row_limit;
+-- name: ListDueWakeups :many
+-- Scheduler lane 2: schedules, deadlines and condition checks that are due.
+-- Rules already visited in this pass are skipped.
 WITH candidates AS (
  SELECT id FROM issue_wakeup WHERE enabled AND kind<>'event' AND next_fire_at<=now()
  UNION
  SELECT id FROM issue_wakeup WHERE enabled AND expires_at<=now()
  UNION
  SELECT id FROM issue_wakeup WHERE enabled AND condition IS NOT NULL AND next_fire_at<=now()
- UNION
- SELECT wakeup_id FROM issue_wakeup_receipt WHERE processed_at IS NULL
 )
 SELECT w.* FROM candidates c JOIN issue_wakeup w ON w.id=c.id
-WHERE sqlc.narg('workspace_ids')::uuid[] IS NULL OR w.workspace_id = ANY(sqlc.narg('workspace_ids')::uuid[])
-ORDER BY w.updated_at,w.id LIMIT 100;
+WHERE (sqlc.narg('workspace_ids')::uuid[] IS NULL OR w.workspace_id = ANY(sqlc.narg('workspace_ids')::uuid[]))
+  AND NOT (w.id = ANY(@skip_ids::uuid[]))
+ORDER BY w.updated_at,w.id LIMIT @row_limit;
+-- name: ListPendingWakeupInputGroups :many
+-- Scheduler observability over unprocessed inputs, grouped per rule and by
+-- whether a run still reserves them. Dispatch deliberately keeps some inputs
+-- pending while a run holds them; these flags mirror its checks:
+--  reserved:     a claim reserved them for a run that has not started and has
+--                not ended (takenReceipts). A run that ended without starting
+--                releases them, and one that started has them consumed on the
+--                next dispatch, so both are backlog.
+--  own_claimed:  the rule's own run is claimed (FindPendingWakeupTask).
+--  user_waiting: a queued run of the rule's agent, run as its creator, will
+--                take them along (hasWaitingRun). Platform rules wait for the
+--                issue's current target instead; the caller resolves that.
+-- Oldest groups first, one page at a time: the caller pages with the last
+-- group's (oldest, wakeup_id, reserved) until a short page, so no group is
+-- left unread however many there are.
+WITH groups AS (
+ SELECT w.id AS wakeup_id, w.issue_id, (w.system_rule IS NOT NULL)::bool AS system_rule,
+  (r.task_id IS NOT NULL AND EXISTS (SELECT 1 FROM agent_task_queue t WHERE t.id=r.task_id
+    AND t.started_at IS NULL AND t.status NOT IN ('running','completed','failed','cancelled')))::bool AS reserved,
+  EXISTS (SELECT 1 FROM agent_task_queue t WHERE t.context->>'wakeup_id'=w.id::text AND t.status='dispatched')::bool AS own_claimed,
+  (w.system_rule IS NULL AND EXISTS (SELECT 1 FROM agent_task_queue t WHERE t.issue_id=w.issue_id AND t.status='queued'
+    AND t.agent_id=w.agent_id AND t.originator_user_id=w.created_by))::bool AS user_waiting,
+  min(r.created_at)::timestamptz AS oldest, count(*)::int AS inputs
+ FROM issue_wakeup_receipt r JOIN issue_wakeup w ON w.id=r.wakeup_id
+ WHERE r.processed_at IS NULL
+  AND (sqlc.narg('workspace_ids')::uuid[] IS NULL OR w.workspace_id = ANY(sqlc.narg('workspace_ids')::uuid[]))
+ GROUP BY 1,2,3,4,5,6
+)
+SELECT g.wakeup_id, g.issue_id, g.system_rule, g.reserved, g.own_claimed, g.user_waiting, g.oldest, g.inputs FROM groups g
+WHERE sqlc.narg('after_oldest')::timestamptz IS NULL
+   OR (g.oldest, g.wakeup_id, g.reserved) > (sqlc.narg('after_oldest')::timestamptz, @after_wakeup_id::uuid, @after_reserved::bool)
+ORDER BY g.oldest, g.wakeup_id, g.reserved LIMIT @page_size;
 -- name: ListPendingWakeupReceipts :many
 SELECT * FROM issue_wakeup_receipt WHERE wakeup_id= @wakeup_id AND revision= @revision AND processed_at IS NULL ORDER BY created_at,id LIMIT 100 FOR UPDATE;
 
@@ -133,7 +177,7 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
+    workflow_step, id
 )
 SELECT
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -158,6 +202,14 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    -- The workflow step this run works on (MUL-7420). A wakeup continues the
+    -- run that registered it, so it keeps that run's step: a status change it
+    -- makes after someone else moved the issue is refused like the run's own
+    -- would be. A wakeup a member registered starts from the issue's status.
+    COALESCE(
+        (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = sqlc.narg(delegated_from_task_id) AND s.issue_id = $3),
+        (SELECT i.status FROM issue i WHERE i.id = $3)
+    ),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;

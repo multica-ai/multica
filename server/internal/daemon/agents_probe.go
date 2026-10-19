@@ -142,7 +142,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 			// Codex Desktop bundles its CLI inside the macOS app instead of
 			// installing it onto PATH.
 			for _, p := range codexDesktopAppBundlePaths() {
-				if _, err := os.Stat(p); err == nil {
+				if executableCandidate(p) {
 					return AgentEntry{
 						Path:    p,
 						Command: cmd,
@@ -268,6 +268,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
+	}
+	// Meta Muse Code (`muse`) exposes its session protocol (MSP) through
+	// `muse serve`. The launcher script installs and updates the real binary
+	// under ~/.local/bin, so the PATH entry is what a host actually has.
+	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
+		agents["muse"] = e
 	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
 	// on PATH; users install it separately, often via an npm global prefix).

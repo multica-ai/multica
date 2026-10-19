@@ -8,7 +8,6 @@ import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
 import { NoAccessPage } from "@multica/views/workspace/no-access-page";
-import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { workspaceSlugFromPathname } from "@/lib/workspace-slug-from-pathname";
@@ -54,28 +53,10 @@ export default function WorkspaceLayout({
     enabled: !!user,
   });
 
-  // Render-phase sync: feed the URL slug into the platform singleton so
-  // the first child query's X-Workspace-Slug header is already correct.
-  // setCurrentWorkspace self-dedupes + runs rehydrate as a side effect;
-  // safe to call on every render.
-  //
-  // Gated on the live pathname because this is a module-global write from
-  // render, and the App Router can keep a previous workspace's layout mounted
-  // beside the incoming one. Both instances re-render on their own query
-  // activity, so an unguarded write let them alternate — every render flipping
-  // the singleton back to its own slug, indefinitely. Each flip tore down and
-  // rebuilt the realtime socket (packages/core/realtime/provider.tsx binds it
-  // to this slug) and re-pointed the @mention lookup, which reads the same
-  // singleton synchronously and falls back to an empty list when the workspace
-  // it names has no warm cache (packages/views/editor/extensions/
-  // mention-suggestion.tsx). Realtime went dead and the mention list came back
-  // empty for whichever workspace the user was actually looking at.
-  //
-  // Comparing against the pathname resolves it without an ownership handshake:
-  // the URL is the source of truth for workspace identity, and usePathname()
-  // is one value shared by every mounted instance, so exactly one layout — the
-  // routed one — can define it. Desktop needs its own protocol instead
-  // (workspace-route-layout.tsx) because it has no URL bar to appeal to.
+  // Sync routed workspace identity during render so the first child request has
+  // the correct workspace header. Gate this global write on the live pathname:
+  // App Router can retain old layouts whose rerenders would otherwise switch the
+  // singleton and realtime connection back to a stale workspace.
   if (workspace && workspaceSlug === workspaceSlugFromPathname(pathname)) {
     setCurrentWorkspace(workspaceSlug, workspace.id);
   }
@@ -123,11 +104,6 @@ export default function WorkspaceLayout({
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
       {children}
-      {/* Reads the welcome-store transient signal parked by
-       *  OnboardingFlow.handleRuntimeNext. Runtime path → loading veil →
-       *  blocking Modal with Helper + starter cards. Skip path → Modal
-       *  with two seeded issues. No signal → null. */}
-      <WelcomeAfterOnboarding />
     </WorkspaceSlugProvider>
   );
 }

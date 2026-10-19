@@ -83,9 +83,7 @@ export function StepRuntimeConnect({
   );
 }
 
-// ============================================================
 // Fancy desktop view
-// ============================================================
 
 type Phase = "scanning" | "found" | "empty";
 
@@ -167,6 +165,7 @@ function FancyView({
   const onlineCount = runtimes.filter((r) => r.status === "online").length;
 
   const [submitting, setSubmitting] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [model, setModel] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -193,10 +192,12 @@ function FancyView({
   const handleSkip = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setSkipping(true);
     try {
       await onNext(null);
     } finally {
       setSubmitting(false);
+      setSkipping(false);
     }
   };
   // Starting with Mika only makes sense when a runtime is selected.
@@ -251,6 +252,7 @@ function FancyView({
         {phase === "empty" && (
           <EmptyView
             onSkip={handleSkip}
+            skipping={skipping}
             onRefresh={handleRefresh}
             refreshing={refreshing}
           />
@@ -273,7 +275,9 @@ function FancyView({
             disabled={!canContinue || submitting}
             onClick={handleContinue}
           >
-            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {submitting && !skipping && (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
             {t(($) => $.step_runtime.continue)}
           </Button>
         )}
@@ -284,6 +288,7 @@ function FancyView({
             disabled={submitting}
             onClick={handleSkip}
           >
+            {skipping && <Loader2 className="h-4 w-4 animate-spin" />}
             {t(($) => $.step_runtime.skip)}
           </Button>
         )}
@@ -292,9 +297,7 @@ function FancyView({
   );
 }
 
-// ------------------------------------------------------------
 // Phase views (inline — all three share the same 620px column)
-// ------------------------------------------------------------
 
 function ScanningView() {
   const { t } = useT("onboarding");
@@ -397,10 +400,12 @@ function FoundView({
 
 function EmptyView({
   onSkip,
+  skipping,
   onRefresh,
   refreshing,
 }: {
   onSkip: () => void;
+  skipping: boolean;
   onRefresh: () => void;
   refreshing: boolean;
 }) {
@@ -434,6 +439,7 @@ function EmptyView({
           subtitle={t(($) => $.step_runtime.empty_skip_subtitle)}
           actionLabel={t(($) => $.step_runtime.empty_skip_action)}
           onAction={onSkip}
+          busy={skipping}
         />
 
         <ComingSoonCard
@@ -522,17 +528,21 @@ function EmptyCard({
   subtitle,
   actionLabel,
   onAction,
+  busy,
 }: {
   title: string;
   subtitle: string;
   actionLabel: string;
   onAction: () => void;
+  busy: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onAction}
-      className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/30"
+      disabled={busy}
+      aria-busy={busy}
+      className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/30 disabled:pointer-events-none"
     >
       <div className="min-w-0">
         <div className="text-body font-medium text-foreground">{title}</div>
@@ -545,15 +555,17 @@ function EmptyCard({
         className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 py-2 text-label font-medium text-foreground transition-colors group-hover:border-foreground group-hover:bg-foreground group-hover:text-background"
       >
         {actionLabel}
-        <ArrowRight className="h-3.5 w-3.5" />
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <ArrowRight className="h-3.5 w-3.5" />
+        )}
       </span>
     </button>
   );
 }
 
-// ------------------------------------------------------------
 // Card components
-// ------------------------------------------------------------
 
 function SkeletonRuntimeCard() {
   return (

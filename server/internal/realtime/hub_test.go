@@ -25,8 +25,16 @@ const testUserID = "test-user"
 // mockMembershipChecker always returns true.
 type mockMembershipChecker struct{}
 
-func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) bool {
-	return true
+func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+func (*mockMembershipChecker) Members(_ context.Context, identities []MembershipIdentity) (map[MembershipIdentity]bool, error) {
+	members := make(map[MembershipIdentity]bool, len(identities))
+	for _, identity := range identities {
+		members[identity] = true
+	}
+	return members, nil
 }
 
 func makeTestToken(t *testing.T) string {
@@ -89,6 +97,7 @@ func newTestHub(t *testing.T) (*Hub, *httptest.Server) {
 	go hub.Run()
 
 	mc := &mockMembershipChecker{}
+	hub.SetMembershipChecker(mc)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		HandleWebSocket(hub, mc, nil, nil, w, r)

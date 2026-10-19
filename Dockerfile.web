@@ -8,6 +8,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
 COPY apps/web/package.json apps/web/
 # postinstall runs fumadocs-mdx which reads apps/web/source.config.ts
 COPY apps/web/source.config.ts apps/web/source.config.ts
+# Root pnpm patchedDependencies is read even without the mobile workspace.
+COPY apps/mobile/patches/ apps/mobile/patches/
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
 COPY packages/views/package.json packages/views/

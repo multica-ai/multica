@@ -13,9 +13,7 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
   return runtime.runtime_mode === "local" && runtime.status === "online";
 }
 
-// ---------------------------------------------------------------------------
 // Formatting helpers
-// ---------------------------------------------------------------------------
 
 // Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
 // — gives the user enough precision to tell "just lost" from "long lost"
@@ -168,9 +166,7 @@ export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-// ---------------------------------------------------------------------------
 // Cost estimation
-// ---------------------------------------------------------------------------
 
 // Pricing per million tokens (USD). Sources, each authoritative for the
 // rows tagged under it — keep in sync when providers release new models
@@ -222,6 +218,13 @@ const MODEL_PRICING: Record<
   //    usual 0.1x); Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier,
   //    and Opus 5.5 drops to 4/20 (cache reads at 0.05x input). --
   "claude-sonnet-5":     { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
+  // Sonnet 5.5 keeps the 2/10 tier but halves the cache-read rate.
+  "claude-sonnet-5-5":   { input: 2,    output: 10,   cacheRead: 0.10, cacheWrite: 2.50 },
+  // Haiku 5.5 uses the <=100K prompt tier. Above 100K (including cache
+  // reads/writes), all four rates are 5x higher. Rollups lack per-request
+  // prompt sizes, so long requests are underestimated. Mirror the backend
+  // estimate in server/internal/metrics/pricing.go.
+  "claude-haiku-5-5":    { input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite: 0.125 },
   "claude-fable-5-1":   { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   "claude-opus-5-5":    { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5.00 },
@@ -379,7 +382,7 @@ const MODEL_PRICING: Record<
   "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
 
-  // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
+  // -- Cursor models: Composer / Grok / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,
   //    cursor.com/docs/models/cursor-composer-2-5).
   //    Cursor's model ids are all unprefixed generic names (`auto`,
@@ -397,6 +400,70 @@ const MODEL_PRICING: Record<
   "cursor/composer-2":        { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
   "cursor/composer-1.5":      { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
   "cursor/composer-1":        { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
+  "cursor/grok-4.7":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.7-fast":     { input: 4,    output: 12,   cacheRead: 1,      cacheWrite: 0 },
+  "cursor/grok-4.6":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.6-fast":     { input: 4,    output: 12,   cacheRead: 1,      cacheWrite: 0 },
+  "cursor/grok-4.5":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.5-fast":     { input: 4,    output: 18,   cacheRead: 1,      cacheWrite: 0 },
+
+  // -- Third-party models through Cursor (cursor.com/docs/models-and-pricing,
+  //    "Model pricing"). Cursor bills these at API list price, but its sheet
+  //    is the bill, so Cursor rows use it even where it differs from the
+  //    vendor rows above (GPT-5.6 Sol is on a Cursor promo through
+  //    2026-11-21; update the row when it ends). Keys are the Cursor base id
+  //    left by `cursorBaseModel`, which drops the effort / thinking / fast
+  //    variant parts — effort and thinking don't change per-token rates.
+  //    A `-fast` row exists only where Cursor publishes the Fast rate; other
+  //    Fast variants stay unmapped rather than borrowing the standard rate.
+  //    Where the sheet lists no cache-write rate, cacheWrite is 0 (same as the
+  //    Composer rows). Long-context surcharges (GPT >272K input) can't be
+  //    seen in aggregated rows, so those requests are underestimated. --
+  "cursor/claude-opus-5-5":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 5 },
+  "cursor/claude-opus-5":        { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-opus-4-8":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  // Published as "3x lower per-token pricing than Opus 4.7 fast mode".
+  "cursor/claude-opus-4-8-fast": { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
+  "cursor/claude-opus-4-7":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-opus-4-7-fast": { input: 30,   output: 150,  cacheRead: 3,     cacheWrite: 37.5 },
+  "cursor/claude-4.6-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-4.5-opus":      { input: 5,    output: 25,   cacheRead: 0.5,   cacheWrite: 6.25 },
+  "cursor/claude-fable-5-1":     { input: 10,   output: 50,   cacheRead: 0.25,  cacheWrite: 12.5 },
+  "cursor/claude-fable-5":       { input: 10,   output: 50,   cacheRead: 1,     cacheWrite: 12.5 },
+  "cursor/claude-sonnet-5-5":    { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 2.5 },
+  "cursor/claude-sonnet-5":      { input: 2,    output: 10,   cacheRead: 0.2,   cacheWrite: 2.5 },
+  "cursor/claude-4.6-sonnet":    { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
+  "cursor/claude-4.5-sonnet":    { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
+  "cursor/claude-4-sonnet":      { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 3.75 },
+  // <=100K prompt tier; see the claude-haiku-5-5 row above.
+  "cursor/claude-haiku-5-5":     { input: 0.1,  output: 0.5,  cacheRead: 0.01,  cacheWrite: 0.125 },
+  "cursor/gpt-5.6-sol":          { input: 4,    output: 20,   cacheRead: 0.4,   cacheWrite: 5 },
+  "cursor/gpt-5.6-sol-fast":     { input: 8,    output: 40,   cacheRead: 0.8,   cacheWrite: 10 },
+  "cursor/gpt-5.6-terra":        { input: 2,    output: 12,   cacheRead: 0.2,   cacheWrite: 2.5 },
+  "cursor/gpt-5.6-terra-fast":   { input: 4,    output: 24,   cacheRead: 0.4,   cacheWrite: 5 },
+  "cursor/gpt-5.6-luna":         { input: 0.2,  output: 1.2,  cacheRead: 0.02,  cacheWrite: 0.25 },
+  "cursor/gpt-5.6-luna-fast":    { input: 0.4,  output: 2.4,  cacheRead: 0.04,  cacheWrite: 0.5 },
+  "cursor/gpt-5.5":              { input: 5,    output: 30,   cacheRead: 0.5,   cacheWrite: 0 },
+  "cursor/gpt-5.4":              { input: 2.5,  output: 15,   cacheRead: 0.25,  cacheWrite: 0 },
+  "cursor/gpt-5.4-fast":         { input: 5,    output: 30,   cacheRead: 0.5,   cacheWrite: 0 },
+  "cursor/gpt-5.4-mini":         { input: 0.75, output: 4.5,  cacheRead: 0.075, cacheWrite: 0 },
+  "cursor/gpt-5.4-nano":         { input: 0.2,  output: 1.25, cacheRead: 0.02,  cacheWrite: 0 },
+  "cursor/gpt-5.3-codex":        { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 0 },
+  "cursor/gpt-5.2":              { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 0 },
+  "cursor/gpt-5-mini":           { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0 },
+  "cursor/gemini-4-argon":       { input: 2,    output: 10,   cacheRead: 0.1,   cacheWrite: 0 },
+  "cursor/gemini-3.8-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
+  "cursor/gemini-3.7-flash":     { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
+  "cursor/gemini-3.6-flash":     { input: 1.5,  output: 7.5,  cacheRead: 0.15,  cacheWrite: 0 },
+  "cursor/gemini-3.5-flash":     { input: 1.5,  output: 9,    cacheRead: 0.15,  cacheWrite: 0 },
+  "cursor/gemini-3.1-pro":       { input: 2,    output: 12,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/gemini-3-flash":       { input: 0.5,  output: 3,    cacheRead: 0.05,  cacheWrite: 0 },
+  "cursor/kimi-k3":              { input: 3,    output: 15,   cacheRead: 0.3,   cacheWrite: 0 },
+  "cursor/kimi-k2.7-code":       { input: 0.95, output: 4,    cacheRead: 0.19,  cacheWrite: 0 },
+  "cursor/glm-5.2":              { input: 1.4,  output: 4.4,  cacheRead: 0.26,  cacheWrite: 0 },
+  "cursor/muse-wonder-1.0":      { input: 4,    output: 20,   cacheRead: 0.2,   cacheWrite: 0 },
+  "cursor/muse-spark-1.3":       { input: 1.25, output: 4.25, cacheRead: 0.15,  cacheWrite: 0 },
+
   // Legacy fallback bucket when neither the result event nor the runtime
   // model is known — the daemon emits the literal `cursor`. This key equals
   // the provider name itself, so it can't collide across providers and stays
@@ -470,7 +537,42 @@ function pricingCandidates(model: string, provider?: string): string[] {
   const base = canonicalCandidates(model);
   const p = normalizeProvider(provider);
   if (!p) return base;
+  if (p === "cursor") return cursorPricingCandidates(model, base);
   return [...base.map((c) => qualify(p, c)), ...base];
+}
+
+// Cursor's catalog ids are a base model plus variant parts, in no fixed
+// order: `claude-opus-4-7-thinking-high-fast`, `claude-4.6-sonnet-medium-thinking`,
+// `cursor-grok-4.6-high`, or the parameterized
+// `claude-opus-4-8[context=1m,effort=high,fast=true]`.
+const CURSOR_VARIANT_SUFFIX = /-(?:fast|thinking|none|minimal|low|medium|high|xhigh|extra-high|max)$/;
+
+function cursorBaseModel(model: string): { base: string; fast: boolean } {
+  let id = model.trim().toLowerCase();
+  let fast = false;
+  const params = id.match(/\[([^\]]*)\]$/);
+  if (params) {
+    fast = /(?:^|,)\s*fast\s*=\s*true\s*(?:,|$)/.test(params[1] ?? "");
+    id = id.slice(0, params.index);
+  }
+  for (let m = id.match(CURSOR_VARIANT_SUFFIX); m; m = id.match(CURSOR_VARIANT_SUFFIX)) {
+    if (m[0] === "-fast") fast = true;
+    id = id.slice(0, m.index);
+  }
+  return { base: id.replace(/^cursor-/, ""), fast };
+}
+
+// Fast mode bills above the standard rate, so a Fast variant resolves only
+// through its exact id or its own `cursor/<base>-fast` row — never through a
+// canonical form (`[fast=true]` stripped as a context tag) or the base
+// model's price. Standard variants try the exact ids, then the Cursor base
+// row, then the bare vendor row for the same SKU.
+function cursorPricingCandidates(model: string, canonical: string[]): string[] {
+  const { base, fast } = cursorBaseModel(model);
+  if (fast) return [qualify("cursor", model), `cursor/${base}-fast`];
+  const qualified = canonical.map((c) => qualify("cursor", c));
+  if (!base) return [...qualified, ...canonical];
+  return [...new Set([...qualified, `cursor/${base}`, base, ...canonical])];
 }
 
 // The canonical storage/diagnostic key for a (model, provider) pair: the
@@ -764,9 +866,7 @@ export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Per-run usage
-// ---------------------------------------------------------------------------
 
 /** Collapsed usage for one agent run, or for a set of runs. */
 export interface TaskUsageSummary {
@@ -844,9 +944,7 @@ export function estimateCacheSavings(usage: Priceable): number {
   return wouldHaveCost - actualCost;
 }
 
-// ---------------------------------------------------------------------------
 // Data aggregation
-// ---------------------------------------------------------------------------
 
 export interface DailyTokenData {
   date: string;
@@ -1179,13 +1277,11 @@ function diffDaysIso(from: string, to: string): number {
   return Math.round((b - a) / 86_400_000);
 }
 
-// ---------------------------------------------------------------------------
 // Calendar helpers — all date math runs on YYYY-MM-DD strings in the
 // runtime's IANA timezone. The backend already groups daily usage by
 // `start-of-day in runtime tz`, so we keep the entire frontend aggregation
 // on the same axis (Daily / Weekly) to avoid one-day drift when the browser
 // and runtime sit in different time zones.
-// ---------------------------------------------------------------------------
 
 // Today's calendar date (YYYY-MM-DD) in the given IANA timezone. `en-CA`
 // gives ISO-shaped output without us having to assemble Intl parts by hand.
@@ -1232,14 +1328,12 @@ export function formatShortDate(iso: string): string {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Cost-by-X aggregations
 //
 // All three "Cost by …" tabs share the same shape: a sorted list of rows
 // where each row carries a key (agent name, model name, or hour-of-day),
 // total tokens and total cost. The chart / list components are oblivious
 // to which axis they're rendering — they just see {key, tokens, cost}.
-// ---------------------------------------------------------------------------
 
 export interface CostByKey {
   key: string;

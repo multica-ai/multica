@@ -79,7 +79,11 @@
       "cancelled": "Decided not to do."
     },
     "pr_auto_complete_badge": "Set when PRs merge",
-    "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them."
+    "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them.",
+    "builtin_badge": "Built-in",
+    "workflow_usage_one": "{{count}} workflow uses it",
+    "workflow_usage_other": "{{count}} workflows use it",
+    "workflow_usage_none": "In no workflow"
   },
   "wakeups": {
     "description": "Platform rules that apply to every issue. Each issue can change them in its Wakeups section.",
@@ -406,7 +410,8 @@
       "billing": "Billing",
       "code": "Code",
       "channels": "Messaging",
-      "apps": "Connected apps"
+      "apps": "Connected apps",
+      "workflows": "Workflows"
     },
     "groups": {
       "personal": "Personal",

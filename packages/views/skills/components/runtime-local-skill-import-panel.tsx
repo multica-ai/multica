@@ -65,9 +65,7 @@ import {
 } from "../../runtimes/components/runtime-machines";
 import { isNameConflictError } from "../lib/utils";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 type BulkImportResult = {
   key: string;
@@ -102,9 +100,7 @@ const INITIAL_BULK_STATE: BulkImportState = {
   results: [],
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Max concurrent imports. Higher = faster but more daemon/network pressure.
@@ -135,9 +131,7 @@ function ResultIcon({ status }: { status: BulkImportResult["status"] }) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Skill row with checkbox
-// ---------------------------------------------------------------------------
 
 function SkillItem({
   skill,
@@ -248,9 +242,7 @@ function SkillItem({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Summary view (shown after bulk import completes)
-// ---------------------------------------------------------------------------
 
 function BulkImportSummary({ results }: { results: BulkImportResult[] }) {
   const { t } = useT("skills");
@@ -499,9 +491,7 @@ function ConflictResolutionPanel({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Panel
-// ---------------------------------------------------------------------------
 
 export function RuntimeLocalSkillImportPanel({
   onImported,

@@ -79,7 +79,10 @@
       "cancelled": "見送り。"
     },
     "pr_auto_complete_badge": "PR のマージで自動設定",
-    "built_in_locked": "組み込みステータスはシステムの動作に使われるため、編集やアーカイブはできません。並び順は変更できます。"
+    "built_in_locked": "組み込みステータスはシステムの動作に使われるため、編集やアーカイブはできません。並び順は変更できます。",
+    "builtin_badge": "組み込み",
+    "workflow_usage_other": "{{count}} 件のワークフローで使用中",
+    "workflow_usage_none": "ワークフローで未使用"
   },
   "wakeups": {
     "description": "すべてのタスクに適用されるプラットフォームのルールです。各タスクの「ウェイクアップ」セクションで個別に変更できます。",
@@ -405,7 +408,8 @@
       "billing": "請求とプラン",
       "code": "コード",
       "channels": "メッセージング",
-      "apps": "接続済みアプリ"
+      "apps": "接続済みアプリ",
+      "workflows": "ワークフロー"
     },
     "groups": {
       "personal": "個人",

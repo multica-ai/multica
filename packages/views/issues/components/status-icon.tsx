@@ -8,18 +8,14 @@ import type {
 } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
-// ---------------------------------------------------------------------------
 // Geometry constants (viewBox 0 0 14 14, center 7,7)
-// ---------------------------------------------------------------------------
 
 const CX = 7;
 const CY = 7;
 const OUTER_R = 6;
 const FILL_R = 3.5;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Build a pie-wedge SVG path from 12 o'clock, clockwise */
 function piePath(cx: number, cy: number, r: number, progress: number): string {
@@ -30,9 +26,7 @@ function piePath(cx: number, cy: number, r: number, progress: number): string {
   return `M${cx},${cy} L${cx},${cy - r} A${r},${r} 0 ${largeArc},1 ${endX},${endY} Z`;
 }
 
-// ---------------------------------------------------------------------------
 // Base component — dashed outer ring + pie fill + optional center icon
-// ---------------------------------------------------------------------------
 
 function ProgressCircle({
   progress,
@@ -65,9 +59,7 @@ function ProgressCircle({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Per-status renderers
-// ---------------------------------------------------------------------------
 
 /** 16 small dots arranged in a ring */
 function BacklogIcon() {
@@ -146,9 +138,7 @@ function CancelledIcon() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Renderer map
-// ---------------------------------------------------------------------------
 
 const STATUS_RENDERERS: Record<BuiltInIssueStatus, () => React.ReactNode> = {
   backlog: BacklogIcon,
@@ -187,9 +177,7 @@ const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
   cancelled: "text-muted-foreground",
 };
 
-// ---------------------------------------------------------------------------
 // Public component
-// ---------------------------------------------------------------------------
 
 export function StatusIcon({
   status,

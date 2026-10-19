@@ -169,7 +169,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	writeDone := make(chan error, 1)
 	go func() {
 		if supplements != nil {
-			if initErr := supplements.initialize(inputWriter, claudeSupplementHandshakeTimeout); initErr != nil {
+			if initErr := supplements.initialize(inputWriter, opts.HandshakeTimeout); initErr != nil {
 				b.cfg.Logger.Warn("Claude additional messages unavailable; continuing normally", "error", initErr)
 				supplements.end()
 			}

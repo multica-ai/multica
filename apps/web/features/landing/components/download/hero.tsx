@@ -78,9 +78,7 @@ export function DownloadHero({
   );
 }
 
-// ------------------------------------------------------------
 // Content resolver — maps (detect, assets) → CTA props
-// ------------------------------------------------------------
 
 interface HeroContent {
   title: string;
@@ -207,9 +205,7 @@ export function resolveContent(
   };
 }
 
-// ------------------------------------------------------------
 // Pieces
-// ------------------------------------------------------------
 
 function PrimaryCta({
   href,

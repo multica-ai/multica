@@ -179,46 +179,10 @@ export function useMarkdownStyle() {
         color: t.brand,
         underline: true,
       },
-      // Inline code — monospace + muted-foreground tint, NO background chip.
-      //
-      // Why no background: on iOS, NSAttributedString draws
-      // NSBackgroundColorAttributeName as a rectangle spanning the full
-      // line-box height (24pt for our CJK-tuned body leading). PingFang
-      // SC places the baseline at ~75-80% of the line-box, so monospaced
-      // glyphs sit low inside that rectangle, leaving ~11pt empty at the
-      // top vs ~6pt at the bottom — a visible 2:1 asymmetry in CJK
-      // paragraphs. This is a platform-level constraint, not a library
-      // bug: the library's STYLES.md exposes only fontFamily / fontSize /
-      // color / backgroundColor / borderColor for inline code — no
-      // padding, lineHeight, or baselineOffset knob. Confirmed 2026-05-21
-      // (researcher brief): zero open PRs / forks / prereleases touching
-      // inline-code vertical geometry; upstream issue #255 has no
-      // maintainer response since 2026-04-20. The only real fixes are at
-      // the native layer (custom NSLayoutManager.drawBackground override
-      // or TextKit 2 NSTextLayoutManager.enumerateTextSegments(.highlight))
-      // which would require forking the library — not worth the perpetual
-      // patch-rebase cost for a polish issue.
-      //
-      // Visual identification stays strong without the chip: monospace
-      // font + muted-foreground tint matches Apple Notes / iA Writer.
-      //
-      // Color choice — mutedForeground (NOT brand):
-      //   - mutedForeground is a neutral gray, reads as "subdued prose".
-      //   - brand is reserved for links; tinting code blue confused users
-      //     into tapping it as if it were a link (tried 2026-05-19, then
-      //     reverted same day for this reason).
-      //
-      // fontFamily intentionally NOT set: enriched-markdown's default is
-      // the platform system monospace (SF Mono on iOS, monospace on
-      // Android), which has a larger visual x-height than the previously-
-      // explicit "Menlo" override.
-      //
-      // Revisit when:
-      //   - upstream #255 ships a paddingVertical / lineHeight knob, OR
-      //   - we contribute the TextKit 2 fix upstream (the right hook is
-      //     NSTextLayoutManager.enumerateTextSegments(in:type:.highlight:))
-      // Either way, switch back to a tinted-chip style for cross-platform
-      // visual parity with web/desktop.
+      // Keep inline code backgrounds transparent: native attributed-string chips
+      // span the line box and cannot be vertically padded by this renderer. Monospace
+      // and a neutral tint identify code without making it look like a link.
+      // Leave fontFamily unset to use the platform's system monospace.
       code: {
         color: t.mutedForeground,
         backgroundColor: "transparent",

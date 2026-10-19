@@ -72,9 +72,7 @@ export function isImageAttachment(
   return ext !== "" && IMAGE_EXTENSIONS.has(ext);
 }
 
-// ---------------------------------------------------------------------------
 // URL → attachment matching
-// ---------------------------------------------------------------------------
 
 function stripQueryAndFragment(url: string): string {
   return url.split(/[?#]/, 1)[0] ?? "";
@@ -177,9 +175,7 @@ export function orderStandaloneAttachments<T extends Pick<Attachment, "content_t
   return [...groups.image, ...groups.file];
 }
 
-// ---------------------------------------------------------------------------
 // Inline image references
-// ---------------------------------------------------------------------------
 
 function blankOut(text: string): string {
   // Newlines survive so line-anchored patterns below keep their line numbers.
@@ -299,9 +295,7 @@ function extractInlineRefs(rawContent: string): InlineRef[] {
   return refs.sort((a, b) => a.index - b.index);
 }
 
-// ---------------------------------------------------------------------------
 // Sequence
-// ---------------------------------------------------------------------------
 
 /** One attachment the viewer can page to. */
 export interface ImageSequenceItem {

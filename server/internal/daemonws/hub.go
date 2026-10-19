@@ -1036,6 +1036,9 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 			hctx, cancel = context.WithTimeout(c.ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 			defer cancel()
 		}
+		completion := &rpcCompletion{}
+		hctx = context.WithValue(hctx, rpcCompletionKey{}, completion)
+		defer completion.run()
 		status, body, err := handler(hctx, c.identity, req.Method, req.Body)
 		if err != nil {
 			if status < 400 {

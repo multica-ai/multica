@@ -104,7 +104,7 @@ export function createEnDict(
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 26 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 27 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -119,7 +119,7 @@ export function createEnDict(
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 26 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 27 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -139,7 +139,7 @@ export function createEnDict(
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 26 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 27 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -196,7 +196,7 @@ export function createEnDict(
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 26 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends.",
+          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -522,6 +522,69 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.6.3",
+        date: "2026-10-16",
+        title: "Per-run cost details, shorter onboarding, revoked access for former members, and steadier runs",
+        changes: [],
+        features: [
+          "The execution log shows a cost bar for each run, along with its tokens, time, and model.",
+          "Run details compare runs by cost, tokens, or agent time, with a cumulative view one click away.",
+          "Expand any run to see its token and cost breakdown.",
+        ],
+        improvements: [
+          "Skipping runtime setup during onboarding opens the install guide Issue right away.",
+        ],
+        fixes: [
+          "Members who leave or are removed from a workspace stop getting its notifications and live updates.",
+          "The agent builder fills in the configuration even when its draft comes back slightly malformed.",
+          "The agent builder's retry warning stays gone once you close it or edit the form yourself.",
+          "Tasks picked up but never delivered to your computer go back to the queue instead of getting stuck.",
+          "Resuming in a local folder no longer replays committed changes as drafts, and keeps your other drafts.",
+          "Cache cleanup no longer deletes tracked folders like .next, or Git checkouts inside them.",
+          "Claude Sonnet 5.5 and Haiku 5.5 runs now show an estimated cost.",
+          "Arabic, Hebrew, and other right-to-left text reads in the right order, even with English mixed in.",
+        ],
+      },
+      {
+        version: "0.6.2",
+        date: "2026-10-13",
+        title: "Text and link list properties, workspace switching in Cmd+K, one-click starters, and steadier runs",
+        changes: [],
+        features: [
+          "Custom properties can hold a list of text or links, and be filtered by exact value.",
+          "Press Cmd/Ctrl+K to switch to another workspace.",
+          "On desktop, switching workspace brings back the tab you last had open there.",
+          "Clicking a conversation starter in an empty chat sends it right away, and never overwrites a draft.",
+          "Turn on start-at-login for your local daemon from the command line; it stays off until you do.",
+        ],
+        improvements: [
+          "The Issues list loads its first page faster.",
+          "Desktop navigation and the tab bar now line up.",
+        ],
+        fixes: [
+          "Long Codex threads continue across local folders, and rate limits no longer stall a run.",
+          "The Codex CLI inside ChatGPT.app is detected.",
+          "Pi tasks get the MCP servers you configured.",
+          "Failed Pi and Kimi runs show as failed instead of finishing quietly.",
+          "Antigravity keeps its answer even when the connection drops right at the end.",
+          "A CodeBuddy startup error no longer stops runs already in progress.",
+          "Oh My Pi starts a fresh session when asked, instead of resuming the old one.",
+          "Tasks on Windows keep access to the system temp folder.",
+          "Tasks are no longer cut off as unresponsive after your computer wakes from sleep.",
+          "The local daemon recovers even when its health-check port is taken.",
+          "Hermes picks up its earlier session across local folders.",
+          "Busy Autopilot schedules no longer go silent, and runs keep their Autopilot attribution.",
+          "PR wakeups no longer miss a change, and explain problems they can recover from.",
+          "Lark clears its Typing reaction once the task ends.",
+          "WeCom Issue notifications come from the bot of the agent doing the work.",
+          "Issue prefixes that contain digits show up in search.",
+          "Editing a project at the same time as someone else no longer wipes their fields.",
+          "Follow-ups sent while a chat is still loading are no longer lost.",
+          "Plain attachment download links keep working, and text steps in run details are labeled correctly.",
+          "Server errors no longer expose internal error details.",
+        ],
+      },
       {
         version: "0.6.1",
         date: "2026-10-01",

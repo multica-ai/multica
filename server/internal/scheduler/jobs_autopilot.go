@@ -218,8 +218,8 @@ func autopilotScopes(
 }
 
 // autopilotPlansForScope returns the PlansForScope hook that computes
-// every cron occurrence in (lastPlan, dbNow], keeps only the most recent
-// one, and rejects it if it is outside the dispatch-lateness window.
+// the cron occurrences in (lastPlan, dbNow] that are still inside the
+// dispatch-lateness window, and keeps only the most recent one.
 // The latest-only collapse prevents a long outage from replaying every
 // missed slot; the lateness guard prevents a paused / newly eligible
 // trigger from firing hours after its configured time.
@@ -235,7 +235,6 @@ func autopilotScopes(
 func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 	ctx context.Context, scope Scope, now time.Time, latest LatestPlanInfo,
 ) ([]time.Time, error) {
-	const replayWindow = 24 * time.Hour
 	return func(ctx context.Context, scope Scope, now time.Time, latest LatestPlanInfo) ([]time.Time, error) {
 		cfg, ok := cache.get(scope.ID)
 		if !ok {
@@ -280,8 +279,7 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 		//      created_at so only occurrences after the trigger
 		//      existed are enumerated.
 		//
-		// Each case feeds into a final safety cap that prevents
-		// enumerating more than `replayWindow` of history at once.
+		// Each case feeds into a final floor at the lateness window.
 		var after time.Time
 		switch {
 		case latest.Found:
@@ -291,13 +289,11 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 		default:
 			after = cfg.CreatedAt
 		}
-		// Bound replay by CatchUpWindow so a long pause / dormant
-		// trigger does not enumerate millions of historical buckets.
-		// `after` is normally already recent (either latest.PlanTime
-		// or last_fired_at); the cap only matters for the unusual
-		// "trigger created weeks ago but never fired" path.
-		if oldest := now.Add(-replayWindow); after.Before(oldest) {
-			after = oldest
+		// Enumerate only dispatchable history so the 1024-entry cap cannot
+		// hide recent occurrences after a long pause. Subtract 1ns because
+		// enumeration excludes `after`, but the lateness bound is inclusive.
+		if floor := now.Add(-maxAutopilotScheduleLateness); after.Before(floor) {
+			after = floor.Add(-time.Nanosecond)
 		}
 
 		occs, err := service.NextOccurrencesUTC(cfg.CronExpression, cfg.Timezone, after, now)

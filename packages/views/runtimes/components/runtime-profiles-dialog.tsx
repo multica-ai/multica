@@ -248,9 +248,7 @@ export function RuntimeProfilesDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Master list — custom profiles first, built-in families as collapsed reference.
-// ---------------------------------------------------------------------------
 
 function CatalogList({
   catalog,
@@ -472,10 +470,8 @@ function CatalogRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Detail panel — adaptive: built-in is read-only, custom shows fields +
 // Edit / Delete.
-// ---------------------------------------------------------------------------
 
 function DetailPanel({
   entry,
@@ -636,9 +632,7 @@ function DetailRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create / edit form.
-// ---------------------------------------------------------------------------
 
 function ProfileFormView({
   wsId,

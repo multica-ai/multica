@@ -132,6 +132,13 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueWorkflow,
+  IssueWorkflowWriteRequest,
+  IssueWorkflowDryRunResponse,
+  ListIssueWorkflowsResponse,
+  SetProjectWorkflowRequest,
+  SetWorkflowHandoffRequest,
+  WorkflowHandoffPreview,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -407,6 +414,15 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
+  ListIssueWorkflowsResponseSchema,
+  IssueWorkflowSchema,
+  IssueWorkflowDryRunResponseSchema,
+  EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE,
+  EMPTY_ISSUE_WORKFLOW,
+  EMPTY_ISSUE_WORKFLOW_DRY_RUN,
+  WorkflowHandoffPreviewSchema,
+  EMPTY_WORKFLOW_HANDOFF_PREVIEW,
+  IssueWorkflowBriefPreviewSchema,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -1403,7 +1419,10 @@ export class ApiClient {
     return issue;
   }
 
-  async createIssue(data: CreateIssueRequest): Promise<Issue> {
+  async createIssue(
+    data: CreateIssueRequest,
+    workspaceSlug?: string,
+  ): Promise<Issue> {
     const requestedProperties = requestedIssueCreateProperties(data);
     if (requestedProperties) {
       const config = await this.getConfig();
@@ -1424,6 +1443,7 @@ export class ApiClient {
     // render its localized "failed to create" toast.
     const raw = await this.fetch<unknown>("/api/issues", {
       method: "POST",
+      headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
     });
     const issue = parseWithFallback<Issue | null>(raw, CreateIssueResponseSchema, null, {
@@ -2054,12 +2074,10 @@ export class ApiClient {
     });
   }
 
-  // ---------------------------------------------------------------------
   // Cloud Billing — proxies to multica-cloud /api/v1/billing/*. The
   // multica-api server stamps X-User-ID and forwards bytes; everything
   // here is upstream-shaped. See packages/core/types/billing.ts for the
   // response field documentation.
-  // ---------------------------------------------------------------------
 
   async getCloudBillingBalance(): Promise<BillingBalance> {
     const raw = await this.fetch<unknown>("/api/cloud-billing/balance");
@@ -2183,7 +2201,6 @@ export class ApiClient {
     );
   }
 
-  // ---------------------------------------------------------------------
   // Workspace subscriptions — the server resolves the workspace from the
   // authenticated request context, so no caller names one.
   //
@@ -2193,7 +2210,6 @@ export class ApiClient {
   //   - non-2xx (older cloud without the route, 403, 503) throws ApiError from
   //     `fetch`, so a React Query caller sees `isError`;
   //   - a 2xx body that does not match the contract returns null here.
-  // ---------------------------------------------------------------------
 
   async getWorkspaceSubscriptionSummary(): Promise<WorkspaceSubscriptionSummary | null> {
     const raw = await this.fetch<unknown>("/api/cloud-subscriptions/summary");
@@ -2375,10 +2391,8 @@ export class ApiClient {
     });
   }
 
-  // ---------------------------------------------------------------------
   // Custom runtime profiles (MUL-3284). All workspace-scoped: the caller
   // passes the workspace id the same way the runtimes list resolves it.
-  // ---------------------------------------------------------------------
 
   async listRuntimeProfiles(workspaceId: string): Promise<RuntimeProfile[]> {
     const res = await this.fetch<{ runtime_profiles?: RuntimeProfile[] }>(
@@ -2520,12 +2534,10 @@ export class ApiClient {
     );
   }
 
-  // ---------------------------------------------------------------------------
   // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
   // Each accepts an optional `project_id` to narrow the scope to one project.
   // Cost is computed client-side from the model pricing table (same contract
   // as the per-runtime endpoints above).
-  // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
     params: { days?: number; project_id?: string | null; tz?: string },
@@ -3947,6 +3959,15 @@ export class ApiClient {
     });
   }
 
+  // The Markdown download path resolves the attachment's own workspace and
+  // checks membership there. Its link may be pasted into another workspace.
+  async getAttachmentForDownload(id: string): Promise<Attachment> {
+    const raw = await this.fetch<unknown>(`/api/attachments/${id}/download-metadata`);
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "GET /api/attachments/{id}/download-metadata",
+    });
+  }
+
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
   }
@@ -4109,6 +4130,135 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Workspace workflows (MUL-7420). Reads are open to any workspace member;
+  // creating, editing and deleting a workflow is owner/admin only. Adoption
+  // (creating a workflow, pointing a project at one) is gated server-side by
+  // the project_workflows_v1 flag and returns 403 when it is off.
+  async listIssueWorkflows(): Promise<ListIssueWorkflowsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows`);
+    return parseWithFallback(raw, ListIssueWorkflowsResponseSchema, EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE, {
+      endpoint: "GET /api/issue-workflows",
+    });
+  }
+
+  async createIssueWorkflow(data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "POST /api/issue-workflows",
+    });
+  }
+
+  /**
+   * Saves a workflow edit. When the edit removes statuses that issues of the
+   * workflow's projects still use, the server answers 409
+   * `workflow_status_mapping_required` with a plan; resend with
+   * `status_mapping`. `dryRunIssueWorkflowUpdate` fetches that plan up front.
+   */
+  async updateIssueWorkflow(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...data, dry_run: false }),
+    });
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "PATCH /api/issue-workflows/{id}",
+    });
+  }
+
+  async dryRunIssueWorkflowUpdate(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflowDryRunResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...data, dry_run: true }),
+    });
+    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
+      endpoint: "PATCH /api/issue-workflows/{id} (dry run)",
+    });
+  }
+
+  async deleteIssueWorkflow(id: string): Promise<void> {
+    await this.fetch(`/api/issue-workflows/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Renders the brief a column's handler would receive, from an unsaved
+   * handoff. `project_id` names the project the preview is for, if any.
+   */
+  async previewWorkflowBrief(
+    workflowId: string,
+    data: SetWorkflowHandoffRequest & { status_key: string; project_id?: string },
+  ): Promise<string> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/brief`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = parseWithFallback(raw, IssueWorkflowBriefPreviewSchema, { brief: "" }, {
+      endpoint: "POST /api/issue-workflows/{id}/brief",
+    });
+    return parsed.brief;
+  }
+
+  /**
+   * Saves a workflow's handoff for one column, for every project using it;
+   * handler "none" clears it. With `copyForProjectId` the workflow stays as
+   * it is: the handoff lands on a copy that project switches to, and the copy
+   * is returned. Admin only.
+   */
+  async setWorkflowHandoff(
+    workflowId: string,
+    statusKey: string,
+    data: SetWorkflowHandoffRequest,
+    copyForProjectId?: string,
+  ): Promise<IssueWorkflow> {
+    const body = copyForProjectId ? { ...data, copy_for_project_id: copyForProjectId } : data;
+    const raw = await this.fetch<unknown>(
+      `/api/issue-workflows/${workflowId}/handoffs/${encodeURIComponent(statusKey)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "PUT /api/issue-workflows/{id}/handoffs/{status}",
+    });
+  }
+
+  /**
+   * What moving an issue to `status` would do under its project's workflow:
+   * who it goes to, the current agent's active runs, and the brief. Writes
+   * nothing; a status outside the workflow answers 400. With `projectId` it
+   * previews moving the issue into that project instead, entering the column
+   * it lands on (`status` may then be empty).
+   */
+  async previewWorkflowHandoff(issueId: string, status: string, projectId?: string): Promise<WorkflowHandoffPreview> {
+    const query = new URLSearchParams();
+    if (status) query.set("status", status);
+    if (projectId) query.set("project_id", projectId);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/workflow-handoff?${query.toString()}`);
+    return parseWithFallback(raw, WorkflowHandoffPreviewSchema, EMPTY_WORKFLOW_HANDOFF_PREVIEW, {
+      endpoint: "GET /api/issues/{id}/workflow-handoff",
+    });
+  }
+
+  /**
+   * Switches a project's workflow; issues on unlisted statuses need a mapping.
+   * Callers refetch the project and its issues, so the response is not read.
+   */
+  async setProjectWorkflow(projectId: string, data: SetProjectWorkflowRequest): Promise<void> {
+    await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ ...data, dry_run: false }),
+    });
+  }
+
+  async dryRunProjectWorkflow(projectId: string, workflowId: string | null): Promise<IssueWorkflowDryRunResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ workflow_id: workflowId, dry_run: true }),
+    });
+    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
+      endpoint: "POST /api/projects/{id}/workflow (dry run)",
+    });
   }
 
   // Issue status catalog (MUL-6243). Reads are open to any workspace member;

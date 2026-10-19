@@ -36,9 +36,7 @@ import {
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
 
-// ---------------------------------------------------------------------------
 // Delete dialog — single row (kebab) and batch share one implementation.
-// ---------------------------------------------------------------------------
 
 export function DeleteAutopilotsDialog({
   rows,
@@ -119,9 +117,7 @@ export function DeleteAutopilotsDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Status helpers shared by kebab and batch toolbar.
-// ---------------------------------------------------------------------------
 
 function useSetStatus() {
   const updateAutopilot = useUpdateAutopilot();
@@ -137,12 +133,10 @@ function useSetStatus() {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Row kebab — the row is a plain `<div>` whose whole-row navigation is a mouse
 // `onClick` (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops
 // click propagation so opening this menu never navigates the row — just
 // stopPropagation, no preventDefault (same pattern as the skills list).
-// ---------------------------------------------------------------------------
 
 export function AutopilotRowActions({ row }: { row: Autopilot }) {
   const { t } = useT("autopilots");
@@ -221,9 +215,7 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar
-// ---------------------------------------------------------------------------
 
 export function AutopilotBatchToolbar({
   rows,

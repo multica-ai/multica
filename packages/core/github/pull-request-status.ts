@@ -21,9 +21,7 @@ import type {
 // fields; each rule defaults defensively (`?? 0`, `?? []`, explicit `=== "..."`
 // checks) so an absent field never fabricates a positive verdict.
 
-// ---------------------------------------------------------------------------
 // CI status
-// ---------------------------------------------------------------------------
 
 // Discriminated union for the CI element. `none` is a current snapshot with no
 // checks; `unavailable` means there is no current snapshot region to render.
@@ -94,9 +92,7 @@ export function deriveChecksStatus(input: PullRequestChecksInput): PullRequestCh
   return input.snapshot_available === true ? { kind: "none" } : { kind: "unavailable" };
 }
 
-// ---------------------------------------------------------------------------
 // Mergeability
-// ---------------------------------------------------------------------------
 
 // Discriminated union for the mergeability element. `none` renders nothing:
 // when GitHub has not decided (mergeable unknown/null and no decisive
@@ -141,9 +137,7 @@ export function deriveMergeStatus(input: PullRequestMergeInput): PullRequestMerg
   return { kind: "none" };
 }
 
-// ---------------------------------------------------------------------------
 // Diff stats
-// ---------------------------------------------------------------------------
 
 export interface PullRequestStatsInput {
   additions?: number;
@@ -163,9 +157,7 @@ export function shouldShowPullRequestStats(input: PullRequestStatsInput): boolea
   return a + d + f > 0;
 }
 
-// ---------------------------------------------------------------------------
 // Row verdict
-// ---------------------------------------------------------------------------
 
 // The one thing the sidebar row says about a PR: what stands between it and a
 // merge, or how it ended. `failed` carries the failing check names and whether
@@ -224,9 +216,7 @@ export function derivePullRequestVerdict(input: PullRequestVerdictInput): PullRe
   return { kind: "unknown" };
 }
 
-// ---------------------------------------------------------------------------
 // Row copy
-// ---------------------------------------------------------------------------
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

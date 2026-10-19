@@ -5,17 +5,9 @@ import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
 import { isReservedSlug } from "@multica/core/paths";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-//
-// MUL-4741 Phase 2: tabs are *sessions*, not routers. A TabSession is pure
-// serializable state — URL, identity, virtual history, and a memento of
-// restorable view state. The single app router is a projection of the active
-// session, driven exclusively by the tab Coordinator (src/platform/
-// tab-coordinator.ts) which subscribes to this store and reconciles the
-// router to `activeSession.url` with a navigation token. Nothing in this
-// file touches react-router.
+// Tab sessions hold serializable URLs, identity, virtual history, and view
+// mementos. The coordinator projects the active session onto the single router;
+// this store does not operate the router.
 
 /**
  * One captured scroll position.
@@ -293,9 +285,7 @@ interface TabStore {
   reset: () => void;
 }
 
-// ---------------------------------------------------------------------------
 // Session identity helpers
-// ---------------------------------------------------------------------------
 //
 // A tab's icon is NOT part of this model. It is derived from `tab.url` at
 // render time via `routeIconForPath` (@multica/views/layout), which shares the
@@ -312,9 +302,7 @@ function extractWorkspaceSlug(path: string): string | null {
   return first;
 }
 
-// ---------------------------------------------------------------------------
 // URL helpers
-// ---------------------------------------------------------------------------
 
 /** Split a tab URL into pathname and the search+hash suffix. */
 export function splitTabUrl(url: string): { pathname: string; suffix: string } {
@@ -405,9 +393,7 @@ export function sanitizeTabPath(path: string): string | null {
   return path;
 }
 
-// ---------------------------------------------------------------------------
 // Session factory
-// ---------------------------------------------------------------------------
 
 function createId(): string {
   return createSafeId();
@@ -618,9 +604,7 @@ function normalizeBrowsingHistoryTitles(
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Group helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Build a group with its MRU order reconciled against the new (tabs,
@@ -711,9 +695,7 @@ function buildCloseOtherTabsResult(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Store
-// ---------------------------------------------------------------------------
 
 export const useTabStore = create<TabStore>()(
   persist(
@@ -1497,9 +1479,7 @@ function setHistoryIndex(
   });
 }
 
-// ---------------------------------------------------------------------------
 // Persisted shapes (for migration)
-// ---------------------------------------------------------------------------
 
 interface V1Tab {
   id: string;
@@ -1711,9 +1691,7 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
   return { activeWorkspaceSlug, byWorkspace };
 }
 
-// ---------------------------------------------------------------------------
 // Selectors (convenience hooks)
-// ---------------------------------------------------------------------------
 
 /**
  * Pure non-hook helper — useful from event handlers / effects that already

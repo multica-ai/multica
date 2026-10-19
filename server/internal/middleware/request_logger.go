@@ -110,6 +110,10 @@ var softNotFoundMarkers = []string{
 	"task not found",
 }
 
+// StatusClientClosedRequest identifies a request abandoned by its client. It is
+// distinct from both a successful response and a server-side failure.
+const StatusClientClosedRequest = 499
+
 // RequestLogger is a structured HTTP request logger using slog.
 // It replaces Chi's built-in chimw.Logger with colored, structured output.
 func RequestLogger(next http.Handler) http.Handler {
@@ -164,6 +168,8 @@ func RequestLogger(next http.Handler) http.Handler {
 		switch {
 		case status >= 500:
 			slog.Error("http request", attrs...)
+		case status == StatusClientClosedRequest:
+			slog.Info("http request", attrs...)
 		case status == http.StatusNotFound && isSoftNotFound(bodyPrefix.Bytes()):
 			// Lifecycle 404 — runtime/task was deleted server-side. The daemon
 			// catches this exact body and triggers its own self-heal, so it is

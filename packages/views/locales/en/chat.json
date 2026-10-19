@@ -168,7 +168,9 @@
       "label": "Recommend an action",
       "prompt": "Review what you know about my workspace and recommend a useful first action."
     },
-    "customize": "Customize starters"
+    "customize": "Customize starters",
+    "uploading": "Wait for uploads to finish before using a starter.",
+    "draft_in_progress": "Send or clear your draft before using a starter."
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",

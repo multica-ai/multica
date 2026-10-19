@@ -75,9 +75,7 @@ import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Canonical comparison form for a markdown string: drop the blank lines a
  *  block leaves behind at either end, so both sides of a dirty check compare
@@ -115,9 +113,16 @@ function hasUploadingNode(editor: Editor): boolean {
   return found;
 }
 
-// ---------------------------------------------------------------------------
+/** Inside a NodeView's own controls, which handle their clicks. The editable
+ *  content a NodeView hosts (a table's cells) is not: its links are the
+ *  editor's, unless they sit in a NodeView of their own (a mention). */
+function isInNodeViewChrome(target: HTMLElement): boolean {
+  const wrapper = target.closest("[data-node-view-wrapper]");
+  const content = target.closest("[data-node-view-content-react]");
+  return wrapper !== null && !(content !== null && wrapper.contains(content));
+}
+
 // Types
-// ---------------------------------------------------------------------------
 
 interface ContentEditorBaseProps {
   /**
@@ -352,9 +357,7 @@ interface ContentEditorRef {
   adoptContent: (markdown: string) => void;
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
   function ContentEditor(
@@ -647,7 +650,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           click(_view, event) {
             const target = event.target as HTMLElement;
             // Skip links inside NodeView wrappers — they handle their own clicks
-            if (target.closest("[data-node-view-wrapper]")) return false;
+            if (isInNodeViewChrome(target)) return false;
 
             const link = target.closest("a");
             const href = link?.getAttribute("href");
@@ -668,7 +671,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           auxclick(_view, event) {
             if (event.button !== 1) return false;
             const target = event.target as HTMLElement;
-            if (target.closest("[data-node-view-wrapper]")) return false;
+            if (isInNodeViewChrome(target)) return false;
             const href = target.closest("a")?.getAttribute("href");
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();

@@ -170,6 +170,24 @@ describe("unread filtering", () => {
       filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, unreadOnly: true }),
     ).toEqual(rows);
   });
+
+  it("keeps the open notification visible after opening marks it read", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, unreadOnly: true };
+    const opened = item("opened", "todo", "high", { read: true });
+    const read = item("read", "todo", "high", { read: true });
+
+    expect(
+      filterInboxItems([opened, read], filters, "issue-opened").map(
+        (candidate) => candidate.id,
+      ),
+    ).toEqual(["opened"]);
+
+    // Pinning only crosses the unread dimension: an explicit issue filter
+    // still removes the open row, and the page clears its selection.
+    expect(
+      filterInboxItems([opened], { ...filters, statuses: ["done"] }, "issue-opened"),
+    ).toEqual([]);
+  });
 });
 
 describe("inboxPriorityFilterSupport", () => {

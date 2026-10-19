@@ -79,7 +79,11 @@
       "cancelled": "Abandonné."
     },
     "pr_auto_complete_badge": "Définie à la fusion des PR",
-    "built_in_locked": "Les états intégrés pilotent le comportement du système : ils ne peuvent être ni modifiés ni archivés, mais vous pouvez les réordonner."
+    "built_in_locked": "Les états intégrés pilotent le comportement du système : ils ne peuvent être ni modifiés ni archivés, mais vous pouvez les réordonner.",
+    "builtin_badge": "Intégré",
+    "workflow_usage_one": "{{count}} workflow l’utilise",
+    "workflow_usage_other": "{{count}} workflows l’utilisent",
+    "workflow_usage_none": "Dans aucun workflow"
   },
   "wakeups": {
     "description": "Règles de la plateforme appliquées à chaque tâche. Chaque tâche peut les modifier dans sa section Réveils.",
@@ -406,7 +410,8 @@
       "billing": "Facturation",
       "code": "Code",
       "channels": "Messagerie",
-      "apps": "Applications connectées"
+      "apps": "Applications connectées",
+      "workflows": "Workflows"
     },
     "groups": {
       "personal": "Personnel",

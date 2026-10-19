@@ -61,6 +61,7 @@ import {
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { PillButton } from "../common/pill-button";
+import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
 import {
   GithubRefField,
@@ -311,6 +312,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setLocalMode(null);
   };
 
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
+
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
   const updateStatus = (v: ProjectStatus) => { setStatus(v); setDraft({ status: v }); };
@@ -395,6 +398,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
+        ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -610,6 +614,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <WorkflowPill value={workflowId} onChange={setWorkflowId} />
 
           <Popover
             open={leadOpen}

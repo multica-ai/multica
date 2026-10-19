@@ -233,7 +233,7 @@ export function AgentBatchToolbar({
       {rows.length > 0 && <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="break-all">
               {t(($) => $.row_actions.archive_dialog_title, {
                 name:
                   rows.length === 1 && rows[0]

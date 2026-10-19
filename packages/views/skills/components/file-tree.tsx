@@ -42,9 +42,7 @@ export interface FileTreeActions {
   reservedPath: string;
 }
 
-// ---------------------------------------------------------------------------
 // Tree data structures
-// ---------------------------------------------------------------------------
 
 interface FileTreeNode {
   name: string;
@@ -104,9 +102,7 @@ function getFileIcon(name: string) {
   return File;
 }
 
-// ---------------------------------------------------------------------------
 // Tree node renderer
-// ---------------------------------------------------------------------------
 
 function TreeNodeItem({
   node,
@@ -341,9 +337,7 @@ function RenameRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Public component
-// ---------------------------------------------------------------------------
 
 export function FileTree({
   filePaths,

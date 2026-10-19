@@ -140,7 +140,6 @@ export class DaemonRecoveryPolicy {
 
 export interface RecoveryProfile {
   name: string;
-  port: number;
 }
 
 export interface DaemonLifecycleResult {
@@ -214,8 +213,7 @@ export function recoveryStartAllowed(input: {
     input.desiredRunning &&
       !input.externalDaemonObserved &&
       input.current &&
-      input.current.name === input.expected.name &&
-      input.current.port === input.expected.port,
+      input.current.name === input.expected.name,
   );
 }
 

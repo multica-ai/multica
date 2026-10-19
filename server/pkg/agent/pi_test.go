@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,6 +37,12 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 			t.Errorf("expected %q in args, got: %v", want, args)
 		}
 	}
+	if got := countArg(args, "--approve"); got != 0 {
+		t.Errorf("--approve count = %d, want 0 in %v", got, args)
+	}
+	if countArg(args, "--extension") != 0 {
+		t.Errorf("extension flag without a managed config: %v", args)
+	}
 
 	for _, arg := range args {
 		if arg == "hello world" {
@@ -47,6 +54,46 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 // Pi reads the per-task AGENTS.md the daemon writes into the workdir, so the
 // daemon never populates SystemPrompt for it (providerNeedsInlineSystemPrompt).
 // Forwarding it anyway would duplicate the whole runtime brief on every turn.
+func TestBuildPiArgsPreservesProjectTrustFlags(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{
+		CustomArgs: []string{"--no-approve", "-a", "--approve", "-na", "--offline"},
+	}, slog.Default())
+
+	for _, kept := range []string{"--no-approve", "-a", "--approve", "-na", "--offline"} {
+		if countArg(args, kept) != 1 {
+			t.Errorf("custom %s missing from %v", kept, args)
+		}
+	}
+}
+
+func TestBuildPiArgsAppendsMcpExtension(t *testing.T) {
+	extensionPath := "/tmp/multica-pi-mcp-test/mcp-extension.mjs"
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{
+		CustomArgs:         []string{"--offline", "--approve"},
+		piMcpExtensionPath: extensionPath,
+	}, slog.Default())
+
+	if countArg(args, "--approve") != 1 {
+		t.Fatalf("custom --approve missing from %v", args)
+	}
+	if len(args) < 2 || args[len(args)-2] != "--extension" || args[len(args)-1] != extensionPath {
+		t.Fatalf("args = %v, want --extension %s at the end", args, extensionPath)
+	}
+	if countArg(args, "--offline") != 1 {
+		t.Fatalf("custom --offline missing from %v", args)
+	}
+}
+
+func countArg(args []string, want string) int {
+	n := 0
+	for _, arg := range args {
+		if arg == want {
+			n++
+		}
+	}
+	return n
+}
+
 func TestBuildPiArgsIgnoresSystemPrompt(t *testing.T) {
 	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{
 		SystemPrompt: "the entire multica runtime brief",
@@ -1011,5 +1058,233 @@ func TestBuildPiArgsBareAndEmptyModels(t *testing.T) {
 		if arg == "--model" {
 			t.Errorf("blank model should omit --model so pi picks its default: %v", empty)
 		}
+	}
+}
+
+func TestWritePiMcpExtensionIsolatesRegistrationErrorsAndLeavesProjectFile(t *testing.T) {
+	workDir := t.TempDir()
+	projectPath := filepath.Join(workDir, ".pi", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := []byte(`{"mcpServers":{"user":{"command":"echo"}}}`)
+	if err := os.WriteFile(projectPath, existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := json.RawMessage(`{
+		"mcpServers": {
+			"probe": {"command": "echo", "args": ["hi"]},
+			"remote": {"type": "http", "url": "http://127.0.0.1:12345/mcp"},
+			"bad name": {"command": "nope"},
+			"legacy": {"type": "sse", "url": "http://example.invalid"},
+			"bad-shape": "not-an-object"
+		}
+	}`)
+	path, err := writePiMcpExtension(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path == "" {
+		t.Fatal("expected an extension file")
+	}
+	t.Cleanup(func() { removePiMcpExtension(path) })
+
+	if !strings.HasPrefix(filepath.Base(filepath.Dir(path)), piMcpExtensionDirPrefix) {
+		t.Fatalf("extension dir = %s, want %s prefix", path, piMcpExtensionDirPrefix)
+	}
+	if filepath.Base(path) != "mcp-extension.mjs" {
+		t.Fatalf("extension file = %s", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("extension mode = %o, want 600", info.Mode().Perm())
+	}
+	script, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	for _, want := range []string{
+		"registerMcpServer", "probe", "echo", "remote", `\"type\":\"http\"`,
+		"127.0.0.1:12345/mcp", "bad name", "legacy", "bad-shape", "try {", "catch (error)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("script missing %q:\n%s", want, text)
+		}
+	}
+	if !strings.Contains(text, "could not register MCP server") {
+		t.Fatalf("script does not report isolated registration failures:\n%s", text)
+	}
+
+	data, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(existing) {
+		t.Fatalf("project mcp.json changed to %s", data)
+	}
+
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{piMcpExtensionPath: path}, slog.Default())
+	if len(args) < 2 || args[len(args)-2] != "--extension" || args[len(args)-1] != path {
+		t.Fatalf("args = %v, want extension %s", args, path)
+	}
+	if countArg(args, "--approve") != 0 {
+		t.Fatalf("--approve present in %v", args)
+	}
+}
+
+func TestWritePiMcpExtensionSkipsUnmanagedAndEmpty(t *testing.T) {
+	for _, raw := range []json.RawMessage{
+		nil,
+		json.RawMessage("null"),
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{}}`),
+		json.RawMessage(`{"mcpServers":null}`),
+	} {
+		path, err := writePiMcpExtension(raw)
+		if err != nil {
+			t.Fatalf("writePiMcpExtension(%s): %v", raw, err)
+		}
+		if path != "" {
+			removePiMcpExtension(path)
+			t.Fatalf("writePiMcpExtension(%s) wrote %s", raw, path)
+		}
+	}
+}
+
+func TestPreparePiMcpExtensionRejectsOldBuiltinOnlyWhenServersPresent(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	raw := json.RawMessage(`{"mcpServers":{"probe":{"command":"echo"}}}`)
+	backend := &piBackend{
+		providerLabel: "pi",
+		cfg: Config{
+			BuiltinRuntime: true,
+			CLIVersion:     "pi 0.87.1",
+		},
+	}
+
+	for _, empty := range []json.RawMessage{
+		nil,
+		json.RawMessage("null"),
+		json.RawMessage(`{}`),
+		json.RawMessage(`{"mcpServers":{}}`),
+		json.RawMessage(`{"mcpServers":null}`),
+	} {
+		path, err := backend.preparePiMcpExtension(empty)
+		if err != nil || path != "" {
+			t.Fatalf("empty config %s on old Pi = (%q, %v), want no extension and no error", empty, path, err)
+		}
+	}
+	path, err := backend.preparePiMcpExtension(raw)
+	if err == nil {
+		removePiMcpExtension(path)
+		t.Fatal("managed MCP config was accepted by Pi below the MCP minimum")
+	}
+	for _, want := range []string{"0.87.1", piMcpMinVersion, "upgrade"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("old Pi error %q missing %q", err, want)
+		}
+	}
+	matches, globErr := filepath.Glob(filepath.Join(os.Getenv("TMPDIR"), piMcpExtensionDirPrefix+"*"))
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("old Pi rejection leaked extension directories: %v", matches)
+	}
+}
+
+func TestPreparePiMcpExtensionRejectsUnverifiableBuiltinVersion(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	raw := json.RawMessage(`{"mcpServers":{"probe":{"command":"echo"}}}`)
+
+	for _, version := range []string{"", "development-build"} {
+		backend := &piBackend{
+			providerLabel: "pi",
+			cfg: Config{
+				BuiltinRuntime: true,
+				CLIVersion:     version,
+			},
+		}
+		path, err := backend.preparePiMcpExtension(raw)
+		if err == nil {
+			removePiMcpExtension(path)
+			t.Fatalf("builtin Pi version %q accepted managed MCP config", version)
+		}
+		for _, want := range []string{piMcpMinVersion, "could not verify", "upgrade"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("unverifiable Pi error %q missing %q", err, want)
+			}
+		}
+	}
+
+	matches, err := filepath.Glob(filepath.Join(os.Getenv("TMPDIR"), piMcpExtensionDirPrefix+"*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("unverifiable Pi rejection leaked extension directories: %v", matches)
+	}
+}
+
+func TestPreparePiMcpExtensionAllowsSupportedBuiltinAndCustomProtocol(t *testing.T) {
+	raw := json.RawMessage(`{"mcpServers":{"probe":{"command":"echo"}}}`)
+	for _, tc := range []struct {
+		name    string
+		backend piBackend
+	}{
+		{
+			name: "supported builtin",
+			backend: piBackend{providerLabel: "pi", cfg: Config{
+				BuiltinRuntime: true,
+				CLIVersion:     piMcpMinVersion,
+			}},
+		},
+		{
+			name: "custom protocol implementation",
+			backend: piBackend{providerLabel: "pi", cfg: Config{
+				BuiltinRuntime: false,
+				CLIVersion:     "0.1.0",
+			}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := tc.backend.preparePiMcpExtension(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if path == "" {
+				t.Fatal("expected MCP extension path")
+			}
+			removePiMcpExtension(path)
+		})
+	}
+}
+
+func TestRemovePiMcpExtensionIgnoresOtherPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp-extension.mjs")
+	if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removePiMcpExtension(path)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("unrelated extension file was removed: %v", err)
+	}
+}
+
+func TestPreparePiMcpExtensionSkipsOmp(t *testing.T) {
+	backend := &piBackend{providerLabel: "omp"}
+	path, err := backend.preparePiMcpExtension(json.RawMessage(`{"mcpServers":{"probe":{"command":"echo"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "" {
+		removePiMcpExtension(path)
+		t.Fatalf("omp wrote a pi extension at %s", path)
 	}
 }

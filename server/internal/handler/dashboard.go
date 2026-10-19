@@ -9,7 +9,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// ---------------------------------------------------------------------------
 // Workspace / Project dashboard
 //
 // Six read endpoints power the workspace dashboard:
@@ -43,7 +42,6 @@ import (
 // token spend / run time / failure volume are workspace-level operational
 // metrics. The three per-AGENT rollups additionally apply per-agent visibility:
 // see foldRestrictedAgents.
-// ---------------------------------------------------------------------------
 
 // restrictedAgentsRowID is the synthetic agent_id that every row this response
 // refuses to name is folded onto. Deliberately not a UUID, so it can never
@@ -509,7 +507,6 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // Failure rollups
 //
 // Both endpoints return EVERY terminal task, not just the failed ones: the
@@ -525,7 +522,6 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 // column. The client folds them into a handful of display classes; the raw
 // reason stays on the wire so that mapping can change without a backend
 // deploy.
-// ---------------------------------------------------------------------------
 
 // DashboardFailureDailyResponse is one (date, failure_reason) bucket of
 // terminal-task counts. FailureReason == "" is the succeeded bucket.

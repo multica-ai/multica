@@ -21,6 +21,42 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useBatchDeleteIssues: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+const { WORKFLOWS, PROJECTS } = vi.hoisted(() => {
+  const workflow = (id: string, isDefault: boolean, keys: string[]) => ({
+    id,
+    workspace_id: "ws-1",
+    name: id,
+    description: "",
+    is_default: isDefault,
+    steps: keys.map((status_key) => ({ status_key, handler: { type: "none" }, instructions: "" })),
+    project_ids: [],
+    created_at: "",
+    updated_at: "",
+  });
+  return {
+    WORKFLOWS: [
+      workflow("default", true, ["todo", "in_progress", "done"]),
+      workflow("dev", false, ["todo", "in_progress", "code_review", "done"]),
+      workflow("design", false, ["todo", "mockup", "done"]),
+    ],
+    PROJECTS: [
+      { id: "p-dev", workflow_id: "dev" },
+      { id: "p-design", workflow_id: "design" },
+      { id: "p-default", workflow_id: null },
+    ],
+  };
+});
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/issue-workflows", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issue-workflows")>()),
+  useIssueWorkflows: () => ({ workflows: WORKFLOWS }),
+}));
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: PROJECTS }),
+}));
+
 vi.mock("../../i18n", () => ({
   useT: () => ({ t: () => "label" }),
 }));
@@ -28,8 +64,12 @@ vi.mock("../../i18n", () => ({
 // Render each picker as a probe that surfaces the value the toolbar passed in,
 // so the test asserts the wiring (real `commonIssueFields` runs underneath).
 vi.mock("./pickers", () => ({
-  StatusPicker: ({ status }: { status: string | null }) => (
-    <div data-testid="status-picker" data-status={status ?? "__none__"} />
+  StatusPicker: ({ status, allowedStatuses }: { status: string | null; allowedStatuses?: ReadonlySet<string> | null }) => (
+    <div
+      data-testid="status-picker"
+      data-status={status ?? "__none__"}
+      data-allowed={allowedStatuses ? [...allowedStatuses].sort().join(",") : "__all__"}
+    />
   ),
   PriorityPicker: ({ priority }: { priority: string | null }) => (
     <div data-testid="priority-picker" data-priority={priority ?? "__none__"} />
@@ -129,6 +169,28 @@ describe("BatchActionToolbar picker wiring", () => {
     expect(assignee).toHaveAttribute("data-mixed", "false");
     expect(assignee).toHaveAttribute("data-assignee-type", "__null__");
     expect(assignee).toHaveAttribute("data-assignee-id", "__null__");
+  });
+
+  it("offers only the statuses every selected project's workflow allows", () => {
+    const issues = [
+      makeIssue({ id: "a", project_id: "p-dev" }),
+      makeIssue({ id: "b", project_id: "p-design" }),
+      makeIssue({ id: "c", project_id: "p-default" }),
+    ];
+    selection.selectedIds = new Set(["a", "b", "c"]);
+
+    render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "done,todo");
+  });
+
+  it("offers every status when no selected issue has a named workflow", () => {
+    const issues = [makeIssue({ id: "a", project_id: "p-default" }), makeIssue({ id: "b" })];
+    selection.selectedIds = new Set(["a", "b"]);
+
+    render(<BatchActionToolbar issues={issues} />);
+
+    expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "__all__");
   });
 
   it("renders nothing when nothing is selected", () => {

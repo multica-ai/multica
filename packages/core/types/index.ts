@@ -10,6 +10,24 @@ export type {
   UpdateIssueStatusRequest,
 } from "./issue-status";
 export type {
+  IssueWorkflow,
+  IssueWorkflowHandler,
+  IssueWorkflowHandlerType,
+  IssueWorkflowStep,
+  ListIssueWorkflowsResponse,
+  IssueWorkflowWriteRequest,
+  IssueWorkflowMappingRequirement,
+  IssueWorkflowMappingPlan,
+  IssueWorkflowDryRunResponse,
+  SetProjectWorkflowRequest,
+  IssueWorkflowStatusCount,
+  WorkflowHandoffPreview,
+  WorkflowHandoffRun,
+  NewWorkflowStatus,
+  IssueWorkflowStepInput,
+  SetWorkflowHandoffRequest,
+} from "./issue-workflow";
+export type {
   Agent,
   AgentConversationStarter,
   AgentStatus,

@@ -138,9 +138,7 @@ function columnTrackVars(
   } as React.CSSProperties;
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function SquadAvatar({ squad }: { squad: Squad }) {
   const initials = squad.name
@@ -248,11 +246,9 @@ function MembersCell({ squad }: { squad: Squad }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Archive (= delete) dialog — reuses the existing archive_dialog copy.
 // Workspace owner/admin only (backend gate). No restore endpoint exists, so
 // once archived a squad is gone from the UI.
-// ---------------------------------------------------------------------------
 
 function ArchiveSquadDialog({
   squad,
@@ -372,9 +368,7 @@ function SquadRowActions({ squad }: { squad: Squad }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header + toolbar
-// ---------------------------------------------------------------------------
 
 function SquadListHeader({
   sortField,
@@ -766,9 +760,7 @@ function SquadListToolbar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export function SquadsPage() {
   const { t } = useT("squads");

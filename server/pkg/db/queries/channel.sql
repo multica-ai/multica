@@ -564,6 +564,39 @@ WHERE b.workspace_id = sqlc.arg('workspace_id')
 ORDER BY b.bound_at DESC
 LIMIT 1;
 
+-- name: FindChannelBindingForMemberOnAgentInstallation :one
+-- Agent-attributed notification lookup: the same member lookup as
+-- FindChannelBindingForMember, pinned to the ONE installation the agent whose
+-- activity raised the notification owns.
+--
+-- Why this exists. FindChannelBindingForMember answers by the
+-- RECIPIENT alone, so in a multi-bot org — one bot per agent, several of them
+-- bound by the same person — every notification a member receives is pushed
+-- through whichever bot they bound most recently, no matter which agent the
+-- notification is about. The recipient reads three agents' activity as if it
+-- all came from one of them. Pinning the lookup to the acting agent's bot is
+-- what makes the notification follow the bot↔agent mapping the sender is
+-- reading.
+--
+-- The tiebreak stays for the case where one member holds two channel users on
+-- the same bot (two WeCom accounts, one Multica account): both rows answer,
+-- and `:one` cannot take more than one, so the newest binding wins here
+-- exactly as it does in the recipient-wide lookup.
+--
+-- channel_type is named once and used for both columns: the installation's
+-- own discriminator and the binding's must agree, or installs of two
+-- platforms could cross-answer here.
+SELECT b.* FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.multica_user_id = sqlc.arg('multica_user_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+  AND ci.channel_type = sqlc.arg('channel_type')
+  AND ci.agent_id = sqlc.arg('agent_id')
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1;
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already

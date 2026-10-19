@@ -45,58 +45,14 @@ func writeHeader(b *strings.Builder) {
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 }
 
-// writeBackgroundTaskSafetySlim emits the Background Task Safety section
-// in its judgment form (MUL-5442): four paragraphs — the platform fact
-// everything else derives from (turn exit is task-terminal, no wakeup
-// exists, never background-and-yield), the external-systems/CI boundary
-// with its single explicit-ask exception, and the persistent-service
-// handoff contract. The pinned anchors the tests assert are the fact,
-// each boundary, both exceptions, and the handoff triple.
+// writeBackgroundTaskSafetySlim states the task-lifetime and external-work
+// boundaries. Turn exit is terminal for run-owned work. External CI is handed off
+// unless this turn explicitly requires its result; a repository merge gate does
+// not supply that requirement.
 //
-// MUL-5223: the external-work boundary alone did not stop agents from
-// blocking on CI. Two holes are closed here. First, the boundary was
-// stated as a concept while the section's only concrete "how to wait"
-// example was a blocking foreground call — and `gh pr checks --watch` is
-// exactly that shape, so watching CI read as compliant. Named tool-shape
-// bans replace the inference. Second, the "unless acceptance criteria
-// require it" escape was being satisfied by the repo's own merge
-// requirements ("CI must pass before merge"), so the section now says
-// branch protection is not the agent's acceptance criterion, and gives
-// the replacement hand-off phrasing so the urge to prove quality lands
-// on local test output plus a PR link instead of on a wait.
-//
-// The ban is scoped, not absolute: an explicitly requested CI result is
-// still reachable, and it names the one executable way to collect it
-// (a single foreground blocking watch inside the same turn). Enabling
-// auto-merge is not a wait and stays allowed — only waiting for it to
-// land is banned.
-//
-// MUL-5274 adds one narrow lifetime exception: a user-requested local
-// development/test service may be handed off after its readiness and cleanup
-// contract are complete. It is not a future result or wakeup. The brief keeps
-// this separate from tests, builds, monitors, and CI polling, which remain
-// run-owned until their result is collected. The brief states only the
-// handoff contract (lifecycle independence, durable logs, cleanup handle);
-// how to detach is the Local Dev Environment skill's concern, not the brief's.
-//
-// Paragraph order: the CI exception lives INSIDE the boundary paragraph
-// (one "The one exception" occurrence, count-guarded in the tests), and the
-// persistent-service paragraph closes the section. A former scoping sentence
-// ("The rules above apply only to work owned by the current run") stays
-// dropped: the boundary paragraph carries its own scope ("are not
-// run-owned").
-//
-// MUL-5442 stage 2 (owner-authorized judgment rewrite): enforcement details
-// a frontier model derives from the platform fact were deliberately dropped
-// — the run-owned work enumeration, the tool-promise enumeration, the
-// wait/collect split rule, the persistent-service scope bullet, the
-// auto-merge and snapshot elaborations. Their pins were retired in the same
-// change. The incident history above (MUL-5223, MUL-5274, MUL-4091) remains
-// the WHY for what stays: the named --watch/watch/poll ban and merge-gate
-// denial survive because MUL-5223 proved the principle alone did not stop
-// CI-watching, and the handoff paragraph is review-locked verbatim
-// (URL/logs/stop triple, general cleanup handle) — do not reword it without
-// a fresh review decision.
+// Keep the explicit watch/poll restriction and its foreground-watch exception
+// together. User-requested persistent services require a separate lifecycle,
+// readiness verification, durable logs, and a cleanup handle.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
 	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup, whatever a tool response promises; an issue wakeup (`multica issue wakeup create`) is different — the platform stores it and starts a new run later. Never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
@@ -265,7 +221,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue assign <id> (--to X | --to-id <uuid> | --unassign)` — change ownership; assigning to an agent can start a run.\n")
 	writeIssueStatusCommand(b, ctx)
 	b.WriteString(duplicateOfCommandLine)
-	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|trigger|delete|runs|events>` — persist an event, condition or time wakeup on this issue, then finish the current run. When the platform can check the fact itself, use a condition (`--until-status`, `--until-pr checks`, `--until-children-done`, `--until-issue`) so no run starts before it holds. Use `--event comment.created --filter-actor-type member --filter-actor-id USER_ID` to wait for a specific member to comment. See `multica issue wakeup --help` and the multica-platform issues reference.\n")
+	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|trigger|delete|runs|events>` — persist an event, condition or time wakeup on this issue, then finish the current run. When the platform can check the fact itself, use a condition (`--until-status`, `--until-pr checks`, `--until-children-done`, `--until-issue`) so no run starts before it holds. PR conditions watch only PRs linked to this exact issue; `--until-pr checks` also requires server-side GitHub check snapshots. Check the rule's `last_error` for missing links or unavailable snapshots; delayed links and snapshots are retried automatically. Use `--event comment.created --filter-actor-type member --filter-actor-id USER_ID` to wait for a specific member to comment. See `multica issue wakeup --help` and the multica-platform issues reference.\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`; see `## Comment Formatting` for why. `multica issue comment add --help` for full flags.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch. Re-running it keeps an existing checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches. `--fresh` discards uncommitted and untracked files and starts a new branch; commits stay on the old branch, but push any you still need first.\n\n")
@@ -530,47 +486,14 @@ func writeInstructionPrecedence(b *strings.Builder) {
 	b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.\n\n")
 }
 
-// The SessionContinuityNotice* family tells the agent a resume the task
-// expected could not be honored. The daemon has already cleared the resume
-// flags, so without this the run would silently reappear as a brand-new
-// conversation (MUL-4424).
+// SessionContinuityNotice variants describe missing provider working memory.
+// Issue discussion remains in issue comments; chat transcripts are recoverable
+// through history commands when SurfacePersistsTranscript says they are stored.
+// Only the unrecoverable variant requires telling the user discussion is lost.
 //
-// There are three because the surfaces lose different things, and saying so
-// accurately matters more than saying it loudly. The question that separates
-// them is not "is this a chat?" but "can this conversation still be read?":
-//
-//   - Issue: the conversation IS the issue body and its comments. Untouched,
-//     and the workflow already makes the agent read them every turn.
-//   - Slack: the conversation lives in the channel and `multica chat history` /
-//     `multica chat thread` can fetch it — see buildChatPrompt, which hands the
-//     agent exactly those commands. Recoverable, just from a different place.
-//   - Web chat, Feishu, WeCom and DingTalk: the conversation is persisted in
-//     Multica's chat_message table and `multica chat history` reads it back —
-//     see handler/chat_history.go's chat_message fallback for non-Slack
-//     sessions. Recoverable, just from a different place. The readable set is
-//     decided in one place, SurfacePersistsTranscript.
-//
-// Only a surface whose conversation Multica never stored (so there is nothing
-// to read back) warrants telling the user; no current surface is in that
-// group, so SessionContinuityNoticeUnrecoverable is a defensive fallback. On
-// the readable ones the discussion survives, so announcing "the previous
-// context was lost" describes a loss that did not happen — the user reasonably
-// hears "the discussion is gone" when not a word of it is. There the notice
-// informs the agent and leaves mentioning it to the agent's judgement. What is
-// actually gone on every surface is the agent's own unrecorded working memory,
-// and each variant says so.
-//
-// Emitted into the per-turn user message rather than the runtime brief: it is
-// true of one run and false of the next on the same issue, so rendering it into
-// the brief broke prompt-cache prefix stability across resumes (MUL-5377).
-// The readable variants say the run "does not continue" the lost session, not
-// that the run is on a fresh one, and that the memory gone is "from the turns
-// that did not come back" rather than from every earlier turn. Under MUL-5305
-// the server may hand back an OLDER session with the gap flagged, and the
-// daemon resumes it (ResumeSessionID is not gated on the flag), so the agent
-// can hold earlier turns' memory while the latest turn's is gone. Both phrasings
-// are true in that case and in the plain fresh-session case; "you are on a fresh
-// one" was not (MUL-6984 review).
+// The server may resume an older session, so do not claim every earlier turn is
+// gone or that the run is necessarily fresh. Emit this run-specific notice in
+// the user message to preserve the stable brief's prompt-cache prefix.
 const SessionContinuityNoticeIssue = "## Session Continuity Notice\n\n" +
 	"This run was meant to continue an earlier conversation, but that provider session could not be restored, and this run does not continue it. The issue and its full comment history are unaffected — that record is the authoritative version of this conversation, and reading it (which your workflow already requires) reconstructs it. What is gone is your own working memory from the turns that did not come back: what you already tried, what you ruled out, and how far you had got. Re-derive what you need instead of assuming it, and do not claim continuity the record cannot back up. Do not open your reply by announcing this — raise it only where it actually matters, such as when the user refers to reasoning you never wrote down.\n\n"
 
@@ -650,117 +573,18 @@ func writeWorkflowAutopilot(b *strings.Builder) {
 	b.WriteString("- " + AutopilotIssueCommandsGuard + "\n\n")
 }
 
-// writeWorkflowIssue emits the single issue workflow used by every
-// issue-bound run, whatever triggered it.
+// writeWorkflowIssue emits stable instructions for all issue-bound runs.
+// Keep trigger IDs and per-turn facts in the user message to preserve prompt caching.
+// Status writes depend on advancing the issue's deliverable and use exact built-in
+// keys. Keep the entry and exit checks inside steps 3 and 5 so they are encountered
+// at the relevant point in the workflow.
 //
-// One section with no per-trigger branching, because this text lands in
-// messages[0] — ahead of the whole conversation — and any divergence between
-// the first run and later runs on the same resumed session throws away the
-// prompt cache for the entire history (MUL-5377). So nothing here may depend
-// on which trigger fired this turn, and no per-run identifier (trigger comment
-// id, thread id, new-comment delta, reply targets) may be interpolated. Those
-// travel in the per-turn user message instead; see daemon.buildCommentPrompt.
+// Step 2 owns the scan requirement; per-turn hints supply facts and commands.
+// Use roots-only summaries before bounded thread reads: recent limits threads,
+// not replies. A server-computed delta can satisfy the scan.
 //
-// There is deliberately no "turn mode" anymore (MUL-6417). The Reply/Ownership
-// split dated from PR #205 and was already merged in substance by MUL-5377
-// (one section, mode router) and MUL-6300 (reply turns own the same status
-// arc); what remained was a marker plus two small blocks restating information
-// the per-turn message already carries as data. The two rules that replace the
-// router:
-//
-//   - Delivery routes on data: the per-turn message either carries a
-//     triggering comment with this turn's --parent value (reply in that
-//     thread) or it does not (post a new top-level comment).
-//   - Status is written when the FACT changes, judged from what the work
-//     changes about the issue — not from the trigger type, not from the run
-//     lifecycle, and not gated on being the assignee. Lifecycle writes
-//     oscillate under concurrent runs (every run flips its own open/close
-//     pair — the churn MUL-6300's assignee gate existed to stop); fact
-//     writes converge, because agents judging the same fact write the same
-//     value or nothing. A todo issue the agent was only asked to research
-//     correctly stays todo, which the old unconditional arc got wrong twice.
-//
-// The in_progress moment is the START of work, not the end of the turn: a
-// turn that advances the issue's own ask makes "being worked" true the moment
-// it begins, and the first work turn on a fresh assignment can run for half
-// an hour — judged only at turn end, the board showed todo the whole time
-// (Bohan's post-merge report on MUL-6417). This is the old rule's timing
-// with the fact anchor's conditionality: an ancillary turn still writes
-// nothing at either moment, so the concurrency convergence is unchanged.
-// The activity indicator still shows the run itself, but columns, filters,
-// and sorting read status — the indicator alone proved not to be the board
-// surface people actually watch.
-//
-// The start write lives INSIDE step 3, not in the status block below —
-// placement is load-bearing, not style. The first attempt stated it as a
-// bullet under the status heading, and a run on MUL-6460 that verifiably had
-// that brief walked steps 1→2→3 and never wrote a status: at the moment the
-// condition triggers the model is executing the numbered list, and a rule
-// outside the list does not fire (the pre-MUL-6417 opening write was
-// reliable precisely because it was an explicit step). Same incident killed
-// the "asked to research stays todo" example from the no-write bullet: that
-// run's work WAS research toward its own issue's ask, so the example
-// pattern-matched the exact case it was never meant to cover. Ancillary is
-// now defined by output alone — the turn produced none of the issue's own
-// deliverable. No activity-word list survives in EITHER direction: Elon's
-// review on #7295 caught "review" still sitting in a skip-list (the same
-// incident queued to replay on a review-the-PR issue), and J's review
-// caught the positive form-list that replaced it ("code, research, a
-// design, ...") — a whitelist reads as exhaustive, so a triage or
-// reproduce-the-bug turn would not find itself in it. What remains is the
-// criterion plus one never-decides sentence, placed inside step 3 because
-// that is the position that fires. The exit-side check is anchored inside
-// step 5 for the same reason, and the step-3 skip is scoped to the
-// in_progress CATEGORY so a custom status like Planning already counts as
-// recorded once MUL-6460 puts the catalog in front of agents.
-//
-// The invariants MUL-6300 pinned survive as consequences instead of gates: a
-// conversational turn changes nothing about the issue's state, so it writes
-// nothing; an @mention pull-in on someone else's (or an unassigned) issue
-// almost never changes its state, so it writes nothing — but a turn that
-// genuinely does move the work may now record it, whoever the assignee is.
-//
-// Step 2 is the ONLY place that decides WHETHER the scan runs (MUL-6984). The
-// per-turn hints (execenv.BuildColdCommentsHint / BuildNewCommentsHint /
-// BuildResumedCommentsHint) carry this turn's facts and exact commands and no
-// modality. Before this, the brief said "always run the scan, even when the
-// trigger looks self-contained" while the per-turn hints said "Need cross-thread
-// background?" / "Only if you need context from the other threads" — two
-// surfaces in one context, opposite modality, each written against a different
-// incident (#3494/#3535 against blind bulk reads, #6093 against missed
-// threads). The scan stays mandatory because the judgment "do other threads
-// matter?" needs exactly the data the scan produces: measured on 537
-// comment-triggered runs, 1 in 10 scans opened a thread the prompt had not
-// named, and 0 of 36 non-scanning runs did. The one data-driven exemption is
-// the server-computed empty delta on a resumed run, which the resumed hint
-// reports as the scan's answer.
-//
-// Step 2 asks for a roots scan first, not `--recent 10` (MUL-5372). `--recent N`
-// caps THREADS, not comments: each returned thread carries its root plus every
-// descendant with no depth cap, so on an issue with fewer than N root threads it
-// returns the entire comment history. Because this step is mandatory and fires on
-// every run, making it the bulk read meant every reply turn re-read the whole
-// issue — and, on comment-triggered turns, duplicated the bounded thread read the
-// per-turn message had already pointed at (see daemon.buildCommentPrompt and
-// BuildColdCommentsHint). `--roots-only --summary` keeps the anti-stale property
-// that step exists for — the agent still sees every thread that exists — at a
-// fraction of the payload, and the drill-down stays explicit.
-//
-// The step names ONLY the two reads it mandates. Flag semantics — including the
-// `--recent N` saturation trap above — belong to `## Available Commands`, which
-// is the single discovery point for the comment-read surface; repeating them per
-// step is what made this one bloat in the first place.
-//
-// Squad leaders keep one status bullet: a dispatch turn leaves the parent
-// mid-flight, so its end-of-turn fact is in_progress, and in_review waits for
-// the re-trigger (member update / stage barrier) that confirms the overall
-// goal is met. Flipping the parent on the dispatch turn would mark unfinished
-// multi-stage work as ready for review; see the Squad Operating Protocol and
-// the sub-issue wakeup (service/issue_wakeup_system.go).
-//
-// ctx.IsSquadLeader is a PER-TASK role, not agent configuration: branching on
-// it here does move brief bytes when the same agent runs leader one turn and
-// worker the next. Owner-accepted tradeoff; decision recorded in MUL-5811.
+// Squad dispatch leaves work in progress until a later turn confirms delivery.
+// The per-task leader role may change brief bytes across a resumed session.
 func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("**Every issue turn runs the same workflow.** The per-turn user message carries what triggered this run — an assignment handoff, or a triggering comment with its id and your `--parent` value — plus this issue's real id and ready-to-run context-read commands; assemble other calls from `## Available Commands`.\n\n")
 

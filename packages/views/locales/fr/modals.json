@@ -19,6 +19,16 @@
     "toast_deleted": "Tâche supprimée",
     "toast_delete_failed": "Échec de la suppression de la tâche"
   },
+  "rename_issue": {
+    "title": "Renommer la tâche",
+    "placeholder": "Titre de la tâche",
+    "input_aria_label": "Renommer {{identifier}}",
+    "submit": "Enregistrer",
+    "saving": "Enregistrement...",
+    "title_required": "Saisissez un titre",
+    "toast_renamed": "Tâche renommée",
+    "toast_failed": "Échec du renommage de la tâche"
+  },
   "feedback": {
     "title": "Faire un retour",
     "placeholder": "Parlez-nous de votre expérience, des bugs rencontrés ou des fonctionnalités que vous aimeriez voir…",

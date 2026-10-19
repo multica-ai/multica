@@ -168,7 +168,9 @@
       "label": "Recommander une action",
       "prompt": "Examinez ce que vous savez de mon espace de travail et recommandez une première action utile."
     },
-    "customize": "Personnaliser les amorces"
+    "customize": "Personnaliser les amorces",
+    "uploading": "Attendez la fin des téléversements avant d’utiliser une amorce.",
+    "draft_in_progress": "Envoyez ou effacez votre brouillon avant d’utiliser une amorce."
   },
   "onboarding_cards": {
     "aria_label": "Façons de démarrer",

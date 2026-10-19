@@ -15,6 +15,7 @@ import {
   Network,
   Pin,
   PinOff,
+  Pencil,
   Plus,
   Trash2,
   Unlink,
@@ -30,7 +31,9 @@ import {
 } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useStatusOptions } from "../utils/status-options";
+import { stepHandsOff, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
+import { useModalStore } from "@multica/core/modals";
+import { useIssueStatusOptions } from "../utils/status-options";
 import { issueKeys } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
@@ -108,7 +111,17 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const statusOptions = useStatusOptions(wsId);
+  // Only the statuses the issue's workflow allows; entering a step that hands
+  // the issue off confirms first, as in the status picker. (MUL-7420)
+  const { options: statusOptions, workflow } = useIssueStatusOptions(wsId, issue.project_id);
+  const openModal = useModalStore((s) => s.open);
+  const setStatus = (status: string) => {
+    if (workflow && status !== issue.status && stepHandsOff(workflowStep(workflow, status))) {
+      openModal("issue-workflow-handoff", { issueId: issue.id, identifier: issue.identifier, status });
+      return;
+    }
+    updateField({ status });
+  };
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const {
     isPinned,
@@ -117,6 +130,7 @@ export function IssueActionsMenuItems({
     togglePin,
     copyLink,
     openCreateSubIssue,
+    openRename,
     openSetParent,
     removeParent,
     openAddChild,
@@ -173,6 +187,16 @@ export function IssueActionsMenuItems({
 
   return (
     <>
+      {/* Rename leads the menu: it is the only entry that changes what the
+          issue *is* rather than a property of it, and on list/board rows it is
+          the only way to reach the title at all. */}
+      <P.Item onClick={openRename}>
+        <Pencil className="h-3.5 w-3.5" />
+        {t(($) => $.actions.rename_issue)}
+      </P.Item>
+
+      <P.Separator />
+
       {/* Status */}
       <P.Sub>
         <P.SubTrigger>
@@ -186,14 +210,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.status)}
         </P.SubTrigger>
         <P.SubContent>
-          {/* Catalog-driven, like the picker and the filter: every entry point
-              that can change a status must offer the same set, or a custom
-              status is unreachable from the board's right-click menu. One flat
-              list in canonical category order. (MUL-6243) */}
+          {/* The same set as the status picker: every entry point that can
+              change a status must offer it, or a custom status is unreachable
+              from the board's right-click menu. (MUL-6243) */}
           {statusOptions.map((option) => (
             <P.Item
               key={option.key}
-              onClick={() => updateField({ status: option.key })}
+              onClick={() => setStatus(option.key)}
             >
               <StatusIcon
                 status={option.key}
@@ -356,10 +379,13 @@ export function IssueActionsMenuItems({
             <ArrowDown className="h-3.5 w-3.5" />
             {t(($) => $.actions.add_sub_issue)}
           </P.Item>
-          <P.Item onClick={openMarkDuplicate}>
-            <CircleEqual className="h-3.5 w-3.5" />
-            {t(($) => $.actions.mark_duplicate)}
-          </P.Item>
+          {/* Marking a duplicate cancels the issue. (MUL-7420) */}
+          {workflowAllowsStatus(workflow, "cancelled") && (
+            <P.Item onClick={openMarkDuplicate}>
+              <CircleEqual className="h-3.5 w-3.5" />
+              {t(($) => $.actions.mark_duplicate)}
+            </P.Item>
+          )}
         </P.SubContent>
       </P.Sub>
 

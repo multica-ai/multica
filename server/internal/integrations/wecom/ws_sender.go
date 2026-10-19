@@ -810,7 +810,7 @@ func (s *wsSender) request(ctx context.Context, cmd string, body map[string]any)
 	}
 	defer s.cancelReply(reqID, w)
 
-	if err := s.write(map[string]any{
+	if err := s.writeCtx(ctx, map[string]any{
 		"cmd":     cmd,
 		"headers": frameHeaders{ReqID: reqID},
 		"body":    body,
@@ -916,6 +916,23 @@ func (s *wsSender) respondStreamFrame(ctx context.Context, reqID, streamID, cont
 // caller must not hold sendMu on wecomChannel — nothing here reaches back
 // into the Channel.
 func (s *wsSender) write(frame map[string]any) error {
+	return s.writeCtx(context.Background(), frame)
+}
+
+// writeCtx is write for a caller that has a context of its own — request, which
+// every upload step and every aibot_send_msg goes through. The wait for the
+// writer ends when ctx does, and a context that has ended by the time the
+// writer is in hand writes nothing.
+//
+// Both failures wrap errNotAttempted: they are raised before any byte could
+// leave, which is exactly the fact that mark carries. request's own pre-write
+// check says the same thing about a context that was already over on entry;
+// this is the same fact about one that ended while the frame queued.
+//
+// The second check exists because lockWriter's select is a coin toss when the
+// writer frees up in the same instant ctx ends: a caller can be handed the
+// writer after it has given up.
+func (s *wsSender) writeCtx(ctx context.Context, frame map[string]any) error {
 	payload, err := json.Marshal(frame)
 	if err != nil {
 		return fmt.Errorf("wecom: marshal frame: %w", err)
@@ -926,12 +943,60 @@ func (s *wsSender) write(frame map[string]any) error {
 	// writer is a nil check when tracing is off, and two log lines when it is
 	// on, against a socket write already in the same section.
 	t := traceOutFields(s.log, frame)
-	ctx := context.Background()
 	if err := s.lockWriter(ctx); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errNotAttempted, err)
 	}
 	defer s.unlockWriter()
-	return s.writeLocked(ctx, payload, t)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", errNotAttempted, err)
+	}
+	// Asked HERE, with the writer in hand: every wait this frame had in front
+	// of it — the writer's, and for a message the chat's turn and any retry
+	// backoff above us — is behind it, and nothing sits between this line and
+	// the socket but the write.
+	if guard := writeGuardFrom(ctx); guard != nil {
+		if err := guard(ctx); err != nil {
+			return fmt.Errorf("%w: %w", errNotAttempted, err)
+		}
+	}
+	// The socket deadline stays the connection's own. A caller's deadline
+	// bounded the waits above, but write() has never let it shorten the write
+	// itself, and a request that arrives with little time left should not
+	// start failing mid-frame — an outcome that reads as unknown — for want of
+	// it. Values survive WithoutCancel; the deadline does not.
+	return s.writeLocked(context.WithoutCancel(ctx), payload, t)
+}
+
+// writeGuardKey carries a caller's write guard in a context.
+type writeGuardKey struct{}
+
+// withWriteGuard returns a context whose frames are each put to guard at the
+// moment they are about to be written. A non-nil answer stops that frame; the
+// socket sees nothing of it.
+//
+// It travels in the context because the thing it guards is the write, and the
+// write is several calls away from anyone who knows whether it is still
+// allowed: a chunk, an upload step or a message each reach writeLocked through
+// a writer wait, a chat-lock wait or a retry backoff, and a verdict taken
+// before any of those is a verdict about an earlier moment. Asking here asks
+// at the only point that has no wait left in front of it.
+//
+// What the guard checks is the caller's policy. This layer only runs it. A
+// ctx that carries none behaves exactly as before.
+//
+// It covers what goes through request — the upload steps and aibot_send_msg,
+// text or media. Stream frames take their own path (writeStreamFrame) and do
+// not consult it; nothing puts a guard on those today.
+//
+// The guard runs while the writer is held, so it must be quick: whatever it
+// waits for, the ping loop and every other send on this socket wait for too.
+func withWriteGuard(ctx context.Context, guard func(context.Context) error) context.Context {
+	return context.WithValue(ctx, writeGuardKey{}, guard)
+}
+
+func writeGuardFrom(ctx context.Context) func(context.Context) error {
+	g, _ := ctx.Value(writeGuardKey{}).(func(context.Context) error)
+	return g
 }
 
 // writeStreamFrame is write() for a stream frame: the same serialized push,

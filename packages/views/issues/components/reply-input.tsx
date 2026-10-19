@@ -22,9 +22,7 @@ import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface ReplyInputProps {
   issueId: string;
@@ -51,9 +49,7 @@ interface ReplyInputProps {
 
 const NEVER_STEER_BY_DEFAULT = () => false;
 
-// ---------------------------------------------------------------------------
 // ReplyInput
-// ---------------------------------------------------------------------------
 
 function ReplyInput({
   issueId,

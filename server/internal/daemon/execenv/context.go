@@ -147,6 +147,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
 // QwenPaw:      skills → {workDir}/.qwenpaw/skills/{name}/SKILL.md  (native project-level discovery)
 // MiniMax Code: skills → {workDir}/.minimax/skills/{name}/SKILL.md  (native project-level discovery)
+// Muse Code:   skills → {workDir}/.agents/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
@@ -412,6 +413,9 @@ func skillsDirPath(workDir, provider string) string {
 	case "mcode":
 		// MiniMax Code discovers project-level skills from .minimax/skills/.
 		return filepath.Join(workDir, ".minimax", "skills")
+	case "muse":
+		// Muse's native project root: https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/
+		return filepath.Join(workDir, ".agents", "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See

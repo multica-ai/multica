@@ -1,5 +1,6 @@
 import type { AgentTask } from "@multica/core/types";
 import {
+  estimateCost,
   estimateCostBreakdown,
   summarizeTaskUsage,
   type CostBreakdown,
@@ -7,10 +8,11 @@ import {
 } from "../../runtimes/utils";
 import { taskDurationMs } from "./task-run-labels";
 
-// Pure data for the issue's run timeline: the sidebar's spend strip and the
-// Runs dialog it opens. Everything the two surfaces draw — bar positions, the
-// cumulative cost curve, day groups — is derived here, so the rendering code
-// only maps numbers to pixels and the arithmetic has one place to be tested.
+// Pure data for the issue's run timeline: the sidebar's per-run cost bars and
+// the Runs dialog they open. Everything the two surfaces draw — bar heights,
+// the cumulative cost curve, shares, day groups, totals — is derived here, so the rendering
+// code only maps numbers to pixels and the arithmetic has one place to be
+// tested.
 
 const ACTIVE_STATUSES = new Set<AgentTask["status"]>([
   "queued",
@@ -24,9 +26,9 @@ const TERMINAL_STATUSES = new Set<AgentTask["status"]>([
   "cancelled",
 ]);
 
-// A run has to cost at least this share of the issue before the chart calls it
-// out. Below it no single run explains the curve, and labelling the biggest of
-// many similar steps would point at noise.
+// A run has to cost at least this share of the issue before the cumulative
+// chart calls it out. Below it no single run explains the curve, and labelling
+// the biggest of many similar steps would point at noise.
 const PEAK_MIN_SHARE = 0.15;
 
 export interface TimelineRun {
@@ -55,11 +57,28 @@ export interface TimelineLane {
   runs: TimelineRun[];
 }
 
+export interface TokenTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export interface CostShare {
+  /** An agent id or a model id, depending on the split. */
+  key: string;
+  cost: number;
+}
+
 export interface RunTimeline {
   /** Oldest first. */
   runs: TimelineRun[];
   totalCost: number;
   pricedCount: number;
+  tokens: TokenTotals;
+  /** What cache reads saved against paying the input rate for them. */
+  cacheSavings: number;
   /** Sum of finished runs' wall time. */
   agentMs: number;
   /** First start to last end (or now, while a run is active). */
@@ -67,15 +86,20 @@ export interface RunTimeline {
   failedCount: number;
   cancelledCount: number;
   activeCount: number;
+  /** The cumulative chart's x axis: the extent, padded. */
   domain: [number, number];
   /** First start to last end — the stretch of the axis that holds runs. */
   extent: [number, number];
   /** The running total after each priced run, in completion order. */
   cumulative: CumulativeStep[];
-  /** One lane per agent, in order of first appearance. */
-  lanes: TimelineLane[];
   /** The run that moved the total most, when it moved it enough to name. */
   peak: TimelineRun | null;
+  /** One lane per agent, in order of first appearance. */
+  lanes: TimelineLane[];
+  /** Spend per agent, most expensive first. */
+  costByAgent: CostShare[];
+  /** Spend per model, most expensive first. */
+  costByModel: CostShare[];
   /** Highest single-run cost, for scaling per-run bars. */
   maxRunCost: number;
 }
@@ -97,6 +121,22 @@ function sumBreakdown(task: AgentTask): CostBreakdown | null {
     total.cacheWrite += b.cacheWrite;
   }
   return total;
+}
+
+function emptyTokens(): TokenTotals {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+}
+
+function addTokens(into: TokenTotals, usage: TaskUsageSummary): void {
+  into.input += usage.input;
+  into.output += usage.output;
+  into.cacheRead += usage.cacheRead;
+  into.cacheWrite += usage.cacheWrite;
+  into.total += usage.tokens;
+}
+
+function sortedShares(map: Map<string, number>): CostShare[] {
+  return Array.from(map, ([key, cost]) => ({ key, cost })).toSorted((a, b) => b.cost - a.cost);
 }
 
 export function toTimelineRun(task: AgentTask, nowMs: number): TimelineRun | null {
@@ -130,18 +170,31 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
 
   let totalCost = 0;
   let pricedCount = 0;
+  let cacheSavings = 0;
   let agentMs = 0;
   let failedCount = 0;
   let cancelledCount = 0;
   let activeCount = 0;
   let maxRunCost = 0;
+  const tokens = emptyTokens();
   const laneMap = new Map<string, TimelineRun[]>();
+  const agentCost = new Map<string, number>();
+  const modelCost = new Map<string, number>();
 
   for (const run of runs) {
     if (run.usage) {
       totalCost += run.usage.cost;
       pricedCount += 1;
+      cacheSavings += run.usage.cacheSavings;
       maxRunCost = Math.max(maxRunCost, run.usage.cost);
+      addTokens(tokens, run.usage);
+      agentCost.set(run.task.agent_id, (agentCost.get(run.task.agent_id) ?? 0) + run.usage.cost);
+      // Per slice, not per run: a run that spilled from one model to another
+      // has a row for each, priced at its own rate.
+      for (const slice of run.task.usage ?? []) {
+        if (!slice.model) continue;
+        modelCost.set(slice.model, (modelCost.get(slice.model) ?? 0) + estimateCost(slice));
+      }
     }
     if (run.durationMs != null) agentMs += run.durationMs;
     if (run.task.status === "failed") failedCount += 1;
@@ -178,6 +231,8 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     runs,
     totalCost,
     pricedCount,
+    tokens,
+    cacheSavings,
     agentMs,
     elapsedMs,
     failedCount,
@@ -186,10 +241,18 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     domain: paddedDomain(first?.startMs ?? nowMs, lastEnd),
     extent: [first?.startMs ?? nowMs, lastEnd],
     cumulative,
-    lanes: Array.from(laneMap, ([agentId, laneRuns]) => ({ agentId, runs: laneRuns })),
     peak,
+    lanes: Array.from(laneMap, ([agentId, laneRuns]) => ({ agentId, runs: laneRuns })),
+    costByAgent: sortedShares(agentCost),
+    costByModel: sortedShares(modelCost),
     maxRunCost,
   };
+}
+
+/** Share of the tokens that were served from cache, 0–1. Null with no input side. */
+export function cacheHitRate(tokens: Pick<TokenTotals, "input" | "cacheRead" | "cacheWrite">): number | null {
+  const prompt = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  return prompt > 0 ? tokens.cacheRead / prompt : null;
 }
 
 // A little air on both ends so the first and last bars never sit on the frame,
@@ -369,6 +432,7 @@ export interface RunDayGroup {
   /** Newest first within the day. */
   runs: TimelineRun[];
   cost: number;
+  tokens: number;
   agentMs: number;
 }
 
@@ -381,12 +445,48 @@ export function groupRunsByDay(runs: readonly TimelineRun[]): RunDayGroup[] {
     const key = day.getTime();
     let group = groups.get(key);
     if (!group) {
-      group = { dayMs: key, runs: [], cost: 0, agentMs: 0 };
+      group = { dayMs: key, runs: [], cost: 0, tokens: 0, agentMs: 0 };
       groups.set(key, group);
     }
     group.runs.push(run);
     group.cost += run.usage?.cost ?? 0;
+    group.tokens += run.usage?.tokens ?? 0;
     group.agentMs += run.durationMs ?? 0;
   }
   return Array.from(groups.values());
+}
+
+// ─── Model names ───────────────────────────────────────────────────────────
+
+function capitalize(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/**
+ * A model id as a compact label: "claude-opus-5-5-high" → "Opus 5.5 high",
+ * "gpt-6.1-sol" → "GPT-6.1 Sol". Provider prefixes and context-window tags
+ * ("[1m]") are dropped. Ids from families it does not know come back as-is,
+ * so an unfamiliar model is never renamed into something misleading.
+ */
+export function shortModelName(model: string): string {
+  const id = model
+    .replace(/^[^/]+\//, "")
+    .replace(/\[[^\]]*\]$/, "")
+    .replace(/-\d{8}$/, "");
+  // claude-<tier>-<major>[-<minor>]-<variant…>
+  const claude = id.match(/^claude-([a-z]+)((?:-\d{1,2})+)(?:-(.+))?$/);
+  if (claude) {
+    const [, tier, version, variant] = claude;
+    return [capitalize(tier!), version!.slice(1).replaceAll("-", "."), variant?.replaceAll("-", " ")]
+      .filter(Boolean)
+      .join(" ");
+  }
+  // gpt-<version>-<variant…>, gemini-<version>-<variant…>
+  const generic = id.match(/^(gpt|gemini)-([^-]+)(?:-(.+))?$/);
+  if (generic) {
+    const [, family, version, variant] = generic;
+    const head = family === "gpt" ? `GPT-${version}` : `Gemini ${version}`;
+    return [head, ...(variant?.split("-").map(capitalize) ?? [])].join(" ");
+  }
+  return model;
 }

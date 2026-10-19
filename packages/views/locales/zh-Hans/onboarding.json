@@ -106,10 +106,6 @@
       "other_placeholder": "例如：协调学习小组"
     }
   },
-  "option_card": {
-    "other_label": "其他",
-    "other_aria": "描述其他选项"
-  },
   "step_question": {
     "hint_pick": "可跳过。"
   },
@@ -135,28 +131,7 @@
     "success_toast": "已加入候补名单。云运行时上线时会通过邮件通知你。",
     "failed_toast": "加入候补名单失败"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "正在为你准备工作区...",
-      "title": "欢迎来到 Multica！",
-      "subtitle": "我们建了一个任务帮你连接运行时。准备好后，在 \"运行时\" 页面就能开始使用 Mika。",
-      "got_it": "知道了",
-      "status_in_progress": "进行中",
-      "error_title": "没能帮你准备好",
-      "error_body": "运行时引导任务没有创建成功。可以重试，也可以随时在\"运行时\"页面自己连接。",
-      "retry": "重试",
-      "dismiss": "暂不",
-      "cards": {
-        "install_runtime": {
-          "title": "连接一个运行时",
-          "subtitle": "安装 Codex 或 Kimi，然后从 \"运行时\" 页面进入 Mika 的引导对话。"
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "你的第一个工作区",
-    "eyebrow_resume": "继续，或重新开始",
     "headline_first": "给工作区起个名字。",
     "headline_resume": "继续 {{name}}，或新建一个。",
     "lede_first": "工作区是任务、智能体和项目所在的地方。之后可以邀请同事，或再开一个工作区。",
@@ -186,11 +161,9 @@
     "slug_reserved_error": "该工作区 URL 是系统保留的，无法使用。",
     "slug_conflict_toast": "请换一个工作区 URL",
     "create_failed_toast": "创建工作区失败",
-    "creation_disabled_eyebrow": "工作区创建已禁用",
     "creation_disabled_headline": "请联系管理员邀请你加入工作区。",
     "creation_disabled_lede": "该 Multica 实例不允许创建新的工作区。等管理员把你邀请到某个工作区后，接受邀请并刷新即可继续。",
     "creation_disabled_logout": "退出登录",
-    "creation_disabled_eyebrow_resume": "你的工作区",
     "creation_disabled_headline_resume": "继续使用 {{name}}。",
     "creation_disabled_lede_resume": "该实例已禁用创建工作区，继续进入你已有的工作区即可。"
   },
@@ -203,8 +176,6 @@
     "status_all_online": "全部在线",
     "status_none_online": "全部离线",
     "status_n_online": "{{count}} 个在线",
-    "online_label": "在线",
-    "offline_label": "离线",
     "empty_headline": "这台电脑上还没有可用的智能体运行时。",
     "empty_lede_prefix": "智能体运行时就是我们要连接的 AI 编程工具，比如 ",
     "empty_lede_suffix": "。装好任意一个后点刷新，或从下面选择一种方式。",
@@ -223,7 +194,6 @@
     "continue": "开始使用 Mika"
   },
   "step_platform": {
-    "eyebrow": "连接一台电脑",
     "headline": "连接一台电脑来运行你的智能体。",
     "lede": "连接一台电脑，让 Mika 开始工作。",
     "hint_default": "可稍后连接。",
@@ -238,7 +208,6 @@
     "cloud_action": "即将推出",
     "cli_dialog_title": "通过终端连接",
     "cli_dialog_pick_hint": "在上方选一台电脑。",
-    "cli_dialog_connect": "连接并继续",
     "runtimes_connected_other": "已连接 {{count}} 台电脑",
     "live_listening": "实时 · 正在等待你的电脑",
     "stage_normal_prefix": "运行上面的命令。当 ",
@@ -253,6 +222,7 @@
   },
   "errors": {
     "skip_failed": "完成上手引导失败",
+    "guide_failed": "运行时引导任务没有创建成功，请重试。",
     "mika_setup_failed": "无法启动 Mika 工作区"
   },
   "mika_intro": {

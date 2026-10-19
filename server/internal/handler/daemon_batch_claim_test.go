@@ -76,11 +76,12 @@ func TestClaimTasksByRuntime_ClaimPollHintSchedulesNextDeferredTask(t *testing.T
 	ctx := context.Background()
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Batch claim deferred hint")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Batch claim deferred hint agent")
+	// Match the handler's clock; a Docker database clock can be slightly ahead.
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id": runtimeID,
 		"issue_id":   issueID,
 		"status":     "deferred",
-		"fire_at":    testutil.Raw("now() + interval '5 seconds'"),
+		"fire_at":    time.Now().Add(5 * time.Second),
 	})
 
 	hinted := testutil.Decode[batchClaimResponse](t, testHandler.ClaimTasksByRuntime,

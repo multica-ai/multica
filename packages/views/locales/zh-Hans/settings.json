@@ -79,7 +79,10 @@
       "cancelled": "决定不做。"
     },
     "pr_auto_complete_badge": "PR 合并后自动进入",
-    "built_in_locked": "内置状态驱动系统行为，不能编辑或归档，但可以调整顺序。"
+    "built_in_locked": "内置状态驱动系统行为，不能编辑或归档，但可以调整顺序。",
+    "builtin_badge": "内置",
+    "workflow_usage_other": "{{count}} 个工作流在用",
+    "workflow_usage_none": "未被工作流使用"
   },
   "wakeups": {
     "description": "平台对所有任务生效的规则。每个任务可以在自己的「唤醒」区域单独修改。",
@@ -405,7 +408,8 @@
       "billing": "账单与套餐",
       "code": "代码",
       "channels": "消息渠道",
-      "apps": "已连接应用"
+      "apps": "已连接应用",
+      "workflows": "工作流"
     },
     "groups": {
       "personal": "个人",

@@ -129,13 +129,36 @@ end
 redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
 return 1
 `
+	// ClaimState is Resolve WITHOUT the fence: it reads the same key and
+	// returns the same claimState codes, but a held claim stays held. That is
+	// what an inbox publisher polls while it waits to see whether a replica
+	// took the delivery; fencing a holder that is merely mid-delivery would
+	// hand the publisher's fallback a second card to send. Return codes are
+	// claimState values: 0 absent, 1 held, 2 settled, 3 lost.
+	redisClaimStateSource = `
+local v = redis.call('GET', KEYS[1])
+if (not v) then
+  return 0
+end
+if v == ARGV[1] then
+  return 2
+end
+if v == ARGV[2] then
+  return 3
+end
+if not string.find(v, '/', 1, true) then
+  return 2
+end
+return 1
+`
 )
 
 var (
-	redisClaim   = redis.NewScript(redisClaimSource)
-	redisRelease = redis.NewScript(redisReleaseSource)
-	redisSettle  = redis.NewScript(redisSettleSource)
-	redisResolve = redis.NewScript(redisResolveSource)
+	redisClaim      = redis.NewScript(redisClaimSource)
+	redisRelease    = redis.NewScript(redisReleaseSource)
+	redisSettle     = redis.NewScript(redisSettleSource)
+	redisResolve    = redis.NewScript(redisResolveSource)
+	redisClaimState = redis.NewScript(redisClaimStateSource)
 )
 
 func (d *redisDedupe) Claim(ctx context.Context, key, token string, ttl time.Duration) (bool, error) {
@@ -193,6 +216,20 @@ func (d *redisDedupe) Resolve(ctx context.Context, key string) (claimState, erro
 	ctx, cancel := context.WithTimeout(ctx, d.budget)
 	defer cancel()
 	n, err := redisResolve.Run(ctx, d.rdb, []string{key}, claimSettledValue, claimLostValue).Int()
+	if err != nil {
+		return claimAbsent, err
+	}
+	return claimState(n), nil
+}
+
+// ClaimState is the read-only half of Resolve: it answers what the key holds
+// without fencing a holder. It is a budget-bounded round trip, like Claim;
+// its caller polls it inside a window it owns, so it must not outstay one
+// call.
+func (d *redisDedupe) ClaimState(ctx context.Context, key string) (claimState, error) {
+	ctx, cancel := context.WithTimeout(ctx, d.budget)
+	defer cancel()
+	n, err := redisClaimState.Run(ctx, d.rdb, []string{key}, claimSettledValue, claimLostValue).Int()
 	if err != nil {
 		return claimAbsent, err
 	}

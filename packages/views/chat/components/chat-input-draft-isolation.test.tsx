@@ -288,6 +288,40 @@ describe("ChatInput draft isolation across a composer switch (real debounce)", (
     vi.useRealTimers();
   });
 
+  it("preserves unflushed typing when a starter is clicked inside the debounce window", async () => {
+    const onSend = vi.fn().mockResolvedValue(false);
+    const { rerender } = render(element({ onSend }));
+    type("unfinished local text");
+    const prompt = "Review the release pull request.";
+
+    rerender(element({ onSend, conversationStarterRequest: { id: 1, content: prompt } }));
+    await act(async () => {});
+    expect(onSend).not.toHaveBeenCalled();
+    expect(editorState.markdown).toBe("unfinished local text");
+
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(store().inputDrafts["__new__"]).toBe("unfinished local text");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("allows a starter after the user clears the draft before its debounce fires", async () => {
+    mockSetContent.mockImplementationOnce((markdown: string) => {
+      editorState.markdown = markdown;
+    });
+    const onSend = vi.fn().mockResolvedValue(false);
+    const { rerender } = render(element({ onSend }));
+    type("unfinished local text");
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(store().inputDrafts["__new__"]).toBe("unfinished local text");
+    type("");
+    const prompt = "Review the release pull request.";
+
+    rerender(element({ onSend, conversationStarterRequest: { id: 1, content: prompt } }));
+    await act(async () => {});
+    expect(onSend).toHaveBeenCalledWith(prompt, undefined, expect.any(Function), []);
+    expect(store().inputDrafts["__new__"]).toBe(prompt);
+  });
+
   it("files unflushed keystrokes under the session they were typed in, never the one switched to", () => {
     store().activeSessionId = "session-a";
     const { rerender } = render(element());

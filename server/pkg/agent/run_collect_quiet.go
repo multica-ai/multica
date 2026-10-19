@@ -69,83 +69,23 @@ func JSONOutputComplete(stdout []byte) bool {
 	return len(trimmed) > 0 && json.Valid(trimmed)
 }
 
-// RunCollectQuiet runs a one-shot CLI command and returns when the process
-// exits, or — for a CLI that will not exit — as soon as it has produced output
-// that `complete` accepts and that has then stayed idle for idleGrace.
+// RunCollectQuiet collects a short one-shot response until process exit, or
+// until complete accepts the buffer and no output arrives for idleGrace.
+// Both checks are required: banners can be idle, and a complete-looking answer
+// may still be followed by output. A nil complete disables early return.
 //
-// # Why "output is enough" beats "wait for exit"
+// Context expiry is always an error, with captured output returned for inspection.
+// quiet distinguishes accepted output from a clean process exit.
 //
-// Measured on a host running openclaw 2026.5.27:
+// The collector owns pipes and process cleanup so descendants holding stdout do
+// not extend the deadline beyond the drain/reap/settle grace windows. Unix signals
+// reach the original process group; Windows uses a Job Object. The return bound
+// does not depend on every descendant being reachable.
 //
-//	openclaw --version    258ms  exits cleanly
-//	openclaw config file    60s  correct path printed, then never exits
-//	openclaw agents list    60s  correct list printed, then never exits
-//
-// Waiting for exit turns two working commands into a task-fatal error, and they
-// sit on the task's critical path (Prepare -> prepareOpenclawConfig). The
-// contract of those commands is "print a value"; once the value has arrived,
-// whether the process tidies itself up is not the caller's business.
-//
-// Nor is that a quirk of the build those timings came from. Upstream has an
-// explicit opt-in for "print a one-shot answer and then exit" —
-// `requestExitAfterOneShotOutput`, flushed at the end of `runCli` after both
-// streams drain (`src/cli/one-shot-exit.ts`, checked at `v2026.7.1`). In the
-// shipped 2026.7.1 build only `models list`, `models status` and the hooks CLI
-// take it. `config file`, `config get` and `agents list` do not: their success
-// paths only print, so termination is whatever the Node event loop happens to
-// do, and `runtime.exit` appears on their failure paths alone. So a version
-// where they exit promptly is not making a promise a later one has to keep.
-//
-// # Why `complete` is required rather than "any output"
-//
-// An earlier revision returned success from the deadline branch whenever stdout
-// was non-empty. That salvaged partial answers: a CLI still streaming when the
-// deadline arrived had its truncated output reported as success (measured 9 runs
-// in 10 against a 250ms deadline). Two conditions now gate the early return, and
-// neither is sufficient alone:
-//
-//   - `complete` accepts the buffer. Idle alone is not enough, because the CLI
-//     may be pausing between a banner and the real answer — `openclaw config
-//     file` prints Doctor warning UI first (see MUL-3136), and cutting off there
-//     yields the banner instead of the path. The rule carries the whole weight of
-//     that distinction: review broke a rule that judged the path by *shape* with a
-//     warning line that was itself a path, so a rule has to be one the CLI's
-//     pre-answer output cannot satisfy at all.
-//   - The buffer has then been idle for idleGrace. Complete alone is not enough,
-//     because more output may still follow and change the answer.
-//
-// Reaching the context deadline is never success. Whatever was captured is
-// returned alongside the error so a caller with a different rule can inspect it,
-// but this helper does not decide on the caller's behalf.
-//
-// A nil `complete` disables the early return entirely: the call then waits for
-// exit, bounded only by ctx. That is the right default for a command whose
-// output shape has no completeness rule.
-//
-// quiet reports that the return did not come from a clean exit, so callers can
-// log the CLI's misbehaviour without failing on it.
-//
-// Guarantees callers depend on:
-//
-//  1. Returns within roughly the caller's context deadline plus collectDrainGrace,
-//     collectReapWindow and collectSettleGrace, whatever the CLI leaves behind.
-//  2. Descendants that are still in the leader's process group are signalled
-//     before returning, and the signal is repeated across collectReapWindow so one
-//     that was mid-fork does not escape. A descendant that left the group is out
-//     of reach on Unix — OpenClaw's helper was measured with its own PGID and SID —
-//     which is why guarantee 1 does not depend on the kill landing. Windows is
-//     different: the Job Object owns the tree irrespective of groups.
-//  3. Output is not abandoned while something may still be writing it: after the
-//     direct child exits, the call waits for pipe EOF unless `complete` says the
-//     answer is in. Leader exit alone is not treated as completion.
-//  4. Retention is bounded — collectStdoutLimit for the answer (reported, not
-//     silently truncated) and collectStderrTail for the diagnostic sample.
-//  5. The command's real exit status is reported, which openclawShimDiagnostic
-//     depends on (it type-switches on *exec.ExitError).
-//
-// Use this only for commands whose entire output is a short one-shot response.
-// Anything that streams incrementally (agent execution) must keep its own
-// lifecycle handling, where a pause in output carries meaning.
+// Leader exit alone is insufficient: wait for pipe EOF unless complete accepts
+// the answer. Retention is bounded and overflow is reported; preserve the real
+// exit status for callers inspecting exec.ExitError. Streaming agent execution
+// needs its own lifecycle handling and must not use this helper.
 func RunCollectQuiet(ctx context.Context, env []string, idleGrace time.Duration, complete OutputComplete, execPath string, args ...string) (stdout []byte, stderr string, quiet bool, err error) {
 	// Command.exec, not exec.CommandContext: launch.go owns process construction so
 	// a custom runtime's fixed_args prefix cannot be dropped (GH #7046). A zero

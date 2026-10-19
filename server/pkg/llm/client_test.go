@@ -120,7 +120,9 @@ func TestChatRespectsRequestModel(t *testing.T) {
 
 func TestGenerateText(t *testing.T) {
 	var sawSystem bool
+	var gotModel string
 	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
+		gotModel, _ = body["model"].(string)
 		if msgs, ok := body["messages"].([]any); ok {
 			for _, m := range msgs {
 				if mm, ok := m.(map[string]any); ok && mm["role"] == "system" {
@@ -143,38 +145,70 @@ func TestGenerateText(t *testing.T) {
 	if !sawSystem {
 		t.Fatal("expected system message to be sent")
 	}
+	if gotModel != "gpt-6-luna" {
+		t.Fatalf("expected built-in GPT-6 Luna default, got %q", gotModel)
+	}
 }
 
-func TestGenerateJSONUsesGPT56CompatibleParameters(t *testing.T) {
-	var gotBody map[string]any
-	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
-		gotBody = body
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
-	})
+func TestGenerateJSONModelParameters(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		defaultModel     string
+		requestModel     string
+		wantModel        string
+		disableReasoning bool
+	}{
+		{name: "built-in default", wantModel: "gpt-6-luna", disableReasoning: true},
+		{name: "configured GPT-6 Luna", defaultModel: "gpt-6-luna", wantModel: "gpt-6-luna", disableReasoning: true},
+		{name: "requested GPT-6 Luna", defaultModel: "gateway-model", requestModel: "gpt-6-luna", wantModel: "gpt-6-luna", disableReasoning: true},
+		{name: "configured GPT-5.6", defaultModel: "gpt-5.6-luna", wantModel: "gpt-5.6-luna", disableReasoning: true},
+		{name: "configured gateway", defaultModel: "gateway-model", wantModel: "gateway-model"},
+		{name: "requested gateway", requestModel: "gateway-model", wantModel: "gateway-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
+				gotBody = body
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
+			})
 
-	c := New(Config{APIKey: "k", BaseURL: srv.URL, DefaultModel: "gpt-5.6-luna"})
-	out, err := c.GenerateJSON(context.Background(), "", "Return JSON.", "Generate actions.", 0.3, 2048)
-	if err != nil {
-		t.Fatalf("GenerateJSON failed: %v", err)
-	}
-	if out != `{"actions":[]}` {
-		t.Fatalf("unexpected output %q", out)
-	}
-	if gotBody["max_completion_tokens"] != float64(2048) {
-		t.Fatalf("expected max_completion_tokens=2048, got %#v", gotBody["max_completion_tokens"])
-	}
-	if _, ok := gotBody["max_tokens"]; ok {
-		t.Fatalf("deprecated max_tokens must be omitted, got body %#v", gotBody)
-	}
-	if gotBody["reasoning_effort"] != "none" {
-		t.Fatalf("expected reasoning_effort=none, got body %#v", gotBody)
-	}
-	if _, ok := gotBody["temperature"]; ok {
-		t.Fatalf("temperature must be omitted for reasoning-model compatibility, got body %#v", gotBody)
-	}
-	if gotBody["model"] != "gpt-5.6-luna" {
-		t.Fatalf("expected configured GPT-5.6 model, got body %#v", gotBody)
+			c := New(Config{APIKey: "k", BaseURL: srv.URL, DefaultModel: tc.defaultModel})
+			out, err := c.GenerateJSON(context.Background(), tc.requestModel, "Return JSON.", "Generate actions.", 0.3, 2048)
+			if err != nil {
+				t.Fatalf("GenerateJSON failed: %v", err)
+			}
+			if out != `{"actions":[]}` {
+				t.Fatalf("unexpected output %q", out)
+			}
+			if gotBody["max_completion_tokens"] != float64(2048) {
+				t.Fatalf("expected max_completion_tokens=2048, got %#v", gotBody["max_completion_tokens"])
+			}
+			if _, ok := gotBody["max_tokens"]; ok {
+				t.Fatalf("deprecated max_tokens must be omitted, got body %#v", gotBody)
+			}
+			if gotBody["model"] != tc.wantModel {
+				t.Fatalf("expected model %q, got body %#v", tc.wantModel, gotBody)
+			}
+			if gotBody["response_format"].(map[string]any)["type"] != "json_object" {
+				t.Fatalf("expected JSON object response format, got body %#v", gotBody)
+			}
+			if tc.disableReasoning {
+				if gotBody["reasoning_effort"] != "none" {
+					t.Fatalf("expected reasoning_effort=none, got body %#v", gotBody)
+				}
+				if _, ok := gotBody["temperature"]; ok {
+					t.Fatalf("temperature must be omitted for reasoning-model compatibility, got body %#v", gotBody)
+				}
+			} else {
+				if _, ok := gotBody["reasoning_effort"]; ok {
+					t.Fatalf("gateway model must not get reasoning_effort, got body %#v", gotBody)
+				}
+				if gotBody["temperature"] != 0.3 {
+					t.Fatalf("gateway model must preserve temperature, got body %#v", gotBody)
+				}
+			}
+		})
 	}
 }
 

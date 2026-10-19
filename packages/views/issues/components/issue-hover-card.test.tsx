@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { useQuery } from "@tanstack/react-query";
@@ -39,6 +39,31 @@ vi.mock("@multica/core/issues/queries", () => ({
   }),
 }));
 
+vi.mock("@multica/core/agents", () => ({
+  agentTaskSnapshotOptions: (workspaceId: string) => ({
+    queryKey: ["agent-tasks", workspaceId],
+  }),
+}));
+
+vi.mock("@multica/core/projects", () => ({
+  projectListOptions: (workspaceId: string) => ({
+    queryKey: ["projects", workspaceId],
+  }),
+}));
+
+vi.mock("@multica/core/github", () => ({
+  issuePullRequestsOptions: (issueId: string) => ({
+    queryKey: ["pull-requests", issueId],
+  }),
+}));
+
+// The PR summary's verdict logic is owned and tested by pull-request-list.
+vi.mock("./pull-request-list", () => ({
+  PullRequestInlineSummary: ({ pr }: { pr: { number: number } }) => (
+    <span data-testid="pr-summary">#{pr.number}</span>
+  ),
+}));
+
 // The real ActorAvatar pulls in navigation, presence, and four profile cards.
 // The card only needs to know it rendered for the right actor.
 vi.mock("../../common/actor-avatar", () => ({
@@ -63,13 +88,15 @@ vi.mock("../../common/actor-avatar", () => ({
   ),
 }));
 
-// A spy, not a stub: `useActorName` subscribes to the workspace member list,
-// so "was this hook mounted at all" is the assertion that keeps the assignee
-// row from being inlined back into the card body.
-const mockUseActorName = vi.hoisted(() => vi.fn(() => ({ getActorName: () => "zain" })));
+const ACTOR_NAMES: Record<string, string> = {
+  "user-9": "zain",
+  "agent-triage": "GitHub Triage",
+};
 
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: mockUseActorName,
+  useActorName: () => ({
+    getActorName: (_type: string, id: string) => ACTOR_NAMES[id] ?? id,
+  }),
 }));
 
 vi.mock("./status-icon", () => ({
@@ -99,6 +126,8 @@ vi.mock("./priority-icon", () => ({
 
 const mockUseQuery = vi.mocked(useQuery);
 
+type Label = { id: string; name: string; color: string };
+
 type Issue = {
   id: string;
   identifier: string;
@@ -109,7 +138,18 @@ type Issue = {
   description?: string | null;
   assignee_type?: string | null;
   assignee_id?: string | null;
+  creator_type: string;
+  creator_id: string;
+  parent_issue_id?: string | null;
+  project_id?: string | null;
+  due_date?: string | null;
+  labels?: Label[];
+  created_at: string;
+  updated_at: string;
 };
+
+const NOW = Date.now();
+const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
 
 const BASE_ISSUE: Issue = {
   id: "issue-1",
@@ -117,6 +157,16 @@ const BASE_ISSUE: Issue = {
   title: "A very long issue title that the inline chip never shows",
   status: "todo",
   priority: "none",
+  creator_type: "agent",
+  creator_id: "agent-triage",
+  created_at: minutesAgo(3 * 24 * 60),
+  updated_at: minutesAgo(14),
+};
+
+const PARENT_ISSUE = {
+  id: "parent-1",
+  identifier: "MUL-3400",
+  title: "Weekly GitHub triage",
 };
 
 const NOT_FOUND_TEXT = "This issue does not exist or has been deleted in this workspace.";
@@ -127,40 +177,54 @@ type DetailState =
   | { phase: "error" }
   | { phase: "success"; issue: Issue | undefined };
 
+interface Fixtures {
+  progress?: Map<string, { done: number; total: number }>;
+  tasks?: { issue_id: string; agent_id: string; status: string }[];
+  projects?: { id: string; title: string }[];
+  pullRequests?: { id: string; number: number; state: string }[];
+}
+
+const settled = (data: unknown) =>
+  ({ data, isPending: false, isError: false }) as unknown as ReturnType<typeof useQuery>;
+
 /**
- * Routes each query the card body makes to its own fixture, keyed by the first
- * segment of the query key the mocked options factories produce. The detail
- * fixture carries `isPending`/`isError` explicitly because the body branches on
- * them, not on `data` alone.
+ * Routes each query the card makes to its own fixture, keyed by the first
+ * segment of the query key the mocked options factories produce. A disabled
+ * query reports no data, and a `select` is applied the way react-query would.
+ * The detail fixture carries `isPending`/`isError` explicitly because the body
+ * branches on them, not on `data` alone.
  */
-function mockQueries(
-  detail: DetailState,
-  progress?: Map<string, { done: number; total: number }>,
-): void {
+function mockQueries(detail: DetailState, fixtures: Fixtures = {}): void {
   mockUseQuery.mockImplementation((options: unknown) => {
-    const [key] = (options as { queryKey: string[] }).queryKey;
-    if (key === "issue") {
+    const { queryKey, enabled, select } = options as {
+      queryKey: string[];
+      enabled?: boolean;
+      select?: (data: unknown) => unknown;
+    };
+    if (enabled === false) return settled(undefined);
+    const [key, id] = queryKey;
+    const raw = (data: unknown) => settled(select ? select(data) : data);
+    if (key === "issue" && id === "issue-1") {
       return {
         data: detail.phase === "success" ? detail.issue : undefined,
         isPending: detail.phase === "pending",
         isError: detail.phase === "error",
       } as unknown as ReturnType<typeof useQuery>;
     }
-    if (key === "child-progress") {
-      return { data: progress, isPending: false, isError: false } as unknown as ReturnType<
-        typeof useQuery
-      >;
+    if (key === "issue" && id === PARENT_ISSUE.id) return settled(PARENT_ISSUE);
+    if (key === "child-progress") return settled(fixtures.progress);
+    if (key === "agent-tasks") return raw(fixtures.tasks ?? []);
+    if (key === "projects") return raw(fixtures.projects ?? []);
+    if (key === "pull-requests") {
+      return raw({ pull_requests: fixtures.pullRequests ?? [] });
     }
     throw new Error(`Unexpected query key: ${String(key)}`);
   });
 }
 
 /** Shorthand for the common case: the detail query settled with an issue. */
-function mockIssue(
-  issue: Issue,
-  progress?: Map<string, { done: number; total: number }>,
-): void {
-  mockQueries({ phase: "success", issue }, progress);
+function mockIssue(issue: Issue, fixtures?: Fixtures): void {
+  mockQueries({ phase: "success", issue }, fixtures);
 }
 
 function renderCard(fallbackLabel?: string): void {
@@ -192,10 +256,15 @@ function paragraphCount(): number {
   return title.parentElement?.querySelectorAll("p").length ?? 0;
 }
 
+/** The value cell of a property row, found by its term. */
+function propertyValue(term: string): HTMLElement {
+  const dt = screen.getByText(term, { selector: "dt" });
+  return dt.nextElementSibling as HTMLElement;
+}
+
 describe("IssueHoverCard", () => {
   beforeEach(() => {
     mockUseQuery.mockReset();
-    mockUseActorName.mockClear();
     mockIssue(BASE_ISSUE);
   });
 
@@ -221,33 +290,16 @@ describe("IssueHoverCard", () => {
     expect(mockUseQuery).toHaveBeenCalled();
   });
 
-  it("shows the priority glyph ahead of the status icon", async () => {
-    mockIssue({ ...BASE_ISSUE, priority: "high" });
-
-    await openCard();
-
-    const priority = screen.getByTestId("priority-icon");
-    expect(priority).toHaveAttribute("data-priority", "high");
-    // Ordering: priority leads the header, the status icon follows it. Both
-    // glyphs sit inside their own naming wrapper, so compare the wrappers.
-    expect(priority.parentElement?.nextElementSibling).toContainElement(
-      screen.getByTestId("status-icon"),
-    );
-  });
-
-  it("names the status and priority glyphs for assistive tech", async () => {
+  it("names the status and the priority in text, not only as glyphs", async () => {
     mockIssue({ ...BASE_ISSUE, status: "in_progress", priority: "high" });
 
     await openCard();
 
-    // Localized names from the shipped issues namespace — no key of this
-    // card's own. Removing either aria-label drops the element from the query.
-    expect(screen.getByLabelText("In Progress")).toContainElement(
-      screen.getByTestId("status-icon"),
-    );
-    expect(screen.getByLabelText("High")).toContainElement(
-      screen.getByTestId("priority-icon"),
-    );
+    // Localized names from the shipped issues namespace.
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
+    const priority = screen.getByText("High");
+    expect(priority).toContainElement(screen.getByTestId("priority-icon"));
+    expect(screen.getByTestId("priority-icon")).toHaveAttribute("data-priority", "high");
   });
 
   it("paints a custom status with its catalog color", async () => {
@@ -269,7 +321,7 @@ describe("IssueHoverCard", () => {
     );
   });
 
-  it("omits the priority glyph when the issue has no priority", async () => {
+  it("omits the priority when the issue has no priority", async () => {
     mockIssue({ ...BASE_ISSUE, priority: "none" });
 
     await openCard();
@@ -283,48 +335,194 @@ describe("IssueHoverCard", () => {
 
     await openCard();
 
-    const avatar = screen.getByTestId("actor-avatar");
+    const assignee = propertyValue("Assignee");
+    const avatar = within(assignee).getByTestId("actor-avatar");
     expect(avatar).toHaveAttribute("data-actor-type", "member");
     expect(avatar).toHaveAttribute("data-actor-id", "user-9");
     expect(avatar).toHaveAttribute("data-hover-card", "false");
     expect(avatar).toHaveAttribute("data-profile-link", "false");
-    expect(screen.getByText("zain")).toBeInTheDocument();
-    expect(mockUseActorName).toHaveBeenCalled();
+    expect(within(assignee).getByText("zain")).toBeInTheDocument();
   });
 
-  it("omits the assignee when the issue is unassigned", async () => {
+  it("says Unassigned rather than dropping the assignee row", async () => {
     mockIssue({ ...BASE_ISSUE, assignee_type: null, assignee_id: null });
 
     await openCard();
 
-    expect(screen.queryByTestId("actor-avatar")).not.toBeInTheDocument();
-    expect(screen.queryByText("zain")).not.toBeInTheDocument();
-    // The member directory stays unfetched: the row that reads it never mounts.
-    expect(mockUseActorName).not.toHaveBeenCalled();
+    const assignee = propertyValue("Assignee");
+    expect(within(assignee).getByText("Unassigned")).toBeInTheDocument();
+    expect(within(assignee).queryByTestId("actor-avatar")).not.toBeInTheDocument();
+  });
+
+  it("marks the assignee as working while an agent runs on the issue", async () => {
+    mockIssue(
+      { ...BASE_ISSUE, assignee_type: "agent", assignee_id: "agent-triage" },
+      {
+        tasks: [
+          { issue_id: "issue-1", agent_id: "agent-triage", status: "running" },
+          { issue_id: "other-issue", agent_id: "agent-x", status: "queued" },
+        ],
+      },
+    );
+
+    await openCard();
+
+    // ShimmerText renders an aria-hidden copy of its label for the highlight,
+    // so match the cell's text rather than a single element.
+    expect(propertyValue("Assignee")).toHaveTextContent("Working");
+  });
+
+  it("shows no activity when only other issues have agent tasks", async () => {
+    mockIssue(
+      { ...BASE_ISSUE, assignee_type: "agent", assignee_id: "agent-triage" },
+      { tasks: [{ issue_id: "other-issue", agent_id: "agent-x", status: "running" }] },
+    );
+
+    await openCard();
+
+    expect(screen.queryByText("Working")).not.toBeInTheDocument();
+    expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+  });
+
+  it("marks the assignee as queued while only its own run waits", async () => {
+    mockIssue(
+      { ...BASE_ISSUE, assignee_type: "agent", assignee_id: "agent-triage" },
+      {
+        tasks: [
+          { issue_id: "issue-1", agent_id: "agent-triage", status: "queued" },
+          { issue_id: "issue-1", agent_id: "agent-reviewer", status: "running" },
+        ],
+      },
+    );
+
+    await openCard();
+
+    expect(propertyValue("Assignee")).toHaveTextContent("Queued");
+    expect(propertyValue("Assignee")).not.toHaveTextContent("Working");
+  });
+
+  it("does not credit another agent's run on the issue to the assignee", async () => {
+    mockIssue(
+      { ...BASE_ISSUE, assignee_type: "agent", assignee_id: "agent-triage" },
+      { tasks: [{ issue_id: "issue-1", agent_id: "agent-reviewer", status: "running" }] },
+    );
+
+    await openCard();
+
+    expect(screen.queryByText("Working")).not.toBeInTheDocument();
+    expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+  });
+
+  it("never marks a member assignee with agent activity", async () => {
+    mockIssue(
+      { ...BASE_ISSUE, assignee_type: "member", assignee_id: "user-9" },
+      { tasks: [{ issue_id: "issue-1", agent_id: "user-9", status: "queued" }] },
+    );
+
+    await openCard();
+
+    expect(screen.queryByText("Working")).not.toBeInTheDocument();
+    expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+  });
+
+  it("names who created the issue and when it last moved", async () => {
+    await openCard();
+
+    const creator = screen
+      .getAllByTestId("actor-avatar")
+      .find((el) => el.getAttribute("data-actor-id") === "agent-triage");
+    expect(creator).toHaveAttribute("data-hover-card", "false");
+    expect(screen.getByText("GitHub Triage")).toBeInTheDocument();
+    expect(screen.getByText("created 3d ago · updated 14m ago")).toBeInTheDocument();
+  });
+
+  it("shows the project and parent issue when the issue has them", async () => {
+    mockIssue(
+      { ...BASE_ISSUE, project_id: "project-1", parent_issue_id: PARENT_ISSUE.id },
+      { projects: [{ id: "project-1", title: "Runtimes" }] },
+    );
+
+    await openCard();
+
+    expect(within(propertyValue("Project")).getByText("Runtimes")).toBeInTheDocument();
+    const parent = propertyValue("Parent issue");
+    expect(within(parent).getByText("MUL-3400")).toBeInTheDocument();
+    expect(within(parent).getByText("Weekly GitHub triage")).toBeInTheDocument();
+  });
+
+  it("does not query projects or a parent for an issue that has neither", async () => {
+    await openCard();
+
+    expect(screen.queryByText("Project", { selector: "dt" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Parent issue", { selector: "dt" })).not.toBeInTheDocument();
+    const projectQuery = mockUseQuery.mock.calls.find(
+      ([options]) => (options as { queryKey: string[] }).queryKey[0] === "projects",
+    );
+    expect((projectQuery?.[0] as { enabled?: boolean }).enabled).toBe(false);
+  });
+
+  it("caps the labels and counts the rest", async () => {
+    mockIssue({
+      ...BASE_ISSUE,
+      labels: ["bug", "runtime", "desktop", "p1"].map((name, i) => ({
+        id: `label-${i}`,
+        name,
+        color: "#ef4444",
+      })),
+    });
+
+    await openCard();
+
+    const labels = propertyValue("Labels");
+    expect(within(labels).getByText("bug")).toBeInTheDocument();
+    expect(within(labels).getByText("desktop")).toBeInTheDocument();
+    expect(within(labels).queryByText("p1")).not.toBeInTheDocument();
+    expect(within(labels).getByText("+1")).toBeInTheDocument();
+  });
+
+  it("leads with an open pull request and counts the rest", async () => {
+    mockIssue(BASE_ISSUE, {
+      pullRequests: [
+        { id: "pr-1", number: 7600, state: "merged" },
+        { id: "pr-2", number: 7612, state: "open" },
+      ],
+    });
+
+    await openCard();
+
+    const prs = propertyValue("Pull requests");
+    expect(within(prs).getByTestId("pr-summary")).toHaveTextContent("#7612");
+    expect(within(prs).getByText("+1")).toBeInTheDocument();
+  });
+
+  it("omits the pull request row when none are linked", async () => {
+    await openCard();
+
+    expect(screen.queryByText("Pull requests", { selector: "dt" })).not.toBeInTheDocument();
   });
 
   it("shows sub-issue progress when the workspace map has an entry", async () => {
-    mockIssue(BASE_ISSUE, new Map([["issue-1", { done: 2, total: 5 }]]));
+    mockIssue(BASE_ISSUE, { progress: new Map([["issue-1", { done: 2, total: 5 }]]) });
 
     await openCard();
 
-    expect(screen.getByText("2/5")).toBeInTheDocument();
+    expect(within(propertyValue("Sub-issues")).getByText("2/5")).toBeInTheDocument();
   });
 
   it("omits progress when the issue has no children", async () => {
-    mockIssue(BASE_ISSUE, new Map([["other-issue", { done: 1, total: 3 }]]));
+    mockIssue(BASE_ISSUE, { progress: new Map([["other-issue", { done: 1, total: 3 }]]) });
 
     await openCard();
 
-    expect(screen.queryByText(/\d+\/\d+/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+\/\d+$/)).not.toBeInTheDocument();
   });
 
   it("omits progress when the issue has an entry with no children counted", async () => {
-    mockIssue(BASE_ISSUE, new Map([["issue-1", { done: 0, total: 0 }]]));
+    mockIssue(BASE_ISSUE, { progress: new Map([["issue-1", { done: 0, total: 0 }]]) });
 
     await openCard();
 
-    expect(screen.queryByText(/\d+\/\d+/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+\/\d+$/)).not.toBeInTheDocument();
   });
 
   it("shows a flattened description snippet clamped to two lines", async () => {

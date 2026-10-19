@@ -164,7 +164,9 @@
       "label": "推荐一个操作",
       "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
     },
-    "customize": "自定义开场建议"
+    "customize": "自定义开场建议",
+    "uploading": "请等待附件上传完成后再使用开场建议。",
+    "draft_in_progress": "请先发送或清空草稿，再使用开场建议。"
   },
   "onboarding_cards": {
     "aria_label": "开始方式",

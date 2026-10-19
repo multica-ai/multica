@@ -82,9 +82,7 @@ var quickActionTemplateTokenRe = regexp.MustCompile(`\{\{[^}]*\}\}`)
 // reaches nobody, so a prompt may legitimately point at related work.
 var quickActionSideEffectMentionRe = regexp.MustCompile(`mention://(agent|squad|member|all)/`)
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 type QuickActionResponse struct {
 	ID           string  `json:"id"`
@@ -139,9 +137,7 @@ type ListQuickActionsResponse struct {
 	QuickActions []QuickActionResponse `json:"quick_actions"`
 }
 
-// ---------------------------------------------------------------------------
 // Validation
-// ---------------------------------------------------------------------------
 
 func validateQuickActionName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
@@ -194,9 +190,7 @@ func normalizeQuickActionVisibility(raw string) (string, error) {
 	return v, nil
 }
 
-// ---------------------------------------------------------------------------
 // Target resolution
-// ---------------------------------------------------------------------------
 
 // quickActionTarget is the resolved execution target of an action: the agent
 // that will actually run, plus the display identity the client should show.
@@ -412,9 +406,7 @@ func (h *Handler) quickActionToResponse(ctx context.Context, qa db.QuickAction) 
 	return resp
 }
 
-// ---------------------------------------------------------------------------
 // Management gate
-// ---------------------------------------------------------------------------
 
 // requireQuickActionActor resolves the acting member. Agents are rejected: an
 // agent inherits its runtime owner's credentials, and without this an admin's
@@ -476,9 +468,7 @@ func (h *Handler) requirePublicQuickActionRole(w http.ResponseWriter, r *http.Re
 	return ok
 }
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 // ListQuickActions returns the workspace catalog. It performs NO permission
 // work: `private` rows are scoped to their creator by the query (that is what

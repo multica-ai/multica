@@ -193,10 +193,18 @@ export function inboxFiltersForPrioritySupport(
  * (`useInboxUnreadCount`) counts the same thing from the server's summary
  * endpoint, which applies that newest-per-issue rule in SQL — so "only unread"
  * and the number next to Inbox still cannot disagree.
+ *
+ * `pinnedKey` is the notification whose detail is open. Opening an unread
+ * notification marks it read, which would otherwise remove the row the user
+ * just clicked from under the detail pane. The pinned row therefore survives
+ * the unread dimension only; the status, priority, and actor dimensions still
+ * apply, because changing one of those is an explicit request to filter the
+ * notification itself out.
  */
 export function filterInboxItems(
   items: InboxItem[],
   filters: InboxFilters,
+  pinnedKey?: string | null,
 ): InboxItem[] {
   if (isEmptyInboxFilters(filters)) return items;
 
@@ -205,13 +213,17 @@ export function filterInboxItems(
   const actors = new Set(filters.actors);
   return items.filter((item) => {
     const actor = inboxActorKey(item);
-    return (
+    const matchesOtherDimensions =
       (statuses.size === 0 ||
         (item.issue_status != null && statuses.has(item.issue_status))) &&
       (priorities.size === 0 ||
         (item.issue_priority != null && priorities.has(item.issue_priority))) &&
-      (actors.size === 0 || (actor != null && actors.has(actor))) &&
-      (!filters.unreadOnly || item.read !== true)
+      (actors.size === 0 || (actor != null && actors.has(actor)));
+    if (!matchesOtherDimensions) return false;
+    return (
+      !filters.unreadOnly ||
+      item.read !== true ||
+      (pinnedKey != null && (item.issue_id ?? item.id) === pinnedKey)
     );
   });
 }

@@ -121,7 +121,7 @@ export function createJaDict(
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という26種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という27種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -142,7 +142,7 @@ export function createJaDict(
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、26種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、27種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -197,7 +197,7 @@ export function createJaDict(
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の26種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の27種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -279,6 +279,69 @@ export function createJaDict(
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.6.3",
+          date: "2026-10-16",
+          title: "実行ごとの費用の詳細、短くなったオンボーディング、退出したメンバーのアクセス停止、より安定した実行",
+          changes: [],
+          features: [
+            "実行ログで実行ごとの費用がバーで表示され、トークン、所要時間、モデルも分かります。",
+            "実行の詳細で、費用・トークン・所要時間ごとに実行を比べられ、累計表示にも切り替えられます。",
+            "どの実行も展開すると、トークンと費用の内訳が見られます。",
+          ],
+          improvements: [
+            "オンボーディングでランタイムの設定をスキップすると、インストールガイドの Issue がすぐ開きます。",
+          ],
+          fixes: [
+            "ワークスペースを離れた、または外されたメンバーには、通知もリアルタイムの更新も届かなくなります。",
+            "エージェント ビルダーの下書きの形式が少し崩れていても、設定に反映されます。",
+            "エージェント ビルダーの再試行の案内は、閉じるか手で編集すると再び表示されません。",
+            "受け取られたまま届かなかったタスクがキューに戻り、止まったままになりません。",
+            "ローカルフォルダーで再開しても、コミット済みの変更を下書きとして再適用せず、ほかの下書きも残ります。",
+            "キャッシュの整理で、リポジトリが管理する .next などのフォルダーや中の Git リポジトリが消えなくなります。",
+            "Claude Sonnet 5.5 と Haiku 5.5 の実行でも費用の見積もりが表示されます。",
+            "アラビア語やヘブライ語など右から左に書く文章に英語が混ざっても、正しい順序で読めます。",
+          ],
+        },
+        {
+          version: "0.6.2",
+          date: "2026-10-13",
+          title: "テキストとリンクのリストプロパティ、Cmd+K でのワークスペース切り替え、ワンクリックの会話スターター、より安定した実行",
+          changes: [],
+          features: [
+            "カスタム プロパティにテキストやリンクのリストを保存でき、値で完全一致の絞り込みもできます。",
+            "Cmd/Ctrl+K で別のワークスペースに切り替えられます。",
+            "デスクトップ版でワークスペースを切り替えると、前回開いていたタブに戻ります。",
+            "空のチャットで会話スターターを押すとすぐ送信され、下書きは上書きされません。",
+            "コマンドラインから、ローカルのデーモンのログイン時自動起動をオンにできます。初期状態はオフです。",
+          ],
+          improvements: [
+            "Issue 一覧の最初のページが速く表示されます。",
+            "デスクトップ版のナビゲーションとタブバーの位置がそろいました。",
+          ],
+          fixes: [
+            "Codex の長いスレッドがローカルフォルダーをまたいで続けられ、レート制限でも止まりません。",
+            "ChatGPT.app に含まれる Codex CLI も検出されます。",
+            "Pi のタスクで、設定した MCP サーバーが使えます。",
+            "Pi と Kimi の実行が失敗したとき、静かに終わらず失敗として表示されます。",
+            "Antigravity は最後に接続が切れても回答を残します。",
+            "CodeBuddy の起動エラーで、進行中の実行が止まらなくなります。",
+            "Oh My Pi は新しいセッションが必要なとき、古いセッションを再開せず新しく始めます。",
+            "Windows のタスクでシステムの一時フォルダーが使えます。",
+            "PC がスリープから復帰したあと、タスクが応答なしとして打ち切られなくなります。",
+            "ヘルスチェック用のポートが使用中でも、ローカルのデーモンが復旧します。",
+            "Hermes がローカルフォルダーをまたいで前のセッションを続けられます。",
+            "頻繁に動く Autopilot が止まらなくなり、実行も Autopilot との関連を保ちます。",
+            "PR の起動条件が変化を見逃さず、回復できる問題は理由を表示します。",
+            "タスクが終わると、Lark の「入力中」リアクションが消えます。",
+            "WeCom の Issue 通知が、実際に作業したエージェントのボットから届きます。",
+            "数字を含む Issue のプレフィックスでも検索できます。",
+            "プロジェクトを同時に編集しても、ほかの人が変えた項目を上書きしません。",
+            "チャットの読み込み中に送ったフォローアップが失われません。",
+            "通常の添付ファイルのダウンロードリンクが使え、実行詳細のテキストステップも正しく表示されます。",
+            "サーバーエラーで内部のエラー内容が表示されなくなります。",
+          ],
+        },
         {
           version: "0.6.1",
           date: "2026-10-01",

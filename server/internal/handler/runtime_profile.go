@@ -17,7 +17,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// ---------------------------------------------------------------------------
 // Custom Runtime Profiles (MUL-3284)
 //
 // A runtime_profile is a workspace-level, team-shared definition of a custom
@@ -30,7 +29,6 @@ import (
 // Iron rule: a profile carries NO generic per-agent args. Per-agent launch args
 // stay on agent.custom_args. The only args field is fixed_args — args every
 // agent on this runtime must inherit to enter a compatible mode.
-// ---------------------------------------------------------------------------
 
 type RuntimeProfileResponse struct {
 	ID             string   `json:"id"`

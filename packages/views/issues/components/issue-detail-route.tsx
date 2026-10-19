@@ -6,6 +6,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound } from "./issue-detail";
+import { IssuePeekHost } from "./issue-peek";
 
 interface IssueDetailRouteProps {
   /**
@@ -89,11 +90,16 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
   // unbounded request loop that never settles. See `CanonicalIssue.notFound`.
   if (notFound || !canonicalId) return <IssueNotFound showBackLink={!onDelete} />;
 
+  // The page hosts a side peek so Shift+Click on an issue mention in the
+  // description or comments opens it floating over the page. Keyed so moving
+  // to another issue closes the peek.
   return (
-    <IssueDetail
-      issueId={canonicalId}
-      onDelete={onDelete}
-      highlightCommentId={highlight.commentId}
-    />
+    <IssuePeekHost key={canonicalId}>
+      <IssueDetail
+        issueId={canonicalId}
+        onDelete={onDelete}
+        highlightCommentId={highlight.commentId}
+      />
+    </IssuePeekHost>
   );
 }

@@ -94,6 +94,69 @@ func TestWakeupConditionFieldValueWakesOnceWhenItHolds(t *testing.T) {
 	}
 }
 
+// Cross-issue conditions have no event hints. Their stored predicates must be
+// checked through ListReadyWakeups, including after an unmet scheduled check.
+func TestWakeupConditionOtherIssueUsesScheduledChecks(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	workspace := parseTestUUID(t, f.WorkspaceID)
+	other := f.Issue(t, "Waiting for review", testutil.Cols{"status": "in_progress"})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Continue after review",
+		Condition: condition(t, map[string]any{"type": "other_issue", "issue_id": other, "state": "in_review"})})
+	if len(w.EventTypes) != 0 || !w.NextFireAt.Valid {
+		t.Fatalf("poll-only rule: events=%v next_fire_at=%+v", w.EventTypes, w.NextFireAt)
+	}
+	tick := func() db.IssueWakeup {
+		t.Helper()
+		if err := s.TickWorkspaces(ctx, workspace); err != nil {
+			t.Fatal(err)
+		}
+		got, err := f.q.LocklessWakeup(ctx, w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	got := tick()
+	if !got.Enabled || got.FireCount != 0 || wakeRuns(t, f, w.ID) != 0 {
+		t.Fatalf("unmet condition: enabled=%t fire_count=%d", got.Enabled, got.FireCount)
+	}
+	if !got.NextFireAt.Valid || !got.NextFireAt.Time.After(w.NextFireAt.Time) {
+		t.Fatalf("unmet condition was not scheduled for another check: %+v", got.NextFireAt)
+	}
+	// Hold the next check in the future without sleeping or relying on the
+	// wall-clock poll interval. Changing the watched issue emits no hint here.
+	f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()+interval '1 hour' WHERE id=$1", w.ID)
+	wakeSetStatus(t, f, parseTestUUID(t, other), "in_review")
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND processed_at IS NULL", w.ID); n != 0 {
+		t.Fatalf("cross-issue change created %d event hints", n)
+	}
+	if active, err := f.q.HasActiveTaskForIssue(ctx, issue); err != nil || active {
+		t.Fatalf("waiting issue has active work: active=%t err=%v", active, err)
+	}
+	got = tick()
+	if got.FireCount != 0 || wakeRuns(t, f, w.ID) != 0 {
+		t.Fatal("condition fired before its scheduled check")
+	}
+	// Only the persisted due time can make this rule a scheduler candidate.
+	f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()-interval '1 second' WHERE id=$1", w.ID)
+	got = tick()
+	if got.Enabled || got.FireCount != 1 || got.LastError.Valid || wakeRuns(t, f, w.ID) != 1 {
+		t.Fatalf("due condition: enabled=%t fire_count=%d last_error=%+v", got.Enabled, got.FireCount, got.LastError)
+	}
+	task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, "condition.met") || !strings.Contains(task.HandoffNote.String, other) || !strings.Contains(task.HandoffNote.String, `"status":"in_review"`) {
+		t.Fatalf("cross-issue observation missing from the run: %s", task.HandoffNote.String)
+	}
+	got = tick()
+	if got.FireCount != 1 || wakeRuns(t, f, w.ID) != 1 {
+		t.Fatal("once condition fired again on a repeated scheduler pass")
+	}
+}
+
 func TestWakeupConditionRepeatsOnlyWhenItBecomesTrueAgain(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
 	label := f.Insert(t, "issue_label", testutil.Cols{"workspace_id": f.WorkspaceID, "name": "approved", "color": "#123456"})
@@ -159,6 +222,7 @@ func TestWakeupConditionChildrenAndOtherIssue(t *testing.T) {
 
 func TestWakeupConditionPullRequestChecksWaitForNewResult(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
+	s.Tasks.PRSnapshotsEnabled = true
 	ctx := context.Background()
 	var pr string
 	if err := f.Pool.QueryRow(ctx, `INSERT INTO github_pull_request(workspace_id,installation_id,repo_owner,repo_name,pr_number,title,state,html_url,pr_created_at,pr_updated_at,snapshot_head_sha,checks_rollup_state)
@@ -213,5 +277,67 @@ func TestWakeupConditionValidation(t *testing.T) {
 		if _, err := s.Create(ctx, issue, member, pgtype.UUID{}, in); !errors.Is(err, ErrWakeupInput) {
 			t.Errorf("%s: err = %v, want ErrWakeupInput", name, err)
 		}
+	}
+}
+
+func TestWakeupConditionPRDiagnosticsRecover(t *testing.T) {
+	for _, event := range []string{"checks_finished", "merged"} {
+		t.Run(event, func(t *testing.T) {
+			f, s, issue, agent := conditionFixture(t)
+			ctx := context.Background()
+			parent := f.Issue(t, "PR owner")
+			f.Exec(t, "UPDATE issue SET parent_issue_id=$2 WHERE id=$1", issue, parent)
+			pr := f.Insert(t, "github_pull_request", testutil.Cols{
+				"workspace_id": f.WorkspaceID, "installation_id": 1,
+				"repo_owner": "fixture", "repo_name": "wakeup", "pr_number": 1,
+				"title": "PR", "state": "open", "html_url": "https://example.test/pr/1",
+				"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+			})
+			f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+			f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", parent, pr)
+			w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Review PR",
+				Condition: condition(t, map[string]any{"type": "pull_request", "event": event})})
+			assertWaiting := func(w db.IssueWakeup, diagnostic error) {
+				t.Helper()
+				if !w.Enabled || !w.LastError.Valid || w.LastError.String != conditionDiagnosticPrefix+diagnostic.Error() || w.FireCount != 0 || wakeRuns(t, f, w.ID) != 0 {
+					t.Fatalf("expected enabled, unfired rule with %q; got enabled=%t fires=%d error=%+v", diagnostic, w.Enabled, w.FireCount, w.LastError)
+				}
+				if !w.NextFireAt.Valid {
+					t.Fatal("diagnostic stopped condition polling")
+				}
+			}
+			if event == "checks_finished" {
+				// A disabled snapshot client is visible even in the create response.
+				assertWaiting(w, errPRSnapshotsUnavailable)
+				assertWaiting(wakeTick(t, f, s, w.ID), errPRSnapshotsUnavailable)
+				s.Tasks.PRSnapshotsEnabled = true
+			}
+			// Linking to the parent must never satisfy a child issue's rule.
+			assertWaiting(wakeTick(t, f, s, w.ID), errPRNotLinked)
+			f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+			if event == "checks_finished" {
+				assertWaiting(wakeTick(t, f, s, w.ID), errPRSnapshotPending)
+				// Re-enabling also accepts a transiently missing snapshot.
+				disabled, err := s.Disable(ctx, issue, w.ID, parseTestUUID(t, f.UserID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				w, err = s.Enable(ctx, issue, parseTestUUID(t, f.UserID), pgtype.UUID{}, w.ID, WakeupEnableInput{Revision: disabled.Revision})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertWaiting(w, errPRSnapshotPending)
+				f.Exec(t, "UPDATE github_pull_request SET snapshot_head_sha='new',checks_rollup_state='PENDING' WHERE id=$1", pr)
+			}
+			got := wakeTick(t, f, s, w.ID)
+			if got.LastError.Valid || !got.Enabled || wakeRuns(t, f, w.ID) != 0 {
+				t.Fatalf("normal pending condition did not clear diagnostic: %+v", got.LastError)
+			}
+			f.Exec(t, "UPDATE github_pull_request SET state='merged',checks_rollup_state='SUCCESS' WHERE id=$1", pr)
+			got = wakeTick(t, f, s, w.ID)
+			if got.Enabled || got.LastError.Valid || wakeRuns(t, f, w.ID) != 1 {
+				t.Fatalf("recovered condition failed to fire once: enabled=%t error=%+v", got.Enabled, got.LastError)
+			}
+		})
 	}
 }

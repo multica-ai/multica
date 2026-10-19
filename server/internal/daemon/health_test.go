@@ -20,6 +20,96 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
+func TestHealthHandlerReportsEmptyCLICommitWithoutFallback(t *testing.T) {
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v9.9.9", DaemonID: "daemon-test", ServerBaseURL: "https://api.example.test"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if got, present := raw["cli_commit"]; !present || got != "" {
+		t.Fatalf("cli_commit: got %v, present %v; want an explicit empty string without version fallback", got, present)
+	}
+}
+
+func TestHealthHandlerReportsCLICommitAndSameIdentitySnapshot(t *testing.T) {
+	for _, commit := range []string{strings.Repeat("a", 40), "", "unknown", "2ae2dbb", "malformed"} {
+		t.Run("commit="+commit, func(t *testing.T) {
+			d := New(Config{
+				WorkspacesRoot: t.TempDir(), CLICommit: commit, CLIVersion: "v9.9.9",
+				Profile: "profile-test", DaemonID: "daemon-test", DeviceName: "device-test",
+				ServerBaseURL: "https://api.example.test",
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			d.workspaces["workspace-test"] = &workspaceState{runtimeIDs: []string{"runtime-test"}}
+			d.ready.Store(true)
+			d.activeTasks.Store(2)
+			d.runningTasks.Store(1)
+			d.resourceWaitTasks.Store(1)
+			rec := httptest.NewRecorder()
+			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("health status: got %d, want 200", rec.Code)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw health response: %v", err)
+			}
+			for key, want := range map[string]any{
+				"cli_commit": commit, "cli_version": "v9.9.9", "profile": "profile-test",
+				"daemon_id": "daemon-test", "server_url": "https://api.example.test",
+				"device_name": "device-test", "status": "running", "os": runtime.GOOS,
+				"active_task_count": float64(2), "running_task_count": float64(1),
+				"resource_wait_task_count": float64(1),
+			} {
+				if got, present := raw[key]; !present || got != want {
+					t.Errorf("%s: got %v, present %v; want %v", key, got, present, want)
+				}
+			}
+			var typed HealthResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &typed); err != nil {
+				t.Fatalf("decode typed health response: %v", err)
+			}
+			if typed.CLICommit != commit || len(typed.Workspaces) != 1 ||
+				typed.Workspaces[0].ID != "workspace-test" || len(typed.Workspaces[0].Runtimes) != 1 ||
+				typed.Workspaces[0].Runtimes[0] != "runtime-test" {
+				t.Fatalf("commit or workspace/runtime projection changed: %+v", typed)
+			}
+		})
+	}
+}
+
+func TestHealthHandlerCLICommitIsCopiedAtDaemonConstruction(t *testing.T) {
+	cfg := Config{WorkspacesRoot: t.TempDir(), CLICommit: strings.Repeat("a", 40),
+		CLIVersion: "v9.9.9", Profile: "profile-test", DaemonID: "daemon-test",
+		ServerBaseURL: "https://api.example.test"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d := New(cfg, logger)
+	read := func(d *Daemon) HealthResponse {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		var resp HealthResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode health response: %v", err)
+		}
+		return resp
+	}
+	// Changing the input for a later instance cannot change the running instance's build identity.
+	cfg.CLICommit = strings.Repeat("b", 40)
+	cfg.CLIVersion = "v10.0.0"
+	if got := read(d); got.CLICommit != strings.Repeat("a", 40) || got.CLIVersion != "v9.9.9" {
+		t.Fatalf("original daemon identity changed: %+v", got)
+	}
+	if got := read(New(cfg, logger)); got.CLICommit != strings.Repeat("b", 40) || got.CLIVersion != "v10.0.0" {
+		t.Fatalf("new daemon did not use new build identity: %+v", got)
+	}
+}
+
 func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	t.Parallel()
 

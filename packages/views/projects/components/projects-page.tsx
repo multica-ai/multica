@@ -137,12 +137,10 @@ function leadFilterValue(p: Project): string | null {
   return p.lead_type && p.lead_id ? `${p.lead_type}:${p.lead_id}` : null;
 }
 
-// ---------------------------------------------------------------------------
 // Table (compact) view — ListGrid. Name + status are the core columns;
 // priority/progress/lead/issues/created collapse below @2xl, with min-width
 // + the wrapper's overflow as the escape valve. Rows use whole-row mouse
 // navigation; inline controls stop propagation so edit/menu clicks stay local.
-// ---------------------------------------------------------------------------
 
 const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
   priority: 116,
@@ -572,9 +570,7 @@ function ProjectTableHeader({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Card (comfortable) view — kept from the prior page.
-// ---------------------------------------------------------------------------
 
 function ProjectCard({
   project,
@@ -670,10 +666,8 @@ function ProjectCard({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Toolbar — search + result count + filter + display (compact only) + view
 // toggle.
-// ---------------------------------------------------------------------------
 
 const STATUS_VALUES: ProjectStatus[] = [
   "planned",
@@ -790,9 +784,7 @@ function ProjectBatchToolbar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export function ProjectsPage() {
   const { t } = useT("projects");

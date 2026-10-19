@@ -597,7 +597,7 @@ func TestApplyGCAction_RefusesEveryMutationWithoutOwner(t *testing.T) {
 			}
 
 			stats := &gcStats{byPattern: map[string]int{}}
-			if removed := d.applyGCAction(taskDir, tc.action, stats); removed != 0 {
+			if removed := d.applyGCAction(context.Background(), taskDir, tc.action, stats); removed != 0 {
 				t.Fatalf("applyGCAction reported %d removals on an unowned directory", removed)
 			}
 			if stats.cleaned != 0 || stats.orphaned != 0 || stats.artifactDirs != 0 || stats.bytesReclaimed != 0 {
@@ -1489,8 +1489,10 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 
 	mustMkdir("workdir/repo/src")
 	mustWrite("workdir/repo/src/index.ts", "console.log('hi')")
-	mustMkdir("workdir/repo/.git/objects")
-	mustWrite("workdir/repo/.git/objects/pack", "binary")
+	if out, err := exec.Command("git", "-C", filepath.Join(taskDir, "workdir/repo"), "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	mustWrite("workdir/repo/.git/objects/pack/test.pack", "binary")
 	mustMkdir("workdir/repo/node_modules/lodash")
 	mustWrite("workdir/repo/node_modules/lodash/index.js", "module.exports = {}")
 	mustMkdir("workdir/repo/.next/cache")
@@ -1503,7 +1505,7 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 	mustMkdir("output")
 	mustWrite("output/result.txt", "done")
 
-	removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, []string{"node_modules", ".next", ".turbo"})
+	removed, bytes, perPattern := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"node_modules", ".next", ".turbo"})
 
 	if removed != 3 {
 		t.Fatalf("expected 3 artifact dirs removed, got %d", removed)
@@ -1518,7 +1520,7 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 	// Verify protected paths are intact.
 	for _, rel := range []string{
 		"workdir/repo/src/index.ts",
-		"workdir/repo/.git/objects/pack",
+		"workdir/repo/.git/objects/pack/test.pack",
 		"workdir/repo/dist/main.js",
 		"output/result.txt",
 		".gc_meta.json",
@@ -1540,6 +1542,45 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 	}
 }
 
+func TestCleanTaskArtifacts_PreservesTrackedArtifactDirectory(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := t.TempDir()
+	repoDir := filepath.Join(taskDir, "workdir", "repo")
+	tracked := filepath.Join(repoDir, ".next", "server", "page.js")
+	untracked := filepath.Join(repoDir, "node_modules", "dependency", "index.js")
+	for path, content := range map[string]string{
+		tracked:   "committed build output",
+		untracked: "regenerable dependency",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "add", ".next/server/page.js").CombinedOutput(); err != nil {
+		t.Fatalf("git add tracked artifact: %v: %s", err, out)
+	}
+
+	removed, _, perPattern := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"node_modules", ".next"})
+
+	if removed != 1 || perPattern["node_modules"] != 1 || perPattern[".next"] != 0 {
+		t.Fatalf("removed=%d perPattern=%v, want only untracked node_modules removed", removed, perPattern)
+	}
+	if got, err := os.ReadFile(tracked); err != nil || string(got) != "committed build output" {
+		t.Fatalf("tracked artifact was mutated: data=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Dir(filepath.Dir(untracked))); !os.IsNotExist(err) {
+		t.Fatalf("untracked artifact directory survived: %v", err)
+	}
+}
+
 func TestCleanTaskArtifacts_RejectsPatternsWithSeparators(t *testing.T) {
 	t.Parallel()
 
@@ -1549,7 +1590,7 @@ func TestCleanTaskArtifacts_RejectsPatternsWithSeparators(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, _, _ := d.cleanTaskArtifacts(taskDir, []string{"workdir/node_modules", "../etc"})
+	removed, _, _ := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"workdir/node_modules", "../etc"})
 	if removed != 0 {
 		t.Fatalf("expected 0 removals from separator-bearing patterns, got %d", removed)
 	}
@@ -1577,7 +1618,7 @@ func TestCleanTaskArtifacts_DoesNotFollowSymlinks(t *testing.T) {
 		t.Skipf("symlink not supported: %v", err)
 	}
 
-	removed, _, _ := d.cleanTaskArtifacts(taskDir, []string{"node_modules"})
+	removed, _, _ := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"node_modules"})
 	if removed != 0 {
 		t.Fatalf("expected 0 removals (symlinked node_modules), got %d", removed)
 	}
@@ -1597,7 +1638,7 @@ func TestCleanTaskArtifacts_ManagedPathIsExactAndDeduplicated(t *testing.T) {
 		writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/keep"), 400)
 		writeFile(t, filepath.Join(taskDir, "codex-home/auth.json"), 10)
 
-		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, nil)
+		removed, bytes, perPattern := d.cleanTaskArtifacts(context.Background(), taskDir, nil)
 		if removed != 1 || bytes != 300 {
 			t.Fatalf("removed=%d bytes=%d, want 1/300", removed, bytes)
 		}
@@ -1616,7 +1657,7 @@ func TestCleanTaskArtifacts_ManagedPathIsExactAndDeduplicated(t *testing.T) {
 		writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
 		writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
 
-		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, []string{".sandbox-bin"})
+		removed, bytes, perPattern := d.cleanTaskArtifacts(context.Background(), taskDir, []string{".sandbox-bin"})
 		if removed != 2 || bytes != 700 {
 			t.Fatalf("removed=%d bytes=%d, want 2/700 without double counting", removed, bytes)
 		}
@@ -1651,7 +1692,7 @@ func TestCleanTaskArtifacts_ManagedPathDoesNotFollowSymlinks(t *testing.T) {
 				t.Skipf("symlink not supported: %v", err)
 			}
 
-			removed, _, _ := d.cleanTaskArtifacts(taskDir, nil)
+			removed, _, _ := d.cleanTaskArtifacts(context.Background(), taskDir, nil)
 			if removed != 0 {
 				t.Fatalf("removed=%d, want 0 for symlinked managed path", removed)
 			}
@@ -2523,7 +2564,7 @@ func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 	if action == gcActionClean || action == gcActionOrphan {
 		t.Fatalf("active chat session's directory must never be removed, got action %d", action)
 	}
-	d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+	d.applyGCAction(context.Background(), taskDir, action, &gcStats{byPattern: map[string]int{}})
 
 	for _, rel := range []string{".", "logs/run.log", "output/result.md", ".gc_meta.json"} {
 		if _, err := os.Stat(filepath.Join(taskDir, rel)); err != nil {

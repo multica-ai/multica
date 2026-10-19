@@ -7,10 +7,112 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestUploadResponseErrorsAreClassified(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	helpers := []struct {
+		name string
+		call func(*APIClient) (string, string, error)
+	}{
+		{"issue", func(c *APIClient) (string, string, error) {
+			att, err := c.UploadIssueAttachment(context.Background(), []byte("file"), "file.txt", "issue-1")
+			return att.ID, att.URL, err
+		}},
+		{"chat", func(c *APIClient) (string, string, error) {
+			att, err := c.UploadChatAttachment(context.Background(), []byte("file"), "file.txt", "task-1")
+			return att.ID, att.URL, err
+		}},
+		{"avatar", func(c *APIClient) (string, string, error) {
+			return c.UploadFileWithURL(context.Background(), []byte("file"), "file.txt")
+		}},
+	}
+	cases := []struct {
+		name      string
+		status    int
+		body      string
+		truncated bool
+		wantExit  int
+	}{
+		{"success", http.StatusOK, `{"id":"att-1","url":"https://example.test/file"}`, false, 0},
+		{"interrupted body", http.StatusOK, `{"id":"att-1","url":"`, true, ExitNetwork},
+		{"empty body", http.StatusOK, "", false, ExitGeneric},
+		{"invalid JSON", http.StatusOK, `{"id": }`, false, ExitGeneric},
+		{"validation", http.StatusBadRequest, `{"error":"invalid upload"}`, false, ExitValidation},
+		{"authentication", http.StatusUnauthorized, `{"error":"unauthorized"}`, false, ExitAuth},
+	}
+	for _, h := range helpers {
+		for _, tc := range cases {
+			t.Run(h.name+"/"+tc.name, func(t *testing.T) {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					if r.Method != http.MethodPost || r.URL.Path != "/api/upload-file" {
+						t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					}
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.Header().Set("Content-Type", "application/json")
+					if tc.truncated {
+						// End a real HTTP response before its advertised body is complete.
+						w.Header().Set("Content-Length", strconv.Itoa(len(tc.body)+64))
+					}
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, tc.body)
+				}))
+				defer srv.Close()
+				client := NewAPIClient(srv.URL, "ws-1", "test-token")
+				id, url, err := h.call(client)
+				if requests.Load() != 1 {
+					t.Fatalf("upload sent %d requests, want one", requests.Load())
+				}
+				if got := ExitCodeFor(err); got != tc.wantExit {
+					t.Errorf("ExitCodeFor = %d, want %d; err=%v", got, tc.wantExit, err)
+				}
+				if tc.wantExit == 0 {
+					if err != nil || id != "att-1" || url != "https://example.test/file" {
+						t.Fatalf("upload result: id=%q url=%q err=%v", id, url, err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatal("expected an upload error")
+				}
+				var netErr *NetworkError
+				isNetwork := errors.As(err, &netErr)
+				if isNetwork != tc.truncated {
+					t.Errorf("NetworkError = %t, want %t; err=%v", isNetwork, tc.truncated, err)
+				}
+				if tc.truncated {
+					if !errors.Is(err, io.ErrUnexpectedEOF) {
+						t.Errorf("lost underlying unexpected EOF: %v", err)
+					}
+					if msg := FormatError(err, false); !strings.Contains(msg, "network connection") {
+						t.Errorf("FormatError = %q, want network guidance", msg)
+					}
+				} else if tc.status >= 400 {
+					var httpErr *HTTPError
+					if !errors.As(err, &httpErr) || httpErr.StatusCode != tc.status {
+						t.Errorf("HTTP error classification lost: %v", err)
+					}
+				} else if tc.body == "" {
+					if !errors.Is(err, io.EOF) || !strings.HasPrefix(err.Error(), "decode upload response: ") {
+						t.Errorf("plain EOF or existing context lost: %v", err)
+					}
+				} else {
+					var syntaxErr *json.SyntaxError
+					if !errors.As(err, &syntaxErr) || !strings.HasPrefix(err.Error(), "decode upload response: ") {
+						t.Errorf("JSON syntax error or existing context lost: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
 
 // TestHelperStatusErrorsAreClassified is an integration test that drives the
 // real client helpers against a fake server and asserts the error they return

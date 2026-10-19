@@ -34,7 +34,6 @@ export const user: User = {
   avatar_url: null,
   onboarded_at: time,
   onboarding_questionnaire: {},
-  starter_content_state: "imported",
   language: "en",
   profile_description: "",
   timezone: "Asia/Shanghai",

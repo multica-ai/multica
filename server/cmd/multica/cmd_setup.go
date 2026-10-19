@@ -270,7 +270,7 @@ func runDaemonAfterSetup(cmd *cobra.Command, args []string) error {
 	profile := resolveProfile(cmd)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	health := checkDaemonHealthOnPort(ctx, healthPortForProfile(profile))
+	health := checkDaemonHealthOnPort(ctx, resolveHealthPort(profile))
 
 	return dispatchDaemonAfterSetup(
 		cmd,

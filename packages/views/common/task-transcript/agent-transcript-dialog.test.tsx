@@ -249,6 +249,27 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it.each([
+    { type: "text", label: "Agent", icon: ".lucide-bot" },
+    { type: "thinking", label: "Thinking", icon: ".lucide-brain" },
+    { type: "error", label: "Error", icon: ".lucide-circle-alert" },
+  ] as const)("labels a $type step correctly when opened from the timeline", ({ type, label, icon }) => {
+    renderDialog([
+      { seq: 1, type, content: "Final delivered reply", created_at: baseTask.started_at! },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Model 1m 00s" }));
+
+    const inspector = screen.getByRole("complementary");
+    expect(within(inspector).getByRole("heading", { name: label })).toBeInTheDocument();
+    expect(inspector.querySelector(icon)).not.toBeNull();
+    expect(inspector).toHaveTextContent("Final delivered reply");
+    if (type === "text") {
+      expect(within(inspector).queryByText("Error")).not.toBeInTheDocument();
+      expect(inspector.querySelector(".text-destructive, .bg-destructive")).toBeNull();
+    }
+  });
+
   it("shows what was asked, whole, under the header", () => {
     // The lists that open this dialog cut the ask to one line; here it wraps.
     const ask = "Merge the three split-out sub-issues back into this PR &amp; ship conditions, history and runaway protection together";
@@ -258,6 +279,24 @@ describe("AgentTranscriptDialog", () => {
     expect(
       screen.getByText("Merge the three split-out sub-issues back into this PR & ship conditions, history and runaway protection together"),
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    { locale: "en", label: "Agent", model: "Model" },
+    { locale: "zh-Hans", label: "智能体", model: "模型" },
+    { locale: "ja", label: "エージェント", model: "モデル" },
+    { locale: "ko", label: "에이전트", model: "모델" },
+    { locale: "fr", label: "Agent", model: "Modèle" },
+  ] as const)("localizes the text step inspector in $locale", ({ locale, label, model }) => {
+    renderDialog([
+      { seq: 1, type: "text", content: "Final delivered reply", created_at: baseTask.started_at! },
+    ], { locale });
+
+    fireEvent.click(screen.getByRole("button", { name: `${model} 1m 00s` }));
+
+    const inspector = screen.getByRole("complementary");
+    expect(within(inspector).getByRole("heading", { name: label })).toBeInTheDocument();
+    expect(inspector.firstElementChild).toHaveTextContent(label);
   });
 
   it("has no trigger row for a run with no snapshot", () => {

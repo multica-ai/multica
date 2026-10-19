@@ -38,6 +38,7 @@ const PERMISSION_SCOPES: AgentPermissionScope[] = [
 export function AgentConfigurationPanel({
   draft,
   onChange,
+  onAutomaticChange = onChange,
   runtimes,
   runtimesLoading,
   members,
@@ -51,6 +52,8 @@ export function AgentConfigurationPanel({
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
+  /** Value cleanup without user interaction, such as an unsupported model. */
+  onAutomaticChange?: (draft: AgentDraft) => void;
   runtimes: RuntimeDevice[];
   runtimesLoading: boolean;
   members: MemberWithUser[];
@@ -222,6 +225,9 @@ export function AgentConfigurationPanel({
               runtimeOnline={selectedRuntime?.status === "online"}
               value={draft.model}
               onChange={(value) => onChange(applyDraftModelChange(draft, value))}
+              onAutomaticChange={(value) =>
+                onAutomaticChange(applyDraftModelChange(draft, value))
+              }
               // A successful switch clears the model, so an edit made while the
               // rebind is in flight would be silently discarded.
               disabled={!selectedRuntime || runtimeSwitchInFlight}

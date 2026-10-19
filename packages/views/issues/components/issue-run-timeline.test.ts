@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { AgentTask, TaskUsage } from "@multica/core/types";
 import {
   buildRunTimeline,
+  cacheHitRate,
   cumulativeCostAt,
   groupRunsByDay,
   idleSpanAround,
   niceTicks,
   runIndexAt,
+  shortModelName,
   stepCurvePath,
   timeTicks,
 } from "./issue-run-timeline";
@@ -86,7 +88,6 @@ describe("buildRunTimeline", () => {
     expect(timeline.agentMs).toBe(30 * 60 * 1000);
     // Elapsed runs from the first start to now, while a run is still going.
     expect(timeline.elapsedMs).toBe(NOW - new Date("2026-09-24T10:00:00").getTime());
-    expect(timeline.extent).toEqual([new Date("2026-09-24T10:00:00").getTime(), NOW]);
   });
 
   it("ignores deferred runs, which the execution log does not list", () => {
@@ -113,6 +114,51 @@ describe("buildRunTimeline", () => {
     expect(timeline.totalCost).toBe(15);
     expect(timeline.pricedCount).toBe(2);
     expect(timeline.maxRunCost).toBe(10);
+  });
+
+  it("totals cost, tokens and the priciest run over priced runs only", () => {
+    const timeline = buildRunTimeline(
+      [
+        makeTask({ id: "a", usage: usage(400_000) }),
+        makeTask({ id: "b", started_at: "2026-09-24T11:00:00", completed_at: "2026-09-24T11:30:00", usage: usage(200_000) }),
+        makeTask({ id: "unpriced", started_at: "2026-09-24T13:00:00", completed_at: "2026-09-24T13:05:00" }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.totalCost).toBe(15);
+    expect(timeline.pricedCount).toBe(2);
+    expect(timeline.maxRunCost).toBe(10);
+    expect(timeline.tokens).toEqual({ input: 0, output: 600_000, cacheRead: 0, cacheWrite: 0, total: 600_000 });
+  });
+
+  it("splits the spend by agent and by model, largest first", () => {
+    const timeline = buildRunTimeline(
+      [
+        makeTask({ id: "a", agent_id: "agent-a", usage: usage(200_000) }),
+        makeTask({
+          id: "b",
+          agent_id: "agent-b",
+          started_at: "2026-09-24T11:00:00",
+          usage: [
+            ...usage(400_000),
+            // claude-sonnet-5 at 2 / 10: 2M output = $20.
+            { provider: "anthropic", model: "claude-sonnet-5", input_tokens: 0, output_tokens: 2_000_000, cache_read_tokens: 0, cache_write_tokens: 0 },
+          ],
+        }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.costByAgent).toEqual([
+      { key: "agent-b", cost: 30 },
+      { key: "agent-a", cost: 5 },
+    ]);
+    // A run that used two models counts toward each at its own rate.
+    expect(timeline.costByModel).toEqual([
+      { key: "claude-sonnet-5", cost: 20 },
+      { key: "claude-opus-5", cost: 15 },
+    ]);
   });
 
   it("keeps a run without usage at no figure, not $0", () => {
@@ -347,6 +393,16 @@ describe("stepCurvePath", () => {
   });
 });
 
+describe("cacheHitRate", () => {
+  it("is the share of prompt tokens served from cache", () => {
+    expect(cacheHitRate({ input: 100, cacheRead: 800, cacheWrite: 100 })).toBe(0.8);
+  });
+
+  it("has no rate without prompt tokens", () => {
+    expect(cacheHitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBeNull();
+  });
+});
+
 describe("niceTicks", () => {
   it("steps in clean values and tops out at or above the max", () => {
     expect(niceTicks(166)).toEqual([50, 100, 150, 200]);
@@ -404,5 +460,19 @@ describe("groupRunsByDay", () => {
     expect(groups.map((g) => g.runs.map((r) => r.task.id))).toEqual([["d2-a"], ["d1-b", "d1-a"]]);
     expect(groups[1]!.cost).toBe(15);
     expect(groups[1]!.agentMs).toBe(40 * 60 * 1000);
+  });
+});
+
+describe("shortModelName", () => {
+  it("shortens the families it knows", () => {
+    expect(shortModelName("claude-opus-5-5-high")).toBe("Opus 5.5 high");
+    expect(shortModelName("claude-sonnet-4-5-20250929")).toBe("Sonnet 4.5");
+    expect(shortModelName("anthropic/claude-opus-5[1m]")).toBe("Opus 5");
+    expect(shortModelName("gpt-6.1-sol")).toBe("GPT-6.1 Sol");
+    expect(shortModelName("gemini-2.5-pro")).toBe("Gemini 2.5 Pro");
+  });
+
+  it("leaves an unfamiliar id as it is", () => {
+    expect(shortModelName("kimi-k2")).toBe("kimi-k2");
   });
 });

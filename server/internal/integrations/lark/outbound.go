@@ -236,47 +236,14 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 	p.typingIndicator = m
 }
 
-// Register subscribes the patcher to the task-lifecycle events it
-// cares about on the supplied bus. Idempotent only if you call it
-// against a fresh bus; call sites should invoke it exactly once
-// during server boot (after the bus + patcher are constructed and
-// before HTTP traffic starts).
+// Register attaches the patcher once during boot, before traffic starts.
+// ChatDone sends the reply, TaskFailed sends an error, and TaskCancelled clears
+// typing state without an answer. Every cancellation path must publish its event
+// after commit, including deletion paths whose workspace must come from the caller.
 //
-// Subscriptions are deliberately minimal:
-//
-//   - EventChatDone — the agent finished replying. The Patcher sends
-//     the reply as a plain text IM message (Lark's `msg_type=text`),
-//     not as an interactive card. The earlier card-based design (with
-//     thinking → running → final patches) made every reply look like
-//     a system notification nested in card chrome; flipping to plain
-//     text makes free-form chat feel native.
-//
-//   - EventTaskFailed — the run failed; surface a short error card
-//     so the failure is visually distinct from a successful reply.
-//
-//   - EventTaskCancelled — the run ended without an answer. Nothing is
-//     sent for it; the subscription exists so the Typing reaction comes
-//     off. A cancellation publishes no chat-done and no task-failed, so
-//     without this the badge sits on the user's message for good.
-//     task:cancelled is broadcast once per cancelled row by CancelTask,
-//     the queued follow-up cancel behind it, the agent- and issue-level
-//     bulk cancels, the runtime and member revocations, and deleting the
-//     chat session. The delete is the one that used to publish nothing:
-//     BroadcastCancelledTasks resolved each task's workspace through its
-//     chat_session, the same row its transaction had just deleted, and an
-//     event with no workspace is dropped before it reaches the bus. It now
-//     takes the workspace from its caller. Archiving an agent also publishes
-//     task:cancelled for chat tasks after commit, clearing their reactions
-//     through this subscription. Clear marks in-flight adds as ended so a
-//     late Add removes its own reaction when the HTTP call returns.
-//
-// We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
-// (no thinking-card lifecycle anymore — adds noise without value) or to
-// EventTaskCompleted (chat tasks always emit EventChatDone first, which
-// is what we care about; non-chat tasks have no Lark binding anyway and
-// would early-return). Leaving EventTaskCompleted unsubscribed also
-// avoids the prior "Done." overwrite regression where the no-content
-// EventTaskCompleted payload would wipe the real reply.
+// Do not subscribe to TaskCompleted: chat tasks already emit ChatDone, and the
+// empty completion payload must not overwrite the reply. Queued/running events
+// do not drive a thinking-card lifecycle.
 func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)

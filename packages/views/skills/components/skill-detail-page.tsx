@@ -172,9 +172,7 @@ function isDetailView(value: string | null): value is DetailView {
   return value === "overview" || value === "files";
 }
 
-// ---------------------------------------------------------------------------
 // File path validation + inline add
-// ---------------------------------------------------------------------------
 
 export function useValidateNewFilePath() {
   const { t } = useT("skills");
@@ -256,9 +254,7 @@ function AddFileInline({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header
-// ---------------------------------------------------------------------------
 
 function useOriginLabel(origin: OriginInfo | null, runtime: AgentRuntime | null) {
   const { t } = useT("skills");
@@ -385,9 +381,7 @@ function SkillIdentity({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Overview tab
-// ---------------------------------------------------------------------------
 
 function PropertyRow({
   label,
@@ -557,9 +551,7 @@ function OverviewTab({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Files tab
-// ---------------------------------------------------------------------------
 
 function FilesTab({
   filePaths,
@@ -756,9 +748,7 @@ function FilesTab({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Main page
-// ---------------------------------------------------------------------------
 
 export function SkillDetailPage({ skillId }: { skillId: string }) {
   const { t } = useT("skills");

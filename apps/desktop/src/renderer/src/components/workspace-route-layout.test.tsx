@@ -89,10 +89,6 @@ vi.mock("@multica/views/workspace/use-workspace-seen", () => ({
   useWorkspaceSeen: () => state.workspaceSeen,
 }));
 
-vi.mock("@multica/views/workspace/welcome-after-onboarding", () => ({
-  WelcomeAfterOnboarding: () => null,
-}));
-
 vi.mock("@multica/views/layout", () => ({
   WorkspacePresencePrefetch: () => null,
 }));

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import type { ComponentProps } from "react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { RuntimeModelsResult } from "@multica/core/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,7 +47,7 @@ vi.mock("@multica/core/runtimes", () => ({
 // Bumped per test so React Query cannot serve a previous case's cached result.
 let discoveryKey = 0;
 
-function renderDropdown() {
+function renderDropdown(props: Partial<ComponentProps<typeof ModelDropdown>> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -59,6 +60,7 @@ function renderDropdown() {
           runtimeOnline
           value=""
           onChange={onChange}
+          {...props}
         />
       </QueryClientProvider>
     </I18nProvider>,
@@ -87,7 +89,8 @@ describe("ModelDropdown", () => {
   });
 
   it("offers the gpt-5.6 Codex models and submits their canonical IDs", async () => {
-    const { container, onChange } = renderDropdown();
+    const onAutomaticChange = vi.fn();
+    const { container, onChange } = renderDropdown({ onAutomaticChange });
     openDropdown(container);
 
     expect(await screen.findByText("GPT-5.6 Sol")).toBeTruthy();
@@ -99,6 +102,33 @@ describe("ModelDropdown", () => {
 
     fireEvent.click(screen.getByText("GPT-5.6 Terra"));
     expect(onChange).toHaveBeenCalledWith("gpt-5.6-terra");
+    expect(onAutomaticChange).not.toHaveBeenCalled();
+  });
+
+  it("routes unsupported model cleanup separately from user selections", async () => {
+    discovery = async () => ({ models: [], supported: false });
+    const onAutomaticChange = vi.fn();
+    const { onChange } = renderDropdown({ value: "saved-model", onAutomaticChange });
+
+    await waitFor(() => expect(onAutomaticChange).toHaveBeenCalledWith(""));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("still clears unsupported models for callers with one change handler", async () => {
+    discovery = async () => ({ models: [], supported: false });
+    const { onChange } = renderDropdown({ value: "saved-model" });
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(""));
+  });
+
+  it("treats explicit clearing as a user selection", async () => {
+    const onAutomaticChange = vi.fn();
+    const { container, onChange } = renderDropdown({ value: "saved-model", onAutomaticChange });
+    openDropdown(container);
+    fireEvent.click(await screen.findByText(enAgents.model_dropdown.clear_full));
+
+    expect(onChange).toHaveBeenCalledWith("");
+    expect(onAutomaticChange).not.toHaveBeenCalled();
   });
 
   it("offers an explicit refresh that requests the runtime's live catalog", async () => {

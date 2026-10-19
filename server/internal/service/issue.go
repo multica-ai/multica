@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -26,12 +27,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// IssueService is the single service-layer entry point for creating issues.
-// Both the HTTP `POST /issues` handler and the future Lark `/issue` command
-// call into Create so that duplicate guard, issue numbering, attachment
-// linking, broadcast, analytics, and agent/squad enqueue stay aligned. The
-// service deliberately does NOT depend on http.Request — callers parse
-// their own transport and pass a fully-resolved IssueCreateParams.
+// IssueService is the shared issue-creation entry point for HTTP and channel
+// callers. It keeps numbering, duplicate guards, attachments, broadcasts,
+// analytics, and agent/squad enqueue aligned. Callers resolve transport inputs
+// into IssueCreateParams; the service does not depend on http.Request.
 type IssueService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
@@ -272,6 +271,18 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if current.Digest != p.SourceContext.Digest {
 			return IssueCreateResult{}, ErrSourceContextChanged
 		}
+	}
+
+	// Project workflow (MUL-7420): an issue created in a project whose named
+	// workflow does not list the requested status starts on todo instead.
+	// The HTTP create path already rejects an explicit status outside the
+	// workflow; this keeps the other creators (channels, captured comments)
+	// inside it too. Resolved before the custom-status guard below so that
+	// guard checks the status actually written.
+	if def, err := s.createWorkflow(ctx, qtx, p); err != nil {
+		return IssueCreateResult{}, err
+	} else if def != nil && !def.IsDefault && !def.Has(p.Status) {
+		p.Status = issueworkflow.StartStatus
 	}
 
 	// A create landing on a CUSTOM status takes the shared catalog lock AND
@@ -825,6 +836,22 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 		)
 		return analytics.SourceManual, "", ""
 	}
+}
+
+// createWorkflow resolves the workflow of the project a new issue lands in:
+// its own project, or its parent's when it names none.
+func (s *IssueService) createWorkflow(ctx context.Context, qtx *db.Queries, p IssueCreateParams) (*issueworkflow.Definition, error) {
+	projectID := p.ProjectID
+	if !projectID.Valid && p.ParentIssueID.Valid {
+		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: p.ParentIssueID, WorkspaceID: p.WorkspaceID})
+		if err != nil {
+			// The parent check below reports a missing parent.
+			return nil, nil
+		}
+		projectID = parent.ProjectID
+	}
+	def, _, err := issueworkflow.ForProject(ctx, qtx, p.WorkspaceID, projectID)
+	return def, err
 }
 
 func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string, agentRunFireAt time.Time) pgtype.UUID {

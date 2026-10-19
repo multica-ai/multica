@@ -266,6 +266,9 @@ archived statuses remain readable via an explicit status filter.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
+- **Project workflows** can limit which statuses an issue takes and turn a
+  status change into a handoff to another agent. When the per-turn prompt
+  carries a `[Project workflow]` block, read `references/projects.md`.
 
 ## Who else is running right now
 
@@ -443,7 +446,7 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 ```
 
 - `--until-status KEY` — this issue's status is that key (built-in or one of the workspace's statuses).
-- `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. With several linked pull requests, any one satisfies it.
+- `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. With several linked pull requests, any one satisfies it. Both conditions inspect only PRs linked directly to this issue; they do not inherit a parent issue's PRs. Check evaluation also requires server-side GitHub snapshots. A missing link or snapshot is recorded in the rule's `last_error` and retried automatically rather than rejecting the rule.
 - `--until-children-done` — every sub-issue, staged or not, is closed (`done` or `cancelled`). With `--stage N` it waits only for staged sub-issues up to stage N, and stage N must have at least one. A parent with no sub-issues never fires. The parent's assignee already gets the sub-issue wakeup described under Stages; do not add this condition for the same wake.
 - `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), or `in_review`.
 - The same form also accepts `--until-assignee member|agent|squad:ID`, `--until-label LABEL_ID`, and `--until-property PROPERTY_ID=VALUE` (VALUE may be JSON). `multica issue wakeup create --help` lists them.
