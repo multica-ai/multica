@@ -102,6 +102,45 @@ func TestFinalizeStreamResultPreservesErrorResultWhenContextEnds(t *testing.T) {
 	}
 }
 
+// An error result that carries no text must keep the original "without
+// details" fallback — the delivery layer and operators recognise that wording —
+// while appending the protocol context the parser observed. Without it the
+// message says a failure happened but nothing about which kind.
+func TestFinalizeStreamResultEmptyErrorResultKeepsFallbackAndAddsContext(t *testing.T) {
+	t.Parallel()
+
+	status, output, errMsg := finalizeStreamResult(
+		"claude",
+		time.Second,
+		nil,
+		nil,
+		nil,
+		"session-1",
+		streamTerminalState{
+			lastAssistantText: strings.Repeat("x", 42),
+			sawResult:         true,
+			resultIsError:     true,
+		},
+		"",
+	)
+	if status != "failed" || output != "" {
+		t.Fatalf("finalizeStreamResult() = (%q, %q, %q), want failed with empty output", status, output, errMsg)
+	}
+	if !strings.HasPrefix(errMsg, "claude returned an error result without details") {
+		t.Fatalf("error = %q, want the original fallback preserved as the prefix", errMsg)
+	}
+	for _, want := range []string{
+		"result_seen=true",
+		"result_bytes=0",
+		"last_assistant_bytes=42",
+		"scanner_error=false",
+	} {
+		if !strings.Contains(errMsg, want) {
+			t.Errorf("error = %q, want substring %q", errMsg, want)
+		}
+	}
+}
+
 func TestStreamProtocolObservationDoesNotLogContent(t *testing.T) {
 	t.Parallel()
 

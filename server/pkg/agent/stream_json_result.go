@@ -122,7 +122,11 @@ func finalizeStreamResult(
 		status = "failed"
 		errMsg = state.finalResultText
 		if errMsg == "" {
-			errMsg = provider + " returned an error result without details"
+			// The frame that failed the run carried no text. Keep the original
+			// fallback intact and append what the parser observed, so an empty
+			// error result is distinguishable from a protocol that never
+			// completed. The caller layers the CLI's stderr tail on top.
+			errMsg = provider + " returned an error result without details" + streamResultContext(state)
 		}
 	}
 
@@ -159,6 +163,20 @@ func finalizeStreamResult(
 		return status, state.finalResultText, ""
 	}
 	return status, state.lastAssistantText, ""
+}
+
+// streamResultContext summarises what the parser observed by the time the
+// terminal error frame turned out to be empty. The lengths and flags are
+// protocol metadata only — no transcript text — so the diagnostic can be
+// persisted in Result.Error without leaking an answer or a credential.
+func streamResultContext(state streamTerminalState) string {
+	return fmt.Sprintf(
+		" (result_seen=%t, result_bytes=%d, last_assistant_bytes=%d, scanner_error=%t)",
+		state.sawResult,
+		len(state.finalResultText),
+		len(state.lastAssistantText),
+		state.scanErr != nil,
+	)
 }
 
 type streamProtocolObservation struct {

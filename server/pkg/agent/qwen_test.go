@@ -374,3 +374,39 @@ func TestQwenCode020ErrorFixturePreservesErrorMessage(t *testing.T) {
 		t.Fatalf("error detail = %q", state.finalResultText)
 	}
 }
+
+// An error frame that names nothing used to collapse to a bare "without
+// details" string. That fallback is kept — operators and docs recognise it —
+// but it must now carry the stream shape, so an empty error event is
+// distinguishable from protocol drift.
+func TestQwenErrorTextWithoutDetailsCarriesStreamContext(t *testing.T) {
+	t.Parallel()
+
+	for _, eventType := range []string{"result", "error"} {
+		state := qwenStreamState{eventCount: 3, invalidEventCount: 1, assistantEventCount: 2, toolUseCount: 1}
+		got := qwenErrorText(qwenStreamEvent{Type: eventType}, &state)
+		if !strings.HasPrefix(got, "qwen returned an error event without details") {
+			t.Errorf("event type %q: error text = %q, want the original fallback preserved", eventType, got)
+		}
+		for _, want := range []string{
+			"event_type=" + eventType,
+			"event_count=3",
+			"invalid_event_count=1",
+			"assistant_event_count=2",
+			"tool_use_count=1",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("event type %q: error text = %q, want substring %q", eventType, got, want)
+			}
+		}
+	}
+
+	// A type outside the protocol must be collapsed, never echoed verbatim.
+	got := qwenErrorText(qwenStreamEvent{Type: "PRIVATE PROMPT TEXT"}, &qwenStreamState{})
+	if !strings.Contains(got, "event_type=unknown") {
+		t.Errorf("error text = %q, want unknown event type for an unrecognised value", got)
+	}
+	if strings.Contains(got, "PRIVATE") {
+		t.Errorf("error text leaked an arbitrary event type: %q", got)
+	}
+}

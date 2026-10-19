@@ -121,6 +121,38 @@ sleep 10
 	}
 }
 
+// A terminal result that arrives but carries no detail text is the most
+// common silent failure: the protocol completed, so the old !resultSeen gate
+// suppressed the stderr tail precisely when it was the only evidence left.
+func TestCursorExecuteReportsEmptyErrorResultWithContext(t *testing.T) {
+	script := `#!/bin/sh
+` + drainStdin + `
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-empty-result"}'
+printf '%s\n' 'cursor-agent: provider rejected the request: upstream returned 500' >&2
+printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"session_id":"sess-empty-result"}'
+`
+	result := executeFakeCursor(t, script)
+
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed; error=%q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		"cursor-agent returned an error result without details",
+		"result_seen=true",
+		"result_bytes=0",
+		"last_event_type=result",
+		"cursor stderr:",
+		"upstream returned 500",
+	} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("error = %q, want substring %q", result.Error, want)
+		}
+	}
+	if result.Output != "" {
+		t.Fatalf("output = %q, want empty failed output", result.Output)
+	}
+}
+
 func TestCursorExecuteReportsSanitizedStderrOnProcessFailure(t *testing.T) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

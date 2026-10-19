@@ -312,7 +312,7 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 		if state.resultIsError {
 			// Qwen 0.20.0 result errors omit result; their actionable detail
 			// is in error.message.
-			state.finalResultText = qwenErrorText(event)
+			state.finalResultText = qwenErrorText(event, state)
 		} else {
 			state.finalResultText = event.Result
 		}
@@ -330,7 +330,7 @@ func handleQwenEvent(event qwenStreamEvent, ch chan<- Message, state *qwenStream
 		// Be fail-closed if a later Qwen release emits a terminal error event.
 		state.sawResult = true
 		state.resultIsError = true
-		state.finalResultText = qwenErrorText(event)
+		state.finalResultText = qwenErrorText(event, state)
 	}
 }
 
@@ -448,7 +448,7 @@ func qwenToolResultOutput(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func qwenErrorText(event qwenStreamEvent) string {
+func qwenErrorText(event qwenStreamEvent, state *qwenStreamState) string {
 	if event.Result != "" {
 		return event.Result
 	}
@@ -461,5 +461,28 @@ func qwenErrorText(event qwenStreamEvent) string {
 	if len(event.Error) > 0 {
 		return string(event.Error)
 	}
-	return "qwen returned an error event without details"
+	// The error frame named nothing. Append the stream shape the parser had
+	// already seen so the failure is not just "an error happened": the counts
+	// separate a well-formed but empty error event from protocol drift, and
+	// qwen.go layers the CLI's captured stderr tail on top of this message.
+	return fmt.Sprintf(
+		"qwen returned an error event without details (event_type=%s, event_count=%d, invalid_event_count=%d, assistant_event_count=%d, tool_use_count=%d)",
+		qwenDiagnosticEventType(event.Type),
+		state.eventCount,
+		state.invalidEventCount,
+		state.assistantEventCount,
+		state.toolUseCount,
+	)
+}
+
+// qwenDiagnosticEventType keeps the fallback diagnostic content-free: only the
+// protocol types handleQwenEvent recognises are echoed, anything else is
+// collapsed rather than copied into a task-level error string.
+func qwenDiagnosticEventType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "result", "error":
+		return strings.TrimSpace(value)
+	default:
+		return "unknown"
+	}
 }

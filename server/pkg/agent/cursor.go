@@ -354,11 +354,24 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// on a full pipe has returned by now; the writer sends exactly once.
 		writeErr := <-writeErrCh
 
+		// resultErrorUndetailed marks the failure shape that reaches this point
+		// with no detail text of its own: the terminal result event reported an
+		// error but carried an empty payload. It differs from "no result at
+		// all" in that the protocol boundary WAS reached, but it is equally
+		// silent, so it must still carry the stream context and stderr tail.
+		resultErrorUndetailed := false
 		if resultSeen {
 			// A parsed result is the protocol boundary. Ignore the cancellation and
 			// exit error caused by stopping a Cursor worker that lingers afterward.
 			if finalStatus == "failed" && finalError == "" {
-				finalError = "cursor-agent returned an error result without details"
+				resultErrorUndetailed = true
+				finalError = cursorResultErrorDiagnostic(
+					"cursor-agent returned an error result without details",
+					resultBytes,
+					eventCount,
+					invalidEventCount,
+					lastEventType,
+				)
 			}
 		} else {
 			switch {
@@ -403,6 +416,13 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				invalidEventCount,
 				lastEventType,
 			)
+		}
+		// The stderr tail is context, not a replacement for the error the run
+		// already reported: attach it whenever the failure is silent about its
+		// cause — either the stream never reached a result, or the result it
+		// reached carried no detail. Gating it on !resultSeen alone hid stderr
+		// on exactly the most common silent failure (an empty error result).
+		if finalStatus == "failed" && (!resultSeen || resultErrorUndetailed) {
 			finalError = withAgentStderr(finalError, "cursor", sanitizeAgentDiagnostic(stderrBuf.Tail()))
 		}
 
@@ -484,6 +504,22 @@ func cursorFailureDiagnostic(message string, exitErr, scanErr error, eventCount,
 		invalidEventCount,
 		lastEventType,
 		cursorIncompleteFinalizationWarning,
+	)
+}
+
+// cursorResultErrorDiagnostic appends the context we already hold to the
+// "error result without details" fallback. The terminal frame arrived but
+// named nothing, so the stream shape is the only evidence left that separates
+// a well-formed error from a protocol drift — the caller attaches the captured
+// stderr tail on top of this.
+func cursorResultErrorDiagnostic(message string, resultBytes, eventCount, invalidEventCount int, lastEventType string) string {
+	return fmt.Sprintf(
+		"%s (result_seen=true, result_bytes=%d, event_count=%d, invalid_event_count=%d, last_event_type=%s)",
+		message,
+		resultBytes,
+		eventCount,
+		invalidEventCount,
+		lastEventType,
 	)
 }
 
