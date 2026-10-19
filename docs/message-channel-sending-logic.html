@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multica 多渠道消息发送逻辑调研（SHAR-153）</title>
+<style>
+  :root { --fg:#1f2328; --muted:#57606a; --line:#d0d7de; --bg:#fff; --accent:#0969da; --warn:#9a6700; --warnbg:#fff8c5; --ok:#1a7f37; --codebg:#f6f8fa; }
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; color:var(--fg); line-height:1.6; max-width:960px; margin:0 auto; padding:24px; background:var(--bg); }
+  h1 { font-size:24px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  h2 { font-size:19px; margin-top:32px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  h3 { font-size:16px; margin-top:22px; }
+  code { background:var(--codebg); padding:1px 5px; border-radius:4px; font-size:13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--codebg); }
+  .note { background:var(--codebg); border-left:4px solid var(--accent); padding:10px 14px; margin:14px 0; font-size:14px; }
+  .warn { background:var(--warnbg); border-left:4px solid var(--warn); padding:10px 14px; margin:14px 0; font-size:14px; }
+  .ok { color:var(--ok); font-weight:600; }
+  .mut { color:var(--muted); font-size:13px; }
+  svg { max-width:100%; height:auto; display:block; margin:14px auto; background:#fbfcfd; border:1px solid var(--line); border-radius:8px; }
+  ul { margin:8px 0; } li { margin:4px 0; }
+  .small { font-size:12px; color:var(--muted); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Multica 多渠道消息发送逻辑调研</h1>
+<p class="mut">SHAR-153 · 调研员 · 检索日期 2026-10-19 · 结论以代码为准，附 <code>file:line</code> 引用</p>
+
+<h2>1. 摘要</h2>
+<ul>
+  <li>消息渠道发送分两条互不相交的寻址链路：<b>任务通知（inbox）</b>走 <code>EventInboxNew</code> → WeCom 智能机器人推送；<b>智能体回复</b>走 <code>EventChatDone</code> → 回到提问时绑定的 bot（<code>channel_task_delivery</code> 行）。</li>
+  <li>多绑定（同成员同渠道类型多个 bot）下，<b>通知</b>由 <code>FindNotificationBindingForMember</code> 选「显式通知目标」或「最旧绑定」；<b>回复</b>始终锚定提问 bot，与通知目标无关。</li>
+  <li><b>只有 WeCom</b> 订阅了 <code>EventInboxNew</code>，会把通知推进 bot；Slack/Lark/DingTalk/Telegram 不订阅该事件，仅回写回复、不发 bot 通知（成员侧只剩应用内 inbox）。</li>
+  <li>SHAR-146 修复的「新 bot 静默劫持全部通知」根因：旧 <code>FindChannelBindingForMember</code> 用 <code>bound_at DESC</code>（最新胜）。其函数当前已无出站调用方，被 <code>FindNotificationBindingForMember</code> 取代。</li>
+</ul>
+
+<div class="warn"><b>调研基线提示：</b>本文结论基于分支 <code>task/shar-146-notification-target-bot</code>（含 SHAR-146 改动）。调研时 SHAR-146 <b>尚未合并</b> <code>origin/main</code>：<code>FindNotificationBindingForMember</code> / <code>is_notification_target</code> 在 <code>origin/main</code> 中不存在。若以未合并前的 <code>main</code> 为准，则通知仍为 <code>FindChannelBindingForMember</code> 的「最新 bot 胜」劫持逻辑。</div>
+
+<h2>2. 信息类型全景</h2>
+<table>
+  <tr><th>信息类别</th><th>子类型</th><th>事件源 / 触发</th><th>代码位置</th><th>经渠道发出？</th></tr>
+  <tr>
+    <td rowspan="4"><b>任务通知<br>(inbox)</b></td>
+    <td>指派/取消/改派：<code>issue_assigned</code> <code>unassigned</code> <code>assignee_changed</code></td>
+    <td><code>issue:created</code> / <code>issue:updated</code></td>
+    <td><code>server/cmd/server/notification_listeners.go:674,709,751,766</code></td>
+    <td rowspan="4">仅 <b>WeCom</b> 经 bot 推送；其余渠道仅写入应用内 inbox</td>
+  </tr>
+  <tr>
+    <td>状态/优先级/日期变更：<code>status_changed</code> <code>priority_changed</code> <code>start_date_changed</code> <code>due_date_changed</code></td>
+    <td><code>issue:updated</code></td>
+    <td><code>notification_listeners.go:791,825,837,856</code></td>
+  </tr>
+  <tr>
+    <td>新评论 / @提及：<code>new_comment</code> <code>mentioned</code></td>
+    <td><code>comment:created</code></td>
+    <td><code>notification_listeners.go:899,946,951</code></td>
+  </tr>
+  <tr>
+    <td>任务失败 / 反应：<code>task_failed</code> <code>reaction_added</code></td>
+    <td><code>task:failed</code> / <code>issue_reaction:added</code> / <code>reaction:added</code></td>
+    <td><code>notification_listeners.go:1038,961,996</code></td>
+  </tr>
+  <tr>
+    <td><b>智能体回复</b></td>
+    <td>agent 对提问的回答（含文件）</td>
+    <td><code>chat:done</code></td>
+    <td>wecom: <code>server/internal/integrations/wecom/outbound.go:203,258,502</code><br>slack/lark/dingtalk/telegram: 各自 <code>outbound.go</code>（均经 <code>GetChannelTaskDelivery</code>）</td>
+    <td>各渠道回写提问来源的 bot 聊天</td>
+  </tr>
+  <tr>
+    <td><b>其他渠道消息</b></td>
+    <td>GitHub 快照刷新 / Composio 动作派发</td>
+    <td>PR 事件 / 工具调用</td>
+    <td><code>server/internal/integrations/ghsnapshot/refresh.go:25</code><br><code>server/internal/integrations/composio/dispatch.go</code></td>
+    <td><span class="ok">不</span>参与成员通知目标寻址（<span class="mut">见 §6 未核实项</span>）</td>
+  </tr>
+</table>
+
+<p class="mut">inbox item 的「写入 DB + 发布 <code>EventInboxNew</code>」统一在 <code>notifyIssueSubscribers</code> / <code>notifyDirect</code> / <code>notifyMentionedMembers</code> 内完成，例如 <code>notification_listeners.go:450-479</code>。</p>
+
+<h2>3. 发送策略（按类别）</h2>
+
+<h3>3.1 任务通知（WeCom inbox → 智能机器人）</h3>
+<ul>
+  <li><b>寻址</b>：<code>wecom/outbound.go:822</code> 调 <code>FindNotificationBindingForMember</code>（<code>channel.sql:567</code>），按 <code>workspace_id + multica_user_id + channel_type='wecom'</code> 过滤，<code>ci.status='active'</code>。仅成员收件人（<code>recipient_type='member'</code>，<code>outbound.go:796</code>），agent 不收 bot 通知。</li>
+  <li><b>时机</b>：<code>notification_listeners</code> 在事件总线同步分发（HTTP 请求内）创建 inbox item 并发布 <code>EventInboxNew</code>；WeCom <code>handleInboxNew</code>（<code>outbound.go:786</code>）订阅后立即尝试 bot push。</li>
+  <li><b>失败处理 / 重试</b>：无绑定 / 无 socket / 发送失败 → 函数返回 <code>false</code>，<b>静默 no-op</b>，成员仍从<b>应用内 inbox</b> 收到（<code>outbound.go:832,884,890</code>）。无重试；多副本下无持租约副本时仅记 warn（<code>outbound.go:881</code>）。</li>
+  <li><b>去重</b>：inbox item 已在业务层去重（actor/exclude/muted/delegated 过滤，<code>notification_listeners.go:429-448</code>）；每次 <code>EventInboxNew</code> 经 <code>FindNotificationBindingForMember</code> 仅命中<b>单绑定</b>，bot push 不重复。</li>
+</ul>
+
+<h3>3.2 智能体回复（各渠道，回写提问 bot）</h3>
+<ul>
+  <li><b>寻址</b>：回复不查通知目标，而是读提问时写入的 <code>channel_task_delivery</code> 行（<code>task.go:2107 CreateChannelTaskDeliveryFromSession</code>），由 <code>taskAddress</code> → <code>GetChannelTaskDelivery</code> 解析聊天（<code>wecom/outbound.go:502-536</code>）。即「在谁的 bot 里问，答回谁的 bot」。</li>
+  <li><b>时机</b>：<code>chat:done</code> 事件（WeCom <code>outbound.go:203</code>；各渠道各自订阅）。</li>
+  <li><b>失败处理 / 重试</b>：WeCom 经 relay 转发到持 WS 租约的副本（<code>outbound.go:624</code>）；无 live 连接则 <code>dropped/warn</code>，不缓冲（<code>outbound.go:649</code>）。Slack/Lark/DingTalk/Telegram 为无状态 HTTP，任意副本可发。</li>
+  <li><b>去重</b>：每条回复由唯一 <code>task_id</code> + <code>delivery row</code> 锚定到<b>单一 bot</b>，天然不会跨 bot 重复。</li>
+</ul>
+
+<h2>4. 多绑定场景（核心）</h2>
+
+<h3>4.1 同渠道类型绑定多个 bot（例：WeCom bot A=旧，bot B=新）</h3>
+<ul>
+  <li><b>通知寻址</b>（<code>channel.sql:588</code>）：<code>ORDER BY is_notification_target DESC, bound_at ASC</code> →
+    <ol>
+      <li>若该成员对某绑定显式设了通知目标（<code>is_notification_target=true</code>），<b>优先选它</b>；</li>
+      <li>否则选 <code>bound_at</code> 最小者（<b>最旧绑定 = bot A</b>）。</li>
+    </ol>
+  </li>
+  <li>效果：新绑定的 bot B 不再静默继承通知流（这正是 SHAR-146 修复的劫持，根因见 <code>migrations/573_*.up.sql:5-8</code>）。</li>
+  <li><b>显式目标设置</b>：<code>channel_binding_notification.go:135</code> <code>SetWecomBindingNotificationTarget</code>，radio 语义（事务内先 clear 再 set，<code>:207-234</code>），由 partial unique index（<code>573_*.up.sql:30</code>，<code>(workspace_id, multica_user_id, channel_type) WHERE is_notification_target</code>）保证每 (成员, 渠道类型) 至多一个目标。</li>
+  <li><b>回复不受影响</b>：仍走提问 bot 的 <code>delivery row</code>，与是否设通知目标无关。</li>
+</ul>
+
+<h3>4.2 跨渠道多绑定（WeCom + DingTalk + Lark + Slack）</h3>
+<ul>
+  <li><b>通知 bot push 仅 WeCom 订阅 <code>EventInboxNew</code></b>（全仓库唯一订阅方 <code>wecom/outbound.go:218</code>；Slack/Lark/DingTalk/Telegram 均无该订阅，已核实）。因此 DingTalk/Lark/Slack 成员<b>不会</b>收到 bot 推送通知，仅应用内 inbox。</li>
+  <li><b>回复</b>：各渠道在各自 bot 回答时回写各自 <code>delivery row</code>，互不影响、互不重复。</li>
+  <li>通知目标 API 仅 WeCom 提供（<code>channel_binding_notification.go</code>），其余渠道无对应设置入口，也不参与 <code>FindNotificationBindingForMember</code>。</li>
+</ul>
+
+<h3>4.3 账号复用链路（<code>FindReusableChannelUserBinding</code>，Slack-only）</h3>
+<ul>
+  <li>用途：<b>入站身份解析</b>。Slack 用户在未绑定的 installation 发消息，但同一 <code>(workspace, Slack team)</code> 已绑定另一 installation → 复用该链接，免重新授权（<code>slack/resolvers.go:266</code>，<code>channel.sql:591</code>，<code>bound_at DESC</code> 最新胜）。</li>
+  <li>与<b>发送寻址</b>的交互：复用只在「入站」产生/确认绑定，<b>不改变</b>出站通知寻址（出站用 <code>FindNotificationBindingForMember</code> / <code>delivery row</code>）。即：Slack 复用可在另一 installation 落一条绑定，但该绑定仅在「被提问」或「被设为通知目标」时才参与出站。注意 <code>FindReusableChannelUserBinding</code> 仅 Slack 调用（<code>channel.sql:606</code> 注释明确 Slack-only）。</li>
+  <li>配对关系：<code>FindChannelBindingForMember</code> 的 <code>bound_at DESC</code> 与 <code>FindReusableChannelUserBinding</code> 一致（<code>channel.sql:557,600</code>），但 <code>FindChannelBindingForMember</code> 当前<b>无出站调用方</b>（被 SHAR-146 的 <code>FindNotificationBindingForMember</code> 取代，见 §6 风险 5）。</li>
+</ul>
+
+<h2>5. 逻辑通路图</h2>
+
+<h3>图 1 · 主通路：事件 → inbox → 寻址 → 渠道适配 → 外部 bot</h3>
+<svg viewBox="0 0 820 360" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#444"/>
+    </marker>
+  </defs>
+  <!-- nodes -->
+  <rect x="10" y="20" width="150" height="46" rx="6" fill="#e7f0ff" stroke="#0969da"/>
+  <text x="85" y="40" text-anchor="middle">事件源</text>
+  <text x="85" y="56" text-anchor="middle" font-size="11">issue/comment/task</text>
+
+  <rect x="200" y="20" width="190" height="46" rx="6" fill="#fff3e0" stroke="#9a6700"/>
+  <text x="295" y="38" text-anchor="middle">notification_listeners</text>
+  <text x="295" y="54" text-anchor="middle" font-size="11">建 inbox item + 发 EventInboxNew</text>
+
+  <rect x="440" y="20" width="170" height="46" rx="6" fill="#e7f0ff" stroke="#0969da"/>
+  <text x="525" y="38" text-anchor="middle">WeCom Outbound</text>
+  <text x="525" y="54" text-anchor="middle" font-size="11">handleInboxNew</text>
+
+  <rect x="650" y="20" width="160" height="46" rx="6" fill="#e6ffed" stroke="#1a7f37"/>
+  <text x="730" y="38" text-anchor="middle">aibot WS 推送</text>
+  <text x="730" y="54" text-anchor="middle" font-size="11">或仅应用内 inbox</text>
+
+  <!-- edges main -->
+  <line x1="160" y1="43" x2="198" y2="43" stroke="#444" marker-end="url(#arr)"/>
+  <line x1="390" y1="43" x2="438" y2="43" stroke="#444" marker-end="url(#arr)"/>
+  <line x1="610" y1="43" x2="648" y2="43" stroke="#444" marker-end="url(#arr)"/>
+
+  <!-- reply branch -->
+  <rect x="200" y="180" width="190" height="46" rx="6" fill="#fff3e0" stroke="#9a6700"/>
+  <text x="295" y="198" text-anchor="middle">EnqueueChatTask</text>
+  <text x="295" y="214" text-anchor="middle" font-size="11">写 channel_task_delivery(提问bot)</text>
+
+  <rect x="440" y="180" width="170" height="46" rx="6" fill="#e7f0ff" stroke="#0969da"/>
+  <text x="525" y="198" text-anchor="middle">EventChatDone</text>
+  <text x="525" y="214" text-anchor="middle" font-size="11">taskAddress→delivery row</text>
+
+  <rect x="650" y="180" width="160" height="46" rx="6" fill="#e6ffed" stroke="#1a7f37"/>
+  <text x="730" y="198" text-anchor="middle">回写同一 bot</text>
+  <text x="730" y="214" text-anchor="middle" font-size="11">各渠道 outbound</text>
+
+  <line x1="160" y1="203" x2="198" y2="203" stroke="#444" marker-end="url(#arr)"/>
+  <line x1="390" y1="203" x2="438" y2="203" stroke="#444" marker-end="url(#arr)"/>
+  <line x1="610" y1="203" x2="648" y2="203" stroke="#444" marker-end="url(#arr)"/>
+
+  <text x="85" y="270" text-anchor="middle" font-size="12" fill="#57606a">成员在任一 bot 提问</text>
+  <line x1="85" y1="266" x2="295" y2="226" stroke="#bbb" stroke-dasharray="4" marker-end="url(#arr)"/>
+
+  <text x="410" y="320" text-anchor="middle" font-size="12" fill="#57606a">两条链路互不相交：通知走 FindNotificationBindingForMember（按成员/渠道类型）；回复走 delivery row（按提问会话）</text>
+  <!-- legend note -->
+  <text x="10" y="345" font-size="11" fill="#57606a">链路① 通知（蓝→橙→蓝→绿）　链路② 回复（橙→蓝→绿）</text>
+</svg>
+
+<h3>图 2 · 多绑定目标选择分支（WeCom 通知）</h3>
+<svg viewBox="0 0 820 380" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif" font-size="13">
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#444"/>
+    </marker>
+  </defs>
+  <rect x="10" y="30" width="220" height="44" rx="6" fill="#e7f0ff" stroke="#0969da"/>
+  <text x="120" y="48" text-anchor="middle">EventInboxNew</text>
+  <text x="120" y="64" text-anchor="middle" font-size="11">收件人 member + wecom</text>
+
+  <rect x="300" y="30" width="240" height="44" rx="6" fill="#fff3e0" stroke="#9a6700"/>
+  <text x="420" y="48" text-anchor="middle">FindNotificationBindingForMember</text>
+  <text x="420" y="64" text-anchor="middle" font-size="11">channel.sql:567 · ORDER BY target DESC, bound_at ASC</text>
+
+  <line x1="230" y1="52" x2="298" y2="52" stroke="#444" marker-end="url(#a2)"/>
+
+  <!-- diamond -->
+  <polygon points="420,140 560,170 420,200 280,170" fill="#fbfcfd" stroke="#444"/>
+  <text x="420" y="166" text-anchor="middle" font-size="12">存在 is_notification_</text>
+  <text x="420" y="182" text-anchor="middle" font-size="12">target = true 的绑定?</text>
+
+  <line x1="420" y1="74" x2="420" y2="138" stroke="#444" marker-end="url(#a2)"/>
+  <text x="600" y="120" font-size="11" fill="#1a7f37">是</text>
+  <line x1="560" y1="170" x2="640" y2="170" stroke="#1a7f37" marker-end="url(#a2)"/>
+  <text x="150" y="120" font-size="11" fill="#9a6700">否</text>
+  <line x1="280" y1="170" x2="200" y2="170" stroke="#9a6700" marker-end="url(#a2)"/>
+
+  <rect x="640" y="148" width="170" height="44" rx="6" fill="#e6ffed" stroke="#1a7f37"/>
+  <text x="725" y="166" text-anchor="middle">选该显式目标绑定</text>
+  <text x="725" y="182" text-anchor="middle" font-size="11">成员手动指定</text>
+
+  <rect x="30" y="148" width="170" height="44" rx="6" fill="#e6ffed" stroke="#1a7f37"/>
+  <text x="115" y="166" text-anchor="middle">选最旧绑定</text>
+  <text x="115" y="182" text-anchor="middle" font-size="11">bound_at 最小 = bot A</text>
+
+  <!-- converge -->
+  <line x1="725" y1="192" x2="725" y2="250" stroke="#444" marker-end="url(#a2)"/>
+  <line x1="115" y1="192" x2="115" y2="250" stroke="#444" marker-end="url(#a2)"/>
+  <line x1="115" y1="250" x2="720" y2="250" stroke="#444"/>
+  <line x1="725" y1="250" x2="725" y2="278" stroke="#444" marker-end="url(#a2)"/>
+
+  <rect x="640" y="278" width="170" height="40" rx="6" fill="#e7f0ff" stroke="#0969da"/>
+  <text x="725" y="302" text-anchor="middle">单目标 bot push</text>
+
+  <text x="20" y="350" font-size="11" fill="#57606a">新绑定 bot B 无显式目标时落到「最旧绑定」，不再劫持通知流（SHAR-146）。回复链路不走此图，另走 delivery row。</text>
+</svg>
+
+<h2>6. 已知问题与风险清单</h2>
+<table>
+  <tr><th>#</th><th>风险 / 问题</th><th>代码事实</th><th>影响</th></tr>
+  <tr>
+    <td>1</td>
+    <td>SHAR-146 未合并 <code>origin/main</code></td>
+    <td>调研时 <code>FindNotificationBindingForMember</code>/<code>is_notification_target</code> 仅存在于 <code>task/shar-146-notification-target-bot</code>；<code>origin/main</code> 无此函数（已 <code>git merge-base --is-ancestor</code> 核实）</td>
+    <td>线上若未合并，通知仍是 <code>FindChannelBindingForMember</code> 的「最新 bot 胜」劫持逻辑</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>通知 bot push 仅 WeCom 支持</td>
+    <td>全仓库唯一 <code>EventInboxNew</code> 订阅方为 <code>wecom/outbound.go:218</code></td>
+    <td>DingTalk/Lark/Slack/Telegram 成员收不到 bot 通知，仅应用内 inbox；跨渠道成员可能预期同步通知但未发生</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>WeCom 单副本约束下的丢失窗口</td>
+    <td><code>outbound.go:880-884</code> 所有副本重连中时 push 被丢弃并 warn，无重试；无 Redis relay 时单副本约束生效（<code>outbound.go:17-30</code>）</td>
+    <td>成员仅剩应用内 inbox（降级而非丢失），但 bot 通知可能漏发</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>显式目标 installation 被撤销后静默降级</td>
+    <td><code>FindNotificationBindingForMember</code> 过滤 <code>ci.status='active'</code>（<code>channel.sql:584</code>）；撤销后 <code>ErrNoRows</code> → 无 bot push（<code>outbound.go:827</code>）</td>
+    <td>用户所选目标失效时不会收到任何提示，通知仅落应用内 inbox</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><code>FindChannelBindingForMember</code> 已成死代码</td>
+    <td>全仓库无出站调用方（仅 <code>generated/channel.sql.go</code> 定义）；其 <code>bound_at DESC</code> 仅与入站复用 <code>FindReusableChannelUserBinding</code> 配对</td>
+    <td>保留易误用；语义与通知寻址已分离，维护者需注意不要误用于出站</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>同 <code>bound_at</code> 并列竞态</td>
+    <td><code>channel.sql:588</code> <code>ORDER BY ... bound_at ASC</code> 在并列时由 DB 任意裁决</td>
+    <td>极小概率选错「最旧」绑定（仅当同毫秒绑定多条）</td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td>串台防护（已具备，非风险）</td>
+    <td>WeCom 回复经 <code>ChannelIngested</code> 来源门禁（<code>outbound.go:335</code>）；Slack/Lark/DingTalk/Telegram 各自 outbound 同样做来源门禁（<code>slack/outbound.go:121</code>）</td>
+    <td>web 端运行答案不会漏入渠道群聊；回复不会跨 bot 串台</td>
+  </tr>
+  <tr>
+    <td>8</td>
+    <td>重复风险（已规避，非风险）</td>
+    <td>每 <code>EventInboxNew</code> 仅一次 bot push（命中单绑定）；每回复锚定单 <code>delivery row</code>；relay 路径由持租约副本计数一次（<code>outbound.go:638</code>）</td>
+    <td>通知/回复均不会跨 bot 重复</td>
+  </tr>
+</table>
+
+<h2>7. 未核实 / 存疑</h2>
+<ul>
+  <li><b>ghsnapshot / composio 是否经成员通知寻址</b>：二者为 GitHub 快照刷新与 Composio 动作派发，均不订阅 <code>EventInboxNew</code>、不调用 <code>FindNotificationBindingForMember</code>，故不参与成员 bot 通知目标选择。但其对外消息的精确收件人模型未深入核实（<code>ghsnapshot/refresh.go</code> 仅按 <code>installation+PR</code> 刷新，<code>composio/dispatch.go</code> 派发动作），标注「未核实」。</li>
+  <li><b>跨渠道「同时绑定」的通知期望</b>：当前设计下多渠道成员在飞书/钉钉侧无 bot 通知。是否应有跨渠道聚合通知属产品决策，非本调研范围。</li>
+  <li><b>SHAR-145 根因</b>：本调研聚焦 SHAR-146（migration 573 已述根因）。SHAR-145 的具体内容未单独核实，文中仅沿用 issue 描述。</li>
+</ul>
+
+<h2>8. 来源清单（本次引用）</h2>
+<ul class="small">
+  <li><code>server/pkg/db/queries/channel.sql:548</code> FindChannelBindingForMember（newest-wins，无出站调用）</li>
+  <li><code>server/pkg/db/queries/channel.sql:567</code> FindNotificationBindingForMember（显式目标 / 最旧回退）</li>
+  <li><code>server/pkg/db/queries/channel.sql:591</code> FindReusableChannelUserBinding（Slack-only 入站复用）</li>
+  <li><code>server/pkg/db/queries/channel.sql:644,658,674,686</code> 绑定列举 / 通知目标 clear-set-unset</li>
+  <li><code>server/migrations/573_channel_user_binding_notification_target.up.sql</code> 加列 + partial unique index + 根因</li>
+  <li><code>server/migrations/124_channel_generalization.up.sql:130</code> channel_user_binding 基础表</li>
+  <li><code>server/internal/integrations/wecom/outbound.go:203,218,786,813,822,502</code> WeCom 订阅/寻址</li>
+  <li><code>server/internal/integrations/wecom/inbox_message.go:69</code> / <code>inbox_enrichment.go:183</code> 通知卡片构建</li>
+  <li><code>server/cmd/server/notification_listeners.go:299,370,450,473,487,550,670</code> inbox 生成与发布</li>
+  <li><code>server/internal/service/task.go:1909,2107</code> 回复 delivery row 写入</li>
+  <li><code>server/internal/integrations/slack/resolvers.go:266</code> 账号复用调用点</li>
+  <li><code>server/internal/handler/channel_binding_notification.go:135</code> 通知目标设置 API</li>
+</ul>
+
+<p class="small">说明：本文为只读调研，未改动业务代码、未发外部消息。结论均取自上述代码位置；与 issue 描述不一致处以代码事实为准（重点：SHAR-146 合入状态）。</p>
+
+</body>
+</html>
