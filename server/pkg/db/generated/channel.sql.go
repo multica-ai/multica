@@ -1412,6 +1412,41 @@ func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChann
 	return i, err
 }
 
+const findChannelUserBindingByInstallationAndMember = `-- name: FindChannelUserBindingByInstallationAndMember :one
+SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at, is_notification_target FROM channel_user_binding
+WHERE installation_id = $1
+  AND multica_user_id = $2
+  AND channel_type = $3
+`
+
+type FindChannelUserBindingByInstallationAndMemberParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	ChannelType    string      `json:"channel_type"`
+}
+
+// The reverse of GetChannelUserBindingByUserID (SHAR-155): given the
+// installation a push should leave from and the Multica member it is for,
+// return that member's binding inside it. No row means the member never
+// interacted with that bot — the caller falls through to the next routing
+// rule rather than pushing to an address it does not have.
+func (q *Queries) FindChannelUserBindingByInstallationAndMember(ctx context.Context, arg FindChannelUserBindingByInstallationAndMemberParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findChannelUserBindingByInstallationAndMember, arg.InstallationID, arg.MulticaUserID, arg.ChannelType)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+		&i.IsNotificationTarget,
+	)
+	return i, err
+}
+
 const findLiveChannelBindingToken = `-- name: FindLiveChannelBindingToken :one
 SELECT token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at, consumed_at, created_at FROM channel_binding_token
 WHERE installation_id = $1
@@ -1713,6 +1748,43 @@ func (q *Queries) GetChannelChatSessionBindingBySessionAny(ctx context.Context, 
 		&i.HistoryStartMessageID,
 		&i.HistoryEndMessageID,
 		&i.HistoryBoundaryPending,
+	)
+	return i, err
+}
+
+const findActiveChannelInstallationByAgent = `-- name: FindActiveChannelInstallationByAgent :one
+SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND channel_type = $3
+  AND status = 'active'
+`
+
+type FindActiveChannelInstallationByAgentParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+// The sender-routed inbox push (SHAR-155) rule 1: does the agent that authored
+// a comment own a wecom bot in this workspace? The PK (workspace_id, agent_id,
+// channel_type) admits at most one row, so :one with no ordering is exact.
+func (q *Queries) FindActiveChannelInstallationByAgent(ctx context.Context, arg FindActiveChannelInstallationByAgentParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, findActiveChannelInstallationByAgent, arg.WorkspaceID, arg.AgentID, arg.ChannelType)
+	var i ChannelInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

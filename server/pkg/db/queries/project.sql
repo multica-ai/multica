@@ -54,6 +54,18 @@ DELETE FROM project WHERE id = $1 AND workspace_id = $2;
 SELECT count(*) FROM issue
 WHERE project_id = $1;
 
+-- name: GetIssueProjectLead :one
+-- SHAR-155 routing rule 2: the project a notification's issue belongs to and
+-- its lead, so a sender-routed inbox push can fall back to the lead member's
+-- wecom binding. A project with no lead (lead_type/lead_id NULL) or an
+-- agent lead returns a row with NULL lead fields — the caller reads
+-- lead_type='member' to decide whether to use it at all. issue.project_id is
+-- SET NULL on project delete, so a missing row is the "no project" case.
+SELECT p.lead_type, p.lead_id
+FROM issue i
+JOIN project p ON p.id = i.project_id
+WHERE i.id = sqlc.arg('issue_id');
+
 -- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,

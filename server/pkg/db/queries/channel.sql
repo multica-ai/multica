@@ -588,6 +588,27 @@ WHERE b.workspace_id = sqlc.arg('workspace_id')
 ORDER BY b.is_notification_target DESC, b.bound_at ASC
 LIMIT 1;
 
+-- name: FindActiveChannelInstallationByAgent :one
+-- The sender-routed inbox push (SHAR-155) rule 1: does the agent that authored
+-- a comment own a wecom bot in this workspace? The PK (workspace_id, agent_id,
+-- channel_type) admits at most one row, so :one with no ordering is exact.
+SELECT * FROM channel_installation
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND agent_id = sqlc.arg('agent_id')
+  AND channel_type = sqlc.arg('channel_type')
+  AND status = 'active';
+
+-- name: FindChannelUserBindingByInstallationAndMember :one
+-- The reverse of GetChannelUserBindingByUserID (SHAR-155): given the
+-- installation a push should leave from and the Multica member it is for,
+-- return that member's binding inside it. No row means the member never
+-- interacted with that bot — the caller falls through to the next routing
+-- rule rather than pushing to an address it does not have.
+SELECT * FROM channel_user_binding
+WHERE installation_id = sqlc.arg('installation_id')
+  AND multica_user_id = sqlc.arg('multica_user_id')
+  AND channel_type = sqlc.arg('channel_type');
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already

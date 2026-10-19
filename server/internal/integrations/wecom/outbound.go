@@ -92,6 +92,22 @@ type outboundQueries interface {
 	// notifications. FindChannelBindingForMember's newest-wins tiebreak is
 	// paired with the account-reuse chain and is deliberately left alone.
 	FindNotificationBindingForMember(ctx context.Context, arg db.FindNotificationBindingForMemberParams) (db.ChannelUserBinding, error)
+	// FindChannelBindingForMember picks the bot a member's binding names when
+	// the binding is used as a TRANSPORT rather than as the member's own
+	// notification address (SHAR-155 rule 2 — the project lead's bot). Newest
+	// active binding wins, matching the account-reuse chain.
+	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
+	// FindActiveChannelInstallationByAgent is SHAR-155 rule 1: the wecom bot
+	// the authoring agent owns in this workspace, if any.
+	FindActiveChannelInstallationByAgent(ctx context.Context, arg db.FindActiveChannelInstallationByAgentParams) (db.ChannelInstallation, error)
+	// FindChannelUserBindingByInstallationAndMember is SHAR-155's reverse
+	// lookup: the recipient's binding INSIDE one installation. Callers treat
+	// pgx.ErrNoRows as "not bound to that bot" and fall through to the next
+	// routing rule.
+	FindChannelUserBindingByInstallationAndMember(ctx context.Context, arg db.FindChannelUserBindingByInstallationAndMemberParams) (db.ChannelUserBinding, error)
+	// GetIssueProjectLead is SHAR-155 rule 2: the project an issue belongs to
+	// and its lead. A missing row is an issue with no project.
+	GetIssueProjectLead(ctx context.Context, arg db.GetIssueProjectLeadParams) (db.GetIssueProjectLeadRow, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 	// Which language this round's bubble is closed in: a 1:1 reads the asker's
@@ -808,6 +824,24 @@ func (o *Outbound) handleInboxNew(e events.Event) {
 	o.tryDeliverInbox(ctx, item, recipientIDStr, workspaceIDStr)
 }
 
+// inboxRoute names the rule that addressed an inbox push (SHAR-155), so the
+// delivery log and tests can say which rule fired rather than only that one
+// did. System messages (status changes, task failures) and member-authored
+// comments keep the rule-3 address they have always had — the value here is
+// still inboxRouteMemberBinding for them.
+type inboxRoute string
+
+const (
+	// inboxRouteSenderBot is rule 1: the commenting agent's own wecom bot.
+	inboxRouteSenderBot inboxRoute = "sender_bot"
+	// inboxRouteProjectLead is rule 2: the issue's project lead's wecom bot.
+	inboxRouteProjectLead inboxRoute = "project_lead"
+	// inboxRouteMemberBinding is rule 3 (SHAR-146): the recipient's own
+	// notification binding — the address every member item used before
+	// SHAR-155 and the one system messages still use.
+	inboxRouteMemberBinding inboxRoute = "member_binding"
+)
+
 // tryDeliverInbox is the delivery core. Returns true iff the bot pushed
 // the notification.
 func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, recipientIDStr, workspaceIDStr string) bool {
@@ -819,6 +853,37 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	if err != nil || !workspaceID.Valid {
 		return false
 	}
+	binding, route, ok := o.routeInboxPush(ctx, item, recipientID, workspaceID, recipientIDStr, workspaceIDStr)
+	if !ok {
+		return false
+	}
+	return o.pushInboxViaBinding(ctx, item, binding, recipientID, workspaceID, workspaceIDStr, recipientIDStr, route)
+}
+
+// routeInboxPush picks the binding an inbox push leaves from. Comment and
+// mention notifications authored by an AGENT are addressed by sender first
+// (SHAR-155): rule 1 — the author's own wecom bot; rule 2 — the issue's
+// project lead's bot. Both rules require the RECIPIENT to be bound inside
+// the chosen bot's installation, mirroring how aibot pushes only to channel
+// user ids that have interacted with it. A miss at any step falls through
+// to rule 3, the recipient's own notification binding (SHAR-146).
+//
+// System messages and member-authored items never enter rules 1/2: their
+// actor is not an agent, so they keep the rule-3 address they have always
+// had. That guard is what keeps "no behavior change for status changes /
+// task failures" in one place.
+//
+// The route is returned only so the delivery log and tests can name which
+// rule fired; the push itself does not branch on it.
+func (o *Outbound) routeInboxPush(ctx context.Context, item map[string]any, recipientID, workspaceID pgtype.UUID, recipientIDStr, workspaceIDStr string) (db.ChannelUserBinding, inboxRoute, bool) {
+	if senderRoutedInboxItem(item) {
+		if b, ok := o.senderBotBinding(ctx, item, recipientID, workspaceID); ok {
+			return b, inboxRouteSenderBot, true
+		}
+		if b, ok := o.projectLeadBinding(ctx, item, recipientID, workspaceID); ok {
+			return b, inboxRouteProjectLead, true
+		}
+	}
 	binding, err := o.q.FindNotificationBindingForMember(ctx, db.FindNotificationBindingForMemberParams{
 		WorkspaceID:   workspaceID,
 		MulticaUserID: recipientID,
@@ -829,8 +894,119 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 			o.logger.WarnContext(ctx, "wecom outbound: lookup member binding failed",
 				"error", err, "workspace_id", workspaceIDStr, "recipient_id", recipientIDStr)
 		}
-		return false // no binding → nothing to deliver via bot
+		return db.ChannelUserBinding{}, "", false // no binding → nothing to deliver via bot
 	}
+	return binding, inboxRouteMemberBinding, true
+}
+
+// senderRoutedInboxItem reports whether an inbox item is one of the two
+// interactive types SHAR-155 re-routes: a new comment or a mention,
+// authored by an AGENT. System messages (status changes, task failures) and
+// member-authored items keep the address they have always had.
+//
+// actor_type arrives as a *string in-process (inboxItemToResponse wraps it in
+// util.TextToPtr) and as a plain string after a JSON round trip through a
+// relay or external subscriber, so both shapes are read.
+func senderRoutedInboxItem(item map[string]any) bool {
+	switch inboxItemString(item, "type") {
+	case "new_comment", "mentioned":
+	default:
+		return false
+	}
+	return inboxItemString(item, "actor_type") == "agent"
+}
+
+// senderBotBinding is rule 1: the commenting agent's active wecom
+// installation is the bot the reply would naturally leave from, and the
+// recipient's binding INSIDE it is the address. A miss at either step is the
+// ordinary "fall through" answer, not an error worth more than a WARN for a
+// non-ErrNoRows failure.
+func (o *Outbound) senderBotBinding(ctx context.Context, item map[string]any, recipientID, workspaceID pgtype.UUID) (db.ChannelUserBinding, bool) {
+	actorIDStr := inboxItemString(item, "actor_id")
+	actorID, err := util.ParseUUID(actorIDStr)
+	if err != nil || !actorID.Valid {
+		return db.ChannelUserBinding{}, false
+	}
+	inst, err := o.q.FindActiveChannelInstallationByAgent(ctx, db.FindActiveChannelInstallationByAgentParams{
+		WorkspaceID: workspaceID,
+		AgentID:     actorID,
+		ChannelType: channelTypeWecom,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			o.logger.WarnContext(ctx, "wecom outbound: sender bot lookup failed",
+				"error", err, "agent_id", actorIDStr)
+		}
+		return db.ChannelUserBinding{}, false
+	}
+	return o.recipientBindingInInstallation(ctx, inst.ID, recipientID)
+}
+
+// projectLeadBinding is rule 2: when the author has no wecom bot of their
+// own, the issue's project lead — when it is a MEMBER — names the bot, and
+// the recipient must be bound inside it. An agent lead, a leadless project,
+// and an issue with no project at all all answer "no" and the caller falls
+// through to rule 3. The project lead is read for transport only; it does
+// not change WHO the push is for — the recipient is unchanged.
+func (o *Outbound) projectLeadBinding(ctx context.Context, item map[string]any, recipientID, workspaceID pgtype.UUID) (db.ChannelUserBinding, bool) {
+	issueIDStr := inboxItemIssueID(item)
+	issueID, err := util.ParseUUID(issueIDStr)
+	if err != nil || !issueID.Valid {
+		return db.ChannelUserBinding{}, false
+	}
+	lead, err := o.q.GetIssueProjectLead(ctx, db.GetIssueProjectLeadParams{IssueID: issueID})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			o.logger.WarnContext(ctx, "wecom outbound: project lead lookup failed",
+				"error", err, "issue_id", issueIDStr)
+		}
+		return db.ChannelUserBinding{}, false
+	}
+	if lead.LeadType.String != "member" || !lead.LeadID.Valid {
+		return db.ChannelUserBinding{}, false
+	}
+	leadBinding, err := o.q.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: lead.LeadID,
+		ChannelType:   channelTypeWecom,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			o.logger.WarnContext(ctx, "wecom outbound: project lead binding lookup failed",
+				"error", err, "lead_id", util.UUIDToString(lead.LeadID))
+		}
+		return db.ChannelUserBinding{}, false
+	}
+	return o.recipientBindingInInstallation(ctx, leadBinding.InstallationID, recipientID)
+}
+
+// recipientBindingInInstallation is SHAR-155's reverse lookup: the recipient's
+// binding INSIDE one installation. No row means the member never interacted
+// with that bot, and that is the ordinary fall-through answer rather than an
+// error — WeCom only lets a bot address a user who has talked to it, so an
+// unbound member is the expected negative here, not a fault.
+func (o *Outbound) recipientBindingInInstallation(ctx context.Context, installationID, recipientID pgtype.UUID) (db.ChannelUserBinding, bool) {
+	b, err := o.q.FindChannelUserBindingByInstallationAndMember(ctx, db.FindChannelUserBindingByInstallationAndMemberParams{
+		InstallationID: installationID,
+		MulticaUserID:   recipientID,
+		ChannelType:     channelTypeWecom,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			o.logger.WarnContext(ctx, "wecom outbound: installation-scoped binding lookup failed",
+				"error", err, "installation_id", uuidStringPub(installationID),
+				"recipient_id", uuidStringPub(recipientID))
+		}
+		return db.ChannelUserBinding{}, false
+	}
+	return b, true
+}
+
+// pushInboxViaBinding sends the inbox card through one binding's
+// installation, logging which rule addressed it. The send shape — relay
+// when no socket is held here, single-chat push otherwise — is the same as
+// it was before SHAR-155; only which installation carries it changed.
+func (o *Outbound) pushInboxViaBinding(ctx context.Context, item map[string]any, binding db.ChannelUserBinding, recipientID, workspaceID pgtype.UUID, workspaceIDStr, recipientIDStr string, route inboxRoute) bool {
 	if o.senders == nil {
 		return false
 	}
@@ -867,7 +1043,7 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 			Content:        content,
 		}, relayInboxEventID(itemIDOf(item), recipientIDStr)) {
 			o.logger.DebugContext(ctx, "wecom outbound: routed an inbox push to the replica holding the socket",
-				"installation_id", uuidStringPub(binding.InstallationID))
+				"installation_id", uuidStringPub(binding.InstallationID), "route", route)
 			return true
 		}
 		// Logged, not counted on the reply counters. Their documented unit is
@@ -880,20 +1056,36 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 		// loss.
 		o.logger.WarnContext(ctx, "wecom outbound: inbox push not delivered and not routable",
 			"installation_id", uuidStringPub(binding.InstallationID),
-			"recipient_id", recipientIDStr)
+			"recipient_id", recipientIDStr, "route", route)
 		return false // supervisor down or reconnecting — no live connection
 	}
 	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {
 		o.logger.WarnContext(ctx, "wecom outbound: inbox push failed",
 			"error", err, "installation_id", uuidStringPub(binding.InstallationID),
-			"recipient_id", recipientIDStr)
+			"recipient_id", recipientIDStr, "route", route)
 		return false // send failed → no bot delivery
 	}
 	o.logger.DebugContext(ctx, "wecom outbound: inbox delivered via bot",
 		"installation_id", uuidStringPub(binding.InstallationID),
 		"recipient_id", recipientIDStr,
-		"inbox_type", item["type"])
+		"inbox_type", item["type"], "route", route)
 	return true
+}
+
+// inboxItemString reads a string field that arrives as either a plain string
+// (after a JSON round trip through a relay or external subscriber) or a
+// *string (in-process, the shape inboxItemToResponse writes). Returns "" for
+// a missing field or a nil pointer.
+func inboxItemString(item map[string]any, key string) string {
+	switch v := item[key].(type) {
+	case string:
+		return v
+	case *string:
+		if v != nil {
+			return *v
+		}
+	}
+	return ""
 }
 
 // uuidStringPub renders a pgtype.UUID for a log line without depending on

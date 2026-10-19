@@ -49,7 +49,26 @@ type fakeOutboundQueries struct {
 	installErr     error
 	memberBinding  db.ChannelUserBinding
 	memberErr      error
-	workspace      db.Workspace
+	// senderInstallation answers rule 1: the commenting agent's active wecom
+	// installation operator (FindActiveChannelInstallationByAgent).
+	senderInstallation db.ChannelInstallation
+	senderInstallErr   error
+	// installationMemberBinding answers the reverse lookup — the recipient's
+	// binding inside one installation (FindChannelUserBindingByInstallationAndMember).
+	// perInstallationBindings overrides it per installation id, which is how a
+	// test says "bound in this bot, not in that one" when two rules reach the
+	// same lookup about different installations.
+	installationMemberBinding db.ChannelUserBinding
+	installationMemberErr     error
+	perInstallationBindings   map[string]db.ChannelUserBinding
+	// issueProjectLead answers rule 2's project lead read (GetIssueProjectLead).
+	issueProjectLead db.GetIssueProjectLeadRow
+	issueProjectErr  error
+	// leadBinding answers rule 2's bot selection for a member lead
+	// (FindChannelBindingForMember).
+	leadBinding db.ChannelUserBinding
+	leadErr     error
+	workspace   db.Workspace
 	workspaceErr   error
 	attachments    []db.Attachment
 	attachmentsErr error
@@ -86,6 +105,12 @@ type fakeOutboundQueries struct {
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
+	// route counters, so a test can prove WHICH rule addressed a push.
+	memberBindingGets  int
+	senderInstallGets  int
+	installMemberGets  int
+	projectLeadGets    int
+	leadBindingGets    int
 	// perTaskIngested overrides channelIngested for one id. A rig needs it
 	// whenever two runs of DIFFERENT origin share a session — a question typed
 	// in the room and one typed in Multica against the same agent — which is
@@ -224,7 +249,39 @@ func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChan
 	return f.installation, f.installErr
 }
 func (f *fakeOutboundQueries) FindNotificationBindingForMember(context.Context, db.FindNotificationBindingForMemberParams) (db.ChannelUserBinding, error) {
+	f.memberBindingGets++
 	return f.memberBinding, f.memberErr
+}
+func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
+	f.leadBindingGets++
+	return f.leadBinding, f.leadErr
+}
+func (f *fakeOutboundQueries) FindActiveChannelInstallationByAgent(context.Context, db.FindActiveChannelInstallationByAgentParams) (db.ChannelInstallation, error) {
+	f.senderInstallGets++
+	return f.senderInstallation, f.senderInstallErr
+}
+func (f *fakeOutboundQueries) FindChannelUserBindingByInstallationAndMember(_ context.Context, arg db.FindChannelUserBindingByInstallationAndMemberParams) (db.ChannelUserBinding, error) {
+	f.installMemberGets++
+	// A per-installation override, when present, wins over the shared default
+	// error — that is how a test expresses "bound in this bot, not in that
+	// one" against a lookup that is shared by rules 1 and 2.
+	if b, ok := f.perInstallationBindings[uuidStringPub(arg.InstallationID)]; ok {
+		return b, nil
+	}
+	if f.installationMemberErr != nil {
+		return db.ChannelUserBinding{}, f.installationMemberErr
+	}
+	// Stamped with the installation ASKED ABOUT, so a test that registers
+	// senders for two installations can tell which bot a push left from
+	// even when rules 1 and 2 both reach this lookup.
+	b := f.installationMemberBinding
+	b.InstallationID = arg.InstallationID
+	b.MulticaUserID = arg.MulticaUserID
+	return b, nil
+}
+func (f *fakeOutboundQueries) GetIssueProjectLead(context.Context, db.GetIssueProjectLeadParams) (db.GetIssueProjectLeadRow, error) {
+	f.projectLeadGets++
+	return f.issueProjectLead, f.issueProjectErr
 }
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
