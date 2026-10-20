@@ -2357,6 +2357,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.StartClaimSupported = true
 	}
 	var issueNumber int32
+	var issueProjectID pgtype.UUID
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -2608,6 +2609,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ThreadName = issue.Title
 		issueNumber = issue.Number
+		issueProjectID = issue.ProjectID
 
 		// Issue-state delta (MUL-7344). Every field below already sits on the
 		// `issue` row this claim loaded, so this costs one extra read — the
@@ -3446,9 +3448,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							WorkspaceID: wsUUID,
 						})
 						if perr == nil && parent.ID.Valid {
-							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
-								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
-							}
+							resp.ParentIssueIdentifier = h.issuePrefixFor(r.Context(), wsUUID, parent.ProjectID) + "-" + strconv.Itoa(int(parent.Number))
 						} else if qc.SourceContextID != "" && errors.Is(perr, pgx.ErrNoRows) {
 							// A contextual quick-create already owns an immutable
 							// snapshot. If its source was deleted before this first
@@ -3524,7 +3524,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
-			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
+			resp.IssueIdentifier = service.IssueIdentifier(
+				service.IssuePrefixForScope(r.Context(), h.Queries, ws.ID, issueProjectID), issueNumber)
 		}
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String

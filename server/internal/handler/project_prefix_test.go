@@ -64,11 +64,14 @@ func TestProjectIssuePrefixScopesNumbering(t *testing.T) {
 		"status":   "todo",
 		"priority": "medium",
 	})
-	if workspaceIssue.Identifier == "" || workspaceIssue.Identifier[0] != 'S' {
-		t.Fatalf("workspace issue identifier = %q, want a SHAR- identifier", workspaceIssue.Identifier)
+	// The workspace counter is shared with the rest of the suite, so assert the
+	// shape rather than a fixed number: SHAR-<n>, and a different identifier
+	// from the project-scoped issue even when both numbers collide.
+	if want := "SHAR-" + strconv.Itoa(int(workspaceIssue.Number)); workspaceIssue.Identifier != want {
+		t.Fatalf("workspace issue identifier = %q, want %q", workspaceIssue.Identifier, want)
 	}
-	if workspaceIssue.Number == projectIssue.Number {
-		t.Fatalf("workspace and project scopes must count independently, both got %d", workspaceIssue.Number)
+	if workspaceIssue.Identifier == projectIssue.Identifier {
+		t.Fatalf("project and workspace identifiers must differ, both are %q", workspaceIssue.Identifier)
 	}
 
 	projectResolved, ok := testHandler.resolveIssueByIdentifier(context.Background(), "PROA-1", testWorkspaceID)
@@ -166,5 +169,67 @@ func TestProjectIssuePrefixConflicts(t *testing.T) {
 	testHandler.UpdateWorkspace(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("workspace prefix takeover: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestProjectDeleteMovesIssuesToWorkspaceScope covers the fallback path: the FK
+// becomes NULL on delete, so those issues must leave the project prefix.
+func TestProjectDeleteMovesIssuesToWorkspaceScope(t *testing.T) {
+	setWorkspaceIssuePrefixForTest(t, "SHAR")
+	projectID := createProjectForTest(t, "Delete project "+t.Name(), "PDEL")
+
+	issue := createIssueForTest(t, map[string]any{
+		"title": "delete scoped issue " + t.Name(), "status": "todo", "priority": "medium", "project_id": projectID,
+	})
+	if issue.Identifier != "PDEL-1" {
+		t.Fatalf("identifier before delete = %q, want PDEL-1", issue.Identifier)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("DELETE", "/api/projects/"+projectID, nil), "id", projectID)
+	testHandler.DeleteProject(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteProject: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, ok := testHandler.resolveIssueByIdentifier(context.Background(), "PDEL-1", testWorkspaceID); ok {
+		t.Fatalf("the deleted project's prefix must stop resolving")
+	}
+	number := workspaceNumberForTest(t, issue.ID)
+	moved, ok := testHandler.resolveIssueByIdentifier(context.Background(), "SHAR-"+strconv.Itoa(int(number)), testWorkspaceID)
+	if !ok || uuidToString(moved.ID) != issue.ID {
+		t.Fatalf("issue did not move to the workspace scope: %+v", moved)
+	}
+}
+
+// TestIssueProjectMoveRenumbersScope covers moving one issue into a prefixed
+// project through the ordinary update path.
+func TestIssueProjectMoveRenumbersScope(t *testing.T) {
+	setWorkspaceIssuePrefixForTest(t, "SHAR")
+	projectID := createProjectForTest(t, "Move target "+t.Name(), "PMOV")
+
+	issue := createIssueForTest(t, map[string]any{
+		"title": "movable issue " + t.Name(), "status": "todo", "priority": "medium",
+	})
+	if issue.Identifier == "PMOV-1" {
+		t.Fatalf("issue created outside the project must not use its prefix")
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"project_id": projectID}), "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated issue: %v", err)
+	}
+	if updated.Identifier != "PMOV-1" {
+		t.Fatalf("identifier after move = %q, want PMOV-1", updated.Identifier)
+	}
+	resolved, ok := testHandler.resolveIssueByIdentifier(context.Background(), "PMOV-1", testWorkspaceID)
+	if !ok || uuidToString(resolved.ID) != issue.ID {
+		t.Fatalf("PMOV-1 resolved to %+v, want issue %s", resolved, issue.ID)
 	}
 }

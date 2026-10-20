@@ -35,6 +35,12 @@ progress = issues in done or cancelled ÷ all issues in the project
 
 `cancelled` means that work has been closed out of the project's scope, so it counts toward progress. Project status and issue status are independent: finishing every issue does not automatically set the project to `completed`, and changing the project's status does not bulk-change its issues.
 
+## Issue prefix
+
+A project can own its own issue prefix. With a prefix, the project's issues are numbered in a separate sequence and read as `PROA-1`, `PROA-2`, while everything else in the workspace keeps the workspace prefix (`SHAR-1`). Two projects in the same workspace cannot share a prefix, and a project prefix cannot equal the workspace prefix — either would make one identifier name two issues.
+
+Changing or clearing the prefix renumbers that project's issues in the new scope. Deleting the project moves them back to the workspace sequence. Existing issues keep their old numbers when no prefix changes.
+
 ## Project description and execution context
 
 When an agent runs an issue inside a project, the project's name and description are added to that run's context. The description is the place for information every related issue needs: the goal, technical boundaries, delivery conventions. Requirements that apply to only one issue belong in that issue.

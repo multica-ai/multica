@@ -742,8 +742,7 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
-	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
-	if err != nil {
+	if _, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID); err != nil {
 		slog.Warn("failed to load workspace after channel media bind",
 			"workspace_id", util.UUIDToString(issue.WorkspaceID), "error", err)
 		// Without the workspace we cannot publish the matching owner snapshot.
@@ -758,7 +757,7 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 		ActorType:   "member",
 		ActorID:     util.UUIDToString(actorID),
 		Payload: map[string]any{
-			"issue":            IssueToMapResolved(ctx, s.Queries, current, workspace.IssuePrefix),
+			"issue":            IssueToMapResolved(ctx, s.Queries, current, IssuePrefixForScope(ctx, s.Queries, current.WorkspaceID, current.ProjectID)),
 			"assignee_changed": false,
 			"status_changed":   false,
 			"project_changed":  false,

@@ -377,7 +377,8 @@ SELECT
     atq.dispatched_at  AS task_dispatched_at,
     i.number           AS issue_number,
     i.title            AS issue_title,
-    i.status           AS issue_status
+    i.status           AS issue_status,
+    i.project_id       AS issue_project_id
 FROM squad_member sm
 LEFT JOIN agent a
        ON sm.member_type = 'agent' AND a.id = sm.member_id
@@ -407,6 +408,7 @@ type ListSquadMemberStatusRowsRow struct {
 	IssueNumber       pgtype.Int4        `json:"issue_number"`
 	IssueTitle        pgtype.Text        `json:"issue_title"`
 	IssueStatus       pgtype.Text        `json:"issue_status"`
+	IssueProjectID    pgtype.UUID        `json:"issue_project_id"`
 }
 
 // Per-row join used to build the squad-members status view. One row per
@@ -439,6 +441,7 @@ func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.
 			&i.IssueNumber,
 			&i.IssueTitle,
 			&i.IssueStatus,
+			&i.IssueProjectID,
 		); err != nil {
 			return nil, err
 		}

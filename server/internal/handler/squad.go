@@ -663,7 +663,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), squad.WorkspaceID)
+	prefixes := h.newIssuePrefixResolver(r.Context(), squad.WorkspaceID)
 	now := time.Now()
 
 	// Group rows by member_id while preserving the SQL ORDER BY (squad_member
@@ -715,7 +715,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			if row.TaskIssueID.Valid {
 				brief := SquadActiveIssueBrief{
 					IssueID:    uuidToString(row.TaskIssueID),
-					Identifier: prefix + "-" + strconv.Itoa(int(row.IssueNumber.Int32)),
+					Identifier: prefixes.resolve(row.IssueProjectID) + "-" + strconv.Itoa(int(row.IssueNumber.Int32)),
 					Title:      row.IssueTitle.String,
 					IssueStatus: func() string {
 						if row.IssueStatus.Valid {

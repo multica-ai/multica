@@ -154,7 +154,8 @@ SELECT
     atq.dispatched_at  AS task_dispatched_at,
     i.number           AS issue_number,
     i.title            AS issue_title,
-    i.status           AS issue_status
+    i.status           AS issue_status,
+    i.project_id       AS issue_project_id
 FROM squad_member sm
 LEFT JOIN agent a
        ON sm.member_type = 'agent' AND a.id = sm.member_id

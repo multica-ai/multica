@@ -286,7 +286,7 @@ func BuildSourceIssueSnapshot(ctx context.Context, q *db.Queries, workspaceID, i
 		attachmentSnapshots = append(attachmentSnapshots, attachmentSnapshot(attachment, "issue", util.UUIDToString(issue.ID)))
 	}
 	return SourceContextIssueSnapshot{
-		ID: util.UUIDToString(issue.ID), Identifier: workspace.IssuePrefix + "-" + fmt.Sprint(issue.Number), Number: issue.Number,
+		ID: util.UUIDToString(issue.ID), Identifier: IssuePrefixForScope(ctx, q, workspace.ID, issue.ProjectID) + "-" + fmt.Sprint(issue.Number), Number: issue.Number,
 		Title: issue.Title, Description: sourceContextText(issue.Description),
 		CreatedAt: sourceContextTime(issue.CreatedAt), UpdatedAt: sourceContextTime(issue.UpdatedAt), Revision: issue.Revision,
 		Attachments: attachmentSnapshots,

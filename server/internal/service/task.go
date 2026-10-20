@@ -7456,7 +7456,7 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
 // would mean unifying the payload type and is left as a follow-up.
 func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue, prevStatus string) {
-	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	prefix := IssuePrefixForScope(ctx, s.Queries, issue.WorkspaceID, issue.ProjectID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
@@ -7914,7 +7914,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	// subscriber template, and — missing entirely until MUL-5483 — ordinary
 	// agent-created sub-issues). Keeping a second write here would leave the
 	// same decision encoded in two places that can drift.
-	prefix := s.getIssuePrefix(workspaceID)
+	prefix := IssuePrefixForScope(ctx, s.Queries, workspaceID, issue.ProjectID)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),

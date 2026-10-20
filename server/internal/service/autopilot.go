@@ -818,7 +818,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// (subscriber listeners, activity listeners, notification listeners). For
 	// squad autopilots, this is what triggers shouldEnqueueSquadLeaderOnAssign
 	// → enqueueSquadLeaderTask — no separate squad-routing code needed here.
-	prefix := s.getIssuePrefix(ap.WorkspaceID)
+	prefix := IssuePrefixForScope(ctx, s.Queries, ap.WorkspaceID, issue.ProjectID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueCreated,
 		WorkspaceID: util.UUIDToString(ap.WorkspaceID),
