@@ -313,6 +313,31 @@ Both checkouts use:
 
 But they do not share application data, because each uses a different database.
 
+### The shared container is pinned to its own Compose project
+
+The dev container runs in the Compose project `multica-dev`, whatever the
+checkout directory is called. Compose otherwise derives the project name from
+the directory name, so a checkout in a directory called `multica` used to
+resolve to the same project as a self-hosted install living in another
+directory: `docker compose up -d postgres` then took over - and stopped - that
+install's `multica-postgres-1` container.
+
+`scripts/ensure-postgres.sh`, `scripts/drop-database.sh` and the `make db-*`
+targets all go through `scripts/dev-compose.sh`, which pins the project name and
+anchors the compose file to this checkout.
+
+| Variable | Effect |
+| --- | --- |
+| `MULTICA_PG_COMPOSE_PROJECT` | use a different Compose project name for the dev container |
+| `MULTICA_PG_REUSE_EXTERNAL=1` | reuse whichever PostgreSQL container already publishes the port instead of refusing |
+
+If something else already publishes `localhost:5432` - another checkout's
+container, a self-hosted install, a native PostgreSQL - the script explains the
+situation and refuses to start a container. It never stops or recreates a
+container this project does not own. Free the port to get an isolated dev
+container, or set `MULTICA_PG_REUSE_EXTERNAL=1` to use that instance as-is.
+
+
 ## Command Reference
 
 ### Shared Infrastructure

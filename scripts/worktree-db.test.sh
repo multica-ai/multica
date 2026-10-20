@@ -64,8 +64,9 @@ fi
 : >"$docker_log"
 printf 'y\n' | PATH="$stub_dir:$PATH" DOCKER_LOG="$docker_log" \
   bash "$root_dir/scripts/drop-database.sh" "$local_env" >"$output"
+require_contains "$docker_log" "compose -p multica-dev"
 require_contains "$docker_log" \
-  "compose exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_feature_123"
+  "exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_feature_123"
 require_contains "$output" "Dropped database 'multica_feature_123'."
 
 remote_env="$tmp_dir/remote.env"
@@ -167,7 +168,7 @@ if [ -e "$worktree" ]; then
   fail "remove-worktree did not remove the worktree after database deletion"
 fi
 require_contains "$docker_log" \
-  "compose exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_worktree_456"
+  "exec -T postgres dropdb --username multica --maintenance-db postgres --if-exists --force -- multica_worktree_456"
 
 dirty_worktree="$tmp_dir/dirty-worktree"
 git -C "$repo" worktree add -q -b dirty-feature "$dirty_worktree"
@@ -194,5 +195,98 @@ if (cd "$repo" && bash "$root_dir/scripts/remove-worktree.sh" "$repo") >"$output
   fail "remove-worktree must refuse the primary checkout"
 fi
 require_contains "$output" "Refusing to remove the primary checkout"
+
+# ensure-postgres.sh must stay inside its own pinned compose project and must
+# never start a container over an instance it does not own (SHAR-208).
+pg_stub_dir="$tmp_dir/pg-bin"
+mkdir -p "$pg_stub_dir"
+cat >"$pg_stub_dir/docker" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$DOCKER_LOG"
+case "$*" in
+  "ps --filter publish="*)
+    if [ -n "${STUB_FOREIGN_CONTAINER:-}" ]; then
+      printf '%s\n' "$STUB_FOREIGN_CONTAINER"
+    fi
+    ;;
+  *" ps -q postgres")
+    if [ -n "${STUB_OWN_CONTAINER:-}" ]; then
+      printf '%s\n' "$STUB_OWN_CONTAINER"
+    fi
+    ;;
+  *" psql "*"SELECT 1"*)
+    printf '1\n'
+    ;;
+esac
+STUB
+chmod +x "$pg_stub_dir/docker"
+
+pg_env="$tmp_dir/pg.env"
+cat >"$pg_env" <<'EOF'
+POSTGRES_DB=multica_dev_test
+POSTGRES_USER=multica
+POSTGRES_PASSWORD=multica
+DATABASE_URL=postgres://multica:multica@localhost:5432/multica_dev_test?sslmode=disable
+EOF
+
+# A checkout directory literally named like the self-hosted deployment.
+colliding_checkout="$tmp_dir/multica"
+mkdir -p "$colliding_checkout"
+
+: >"$docker_log"
+if ! (cd "$colliding_checkout" && PATH="$pg_stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  bash "$root_dir/scripts/ensure-postgres.sh" "$pg_env") >"$output" 2>&1; then
+  fail "ensure-postgres failed in a clean run"
+fi
+require_contains "$docker_log" "compose -p multica-dev"
+require_contains "$docker_log" "up -d postgres"
+if grep -Fq -- "-p multica " "$docker_log"; then
+  fail "ensure-postgres resolved to the default 'multica' compose project"
+fi
+if grep -Eq ' (down|stop|rm) ' "$docker_log"; then
+  fail "ensure-postgres ran a destructive compose command"
+fi
+
+: >"$docker_log"
+foreign_status=0
+(cd "$colliding_checkout" && PATH="$pg_stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  STUB_FOREIGN_CONTAINER='abc123|multica-postgres-1|multica' \
+  bash "$root_dir/scripts/ensure-postgres.sh" "$pg_env") >"$output" 2>&1 || foreign_status=$?
+if [ "$foreign_status" -eq 0 ]; then
+  fail "ensure-postgres must refuse a port owned by another deployment"
+fi
+require_contains "$output" "Refusing to start the dev PostgreSQL"
+require_contains "$output" "multica-postgres-1"
+if grep -Fq "up -d postgres" "$docker_log"; then
+  fail "ensure-postgres started a container while another deployment owned the port"
+fi
+if grep -Fq "exec -T postgres" "$docker_log"; then
+  fail "ensure-postgres touched another deployment's container"
+fi
+
+: >"$docker_log"
+if ! (cd "$colliding_checkout" && PATH="$pg_stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  STUB_FOREIGN_CONTAINER='abc123|multica-postgres-1|multica' MULTICA_PG_REUSE_EXTERNAL=1 \
+  bash "$root_dir/scripts/ensure-postgres.sh" "$pg_env") >"$output" 2>&1; then
+  fail "ensure-postgres failed with MULTICA_PG_REUSE_EXTERNAL=1"
+fi
+require_contains "$output" "Reusing the PostgreSQL container"
+require_contains "$docker_log" "exec -i abc123 pg_isready"
+if grep -Fq "up -d postgres" "$docker_log"; then
+  fail "ensure-postgres started a container instead of reusing the opted-in one"
+fi
+
+: >"$docker_log"
+if ! (cd "$colliding_checkout" && PATH="$pg_stub_dir:$PATH" DOCKER_LOG="$docker_log" \
+  STUB_OWN_CONTAINER='def456' STUB_FOREIGN_CONTAINER='abc123|multica-postgres-1|multica' \
+  bash "$root_dir/scripts/ensure-postgres.sh" "$pg_env") >"$output" 2>&1; then
+  fail "ensure-postgres failed when the dev project already owned a container"
+fi
+require_contains "$docker_log" "compose -p multica-dev"
+require_contains "$docker_log" "exec -T postgres pg_isready"
+if grep -Fq -- "--filter publish" "$docker_log"; then
+  fail "ensure-postgres probed foreign containers although it already owned one"
+fi
 
 echo "worktree database cleanup tests passed"
