@@ -5340,11 +5340,12 @@ SELECT
     atq.status,
     atq.created_at,
     atq.started_at,
-    w.issue_prefix,
+    COALESCE(NULLIF(p.issue_prefix, ''), w.issue_prefix) AS issue_prefix,
     i.number AS issue_number,
     i.title AS issue_title
 FROM agent_task_queue atq
 JOIN issue i ON i.id = atq.issue_id
+LEFT JOIN project p ON p.id = i.project_id
 JOIN workspace w ON w.id = i.workspace_id
 WHERE i.workspace_id = $1
   AND (i.id = $2::uuid OR i.parent_issue_id = $2::uuid)

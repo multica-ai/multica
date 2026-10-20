@@ -314,12 +314,17 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			projectID = parent.ProjectID
 		}
 	}
+	var numberingProjectID pgtype.UUID
 	if projectID.Valid {
-		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		project, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: p.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
+		}
+		if project.IssuePrefix != "" {
+			numberingProjectID = project.ID
 		}
 	}
 
@@ -341,7 +346,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
+	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, numberingProjectID, issueCountPolicy)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("allocate issue number: %w", err)
 	}
@@ -737,8 +742,7 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
-	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
-	if err != nil {
+	if _, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID); err != nil {
 		slog.Warn("failed to load workspace after channel media bind",
 			"workspace_id", util.UUIDToString(issue.WorkspaceID), "error", err)
 		// Without the workspace we cannot publish the matching owner snapshot.
@@ -753,7 +757,7 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 		ActorType:   "member",
 		ActorID:     util.UUIDToString(actorID),
 		Payload: map[string]any{
-			"issue":            IssueToMapResolved(ctx, s.Queries, current, workspace.IssuePrefix),
+			"issue":            IssueToMapResolved(ctx, s.Queries, current, IssuePrefixForScope(ctx, s.Queries, current.WorkspaceID, current.ProjectID)),
 			"assignee_changed": false,
 			"status_changed":   false,
 			"project_changed":  false,

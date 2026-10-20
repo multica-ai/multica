@@ -79,15 +79,32 @@ func CheckIssueCreateCapacity(ctx context.Context, q *db.Queries, provider entit
 	return nil
 }
 
-// AllocateIssueNumber serializes creates on the workspace row, then checks the
-// current number of issue rows inside the same transaction. The caller must
-// roll the transaction back on IssueLimitReachedError; that also rolls back
-// the counter increment. Deleting an issue frees capacity because
+// AllocateIssueNumber serializes creates on the numbering scope row, then
+// checks the current number of issue rows inside the same transaction. The
+// caller must roll the transaction back on IssueLimitReachedError; that also
+// rolls back the counter increment. Deleting an issue frees capacity because
 // issue_counter is deliberately not used as quota usage.
-func AllocateIssueNumber(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, policy IssueCountPolicy) (int32, error) {
-	number, err := q.IncrementIssueCounter(ctx, workspaceID)
-	if err != nil {
-		return 0, err
+//
+// numberingProjectID is valid when the issue belongs to a project that owns an
+// issue prefix: its number then comes from that project's counter, so PROA-1
+// and SHAR-1 can coexist. Quota admission stays workspace-wide.
+func AllocateIssueNumber(ctx context.Context, q *db.Queries, workspaceID, numberingProjectID pgtype.UUID, policy IssueCountPolicy) (int32, error) {
+	var number int32
+	if numberingProjectID.Valid {
+		projectNumber, err := q.IncrementProjectIssueCounter(ctx, numberingProjectID)
+		if err != nil {
+			return 0, err
+		}
+		if projectNumber > math.MaxInt32 {
+			return 0, fmt.Errorf("project issue counter exhausted: %d", projectNumber)
+		}
+		number = int32(projectNumber)
+	} else {
+		workspaceNumber, err := q.IncrementIssueCounter(ctx, workspaceID)
+		if err != nil {
+			return 0, err
+		}
+		number = workspaceNumber
 	}
 	if policy.Action != entitlement.ActionEnforce {
 		return number, nil

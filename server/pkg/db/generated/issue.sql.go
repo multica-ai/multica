@@ -937,6 +937,68 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 	return i, err
 }
 
+const getIssueByPrefixAndNumber = `-- name: GetIssueByPrefixAndNumber :one
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id FROM issue i
+LEFT JOIN project p ON p.id = i.project_id
+WHERE i.workspace_id = $1
+  AND i.number = $2
+  AND UPPER(COALESCE(NULLIF(p.issue_prefix, ''), $3::text)) = UPPER($4::text)
+`
+
+type GetIssueByPrefixAndNumberParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Number          int32       `json:"number"`
+	WorkspacePrefix string      `json:"workspace_prefix"`
+	Prefix          string      `json:"prefix"`
+}
+
+// Resolves an identifier within its numbering scope. The effective prefix is
+// the project prefix when the issue belongs to a prefixed project, otherwise
+// the workspace prefix passed by the caller (which already accounts for the
+// legacy name-based fallback for workspaces with an empty stored prefix).
+func (q *Queries) GetIssueByPrefixAndNumber(ctx context.Context, arg GetIssueByPrefixAndNumberParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueByPrefixAndNumber,
+		arg.WorkspaceID,
+		arg.Number,
+		arg.WorkspacePrefix,
+		arg.Prefix,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.TriageState,
+		&i.DuplicateOfIssueID,
+	)
+	return i, err
+}
+
 const getIssueGCStatus = `-- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
 FROM issue
@@ -1748,6 +1810,31 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	return items, nil
 }
 
+const listProjectIssueIDs = `-- name: ListProjectIssueIDs :many
+SELECT id FROM issue WHERE project_id = $1 ORDER BY id
+`
+
+// Ordered by id so renumbering is deterministic.
+func (q *Queries) ListProjectIssueIDs(ctx context.Context, projectID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listProjectIssueIDs, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockIssueDuplicateKey = `-- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
@@ -2085,6 +2172,20 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 		&i.Revision,
 	)
 	return i, err
+}
+
+const setIssueNumber = `-- name: SetIssueNumber :exec
+UPDATE issue SET number = $2 WHERE id = $1
+`
+
+type SetIssueNumberParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Number int32       `json:"number"`
+}
+
+func (q *Queries) SetIssueNumber(ctx context.Context, arg SetIssueNumberParams) error {
+	_, err := q.db.Exec(ctx, setIssueNumber, arg.ID, arg.Number)
+	return err
 }
 
 const updateIssue = `-- name: UpdateIssue :one

@@ -445,11 +445,7 @@ func writePublicIssueRevisionConflict(w http.ResponseWriter, r *http.Request) {
 // pluginIssuePayload explicitly maps the App response into the stable Public
 // DTO. New App-only fields cannot leak into the public contract by accident.
 func (h *Handler) pluginIssuePayload(r *http.Request, caller service.PluginActionCaller, issue db.Issue) publicapiv1.Issue {
-	prefix := ""
-	if workspace, err := h.Queries.GetWorkspace(r.Context(), caller.WorkspaceID); err == nil {
-		prefix = workspace.IssuePrefix
-	}
-	app := issueToResponse(issue, prefix)
+	app := issueToResponse(issue, h.issuePrefixFor(r.Context(), caller.WorkspaceID, issue.ProjectID))
 	return publicapiv1.Issue{
 		ID:             app.ID,
 		WorkspaceID:    app.WorkspaceID,

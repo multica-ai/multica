@@ -715,7 +715,21 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, issueCountPolicy)
+	var numberingProjectID pgtype.UUID
+	if projectID.Valid {
+		project, projectErr := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID:          projectID,
+			WorkspaceID: ap.WorkspaceID,
+		})
+		if projectErr != nil {
+			return fmt.Errorf("load autopilot project: %w", projectErr)
+		}
+		if project.IssuePrefix != "" {
+			numberingProjectID = project.ID
+		}
+	}
+
+	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, numberingProjectID, issueCountPolicy)
 	if err != nil {
 		var limitErr *IssueLimitReachedError
 		if errors.As(err, &limitErr) {
@@ -804,7 +818,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// (subscriber listeners, activity listeners, notification listeners). For
 	// squad autopilots, this is what triggers shouldEnqueueSquadLeaderOnAssign
 	// → enqueueSquadLeaderTask — no separate squad-routing code needed here.
-	prefix := s.getIssuePrefix(ap.WorkspaceID)
+	prefix := IssuePrefixForScope(ctx, s.Queries, ap.WorkspaceID, issue.ProjectID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueCreated,
 		WorkspaceID: util.UUIDToString(ap.WorkspaceID),

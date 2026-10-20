@@ -142,7 +142,7 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefixes := h.newIssuePrefixResolver(r.Context(), issue.WorkspaceID)
 	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
 
 	var duplicateOf *IssueResponse
@@ -153,7 +153,7 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 		})
 		switch {
 		case err == nil:
-			resp := issueToResponse(original, prefix)
+			resp := issueToResponse(original, prefixes.resolve(original.ProjectID))
 			fill(&resp)
 			duplicateOf = &resp
 		case !isNotFound(err):
@@ -174,7 +174,7 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 	}
 	duplicates := make([]IssueResponse, 0, len(rows))
 	for _, row := range rows {
-		resp := issueToResponse(row, prefix)
+		resp := issueToResponse(row, prefixes.resolve(row.ProjectID))
 		fill(&resp)
 		duplicates = append(duplicates, resp)
 	}

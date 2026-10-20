@@ -1225,7 +1225,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefixes := h.newIssuePrefixResolver(ctx, wsUUID)
 	var originals []pgtype.UUID
 	for _, sr := range results {
 		originals = appendDuplicateOriginal(originals, sr.issue.Status, sr.issue.DuplicateOfIssueID)
@@ -1234,7 +1234,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
 		sir := SearchIssueResponse{
-			IssueResponse: issueToResponse(sr.issue, prefix),
+			IssueResponse: issueToResponse(sr.issue, prefixes.resolve(sr.issue.ProjectID)),
 			MatchSource:   sr.matchSource,
 		}
 		fillSearch(&sir.IssueResponse)
@@ -1396,7 +1396,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		prefix := h.getIssuePrefix(ctx, wsUUID)
+		prefixes := h.newIssuePrefixResolver(ctx, wsUUID)
 		ids := make([]pgtype.UUID, len(issues))
 		var originals []pgtype.UUID
 		for i, issue := range issues {
@@ -1407,7 +1407,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		fillOpen := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
-			resp[i] = openIssueRowToResponse(issue, prefix)
+			resp[i] = openIssueRowToResponse(issue, prefixes.resolve(issue.ProjectID))
 			fillOpen(&resp[i])
 			labels := labelsMap[resp[i].ID]
 			if labels == nil {
@@ -1816,7 +1816,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		return
 	}
 
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefixes := h.newIssuePrefixResolver(ctx, wsUUID)
 	ids := make([]pgtype.UUID, len(issues))
 	for i, issue := range issues {
 		ids[i] = issue.ID
@@ -1824,7 +1824,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
-		resp[i] = issueListRowToResponse(issue, prefix)
+		resp[i] = issueListRowToResponse(issue, prefixes.resolve(issue.ProjectID))
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}
@@ -2434,7 +2434,7 @@ ORDER BY
 		originals = appendDuplicateOriginal(originals, row.Status, row.DuplicateOfIssueID)
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefixes := h.newIssuePrefixResolver(ctx, wsUUID)
 	// One Resolver for the whole page — a per-row filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillGrouped := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
@@ -2456,7 +2456,7 @@ ORDER BY
 			})
 		}
 
-		issue := issueListRowToResponse(row.ListIssuesRow, prefix)
+		issue := issueListRowToResponse(row.ListIssuesRow, prefixes.resolve(row.ProjectID))
 		fillGrouped(&issue)
 		labels := labelsMap[issue.ID]
 		if labels == nil {
@@ -2475,7 +2475,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefix := h.issuePrefixFor(r.Context(), issue.WorkspaceID, issue.ProjectID)
 	resp := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
@@ -2531,7 +2531,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefixes := h.newIssuePrefixResolver(r.Context(), issue.WorkspaceID)
 	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
 		ids[i] = child.ID
@@ -2545,7 +2545,7 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	statusResolver := issuestatus.NewResolver(issue.WorkspaceID)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
-		resp[i] = issueToResponse(child, prefix)
+		resp[i] = issueToResponse(child, prefixes.resolve(child.ProjectID))
 		resp[i].StatusCategory = issuestatus.WireCategory(child.Status, statusResolver.Category(r.Context(), h.Queries, child.Status))
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
@@ -2617,7 +2617,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	prefixes := h.newIssuePrefixResolver(r.Context(), wsUUID)
 	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
 		ids[i] = child.ID
@@ -2631,7 +2631,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	statusResolver := issuestatus.NewResolver(wsUUID)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
-		resp[i] = issueToResponse(child, prefix)
+		resp[i] = issueToResponse(child, prefixes.resolve(child.ProjectID))
 		resp[i].StatusCategory = issuestatus.WireCategory(child.Status, statusResolver.Category(r.Context(), h.Queries, child.Status))
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
@@ -3366,9 +3366,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Prefix is workspace-level; pre-compute once so both the broadcast
-	// payload builder and the HTTP response share the same value.
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	// Both the broadcast payload builder and the HTTP response resolve the
+	// identifier through this snapshot, so a project-scoped create is not
+	// labelled with the workspace prefix.
+	prefixes := h.newIssuePrefixResolver(r.Context(), wsUUID)
 
 	// One filler for this create, shared by the broadcast payload and the HTTP
 	// response below, so a custom-status create reads the catalog once per
@@ -3424,7 +3425,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
 		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
-			payload := issueToResponse(issue, prefix)
+			payload := issueToResponse(issue, prefixes.resolve(issue.ProjectID))
 			// The event other tabs receive must carry the category too — filling
 			// only the HTTP response below is too late for them, and a create
 			// they cannot bucket forces a full refetch. Shares one filler with
@@ -3444,7 +3445,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	if errors.Is(err, service.ErrActiveDuplicate) {
 		dup := *res.DuplicateIssue
-		existing := issueToResponse(dup, h.getIssuePrefix(r.Context(), dup.WorkspaceID))
+		existing := issueToResponse(dup, prefixes.resolve(dup.ProjectID))
 		h.fillStatusCategory(r.Context(), dup.WorkspaceID, &existing)
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"code":  "active_duplicate_issue",
@@ -3485,7 +3486,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
-	resp := issueToResponse(issue, prefix)
+	resp := issueToResponse(issue, prefixes.resolve(issue.ProjectID))
 	fillCreated(&resp)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	// Echo the authoritative labels attached in the create transaction. Always
@@ -3621,6 +3622,59 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 }
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
+
+// renumberIssueAfterScopeChange allocates a number in the issue's new numbering
+// scope when an update moved it between the workspace scope and a prefixed
+// project. It is a no-op when both sides resolve to the same prefix.
+//
+// The allocation runs in its own transaction and takes the target scope's row
+// lock, so it cannot race a concurrent create in the same scope.
+func (h *Handler) renumberIssueAfterScopeChange(ctx context.Context, prev, updated db.Issue) (db.Issue, error) {
+	prevPrefix := h.issuePrefixFor(ctx, prev.WorkspaceID, prev.ProjectID)
+	newPrefix := h.issuePrefixFor(ctx, updated.WorkspaceID, updated.ProjectID)
+	if strings.EqualFold(prevPrefix, newPrefix) {
+		return updated, nil
+	}
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return updated, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	var number int32
+	if updated.ProjectID.Valid && newPrefix != h.getIssuePrefix(ctx, updated.WorkspaceID) {
+		if _, err := qtx.LockProjectForIssuePrefix(ctx, db.LockProjectForIssuePrefixParams{
+			ID:          updated.ProjectID,
+			WorkspaceID: updated.WorkspaceID,
+		}); err != nil {
+			return updated, err
+		}
+		projectNumber, err := qtx.IncrementProjectIssueCounter(ctx, updated.ProjectID)
+		if err != nil {
+			return updated, err
+		}
+		number = int32(projectNumber)
+	} else {
+		workspaceNumber, err := qtx.IncrementIssueCounter(ctx, updated.WorkspaceID)
+		if err != nil {
+			return updated, err
+		}
+		number = workspaceNumber
+	}
+	if err := qtx.SetIssueNumber(ctx, db.SetIssueNumberParams{ID: updated.ID, Number: number}); err != nil {
+		return updated, err
+	}
+	reloaded, err := qtx.GetIssue(ctx, updated.ID)
+	if err != nil {
+		return updated, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return updated, err
+	}
+	return reloaded, nil
+}
 
 func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
@@ -3998,10 +4052,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Moving an issue between numbering scopes (workspace <-> prefixed project)
+	// changes which counter owns it, so give it a number in the new scope.
+	if _, touchedProject := rawFields["project_id"]; touchedProject {
+		renumbered, renumberErr := h.renumberIssueAfterScopeChange(r.Context(), prevIssue, issue)
+		if renumberErr != nil {
+			slog.Warn("renumber issue after project change failed", append(logger.RequestAttrs(r), "issue_id", id, "error", renumberErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to renumber issue for its new project")
+			return
+		}
+		issue = renumbered
+	}
+
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefix := h.issuePrefixFor(r.Context(), issue.WorkspaceID, issue.ProjectID)
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
@@ -4449,7 +4515,7 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 // detached children and duplicates whose original was deleted.
 func (h *Handler) publishIssueSnapshots(ctx context.Context, issues []db.Issue, actorType, actorID string) {
 	for _, issue := range issues {
-		response := issueToResponse(issue, h.getIssuePrefix(ctx, issue.WorkspaceID))
+		response := issueToResponse(issue, h.issuePrefixFor(ctx, issue.WorkspaceID, issue.ProjectID))
 		h.fillStatusCategory(ctx, issue.WorkspaceID, &response)
 		h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue": response})
 	}
@@ -4461,7 +4527,7 @@ func (h *Handler) publishIssueSnapshots(ctx context.Context, issues []db.Issue, 
 // activity log can no longer look up (MUL-7349).
 func (h *Handler) publishClearedDuplicates(ctx context.Context, cleared []clearedDuplicate, actorType, actorID string) {
 	for _, c := range cleared {
-		prefix := h.getIssuePrefix(ctx, c.Issue.WorkspaceID)
+		prefix := h.issuePrefixFor(ctx, c.Issue.WorkspaceID, c.Issue.ProjectID)
 		response := issueToResponse(c.Issue, prefix)
 		h.fillStatusCategory(ctx, c.Issue.WorkspaceID, &response)
 		h.publish(protocol.EventIssueUpdated, uuidToString(c.Issue.WorkspaceID), actorType, actorID, map[string]any{
@@ -4779,7 +4845,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := h.issuePrefixFor(r.Context(), issue.WorkspaceID, issue.ProjectID)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 

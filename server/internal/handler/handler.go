@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -1105,14 +1104,18 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
-	// Case-insensitive: a hand-typed `trs-134` should open `TRS-134`.
+	// Case-insensitive: a hand-typed `trs-134` should open `TRS-134`. The
+	// prefix may be the workspace's own or any project prefix in it, so the
+	// comparison happens in SQL against each issue's effective scope.
 	prefix := h.getIssuePrefix(ctx, wsUUID)
-	if prefix == "" || !strings.EqualFold(parts.prefix, prefix) {
+	if prefix == "" {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-		WorkspaceID: wsUUID,
-		Number:      parts.number,
+	issue, err := h.Queries.GetIssueByPrefixAndNumber(ctx, db.GetIssueByPrefixAndNumberParams{
+		WorkspaceID:     wsUUID,
+		Number:          parts.number,
+		WorkspacePrefix: prefix,
+		Prefix:          parts.prefix,
 	})
 	if err != nil {
 		return db.Issue{}, false
@@ -1183,6 +1186,56 @@ func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) s
 		return ""
 	}
 	return issuePrefixForWorkspace(ws)
+}
+
+// issuePrefixResolver resolves the identifier prefix of each numbering scope in
+// one workspace. A project that owns a prefix numbers its own issues
+// (PROA-1), everything else falls back to the workspace prefix (SHAR-1).
+type issuePrefixResolver struct {
+	workspacePrefix string
+	projectPrefixes map[pgtype.UUID]string
+}
+
+// newIssuePrefixResolver loads the workspace prefix plus every project prefix
+// once, so list endpoints do not query per row.
+func (h *Handler) newIssuePrefixResolver(ctx context.Context, workspaceID pgtype.UUID) issuePrefixResolver {
+	resolver := issuePrefixResolver{workspacePrefix: h.getIssuePrefix(ctx, workspaceID)}
+	projects, err := h.Queries.ListProjectIssuePrefixes(ctx, workspaceID)
+	if err != nil {
+		return resolver
+	}
+	resolver.projectPrefixes = make(map[pgtype.UUID]string, len(projects))
+	for _, p := range projects {
+		resolver.projectPrefixes[p.ID] = p.IssuePrefix
+	}
+	return resolver
+}
+
+// resolve returns the effective prefix for an issue in this workspace.
+func (r issuePrefixResolver) resolve(projectID pgtype.UUID) string {
+	if projectID.Valid {
+		if prefix, ok := r.projectPrefixes[projectID]; ok && prefix != "" {
+			return prefix
+		}
+	}
+	return r.workspacePrefix
+}
+
+// issuePrefixFor resolves the effective prefix of a single issue. Unlike
+// newIssuePrefixResolver it skips the project list and reads one project.
+func (h *Handler) issuePrefixFor(ctx context.Context, workspaceID, projectID pgtype.UUID) string {
+	workspacePrefix := h.getIssuePrefix(ctx, workspaceID)
+	if !projectID.Valid {
+		return workspacePrefix
+	}
+	project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		ID:          projectID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil || project.IssuePrefix == "" {
+		return workspacePrefix
+	}
+	return project.IssuePrefix
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {

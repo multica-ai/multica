@@ -13,7 +13,7 @@ import (
 
 const listWorkspaceWakeups = `-- name: ListWorkspaceWakeups :one
 WITH base AS MATERIALIZED (
- SELECT w.id,w.issue_id,i.title AS issue_title,ws.issue_prefix||'-'||i.number AS issue_identifier,
+ SELECT w.id,w.issue_id,i.title AS issue_title,COALESCE(NULLIF(proj.issue_prefix,''),ws.issue_prefix)||'-'||i.number AS issue_identifier,
   w.agent_id,a.name AS agent_name,w.kind,w.mode,w.event_types,w.filter_actor_type,
  (CASE WHEN actor_agent.id IS NOT NULL OR actor_member.user_id IS NOT NULL THEN w.filter_actor_id END)::uuid AS filter_actor_id,
  COALESCE(actor_agent.name,actor_user.name,'')::text AS filter_actor_name,
@@ -35,6 +35,7 @@ WITH base AS MATERIALIZED (
  FROM issue_wakeup w
  JOIN workspace ws ON ws.id=w.workspace_id
  JOIN issue i ON i.id=w.issue_id AND i.workspace_id=w.workspace_id
+ LEFT JOIN project proj ON proj.id=i.project_id
  JOIN agent a ON a.id=w.agent_id AND a.workspace_id=w.workspace_id
  LEFT JOIN agent actor_agent ON w.filter_actor_type='agent' AND actor_agent.id=w.filter_actor_id AND actor_agent.workspace_id=w.workspace_id AND actor_agent.id=ANY($1::uuid[])
 LEFT JOIN member actor_member ON w.filter_actor_type='member' AND actor_member.user_id=w.filter_actor_id AND actor_member.workspace_id=w.workspace_id
@@ -53,7 +54,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
  -- The child-done system rule of each open parent that still waits for a
  -- sub-issue: every child when unstaged, else its lowest unfinished stage.
  -- Its target is the parent's assignee (a squad's leader) at the moment.
- SELECT w.id,w.issue_id,p.title,ws.issue_prefix||'-'||p.number,
+ SELECT w.id,w.issue_id,p.title,COALESCE(NULLIF(proj.issue_prefix,''),ws.issue_prefix)||'-'||p.number,
   COALESCE(ta.id,leader.id),COALESCE(ta.name,leader.name,''),w.kind,w.mode,w.event_types,NULL::text,
   NULL::uuid,''::text,NULL::uuid,NULL::text,NULL::uuid,
   NULL::bigint,NULL::text,w.timezone,
@@ -66,6 +67,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
   'system',w.system_rule,ch.stage,p.assignee_type,ch.remaining
  FROM issue_wakeup w
  JOIN issue p ON p.id=w.issue_id AND p.workspace_id=w.workspace_id
+ LEFT JOIN project proj ON proj.id=p.project_id
  JOIN workspace ws ON ws.id=p.workspace_id
  LEFT JOIN agent ta ON p.assignee_type='agent' AND ta.id=p.assignee_id AND ta.workspace_id=p.workspace_id
  LEFT JOIN squad sq ON p.assignee_type='squad' AND sq.id=p.assignee_id AND sq.workspace_id=p.workspace_id

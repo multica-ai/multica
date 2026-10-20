@@ -1399,19 +1399,8 @@ func (h *Handler) resolvePRLinkPolicy(ctx context.Context, insts []db.GithubInst
 		}
 		prefix := issuePrefixForWorkspace(ws)
 		for _, id := range idents {
-			number, ok := issueNumberForPrefix(id, prefix)
-			if !ok {
+			if _, ok := h.lookupIssueByIdentifier(ctx, inst.WorkspaceID, prefix, id); !ok {
 				continue
-			}
-			if _, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-				WorkspaceID: inst.WorkspaceID,
-				Number:      number,
-			}); err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					continue
-				}
-				return indeterminate("github: cannot resolve identifier in bound workspace, leaving links unchanged for this delivery",
-					"err", err, "identifier", id, "workspace_id", uuidToString(inst.WorkspaceID))
 			}
 			resolvers[id] = append(resolvers[id], resolver{workspaceID: uuidToString(inst.WorkspaceID), autoLink: autoLink})
 		}
@@ -1900,33 +1889,21 @@ func githubFeaturesEnabled(ws db.Workspace) bool {
 // identifier, and false when the identifier is malformed or carries a prefix
 // that is not the workspace's. Case-insensitive: branch names are
 // conventionally lowercase while issue prefixes are uppercase.
-func issueNumberForPrefix(identifier, prefix string) (int32, bool) {
-	idx := strings.LastIndex(identifier, "-")
-	if idx < 0 {
-		return 0, false
-	}
-	gotPrefix, numStr := identifier[:idx], identifier[idx+1:]
-	if !strings.EqualFold(gotPrefix, prefix) {
-		return 0, false
-	}
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, false
-	}
-	return int32(n), true
-}
-
 // lookupIssueByIdentifier looks up an issue in the given workspace by its
-// "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
-// the workspace's configured prefix and the number resolves to a real issue.
-func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
-	number, ok := issueNumberForPrefix(identifier, prefix)
-	if !ok {
+// "PREFIX-NUMBER" identifier. The prefix must be the workspace's effective
+// prefix or a project prefix inside it — the caller passes the workspace
+// prefix it already loaded, and the query compares against each issue's
+// effective scope.
+func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, workspacePrefix, identifier string) (db.Issue, bool) {
+	parts := splitIdentifier(identifier)
+	if parts == nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
-		WorkspaceID: workspaceID,
-		Number:      number,
+	issue, err := h.Queries.GetIssueByPrefixAndNumber(ctx, db.GetIssueByPrefixAndNumberParams{
+		WorkspaceID:     workspaceID,
+		Number:          parts.number,
+		WorkspacePrefix: workspacePrefix,
+		Prefix:          parts.prefix,
 	})
 	if err != nil {
 		return db.Issue{}, false

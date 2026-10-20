@@ -290,7 +290,7 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 		h.processChildEvents(ctx, updated.ParentIssueID)
 	}
 
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	prefix := h.issuePrefixFor(ctx, issue.WorkspaceID, issue.ProjectID)
 	resp := issueToResponse(updated, prefix)
 	h.fillStatusCategory(ctx, updated.WorkspaceID, &resp)
 	h.publish(protocol.EventIssueUpdated, uuidToString(workspaceID), "system", "", map[string]any{
