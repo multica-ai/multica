@@ -28,6 +28,7 @@ import { agentListOptions, memberListOptions, squadListOptions } from "@multica/
 import { shortcutMatchesEvent, useShortcut } from "@multica/core/shortcuts";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Popover,
@@ -57,6 +58,8 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { PickerEmpty, PickerItem, PickerSection, PropertyPicker } from "./pickers/property-picker";
 import { IssuePickerModal } from "../../modals/issue-picker-modal";
 import { useStatusLabel } from "../utils/status-label";
+import { DAY_KEYS } from "../../autopilots/components/schedule-editor/model";
+import { toggleDay } from "../../autopilots/components/schedule-editor/transitions";
 import { useWakeupText } from "./wakeup-presentation";
 import {
   WAKEUP_EVENT_TYPES,
@@ -251,6 +254,7 @@ export function WakeupCreateForm({
           onChange={(event) => update({ atCustom: event.target.value })}
         />
       )}
+      {draft.condition === "recurring" && <RecurrenceFields draft={draft} update={update} />}
       <label htmlFor={`${id}-instruction`} className="mt-4 mb-1.5 block text-caption font-medium">
         {t(($) => $.wakeups.instruction_title)}
       </label>
@@ -500,7 +504,8 @@ function ConditionParams({
           options={[
             { value: "hourly", label: t(($) => $.wakeups.create.hourly) },
             { value: "daily", label: t(($) => $.wakeups.create.daily) },
-            { value: "weekdays", label: t(($) => $.wakeups.create.weekdays) },
+            { value: "weekly", label: t(($) => $.wakeups.create.weekly) },
+            { value: "monthly", label: t(($) => $.wakeups.create.monthly) },
           ]}
           onChange={(recurrence) => update({ recurrence: recurrence as WakeupRecurrence })}
         />
@@ -614,6 +619,92 @@ function Segmented<T extends string>({
         </button>
       ))}
     </div>
+  );
+}
+
+/** What the frequency pill alone does not say: the minute of the day the rule
+ *  fires at, which days or date it applies to, and whether a daily rule skips
+ *  the weekend. An hourly rule has none of these. */
+function RecurrenceFields({
+  draft,
+  update,
+}: {
+  draft: WakeupDraft;
+  update: (patch: Partial<WakeupDraft>) => void;
+}) {
+  const { t } = useT("issues");
+  // Day abbreviations live with the autopilot schedule editor, which is the
+  // other surface that picks a day set; one set of names serves both.
+  const { t: ta } = useT("autopilots");
+  if (draft.recurrence === "hourly") return null;
+  return (
+    <>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        {draft.recurrence === "weekly" && (
+          <div role="group" aria-label={t(($) => $.wakeups.create.pick_weekdays)} className="flex gap-0.5">
+            {/* Monday first: that is how the week reads in every locale that
+                names its days. The chip holds the cron number, not its position. */}
+            {[1, 2, 3, 4, 5, 6, 0].map((day) => {
+              const key = DAY_KEYS[day]!;
+              const selected = draft.recurrenceDays.includes(day);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={selected}
+                  aria-label={ta(($) => $.schedule_editor.a11y.days_full[key])}
+                  onClick={() => update({ recurrenceDays: toggleDay(draft.recurrenceDays, day) })}
+                  className={cn(
+                    "inline-flex h-7 w-7 items-center justify-center rounded-md text-micro font-medium leading-none transition-colors",
+                    selected ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {ta(($) => $.schedule_editor.days_short[key])}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {draft.recurrence === "monthly" && (
+          <PillMenu
+            label={t(($) => $.wakeups.create.day_of_month)}
+            value={String(draft.recurrenceDayOfMonth)}
+            options={Array.from({ length: 31 }, (_, i) => ({
+              value: String(i + 1),
+              label: t(($) => $.wakeups.create.month_day, { day: i + 1 }),
+            }))}
+            onChange={(day) => update({ recurrenceDayOfMonth: Number(day) })}
+          />
+        )}
+        <TimeInput
+          value={draft.recurrenceTime}
+          onChange={(recurrenceTime) => update({ recurrenceTime })}
+          className="h-7"
+          hourLabel={t(($) => $.wakeups.create.hour)}
+          minuteLabel={t(($) => $.wakeups.create.minute)}
+        />
+        {draft.recurrence === "daily" && (
+          <button
+            type="button"
+            aria-pressed={draft.recurrenceWorkdaysOnly}
+            onClick={() => update({ recurrenceWorkdaysOnly: !draft.recurrenceWorkdaysOnly })}
+            className={cn(
+              "inline-flex h-7 items-center rounded-md px-2 text-caption font-medium leading-none transition-colors",
+              draft.recurrenceWorkdaysOnly
+                ? "bg-foreground text-background"
+                : "bg-muted text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(($) => $.wakeups.create.weekdays_only)}
+          </button>
+        )}
+      </div>
+      {draft.recurrence === "monthly" && draft.recurrenceDayOfMonth >= 29 && (
+        <p className="mt-1.5 text-caption text-muted-foreground">
+          {ta(($) => $.schedule_editor.monthly_short_month_hint, { day: draft.recurrenceDayOfMonth })}
+        </p>
+      )}
+    </>
   );
 }
 

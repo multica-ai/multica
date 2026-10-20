@@ -119,6 +119,56 @@ describe("WakeupCreateForm", () => {
     );
   });
 
+  it("lets a daily check skip the weekend and pick its minute", async () => {
+    await renderForm();
+    await chooseCondition("定期检查");
+    // Daily is the default, at 09:00, weekends included.
+    expect(screen.getByRole("button", { name: "定期检查: 每天" })).toBeVisible();
+    const weekdays = screen.getByRole("button", { name: "仅工作日" });
+    expect(weekdays).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(weekdays);
+    expect(weekdays).toHaveAttribute("aria-pressed", "true");
+    // Typing one digit into the hour segment lands on 07.
+    fireEvent.keyDown(screen.getByLabelText("小时"), { key: "7" });
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "巡检迁移任务" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind: "cron", cron_expression: "0 7 * * 1-5" })),
+    );
+  });
+
+  it("lets a weekly check pick its days", async () => {
+    await renderForm();
+    await chooseCondition("定期检查");
+    fireEvent.click(screen.getByRole("button", { name: "定期检查: 每天" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "每周" }));
+    // Weekdays up front; the weekend toggle has nothing left to say.
+    for (const day of ["周一", "周二", "周三", "周四", "周五"]) {
+      expect(screen.getByRole("button", { name: day })).toHaveAttribute("aria-pressed", "true");
+    }
+    expect(screen.queryByRole("button", { name: "仅工作日" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "周日" }));
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "巡检迁移任务" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ cron_expression: "0 9 * * 0-5" })),
+    );
+  });
+
+  it("lets a monthly check pick its date", async () => {
+    await renderForm();
+    await chooseCondition("定期检查");
+    fireEvent.click(screen.getByRole("button", { name: "定期检查: 每天" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "每月" }));
+    fireEvent.click(screen.getByRole("button", { name: /每月几号: 1 日/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "15 日" }));
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "巡检迁移任务" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ cron_expression: "0 9 15 * *" })),
+    );
+  });
+
   it("keeps the draft and explains a capacity refusal", async () => {
     create.mockRejectedValue(new ApiError("full", 400, "Bad Request", { code: "wakeup_capacity_exceeded" }));
     await renderForm();
