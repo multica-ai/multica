@@ -106,10 +106,6 @@
       "other_placeholder": "ví dụ: điều phối nhóm học tập"
     }
   },
-  "option_card": {
-    "other_label": "Khác",
-    "other_aria": "Mô tả điều khác"
-  },
   "step_question": {
     "hint_pick": "Bạn có thể bỏ qua bước này."
   },
@@ -135,28 +131,7 @@
     "success_toast": "Bạn đã có trong danh sách. Chúng tôi sẽ gửi email khi runtime đám mây ra mắt.",
     "failed_toast": "Không tham gia được danh sách chờ"
   },
-  "welcome_after_onboarding": {
-    "skip": {
-      "loading": "Đang thiết lập không gian làm việc của bạn…",
-      "title": "Chào mừng đến với Multica!",
-      "subtitle": "Chúng tôi đã thêm một công việc để giúp bạn kết nối runtime. Khi sẵn sàng, hãy bắt đầu với Mika từ trang Runtimes.",
-      "got_it": "Đã hiểu",
-      "status_in_progress": "Đang tiến hành",
-      "error_title": "Không thiết lập được",
-      "error_body": "Hướng dẫn runtime chưa được tạo. Bạn có thể thử lại, hoặc kết nối runtime từ trang Runtimes bất cứ khi nào sẵn sàng.",
-      "retry": "Thử lại",
-      "dismiss": "Để sau",
-      "cards": {
-        "install_runtime": {
-          "title": "Kết nối runtime",
-          "subtitle": "Cài đặt Codex hoặc Kimi, sau đó bắt đầu cuộc trò chuyện có hướng dẫn với Mika từ trang Runtimes."
-        }
-      }
-    }
-  },
   "step_workspace": {
-    "eyebrow_first": "Không gian làm việc đầu tiên của bạn",
-    "eyebrow_resume": "Tiếp tục hoặc bắt đầu mới",
     "headline_first": "Đặt tên cho không gian làm việc của bạn.",
     "headline_resume": "Tiếp tục với {{name}}, hoặc bắt đầu một cái khác.",
     "lede_first": "Không gian làm việc là nơi chứa các công việc, agent và dự án của bạn. Bạn có thể mời đồng đội hoặc tạo thêm không gian làm việc sau.",
@@ -186,11 +161,9 @@
     "slug_reserved_error": "URL không gian làm việc đó là URL dành riêng và không thể sử dụng.",
     "slug_conflict_toast": "Hãy chọn URL không gian làm việc khác",
     "create_failed_toast": "Không tạo được không gian làm việc",
-    "creation_disabled_eyebrow": "Tạo không gian làm việc đã bị tắt",
     "creation_disabled_headline": "Hãy xin quản trị viên một lời mời.",
     "creation_disabled_lede": "Phiên bản Multica này không cho phép tạo không gian làm việc mới. Khi quản trị viên mời bạn vào một không gian làm việc, hãy chấp nhận lời mời và làm mới để tiếp tục.",
     "creation_disabled_logout": "Đăng xuất",
-    "creation_disabled_eyebrow_resume": "Không gian làm việc của bạn",
     "creation_disabled_headline_resume": "Tiếp tục với {{name}}.",
     "creation_disabled_lede_resume": "Tạo không gian làm việc đã bị tắt trên phiên bản này, nên bạn sẽ tiếp tục vào không gian làm việc hiện có của mình."
   },
@@ -203,8 +176,6 @@
     "status_all_online": "tất cả trực tuyến",
     "status_none_online": "không có cái nào trực tuyến",
     "status_n_online": "{{count}} trực tuyến",
-    "online_label": "trực tuyến",
-    "offline_label": "ngoại tuyến",
     "empty_headline": "Chưa tìm thấy agent runtime nào trên máy tính này.",
     "empty_lede_prefix": "Agent runtime là một công cụ lập trình AI mà chúng tôi kết nối tới — chẳng hạn như ",
     "empty_lede_suffix": ". Hãy cài một công cụ và làm mới, hoặc chọn một cách bên dưới.",
@@ -220,11 +191,9 @@
     "hint_selected": "Đã chọn: {{name}}",
     "hint_pick": "Chọn một agent runtime ở trên để bắt đầu với Mika.",
     "hint_waiting": "Đang chờ kết quả đầu tiên…",
-    "continue": "Bắt đầu với Mika",
-    "runtime_count_one": "{{count}} agent runtime"
+    "continue": "Bắt đầu với Mika"
   },
   "step_platform": {
-    "eyebrow": "Kết nối một máy tính",
     "headline": "Kết nối một máy tính để chạy agent của bạn.",
     "lede": "Kết nối một máy tính để Mika có thể bắt đầu làm việc.",
     "hint_default": "Bạn có thể kết nối sau.",
@@ -239,7 +208,6 @@
     "cloud_action": "Sắp ra mắt",
     "cli_dialog_title": "Kết nối từ terminal",
     "cli_dialog_pick_hint": "Chọn một máy tính ở trên.",
-    "cli_dialog_connect": "Kết nối & tiếp tục",
     "runtimes_connected_other": "Đã kết nối {{count}} máy tính",
     "live_listening": "Trực tiếp · Đang chờ máy tính của bạn",
     "stage_normal_prefix": "Chạy lệnh ở trên. Ngay khi ",
@@ -250,8 +218,7 @@
     "stage_slow_suffix": " để xem lỗi.",
     "stage_stalled_prefix": "Vẫn chưa có gì truyền qua. Nếu bạn không quen dùng terminal, ",
     "stage_stalled_term": "Desktop",
-    "stage_stalled_suffix": " là cách mượt mà hơn — một cú nhấp và máy tính này được kết nối. Đóng hộp thoại này và chọn Desktop, hoặc bấm Bỏ qua để tiếp tục.",
-    "runtimes_connected_one": "Đã kết nối {{count}} máy tính"
+    "stage_stalled_suffix": " là cách mượt mà hơn — một cú nhấp và máy tính này được kết nối. Đóng hộp thoại này và chọn Desktop, hoặc bấm Bỏ qua để tiếp tục."
   },
   "errors": {
     "skip_failed": "Không hoàn tất được quá trình thiết lập ban đầu",

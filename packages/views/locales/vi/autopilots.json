@@ -453,8 +453,7 @@
     "sort_by": "Sắp xếp theo",
     "direction_asc": "Tăng dần",
     "direction_desc": "Giảm dần",
-    "section_columns": "Cột",
-    "filter_active_count_one": "{{count}} bộ lọc"
+    "section_columns": "Cột"
   },
   "actions": {
     "row_menu": "Thao tác autopilot",
@@ -469,10 +468,8 @@
       "warning": "Hành động này không thể hoàn tác.",
       "cancel": "Hủy",
       "confirm": "Xóa vĩnh viễn",
-      "deleting": "Đang xóa…",
-      "description_one": "Thao tác này sẽ xóa vĩnh viễn {{count}} autopilot và lịch sử chạy của chúng."
-    },
-    "selected_one": "Đã chọn {{count}}"
+      "deleting": "Đang xóa…"
+    }
   },
   "wakeups": {
     "title": "Các lần đánh thức công việc",
@@ -536,7 +533,6 @@
     "banner_view": "Xem",
     "create": "Lần đánh thức mới",
     "create_pick_issue": "Chọn công việc để thêm lần đánh thức",
-    "create_pick_issue_description": "Lần đánh thức thuộc về công việc này và kết thúc cùng với nó.",
-    "banner_one": "{{count}} lần đánh thức đã bị tạm dừng tự động. Gần nhất: {{issue}} “{{condition}}” — {{reason}}"
+    "create_pick_issue_description": "Lần đánh thức thuộc về công việc này và kết thúc cùng với nó."
   }
 }

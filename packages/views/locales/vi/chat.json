@@ -7,8 +7,7 @@
   "fab": {
     "running": "Multica đang làm việc...",
     "unread_other": "{{count}} cuộc trò chuyện chưa đọc",
-    "default": "Hỏi Multica",
-    "unread_one": "{{count}} cuộc trò chuyện chưa đọc"
+    "default": "Hỏi Multica"
   },
   "input": {
     "placeholder_no_agent": "Tạo một agent để bắt đầu trò chuyện",
@@ -45,8 +44,7 @@
     "remove": "Loại bỏ tin nhắn đang xếp hàng",
     "more": "Thêm thao tác hàng đợi",
     "fallback": "Tin nhắn đang xếp hàng",
-    "action_failed_toast": "Không cập nhật được tin nhắn đang xếp hàng",
-    "title_one": "{{count}} tin nhắn đang xếp hàng"
+    "action_failed_toast": "Không cập nhật được tin nhắn đang xếp hàng"
   },
   "message_list": {
     "show_details": "Hiện chi tiết",
@@ -86,9 +84,7 @@
     "quick_actions_heading": "Câu hỏi tiếp nối",
     "quick_actions_aria": "Gợi ý tiếp nối",
     "quick_actions_regenerate": "Tạo lại gợi ý",
-    "quick_actions_regenerate_failed": "Không làm mới được gợi ý. Hãy thử lại.",
-    "tools_one": "{{count}} công cụ",
-    "process_steps_one": "{{count}} bước"
+    "quick_actions_regenerate_failed": "Không làm mới được gợi ý. Hãy thử lại."
   },
   "session_history": {
     "untitled": "Chưa có tiêu đề",

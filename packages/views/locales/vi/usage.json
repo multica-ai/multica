@@ -99,9 +99,7 @@
     "usage_totals_pending": "Tổng mức sử dụng vẫn đang được xử lý",
     "show_all": "Hiện tất cả",
     "show_less": "Hiện {{count}} đầu",
-    "no_data": "Không có hoạt động của agent trong khoảng này.",
-    "usage_unreported_one": "{{count}} lần chạy không báo cáo mức sử dụng",
-    "usage_unreported_pending_one": "{{count}} lần chạy không báo cáo mức sử dụng · tổng số vẫn đang được xử lý"
+    "no_data": "Không có hoạt động của agent trong khoảng này."
   },
   "empty": {
     "title": "Chưa có mức sử dụng",

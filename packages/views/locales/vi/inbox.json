@@ -19,8 +19,6 @@
     "notification_count_other": "{{count}} thông báo",
     "clear": "Xóa bộ lọc",
     "empty": "Không có thông báo nào khớp với bộ lọc của bạn",
-    "active_count_one": "{{count}} bộ lọc đang áp dụng",
-    "notification_count_one": "{{count}} thông báo",
     "no_agents_working": "Không có agent nào đang làm việc"
   },
   "context_menu": {

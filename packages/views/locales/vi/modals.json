@@ -93,8 +93,7 @@
     "submitting": "Đang tạo...",
     "toast_created": "Đã tạo squad",
     "toast_failed": "Không tạo được squad",
-    "toast_member_add_failed": "Không thêm được {{name}}: {{error}}",
-    "members_selected_count_one": "{{count}} đã chọn"
+    "toast_member_add_failed": "Không thêm được {{name}}: {{error}}"
   },
   "create_project": {
     "title": "Dự án mới",
@@ -139,8 +138,7 @@
     "local_pick_failed": "Không mở được trình chọn thư mục.",
     "local_invalid_dir": "Không dùng được thư mục này. Hãy chọn thư mục khác.",
     "local_hint": "Agent trên các máy khác sẽ không thấy đường dẫn này — chúng sẽ không khởi động được. Hãy dùng repo cho công việc dùng chung.",
-    "repos_ref_default": "Nhánh mặc định",
-    "repos_pill_count_one": "{{count}} repo"
+    "repos_ref_default": "Nhánh mặc định"
   },
   "create_issue": {
     "sr_manual": "Công việc mới",

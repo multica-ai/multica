@@ -36,8 +36,7 @@
     "view_board_short": "Bảng",
     "view_list_short": "Danh sách",
     "view_swimlane_short": "Swimlane",
-    "sort_manual": "Thủ công",
-    "issue_count_one": "{{count}} công việc"
+    "sort_manual": "Thủ công"
   },
   "errors": {
     "move_failed": "Không di chuyển được công việc"

@@ -16,8 +16,7 @@
     "delete": "Xóa",
     "no_matches": "Không có dự án nào khớp",
     "selected_other": "{{count}} đã chọn",
-    "clear_selection": "Xóa lựa chọn",
-    "selected_one": "{{count}} đã chọn"
+    "clear_selection": "Xóa lựa chọn"
   },
   "table": {
     "name": "Tên",
@@ -180,7 +179,6 @@
     "direction_asc": "Tăng dần",
     "direction_desc": "Giảm dần",
     "section_columns": "Cột",
-    "view": "Chế độ xem",
-    "filter_active_count_one": "{{count}} bộ lọc"
+    "view": "Chế độ xem"
   }
 }

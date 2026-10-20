@@ -87,11 +87,7 @@
     "table_columns_other": "{{count}} cột",
     "address": "Địa chỉ",
     "address_hint": "?query",
-    "reload": "Tải lại",
-    "tree_items_one": "{{count}} mục",
-    "tree_keys_one": "{{count}} khóa",
-    "table_rows_one": "{{count}} hàng",
-    "table_columns_one": "{{count}} cột"
+    "reload": "Tải lại"
   },
   "link_hover": {
     "copy_link": "Sao chép liên kết",

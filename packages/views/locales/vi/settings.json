@@ -16,7 +16,6 @@
       "reorder": "Sắp xếp lại {{name}}"
     },
     "reorder_hint": "Kéo thả trong cùng một nhóm để sắp xếp lại bảng, danh sách và menu.",
-    "built_in_dialog": {},
     "editor": {
       "create_title": "Trạng thái mới",
       "edit_title": "Chỉnh sửa trạng thái",
@@ -81,7 +80,6 @@
     "pr_auto_complete_badge": "Đặt khi PR được merge",
     "built_in_locked": "Trạng thái tích hợp sẵn điều khiển hành vi hệ thống nên không thể chỉnh sửa hay lưu trữ. Bạn vẫn có thể sắp xếp lại chúng.",
     "builtin_badge": "Tích hợp sẵn",
-    "workflow_usage_one": "{{count}} quy trình đang dùng",
     "workflow_usage_other": "{{count}} quy trình đang dùng",
     "workflow_usage_none": "Không thuộc quy trình nào"
   },
@@ -100,8 +98,7 @@
     "save_error": "Không thể lưu giá trị mặc định.",
     "customized_other": "{{count}} công việc đang mở có cài đặt riêng và bỏ qua mặc định này.",
     "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được các mặc định này.",
-    "load_error": "Không thể tải mặc định wakeup.",
-    "customized_one": "{{count}} công việc đang mở có cài đặt riêng và bỏ qua mặc định này."
+    "load_error": "Không thể tải mặc định wakeup."
   },
   "quick_actions": {
     "title": "Thao tác nhanh",
@@ -427,8 +424,7 @@
     "search_clear": "Xóa tìm kiếm",
     "search_empty": "Không có cài đặt nào khớp",
     "search_results_other": "{{count}} kết quả",
-    "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được mục này",
-    "search_results_one": "{{count}} kết quả"
+    "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được mục này"
   },
   "plugins": {
     "title": "Plugin",
@@ -473,8 +469,7 @@
       "frequency_minutes_other": "Mỗi {{count}} phút",
       "frequency_hourly": "Mỗi giờ vào phút {{minute}}",
       "frequency_daily": "Mỗi ngày lúc {{hour}}:{{minute}}",
-      "frequency_custom": "Lịch lặp tùy chỉnh",
-      "frequency_minutes_one": "Mỗi {{count}} phút"
+      "frequency_custom": "Lịch lặp tùy chỉnh"
     },
     "config": {
       "title": "Cấu hình",
@@ -588,8 +583,7 @@
       "cancel": "Hủy",
       "confirm": "Lưu trữ thuộc tính",
       "failed": "Không thể lưu trữ thuộc tính"
-    },
-    "usage_count_one": "{{count}} công việc"
+    }
   },
   "labels": {
     "title": "Nhãn",
@@ -1082,8 +1076,7 @@
     "byo_submitting": "Đang kết nối…",
     "byo_cancel": "Hủy",
     "byo_success_toast": "Đã kết nối bot DingTalk",
-    "byo_failed_toast": "Không thể kết nối bot DingTalk",
-    "group_mentions_one": "{{count}} lượt nhắc"
+    "byo_failed_toast": "Không thể kết nối bot DingTalk"
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1309,11 +1302,7 @@
       "waiting_logs": "Đang chờ nhật ký…",
       "reconnect_failed": "Không thể kết nối lại daemon",
       "try_again_moment": "Hãy thử lại sau ít phút.",
-      "try_again": "Hãy thử lại.",
-      "stop_confirm_title_one": "Dừng daemon khi đang có {{count}} lượt chạy đang hoạt động?",
-      "stop_confirm_description_one": "{{count}} lượt chạy đang hoạt động trên thiết bị này. Dừng ngay bây giờ sẽ làm gián đoạn chúng — các lượt chạy bị ảnh hưởng sẽ bị đánh dấu thất bại khi hết thời gian chờ. Daemon sẽ không tự khởi động lại.",
-      "copied_lines_one": "Đã sao chép {{count}} dòng",
-      "runtime_count_one": "{{count}} runtime"
+      "try_again": "Hãy thử lại."
     }
   },
   "members": {
@@ -1435,8 +1424,7 @@
   },
   "mcp_usage": {
     "agent_count_other": "Được {{count}} agent sử dụng",
-    "none": "Chưa được gán cho agent nào",
-    "agent_count_one": "Được {{count}} agent sử dụng"
+    "none": "Chưa được gán cho agent nào"
   },
   "mcp_sources": {
     "title": "Các cách cấp công cụ cho agent",

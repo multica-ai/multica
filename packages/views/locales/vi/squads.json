@@ -87,8 +87,7 @@
     "status_archived": "Đã lưu trữ",
     "issue_status_blocked": "bị chặn",
     "active_issue_more": "và {{count}} công việc nữa",
-    "last_active_label": "hoạt động lần cuối {{time}}",
-    "section_count_one": "{{count}} thành viên trong squad này"
+    "last_active_label": "hoạt động lần cuối {{time}}"
   },
   "detail_tabs": {
     "members": "Thành viên",
@@ -119,9 +118,7 @@
     "archived": "Đã lưu trữ",
     "member_count_other": "{{count}} thành viên",
     "members_section": "Thành viên",
-    "more_members_other": "+{{count}} nữa",
-    "member_count_one": "{{count}} thành viên",
-    "more_members_one": "+{{count}} nữa"
+    "more_members_other": "+{{count}} nữa"
   },
   "instructions_tab": {
     "description": "Trưởng nhóm đọc các hướng dẫn này mỗi khi làm việc trên một công việc được giao cho squad này.",
@@ -142,7 +139,6 @@
     "result_count_title": "Squad khớp / tất cả squad",
     "filter_label": "Bộ lọc",
     "filter_active_count_other": "{{count}} bộ lọc",
-    "clear_filters": "Xóa bộ lọc",
-    "filter_active_count_one": "{{count}} bộ lọc"
+    "clear_filters": "Xóa bộ lọc"
   }
 }
