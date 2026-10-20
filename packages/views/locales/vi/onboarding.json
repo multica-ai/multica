@@ -220,7 +220,8 @@
     "hint_selected": "Đã chọn: {{name}}",
     "hint_pick": "Chọn một agent runtime ở trên để bắt đầu với Mika.",
     "hint_waiting": "Đang chờ kết quả đầu tiên…",
-    "continue": "Bắt đầu với Mika"
+    "continue": "Bắt đầu với Mika",
+    "runtime_count_one": "{{count}} agent runtime"
   },
   "step_platform": {
     "eyebrow": "Kết nối một máy tính",
@@ -249,11 +250,13 @@
     "stage_slow_suffix": " để xem lỗi.",
     "stage_stalled_prefix": "Vẫn chưa có gì truyền qua. Nếu bạn không quen dùng terminal, ",
     "stage_stalled_term": "Desktop",
-    "stage_stalled_suffix": " là cách mượt mà hơn — một cú nhấp và máy tính này được kết nối. Đóng hộp thoại này và chọn Desktop, hoặc bấm Bỏ qua để tiếp tục."
+    "stage_stalled_suffix": " là cách mượt mà hơn — một cú nhấp và máy tính này được kết nối. Đóng hộp thoại này và chọn Desktop, hoặc bấm Bỏ qua để tiếp tục.",
+    "runtimes_connected_one": "Đã kết nối {{count}} máy tính"
   },
   "errors": {
     "skip_failed": "Không hoàn tất được quá trình thiết lập ban đầu",
-    "mika_setup_failed": "Không khởi động được không gian làm việc Mika của bạn"
+    "mika_setup_failed": "Không khởi động được không gian làm việc Mika của bạn",
+    "guide_failed": "Không tạo được hướng dẫn runtime. Vui lòng thử lại."
   },
   "mika_intro": {
     "headline": "Gặp gỡ Mika, đồng đội agent đầu tiên của bạn.",

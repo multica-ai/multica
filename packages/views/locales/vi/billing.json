@@ -148,7 +148,8 @@
       "members_description": "Agent và lời mời đang chờ không được tính là ghế.",
       "member_count_other": "{{count}} thành viên",
       "billing_interval": "Chu kỳ thanh toán",
-      "period_end": "Ngày kết thúc chu kỳ hiện tại"
+      "period_end": "Ngày kết thúc chu kỳ hiện tại",
+      "member_count_one": "{{count}} thành viên"
     },
     "upgrade": {
       "title": "Nâng cấp lên Pro",
@@ -159,7 +160,8 @@
       "pro_for_team_other": "Pro cho {{count}} ghế người dùng",
       "price_loading": "Đang tải giá gói đăng ký",
       "unit_price": "{{price}} cho mỗi ghế người dùng",
-      "price_at_checkout": "Máy chủ sẽ đếm lại số thành viên là người trước khi mua. Stripe Checkout hiển thị giá mỗi ghế và tổng số tiền chính xác trước khi bạn thanh toán."
+      "price_at_checkout": "Máy chủ sẽ đếm lại số thành viên là người trước khi mua. Stripe Checkout hiển thị giá mỗi ghế và tổng số tiền chính xác trước khi bạn thanh toán.",
+      "pro_for_team_one": "Pro cho {{count}} ghế người dùng"
     },
     "management": {
       "title": "Quản lý gói đăng ký",
@@ -205,7 +207,9 @@
       "members_over_capacity_description": "Không gian làm việc này có {{actual}} thành viên nhưng chỉ có {{purchased}} ghế đã mua. Hãy thêm đủ ghế hoặc loại bỏ thành viên trước khi gửi thêm lời mời.",
       "occupancy_over_capacity_description": "Không gian làm việc này đang dùng {{occupied}} trong {{purchased}} ghế đã mua ({{members}} thành viên và {{reserved}} lời mời đang chờ). Hãy thêm ghế, loại bỏ một thành viên hoặc thu hồi lời mời đang chờ trước khi mời người khác.",
       "updated": "Đã gửi yêu cầu mua ghế",
-      "available_help": "Cách tính số ghế còn trống"
+      "available_help": "Cách tính số ghế còn trống",
+      "seat_count_one": "{{count}} ghế",
+      "pending_with_date_one": "{{count}} ghế từ {{date}}"
     },
     "seat_purchase": {
       "title": "Thêm ghế",
@@ -232,7 +236,10 @@
       "delayed_description": "Việc kiểm tra tự động đã dừng. Giao dịch mua vẫn có thể hoàn tất; hãy kiểm tra lại sau hoặc liên hệ hỗ trợ trước khi bắt đầu một giao dịch mua khác.",
       "delayed_description_with_expiry": "Việc kiểm tra tự động đã dừng. Nếu lần thử này vẫn đang chờ sau {{date}}, hãy tải lại trang trước khi yêu cầu báo giá khác; liên hệ hỗ trợ nếu nó vẫn ở trạng thái chờ.",
       "submitted_other": "Đã gửi yêu cầu mua {{count}} ghế. Sức chứa mới sẽ xuất hiện sau khi Stripe xác nhận.",
-      "error_title": "Không cập nhật được ước tính"
+      "error_title": "Không cập nhật được ước tính",
+      "confirm_one": "Thêm {{count}} ghế",
+      "pending_description_one": "Stripe đang xác nhận việc cập nhật gói đăng ký lên {{count}} ghế.",
+      "submitted_one": "Đã gửi yêu cầu mua {{count}} ghế. Sức chứa mới sẽ xuất hiện sau khi Stripe xác nhận."
     },
     "confirm": {
       "title": "Tiếp tục tới Stripe Checkout?",

@@ -96,7 +96,14 @@
     "cancel": "Hủy",
     "add_confirm": "Thêm ({{num}})",
     "adding": "Đang thêm...",
-    "added_multi_toast_other": "Đã thêm vào {{count}} agent"
+    "added_multi_toast_other": "Đã thêm vào {{count}} agent",
+    "delete_dialog_title_one": "Xóa {{count}} skill?",
+    "delete_dialog_desc_one": "Thao tác này sẽ xóa vĩnh viễn {{count}} skill đã chọn và loại bỏ chúng khỏi mọi agent.",
+    "deleted_toast_one": "Đã xóa {{count}} skill",
+    "update_summary_selected_one": "{{count}} skill sẽ được cập nhật từ nguồn của chúng",
+    "update_summary_skipped_one": "{{count}} không thể cập nhật từ nguồn — đã bỏ qua",
+    "updated_toast_one": "Đã cập nhật {{count}} skill từ nguồn",
+    "added_multi_toast_one": "Đã thêm vào {{count}} agent"
   },
   "toolbar": {
     "result_count_title": "Skill khớp / tất cả skill",
@@ -114,7 +121,8 @@
     "direction_desc": "Giảm dần",
     "section_columns": "Cột",
     "manage_labels": "Quản lý nhãn...",
-    "manage_labels_title": "Nhãn skill"
+    "manage_labels_title": "Nhãn skill",
+    "filter_active_count_one": "{{count}} bộ lọc"
   },
   "detail": {
     "all_skills": "Tất cả skill",
@@ -143,7 +151,8 @@
       "changed_files_other": "{{count}} tệp",
       "discard": "Hủy bỏ",
       "save": "Lưu thay đổi",
-      "saving": "Đang lưu…"
+      "saving": "Đang lưu…",
+      "changed_files_one": "{{count}} tệp"
     },
     "not_found": {
       "title": "Không tìm thấy skill",
@@ -178,7 +187,8 @@
       "warning": "Thao tác này không thể hoàn tác.",
       "cancel": "Hủy",
       "confirm": "Xóa vĩnh viễn",
-      "deleting": "Đang xóa…"
+      "deleting": "Đang xóa…",
+      "description_with_agents_one": "Thao tác này sẽ xóa vĩnh viễn \"{{name}}\" và loại bỏ nó khỏi {{count}} agent đang sử dụng."
     },
     "add_file": {
       "placeholder": "templates/review.md",
@@ -198,12 +208,15 @@
       "files_other": "{{count}} tệp",
       "used_by_other": "{{count}} agent",
       "updated": "Đã cập nhật {{when}}",
-      "updated_by": "Đã cập nhật {{when}} bởi {{name}}"
+      "updated_by": "Đã cập nhật {{when}} bởi {{name}}",
+      "files_one": "{{count}} tệp",
+      "used_by_one": "{{count}} agent"
     },
     "tabs": {
       "aria": "Các mục của skill",
       "overview": "Tổng quan",
-      "files_other": "Tệp {{count}}"
+      "files_other": "Tệp {{count}}",
+      "files_one": "Tệp {{count}}"
     },
     "overview": {
       "properties": "Thuộc tính",
@@ -218,7 +231,8 @@
       "permissions_locked_creator": "Chỉ người tạo ({{name}}) hoặc quản trị viên của không gian làm việc mới có thể chỉnh sửa skill này.",
       "permissions_locked": "Chỉ người tạo hoặc quản trị viên của không gian làm việc mới có thể chỉnh sửa skill này.",
       "properties_help": "Giới thiệu về thuộc tính skill",
-      "character_count": "{{count}} ký tự"
+      "character_count": "{{count}} ký tự",
+      "used_by_one": "Được {{count}} agent sử dụng"
     },
     "files": {
       "list_aria": "Các tệp của skill",
@@ -229,7 +243,8 @@
       "mode_aria": "Chế độ xem tệp",
       "mode_preview": "Xem trước",
       "mode_edit": "Chỉnh sửa",
-      "mode_raw": "Văn bản thuần"
+      "mode_raw": "Văn bản thuần",
+      "supporting_one": "Tệp hỗ trợ {{count}}"
     }
   },
   "create": {
@@ -287,7 +302,8 @@
       "cancel": "Hủy",
       "import": "Nhập",
       "importing": "Đang nhập…",
-      "toast_imported": "Đã nhập skill"
+      "toast_imported": "Đã nhập skill",
+      "files_one": "{{count}} tệp"
     },
     "url": {
       "url_label": "URL skill",
@@ -355,7 +371,8 @@
     "conflict_footer": "Còn {{count}} quyết định xử lý xung đột đang chờ.",
     "conflict_apply_button": "Áp dụng quyết định",
     "conflict_missing_resolution": "Hãy chọn cách xử lý xung đột này.",
-    "conflict_name_still_exists": "Tên đó đã tồn tại. Hãy chọn tên khác hoặc bỏ qua."
+    "conflict_name_still_exists": "Tên đó đã tồn tại. Hãy chọn tên khác hoặc bỏ qua.",
+    "skill_files_one": "{{count}} tệp"
   },
   "file_tree": {
     "no_files": "Không có tệp",

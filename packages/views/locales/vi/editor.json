@@ -87,7 +87,11 @@
     "table_columns_other": "{{count}} cột",
     "address": "Địa chỉ",
     "address_hint": "?query",
-    "reload": "Tải lại"
+    "reload": "Tải lại",
+    "tree_items_one": "{{count}} mục",
+    "tree_keys_one": "{{count}} khóa",
+    "table_rows_one": "{{count}} hàng",
+    "table_columns_one": "{{count}} cột"
   },
   "link_hover": {
     "copy_link": "Sao chép liên kết",
@@ -120,7 +124,8 @@
     "copy_code": "Sao chép code",
     "show_preview": "Hiện bản xem trước",
     "show_source": "Hiện nguồn",
-    "fullscreen": "Toàn màn hình"
+    "fullscreen": "Toàn màn hình",
+    "close_preview": "Đóng"
   },
   "dynamic_block": {
     "preview": "Xem trước",
@@ -164,5 +169,18 @@
     "export_png": "Tải xuống PNG",
     "export_svg": "Tải xuống SVG",
     "export_source": "Tải xuống .mmd"
+  },
+  "table": {
+    "reset_widths": "Đặt lại độ rộng",
+    "expand": "Mở rộng bảng",
+    "copy_markdown": "Sao chép dạng Markdown",
+    "copy_csv": "Sao chép dạng CSV",
+    "copied": "Đã sao chép",
+    "resize_column": "Đổi kích thước cột {{name}}",
+    "expanded_title": "Bảng",
+    "filter_placeholder": "Lọc hàng",
+    "clear_filter": "Xóa bộ lọc",
+    "no_matches": "Không có hàng phù hợp",
+    "close": "Đóng"
   }
 }

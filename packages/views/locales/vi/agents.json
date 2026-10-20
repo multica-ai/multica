@@ -36,7 +36,8 @@
   },
   "presence_status_aria": "Trạng thái: {{status}}",
   "avatar_stack": {
-    "overflow_aria_other": "thêm {{count}} agent"
+    "overflow_aria_other": "thêm {{count}} agent",
+    "overflow_aria_one": "thêm {{count}} agent"
   },
   "archived": {
     "active_link": "Agent đang hoạt động",
@@ -62,7 +63,8 @@
     "section_remote": "Từ xa",
     "section_cloud": "Đám mây",
     "agent_count_other": "{{count}} agent",
-    "empty": "Chưa có máy nào"
+    "empty": "Chưa có máy nào",
+    "agent_count_one": "{{count}} agent"
   },
   "columns": {
     "agent": "Agent",
@@ -85,7 +87,8 @@
     "fallback_runtime_cloud": "Đám mây",
     "fallback_runtime_local": "Cục bộ",
     "actions_aria": "Thao tác hàng",
-    "task_count_other": "{{count}} lượt chạy"
+    "task_count_other": "{{count}} lượt chạy",
+    "task_count_one": "{{count}} lượt chạy"
   },
   "activity_tooltip": {
     "created_today": "Tạo hôm nay",
@@ -93,7 +96,9 @@
     "last_7_days": "7 ngày qua",
     "no_activity": "Không có hoạt động",
     "runs_other": "{{count}} lượt chạy",
-    "failed_suffix": " · {{count}} thất bại ({{percent}}%)"
+    "failed_suffix": " · {{count}} thất bại ({{percent}}%)",
+    "created_days_ago_one": "Tạo {{count}} ngày trước",
+    "runs_one": "{{count}} lượt chạy"
   },
   "row_actions": {
     "cancel_all_tasks": "Hủy mọi lượt chạy",
@@ -125,7 +130,11 @@
     "archive_dialog_title": "Lưu trữ \"{{name}}\"?",
     "archive_dialog_description": "Agent sẽ không thể được giao việc hay được nhắc đến, và mọi lượt chạy đang hoạt động sẽ bị hủy. Toàn bộ lịch sử được giữ lại và bạn có thể khôi phục sau.",
     "archive_dialog_cancel": "Hủy",
-    "archive_dialog_confirm": "Lưu trữ"
+    "archive_dialog_confirm": "Lưu trữ",
+    "cancelled_tasks_toast_one": "Đã hủy {{count}} lượt chạy",
+    "cancel_dialog_running_one": "{{count}} đang chạy",
+    "cancel_dialog_queued_one": "{{count}} đang chờ",
+    "cancel_dialog_impact_one": "Thao tác này sẽ hủy {{summary}} lượt chạy."
   },
   "detail": {
     "back_to_agents": "Agent",
@@ -196,7 +205,8 @@
     "agent_context": "Agent",
     "access": "Quyền truy cập",
     "attention_title": "Các lượt chạy cần chú ý",
-    "attention_queued_other": "{{count}} lượt chạy đang chờ trong khi runtime không khả dụng."
+    "attention_queued_other": "{{count}} lượt chạy đang chờ trong khi runtime không khả dụng.",
+    "attention_queued_one": "{{count}} lượt chạy đang chờ trong khi runtime không khả dụng."
   },
   "skill_attach": {
     "trigger_aria": "Gắn skill của không gian làm việc",
@@ -423,7 +433,8 @@
       "list_loading": "Đang tải…",
       "list_empty_default": "Không có skill nào khả dụng.",
       "list_no_match": "Không có skill phù hợp.",
-      "search_placeholder": "Tìm kiếm skill…"
+      "search_placeholder": "Tìm kiếm skill…",
+      "selected_one": "{{count}} đã chọn — nhấn để chỉnh sửa"
     },
     "avatar": {
       "change_aria": "Đổi ảnh đại diện",
@@ -492,7 +503,8 @@
       "reveal_action": "Hiển thị & chỉnh sửa",
       "revealing": "Đang hiển thị…",
       "reveal_failed_toast": "Tải giá trị biến môi trường thất bại",
-      "empty_editable": "Chưa cấu hình biến môi trường nào."
+      "empty_editable": "Chưa cấu hình biến môi trường nào.",
+      "not_revealed_title_one": "Đã cấu hình {{count}} biến"
     },
     "custom_args": {
       "intro": "Thêm các tham số CLI được truyền khi agent này khởi động.",
@@ -686,7 +698,8 @@
       "add_dialog_confirm_default": "Thêm",
       "add_dialog_confirm_other": "Thêm {{count}} skill",
       "add_dialog_cancel": "Hủy",
-      "add_failed_toast": "Thêm skill thất bại"
+      "add_failed_toast": "Thêm skill thất bại",
+      "add_dialog_confirm_one": "Thêm {{count}} skill"
     },
     "integrations": {
       "members_note": "Chỉ chủ sở hữu và quản trị viên của không gian làm việc mới quản lý được kết nối này. Bạn có thể xem các bot đã kết nối trong Cài đặt → Tích hợp."
@@ -743,7 +756,9 @@
       "cancel_failed_toast": "Hủy lượt chạy thất bại",
       "started_prefix": "Bắt đầu {{when}}",
       "dispatched_prefix": "Đã điều phối {{when}}",
-      "queued_prefix": "Đã xếp hàng {{when}}"
+      "queued_prefix": "Đã xếp hàng {{when}}",
+      "subtitle_active_one": "{{count}} lượt chạy đang hoạt động",
+      "runs_one": "lượt chạy"
     }
   },
   "char_counter": {
@@ -895,7 +910,11 @@
     "tool_kind_write": "Chỉnh sửa",
     "tool_kind_read": "Đọc",
     "tool_kind_misc": "Khác",
-    "trigger_wakeup": "Đánh thức"
+    "trigger_wakeup": "Đánh thức",
+    "outcome_files_one": "{{count}} tệp",
+    "outcome_commands_one": "{{count}} lệnh",
+    "group_calls_one": "{{count}} lần gọi",
+    "steps_count_one": "{{count}} bước"
   },
   "task_failure": {
     "cancelled_by_system": "Bị hệ thống hủy",
@@ -936,13 +955,15 @@
       "agent_error": "Lỗi thực thi agent",
       "codex_semantic_inactivity": "Codex quá thời gian do không hoạt động",
       "manual": "Bị người dùng hủy",
-      "user_cancelled": "Bị người dùng hủy"
+      "user_cancelled": "Bị người dùng hủy",
+      "runtime_access_revoked": "Quyền truy cập runtime đã bị thu hồi"
     }
   },
   "last_active": {
     "today": "Hôm nay",
     "days_ago_other": "{{count}} ngày trước",
-    "none": "Không có hoạt động (30 ngày)"
+    "none": "Không có hoạt động (30 ngày)",
+    "days_ago_one": "{{count}} ngày trước"
   },
   "toolbar": {
     "result_count_title": "Agent phù hợp / agent trong phạm vi",
@@ -958,10 +979,12 @@
     "direction_desc": "Giảm dần",
     "section_columns": "Cột",
     "section_owner": "Chủ sở hữu",
-    "section_model": "Model"
+    "section_model": "Model",
+    "filter_active_count_one": "{{count}} bộ lọc"
   },
   "actions": {
     "selected_other": "{{count}} đã chọn",
-    "clear_selection": "Xóa lựa chọn"
+    "clear_selection": "Xóa lựa chọn",
+    "selected_one": "{{count}} đã chọn"
   }
 }

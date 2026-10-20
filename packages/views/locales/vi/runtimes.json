@@ -70,7 +70,9 @@
       "workload_hint": "{{running}} đang chạy · {{queued}} đang chờ",
       "cli": "CLI",
       "cloud_worker": "Cloud worker",
-      "local_daemon": "Daemon cục bộ"
+      "local_daemon": "Daemon cục bộ",
+      "runtimes_hint_one": "{{count}} trực tuyến",
+      "health_issues_one": "{{count}} sự cố"
     },
     "rename": "Đổi tên máy",
     "rename_dialog": {
@@ -84,7 +86,9 @@
       "toast_saved": "Đã đổi tên máy",
       "toast_cleared": "Đã xóa tên máy",
       "toast_failed": "Không đổi tên được máy"
-    }
+    },
+    "runtime_count_one": "{{count}} runtime",
+    "busy_count_one": "{{count}} đang bận"
   },
   "health": {
     "online": {
@@ -172,13 +176,31 @@
           "workload_queued": "Đang chờ",
           "visibility_workspace": "Không gian làm việc",
           "visibility_private": "Riêng tư"
-        }
+        },
+        "title_one": "Gỡ gắn {{count}} agent và xóa Runtime này?",
+        "checkbox_one": "Tôi hiểu các {{count}} agent này sẽ bị gỡ gắn và không chạy được cho đến khi tôi gắn chúng với một runtime, và mọi lần chạy đang chờ hoặc đang tiến hành sẽ bị hủy.",
+        "confirm_one": "Gỡ gắn {{count}} agent và xóa runtime"
       }
     },
     "toast_deleted": "Đã xóa runtime",
     "toast_delete_failed": "Không xóa được runtime",
     "running_chip_other": "· {{count}} đang chạy",
-    "queued_chip_other": "· {{count}} đang chờ"
+    "queued_chip_other": "· {{count}} đang chờ",
+    "serving_count_one": "{{count}} agent",
+    "running_chip_one": "· {{count}} đang chạy",
+    "queued_chip_one": "· {{count}} đang chờ",
+    "visibility_revoke_dialog": {
+      "title": "Đặt Runtime này thành riêng tư?",
+      "description": "Đặt \"{{name}}\" thành riêng tư sẽ gỡ gắn kết {{count}} agent của đồng đội, hủy {{taskCount}} lượt chạy đang hoạt động trên máy này và tạm dừng các autopilot đang gán cho những agent đó. Agent và lượt chạy của chính bạn không bị ảnh hưởng.",
+      "warning": "Quyền truy cập bị thu hồi ngay lập tức trên máy chủ. Các daemon đang kết nối sẽ dừng qua cơ chế kiểm tra hủy thông thường. Máy đang ngoại tuyến sẽ không nhận được yêu cầu dừng cho tới khi kết nối lại; tiến trình cục bộ của nó có thể vẫn tiếp tục trong lúc đó.",
+      "plan_changed": "Kế hoạch truy cập đã thay đổi trong lúc hộp thoại này đang mở. Hãy xem lại và xác nhận lần nữa.",
+      "checkbox": "Tôi hiểu rằng các agent của đồng đội trong danh sách sẽ bị gỡ gắn kết, các lượt chạy đang hoạt động của chúng sẽ bị hủy, và các autopilot đang bật của chúng sẽ bị tạm dừng.",
+      "cancel": "Hủy",
+      "confirm": "Đặt Runtime thành riêng tư",
+      "submitting": "Đang thu hồi quyền truy cập...",
+      "toast_success": "Runtime giờ đã riêng tư và quyền truy cập của đồng đội đã bị thu hồi",
+      "toast_failed": "Thu hồi quyền truy cập runtime thất bại"
+    }
   },
   "detail_page": {
     "not_found_title": "Không tìm thấy runtime",
@@ -281,7 +303,8 @@
     "heatmap_quietest_weekday": "Ngày trong tuần yên ắng nhất",
     "heatmap_average": "trung bình {{value}}",
     "heatmap_window_total_other": "Tổng {{count}} ngày",
-    "tooltip_total": "Tổng"
+    "tooltip_total": "Tổng",
+    "heatmap_window_total_one": "Tổng {{count}} ngày"
   },
   "list": {
     "col_runtime": "Runtime",
@@ -448,6 +471,11 @@
     "table_output": "Đầu ra",
     "table_cache_r": "Cache đọc",
     "table_cache_w": "Cache ghi",
-    "no_data": "Chưa có dữ liệu sử dụng"
-  }
+    "no_data": "Chưa có dữ liệu sử dụng",
+    "unmapped_notice_one": "{{count}} model chưa có giá được duy trì — token của chúng không được tính vào tổng chi phí.",
+    "cost_by_caption_agent_one": "{{count}} agent trên runtime này",
+    "cost_by_caption_model_one": "{{count}} model đã dùng"
+  },
+  "running_one": "{{count}} đang chạy",
+  "queued_one": "{{count}} đang chờ"
 }

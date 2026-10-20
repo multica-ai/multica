@@ -48,6 +48,7 @@
     "row_workspace_fallback": "Không gian làm việc",
     "row_inviter_fallback": "Ai đó",
     "row_invited_admin": "{{inviter}} đã mời bạn làm quản trị viên",
-    "row_invited_member": "{{inviter}} đã mời bạn làm thành viên"
+    "row_invited_member": "{{inviter}} đã mời bạn làm thành viên",
+    "submit_join_one": "Tham gia {{count}} không gian làm việc"
   }
 }

@@ -7,7 +7,8 @@
   "fab": {
     "running": "Multica đang làm việc...",
     "unread_other": "{{count}} cuộc trò chuyện chưa đọc",
-    "default": "Hỏi Multica"
+    "default": "Hỏi Multica",
+    "unread_one": "{{count}} cuộc trò chuyện chưa đọc"
   },
   "input": {
     "placeholder_no_agent": "Tạo một agent để bắt đầu trò chuyện",
@@ -44,7 +45,8 @@
     "remove": "Loại bỏ tin nhắn đang xếp hàng",
     "more": "Thêm thao tác hàng đợi",
     "fallback": "Tin nhắn đang xếp hàng",
-    "action_failed_toast": "Không cập nhật được tin nhắn đang xếp hàng"
+    "action_failed_toast": "Không cập nhật được tin nhắn đang xếp hàng",
+    "title_one": "{{count}} tin nhắn đang xếp hàng"
   },
   "message_list": {
     "show_details": "Hiện chi tiết",
@@ -70,7 +72,8 @@
       "context_overflow": "Cuộc trò chuyện này đã quá dài so với model. Hãy bắt đầu một phiên mới, hoặc chia yêu cầu của bạn thành các bước nhỏ hơn.",
       "runtime_missing_executable": "Không chạy được CLI của agent trên máy này. Hãy kiểm tra xem nó đã được cài đặt đúng và có trong PATH chưa, rồi thử lại.",
       "runtime_version_unsupported": "CLI của agent quá cũ so với runtime này. Hãy nâng cấp nó, rồi thử lại.",
-      "fallback": "Đã xảy ra lỗi và agent không thể hoàn thành câu trả lời. Hãy thử lại."
+      "fallback": "Đã xảy ra lỗi và agent không thể hoàn thành câu trả lời. Hãy thử lại.",
+      "runtime_access_revoked": "Quyền truy cập runtime đã bị thu hồi. Hãy gắn agent vào một runtime có thể truy cập được trước khi bắt đầu lượt chạy khác."
     },
     "tools_other": "{{count}} công cụ",
     "tool_result_named": "Kết quả {{tool}}: ",
@@ -83,7 +86,9 @@
     "quick_actions_heading": "Câu hỏi tiếp nối",
     "quick_actions_aria": "Gợi ý tiếp nối",
     "quick_actions_regenerate": "Tạo lại gợi ý",
-    "quick_actions_regenerate_failed": "Không làm mới được gợi ý. Hãy thử lại."
+    "quick_actions_regenerate_failed": "Không làm mới được gợi ý. Hãy thử lại.",
+    "tools_one": "{{count}} công cụ",
+    "process_steps_one": "{{count}} bước"
   },
   "session_history": {
     "untitled": "Chưa có tiêu đề",

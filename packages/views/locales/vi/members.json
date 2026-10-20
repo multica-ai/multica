@@ -8,7 +8,8 @@
     "unavailable": "Thành viên không khả dụng",
     "agents_section": "Agent ({{count}})",
     "detail_link": "Chi tiết →",
-    "more_agents_other": "và {{count}} agent khác"
+    "more_agents_other": "và {{count}} agent khác",
+    "more_agents_one": "và {{count}} agent khác"
   },
   "detail": {
     "workspace_fallback": "Không gian làm việc",

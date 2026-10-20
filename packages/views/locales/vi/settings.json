@@ -79,7 +79,11 @@
       "cancelled": "Quyết định không làm."
     },
     "pr_auto_complete_badge": "Đặt khi PR được merge",
-    "built_in_locked": "Trạng thái tích hợp sẵn điều khiển hành vi hệ thống nên không thể chỉnh sửa hay lưu trữ. Bạn vẫn có thể sắp xếp lại chúng."
+    "built_in_locked": "Trạng thái tích hợp sẵn điều khiển hành vi hệ thống nên không thể chỉnh sửa hay lưu trữ. Bạn vẫn có thể sắp xếp lại chúng.",
+    "builtin_badge": "Tích hợp sẵn",
+    "workflow_usage_one": "{{count}} quy trình đang dùng",
+    "workflow_usage_other": "{{count}} quy trình đang dùng",
+    "workflow_usage_none": "Không thuộc quy trình nào"
   },
   "wakeups": {
     "description": "Quy tắc nền tảng áp dụng cho mọi công việc. Mỗi công việc có thể thay đổi chúng trong mục Wakeups của riêng nó.",
@@ -96,7 +100,8 @@
     "save_error": "Không thể lưu giá trị mặc định.",
     "customized_other": "{{count}} công việc đang mở có cài đặt riêng và bỏ qua mặc định này.",
     "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được các mặc định này.",
-    "load_error": "Không thể tải mặc định wakeup."
+    "load_error": "Không thể tải mặc định wakeup.",
+    "customized_one": "{{count}} công việc đang mở có cài đặt riêng và bỏ qua mặc định này."
   },
   "quick_actions": {
     "title": "Thao tác nhanh",
@@ -143,7 +148,9 @@
     "prompt_hint": "Gửi nguyên văn. Agent đã nhìn thấy công việc.",
     "template_not_supported": "Biến chưa được hỗ trợ — hãy xóa {{token}}. Agent đã đọc công việc này.",
     "delete_title": "Xóa thao tác nhanh này?",
-    "delete_description": "Nó sẽ biến mất khỏi mọi thanh bên của công việc. Các lượt chạy trước vẫn còn trong nhật ký thực thi. Hãy lưu trữ thay thế nếu bạn có thể muốn dùng lại."
+    "delete_description": "Nó sẽ biến mất khỏi mọi thanh bên của công việc. Các lượt chạy trước vẫn còn trong nhật ký thực thi. Hãy lưu trữ thay thế nếu bạn có thể muốn dùng lại.",
+    "no_target": "Không có đích",
+    "no_target_hint": "Đăng một tin nhắn mà không nhắc tới ai."
   },
   "auto_save": {
     "saving": "Đang lưu…",
@@ -405,7 +412,8 @@
       "billing": "Thanh toán",
       "code": "Code",
       "channels": "Nhắn tin",
-      "apps": "Ứng dụng đã kết nối"
+      "apps": "Ứng dụng đã kết nối",
+      "workflows": "Quy trình"
     },
     "groups": {
       "personal": "Cá nhân",
@@ -419,7 +427,8 @@
     "search_clear": "Xóa tìm kiếm",
     "search_empty": "Không có cài đặt nào khớp",
     "search_results_other": "{{count}} kết quả",
-    "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được mục này"
+    "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được mục này",
+    "search_results_one": "{{count}} kết quả"
   },
   "plugins": {
     "title": "Plugin",
@@ -464,7 +473,8 @@
       "frequency_minutes_other": "Mỗi {{count}} phút",
       "frequency_hourly": "Mỗi giờ vào phút {{minute}}",
       "frequency_daily": "Mỗi ngày lúc {{hour}}:{{minute}}",
-      "frequency_custom": "Lịch lặp tùy chỉnh"
+      "frequency_custom": "Lịch lặp tùy chỉnh",
+      "frequency_minutes_one": "Mỗi {{count}} phút"
     },
     "config": {
       "title": "Cấu hình",
@@ -578,7 +588,8 @@
       "cancel": "Hủy",
       "confirm": "Lưu trữ thuộc tính",
       "failed": "Không thể lưu trữ thuộc tính"
-    }
+    },
+    "usage_count_one": "{{count}} công việc"
   },
   "labels": {
     "title": "Nhãn",
@@ -1071,7 +1082,8 @@
     "byo_submitting": "Đang kết nối…",
     "byo_cancel": "Hủy",
     "byo_success_toast": "Đã kết nối bot DingTalk",
-    "byo_failed_toast": "Không thể kết nối bot DingTalk"
+    "byo_failed_toast": "Không thể kết nối bot DingTalk",
+    "group_mentions_one": "{{count}} lượt nhắc"
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1297,7 +1309,11 @@
       "waiting_logs": "Đang chờ nhật ký…",
       "reconnect_failed": "Không thể kết nối lại daemon",
       "try_again_moment": "Hãy thử lại sau ít phút.",
-      "try_again": "Hãy thử lại."
+      "try_again": "Hãy thử lại.",
+      "stop_confirm_title_one": "Dừng daemon khi đang có {{count}} lượt chạy đang hoạt động?",
+      "stop_confirm_description_one": "{{count}} lượt chạy đang hoạt động trên thiết bị này. Dừng ngay bây giờ sẽ làm gián đoạn chúng — các lượt chạy bị ảnh hưởng sẽ bị đánh dấu thất bại khi hết thời gian chờ. Daemon sẽ không tự khởi động lại.",
+      "copied_lines_one": "Đã sao chép {{count}} dòng",
+      "runtime_count_one": "{{count}} runtime"
     }
   },
   "members": {
@@ -1419,7 +1435,8 @@
   },
   "mcp_usage": {
     "agent_count_other": "Được {{count}} agent sử dụng",
-    "none": "Chưa được gán cho agent nào"
+    "none": "Chưa được gán cho agent nào",
+    "agent_count_one": "Được {{count}} agent sử dụng"
   },
   "mcp_sources": {
     "title": "Các cách cấp công cụ cho agent",

@@ -33,7 +33,8 @@
     "steer_resend": "Gửi thành lần chạy mới",
     "steer_resend_failed": "Không thể gửi thành lần chạy mới.",
     "steer_step": "{{name}} đã thêm",
-    "steer_step_read": "Đã đọc"
+    "steer_step_read": "Đã đọc",
+    "steps_one": "{{count}} bước"
   },
   "working_filter_error": {
     "title": "Không thể tải các công việc có agent đang làm việc"
@@ -102,7 +103,8 @@
     "error_comment_limit": "Lịch sử luồng bình luận của nguồn có ít nhất {{count}} bình luận; giới hạn là 256.",
     "error_text_limit": "Văn bản nguồn có {{size}} byte; giới hạn là 1 MiB.",
     "error_attachment_count_limit": "Nguồn có {{count}} tệp đính kèm; giới hạn là 100.",
-    "error_attachment_size_limit": "Tệp đính kèm của nguồn tổng cộng {{size}} byte; giới hạn là 500 MiB."
+    "error_attachment_size_limit": "Tệp đính kèm của nguồn tổng cộng {{size}} byte; giới hạn là 500 MiB.",
+    "preview_summary_one": "Ngữ cảnh từ {{identifier}} · mô tả công việc + {{count}} bình luận"
   },
   "revision": {
     "conflict": "Công việc hoặc bình luận đã thay đổi. Phiên bản mới nhất đã được làm mới; hãy so sánh trước khi lưu lại.",
@@ -194,7 +196,9 @@
     "active_count_other": "{{count}} bộ lọc",
     "in_view": "Đã có trong chế độ xem này",
     "chip_edit": "Chỉnh sửa",
-    "chip_save_as": "Lưu thành"
+    "chip_save_as": "Lưu thành",
+    "issue_count_one": "{{count}} công việc",
+    "active_count_one": "{{count}} bộ lọc"
   },
   "display": {
     "tooltip": "Cài đặt hiển thị",
@@ -367,7 +371,10 @@
     "empty_grouping": "Không có công việc nào khớp",
     "no_value": "Không có giá trị",
     "ordered_by": "Bảng được sắp xếp theo {{field}}",
-    "manual_reorder_hint": "Chuyển sang sắp xếp Thủ công để sắp xếp lại công việc trong một cột."
+    "manual_reorder_hint": "Chuyển sang sắp xếp Thủ công để sắp xếp lại công việc trong một cột.",
+    "filter_to_status": "Lọc theo trạng thái này",
+    "outside_workflow": "Không nằm trong quy trình của bảng này",
+    "workflow_columns_note": "Các cột lấy từ quy trình của bảng; các view ngoài dự án dùng Mặc định."
   },
   "peek": {
     "panel_label": "Xem trước công việc",
@@ -479,7 +486,11 @@
     "project_directory_path_copied_with_branch": "Đã sao chép đường dẫn thư mục dự án — công việc đang ở nhánh {{branch}}",
     "workdir_path_copy_failed": "Sao chép đường dẫn workdir thất bại",
     "workdir_path_unavailable": "Chưa có workdir cục bộ — công việc chưa được agent cục bộ chạy",
-    "pull_requests_empty_title": "Không có pull request nào được liên kết."
+    "pull_requests_empty_title": "Không có pull request nào được liên kết.",
+    "pull_request_card_files_count_one": "{{count}} tệp",
+    "thread_nav_show_replies_one": "Hiện {{count}} phản hồi",
+    "thread_nav_show_replies_other": "Hiện {{count}} phản hồi",
+    "thread_nav_hide_replies": "Ẩn phản hồi"
   },
   "timeline": {
     "loading": "Đang tải..."
@@ -536,7 +547,14 @@
     "wakeup_checkin": "kiểm tra âm thầm: {{note}}",
     "wakeup_checkin_coalesced_other": "{{count}} lần kiểm tra âm thầm · mới nhất: {{note}}",
     "wakeup_chip_created_by": "Wakeup của {{name}}",
-    "wakeup_chip_system": "Quy tắc hệ thống"
+    "wakeup_chip_system": "Quy tắc hệ thống",
+    "task_completed_one": "đã hoàn thành một lần chạy ({{count}} lần)",
+    "task_failed_one": "lần chạy thất bại ({{count}} lần)",
+    "activity_count_one": "{{count}} hoạt động",
+    "show_more_activities_one": "Hiện thêm {{count}} hoạt động",
+    "wakeup_child_done_stage_one": "Toàn bộ {{count}} công việc con của giai đoạn {{stage}} đã hoàn thành",
+    "wakeup_child_done_all_one": "Toàn bộ {{count}} công việc con đã hoàn thành",
+    "wakeup_checkin_coalesced_one": "{{count}} lần kiểm tra âm thầm · mới nhất: {{note}}"
   },
   "comment": {
     "add_reaction": "Thêm biểu cảm",
@@ -617,7 +635,10 @@
       "fold_other": "{{count}} bình luận từ {{authors}}",
       "bar_authors_more_other": "{{names}} và {{count}} người khác",
       "resolve_failed": "Giải quyết luồng thất bại",
-      "unresolve_failed": "Hủy giải quyết luồng thất bại"
+      "unresolve_failed": "Hủy giải quyết luồng thất bại",
+      "bar_one": "{{count}} bình luận đã giải quyết từ {{authors}}",
+      "fold_one": "{{count}} bình luận từ {{authors}}",
+      "bar_authors_more_one": "{{names}} và {{count}} người khác"
     },
     "recipient_steer": "Thêm vào lần chạy hiện tại",
     "recipient_steer_desc": "{{name}} sẽ đọc nó sau bước hiện tại và tiếp tục làm nhiệm vụ ban đầu. Chỉ văn bản.",
@@ -633,7 +654,11 @@
     "recipient_count_other": "{{count}} agent sẽ nhận được tin nhắn này",
     "steer_attachment_notice": "Chỉ văn bản mới có thể tham gia một lần chạy đang diễn ra, nên tin nhắn có tệp sẽ được xử lý sau lần chạy đó.",
     "restart_send": "Dừng và gửi",
-    "restart_failed": "Không thể dừng lần chạy hiện tại. Tin nhắn của bạn chưa được gửi."
+    "restart_failed": "Không thể dừng lần chạy hiện tại. Tin nhắn của bạn chưa được gửi.",
+    "posted_partial_trigger_one": "Đã đăng bình luận, nhưng {{count}} lượt nhắc không được kích hoạt",
+    "reply_count_one": "{{count}} câu trả lời",
+    "trigger_will_start_count_one": "{{count}} agent sẽ khởi động khi gửi",
+    "recipient_count_one": "{{count}} agent sẽ nhận được tin nhắn này"
   },
   "reply": {
     "placeholder": "Viết câu trả lời...",
@@ -653,7 +678,8 @@
       "selection_failed": "Không thể ghi lại vùng chọn. Hãy chọn văn bản trong một bình luận hoặc mô tả rồi thử lại.",
       "source_label": "Bình luận của {{name}}",
       "edit": "Chỉnh sửa chú thích {{number}}",
-      "note_placeholder": "Thêm bình luận…"
+      "note_placeholder": "Thêm bình luận…",
+      "count_one": "{{count}} chú thích"
     }
   },
   "agent_activity": {
@@ -668,7 +694,13 @@
     "tasks_count_other": "{{count}} lần chạy",
     "chip_agents_working_other": "{{count}} agent đang làm việc",
     "issues_count_other": "{{count}} công việc",
-    "chip_agents_working_unknown": "Agent đang làm việc: —"
+    "chip_agents_working_unknown": "Agent đang làm việc: —",
+    "hover_header_one": "{{count}} agent đang hoạt động",
+    "hover_header_tasks_one": "{{count}} lần chạy đang hoạt động",
+    "hover_header_queued_one": "{{count}} agent đang trong hàng đợi",
+    "tasks_count_one": "{{count}} lần chạy",
+    "chip_agents_working_one": "{{count}} agent đang làm việc",
+    "issues_count_one": "{{count}} công việc"
   },
   "filtered_empty": {
     "title": "Không có công việc nào khớp với các bộ lọc này",
@@ -684,7 +716,8 @@
     "transcript_button": "Xem bản ghi",
     "stop_button": "Dừng",
     "stop_tooltip": "Dừng agent",
-    "cancel_failed": "Hủy lần chạy thất bại"
+    "cancel_failed": "Hủy lần chạy thất bại",
+    "tool_count_one": "{{count}} công cụ"
   },
   "execution_log": {
     "section": "Nhật ký thực thi",
@@ -734,7 +767,10 @@
     "more_runs_other": "thêm {{count}}",
     "strip_aria": "Chi phí lũy kế theo thời gian — mở dòng thời gian của lần chạy",
     "strip_no_usage": "Chưa ghi nhận mức sử dụng",
-    "sparkline_now": "Hiện tại"
+    "sparkline_now": "Hiện tại",
+    "included_comments_one": "Bao gồm {{count}} bình luận",
+    "summary_runs_one": "{{count}} lần chạy",
+    "more_runs_one": "thêm {{count}}"
   },
   "runs_timeline": {
     "title": "Các lần chạy",
@@ -762,7 +798,48 @@
     "hover_no_run": "Không có lần chạy",
     "hover_idle": "Nhàn rỗi {{duration}}",
     "note_unmapped": "Không có giá lưu trữ cho {{models}}; token của chúng được đếm nhưng chi phí thì không.",
-    "note_estimate": "Chi phí được ước tính từ giá model đã công bố, trừ nơi nhà cung cấp báo số liệu riêng."
+    "note_estimate": "Chi phí được ước tính từ giá model đã công bố, trừ nơi nhà cung cấp báo số liệu riêng.",
+    "count_failed_one": "{{count}} thất bại",
+    "count_cancelled_one": "{{count}} đã hủy",
+    "count_active_one": "{{count}} đang hoạt động",
+    "chart_aria_one": "Chi phí lũy kế theo thời gian: {{cost}} qua {{count}} lần chạy",
+    "day_runs_one": "{{count}} lần chạy",
+    "stat_tokens": "Token",
+    "stat_output": "Đầu ra",
+    "tokens_cached": "{{percent}} từ bộ nhớ đệm",
+    "elapsed_note": "Đã trôi qua {{duration}}",
+    "view_label": "Chế độ xem biểu đồ",
+    "view_runs": "Theo lượt chạy",
+    "view_cumulative": "Lũy kế",
+    "cumulative_aria_one": "Chi phí lũy kế theo thời gian: {{cost}} qua {{count}} lượt chạy",
+    "cumulative_aria_other": "Chi phí lũy kế theo thời gian: {{cost}} qua {{count}} lượt chạy",
+    "metric_label": "Chỉ số biểu đồ",
+    "metric_cost": "Chi phí",
+    "metric_tokens": "Token",
+    "metric_time": "Thời gian agent",
+    "unit_run": "mỗi lượt chạy",
+    "stack_agent": "theo agent",
+    "stack_type": "theo loại token",
+    "by_agent": "Theo agent",
+    "by_model": "Theo model",
+    "others": "Khác",
+    "col_time": "Thời gian",
+    "col_trigger": "Kích hoạt",
+    "col_agent": "Agent",
+    "col_model": "Model",
+    "col_duration": "Thời lượng",
+    "col_tokens": "Token",
+    "col_cost": "Chi phí",
+    "tokens_count": "{{tokens}} token",
+    "details_toggle": "Chi tiết lượt chạy",
+    "detail_breakdown": "Phân tích chi phí",
+    "detail_total": "Tổng",
+    "detail_status": "Trạng thái",
+    "detail_model": "Model",
+    "detail_cache": "Trúng bộ nhớ đệm",
+    "cache_hit_value": "{{percent}} · tiết kiệm {{amount}}",
+    "detail_time": "Thời gian",
+    "detail_branch": "Nhánh"
   },
   "terminate_dialog": {
     "title": "Dừng lần chạy này?",
@@ -784,7 +861,13 @@
     "delete_dialog_title_other": "Xóa {{count}} công việc?",
     "delete_dialog_desc_other": "Hành động này không thể hoàn tác. Nó sẽ xóa vĩnh viễn các công việc đã chọn và mọi dữ liệu liên quan.",
     "delete_dialog_warning": "Bất kỳ thành viên nào của không gian làm việc cũng có thể xóa công việc.",
-    "cancel": "Hủy"
+    "cancel": "Hủy",
+    "update_success_one": "Đã cập nhật {{count}} công việc",
+    "delete_success_one": "Đã xóa {{count}} công việc",
+    "delete_dialog_title_one": "Xóa {{count}} công việc?",
+    "delete_dialog_desc_one": "Hành động này không thể hoàn tác. Nó sẽ xóa vĩnh viễn các công việc đã chọn và mọi dữ liệu liên quan.",
+    "update_partial_one": "Đã cập nhật {{updated}} trong {{count}} công việc. Những mục còn lại không cho phép thay đổi này và được giữ nguyên.",
+    "update_partial_other": "Đã cập nhật {{updated}} trong {{count}} công việc. Những mục còn lại không cho phép thay đổi này và được giữ nguyên."
   },
   "card": {
     "update_failed": "Cập nhật công việc thất bại",
@@ -818,7 +901,8 @@
     "remove_parent_issue_success": "Đã xóa công việc cha",
     "add_sub_issue": "Thêm công việc con...",
     "delete_issue": "Xóa công việc",
-    "mark_duplicate": "Đánh dấu trùng lặp..."
+    "mark_duplicate": "Đánh dấu trùng lặp...",
+    "rename_issue": "Đổi tên công việc"
   },
   "pickers": {
     "custom_property": {
@@ -1227,7 +1311,9 @@
       "missing_issue": "Hãy chọn một công việc.",
       "checked": "Đã chọn",
       "unchecked": "Chưa chọn",
-      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó."
+      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó.",
+      "wait_days_one": "{{count}} ngày",
+      "max_fires_times_one": "{{count}} lần"
     },
     "system": {
       "badge": "Hệ thống",
@@ -1259,7 +1345,8 @@
       "instruction_default": "Chưa đặt trên công việc này; dùng mặc định:",
       "instruction_placeholder": "Để trống để dùng mặc định",
       "instruction_invalid": "Giữ hướng dẫn trong giới hạn 4.000 byte.",
-      "paused": "Đã tạm dừng: {{reason}}"
+      "paused": "Đã tạm dừng: {{reason}}",
+      "remaining_one": "Còn {{count}}"
     },
     "cond": {
       "status": "Khi công việc này chuyển sang {{status}}",
@@ -1321,7 +1408,8 @@
       "delete_title": "Xóa wakeup này?",
       "delete_body": "{{agent}} không còn được đánh thức bởi nó nữa, và các lần chạy của nó chưa bắt đầu sẽ bị rút lại. Lần chạy đã bắt đầu vẫn tiếp tục.",
       "deleting": "Đang xóa…",
-      "delete_error": "Không thể xóa wakeup"
+      "delete_error": "Không thể xóa wakeup",
+      "fires_one": "Đã kích hoạt {{count}} lần"
     },
     "paused_reason": {
       "max_fires": "đã đạt giới hạn {{count}} lần chạy",
@@ -1362,7 +1450,8 @@
     "not_merged_action": "Gỡ",
     "all_merged_to": "Mọi PR đã hợp nhất. PR hợp nhất tiếp theo sẽ chuyển công việc này sang {{status}}.",
     "issue_disabled": "Việc hợp nhất PR sẽ không thay đổi công việc này",
-    "issue_disabled_action": "Bật"
+    "issue_disabled_action": "Bật",
+    "waiting_to_one": "Chuyển sang {{status}} khi {{prs}} hợp nhất"
   },
   "deliverables": {
     "section_title": "Sản phẩm bàn giao",
@@ -1393,6 +1482,281 @@
     "overview_summary_with_size_other": "{{count}} sản phẩm bàn giao · tổng {{size}}",
     "overview_close": "Đóng",
     "overview_empty": "Không có sản phẩm bàn giao nào thuộc loại này.",
-    "group_comment_by": "Bình luận của {{name}}"
+    "group_comment_by": "Bình luận của {{name}}",
+    "view_all_one": "Xem tất cả {{count}} sản phẩm bàn giao",
+    "overview_summary_one": "{{count}} sản phẩm bàn giao",
+    "overview_summary_with_size_one": "{{count}} sản phẩm bàn giao · tổng {{size}}"
+  },
+  "hover_card": {
+    "created_updated": "đã tạo {{created}} · đã cập nhật {{updated}}"
+  },
+  "workflows": {
+    "default_name": "Mặc định",
+    "default_summary": "Mọi trạng thái, không bàn giao",
+    "hands_off_to": "Bàn giao cho {{name}}",
+    "not_in_workflow": "Không nằm trong quy trình {{name}}",
+    "drop_blocked": "{{status}} không thuộc quy trình {{name}}",
+    "create_handoff_hint": "Sẽ được bàn giao cho {{name}}",
+    "handler": {
+      "none": "Giữ nguyên người được giao",
+      "agent": "Agent",
+      "squad": "Squad",
+      "member": "Thành viên",
+      "project_lead": "Trưởng dự án",
+      "creator": "Người tạo công việc",
+      "project_lead_named": "{{name}} (trưởng dự án)"
+    },
+    "settings": {
+      "title": "Quy trình",
+      "new": "Quy trình mới",
+      "projects_one": "{{count}} dự án",
+      "projects_other": "{{count}} dự án",
+      "default_projects": "Dự án chưa có quy trình",
+      "no_projects": "Chưa được dùng",
+      "edit": "Sửa",
+      "delete": "Xóa",
+      "delete_title": "Xóa {{name}}?",
+      "delete_description": "Các công việc giữ nguyên trạng thái của chúng.",
+      "delete_in_use": "Hãy chuyển các dự án của nó sang quy trình khác trước.",
+      "deleted": "Đã xóa quy trình",
+      "delete_error": "Không xóa được quy trình",
+      "statuses_title": "Thư viện trạng thái",
+      "statuses_one": "{{count}} trạng thái",
+      "statuses_other": "{{count}} trạng thái",
+      "handoffs_one": "{{count}} bước bàn giao",
+      "handoffs_other": "{{count}} bước bàn giao",
+      "no_handoffs": "Không có bàn giao",
+      "used_by_one": "Được {{count}} dự án dùng: {{names}}",
+      "used_by_other": "Được {{count}} dự án dùng: {{names}}",
+      "used_by_default_one": "Được {{count}} dự án dùng: {{names}}, và các công việc không thuộc dự án",
+      "used_by_default_other": "Được {{count}} dự án dùng: {{names}}, và các công việc không thuộc dự án",
+      "used_by_default_none": "Được các công việc không thuộc dự án dùng",
+      "new_blank": "Quy trình trống",
+      "from_template": "Từ mẫu có sẵn"
+    },
+    "editor": {
+      "create_title": "Quy trình mới",
+      "edit_title": "Sửa quy trình",
+      "name": "Tên",
+      "name_placeholder": "vd: Giao hàng",
+      "description": "Mô tả",
+      "steps": "Các bước",
+      "add_step": "Thêm bước",
+      "start": "Bắt đầu",
+      "set_start": "Đặt làm bước bắt đầu",
+      "move_up": "Di chuyển lên",
+      "move_down": "Di chuyển xuống",
+      "remove": "Xóa cột",
+      "on_enter": "Khi vào bước, bàn giao cho",
+      "choose_target": "Chọn…",
+      "instructions": "Hướng dẫn bàn giao",
+      "instructions_placeholder": "Điều gì nên xảy ra ở bước này?",
+      "next": "Khi xong, chuyển tới",
+      "back": "Khi cần thay đổi, quay lại",
+      "none_option": "Chưa đặt",
+      "save": "Lưu",
+      "create": "Tạo",
+      "cancel": "Hủy",
+      "saved": "Đã lưu quy trình",
+      "created": "Đã tạo quy trình",
+      "error": "Không lưu được quy trình",
+      "used_by_note_one": "Được {{count}} dự án dùng: {{names}}. Các thay đổi đã lưu áp dụng ngay cho dự án đó.",
+      "used_by_note_other": "Được {{count}} dự án dùng: {{names}}. Các thay đổi đã lưu áp dụng ngay cho các dự án đó.",
+      "unused_note": "Chưa dự án nào dùng nó. Hãy chọn nó trong thuộc tính của một dự án.",
+      "duplicate": "Nhân bản thành quy trình mới",
+      "copy_name": "{{name}} (bản sao)",
+      "more": "Thêm thao tác",
+      "steps_hint": "Kéo để sắp xếp lại các cột ở giữa. Backlog và Blocked là tùy chọn. Trạng thái mới được tạo khi bạn lưu.",
+      "reorder": "Sắp xếp lại {{name}}",
+      "card_hand_to": "Bàn giao cho",
+      "card_then": "rồi → {{status}}",
+      "status": "Trạng thái",
+      "status_hint": "Trạng thái lấy từ thư viện. Đổi tên hoặc đổi màu chúng ở đó; thay đổi sẽ tới mọi quy trình đang dùng chúng.",
+      "handler_hint_on": "Khi một công việc vào bước này, người được giao của nó trở thành người phụ trách này; một agent hoặc squad bắt đầu làm việc ngay.",
+      "handler_hint_off": "Vào bước này giữ nguyên người được giao và không khởi chạy lượt nào.",
+      "handler_hint_lead": "Xác định theo từng dự án: trưởng dự án của mỗi dự án.",
+      "handler_hint_creator": "Xác định theo từng công việc: người đã tạo nó.",
+      "target_agent": "Agent",
+      "target_squad": "Squad · trưởng nhóm điều phối",
+      "target_member": "Thành viên",
+      "instructions_hint": "Được gửi cho người phụ trách cùng lượt chạy này, kèm theo mô tả và các bình luận của công việc.",
+      "next_hint": "Được ghi vào bản tóm tắt của người phụ trách để họ biết trạng thái nào tiếp theo. Hệ thống không bao giờ tự chuyển trạng thái khi một lượt chạy kết thúc.",
+      "preview_brief": "Xem trước bản tóm tắt của agent",
+      "preview_title": "Bản tóm tắt cho bước “{{status}}”",
+      "preview_description": "Những gì lượt chạy của người phụ trách nhận được khi một công việc vào bước này. Không cần lưu thay đổi để xem trước.",
+      "description_placeholder": "Thêm mô tả",
+      "select_step": "Chọn một cột để đặt người mà nó bàn giao công việc tới.",
+      "unsaved": "Thay đổi chưa lưu",
+      "not_found": "Quy trình này không còn tồn tại.",
+      "default_note": "Mặc định là bảng của mọi dự án không chọn quy trình, và của các view ngoài dự án.",
+      "new_badge": "Mới",
+      "columns": "Các cột",
+      "include_status": "Bao gồm {{status}}",
+      "step_off_short": "Tắt",
+      "step_off": "Đã tắt: quy trình này bỏ qua trạng thái đó. Bật nó trong danh sách bước để sử dụng.",
+      "status_new_hint": "Một trạng thái mới. Nó được thêm vào thư viện trạng thái khi bạn lưu.",
+      "no_other_status": "Mọi trạng thái đều đã là một bước.",
+      "no_handoff_step": "Bước này không bàn giao: công việc vào đây giữ nguyên người được giao và không khởi chạy lượt nào.",
+      "new_step_handoff": "Hãy lưu quy trình trước; trạng thái mới có thể bàn giao sau đó."
+    },
+    "mapping": {
+      "title": "Chuyển công việc vào {{name}}",
+      "description": "Các trạng thái này không có trong quy trình. Chọn nơi công việc của chúng sẽ tới; công việc ở các trạng thái khác giữ nguyên.",
+      "issues_one": "{{count}} công việc",
+      "issues_other": "{{count}} công việc",
+      "no_handoff": "Chuyển công việc theo cách này không bàn giao chúng và không khởi chạy lượt nào.",
+      "confirm": "Chuyển và đổi",
+      "confirm_save": "Chuyển và lưu",
+      "cancel": "Hủy",
+      "switch_title": "Chuyển “{{project}}” sang “{{workflow}}”?",
+      "switch_description_one": "{{project}} có {{count}} công việc. Chỉ những công việc ở các trạng thái mà “{{workflow}}” không có mới cần trạng thái mới.",
+      "switch_description_other": "{{project}} có {{count}} công việc. Chỉ những công việc ở các trạng thái mà “{{workflow}}” không có mới cần trạng thái mới.",
+      "needs_mapping_one": "Cần trạng thái mới · {{count}} công việc",
+      "needs_mapping_other": "Cần trạng thái mới · {{count}} công việc",
+      "unchanged_one": "{{count}} công việc còn lại ({{statuses}}) giữ nguyên trạng thái — cả hai quy trình đều có nó.",
+      "unchanged_other": "{{count}} công việc còn lại ({{statuses}}) giữ nguyên trạng thái — cả hai quy trình đều có nó.",
+      "switch_note": "Chuyển đổi là thay đổi của quản trị viên: nó không bàn giao gì, không khởi chạy agent nào, và giữ nguyên người được giao. Các view và bộ lọc đã lưu hoạt động theo trạng thái và không bị ảnh hưởng.",
+      "confirm_count_one": "Đổi và cập nhật {{count}} công việc",
+      "confirm_count_other": "Đổi và cập nhật {{count}} công việc",
+      "confirm_plain": "Đổi",
+      "edit_title": "Lưu “{{workflow}}”?",
+      "edit_description": "Một số công việc trong các dự án đang dùng quy trình này đang ở các trạng thái bạn đã loại bỏ. Chọn nơi chúng sẽ tới; mọi thứ khác giữ nguyên.",
+      "confirm_save_count_one": "Lưu và cập nhật {{count}} công việc",
+      "confirm_save_count_other": "Lưu và cập nhật {{count}} công việc",
+      "switched_one": "“{{project}}” giờ dùng “{{workflow}}”; đã cập nhật {{count}} công việc",
+      "switched_other": "“{{project}}” giờ dùng “{{workflow}}”; đã cập nhật {{count}} công việc",
+      "nothing_moves": "Trạng thái của mọi công việc đều có trong cả hai quy trình, nên không có gì di chuyển."
+    },
+    "project": {
+      "label": "Quy trình",
+      "switched": "Đã đổi quy trình",
+      "error": "Không đổi được quy trình",
+      "picker_title": "Chọn một quy trình",
+      "default_badge": "Mặc định",
+      "used_by_short": "Được dùng bởi: {{names}}",
+      "used_by_nobody": "Chưa có dự án nào",
+      "manage": "Quản lý quy trình…",
+      "picker_more": "Tạo thêm quy trình trong Cài đặt → Quy trình."
+    },
+    "picker": {
+      "header": "{{workflow}} · từ dự án “{{project}}”",
+      "footer": "Chỉ các trạng thái trong quy trình của công việc này được hiển thị. Phía bên phải là người mà việc vào trạng thái đó sẽ bàn giao tới."
+    },
+    "confirm": {
+      "title": "Chuyển {{issue}} tới “{{status}}”?",
+      "reassign_run": "Người được giao thay đổi từ {{from}} sang {{to}}, người sẽ bắt đầu làm việc ngay.",
+      "reassign": "Người được giao thay đổi từ {{from}} sang {{to}}.",
+      "same_handler_run": "{{to}} vẫn là người được giao và bắt đầu ở bước này.",
+      "unassigned": "Chưa giao",
+      "running_title": "{{name}} vẫn đang chạy (được {{duration}})",
+      "stop_label": "Dừng lượt chạy của {{name}}",
+      "stop_hint": "Code và bình luận nó đã tạo vẫn còn. Nếu bạn không dừng nó, hai agent sẽ cùng làm trên công việc này.",
+      "queued_title": "Lượt chạy của {{name}} vẫn đang chờ",
+      "cancel_queued_label": "Hủy lượt chạy đang chờ của {{name}}",
+      "queued_hint": "Nếu bạn không hủy nó, {{name}} vẫn sẽ bắt đầu trên công việc này sau đó.",
+      "brief_toggle": "Những gì {{name}} nhận được",
+      "confirm": "Chuyển tới {{status}}",
+      "cancel": "Hủy",
+      "minutes_one": "{{count}} phút",
+      "minutes_other": "{{count}} phút",
+      "hours_one": "{{count}} giờ",
+      "hours_other": "{{count}} giờ",
+      "under_minute": "dưới một phút",
+      "error": "Không chuyển được công việc",
+      "project_title": "Chuyển {{issue}} tới {{project}}?",
+      "project_confirm": "Chuyển tới {{project}}"
+    },
+    "board": {
+      "drop_hint_run": "Thả để bàn giao cho {{name}} và bắt đầu lượt chạy",
+      "drop_hint": "Thả để bàn giao cho {{name}}"
+    },
+    "timeline": {
+      "handed_to": "Đã bàn giao cho",
+      "run_started": "và đã bắt đầu một lượt chạy ·",
+      "member_no_run": "(thành viên, không có lượt chạy)",
+      "show_brief": "Xem bản tóm tắt bàn giao",
+      "hide_brief": "Ẩn bản tóm tắt bàn giao",
+      "brief_header": "Bản tóm tắt quy trình mà lượt chạy này nhận được"
+    },
+    "detail": {
+      "follows_project": "(từ dự án)",
+      "card_title": "{{workflow}} · từ {{project}}",
+      "card_hint": "Quy trình của dự án quyết định các cột và các bàn giao này."
+    },
+    "list_separator": ", ",
+    "handoff": {
+      "add": "Bàn giao cho…",
+      "title": "Khi một công việc vào “{{status}}”",
+      "next_default": "Cột tiếp theo ({{status}})",
+      "saved": "Đã lưu bàn giao",
+      "error": "Không lưu được bàn giao",
+      "read_only": "Bàn giao thuộc về quy trình; quản trị viên không gian làm việc thay đổi chúng.",
+      "to": "Bàn giao cho",
+      "members": "Thành viên",
+      "mode_none": "Không bàn giao",
+      "mode_none_hint": "Người được giao giữ nguyên",
+      "mode_agent": "Bàn giao cho một agent",
+      "mode_agent_hint": "Bắt đầu một lượt chạy ngay",
+      "mode_member": "Bàn giao cho một thành viên",
+      "mode_member_hint": "Thay đổi người được giao; không chạy gì cả",
+      "project_lead_hint": "Nếu trưởng dự án là một agent, nó sẽ bắt đầu một lượt chạy.",
+      "pick_agent": "Chọn một agent",
+      "pick_member": "Chọn một thành viên",
+      "search_agents": "Tìm agent",
+      "search_members": "Tìm thành viên",
+      "instructions": "Bước này làm gì",
+      "scope_line": "Thuộc quy trình {{workflow}}",
+      "scope_line_shared": "Thuộc {{workflow}}, còn được {{projects}} dùng",
+      "scope_more": "{{names}} và {{count}} nữa",
+      "scope_question": "Thay đổi này nên áp dụng ở đâu?",
+      "scope_all": "Tất cả {{count}} dự án đang dùng {{workflow}}",
+      "scope_all_hint": "{{projects}} đều dùng bàn giao mới",
+      "scope_project": "Chỉ {{project}}",
+      "scope_project_hint": "Sao chép quy trình thành “{{copy}}” cho {{project}}; các dự án khác giữ nguyên",
+      "saved_copy": "Đã lưu vào “{{workflow}}”, chỉ {{project}} dùng"
+    },
+    "columns": {
+      "new_status": "Trạng thái mới…",
+      "name_placeholder": "Tên trạng thái",
+      "add": "Thêm"
+    },
+    "menu": {
+      "view_flow": "Xem toàn bộ luồng",
+      "switch": "Đổi quy trình"
+    },
+    "flow": {
+      "title": "Quy trình {{workflow}}",
+      "scope_own": "Chỉ dự án này dùng quy trình này.",
+      "no_handoff_here": "Không bàn giao",
+      "scope_shared_one": "{{count}} dự án dùng quy trình này. Các bàn giao của nó áp dụng cho mọi dự án đang dùng nó.",
+      "scope_shared_other": "{{count}} dự án dùng quy trình này. Các bàn giao của nó áp dụng cho mọi dự án đang dùng nó."
+    },
+    "templates": {
+      "delivery": {
+        "name": "Bàn giao",
+        "summary": "Làm, review, rồi QA trước khi xong",
+        "statuses": {
+          "qa": "QA"
+        }
+      },
+      "content": {
+        "name": "Nội dung",
+        "summary": "Soạn thảo, biên tập và lên lịch",
+        "statuses": {
+          "drafting": "Đang soạn",
+          "editing": "Đang biên tập",
+          "scheduled": "Đã lên lịch"
+        }
+      },
+      "community": {
+        "name": "Cộng đồng",
+        "summary": "Phân loại, phản hồi, chờ người báo",
+        "statuses": {
+          "triage": "Phân loại",
+          "replying": "Đang phản hồi",
+          "waiting": "Đang chờ người báo"
+        }
+      }
+    }
   }
 }
