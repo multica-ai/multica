@@ -69,7 +69,9 @@ case "$answer" in
 esac
 
 cd "$root_dir"
-docker compose exec -T postgres \
+# shellcheck source=scripts/dev-compose.sh
+. "$root_dir/scripts/dev-compose.sh"
+dev_compose exec -T postgres \
   dropdb \
   --username "$POSTGRES_USER" \
   --maintenance-db postgres \

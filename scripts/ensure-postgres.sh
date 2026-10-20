@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ENV_FILE="${1:-.env}"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -68,21 +70,67 @@ is_local() {
 
 if is_local; then
   # ---------- Local: use Docker ----------
-  echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
-  docker compose up -d postgres
+  # shellcheck source=scripts/dev-compose.sh
+  . "$script_dir/dev-compose.sh"
+
+  # Only ever act on the labelled dev project. Compose defaults the project
+  # name to the checkout directory, which used to let this script adopt - and
+  # stop - another deployment's container with the same name (SHAR-208).
+  external_container=""
+  own_container="$(dev_compose ps -q postgres 2> /dev/null | head -n 1 || true)"
+  if [ -z "$own_container" ]; then
+    port_owner="$(docker ps --filter "publish=$db_port" \
+      --format '{{.ID}}|{{.Names}}|{{.Label "com.docker.compose.project"}}' 2> /dev/null \
+      | head -n 1 || true)"
+    if [ -n "$port_owner" ]; then
+      IFS='|' read -r owner_id owner_name owner_project <<< "$port_owner"
+      if [ "${MULTICA_PG_REUSE_EXTERNAL:-0}" = "1" ]; then
+        echo "==> Reusing the PostgreSQL container already published on localhost:$db_port: $owner_name (compose project: ${owner_project:-none})"
+        external_container="$owner_id"
+      else
+        {
+          echo "Refusing to start the dev PostgreSQL: localhost:$db_port is already published by container '$owner_name' (compose project: ${owner_project:-none})."
+          echo "This checkout does not manage that container, so it is left untouched - no stop, no recreate."
+          echo ""
+          echo "Options:"
+          echo "  - reuse that instance as-is: MULTICA_PG_REUSE_EXTERNAL=1 <same command>"
+          echo "  - or stop it / free port $db_port, then re-run."
+          echo ""
+          echo "Dev compose project for this checkout: $dev_compose_project"
+        } >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  if [ -n "$external_container" ]; then
+    pg_exec() { docker exec -i "$external_container" "$@"; }
+  else
+    echo "==> Ensuring shared dev PostgreSQL container is running on localhost:$db_port (compose project: $dev_compose_project)..."
+    dev_compose up -d postgres
+    pg_exec() { dev_compose exec -T postgres "$@"; }
+  fi
 
   echo "==> Waiting for PostgreSQL to be ready..."
-  until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
+  ready=0
+  for _ in $(seq 1 120); do
+    if pg_exec pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; then
+      ready=1
+      break
+    fi
     sleep 1
   done
+  if [ "$ready" != "1" ]; then
+    echo "PostgreSQL did not become ready within 120s (compose project: $dev_compose_project)." >&2
+    echo "Inspect it with: docker compose -p $dev_compose_project logs postgres" >&2
+    exit 1
+  fi
 
   echo "==> Ensuring database '$POSTGRES_DB' exists..."
-  db_exists="$(docker compose exec -T postgres \
-    psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
+  db_exists="$(pg_exec psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
 
   if [ "$db_exists" != "1" ]; then
-    docker compose exec -T postgres \
-      psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
+    pg_exec psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
       -c "CREATE DATABASE \"$POSTGRES_DB\"" \
       > /dev/null
   fi
