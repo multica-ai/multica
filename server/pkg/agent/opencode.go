@@ -550,10 +550,22 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	// all means the run did not finish: its provider stream died and
 	// `opencode run` exited without emitting an error event. Fail closed on
 	// that structural evidence rather than reporting a false-green completion.
+	// OpenCode v2 streams can end without step_finish even when the run
+	// finished cleanly (anomalyco/opencode#53207): the final step opens,
+	// streams its answer in full, and the stream just ends. On the v2
+	// contract that shape is the normal success path, so when the open step
+	// produced the answer text, failing closed would discard a completed
+	// run. The caller still fails the run if the process itself exited
+	// non-zero, so accepting the answer here cannot green-light a crashed
+	// process. The relaxation is scoped to the v2 contract and to this
+	// guard only — 1.x streams, and open steps that produced nothing, keep
+	// failing closed below.
+	rescuedOpenStep := openStep && stepProducedOutput && output.Len() > 0 && opencodeUsesV2Contract(b.cfg)
+
 	noTerminalSignal := false
 	if finalStatus == "completed" {
 		switch {
-		case openStep:
+		case openStep && !rescuedOpenStep:
 			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
 			noTerminalSignal = true
