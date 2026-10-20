@@ -446,6 +446,16 @@
     "prop_created": "Created",
     "prop_updated": "Updated",
     "activity_section": "Activity",
+    "timeline": {
+      "group_count": "{{count}} items",
+      "group_range": "{{from}} – {{to}}",
+      "group_latest": "Latest: {{time}} · {{summary}}",
+      "fold_earlier": "{{count}} earlier records",
+      "fold_collapse": "Collapse {{count}} earlier records",
+      "new_records": "{{count}} new records",
+      "order_grouped": "Group by type",
+      "order_raw": "Chronological"
+    },
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
     "delegated_subscription_badge": "Watching via agent",

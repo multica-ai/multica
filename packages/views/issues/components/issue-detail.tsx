@@ -105,6 +105,14 @@ import { useCommentAnnotations } from "./use-comment-annotations";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
+import {
+  TimelineClusterCard,
+  normalizeTimelineFirstLine,
+  clusterDisplayTitle,
+  clusterShortDate,
+  CLUSTER_MIN_SIZE,
+} from "./timeline-cluster-card";
+import { TimelineFoldBar, FOLD_LIMIT } from "./timeline-fold-bar";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
@@ -572,7 +580,9 @@ type TimelineItem =
   | { kind: "run"; id: string; run: CommentRun; entry?: TimelineEntry }
   | { kind: "comment"; id: string; entry: TimelineEntry }
   | { kind: "resolved-bar"; id: string; entry: TimelineEntry }
-  | { kind: "activity-group"; id: string; entries: TimelineEntry[] };
+  | { kind: "activity-group"; id: string; entries: TimelineEntry[] }
+  | { kind: "cluster"; id: string; entries: TimelineEntry[]; latest: TimelineEntry; title: string }
+  | { kind: "fold-bar"; id: string; count: number; from: string; to: string };
 
 type RawTimelineGroup = {
   type: "comment" | "activities";
@@ -1755,6 +1765,41 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [timelineView.groups, expandedResolved],
   );
 
+  // --- Same-origin clustering + recent-fold (NAPI-11) ---
+  // Order mode: "grouped" (default) or "raw". Persisted per-issue via
+  // view-state (same mechanism as the deep-link memento).
+  const timelineOrderMementoKey = `timeline-order:${id}`;
+  const restoredTimelineOrder = useRestoredViewState(timelineOrderMementoKey);
+  const [timelineOrder, setTimelineOrder] = useState<"grouped" | "raw">(
+    () => (restoredTimelineOrder === "raw" ? "raw" : "grouped"),
+  );
+  // Reset order on issue switch — the restored value is read fresh per-id.
+  const restoredTimelineOrderRef = useRef(restoredTimelineOrder);
+  restoredTimelineOrderRef.current = restoredTimelineOrder;
+  useEffect(() => {
+    setTimelineOrder(restoredTimelineOrderRef.current === "raw" ? "raw" : "grouped");
+    setExpandedClusterIds(new Set());
+  }, [id]);
+  const toggleTimelineOrder = useCallback(() => {
+    setTimelineOrder((prev) => {
+      const next = prev === "grouped" ? "raw" : "grouped";
+      writeViewState(timelineOrderMementoKey, next);
+      return next;
+    });
+  }, [timelineOrderMementoKey, writeViewState]);
+
+  // Per-session expanded cluster rows (comment ids rendered as full cards
+  // inside an expanded cluster). Not persisted.
+  const [expandedClusterIds, setExpandedClusterIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  // Fold bar expanded state.
+  const [foldExpanded, setFoldExpanded] = useState(false);
+  // Reset fold on issue switch.
+  useEffect(() => {
+    setFoldExpanded(false);
+  }, [id]);
+
   // In-page find (Cmd/Ctrl+F). `items.length` is the content signal that
   // triggers a match recompute when comments are added/removed; text edits
   // are caught by the hook's own MutationObserver. Opening find forces the
@@ -1816,7 +1861,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const minimapThreads = useMemo<ThreadMinimapThread[]>(
     () =>
       items.flatMap((it) => {
-        if (it.kind === "activity-group" || !it.entry) return [];
+        if (it.kind === "activity-group" || it.kind === "cluster" || it.kind === "fold-bar") return [];
+        if (!it.entry) return [];
         const replies = timelineView.threadReplies.get(it.id) ?? EMPTY_REPLIES;
         const resolution = deriveThreadResolution(it.entry, replies);
         return [
@@ -1837,6 +1883,131 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // When the timeline renders flat (deep-link or in-page find), there is no
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = !!highlightCommentId || find.open;
+
+  // --- Build the clustered + folded view (NAPI-11) ---
+  // Pipeline: flatten → cluster (same-origin ≥3) → fold (>20 → head fold bar).
+  // Both transforms are skipped when:
+  //   - order mode is "raw" (verbatim timeline, no clustering, no fold)
+  //   - a deep-link or in-page-find is active (flat render needs every
+  //     comment in the DOM; clustering would hide targets)
+  function timelineEntryDate(item: TimelineItem | undefined): string | undefined {
+    if (!item) return undefined;
+    if (item.kind === "comment" || item.kind === "resolved-bar") return item.entry.created_at;
+    if (item.kind === "cluster") return item.latest.created_at;
+    if (item.kind === "activity-group") return item.entries[item.entries.length - 1]?.created_at;
+    if (item.kind === "run") return item.entry?.created_at ?? item.run.task.created_at;
+    return undefined;
+  }
+
+  const displayItems = useMemo<TimelineItem[]>(() => {
+    if (timelineOrder === "raw" || isFlatTimeline) return items;
+
+    // --- Cluster: same author + same normalized first line + ≥3 entries ---
+    type ClusterBucket = { entries: TimelineEntry[]; latestIdx: number };
+    const buckets = new Map<string, ClusterBucket>();
+    const itemBucketKey = new Map<number, string>();
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      if (item.kind !== "comment") continue;
+      const entry = item.entry;
+      if (isDeletedComment(entry)) continue;
+      const normalized = normalizeTimelineFirstLine(entry.content);
+      if (!normalized) continue;
+      const key = `${entry.actor_type}:${entry.actor_id}:${normalized}`;
+      itemBucketKey.set(i, key);
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.entries.push(entry);
+        bucket.latestIdx = i;
+      } else {
+        buckets.set(key, { entries: [entry], latestIdx: i });
+      }
+    }
+
+    // Replace qualifying buckets (≥3) with a cluster card at the latest
+    // member's position; drop earlier members from the flat stream.
+    const qualifyingKeys = new Set<string>();
+    for (const [key, bucket] of buckets) {
+      if (bucket.entries.length >= CLUSTER_MIN_SIZE) qualifyingKeys.add(key);
+    }
+
+    let clustered: TimelineItem[] = items;
+    if (qualifyingKeys.size > 0) {
+      clustered = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]!;
+        const key = itemBucketKey.get(i);
+        if (key && qualifyingKeys.has(key)) {
+          const bucket = buckets.get(key)!;
+          if (i === bucket.latestIdx) {
+            clustered.push({
+              kind: "cluster",
+              id: `cluster:${key}`,
+              entries: bucket.entries,
+              latest: bucket.entries[bucket.entries.length - 1]!,
+              title: clusterDisplayTitle(bucket.entries[0]!.content),
+            });
+          }
+          // else: skip — already folded into the cluster card
+        } else {
+          clustered.push(item);
+        }
+      }
+    }
+
+    // --- Fold: if clustered count > 20, wrap head in a fold bar ---
+    if (clustered.length <= FOLD_LIMIT) return clustered;
+
+    const foldCount = clustered.length - FOLD_LIMIT;
+    const hidden = clustered.slice(0, foldCount);
+    const visible = clustered.slice(foldCount);
+    const from = clusterShortDate(timelineEntryDate(hidden[0]));
+    const to = clusterShortDate(timelineEntryDate(hidden[hidden.length - 1]));
+    // When the fold is expanded, render everything (no fold bar); when
+    // collapsed, replace the hidden head with a fold bar.
+    if (foldExpanded) return clustered;
+    return [{ kind: "fold-bar", id: "fold-bar", count: foldCount, from, to } as TimelineItem, ...visible] as TimelineItem[];
+  }, [items, timelineOrder, isFlatTimeline, foldExpanded]);
+
+  // When a deep-link targets a comment hidden inside a cluster, auto-expand
+  // that cluster so the landing effect can scroll to the target. The cluster
+  // card renders each member as a full CommentCard once expanded, so the
+  // `#comment-{id}` anchor exists for the landing logic.
+  useEffect(() => {
+    if (!highlightCommentId || timelineOrder === "raw") return;
+    const target = items.find(
+      (it) => it.kind === "comment" && it.entry.id === highlightCommentId,
+    );
+    if (!target || target.kind !== "comment") return;
+    const entry = target.entry;
+    const normalized = normalizeTimelineFirstLine(entry.content);
+    if (!normalized) return;
+    const targetKey = `${entry.actor_type}:${entry.actor_id}:${normalized}`;
+    // Count how many items share this key.
+    let count = 0;
+    for (const item of items) {
+      if (item.kind !== "comment") continue;
+      const e = item.entry;
+      const n = normalizeTimelineFirstLine(e.content);
+      if (!n) continue;
+      const k = `${e.actor_type}:${e.actor_id}:${n}`;
+      if (k === targetKey) count++;
+    }
+    const clusterId = `cluster:${targetKey}`;
+    if (count >= CLUSTER_MIN_SIZE && !expandedClusterIds.has(clusterId)) {
+      setExpandedClusterIds((prev) => new Set(prev).add(clusterId));
+    }
+  }, [highlightCommentId, items, timelineOrder, expandedClusterIds]);
+
+  const toggleCluster = useCallback((clusterId: string) => {
+    setExpandedClusterIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(clusterId)) next.delete(clusterId);
+      else next.add(clusterId);
+      return next;
+    });
+  }, []);
+
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
@@ -1959,7 +2130,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       const rootId = replyToRoot.get(replyId);
       const index = rootId ? items.findIndex((it) => it.id === rootId) : -1;
       const rootItem = items[index];
-      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      const root = rootItem && rootItem.kind !== "activity-group" && rootItem.kind !== "cluster" && rootItem.kind !== "fold-bar" ? rootItem.entry : undefined;
       if (!rootId || !root) return;
       const collapse = useCommentCollapseStore.getState();
       if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
@@ -2324,7 +2495,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       },
     ];
     for (const item of items) {
-      if (item.kind === "activity-group" || !item.entry) continue;
+      if (item.kind === "activity-group" || item.kind === "cluster" || item.kind === "fold-bar" || !item.entry) continue;
       blocks.push({
         id: item.entry.id,
         content: item.entry.content,
@@ -2370,7 +2541,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return;
       }
       const rootItem = items.find((it) => it.id === commentId);
-      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      const root = rootItem && rootItem.kind !== "activity-group" && rootItem.kind !== "cluster" && rootItem.kind !== "fold-bar" ? rootItem.entry : undefined;
       if (!root) return;
       const collapse = useCommentCollapseStore.getState();
       if (collapse.isCollapsed(id, commentId)) collapse.toggle(id, commentId);
@@ -3073,6 +3244,61 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       );
     }
+    // cluster — same-origin summary card
+    if (item.kind === "cluster") {
+      const expanded = expandedClusterIds.has(item.id);
+      return (
+        <TimelineClusterCard
+          key={item.id}
+          entries={item.entries}
+          latest={item.latest}
+          title={item.title}
+          expanded={expanded}
+          expandedRowIds={expandedClusterIds}
+          onToggle={() => toggleCluster(item.id)}
+          onToggleRow={(entryId) => toggleCluster(`${item.id}:${entryId}`)}
+          renderEntry={(entry) => (
+            <div className="pb-3" id={`comment-${entry.id}`}>
+              <CommentCard
+                issueId={id}
+                runs={commentRuns.get(entry.id) ?? EMPTY_COMMENT_RUNS}
+                enteringRunIds={enteringRunIds}
+                entry={entry}
+                replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
+                currentUserId={user?.id}
+                canModerate={canModerateComments}
+                onReply={submitReply}
+                onReplyAccepted={scrollToTimelineBottom}
+                onEdit={editComment}
+                onDelete={deleteComment}
+                onToggleReaction={handleToggleReaction}
+                onCreateSubIssue={openCommentSubIssue}
+                onResolveToggle={handleResolveToggle}
+                onCopyLink={actions.copyCommentLink}
+                onJumpToComment={jumpToComment}
+                expandedResolvedIds={expandedResolved}
+                onResolvedExpandChange={toggleResolvedExpand}
+                highlightedCommentId={highlightedId}
+              />
+            </div>
+          )}
+          getActorName={getActorName}
+        />
+      );
+    }
+    // fold-bar — collapsed head of a long timeline
+    if (item.kind === "fold-bar") {
+      return (
+        <TimelineFoldBar
+          key={item.id}
+          count={item.count}
+          from={item.from}
+          to={item.to}
+          expanded={foldExpanded}
+          onToggle={() => setFoldExpanded((v) => !v)}
+        />
+      );
+    }
     // activity-group
     const expanded = expandedActivityIds.has(item.id)
       ? true
@@ -3648,6 +3874,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-title-sm font-semibold">{t(($) => $.detail.activity_section)}</h2>
+                {/* Order toggle — only visible when clustering is active
+                    (grouped mode) so short timelines stay pixel-identical to
+                    the pre-change layout (validation #6). */}
+                {timelineOrder === "grouped" && displayItems.length !== items.length && (
+                  <button
+                    type="button"
+                    onClick={toggleTimelineOrder}
+                    className="text-caption text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {t(($) => $.detail.timeline.order_raw)}
+                    <ChevronDown className="inline-block size-3 ml-0.5" />
+                  </button>
+                )}
+                {timelineOrder === "raw" && (
+                  <button
+                    type="button"
+                    onClick={toggleTimelineOrder}
+                    className="text-caption text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {t(($) => $.detail.timeline.order_grouped)}
+                    <ChevronDown className="inline-block size-3 ml-0.5" />
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {/* A delegated subscription is one the user never opted into
@@ -3817,7 +4066,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       key={`${wsId}:${id}`}
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
-                      data={items}
+                      data={displayItems}
                       initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
@@ -3832,7 +4081,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 )
               ) : (
                 <div className="mt-4">
-                  {items.map((item, i) => (
+                  {displayItems.map((item, i) => (
                     <Fragment key={`${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}>
                       {renderItem(i, item)}
                     </Fragment>

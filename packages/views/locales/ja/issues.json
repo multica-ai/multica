@@ -441,6 +441,16 @@
     "prop_created": "作成日",
     "prop_updated": "更新日",
     "activity_section": "アクティビティ",
+    "timeline": {
+      "group_count": "{{count}} 件",
+      "group_range": "{{from}} – {{to}}",
+      "group_latest": "最新：{{time}} · {{summary}}",
+      "fold_earlier": "以前の {{count}} 件",
+      "fold_collapse": "以前の {{count}} 件を折りたたむ",
+      "new_records": "{{count}} 件の新着",
+      "order_grouped": "種類ごとにまとめる",
+      "order_raw": "時系列順"
+    },
     "subscribe": "購読",
     "unsubscribe": "購読解除",
     "delegated_subscription_badge": "エージェント経由で購読中",

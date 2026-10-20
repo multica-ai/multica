@@ -441,6 +441,16 @@
     "prop_created": "생성일",
     "prop_updated": "수정일",
     "activity_section": "활동",
+    "timeline": {
+      "group_count": "{{count}}개",
+      "group_range": "{{from}} – {{to}}",
+      "group_latest": "최신: {{time}} · {{summary}}",
+      "fold_earlier": "이전 {{count}}개 기록",
+      "fold_collapse": "이전 {{count}}개 접기",
+      "new_records": "{{count}}개 새 기록",
+      "order_grouped": "유형별 묶기",
+      "order_raw": "시간순"
+    },
     "subscribe": "구독",
     "unsubscribe": "구독 해제",
     "delegated_subscription_badge": "에이전트를 통해 구독 중",

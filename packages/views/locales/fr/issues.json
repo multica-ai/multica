@@ -446,6 +446,16 @@
     "prop_created": "Création",
     "prop_updated": "Mise à jour",
     "activity_section": "Activité",
+    "timeline": {
+      "group_count": "{{count}} éléments",
+      "group_range": "{{from}} – {{to}}",
+      "group_latest": "Dernier : {{time}} · {{summary}}",
+      "fold_earlier": "{{count}} enregistrements antérieurs",
+      "fold_collapse": "Réduire {{count}} enregistrements antérieurs",
+      "new_records": "{{count}} nouveaux enregistrements",
+      "order_grouped": "Grouper par type",
+      "order_raw": "Chronologique"
+    },
     "subscribe": "S'abonner",
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",

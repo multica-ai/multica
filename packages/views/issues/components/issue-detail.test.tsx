@@ -3572,3 +3572,204 @@ describe("groupSubIssuesByStage", () => {
     expect(groups.map((g) => g.stage)).toEqual([1, 2]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Timeline clustering + fold (NAPI-11)
+// ---------------------------------------------------------------------------
+
+describe("IssueDetail — timeline clustering + fold", () => {
+  function makeTemplateComment(id: string, n: number, template: string): TimelineEntry {
+    return {
+      type: "comment",
+      id,
+      actor_type: "member",
+      actor_id: "user-1",
+      content: template.replace("{{n}}", String(n)),
+      parent_id: null,
+      created_at: `2026-01-1${n}T00:00:00Z`,
+      updated_at: `2026-01-1${n}T00:00:00Z`,
+      comment_type: "comment",
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    contentEditorMounts.count = 0;
+    readonlyContentRenders.length = 0;
+    descriptionSelectionAction.current = undefined;
+    mockViewport.isMobile = false;
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.listIssueReactions.mockResolvedValue([]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
+    mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
+    mockApiObj.getWorkspaceWorkingAgents.mockResolvedValue([]);
+    mockApiObj.listProperties.mockResolvedValue({ properties: [], total: 0 });
+    mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.listTaskMessages.mockResolvedValue([]);
+    mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
+    mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.getProject.mockReset();
+  });
+
+  // --- 归并判定 ---
+  describe("cluster detection", () => {
+    it("groups ≥3 same-origin same-template comments into a cluster card", async () => {
+      const template = "待处理清单（脚本巡检自动提交 {{n}}）\n详细内容略";
+      const timeline: TimelineEntry[] = Array.from({ length: 5 }, (_, i) =>
+        makeTemplateComment(`c-${i + 1}`, i + 1, template),
+      );
+      // Add a non-matching comment at the end.
+      timeline.push({
+        type: "comment",
+        id: "c-unique",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "This is a unique standalone comment.",
+        parent_id: null,
+        created_at: "2026-01-16T00:00:00Z",
+        updated_at: "2026-01-16T00:00:00Z",
+        comment_type: "comment",
+      });
+      mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+      renderIssueDetail();
+
+      // Wait for the Activity section to render.
+      await screen.findByText("Activity");
+      // The cluster should show "待处理清单" (stripped template) as the title.
+      await screen.findByText("待处理清单");
+      // The count chip should say "5 items".
+      expect(screen.getByText("5 items")).toBeInTheDocument();
+      // The standalone comment should still render independently.
+      expect(screen.getByText("This is a unique standalone comment.")).toBeInTheDocument();
+    });
+
+    it("does NOT cluster when only 2 same-template comments (below threshold)", async () => {
+      const template = "Patrol summary {{n}}";
+      const timeline: TimelineEntry[] = [
+        makeTemplateComment("c-1", 1, template),
+        makeTemplateComment("c-2", 2, template),
+        {
+          type: "comment",
+          id: "c-3",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Another unique comment.",
+          parent_id: null,
+          created_at: "2026-01-13T00:00:00Z",
+          updated_at: "2026-01-13T00:00:00Z",
+          comment_type: "comment",
+        },
+      ];
+      mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+      renderIssueDetail();
+
+      await screen.findByText("Activity");
+      // With only 2 same-template, no cluster card appears. All comments render
+      // as standalone cards.
+      expect(screen.queryByText("Patrol summary 1")).toBeInTheDocument();
+      expect(screen.queryByText("Patrol summary 2")).toBeInTheDocument();
+      // No "items" count chip (only cluster cards have it).
+      expect(screen.queryByText("2 items")).toBeNull();
+    });
+
+    it("renders an independent comment and a different-author cluster separately", async () => {
+      const template = "巡检摘要（{{n}}）";
+      const memberComments: TimelineEntry[] = Array.from({ length: 3 }, (_, i) =>
+        makeTemplateComment(`mc-${i + 1}`, i + 1, template),
+      );
+      // Same template but different author — should NOT merge into the first cluster.
+      const agentComments: TimelineEntry[] = Array.from({ length: 3 }, (_, i) => ({
+        ...makeTemplateComment(`ac-${i + 1}`, i + 1, template),
+        actor_type: "agent",
+        actor_id: "agent-1",
+      }));
+      mockApiObj.listTimeline.mockResolvedValue([...memberComments, ...agentComments]);
+
+      renderIssueDetail();
+
+      await screen.findByText("Activity");
+      // Two cluster cards: one for member, one for agent. Both show "3 items".
+      const chips = screen.getAllByText("3 items");
+      expect(chips).toHaveLength(2);
+    });
+  });
+
+  // --- 折叠阈值 ---
+  describe("fold threshold", () => {
+    it("shows a fold bar when clustered items exceed 20", async () => {
+      // 25 unique comments — no clustering, but > 20 items → fold bar.
+      const timeline: TimelineEntry[] = Array.from({ length: 25 }, (_, i) => ({
+        type: "comment",
+        id: `unique-${i + 1}`,
+        actor_type: "member",
+        actor_id: "user-1",
+        content: `Unique comment number ${i + 1} with varied text.`,
+        parent_id: null,
+        created_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+        updated_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+        comment_type: "comment",
+      }));
+      mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+      renderIssueDetail();
+
+      await screen.findByText("Activity");
+      // The fold bar should show "5 earlier records" (25 - 20 = 5).
+      await screen.findByText("5 earlier records");
+    });
+
+    it("does NOT show a fold bar when items ≤ 20", async () => {
+      const timeline: TimelineEntry[] = Array.from({ length: 20 }, (_, i) => ({
+        type: "comment",
+        id: `u-${i + 1}`,
+        actor_type: "member",
+        actor_id: "user-1",
+        content: `Comment ${i + 1} with unique body.`,
+        parent_id: null,
+        created_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+        updated_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+        comment_type: "comment",
+      }));
+      mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+      renderIssueDetail();
+
+      await screen.findByText("Activity");
+      // No fold bar — 20 items is the threshold, not above it.
+      // Wait a tick for any async rendering to settle.
+      await new Promise((r) => setTimeout(r, 100));
+      expect(screen.queryByText(/earlier records/)).toBeNull();
+    });
+  });
+
+  // --- 深链自动展开 ---
+  describe("deep-link auto-expand", () => {
+    it("auto-expands a cluster when a deep-link targets a member inside it", async () => {
+      const template = "待处理清单（脚本巡检自动提交 {{n}}）";
+      const timeline: TimelineEntry[] = Array.from({ length: 4 }, (_, i) =>
+        makeTemplateComment(`c-${i + 1}`, i + 1, template),
+      );
+      mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+      // Render with a deep-link to c-2 (a cluster member).
+      const { container } = renderIssueDetailWithHighlight("c-2");
+
+      // Wait for the cluster card to appear and auto-expand.
+      await waitFor(() => {
+        // The cluster should be expanded, rendering c-2 as a full CommentCard
+        // with id="comment-c-2" (the deep-link anchor).
+        const anchor = container.querySelector("#comment-c-2");
+        expect(anchor).not.toBeNull();
+      }, { timeout: 3000 });
+    });
+  });
+});

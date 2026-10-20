@@ -441,6 +441,16 @@
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
     "activity_section": "动态",
+    "timeline": {
+      "group_count": "{{count}} 条",
+      "group_range": "{{from}} – {{to}}",
+      "group_latest": "最近：{{time}} · {{summary}}",
+      "fold_earlier": "更早的 {{count}} 条记录",
+      "fold_collapse": "收起更早的 {{count}} 条",
+      "new_records": "{{count}} 条新记录",
+      "order_grouped": "按类归并",
+      "order_raw": "按原始时间顺序"
+    },
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
     "delegated_subscription_badge": "由智能体代你关注",
