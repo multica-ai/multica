@@ -28,20 +28,30 @@ describe("buildWakeupInput", () => {
   });
 
   it("gives recurring checks an end date and the viewer's timezone", () => {
-    const daily = buildWakeupInput(draft({ condition: "recurring", recurrence: "daily", until: "2026-09-30" }), now);
-    expect(daily).toEqual({
+    const recurring = (patch: Partial<WakeupDraft>) =>
+      buildWakeupInput(draft({ condition: "recurring", until: "2026-09-30", ...patch }), now);
+    expect(recurring({})).toEqual({
       input: {
         agent_id: "agent", instruction: "Check the result", kind: "cron", cron_expression: "0 9 * * *",
         timezone: "Asia/Shanghai", mode: "continuous", expires_at: new Date(2026, 8, 30, 23, 59, 59).toISOString(),
       },
     });
-    expect(buildWakeupInput(draft({ condition: "recurring", recurrence: "hourly", until: "2026-09-30" }), now)).toMatchObject({
-      input: { kind: "every", interval_seconds: 3600 },
-    });
-    expect(buildWakeupInput(draft({ condition: "recurring", recurrence: "weekdays", until: "2026-09-30" }), now)).toMatchObject({
-      input: { cron_expression: "0 9 * * 1-5" },
-    });
     expect(buildWakeupInput(draft({ condition: "recurring", until: "2026-09-23" }), now)).toEqual({ error: "until_future" });
+  });
+
+  it("turns each recurrence choice into the cron the scheduler runs", () => {
+    const cron = (patch: Partial<WakeupDraft>) => {
+      const result = buildWakeupInput(draft({ condition: "recurring", until: "2026-09-30", ...patch }), now);
+      return "input" in result ? result.input.cron_expression : result.error;
+    };
+    expect(cron({ recurrence: "hourly" })).toBe("0 * * * *");
+    expect(cron({ recurrence: "daily", recurrenceTime: "07:30" })).toBe("30 7 * * *");
+    expect(cron({ recurrence: "daily", recurrenceWorkdaysOnly: true })).toBe("0 9 * * 1-5");
+    // Weekdays-only is meaningless for a rule that already names its days.
+    expect(cron({ recurrence: "weekly", recurrenceDays: [1, 2, 3, 4, 5], recurrenceTime: "18:05", recurrenceWorkdaysOnly: true })).toBe("5 18 * * 1-5");
+    expect(cron({ recurrence: "weekly", recurrenceDays: [1, 3, 5] })).toBe("0 9 * * 1,3,5");
+    expect(cron({ recurrence: "monthly", recurrenceDayOfMonth: 15 })).toBe("0 9 15 * *");
+    expect(cron({ recurrence: "monthly", recurrenceDayOfMonth: 31, recurrenceTime: "23:59" })).toBe("59 23 31 * *");
   });
 
   it("waits for a reply with a deadline and a timeout action", () => {

@@ -1,4 +1,6 @@
 import type { IssueWakeupInput, WakeupCondition as PlatformCondition } from "@multica/core/types";
+import type { DayPattern, ScheduleConfig } from "../../autopilots/components/schedule-editor/model";
+import { cronFields } from "../../autopilots/components/schedule-editor/cron-mapping";
 
 /** The 25 issue-scoped events, in catalog order. */
 export const WAKEUP_EVENT_TYPES = [
@@ -43,7 +45,7 @@ export type WakeupCondition =
   | "custom";
 export type WakeupField = "status" | "assignee" | "label" | "property";
 export type WakeupAtPreset = "10m" | "1h" | "tomorrow" | "custom";
-export type WakeupRecurrence = "hourly" | "daily" | "weekdays";
+export type WakeupRecurrence = "hourly" | "daily" | "weekly" | "monthly";
 export const WAKEUP_WAIT_DAYS = [1, 3, 7, 30] as const;
 export const WAKEUP_MAX_FIRES = [5, 10, 20, 50] as const;
 
@@ -63,6 +65,14 @@ export interface WakeupDraft {
   /** A `datetime-local` value, read in the browser's timezone. */
   atCustom: string;
   recurrence: WakeupRecurrence;
+  /** "HH:MM" the daily, weekly and monthly schedules fire at. */
+  recurrenceTime: string;
+  /** Daily schedules only: skip Saturday and Sunday. */
+  recurrenceWorkdaysOnly: boolean;
+  /** Weekly schedules: 0=Sun … 6=Sat, never empty (see toggleDay). */
+  recurrenceDays: number[];
+  /** Monthly schedules: the day of the month, 1-31. */
+  recurrenceDayOfMonth: number;
   /** A `date` value; the rule ends at the end of that local day. */
   until: string;
   /** Null waits for anyone's reply. */
@@ -117,6 +127,10 @@ export function emptyWakeupDraft(agentId: string, timezone: string, now = new Da
     atPreset: "1h",
     atCustom: "",
     recurrence: "daily",
+    recurrenceTime: "09:00",
+    recurrenceWorkdaysOnly: false,
+    recurrenceDays: [1, 2, 3, 4, 5],
+    recurrenceDayOfMonth: 1,
     until: localDate(until),
     replyActor: null,
     runAgentId: "",
@@ -191,6 +205,36 @@ export function platformCondition(
   }
 }
 
+/** The repeating rule as the schedule editor's structured model, so the cron
+ *  expression comes from one serializer instead of a second, drifting one. */
+type RecurrenceChoice = Pick<
+  WakeupDraft,
+  "recurrence" | "recurrenceTime" | "recurrenceWorkdaysOnly" | "recurrenceDays" | "recurrenceDayOfMonth" | "timezone"
+>;
+
+function recurrenceSchedule(d: RecurrenceChoice): ScheduleConfig {
+  let days: DayPattern = { kind: "every" };
+  if (d.recurrence === "weekly") days = { kind: "weekly", daysOfWeek: d.recurrenceDays };
+  else if (d.recurrence === "monthly") days = { kind: "monthly", dayOfMonth: d.recurrenceDayOfMonth };
+  // "Weekdays only" is a five-day week, which the weekly pattern already
+  // expresses — cron has no separate weekend-excluding flag.
+  else if (d.recurrence === "daily" && d.recurrenceWorkdaysOnly) days = { kind: "weekly", daysOfWeek: [1, 2, 3, 4, 5] };
+  return {
+    // An hourly rule fires on the hour: the minute has no meaning there, and the
+    // user sets none.
+    time: d.recurrence === "hourly" ? { kind: "every", interval: 1, unit: "hours", window: null, minute: 0 } : { kind: "at", time: d.recurrenceTime },
+    days,
+    timezone: d.timezone,
+    raw: null,
+  };
+}
+
+/** The five cron fields for a repeating rule; the caller passes the timezone
+ *  alongside them, so no `TZ=` prefix is needed. */
+function recurrenceCron(d: RecurrenceChoice) {
+  return cronFields(recurrenceSchedule(d));
+}
+
 /** Maps what a person chose onto the wakeup API; the server re-validates. */
 export function buildWakeupInput(
   d: WakeupDraft,
@@ -220,10 +264,11 @@ export function buildWakeupInput(
     case "recurring": {
       const end = new Date(`${d.until}T23:59:59`);
       if (!Number.isFinite(end.getTime()) || end.getTime() <= now.getTime()) return { error: "until_future" };
-      const schedule: Pick<IssueWakeupInput, "kind" | "interval_seconds" | "cron_expression" | "timezone"> =
-        d.recurrence === "hourly"
-          ? { kind: "every", interval_seconds: 3600 }
-          : { kind: "cron", cron_expression: d.recurrence === "daily" ? "0 9 * * *" : "0 9 * * 1-5", timezone: d.timezone };
+      const schedule: Pick<IssueWakeupInput, "kind" | "cron_expression" | "timezone"> = {
+        kind: "cron",
+        cron_expression: recurrenceCron(d),
+        timezone: d.timezone,
+      };
       return { input: { ...base, ...schedule, mode: "continuous", expires_at: end.toISOString() } };
     }
     default: {
