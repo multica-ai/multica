@@ -11,10 +11,13 @@ const mocks = vi.hoisted(() => ({
   role: "admin",
   copyText: vi.fn(),
   deleteProject: vi.fn(),
+  updateProject: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
   push: vi.fn(),
   recordVisit: vi.fn(),
   toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+  issuePrefix: "PROA" as string | undefined,
 }));
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
@@ -25,7 +28,10 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     switch (options.queryKey?.[0]) {
       case "project-detail":
-        return { data: PROJECT, isLoading: false };
+        return {
+          data: { ...PROJECT, issue_prefix: mocks.issuePrefix },
+          isLoading: false,
+        };
       case "members":
         return {
           data: [{ user_id: "user-1", name: "User One", role: mocks.role }],
@@ -38,14 +44,22 @@ vi.mock("@tanstack/react-query", () => ({
         return { data: undefined, isLoading: false };
     }
   },
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
 vi.mock("@multica/core/projects/queries", () => ({
   projectDetailOptions: () => ({ queryKey: ["project-detail"] }),
 }));
 
+vi.mock("@multica/core/issues/queries", () => ({
+  issueKeys: { all: (workspaceId: string) => ["issues", workspaceId] },
+}));
+
 vi.mock("@multica/core/projects/mutations", () => ({
-  useUpdateProject: () => ({ mutate: vi.fn() }),
+  useUpdateProject: () => ({
+    mutate: mocks.updateProject,
+    isPending: false,
+  }),
   useDeleteProject: () => ({ mutate: mocks.deleteProject }),
 }));
 
@@ -79,6 +93,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     projects: () => "/test-workspace/projects",
   }),
+  useCurrentWorkspace: () => ({ id: "workspace-1", issue_prefix: "SHAR" }),
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -86,7 +101,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: mocks.toastSuccess },
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
 vi.mock("react-resizable-panels", () => ({
@@ -297,10 +312,13 @@ beforeEach(() => {
   mocks.role = "admin";
   mocks.copyText.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset();
+  mocks.updateProject.mockReset();
   mocks.getShareableUrl.mockClear();
   mocks.push.mockReset();
   mocks.recordVisit.mockReset();
   mocks.toastSuccess.mockReset();
+  mocks.toastError.mockReset();
+  mocks.issuePrefix = "PROA";
 });
 
 describe("ProjectDetail sharing", () => {
@@ -354,5 +372,73 @@ describe("ProjectDetail project deletion", () => {
     expect(
       screen.queryByRole("button", { name: "Delete project" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ProjectDetail issue prefix", () => {
+  it("shows the project's own prefix when it has one", () => {
+    mocks.issuePrefix = "PROA";
+
+    renderProjectDetail();
+
+    expect(screen.getByText("PROA-n")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Workspace prefix/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls back to the workspace prefix when the project has none", () => {
+    mocks.issuePrefix = undefined;
+
+    renderProjectDetail();
+
+    expect(screen.getByText("Workspace prefix SHAR-n")).toBeInTheDocument();
+  });
+
+  it("saves a normalized prefix and can clear it back to the workspace prefix", async () => {
+    const user = userEvent.setup();
+    mocks.issuePrefix = "PROA";
+    renderProjectDetail();
+
+    const input = screen.getByRole("textbox", { name: "Prefix" });
+
+    await user.clear(input);
+    await user.type(input, "pro-b");
+    expect(input).toHaveValue("PROB");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.updateProject).toHaveBeenCalledWith(
+      { id: PROJECT.id, issue_prefix: "PROB" },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+
+    // "" is the wire value for "clear the prefix"; the key must be present.
+    await user.click(screen.getByRole("button", { name: /use workspace prefix/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.updateProject).toHaveBeenLastCalledWith(
+      { id: PROJECT.id, issue_prefix: "" },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("surfaces the server's conflict message when the prefix is taken", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    const input = screen.getByRole("textbox", { name: "Prefix" });
+    await user.clear(input);
+    await user.type(input, "SHAR");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const options = mocks.updateProject.mock.calls[0]?.[1] as {
+      onError: (error: Error) => void;
+    };
+    options.onError(new Error("Prefix SHAR is already used by project Alpha"));
+
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "Prefix SHAR is already used by project Alpha",
+    );
   });
 });

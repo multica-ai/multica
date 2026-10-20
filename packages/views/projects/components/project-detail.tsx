@@ -3,13 +3,14 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
+import { issueKeys } from "@multica/core/issues/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -17,7 +18,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssuesScope } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, useCurrentWorkspace } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
@@ -28,6 +29,10 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import {
+  ISSUE_PREFIX_MAX_LENGTH,
+  normalizeIssuePrefix,
+} from "./issue-prefix";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -105,6 +110,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const priorityLabels = useProjectPriorityLabels();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
+  const currentWorkspace = useCurrentWorkspace();
+  const workspacePrefix = currentWorkspace?.issue_prefix ?? "";
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
@@ -131,6 +138,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
+  const qc = useQueryClient();
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -202,6 +210,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
+  // Issue prefix popover. A null draft means "closed"; the value is seeded from
+  // the project each time the popover opens so a cancelled edit never sticks.
+  const [prefixOpen, setPrefixOpen] = useState(false);
+  const [prefixDraft, setPrefixDraft] = useState<string | null>(null);
   const leadQuery = leadFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
@@ -241,6 +253,33 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const issueMetrics = getProjectIssueMetrics(project);
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
+  const effectivePrefix = normalizeIssuePrefix(project.issue_prefix ?? "");
+  const prefixValue = prefixDraft !== null ? normalizeIssuePrefix(prefixDraft) : effectivePrefix;
+  const prefixChanged = prefixValue !== effectivePrefix;
+
+  const saveIssuePrefix = () => {
+    updateProject.mutate(
+      { id: project.id, issue_prefix: prefixValue },
+      {
+        onSuccess: () => {
+          setPrefixOpen(false);
+          setPrefixDraft(null);
+          // Renumbering rewrites every identifier in this project, so cached
+          // issue rows are stale even though their status did not change.
+          void qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        },
+        onError: (error) => {
+          // A 409 here means another project (or the workspace itself) already
+          // owns the prefix — show the server's sentence, it names the owner.
+          toast.error(
+            error instanceof Error && error.message
+              ? error.message
+              : t(($) => $.detail.toast_prefix_failed),
+          );
+        },
+      },
+    );
+  };
 
   const sidebarContent = (
     <div className="space-y-5">
@@ -411,6 +450,79 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_issue_prefix)}>
+            <Popover
+              open={prefixOpen}
+              onOpenChange={(v) => {
+                setPrefixOpen(v);
+                setPrefixDraft(v ? normalizeIssuePrefix(project.issue_prefix ?? "") : null);
+              }}
+            >
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="inline-flex min-w-0 items-center gap-1.5 text-caption transition-colors hover:text-foreground"
+                  >
+                    {effectivePrefix ? (
+                      <code className="truncate font-mono">{`${effectivePrefix}-n`}</code>
+                    ) : (
+                      <span className="truncate text-muted-foreground">
+                        {t(($) => $.detail.issue_prefix_uses_workspace, {
+                          example: `${workspacePrefix}-n`,
+                        })}
+                      </span>
+                    )}
+                  </button>
+                }
+              />
+              <PopoverContent align="start" className="w-72 space-y-2 p-3">
+                <div className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.detail.prop_issue_prefix)}
+                </div>
+                <div className="flex items-center gap-1.5 rounded-md border px-2 py-1">
+                  <input
+                    type="text"
+                    aria-label={t(($) => $.detail.prop_issue_prefix)}
+                    value={prefixValue}
+                    onChange={(e) => setPrefixDraft(normalizeIssuePrefix(e.target.value))}
+                    maxLength={ISSUE_PREFIX_MAX_LENGTH}
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={workspacePrefix}
+                    className="w-full min-w-0 bg-transparent font-mono text-caption uppercase outline-none placeholder:text-muted-foreground"
+                  />
+                </div>
+                <p className="text-micro leading-snug text-muted-foreground">
+                  {t(($) => $.detail.issue_prefix_rule, {
+                    example: `${prefixValue || workspacePrefix}-123`,
+                  })}
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-caption"
+                    disabled={!prefixValue}
+                    onClick={() => setPrefixDraft("")}
+                  >
+                    {t(($) => $.detail.issue_prefix_clear)}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-6 px-2 text-caption"
+                    disabled={!prefixChanged}
+                    onClick={saveIssuePrefix}
+                  >
+                    {t(($) => $.detail.issue_prefix_save)}
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </PropRow>
         </div>}
       </div>

@@ -220,6 +220,30 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(within(dialog).getByRole("button", { name: /^Change to/ })).toBeDisabled();
   });
 
+  it("keeps the dialog open and shows the server's message when a project already owns the prefix", async () => {
+    mockUpdateWorkspace.mockRejectedValueOnce(
+      new Error("prefix PROA is already used by project Alpha"),
+    );
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: "Change prefix..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Change issue prefix" });
+    const input = within(dialog).getByRole("textbox", { name: "New prefix" });
+    await user.clear(input);
+    await user.type(input, "PROA");
+    await user.click(within(dialog).getByRole("button", { name: "Change to PROA" }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole("alert")).toHaveTextContent(
+        "prefix PROA is already used by project Alpha",
+      );
+    });
+    // The user has to be able to correct it in place — a toast would vanish.
+    expect(screen.getByRole("dialog", { name: "Change issue prefix" })).toBeInTheDocument();
+    expect(input).toHaveValue("PROA");
+  });
+
   it("shows regular members the values read-only, with who to ask", () => {
     membersRef.current = [
       { user_id: "user-1", role: "member" },

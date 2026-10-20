@@ -138,7 +138,10 @@
     "local_pick_failed": "ディレクトリ選択画面を開けませんでした。",
     "local_invalid_dir": "このディレクトリは使用できません。別のものを選択してください。",
     "local_hint": "他のマシンのエージェントはこのパスを参照できず、起動に失敗します。共有作業にはリポジトリを使用してください。",
-    "repos_ref_default": "デフォルトブランチ"
+    "repos_ref_default": "デフォルトブランチ",
+    "issue_prefix": "タスク接頭辞",
+    "issue_prefix_rule": "英数字 1〜10 文字（A–Z、0–9）。空欄ならワークスペースの接頭辞（{{example}}）を使います。",
+    "issue_prefix_clear": "接頭辞を消去"
   },
   "create_issue": {
     "sr_manual": "新規タスク",

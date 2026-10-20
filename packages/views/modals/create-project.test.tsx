@@ -424,4 +424,35 @@ describe("CreateProjectModal", () => {
 
     expect(screen.getByText("No repositories match your search.")).toBeInTheDocument();
   });
+
+  // A project's issue numbers should be decided when the project is created,
+  // not discovered in settings afterwards.
+  it("normalizes the issue prefix and sends it with the new project", async () => {
+    createProjectMock.mockClear();
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText(/project title/i), "Billing");
+    const prefixInput = screen.getByRole("textbox", { name: "Issue prefix" });
+    await user.type(prefixInput, "pro-a1!");
+    expect(prefixInput).toHaveValue("PROA1");
+
+    await user.click(screen.getByRole("button", { name: /^create project$/i }));
+
+    expect(createProjectMock.mock.calls[0]?.[0]).toMatchObject({
+      issue_prefix: "PROA1",
+    });
+  });
+
+  it("leaves the prefix off the payload while it is empty", async () => {
+    createProjectMock.mockClear();
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText(/project title/i), "No prefix");
+    await user.click(screen.getByRole("button", { name: /^create project$/i }));
+
+    const payload = createProjectMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("issue_prefix");
+  });
 });

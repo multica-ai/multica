@@ -1418,6 +1418,9 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
+  // Empty = issues keep the workspace prefix. Defaulted for backends that
+  // predate project prefixes.
+  issue_prefix: z.string().default(""),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({

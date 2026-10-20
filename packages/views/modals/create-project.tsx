@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Hash, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -60,6 +60,10 @@ import {
 } from "../projects/components/labels";
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
+import {
+  ISSUE_PREFIX_MAX_LENGTH,
+  normalizeIssuePrefix,
+} from "../projects/components/issue-prefix";
 import { PillButton } from "../common/pill-button";
 import { githubShortLabel } from "../common/github-url";
 import {
@@ -168,6 +172,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
+  // Empty means "use the workspace prefix" — the same thing an omitted
+  // issue_prefix means on the wire, so the payload only carries the key once
+  // the user has typed one.
+  const [issuePrefix, setIssuePrefix] = useState("");
+  const [issuePrefixOpen, setIssuePrefixOpen] = useState(false);
   // Dates are collapsed into the ⋯ overflow by default (progressive
   // disclosure, mirroring create-issue); these flip a pill inline + open.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -395,6 +404,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
+        // Omit the key entirely while unset: an absent prefix is what "use the
+        // workspace prefix" looks like on the wire.
+        ...(issuePrefix ? { issue_prefix: issuePrefix } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -704,6 +716,61 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
               </div>
+            </PopoverContent>
+          </Popover>
+
+          {/* Issue prefix — optional, so it stays a pill instead of taking a
+              slot in the form. Unset means the project inherits the workspace
+              prefix, which is what most projects want. */}
+          <Popover open={issuePrefixOpen} onOpenChange={setIssuePrefixOpen}>
+            <PopoverTrigger
+              render={
+                <PillButton>
+                  <Hash className="size-3" />
+                  {issuePrefix ? (
+                    <span className="font-mono">{issuePrefix}</span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {t(($) => $.create_project.issue_prefix)}
+                    </span>
+                  )}
+                </PillButton>
+              }
+            />
+            <PopoverContent side="top" align="start" className="w-72 p-3 space-y-2">
+              <div className="text-caption font-medium text-muted-foreground">
+                {t(($) => $.create_project.issue_prefix)}
+              </div>
+              <div className="flex items-center gap-1.5 rounded-md border px-2 py-1">
+                <Hash className="size-3 shrink-0 text-muted-foreground" />
+                <input
+                  type="text"
+                  aria-label={t(($) => $.create_project.issue_prefix)}
+                  value={issuePrefix}
+                  onChange={(e) => setIssuePrefix(normalizeIssuePrefix(e.target.value))}
+                  maxLength={ISSUE_PREFIX_MAX_LENGTH}
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={workspace?.issue_prefix ?? ""}
+                  className="w-full min-w-0 bg-transparent font-mono text-caption uppercase outline-none placeholder:text-muted-foreground"
+                />
+                {issuePrefix && (
+                  <button
+                    type="button"
+                    onClick={() => setIssuePrefix("")}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label={t(($) => $.create_project.issue_prefix_clear)}
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                )}
+              </div>
+              <p className="text-micro leading-snug text-muted-foreground">
+                {t(($) => $.create_project.issue_prefix_rule, {
+                  example: `${issuePrefix || workspace?.issue_prefix || ""}-123`,
+                })}
+              </p>
             </PopoverContent>
           </Popover>
 

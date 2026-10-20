@@ -21,6 +21,10 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  // Project-level issue prefix (1–10 chars, A–Z / 0–9). Empty means issues in
+  // this project keep the workspace prefix. Optional because a backend that
+  // predates the feature omits the key entirely.
+  issue_prefix?: string;
 }
 
 export interface CreateProjectRequest {
@@ -33,6 +37,9 @@ export interface CreateProjectRequest {
   lead_id?: string;
   start_date?: string;
   due_date?: string;
+  // Optional project issue prefix; the server trims and upper-cases it.
+  // Omitting it leaves the project on the workspace prefix.
+  issue_prefix?: string;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -49,6 +56,9 @@ export interface UpdateProjectRequest {
   // Omit the key to leave the date untouched; send null (or "") to clear it.
   start_date?: string | null;
   due_date?: string | null;
+  // Send "" to clear the project prefix (issues fall back to the workspace
+  // prefix); omit the key to leave it untouched.
+  issue_prefix?: string;
 }
 
 export interface ListProjectsResponse {

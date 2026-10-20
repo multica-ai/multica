@@ -138,7 +138,10 @@
     "local_pick_failed": "디렉터리 선택 창을 열 수 없습니다.",
     "local_invalid_dir": "이 디렉터리는 사용할 수 없습니다. 다른 디렉터리를 선택하세요.",
     "local_hint": "다른 기기의 에이전트는 이 경로를 볼 수 없어 시작에 실패합니다. 공유 작업에는 저장소를 사용하세요.",
-    "repos_ref_default": "기본 브랜치"
+    "repos_ref_default": "기본 브랜치",
+    "issue_prefix": "태스크 접두사",
+    "issue_prefix_rule": "영문자와 숫자 1–10자(A–Z, 0–9). 비워두면 워크스페이스 접두사({{example}})를 사용합니다.",
+    "issue_prefix_clear": "접두사 지우기"
   },
   "create_issue": {
     "sr_manual": "새 태스크",

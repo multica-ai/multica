@@ -46,6 +46,7 @@ import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+import { normalizeIssuePrefix } from "../../projects/components/issue-prefix";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -144,6 +145,10 @@ export function WorkspaceTab() {
   const [prefixDraft, setPrefixDraft] = useState<string | null>(null);
   const [prefixSaveStatus, setPrefixSaveStatus] =
     useState<SettingsSaveStatus>("idle");
+  // Server sentence for a rejected prefix (a 409 names the project that
+  // already owns it). Shown inside the dialog, where the user can fix it —
+  // a toast would disappear while they are still typing.
+  const [prefixError, setPrefixError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -176,13 +181,11 @@ export function WorkspaceTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
-  // Letters + digits only, uppercase, capped at 10 chars. The backend
-  // uppercases and trims on its side too — this is purely a UX guardrail
-  // so the value the user sees in the input matches what gets persisted.
-  const normalizePrefix = (raw: string) =>
-    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  // Letters + digits only, uppercase, capped at 10 chars. The shared helper is
+  // the same guardrail the project prefix field uses, so both surfaces accept
+  // exactly what the server does.
 
-  const normalizedPrefix = normalizePrefix(prefixDraft ?? "");
+  const normalizedPrefix = normalizeIssuePrefix(prefixDraft ?? "");
   const prefixChanged =
     !!workspace && normalizedPrefix !== workspace.issue_prefix;
   const prefixInvalid = normalizedPrefix.length === 0;
@@ -226,6 +229,7 @@ export function WorkspaceTab() {
   const performPrefixSave = async (nextPrefix: string) => {
     if (!workspace) return;
     setPrefixSaveStatus("saving");
+    setPrefixError(null);
     try {
       const updated = await api.updateWorkspace(workspace.id, {
         issue_prefix: nextPrefix,
@@ -240,8 +244,11 @@ export function WorkspaceTab() {
       setPrefixDraft(null);
     } catch (error) {
       setPrefixSaveStatus("error");
-      toast.error(
-        error instanceof Error
+      // Keep the dialog open and put the server's sentence beside the input:
+      // the 409 for "a project already uses this prefix" is the whole point of
+      // this step, and it has to survive longer than a toast.
+      setPrefixError(
+        error instanceof Error && error.message
           ? error.message
           : t(($) => $.workspace.toast_save_failed),
       );
@@ -466,6 +473,7 @@ export function WorkspaceTab() {
                   size="sm"
                   onClick={() => {
                     setPrefixSaveStatus("idle");
+                    setPrefixError(null);
                     setPrefixDraft(workspace.issue_prefix);
                   }}
                 >
@@ -531,7 +539,10 @@ export function WorkspaceTab() {
       <Dialog
         open={prefixDraft !== null}
         onOpenChange={(open) => {
-          if (!open && prefixSaveStatus !== "saving") setPrefixDraft(null);
+          if (!open && prefixSaveStatus !== "saving") {
+            setPrefixDraft(null);
+            setPrefixError(null);
+          }
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -560,7 +571,7 @@ export function WorkspaceTab() {
                 autoCapitalize="characters"
                 spellCheck={false}
                 value={prefixDraft ?? ""}
-                onChange={(event) => setPrefixDraft(normalizePrefix(event.target.value))}
+                onChange={(event) => setPrefixDraft(normalizeIssuePrefix(event.target.value))}
                 maxLength={10}
                 aria-invalid={prefixInvalid}
                 className="font-mono uppercase"
@@ -569,6 +580,11 @@ export function WorkspaceTab() {
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.workspace.prefix_rule)}
               </p>
+              {prefixError && (
+                <p role="alert" className="text-caption leading-5 text-destructive">
+                  {prefixError}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-surface-border px-3 py-2 font-mono text-label">
               <span className="text-muted-foreground line-through">
