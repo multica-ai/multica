@@ -499,7 +499,11 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	}
 	committed = true
 
-	prefix := baseHandler.getIssuePrefix(r.Context(), compiled.workspaceID)
+	// Identifiers are numbered per scope: a project that owns a prefix numbers
+	// its own issues, everything else keeps the workspace prefix. Resolve the
+	// whole page in one read — like the other list endpoints — so the table,
+	// board, gantt and swimlane views render the same key as the issue detail.
+	prefixes := baseHandler.newIssuePrefixResolver(r.Context(), compiled.workspaceID)
 	issueIDs := make([]pgtype.UUID, len(scanned))
 	var originals []pgtype.UUID
 	for index, row := range scanned {
@@ -512,7 +516,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, originals...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
-		issue := issueListRowToResponse(row.issue, prefix)
+		issue := issueListRowToResponse(row.issue, prefixes.resolve(row.issue.ProjectID))
 		fillTableRow(&issue)
 		labels := labelsByIssue[issue.ID]
 		if labels == nil {

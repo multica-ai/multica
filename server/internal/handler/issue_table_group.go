@@ -522,23 +522,30 @@ func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) st
 	}
 }
 
-func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, issuePrefix string) string {
+// contextExpression renders the header context a group needs to label itself.
+// A parent group header shows the parent's identifier, so the prefix has to be
+// resolved in the parent's own numbering scope: the project prefix when that
+// project owns one, the workspace prefix otherwise. `workspacePrefix` is only
+// the fallback — resolving it row-by-row in SQL keeps the header consistent
+// with the issue detail for prefixed projects.
+func (group resolvedIssueTableGroup) contextExpression(addArg func(any) string, workspacePrefix string) string {
 	if group.kind == "compound" && group.primary != nil {
-		return group.primary.contextExpression(addArg, issuePrefix)
+		return group.primary.contextExpression(addArg, workspacePrefix)
 	}
 	if group.kind != "parent" {
 		return "'{}'::jsonb"
 	}
-	prefixRef := addArg(issuePrefix)
+	prefixRef := addArg(workspacePrefix)
 	return fmt.Sprintf(`CASE WHEN group_value = '__no_parent__' THEN '{}'::jsonb ELSE COALESCE((
   SELECT jsonb_build_object('parent', jsonb_build_object(
     'id', p.id::text,
     'number', p.number,
-    'identifier', %s::text || '-' || p.number::text,
+    'identifier', COALESCE(NULLIF(pj.issue_prefix, ''), %s::text) || '-' || p.number::text,
     'title', p.title,
     'status', p.status
   ))
   FROM issue p
+  LEFT JOIN project pj ON pj.id = p.project_id
   WHERE p.workspace_id = $1 AND p.id = group_value::uuid
 ), '{}'::jsonb) END`, prefixRef)
 }
