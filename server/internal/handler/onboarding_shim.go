@@ -248,7 +248,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, pgtype.UUID{}, issueCountPolicy)
 		if err != nil {
 			if writeIssueLimitReached(w, err) {
 				return
@@ -319,7 +319,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		))
 	}
 	if issueCreated {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := h.issuePrefixFor(r.Context(), issue.WorkspaceID, issue.ProjectID)
 		resp := issueToResponse(issue, prefix)
 		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
@@ -416,7 +416,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, pgtype.UUID{}, issueCountPolicy)
 		if err != nil {
 			if writeIssueLimitReached(w, err) {
 				return
@@ -465,7 +465,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	if issueCreated {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := h.issuePrefixFor(r.Context(), issue.WorkspaceID, issue.ProjectID)
 		resp := issueToResponse(issue, prefix)
 		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})

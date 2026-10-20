@@ -570,14 +570,14 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, iss
 	if len(issues) == 0 {
 		return out
 	}
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefixes := h.newIssuePrefixResolver(ctx, wsUUID)
 	var originals []pgtype.UUID
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
 	}
 	fill := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
 	for _, is := range issues {
-		resp := issueToResponse(is, prefix)
+		resp := issueToResponse(is, prefixes.resolve(is.ProjectID))
 		fill(&resp)
 		out = append(out, SearchIndexIssue{
 			IssueResponse:   resp,

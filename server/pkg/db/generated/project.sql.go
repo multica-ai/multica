@@ -26,10 +26,10 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, start_date, due_date
+    lead_type, lead_id, priority, start_date, due_date, issue_prefix
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter
 `
 
 type CreateProjectParams struct {
@@ -43,6 +43,7 @@ type CreateProjectParams struct {
 	Priority    string      `json:"priority"`
 	StartDate   pgtype.Date `json:"start_date"`
 	DueDate     pgtype.Date `json:"due_date"`
+	IssuePrefix string      `json:"issue_prefix"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -57,6 +58,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.Priority,
 		arg.StartDate,
 		arg.DueDate,
+		arg.IssuePrefix,
 	)
 	var i Project
 	err := row.Scan(
@@ -73,6 +75,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.IssuePrefix,
+		&i.IssueCounter,
 	)
 	return i, err
 }
@@ -117,8 +121,41 @@ func (q *Queries) GetIssueProjectLead(ctx context.Context, issueID pgtype.UUID) 
 	return i, err
 }
 
+const getProjectByIssuePrefix = `-- name: GetProjectByIssuePrefix :one
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter FROM project
+WHERE workspace_id = $1 AND issue_prefix <> '' AND issue_prefix = UPPER($2::text)
+`
+
+type GetProjectByIssuePrefixParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssuePrefix string      `json:"issue_prefix"`
+}
+
+func (q *Queries) GetProjectByIssuePrefix(ctx context.Context, arg GetProjectByIssuePrefixParams) (Project, error) {
+	row := q.db.QueryRow(ctx, getProjectByIssuePrefix, arg.WorkspaceID, arg.IssuePrefix)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.IssuePrefix,
+		&i.IssueCounter,
+	)
+	return i, err
+}
+
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -144,6 +181,8 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.IssuePrefix,
+		&i.IssueCounter,
 	)
 	return i, err
 }
@@ -190,8 +229,55 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 	return items, nil
 }
 
+const incrementProjectIssueCounter = `-- name: IncrementProjectIssueCounter :one
+UPDATE project SET issue_counter = issue_counter + 1
+WHERE id = $1
+RETURNING issue_counter
+`
+
+// Serializes project-scoped issue creation on the project row, mirroring
+// IncrementIssueCounter for the workspace scope.
+func (q *Queries) IncrementProjectIssueCounter(ctx context.Context, id pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, incrementProjectIssueCounter, id)
+	var issue_counter int64
+	err := row.Scan(&issue_counter)
+	return issue_counter, err
+}
+
+const listProjectIssuePrefixes = `-- name: ListProjectIssuePrefixes :many
+SELECT id, issue_prefix FROM project
+WHERE workspace_id = $1 AND issue_prefix <> ''
+`
+
+type ListProjectIssuePrefixesRow struct {
+	ID          pgtype.UUID `json:"id"`
+	IssuePrefix string      `json:"issue_prefix"`
+}
+
+// Every project-generated prefix in a workspace, used to resolve identifiers
+// and to keep prefixes unique across the workspace.
+func (q *Queries) ListProjectIssuePrefixes(ctx context.Context, workspaceID pgtype.UUID) ([]ListProjectIssuePrefixesRow, error) {
+	rows, err := q.db.Query(ctx, listProjectIssuePrefixes, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectIssuePrefixesRow{}
+	for rows.Next() {
+		var i ListProjectIssuePrefixesRow
+		if err := rows.Scan(&i.ID, &i.IssuePrefix); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -227,6 +313,8 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Priority,
 			&i.StartDate,
 			&i.DueDate,
+			&i.IssuePrefix,
+			&i.IssueCounter,
 		); err != nil {
 			return nil, err
 		}
@@ -278,6 +366,40 @@ func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDe
 	return id, err
 }
 
+const lockProjectForIssuePrefix = `-- name: LockProjectForIssuePrefix :one
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockProjectForIssuePrefixParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serializes prefix changes and issue renumbering against concurrent creates
+// in the same project.
+func (q *Queries) LockProjectForIssuePrefix(ctx context.Context, arg LockProjectForIssuePrefixParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockProjectForIssuePrefix, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const setProjectIssueCounter = `-- name: SetProjectIssueCounter :exec
+UPDATE project SET issue_counter = $2 WHERE id = $1
+`
+
+type SetProjectIssueCounterParams struct {
+	ID           pgtype.UUID `json:"id"`
+	IssueCounter int64       `json:"issue_counter"`
+}
+
+func (q *Queries) SetProjectIssueCounter(ctx context.Context, arg SetProjectIssueCounterParams) error {
+	_, err := q.db.Exec(ctx, setProjectIssueCounter, arg.ID, arg.IssueCounter)
+	return err
+}
+
 const updateProject = `-- name: UpdateProject :one
 UPDATE project SET
     title = COALESCE($2, title),
@@ -287,11 +409,12 @@ UPDATE project SET
     priority = COALESCE($6, priority),
     lead_type = $7,
     lead_id = $8,
-    start_date = $9,
-    due_date = $10,
+    issue_prefix = COALESCE($9, issue_prefix),
+    start_date = $10,
+    due_date = $11,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter
 `
 
 type UpdateProjectParams struct {
@@ -303,6 +426,7 @@ type UpdateProjectParams struct {
 	Priority    pgtype.Text `json:"priority"`
 	LeadType    pgtype.Text `json:"lead_type"`
 	LeadID      pgtype.UUID `json:"lead_id"`
+	IssuePrefix pgtype.Text `json:"issue_prefix"`
 	StartDate   pgtype.Date `json:"start_date"`
 	DueDate     pgtype.Date `json:"due_date"`
 }
@@ -317,6 +441,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Priority,
 		arg.LeadType,
 		arg.LeadID,
+		arg.IssuePrefix,
 		arg.StartDate,
 		arg.DueDate,
 	)
@@ -335,6 +460,8 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.IssuePrefix,
+		&i.IssueCounter,
 	)
 	return i, err
 }

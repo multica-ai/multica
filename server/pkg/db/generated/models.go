@@ -1321,19 +1321,21 @@ type PluginStorage struct {
 }
 
 type Project struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Title       string             `json:"title"`
-	Description pgtype.Text        `json:"description"`
-	Icon        pgtype.Text        `json:"icon"`
-	Status      string             `json:"status"`
-	LeadType    pgtype.Text        `json:"lead_type"`
-	LeadID      pgtype.UUID        `json:"lead_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Priority    string             `json:"priority"`
-	StartDate   pgtype.Date        `json:"start_date"`
-	DueDate     pgtype.Date        `json:"due_date"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	Icon         pgtype.Text        `json:"icon"`
+	Status       string             `json:"status"`
+	LeadType     pgtype.Text        `json:"lead_type"`
+	LeadID       pgtype.UUID        `json:"lead_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Priority     string             `json:"priority"`
+	StartDate    pgtype.Date        `json:"start_date"`
+	DueDate      pgtype.Date        `json:"due_date"`
+	IssuePrefix  string             `json:"issue_prefix"`
+	IssueCounter int64              `json:"issue_counter"`
 }
 
 type ProjectResource struct {

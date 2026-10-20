@@ -35,7 +35,10 @@ type ProjectResponse struct {
 	// timezone — same contract as issue.start_date / issue.due_date.
 	StartDate  *string `json:"start_date"`
 	DueDate    *string `json:"due_date"`
-	CreatedAt  string  `json:"created_at"`
+	// IssuePrefix is the project's own identifier prefix ("" = project issues
+	// are numbered and prefixed by the workspace).
+	IssuePrefix string `json:"issue_prefix"`
+	CreatedAt   string `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
 	IssueCount int64   `json:"issue_count"`
 	DoneCount  int64   `json:"done_count"`
@@ -59,6 +62,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		LeadID:      uuidToPtr(p.LeadID),
 		StartDate:   dateToPtr(p.StartDate),
 		DueDate:     dateToPtr(p.DueDate),
+		IssuePrefix: p.IssuePrefix,
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
 	}
@@ -108,6 +112,9 @@ type CreateProjectRequest struct {
 	LeadID      *string                               `json:"lead_id"`
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
+	// IssuePrefix optionally gives the project its own numbering scope
+	// (PROA-1). Empty means the project inherits the workspace prefix.
+	IssuePrefix *string                               `json:"issue_prefix"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
@@ -131,6 +138,9 @@ type UpdateProjectRequest struct {
 	LeadID      *string `json:"lead_id"`
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
+	// IssuePrefix absent leaves the prefix unchanged; an empty string clears it
+	// and moves the project's issues back to the workspace scope.
+	IssuePrefix *string `json:"issue_prefix"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +311,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var issuePrefix string
+	if req.IssuePrefix != nil {
+		prefix, ok := h.validateProjectIssuePrefix(w, r, h.Queries, wsUUID, pgtype.UUID{}, *req.IssuePrefix)
+		if !ok {
+			return
+		}
+		issuePrefix = prefix
+	}
+
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
 	var startDate pgtype.Date
@@ -378,6 +397,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
+		IssuePrefix: issuePrefix,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -585,16 +605,78 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
-	project, err := h.Queries.UpdateProject(r.Context(), params)
-	if err != nil {
-		h.writeProjectWriteError(w, r, err, "update")
-		return
+	issuePrefix := prevProject.IssuePrefix
+	prefixChanged := false
+	if req.IssuePrefix != nil {
+		prefix, ok := h.validateProjectIssuePrefix(w, r, h.Queries, wsUUID, prevProject.ID, *req.IssuePrefix)
+		if !ok {
+			return
+		}
+		issuePrefix = prefix
+		prefixChanged = prefix != prevProject.IssuePrefix
+	}
+	params.IssuePrefix = pgtype.Text{String: issuePrefix, Valid: true}
+
+	var project db.Project
+	if !prefixChanged {
+		project, err = h.Queries.UpdateProject(r.Context(), params)
+		if err != nil {
+			h.writeProjectWriteError(w, r, err, "update")
+			return
+		}
+	} else {
+		// A prefix change moves every issue of this project into a new numbering
+		// scope, so the prefix write and the renumbering share one transaction.
+		project, err = h.updateProjectIssuePrefix(r, wsUUID, params, issuePrefix)
+		if err != nil {
+			h.writeProjectWriteError(w, r, err, "update")
+			return
+		}
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// updateProjectIssuePrefix applies a prefix change and renumbers the project's
+// issues in the same transaction, allocating from the new scope's counter in
+// issue-id order.
+func (h *Handler) updateProjectIssuePrefix(r *http.Request, workspaceID pgtype.UUID, params db.UpdateProjectParams, newPrefix string) (db.Project, error) {
+	ctx := r.Context()
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Project{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockProjectForIssuePrefix(ctx, db.LockProjectForIssuePrefixParams{
+		ID:          params.ID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		return db.Project{}, err
+	}
+	project, err := qtx.UpdateProject(ctx, params)
+	if err != nil {
+		return db.Project{}, err
+	}
+	if newPrefix == "" {
+		issueIDs, err := qtx.ListProjectIssueIDs(ctx, project.ID)
+		if err != nil {
+			return db.Project{}, err
+		}
+		if err := h.renumberIssuesToWorkspace(ctx, qtx, workspaceID, issueIDs); err != nil {
+			return db.Project{}, err
+		}
+	} else if err := h.renumberProjectIssues(ctx, qtx, project.ID); err != nil {
+		return db.Project{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Project{}, err
+	}
+	return project, nil
 }
 
 func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
@@ -638,6 +720,19 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to lock project")
 		return
+	}
+	// The project's issues fall back to the workspace numbering scope once the
+	// FK becomes NULL, so give them workspace numbers in the same transaction.
+	if project.IssuePrefix != "" {
+		issueIDs, err := qtx.ListProjectIssueIDs(r.Context(), project.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load project issues")
+			return
+		}
+		if err := h.renumberIssuesToWorkspace(r.Context(), qtx, project.WorkspaceID, issueIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to renumber project issues")
+			return
+		}
 	}
 	if err := qtx.ClearChatSessionProjectByProject(r.Context(), db.ClearChatSessionProjectByProjectParams{
 		ProjectID:   project.ID,

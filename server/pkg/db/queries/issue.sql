@@ -766,3 +766,21 @@ FROM (
     WHERE workspace_id = $1
     LIMIT sqlc.arg('limit')::bigint
 ) bounded_issues;
+
+-- name: GetIssueByPrefixAndNumber :one
+-- Resolves an identifier within its numbering scope. The effective prefix is
+-- the project prefix when the issue belongs to a prefixed project, otherwise
+-- the workspace prefix passed by the caller (which already accounts for the
+-- legacy name-based fallback for workspaces with an empty stored prefix).
+SELECT i.* FROM issue i
+LEFT JOIN project p ON p.id = i.project_id
+WHERE i.workspace_id = sqlc.arg('workspace_id')
+  AND i.number = sqlc.arg('number')
+  AND UPPER(COALESCE(NULLIF(p.issue_prefix, ''), sqlc.arg('workspace_prefix')::text)) = UPPER(sqlc.arg('prefix')::text);
+
+-- name: ListProjectIssueIDs :many
+-- Ordered by id so renumbering is deterministic.
+SELECT id FROM issue WHERE project_id = $1 ORDER BY id;
+
+-- name: SetIssueNumber :exec
+UPDATE issue SET number = $2 WHERE id = $1;

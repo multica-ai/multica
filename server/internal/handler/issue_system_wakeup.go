@@ -102,7 +102,7 @@ func (h *Handler) childDoneSystemWakeup(r *http.Request, parent db.Issue) (*syst
 	if stage.Valid {
 		out.Stage = &stage.Int32
 	}
-	prefix := h.getIssuePrefix(ctx, parent.WorkspaceID)
+	prefixes := h.newIssuePrefixResolver(ctx, parent.WorkspaceID)
 	for _, c := range children {
 		if stage.Valid && (!c.Stage.Valid || c.Stage.Int32 != stage.Int32) {
 			continue
@@ -115,7 +115,7 @@ func (h *Handler) childDoneSystemWakeup(r *http.Request, parent db.Issue) (*syst
 		}
 		out.Remaining++
 		if len(out.Waiting) < 5 {
-			out.Waiting = append(out.Waiting, prefix+"-"+strconv.Itoa(int(c.Number)))
+			out.Waiting = append(out.Waiting, prefixes.resolve(c.ProjectID)+"-"+strconv.Itoa(int(c.Number)))
 		}
 	}
 	ws, err := h.Queries.GetWorkspace(ctx, parent.WorkspaceID)

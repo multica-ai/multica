@@ -430,6 +430,18 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if prefix != "" {
+			// Identifiers are prefix + number, so a project prefix equal to the
+			// workspace prefix would make one identifier name two scopes.
+			if project, err := h.Queries.GetProjectByIssuePrefix(r.Context(), db.GetProjectByIssuePrefixParams{
+				WorkspaceID: idUUID,
+				IssuePrefix: prefix,
+			}); err == nil {
+				writeError(w, http.StatusConflict, "issue prefix "+prefix+" is already used by project "+project.Title+"; change that project's prefix first")
+				return
+			} else if !isNotFound(err) {
+				writeError(w, http.StatusInternalServerError, "failed to validate issue prefix")
+				return
+			}
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
 	}
