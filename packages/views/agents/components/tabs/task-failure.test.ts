@@ -117,6 +117,7 @@ describe("cancelReasonLabel", () => {
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
+      vi: "Bị hệ thống hủy",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {

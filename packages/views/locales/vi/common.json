@@ -1,0 +1,132 @@
+{
+  "avatar_upload": {
+    "change": "Đổi ảnh đại diện",
+    "remove": "Loại bỏ",
+    "select_image": "Hãy chọn một file hình ảnh.",
+    "updated": "Đã cập nhật ảnh đại diện",
+    "failed": "Không tải lên được ảnh đại diện",
+    "upload_image": "Tải lên hình ảnh",
+    "emoji_label": "Emoji",
+    "more_emojis": "Thêm emoji…",
+    "emoji_loading": "Đang tải…"
+  },
+  "avatar_crop": {
+    "title": "Chỉnh sửa ảnh đại diện",
+    "zoom": "Thu phóng",
+    "zoom_in": "Phóng to",
+    "zoom_out": "Thu nhỏ",
+    "rotate": "Xoay",
+    "reset": "Đặt lại",
+    "cancel": "Hủy",
+    "apply": "Lưu",
+    "uploading": "Đang tải lên…",
+    "loading": "Đang tải…",
+    "load_failed": "Không tải được hình ảnh"
+  },
+  "color_picker": {
+    "saturation": "Độ bão hòa và độ sáng",
+    "hue": "Sắc độ",
+    "hex": "Mã màu hex",
+    "eyedropper": "Chọn màu từ màn hình",
+    "presets": "Màu đặt sẵn",
+    "random": "Ngẫu nhiên"
+  },
+  "save": "Lưu",
+  "cancel": "Hủy",
+  "delete": "Xóa",
+  "confirm": "Xác nhận",
+  "loading": "Đang tải...",
+  "time": {
+    "just_now": "Vừa xong",
+    "minutes_ago": "{{count}} phút trước",
+    "hours_ago": "{{count}} giờ trước",
+    "days_ago": "{{count}} ngày trước"
+  },
+  "lark_bind": {
+    "page_title": "Liên kết tài khoản Lark của bạn",
+    "redeeming": "Đang đổi token liên kết…",
+    "needs_auth_description": "Đăng nhập vào Multica để hoàn tất liên kết. Token trong đường link gắn tài khoản Lark của bạn với người dùng Multica này, nên bạn phải đăng nhập trước.",
+    "sign_in": "Đăng nhập",
+    "done_title": "Bạn đã liên kết xong.",
+    "done_description": "Tin nhắn tiếp theo của bạn gửi tới Bot trong Lark sẽ đến thẳng Agent. Bạn có thể đóng tab này.",
+    "error_title": "Không hoàn tất được liên kết",
+    "error_admin_hint": "Nếu tình trạng này tiếp diễn, hãy nhờ quản trị viên không gian làm việc gửi lại đường link liên kết từ Lark.",
+    "error_missing_token": "Đường link thiếu token liên kết. Hãy nhờ Bot gửi link mới trong Lark.",
+    "error_expired": "Đường link liên kết này không hợp lệ hoặc đã hết hạn (link có hiệu lực trong 15 phút). Hãy nhờ Bot gửi link mới.",
+    "error_already_bound": "Tài khoản Lark này đã được liên kết với một người dùng Multica khác. Việc chuyển tài khoản phải qua bước hủy liên kết rõ ràng trước.",
+    "error_not_member": "Bạn đang đăng nhập bằng một tài khoản Multica không phải thành viên của không gian làm việc này.",
+    "error_unknown": "Đã xảy ra lỗi. Hãy thử lại, và nếu vấn đề vẫn tiếp diễn, hãy liên hệ quản trị viên không gian làm việc."
+  },
+  "slack_bind": {
+    "page_title": "Liên kết tài khoản Slack của bạn",
+    "redeeming": "Đang liên kết tài khoản của bạn…",
+    "needs_auth_description": "Đăng nhập vào Multica để hoàn tất liên kết. Token trong đường link gắn tài khoản Slack của bạn với người dùng Multica này, nên bạn phải đăng nhập trước.",
+    "sign_in": "Đăng nhập",
+    "done_title": "Bạn đã liên kết xong.",
+    "done_description": "Tin nhắn tiếp theo của bạn gửi tới bot trong Slack sẽ đến thẳng agent. Bạn có thể đóng tab này.",
+    "error_title": "Không hoàn tất được liên kết",
+    "error_admin_hint": "Nếu tình trạng này tiếp diễn, hãy nhắn lại cho bot trong Slack để nhận đường link mới.",
+    "error_missing_token": "Đường link thiếu token. Hãy nhắn lại cho bot trong Slack để nhận link mới.",
+    "error_expired": "Đường link này không hợp lệ hoặc đã hết hạn (link có hiệu lực trong 15 phút). Hãy nhắn lại cho bot để nhận link mới.",
+    "error_already_bound": "Tài khoản Slack này đã được liên kết với một người dùng Multica khác. Việc chuyển tài khoản phải qua bước hủy liên kết rõ ràng trước.",
+    "error_not_member": "Bạn đang đăng nhập bằng một tài khoản Multica không phải thành viên của không gian làm việc này.",
+    "error_unknown": "Đã xảy ra lỗi. Hãy thử lại, và nếu vấn đề vẫn tiếp diễn, hãy liên hệ quản trị viên không gian làm việc."
+  },
+  "dingtalk_bind": {
+    "page_title": "Liên kết tài khoản DingTalk của bạn",
+    "redeeming": "Đang liên kết tài khoản của bạn…",
+    "needs_auth_description": "Đăng nhập vào Multica để hoàn tất liên kết. Token trong đường link gắn tài khoản DingTalk của bạn với người dùng Multica này, nên bạn phải đăng nhập trước.",
+    "sign_in": "Đăng nhập",
+    "done_title": "Bạn đã liên kết xong.",
+    "done_description": "Tin nhắn tiếp theo của bạn gửi tới bot trong DingTalk sẽ đến thẳng agent. Bạn có thể đóng tab này.",
+    "error_title": "Không hoàn tất được liên kết",
+    "error_admin_hint": "Nếu tình trạng này tiếp diễn, hãy nhắn lại cho bot trong DingTalk để nhận đường link mới.",
+    "error_missing_token": "Đường link thiếu token. Hãy nhắn lại cho bot trong DingTalk để nhận link mới.",
+    "error_expired": "Đường link này không hợp lệ hoặc đã hết hạn (link có hiệu lực trong 15 phút). Hãy nhắn lại cho bot để nhận link mới.",
+    "error_already_bound": "Tài khoản DingTalk này đã được liên kết với một người dùng Multica khác. Việc chuyển tài khoản phải qua bước hủy liên kết rõ ràng trước.",
+    "error_not_member": "Bạn đang đăng nhập bằng một tài khoản Multica không phải thành viên của không gian làm việc này.",
+    "error_unknown": "Đã xảy ra lỗi. Hãy thử lại, và nếu vấn đề vẫn tiếp diễn, hãy liên hệ quản trị viên không gian làm việc."
+  },
+  "telegram_bind": {
+    "page_title": "Liên kết tài khoản Telegram của bạn",
+    "redeeming": "Đang liên kết tài khoản của bạn…",
+    "needs_auth_description": "Đăng nhập vào Multica để hoàn tất liên kết. Token trong đường link gắn tài khoản Telegram của bạn với người dùng Multica này, nên bạn phải đăng nhập trước.",
+    "sign_in": "Đăng nhập",
+    "done_title": "Bạn đã liên kết xong.",
+    "done_description": "Tin nhắn tiếp theo của bạn gửi tới bot trong Telegram sẽ đến thẳng agent. Bạn có thể đóng tab này.",
+    "error_title": "Không hoàn tất được liên kết",
+    "error_admin_hint": "Nếu tình trạng này tiếp diễn, hãy nhắn lại cho bot trong Telegram để nhận đường link mới.",
+    "error_missing_token": "Đường link thiếu token. Hãy nhắn lại cho bot trong Telegram để nhận link mới.",
+    "error_expired": "Đường link này không hợp lệ hoặc đã hết hạn (link có hiệu lực trong 15 phút). Hãy nhắn lại cho bot để nhận link mới.",
+    "error_already_bound": "Tài khoản Telegram này đã được liên kết với một người dùng Multica khác. Việc chuyển tài khoản phải qua bước hủy liên kết rõ ràng trước.",
+    "error_not_member": "Bạn đang đăng nhập bằng một tài khoản Multica không phải thành viên của không gian làm việc này.",
+    "error_unknown": "Đã xảy ra lỗi. Hãy thử lại, và nếu vấn đề vẫn tiếp diễn, hãy liên hệ quản trị viên không gian làm việc."
+  },
+  "expandable_description": {
+    "expand": "Hiển thị thêm",
+    "collapse": "Thu gọn"
+  },
+  "wecom_bind": {
+    "page_title": "Liên kết tài khoản Multica của bạn",
+    "redeeming": "Đang liên kết tài khoản của bạn…",
+    "needs_auth_description": "Đăng nhập vào Multica để hoàn tất liên kết. Token trong đường link gắn danh tính WeCom của bạn với người dùng Multica này, nên bạn phải đăng nhập trước.",
+    "sign_in": "Đăng nhập",
+    "done_title": "Bạn đã liên kết xong.",
+    "done_description": "Tin nhắn tiếp theo của bạn gửi tới bot thông minh trong WeCom sẽ đến thẳng agent. Bạn có thể đóng tab này.",
+    "error_title": "Không hoàn tất được liên kết",
+    "error_admin_hint": "Nếu tình trạng này tiếp diễn, hãy nhắn lại cho bot trong WeCom để nhận đường link mới.",
+    "error_missing_token": "Đường link thiếu token. Hãy nhắn lại cho bot trong WeCom để nhận link mới.",
+    "error_expired": "Đường link này không hợp lệ hoặc đã hết hạn (link có hiệu lực trong 15 phút). Hãy nhắn lại cho bot để nhận link mới.",
+    "error_already_bound": "Danh tính WeCom này đã được liên kết với một người dùng Multica khác. Việc chuyển tài khoản phải qua bước hủy liên kết rõ ràng trước.",
+    "error_not_member": "Bạn đang đăng nhập bằng một tài khoản Multica không phải thành viên của không gian làm việc này.",
+    "error_unknown": "Đã xảy ra lỗi. Hãy thử lại, và nếu vấn đề vẫn tiếp diễn, hãy liên hệ quản trị viên không gian làm việc."
+  },
+  "not_found": {
+    "title": "Không tìm thấy trang",
+    "description": "Trang bạn đang tìm không tồn tại hoặc đã bị di chuyển.",
+    "back_to_multica": "Quay về Multica"
+  },
+  "navigation": {
+    "open_in_new_tab": "Mở trong tab mới"
+  }
+}

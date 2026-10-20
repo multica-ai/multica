@@ -1,0 +1,65 @@
+{
+  "nav": {
+    "inbox": "Hộp thư đến",
+    "chat": "Trò chuyện",
+    "my_issues": "Công việc của tôi",
+    "issues": "Công việc",
+    "projects": "Dự án",
+    "autopilots": "Autopilot",
+    "agents": "Agent",
+    "squads": "Squad",
+    "usage": "Phân tích",
+    "runtimes": "Runtime",
+    "skills": "Skills",
+    "settings": "Cài đặt"
+  },
+  "tab": {
+    "issue": "Công việc",
+    "project": "Dự án",
+    "autopilot": "Autopilot",
+    "agent": "Agent",
+    "member": "Thành viên",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Máy",
+    "runtime": "Runtime",
+    "attachment": "Tệp đính kèm",
+    "create_agent": "Tạo Agent",
+    "unknown": "Trang không xác định"
+  },
+  "help": {
+    "trigger": "Trợ giúp",
+    "download_desktop": "Ứng dụng desktop",
+    "docs": "Tài liệu",
+    "changelog": "Nhật ký thay đổi",
+    "discord": "Discord",
+    "feedback": "Phản hồi",
+    "server_version": "Phiên bản máy chủ {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Đang tải không gian làm việc…",
+    "loading_named_prefix": "Đang tải"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Bỏ ghim",
+    "workspaces_label": "Không gian làm việc",
+    "create_workspace": "Tạo không gian làm việc",
+    "pending_invitations_label": "Lời mời đang chờ",
+    "invitation_workspace_fallback": "Không gian làm việc",
+    "invitation_join": "Tham gia",
+    "invitation_decline": "Từ chối",
+    "log_out": "Đăng xuất",
+    "new_issue": "Công việc mới",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Đã ghim",
+    "work_group": "Công việc",
+    "ai_team_group": "Nhóm AI",
+    "show_more_pins": "Hiển thị thêm {{count}}…",
+    "show_fewer_pins": "Hiển thị ít hơn",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Tham gia Discord của chúng tôi",
+      "dismiss": "Bỏ qua"
+    }
+  }
+}

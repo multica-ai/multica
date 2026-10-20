@@ -1,0 +1,144 @@
+{
+  "page": {
+    "title": "Squad",
+    "new_button": "Squad mới",
+    "empty_no_squads": "Chưa có squad nào.",
+    "empty_no_match": "Không có squad nào khớp với bộ lọc của bạn.",
+    "table": {
+      "name": "Squad",
+      "leader": "Trưởng nhóm",
+      "members": "Thành viên",
+      "creator": "Người tạo",
+      "created": "Ngày tạo"
+    },
+    "no_matches": "Không có squad nào khớp",
+    "row_menu": "Thao tác với squad",
+    "archive_action": "Lưu trữ"
+  },
+  "inspector": {
+    "details_section": "Chi tiết",
+    "archive_button": "Lưu trữ"
+  },
+  "member_type": {
+    "agent": "Agent",
+    "member": "Thành viên"
+  },
+  "archive_dialog": {
+    "title": "Lưu trữ squad này?",
+    "description": "\"{{name}}\" sẽ được lưu trữ. Các công việc hiện đang giao cho squad này sẽ được chuyển cho trưởng nhóm của nó. Hành động này không thể hoàn tác — hãy tạo squad mới nếu bạn cần khôi phục việc điều phối.",
+    "cancel": "Hủy",
+    "confirm": "Lưu trữ",
+    "archiving": "Đang lưu trữ…",
+    "success": "Đã lưu trữ squad"
+  },
+  "name_editor": {
+    "title": "Đổi tên squad",
+    "placeholder": "Tên squad",
+    "required": "Tên là bắt buộc",
+    "cancel": "Hủy",
+    "save": "Lưu",
+    "saved": "Đã lưu",
+    "save_failed": "Không lưu được"
+  },
+  "add_member_dialog": {
+    "title": "Thêm thành viên",
+    "description": "Chọn thành viên không gian làm việc hoặc agent.",
+    "label_member": "Thành viên",
+    "label_role": "Vai trò",
+    "label_optional": "(không bắt buộc)",
+    "cancel": "Hủy",
+    "select_target": "Chọn một thành viên hoặc agent",
+    "search_placeholder": "Tìm kiếm thành viên hoặc agent...",
+    "members_section": "Thành viên",
+    "agents_section": "Agent",
+    "role_placeholder": "ví dụ: Reviewer, Frontend Lead",
+    "add": "Thêm"
+  },
+  "role_editor": {
+    "empty": "Thêm vai trò…",
+    "placeholder": "Vai trò (ví dụ: Reviewer)"
+  },
+  "description_dialog": {
+    "title": "Chỉnh sửa mô tả",
+    "placeholder_empty": "Thêm mô tả",
+    "cancel": "Hủy",
+    "responsibility_placeholder": "Squad này chịu trách nhiệm về việc gì?",
+    "save": "Lưu"
+  },
+  "discard_changes_dialog": {
+    "title": "Hủy các thay đổi chưa lưu?",
+    "description": "Bạn có thay đổi chưa lưu trên tab này. Chuyển tab sẽ hủy các thay đổi đó.",
+    "keep_editing": "Tiếp tục chỉnh sửa",
+    "discard_button": "Hủy bỏ"
+  },
+  "members_tab": {
+    "section_title": "Thành viên",
+    "section_count_other": "{{count}} thành viên trong squad này",
+    "add_member_button": "Thêm thành viên",
+    "create_agent_button": "Tạo Agent",
+    "leader_chip": "Trưởng nhóm",
+    "view_agent_tooltip": "Mở chi tiết agent",
+    "make_leader_tooltip": "Đặt làm trưởng nhóm squad",
+    "remove_member_tooltip": "Loại khỏi squad",
+    "status_working": "Đang làm việc",
+    "status_idle": "Nhàn rỗi",
+    "status_offline": "Ngoại tuyến",
+    "status_unstable": "Không ổn định",
+    "status_archived": "Đã lưu trữ",
+    "issue_status_blocked": "bị chặn",
+    "active_issue_more": "và {{count}} công việc nữa",
+    "last_active_label": "hoạt động lần cuối {{time}}"
+  },
+  "detail_tabs": {
+    "members": "Thành viên",
+    "instructions": "Hướng dẫn"
+  },
+  "details": {
+    "leader": "Trưởng nhóm",
+    "members": "Thành viên",
+    "created_by": "Người tạo",
+    "created": "Ngày tạo",
+    "updated": "Ngày cập nhật"
+  },
+  "toasts": {
+    "member_added": "Đã thêm thành viên",
+    "member_add_failed": "Không thêm được thành viên",
+    "member_removed": "Đã loại bỏ thành viên",
+    "member_remove_failed": "Không loại bỏ được thành viên",
+    "role_updated": "Đã cập nhật vai trò",
+    "role_update_failed": "Không cập nhật được vai trò",
+    "leader_updated": "Đã cập nhật trưởng nhóm",
+    "leader_update_failed": "Không cập nhật được trưởng nhóm",
+    "archive_failed": "Không lưu trữ được squad",
+    "instructions_saved": "Đã lưu hướng dẫn"
+  },
+  "profile_card": {
+    "unavailable": "Squad không khả dụng",
+    "detail_link": "Chi tiết →",
+    "archived": "Đã lưu trữ",
+    "member_count_other": "{{count}} thành viên",
+    "members_section": "Thành viên",
+    "more_members_other": "+{{count}} nữa"
+  },
+  "instructions_tab": {
+    "description": "Trưởng nhóm đọc các hướng dẫn này mỗi khi làm việc trên một công việc được giao cho squad này.",
+    "unsaved_changes": "Thay đổi chưa lưu",
+    "save_button": "Lưu",
+    "placeholder": "ví dụ: Luôn bắt đầu bằng cách viết một test đang lỗi. Ưu tiên các commit nhỏ, độc lập."
+  },
+  "scope": {
+    "mine": "Của tôi",
+    "all": "Tất cả"
+  },
+  "toolbar": {
+    "display": "Hiển thị",
+    "sort_by": "Sắp xếp theo",
+    "direction_asc": "Tăng dần",
+    "direction_desc": "Giảm dần",
+    "section_columns": "Cột",
+    "result_count_title": "Squad khớp / tất cả squad",
+    "filter_label": "Bộ lọc",
+    "filter_active_count_other": "{{count}} bộ lọc",
+    "clear_filters": "Xóa bộ lọc"
+  }
+}

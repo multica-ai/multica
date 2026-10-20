@@ -1,0 +1,251 @@
+{
+  "page": {
+    "title": "Trò chuyện",
+    "select_prompt": "Chọn một cuộc trò chuyện, hoặc bắt đầu cuộc mới bằng nút +",
+    "agent_link_no_access": "Bạn không có quyền trò chuyện với agent này."
+  },
+  "fab": {
+    "running": "Multica đang làm việc...",
+    "unread_other": "{{count}} cuộc trò chuyện chưa đọc",
+    "default": "Hỏi Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Tạo một agent để bắt đầu trò chuyện",
+    "placeholder_archived": "Phiên này đã được lưu trữ",
+    "placeholder_archived_agent": "Agent này đã được lưu trữ",
+    "placeholder_runtime_required": "Gắn một runtime để tiếp tục",
+    "placeholder_access_revoked": "Bạn không còn quyền chạy agent này",
+    "placeholder_named": "Nhắn tin cho {{name}}…",
+    "placeholder_default": "Bắt đầu tin nhắn…",
+    "send_tooltip": "Gửi",
+    "queue_send_tooltip": "Xếp hàng tin nhắn",
+    "stop_tooltip": "Dừng",
+    "send_failed_toast": "Không gửi được tin nhắn",
+    "send_blocked_toast": "Không gửi tin nhắn — bạn không còn quyền sử dụng agent này",
+    "runtime_required_toast": "Không gửi tin nhắn — hãy gắn một runtime cho agent này trước",
+    "runtime_access_denied_toast": "Không gửi tin nhắn — agent này không thể chạy trên runtime riêng tư của nó. Hãy đặt runtime ở chế độ công khai, hoặc gắn lại/sao chép agent sang một runtime mà chủ sở hữu của nó có thể dùng",
+    "attachment_bind_failed_toast": "Đã gửi tin nhắn, nhưng các tệp không được đính kèm. Hãy thử lại sau giây lát.",
+    "add_tooltip": "Thêm",
+    "upload_file": "Hình ảnh hoặc tệp",
+    "project_context": "Ngữ cảnh dự án",
+    "change_project_context": "Thay đổi ngữ cảnh dự án",
+    "remove_project_context": "Loại bỏ ngữ cảnh dự án",
+    "no_projects": "Chưa có dự án nào",
+    "project_context_unsupported": "Mô tả dự án sẽ không được áp dụng — daemon của agent này cần được nâng cấp"
+  },
+  "queue": {
+    "title_other": "{{count}} tin nhắn đang xếp hàng",
+    "clear": "Xóa tất cả",
+    "steer": "Điều hướng",
+    "steer_unavailable": "Điều hướng khả dụng sau khi câu trả lời hiện tại bắt đầu",
+    "steer_no_permission": "Bạn không còn quyền chạy agent này",
+    "steer_unavailable_toast": "Điều hướng không khả dụng. Đang làm mới hàng đợi.",
+    "edit": "Chỉnh sửa tin nhắn đang xếp hàng",
+    "remove": "Loại bỏ tin nhắn đang xếp hàng",
+    "more": "Thêm thao tác hàng đợi",
+    "fallback": "Tin nhắn đang xếp hàng",
+    "action_failed_toast": "Không cập nhật được tin nhắn đang xếp hàng"
+  },
+  "message_list": {
+    "show_details": "Hiện chi tiết",
+    "replied_in": "Đã trả lời trong {{elapsed}}",
+    "failed_after": "Thất bại sau {{elapsed}}",
+    "finished_in": "Hoàn thành trong {{elapsed}}",
+    "no_response": "Agent đã kết thúc lượt này mà không có câu trả lời bằng văn bản.",
+    "failure": {
+      "agent_error": "Agent gặp lỗi và không thể hoàn thành câu trả lời. Hãy thử lại.",
+      "timeout": "Agent mất quá lâu và đã dừng trước khi hoàn thành. Hãy thử lại, hoặc chia yêu cầu của bạn thành các bước nhỏ hơn.",
+      "codex_semantic_inactivity": "Agent đã rơi vào trạng thái nhàn rỗi và dừng trước khi hoàn thành. Hãy thử lại.",
+      "runtime_offline": "Agent hiện đang ngoại tuyến nên không thể trả lời. Hãy thử lại khi nó trực tuyến trở lại.",
+      "runtime_access_denied": "Agent này không thể chạy trên runtime riêng tư của nó nên không thể trả lời. Hãy đặt runtime ở chế độ công khai, hoặc gắn lại/sao chép agent sang một runtime mà chủ sở hữu của nó có thể dùng.",
+      "runtime_recovery": "Agent đã khởi động lại trước khi có thể hoàn thành. Hãy thử lại.",
+      "manual": "Câu trả lời này đã bị hủy.",
+      "skill_bundle_unavailable": "Không tải được các skill của agent nên nó chưa bao giờ bắt đầu. Đây thường là sự cố kết nối — hãy thử lại.",
+      "runtime_cli_timeout": "OpenClaw CLI trên máy không phản hồi kịp thời nên lần chạy này chưa bao giờ bắt đầu. Đây là lỗi quá thời gian khởi động cục bộ, không phải sự cố mạng — thử lại cũng không ích gì cho đến khi CLI nhanh hơn hoặc thời gian chờ được tăng lên (MULTICA_OPENCLAW_CLI_TIMEOUT).",
+      "environment_prepare_failed": "Máy chạy agent không thể thiết lập lần chạy này nên nó chưa bao giờ bắt đầu. Lỗi bên dưới cho biết điều gì đã thất bại tại đó — thường là dung lượng đĩa, quyền truy cập, một thư mục đang được sử dụng, hoặc một cấu hình cục bộ không đọc được. Đây không phải lỗi của agent hay nhà cung cấp model.",
+      "provider_network": "Kết nối tới nhà cung cấp model đã bị ngắt trước khi câu trả lời hoàn thành. Hãy kiểm tra mạng của bạn và thử lại.",
+      "provider_auth_or_access": "Tài khoản model của agent không còn đăng nhập nữa. Hãy đăng nhập lại, rồi thử lại.",
+      "provider_quota_limit": "Tài khoản model của agent đã hết credit. Hãy nạp thêm hoặc chuyển tài khoản, rồi thử lại.",
+      "provider_capacity_or_rate_limit": "Nhà cung cấp model đang bận hoặc đang giới hạn tốc độ tài khoản này. Hãy thử lại sau giây lát.",
+      "context_overflow": "Cuộc trò chuyện này đã quá dài so với model. Hãy bắt đầu một phiên mới, hoặc chia yêu cầu của bạn thành các bước nhỏ hơn.",
+      "runtime_missing_executable": "Không chạy được CLI của agent trên máy này. Hãy kiểm tra xem nó đã được cài đặt đúng và có trong PATH chưa, rồi thử lại.",
+      "runtime_version_unsupported": "CLI của agent quá cũ so với runtime này. Hãy nâng cấp nó, rồi thử lại.",
+      "fallback": "Đã xảy ra lỗi và agent không thể hoàn thành câu trả lời. Hãy thử lại."
+    },
+    "tools_other": "{{count}} công cụ",
+    "tool_result_named": "Kết quả {{tool}}: ",
+    "tool_result_unnamed": "kết quả: ",
+    "process_steps_other": "{{count}} bước",
+    "copy_action": "Sao chép",
+    "copied_toast": "Đã sao chép",
+    "copy_failed_toast": "Sao chép thất bại",
+    "loading_older": "Đang tải tin nhắn cũ hơn…",
+    "quick_actions_heading": "Câu hỏi tiếp nối",
+    "quick_actions_aria": "Gợi ý tiếp nối",
+    "quick_actions_regenerate": "Tạo lại gợi ý",
+    "quick_actions_regenerate_failed": "Không làm mới được gợi ý. Hãy thử lại."
+  },
+  "session_history": {
+    "untitled": "Chưa có tiêu đề",
+    "time": {
+      "just_now": "Vừa xong",
+      "minutes": "{{count}} phút trước",
+      "hours": "{{count}} giờ trước",
+      "days": "{{count}} ngày trước"
+    },
+    "row_delete_aria": "Xóa phiên trò chuyện",
+    "row_rename_aria": "Đổi tên phiên trò chuyện",
+    "row_stop_aria": "Dừng lần chạy hiện tại",
+    "stop_action": "Dừng",
+    "row_subtitle": {
+      "working": "Đang làm việc",
+      "completed": "Đã hoàn thành",
+      "new_reply": "Câu trả lời mới"
+    },
+    "stop_dialog": {
+      "title": "Dừng lần chạy này?",
+      "description_with_title": "Thao tác này sẽ hủy lần chạy hiện tại của agent trong \"{{title}}\". Kết quả một phần sẽ vẫn ở trong cuộc trò chuyện.",
+      "description_default": "Thao tác này sẽ hủy lần chạy hiện tại của agent. Kết quả một phần sẽ vẫn ở trong cuộc trò chuyện.",
+      "cancel": "Tiếp tục chạy",
+      "confirm": "Dừng lần chạy",
+      "confirming": "Đang dừng..."
+    },
+    "delete_dialog": {
+      "title": "Xóa phiên trò chuyện",
+      "description_with_title": "\"{{title}}\" và các tin nhắn của nó sẽ bị loại bỏ vĩnh viễn. Thao tác này không thể hoàn tác.",
+      "description_default": "Phiên trò chuyện này và các tin nhắn của nó sẽ bị loại bỏ vĩnh viễn. Thao tác này không thể hoàn tác.",
+      "cancel": "Hủy",
+      "confirm": "Xóa",
+      "confirming": "Đang xóa..."
+    },
+    "row_actions_aria": "Thao tác trò chuyện"
+  },
+  "window": {
+    "new_chat_tooltip": "Trò chuyện mới",
+    "restore_tooltip": "Khôi phục",
+    "expand_tooltip": "Mở rộng",
+    "minimize_tooltip": "Thu nhỏ",
+    "another_running": "Một cuộc trò chuyện khác đang chạy",
+    "another_unread": "Một cuộc trò chuyện khác có câu trả lời chưa đọc",
+    "running": "Đang chạy",
+    "unread": "Chưa đọc",
+    "no_previous": "Không có cuộc trò chuyện trước đó",
+    "untitled": "Cuộc trò chuyện mới",
+    "my_agents": "Agent của tôi",
+    "others": "Khác",
+    "no_agents": "Không có agent",
+    "history_group": "Lịch sử trò chuyện",
+    "agent_filter_placeholder": "Tìm kiếm agent...",
+    "agent_needs_runtime": "Cần runtime",
+    "agent_needs_runtime_hint": "Gắn một runtime trước khi bắt đầu trò chuyện với agent này"
+  },
+  "empty_state": {
+    "first_time_title": "Trò chuyện với các agent của bạn",
+    "first_time_intro": "✨ Chúng hiểu không gian làm việc của bạn —",
+    "first_time_pillars": "công việc, dự án, skill",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Yêu cầu một bản tóm tắt, lên kế hoạch cho ngày của bạn, hoặc giao một việc nhanh.",
+    "returning_title_named": "Xin chào, tôi là {{name}}",
+    "returning_title_default": "Chào mừng đến với Multica",
+    "returning_subtitle": "Hãy thử hỏi",
+    "chat_with_named": "Trò chuyện với {{name}}"
+  },
+  "conversation_starters": {
+    "aria_label": "Câu mở đầu cuộc trò chuyện",
+    "capabilities": {
+      "label": "Bạn có thể giúp gì?",
+      "prompt": "Bạn giỏi nhất trong việc giúp đỡ điều gì? Hãy cho tôi một cái nhìn tổng quan ngắn gọn."
+    },
+    "first_task": {
+      "label": "Gợi ý một công việc đầu tiên",
+      "prompt": "Hãy gợi ý ba công việc hữu ích mà tôi có thể giao cho bạn."
+    },
+    "recommend": {
+      "label": "Đề xuất một hành động",
+      "prompt": "Hãy xem lại những gì bạn biết về không gian làm việc của tôi và đề xuất một hành động đầu tiên hữu ích."
+    },
+    "customize": "Tùy chỉnh câu mở đầu",
+    "uploading": "Hãy chờ tải lên hoàn tất trước khi dùng câu mở đầu.",
+    "draft_in_progress": "Hãy gửi hoặc xóa bản nháp của bạn trước khi dùng câu mở đầu."
+  },
+  "onboarding_cards": {
+    "aria_label": "Các cách bắt đầu",
+    "cta": "Bắt đầu",
+    "board": {
+      "title": "Dựng một bảng công việc trong vài phút",
+      "desc": "Hãy nói cho tôi mục tiêu — tôi sẽ tạo dự án, chia nhỏ các công việc và đặt mức ưu tiên.",
+      "prompt": "Biến các mục tiêu hiện tại của chúng ta thành một bảng dự án"
+    },
+    "delegate": {
+      "title": "Hãy giao cho tôi một việc trước",
+      "desc": "Chẳng hạn một nghiên cứu nhanh — kết quả sẽ trở lại dưới dạng một công việc và một báo cáo.",
+      "prompt": "Hãy đỡ cho tôi một việc: thực hiện một nghiên cứu nhanh và gửi kết quả về dưới dạng báo cáo"
+    },
+    "digest": {
+      "title": "Để bản tóm tắt hằng ngày tự viết",
+      "desc": "Một bản tóm tắt buổi sáng về tiến độ của không gian làm việc, gửi thẳng tới hộp thư đến của bạn.",
+      "prompt": "Thiết lập một automation hằng ngày đăng bản tóm tắt buổi sáng về tiến độ của không gian làm việc"
+    },
+    "digest_badge": "Hằng ngày 9:00"
+  },
+  "no_agent_banner": "Bạn cần một agent để bắt đầu trò chuyện.",
+  "archived_agent_banner": "{{name}} đã được lưu trữ — cuộc trò chuyện này ở chế độ chỉ đọc.",
+  "agent_access_revoked_banner": "Bạn không còn quyền chạy {{name}} — cuộc trò chuyện này ở chế độ chỉ đọc.",
+  "runtime_required_banner": {
+    "fallback_name": "Agent",
+    "message": "{{name}} cần một runtime trước khi có thể trả lời.",
+    "action": "Gắn runtime"
+  },
+  "offline_banner": {
+    "fallback_name": "agent",
+    "unstable": "Kết nối của {{name}} không ổn định — câu trả lời có thể bị chậm.",
+    "offline": "{{name}} đang ngoại tuyến — tin nhắn của bạn sẽ được chuyển khi họ quay lại."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Ngoại tuyến",
+      "reconnecting": "Đang kết nối lại",
+      "retrying": "Đang thử lại",
+      "queued": "Đang xếp hàng",
+      "waiting_local_directory": "Đang chờ thư mục cục bộ",
+      "waiting_local_directory_reason": "Đang chờ {{reason}}",
+      "starting_up": "Đang khởi động",
+      "thinking": "Đang suy nghĩ",
+      "typing": "Đang nhập"
+    },
+    "tools": {
+      "running_command": "Đang chạy một lệnh",
+      "reading_files": "Đang đọc các tệp",
+      "searching_code": "Đang tìm trong code",
+      "making_edits": "Đang chỉnh sửa",
+      "searching_web": "Đang tìm trên web",
+      "fallback": "Đang làm việc"
+    }
+  },
+  "list": {
+    "typing": "Đang nhập…",
+    "failed": "Gửi thất bại",
+    "you_prefix": "Bạn: ",
+    "no_messages": "Chưa có tin nhắn nào",
+    "no_response_preview": "Không có câu trả lời bằng văn bản",
+    "quick_agents": "Agent thường dùng",
+    "add": "Thêm",
+    "add_agent": "Thêm một agent thường dùng",
+    "unpin_agent": "Loại bỏ khỏi mục thường dùng",
+    "waiting": "Đang chờ câu trả lời",
+    "pin": "Ghim",
+    "unpin": "Bỏ ghim",
+    "pinned": "Đã ghim",
+    "archive": "Lưu trữ",
+    "unarchive": "Bỏ lưu trữ",
+    "archived_title": "Đã lưu trữ",
+    "row_actions_aria": "Thao tác trò chuyện"
+  },
+  "header": {
+    "view_profile": "Xem hồ sơ agent",
+    "rename": "Đổi tên cuộc trò chuyện",
+    "archive": "Lưu trữ cuộc trò chuyện",
+    "unarchive": "Bỏ lưu trữ cuộc trò chuyện",
+    "delete": "Xóa cuộc trò chuyện"
+  }
+}
