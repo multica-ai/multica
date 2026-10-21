@@ -341,6 +341,31 @@ FROM wakeup_source
 WHERE i.id = $1 AND i.workspace_id = $3
 RETURNING i.*;
 
+-- name: ReconcileIssueAfterTaskFailure :one
+-- Guard the target row in the UPDATE itself so a concurrent human status
+-- change wins after PostgreSQL rechecks the row it locks. Deferred retries
+-- also keep the issue active; this reset never enqueues another run.
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', sqlc.arg('source_task_id')::uuid::text, true))
+UPDATE issue AS i SET
+    status = 'todo',
+    duplicate_of_issue_id = NULL,
+    position = (SELECT COALESCE(MIN(target.position), 0) - 1
+                FROM issue AS target
+                WHERE target.workspace_id = i.workspace_id AND target.status = 'todo'),
+    revision = i.revision + 1,
+    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
+    updated_at = now()
+FROM wakeup_source
+WHERE i.id = sqlc.arg('id') AND i.workspace_id = sqlc.arg('workspace_id')
+  AND i.status = 'in_progress'
+  AND i.revision = sqlc.arg('expected_revision')
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS t
+      WHERE t.issue_id = i.id
+        AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  )
+RETURNING i.*;
+
 -- name: LockIssuesForDuplicateMark :many
 -- Locks the issue being marked and its target, in id order, before the mark is
 -- validated. Two marks that share an issue (A -> B racing B -> A, or C -> A

@@ -2038,6 +2038,82 @@ func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg 
 	return i, err
 }
 
+const reconcileIssueAfterTaskFailure = `-- name: ReconcileIssueAfterTaskFailure :one
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', $4::uuid::text, true))
+UPDATE issue AS i SET
+    status = 'todo',
+    duplicate_of_issue_id = NULL,
+    position = (SELECT COALESCE(MIN(target.position), 0) - 1
+                FROM issue AS target
+                WHERE target.workspace_id = i.workspace_id AND target.status = 'todo'),
+    revision = i.revision + 1,
+    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
+    updated_at = now()
+FROM wakeup_source
+WHERE i.id = $1 AND i.workspace_id = $2
+  AND i.status = 'in_progress'
+  AND i.revision = $3
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue AS t
+      WHERE t.issue_id = i.id
+        AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  )
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id
+`
+
+type ReconcileIssueAfterTaskFailureParams struct {
+	ID               pgtype.UUID `json:"id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ExpectedRevision int64       `json:"expected_revision"`
+	SourceTaskID     pgtype.UUID `json:"source_task_id"`
+}
+
+// Guard the target row in the UPDATE itself so a concurrent human status
+// change wins after PostgreSQL rechecks the row it locks. Deferred retries
+// also keep the issue active; this reset never enqueues another run.
+func (q *Queries) ReconcileIssueAfterTaskFailure(ctx context.Context, arg ReconcileIssueAfterTaskFailureParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, reconcileIssueAfterTaskFailure,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.ExpectedRevision,
+		arg.SourceTaskID,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.TriageState,
+		&i.DuplicateOfIssueID,
+	)
+	return i, err
+}
+
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
 UPDATE issue SET
