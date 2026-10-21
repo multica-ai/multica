@@ -238,6 +238,33 @@ Things to know:
 - **The CA applies to the whole backend process**, not only the Git provider
   integration: every outbound TLS client in the backend that uses the system
   trust store trusts it too.
+- **Daemons get the CA for git too.** Daemons clone and fetch workspace
+  repositories with the `git` installed on their machine, which never sees the
+  backend's `SSL_CERT_DIR`. The backend therefore sends the certificates from
+  the directories you added to `SSL_CERT_DIR` (the system directories
+  `/etc/ssl/certs` and `/etc/pki/tls/certs` are left out) to every daemon with
+  the workspace repositories. The daemon adds them to the trust git already
+  has on its machine and records the result in each workspace repository's
+  git config, which its own clone and fetch and the git commands agents run in
+  their checkouts all read. Nothing needs to be installed on the daemon's
+  machine. Things to know about it:
+  - The trust git already has is kept. If the daemon's machine sets a general
+    `http.sslCAInfo` in its system or global git config, the certificates in
+    that file are combined with the backend's; otherwise the system CA bundle
+    is. The daemon writes the combination to a file of its own and does not
+    change the system trust store or that git config.
+  - Narrower settings on the daemon's machine win and are not combined: an
+    `http.<url>.sslCAInfo` for a host, an `http.sslCAInfo` set in a
+    repository's own config, and `GIT_SSL_CAINFO`.
+  - Daemons pick up an added, replaced, or removed CA, and changes to the
+    machine's own trust, the next time they refresh the workspace
+    repositories, which happens before every checkout; they do not need a
+    restart. The backend still does. Checkouts created while a CA was
+    present keep working after it is removed.
+  - Within those repositories, git trusts the backend's CAs for every host,
+    not only the one that needs them.
+  - Daemons on Windows do not apply it: Git for Windows verifies certificates
+    against the Windows certificate store by default, so add the CA there.
 - **Only the trust problem is fixed.** An expired certificate, or one that does
   not cover the host name in the URL, is still rejected; fix the certificate
   itself.

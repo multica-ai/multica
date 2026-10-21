@@ -1,3 +1,4 @@
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
@@ -25,6 +26,11 @@ export interface Project {
   // this project keep the workspace prefix. Optional because a backend that
   // predates the feature omits the key entirely.
   issue_prefix?: string;
+  /**
+   * The workflow this project uses; null for the workspace Default workflow.
+   * Optional because older servers do not send it. (MUL-7420)
+   */
+  workflow_id?: string | null;
 }
 
 export interface CreateProjectRequest {
@@ -40,6 +46,8 @@ export interface CreateProjectRequest {
   // Optional project issue prefix; the server trims and upper-cases it.
   // Omitting it leaves the project on the workspace prefix.
   issue_prefix?: string;
+  /** Workflow to use from the start; omitted uses the Default workflow. */
+  workflow_id?: string | null;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];

@@ -56,7 +56,7 @@ Webhook secret は一度しか表示されません。ページを離れる前�
 
 ### プライベート CA を使うインスタンス
 
-**接続**で、プロバイダーの証明書が "is signed by a certificate authority this server does not trust" と表示された場合、インスタンスの HTTPS 証明書は Multica サーバーが信頼していない社内 CA で発行されている（または自己署名である）ということです。サーバー管理者がその CA をバックエンドの信頼ストアに追加してください。Helm では `backend.extraCACerts.configMap` を設定し、Docker Compose では CA をマウントして `SSL_CERT_DIR` を設定します。手順は [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional) を参照してください。
+**接続**で、プロバイダーの証明書が "is signed by a certificate authority this server does not trust" と表示された場合、インスタンスの HTTPS 証明書は Multica サーバーが信頼していない社内 CA で発行されている（または自己署名である）ということです。サーバー管理者がその CA をバックエンドの信頼ストアに追加してください。Helm では `backend.extraCACerts.configMap` を設定し、Docker Compose では CA をマウントして `SSL_CERT_DIR` を設定します。手順は [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional) を参照してください。バックエンドはこの CA をデーモンにも渡すため、デーモンの git も同じインスタンスのリポジトリをクローンできます。
 
 接続リクエストにはアクセストークンが含まれるため、Multica には証明書の検証をスキップするオプションはありません。証明書がホスト名と一致しない、または検証に失敗した（例: 有効期限切れ）と表示された場合は、証明書そのものを修正してください。CA を信頼しても解決しません。
 

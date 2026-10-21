@@ -53,9 +53,7 @@ import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 export type AttachmentInput =
   // Server response in hand — full record. Used by AttachmentList and any
@@ -206,63 +204,14 @@ function absolutizeMediaURL(rawUrl: string): string {
   return `${baseUrl}${rawUrl}`;
 }
 
-// pickInlineMediaURL returns the URL most likely to load successfully
-// inside a native <img>/<video>/<iframe> resource fetch — i.e. without
-// the calling client attaching an Authorization header.
+// pickInlineMediaURL chooses a URL usable by native media loads, which cannot
+// attach the API client's Authorization header. Signed download URLs are suitable
+// for rendering but must not replace durable Markdown references.
 //
-// The metadata response carries three URL fields per attachment row,
-// each with a different lifetime / accessibility:
-//
-//   - `record.download_url` — this-response click-time URL. In
-//                             CloudFront-signed mode this is the
-//                             signed redirect (works as a native img
-//                             src for the duration of the TTL); in
-//                             other modes it's the bare API endpoint
-//                             (`/api/attachments/<id>/download`) which
-//                             requires per-request auth and does NOT
-//                             load as a native img on a non-same-site
-//                             origin like Desktop's file://.
-//   - `record.markdown_url` — the durable URL the server picked for
-//                             persistence (MUL-3192 / `buildMarkdownURL`):
-//                             public CDN passthrough when the storage is
-//                             public-readable, or `MULTICA_PUBLIC_URL +
-//                             /api/attachments/<id>/download` for
-//                             private-bucket modes. Aligned with the
-//                             server-side policy by construction, so it
-//                             beats `record.url` whenever both exist.
-//   - `record.url`          — raw storage URL. May be private (S3 /
-//                             CloudFront-signed, R2, MinIO) and unable
-//                             to load directly. Last-resort fallback
-//                             for legacy responses that omit
-//                             `markdown_url`.
-//
-// Order:
-//
-//  1. Signed `download_url` — when CloudFront has minted a signed
-//     redirect for THIS response, use it; the TTL means the signed URL
-//     beats `markdown_url` on first paint (no extra hop through the
-//     API endpoint), and the renderer doesn't persist it so the TTL is
-//     not a problem.
-//  2. Known CDN `record.url` — when `/api/config` exposes the same CDN
-//     host as the attachment record, the browser can load the object
-//     directly (public CDN, or CloudFront cookie mode). Prefer it over
-//     an API-shaped `markdown_url` so the rendered `<img src>` and Copy
-//     Link affordance expose the CDN URL while the persisted markdown
-//     can remain the stable attachment endpoint. Skipped when the server
-//     reports `cdn_signed` — in CloudFront signed-URL mode the same
-//     domain serves PRIVATE content and a raw (unsigned) storage URL is
-//     a guaranteed 403 (MUL-3254).
-//  3. Local disk `record.url` — self-host LocalStorage without
-//     LOCAL_UPLOAD_BASE_URL stores a site-relative `/uploads/...` path.
-//     It is the direct static object URL and is loadable once
-//     `absolutizeMediaURL` prefixes apiBaseUrl in split-origin clients.
-//  4. `record.markdown_url` — the durable, server-policy-aligned URL.
-//     Beats raw `record.url` because it never points at a private
-//     bucket (must-fix 2 from MUL-3192 review), except for the explicit
-//     site-relative local upload path above.
-//  5. `record.url` — legacy fallback for responses that omit
-//     `markdown_url` (a backend old enough to predate MUL-3192).
-//  6. The input URL — when there's no record at all.
+// Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
+// on a private CDN fail even when the domain matches. Local /uploads paths remain
+// valid after origin normalization. Otherwise prefer the server's markdown_url,
+// then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
   fallback: string,
@@ -319,9 +268,7 @@ function hasExpiringSignatureQuery(q: URLSearchParams): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------------------
 // Dispatcher
-// ---------------------------------------------------------------------------
 
 export function Attachment({
   attachment,
@@ -467,9 +414,7 @@ export function Attachment({
   );
 }
 
-// ---------------------------------------------------------------------------
 // ImageAttachmentView — inline image with hover toolbar
-// ---------------------------------------------------------------------------
 //
 // DOM and styling are intentionally a direct port of the original
 // extensions/image-view.tsx <figure> structure. Shared visual styles live in

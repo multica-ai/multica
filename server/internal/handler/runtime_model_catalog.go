@@ -6,9 +6,7 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
 // Runtime model catalog cache (stale-while-revalidate)
-// ---------------------------------------------------------------------------
 //
 // Listing a runtime's models is a round trip to the user's machine: the request
 // waits for the daemon's next heartbeat, the daemon shells out to the provider

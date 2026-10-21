@@ -145,6 +145,18 @@
     },
     "visibility_toast_updated": "Visibilité définie sur {{visibility}}",
     "visibility_toast_failed": "Échec de la mise à jour de la visibilité",
+    "visibility_revoke_dialog": {
+      "title": "Rendre ce runtime privé ?",
+      "description": "Rendre « {{name}} » privé dissociera {{count}} agents d'autres membres, annulera {{taskCount}} exécutions actives sur cette machine et mettra en pause les automatisations actives assignées à ces agents. Vos propres agents et exécutions ne seront pas affectés.",
+      "warning": "L'accès est révoqué immédiatement sur le serveur. Les daemons connectés s'arrêtent lors de leur vérification habituelle des annulations. Une machine hors ligne ne recevra la demande d'arrêt qu'à sa reconnexion ; son processus local peut continuer entre-temps.",
+      "plan_changed": "Le plan d'accès a changé pendant que cette boîte de dialogue était ouverte. Vérifiez-le et confirmez à nouveau.",
+      "checkbox": "Je comprends que les agents des autres membres listés seront dissociés, leurs exécutions actives annulées et leurs automatisations actives mises en pause.",
+      "cancel": "Annuler",
+      "confirm": "Rendre le runtime privé",
+      "submitting": "Révocation de l'accès...",
+      "toast_success": "Le runtime est désormais privé et l'accès des autres membres a été révoqué",
+      "toast_failed": "Échec de la révocation de l'accès au runtime"
+    },
     "delete_dialog": {
       "self_heal_notice": "Ce runtime est géré par un daemon local en cours d'exécution. Sa suppression aboutira, mais le daemon en réenregistrera un nouveau en quelques secondes — arrêtez d'abord le processus du daemon pour le supprimer définitivement.",
       "profile_backed_notice": "Ce runtime a été enregistré depuis un profil de runtime personnalisé. Sa suppression ne retire que l'instance actuelle ; un daemon en cours d'exécution peut l'enregistrer de nouveau tant que le profil subsiste. Supprimez le profil dans Runtimes personnalisés pour l'éliminer définitivement.",

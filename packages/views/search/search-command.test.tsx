@@ -4,7 +4,7 @@ import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
 }));
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -83,6 +83,8 @@ const {
   mockMembers,
   mockAgents,
   mockSquads,
+  mockWorkspaces,
+  mockUnreadSummary,
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
@@ -126,6 +128,18 @@ const {
       name: string;
       avatar_url: string | null;
     }>,
+  },
+  mockWorkspaces: {
+    current: [] as Array<{
+      id: string;
+      name: string;
+      slug: string;
+      avatar_url: string | null;
+      created_at: string;
+    }>,
+  },
+  mockUnreadSummary: {
+    current: [] as Array<{ workspace_id: string; count: number }>,
   },
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
@@ -244,6 +258,12 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["workspaces", "ws-test", "members"] }),
   agentListOptions: () => ({ queryKey: ["workspaces", "ws-test", "agents"] }),
   squadListOptions: () => ({ queryKey: ["workspaces", "ws-test", "squads"] }),
+  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
+}));
+
+vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/inbox/queries")>()),
+  inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -264,6 +284,12 @@ function resolveIssue(key: readonly unknown[]) {
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     const key = opts.queryKey;
+    if (key[0] === "workspaces" && key[1] === "list") {
+      return { data: mockWorkspaces.current };
+    }
+    if (key[0] === "inbox" && key[1] === "unread-summary") {
+      return { data: mockUnreadSummary.current };
+    }
     if (key[0] === "workspaces" && key[2] === "members") {
       return { data: mockMembers.current };
     }
@@ -318,6 +344,8 @@ describe("SearchCommand", () => {
     mockAllIssues.current = [];
     mockAgents.current = [];
     mockSquads.current = [];
+    mockWorkspaces.current = [];
+    mockUnreadSummary.current = [];
     mockSetTheme.mockReset();
     mockTheme.current = "system";
     mockPathname.current = "/ws-test/issues";
@@ -562,6 +590,94 @@ describe("SearchCommand", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/members/user-1");
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  describe("workspace switching", () => {
+    // Server order is created_at ascending, which is also the sidebar
+    // switcher's order. "Zeta Labs" is the oldest, so an alphabetical re-sort
+    // would put it last. The current workspace ("ws-test") has "workspace" in
+    // its name, so the bare keyword would match it if it weren't excluded.
+    beforeEach(() => {
+      mockWorkspaces.current = [
+        {
+          id: "ws-zeta",
+          name: "Zeta Labs",
+          slug: "zeta",
+          avatar_url: null,
+          created_at: "2025-01-01T00:00:00Z",
+        },
+        {
+          id: "ws-test",
+          name: "Test Workspace",
+          slug: "ws-test",
+          avatar_url: null,
+          created_at: "2025-06-01T00:00:00Z",
+        },
+        {
+          id: "ws-acme",
+          name: "Acme Corp",
+          slug: "acme-hq",
+          avatar_url: null,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ];
+      mockUnreadSummary.current = [
+        { workspace_id: "ws-acme", count: 2 },
+        { workspace_id: "ws-test", count: 5 },
+      ];
+    });
+
+    const workspaceRows = () =>
+      within(screen.getByRole("group", { name: "Workspaces" })).getAllByRole(
+        "option",
+      );
+
+    it("hides the Workspaces group on an empty query", () => {
+      renderSearch();
+
+      expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+    });
+
+    it("matches a workspace by name and switches to it by slug on Enter", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      const input = screen.getByPlaceholderText("Type a command or search...");
+
+      await user.type(input, "me co");
+      await waitFor(() => {
+        expect(workspaceRows().map((row) => row.textContent)).toEqual([
+          expect.stringContaining("Acme Corp"),
+        ]);
+      });
+
+      await user.clear(input);
+      await user.type(input, "acme-hq");
+      await waitFor(() => expect(workspaceRows()).toHaveLength(1));
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(mockPush).toHaveBeenCalledWith("/acme-hq/issues");
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it('lists every other workspace for "workspace", oldest first, with unread dots', async () => {
+      const user = userEvent.setup();
+      renderSearch();
+
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "workspace",
+      );
+
+      await waitFor(() => {
+        expect(workspaceRows().map((row) => row.textContent)).toEqual([
+          expect.stringContaining("Zeta Labs"),
+          expect.stringContaining("Acme Corp"),
+        ]);
+      });
+      const [zeta, acme] = workspaceRows();
+      expect(within(zeta!).queryByTestId("workspace-unread-dot")).toBeNull();
+      expect(within(acme!).getByTestId("workspace-unread-dot")).toBeInTheDocument();
+    });
   });
 
   it("renders recent issues from query cache joined with store visit records", () => {

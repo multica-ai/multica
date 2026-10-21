@@ -19,6 +19,16 @@
     "toast_deleted": "タスクを削除しました",
     "toast_delete_failed": "タスクを削除できませんでした"
   },
+  "rename_issue": {
+    "title": "タスク名を変更",
+    "placeholder": "タスク名",
+    "input_aria_label": "{{identifier}} の名前を変更",
+    "submit": "保存",
+    "saving": "保存中...",
+    "title_required": "タイトルを入力してください",
+    "toast_renamed": "タスク名を変更しました",
+    "toast_failed": "タスク名を変更できませんでした"
+  },
   "feedback": {
     "title": "フィードバック",
     "placeholder": "使用感、見つけたバグ、追加してほしい機能などをお聞かせください…",

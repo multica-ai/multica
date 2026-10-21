@@ -7,7 +7,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import { useFeatureEnabled } from "@multica/core/config";
+import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -33,6 +35,8 @@ import {
   ISSUE_PREFIX_MAX_LENGTH,
   normalizeIssuePrefix,
 } from "./issue-prefix";
+import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
+import { ProjectWorkflowMenu } from "../../workflows/project-workflow-menu";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -79,9 +83,7 @@ import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
-// ---------------------------------------------------------------------------
 // Property row — sidebar property display
-// ---------------------------------------------------------------------------
 
 function PropRow({
   label,
@@ -100,9 +102,20 @@ function PropRow({
   );
 }
 
-// ---------------------------------------------------------------------------
+// The project's workflow (MUL-7420). Hidden while workflows are off, unless the
+// project already uses one — it can always switch back to Default.
+function ProjectWorkflowPropRow({ project }: { project: Project }) {
+  const { t } = useT("issues");
+  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
+  if (!enabled && !project.workflow_id) return null;
+  return (
+    <PropRow label={t(($) => $.workflows.project.label)}>
+      <ProjectWorkflowControl project={project} />
+    </PropRow>
+  );
+}
+
 // ProjectDetail
-// ---------------------------------------------------------------------------
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
@@ -451,6 +464,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
+          <ProjectWorkflowPropRow project={project} />
           <PropRow label={t(($) => $.detail.prop_issue_prefix)}>
             <Popover
               open={prefixOpen}
@@ -595,6 +609,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
             actions={
               <>
+              <ProjectWorkflowMenu project={project} />
               <Button
                 variant="ghost"
                 size="icon-sm"

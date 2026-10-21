@@ -1,100 +1,19 @@
 package wecom
 
-// stream_store.go — the handles that let each answer land in the bubble its
-// question opened.
+// Stream handles map each chat session's pending answers to writable WeCom bubbles.
+// They are an in-memory cache: missing, expired, or rejected handles fall back to
+// plain messages addressed by the task's delivery row.
 //
-// WeCom's aibot API has no typing indicator, no reaction, no read receipt, and
-// no way to edit a message after the fact. The one affordance it does have is
-// the streaming message: an aibot_respond_msg frame with finish=false paints a
-// bubble the client renders as "working", and a later frame carrying the SAME
-// stream.id replaces that bubble's body in place — finish=true seals it and
-// nothing can touch it again
-// (https://developer.work.weixin.qq.com/document/path/101463).
+// Messages join the collecting round; each queued run takes the oldest unbound
+// round. Sequence order, not arrival-time estimates, pairs the two. A task event
+// may precede its bubble, so unmatched runs wait in the session's pending queue.
+// After binding, lifecycle events match task IDs. Retries resolve the original
+// round through chat_input_task_id rather than taking another question's bubble.
 //
-// THIS STORE IS A CACHE, NOTHING MORE. It maps a chat session to the bubbles
-// that can still be written to. An ending that finds a writable bubble writes
-// into it; one that does not goes out through the plain aibot_send_msg path
-// that outbound.go already has, addressed by the task's own delivery row. A
-// bubble that cannot be written to — never painted, past its window, lost to a
-// restart, or refused by the server when the closing frame goes out — is
-// simply not used. Nothing here records what was said, what is owed, or who
-// was told; nothing owes anyone anything once the bubble is gone.
-//
-// A session holds a LIST of open bubbles, not one. Messages the engine's
-// debouncer collects into one agent run share a bubble; a message it gives a
-// run of its own gets a bubble of its own, queued behind the run in flight —
-// immediately, because a message that produces nothing on screen reads as a
-// message that was lost.
-//
-// WHICH RUN A BUBBLE STANDS FOR IS DECIDED HERE, from two facts that arrive on
-// their own and in either order:
-//
-//   - A message was ingested (open). That is a bubble, and nothing more — at
-//     that moment nobody knows whether the debouncer will answer it with a run
-//     of its own or fold it into the one already collecting.
-//   - A chat run was queued for this session (bindNext, driven by the
-//     task:queued subscription in typing_indicator.go). That is a run, and
-//     nothing more — the event names a task and a chat session and says
-//     nothing about which message produced it.
-//
-// The pairing rule is position, and position alone: a queued run takes the
-// OLDEST round that has no run yet, and a message joins the round that is
-// still collecting rather than opening a second one. That works because the
-// engine serializes a session's chat tasks (ClaimAgentTask) and its debouncer
-// produces at most one run per window, so per session the two sequences are in
-// step. Nothing here re-measures the debounce gap from arrival times: whether
-// a message opens a round or joins one is read off "is a round still waiting
-// for its run", not off a clock.
-//
-// The rounds are kept sorted by the store's own sequence number (insertLocked),
-// which for one session is the order its bubbles were painted in, and that
-// order IS consumed: bindNext and takeOldestUnbound both take the oldest
-// unbound round.
-//
-// The event can beat the bubble. The Router detaches the ingest goroutine, and
-// a session's first message enqueues its task inside dispatch (router.go's
-// startChat path) rather than on the debounced flush, so task:queued routinely
-// arrives before anything is painted. A run with no round to take waits in the
-// session's pending queue and is picked up by the next bubble.
-//
-// The task id, once bound, is what every later lifecycle event matches on —
-// never a position. An auto-retry clone carries a fresh id and inherits its
-// parent's chat_input_task_id, which is this round's own task id: see
-// roundTaker, which resolves the clone through it, and retryUnbind, which puts
-// the round back in line for the clone's own task:queued so the clone never
-// takes a bubble some other question opened.
-//
-// The catch is req_id. Every frame of one stream has to echo the req_id of the
-// aibot_msg_callback that started the turn, and that value is only ever seen
-// by the WebSocket read loop. The answer shows up minutes later on an event
-// bus subscriber holding nothing but a chat_session_id. This store is the seam
-// between the two: session in, {req_id, stream id, addressing} out.
-//
-// IN-MEMORY IS THE RIGHT STORAGE, and deliberately so. One bot is one long
-// connection, and the Supervisor's WS lease already guarantees at most one
-// replica holds it, so a handle is only ever useful in the process that
-// created it. A restart loses the handles and the answers fall back to plain
-// messages — degraded, not corrupted. Persisting them would be a trade rather
-// than a fix: a stored handle still inside the window would be writable from
-// the new process, at the cost of a row per bubble and a sweep to retire them,
-// to save a fallback message on the restart that lands mid-run.
-//
-// A RECONNECT IS NOT A RESTART, and the difference is why this store is built
-// once at boot, outside the connection loop (router.go). A handle outlives the
-// socket it was made on, and WeCom scopes a callback's req_id to the turn
-// rather than to that socket (measured 2026-08-09; sendersRegistry.stream
-// carries the detail), so the bubble a question opened before a drop is closed
-// by the answer over the next connection. A store rebuilt per connection, or
-// emptied when one ends, would leave every reconnect's bubbles spinning with
-// nothing left that could close them.
-//
-// Replay is not this file's problem. WeCom redelivers callbacks after a
-// reconnect, but a redelivered frame loses the dedup claim in
-// channel_inbound_message_dedup and never reaches OutcomeIngested, so it never
-// reaches the typing indicator either. What this file does bound is the
-// protocol's own window: a stream past streamMaxAge is refused by the server,
-// and a handle past that age is worse than no handle at all — it would swallow
-// the answer instead of delivering it.
+// Handles include the callback req_id needed by later stream frames. Keep this
+// store outside the connection loop: handles survive reconnects but are lost on
+// process restart. The bot lease limits writes to one replica, and streamMaxAge
+// bounds handle lifetime. Inbound dedup handles replay before it reaches this store.
 
 import (
 	"context"

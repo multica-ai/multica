@@ -26,10 +26,10 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, start_date, due_date, issue_prefix
+    lead_type, lead_id, priority, start_date, due_date, issue_prefix, workflow_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, issue_prefix, issue_counter
 `
 
 type CreateProjectParams struct {
@@ -44,6 +44,7 @@ type CreateProjectParams struct {
 	StartDate   pgtype.Date `json:"start_date"`
 	DueDate     pgtype.Date `json:"due_date"`
 	IssuePrefix string      `json:"issue_prefix"`
+	WorkflowID  pgtype.UUID `json:"workflow_id"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -59,6 +60,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.StartDate,
 		arg.DueDate,
 		arg.IssuePrefix,
+		arg.WorkflowID,
 	)
 	var i Project
 	err := row.Scan(
@@ -75,6 +77,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.WorkflowID,
 		&i.IssuePrefix,
 		&i.IssueCounter,
 	)
@@ -122,7 +125,7 @@ func (q *Queries) GetIssueProjectLead(ctx context.Context, issueID pgtype.UUID) 
 }
 
 const getProjectByIssuePrefix = `-- name: GetProjectByIssuePrefix :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, issue_prefix, issue_counter FROM project
 WHERE workspace_id = $1 AND issue_prefix <> '' AND issue_prefix = UPPER($2::text)
 `
 
@@ -148,6 +151,7 @@ func (q *Queries) GetProjectByIssuePrefix(ctx context.Context, arg GetProjectByI
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.WorkflowID,
 		&i.IssuePrefix,
 		&i.IssueCounter,
 	)
@@ -155,7 +159,7 @@ func (q *Queries) GetProjectByIssuePrefix(ctx context.Context, arg GetProjectByI
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, issue_prefix, issue_counter FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -181,6 +185,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.WorkflowID,
 		&i.IssuePrefix,
 		&i.IssueCounter,
 	)
@@ -277,7 +282,7 @@ func (q *Queries) ListProjectIssuePrefixes(ctx context.Context, workspaceID pgty
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, issue_prefix, issue_counter FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -313,6 +318,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Priority,
 			&i.StartDate,
 			&i.DueDate,
+			&i.WorkflowID,
 			&i.IssuePrefix,
 			&i.IssueCounter,
 		); err != nil {
@@ -403,46 +409,58 @@ func (q *Queries) SetProjectIssueCounter(ctx context.Context, arg SetProjectIssu
 const updateProject = `-- name: UpdateProject :one
 UPDATE project SET
     title = COALESCE($2, title),
-    description = $3,
-    icon = $4,
-    status = COALESCE($5, status),
-    priority = COALESCE($6, priority),
-    lead_type = $7,
-    lead_id = $8,
-    issue_prefix = COALESCE($9, issue_prefix),
-    start_date = $10,
-    due_date = $11,
+    description = CASE WHEN $3::boolean THEN $4 ELSE description END,
+    icon = CASE WHEN $5::boolean THEN $6 ELSE icon END,
+    status = COALESCE($7, status),
+    priority = COALESCE($8, priority),
+    lead_type = CASE WHEN $9::boolean THEN $10 ELSE lead_type END,
+    lead_id = CASE WHEN $11::boolean THEN $12 ELSE lead_id END,
+    issue_prefix = COALESCE($13, issue_prefix),
+    start_date = CASE WHEN $14::boolean THEN $15 ELSE start_date END,
+    due_date = CASE WHEN $16::boolean THEN $17 ELSE due_date END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, issue_prefix, issue_counter
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, issue_prefix, issue_counter
 `
 
 type UpdateProjectParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	IssuePrefix pgtype.Text `json:"issue_prefix"`
-	StartDate   pgtype.Date `json:"start_date"`
-	DueDate     pgtype.Date `json:"due_date"`
+	ID             pgtype.UUID `json:"id"`
+	Title          pgtype.Text `json:"title"`
+	DescriptionSet bool        `json:"description_set"`
+	Description    pgtype.Text `json:"description"`
+	IconSet        bool        `json:"icon_set"`
+	Icon           pgtype.Text `json:"icon"`
+	Status         pgtype.Text `json:"status"`
+	Priority       pgtype.Text `json:"priority"`
+	LeadTypeSet    bool        `json:"lead_type_set"`
+	LeadType       pgtype.Text `json:"lead_type"`
+	LeadIDSet      bool        `json:"lead_id_set"`
+	LeadID         pgtype.UUID `json:"lead_id"`
+	IssuePrefix    pgtype.Text `json:"issue_prefix"`
+	StartDateSet   bool        `json:"start_date_set"`
+	StartDate      pgtype.Date `json:"start_date"`
+	DueDateSet     bool        `json:"due_date_set"`
+	DueDate        pgtype.Date `json:"due_date"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
 	row := q.db.QueryRow(ctx, updateProject,
 		arg.ID,
 		arg.Title,
+		arg.DescriptionSet,
 		arg.Description,
+		arg.IconSet,
 		arg.Icon,
 		arg.Status,
 		arg.Priority,
+		arg.LeadTypeSet,
 		arg.LeadType,
+		arg.LeadIDSet,
 		arg.LeadID,
 		arg.IssuePrefix,
+		arg.StartDateSet,
 		arg.StartDate,
+		arg.DueDateSet,
 		arg.DueDate,
 	)
 	var i Project
@@ -460,6 +478,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.WorkflowID,
 		&i.IssuePrefix,
 		&i.IssueCounter,
 	)

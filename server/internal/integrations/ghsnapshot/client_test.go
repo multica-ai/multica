@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,9 +113,9 @@ func TestInstallationTokenSingleflight(t *testing.T) {
 	}
 }
 
-// TestGraphQLRateLimited maps a 403 with Retry-After to a *RateLimitError so the
+// TestRESTRateLimited maps a 403 with Retry-After to a *RateLimitError so the
 // refresh manager can back off (acceptance criterion 3).
-func TestGraphQLRateLimited(t *testing.T) {
+func TestRESTRateLimited(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/access_tokens") {
 			w.WriteHeader(http.StatusCreated)
@@ -128,7 +129,7 @@ func TestGraphQLRateLimited(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	_, err := c.graphQL(context.Background(), 1, "query{}", nil)
+	_, err := c.restGet(context.Background(), 1, "/repos/o/r/pulls/5")
 	rl, ok := err.(*RateLimitError)
 	if !ok {
 		t.Fatalf("err = %T (%v), want *RateLimitError", err, err)
@@ -160,6 +161,55 @@ func TestRateLimitFromResponse(t *testing.T) {
 				t.Fatalf("wait = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRESTErrorsKeepPermissionsSeparateFromRateLimits(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		headers map[string]string
+		body    string
+		limited bool
+	}{
+		{"permission denied", 403, nil, `{"message":"Resource not accessible by integration: ghs_secret"}`, false},
+		{"not found", 404, nil, `{"message":"private resource ghs_secret"}`, false},
+		{"upstream unavailable", 503, nil, `{"message":"ghs_secret"}`, false},
+		{"primary limit", 403, map[string]string{"X-RateLimit-Remaining": "0"}, `{}`, true},
+		{"retry after", 403, map[string]string{"Retry-After": "20"}, `{}`, true},
+		{"secondary limit", 403, nil, `{"message":"You have exceeded a secondary rate limit."}`, true},
+		{"too many requests", 429, nil, `{}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := snapshotServer(t, func(w http.ResponseWriter, r *http.Request) {
+				for key, value := range tc.headers {
+					w.Header().Set(key, value)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			defer srv.Close()
+			_, err := newTestClient(t, srv.URL).restGet(context.Background(), 1, "/repos/o/r/pulls/5")
+			var limited *RateLimitError
+			if err == nil || errors.As(err, &limited) != tc.limited {
+				t.Fatalf("err=%v, want rate limit=%v", err, tc.limited)
+			}
+			if strings.Contains(err.Error(), "ghs_secret") {
+				t.Fatal("response body leaked through error")
+			}
+		})
+	}
+}
+
+func TestRESTRejectsOversizedResponse(t *testing.T) {
+	srv := snapshotServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat(" ", (8<<20)+1)))
+	})
+	defer srv.Close()
+	_, err := newTestClient(t, srv.URL).restGet(context.Background(), 1, "/repos/o/r/pulls/5")
+	if err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

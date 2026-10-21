@@ -19,6 +19,16 @@
     "toast_deleted": "태스크를 삭제했습니다",
     "toast_delete_failed": "태스크를 삭제하지 못했습니다"
   },
+  "rename_issue": {
+    "title": "태스크 이름 변경",
+    "placeholder": "태스크 제목",
+    "input_aria_label": "{{identifier}} 이름 변경",
+    "submit": "저장",
+    "saving": "저장 중...",
+    "title_required": "제목을 입력하세요",
+    "toast_renamed": "태스크 이름이 변경되었습니다",
+    "toast_failed": "태스크 이름을 변경하지 못했습니다"
+  },
   "feedback": {
     "title": "피드백",
     "placeholder": "사용 경험, 발견한 버그, 필요한 기능을 알려주세요...",

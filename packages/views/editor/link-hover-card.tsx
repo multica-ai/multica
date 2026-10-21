@@ -34,9 +34,7 @@ function truncateUrl(url: string, max = 48): string {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Hook — manages hover state with enter/leave delays
-// ---------------------------------------------------------------------------
 
 const SHOW_DELAY = 300;
 const HIDE_DELAY = 150;
@@ -123,9 +121,7 @@ function useLinkHover(containerRef: React.RefObject<HTMLElement | null>, disable
   return { ...state, cardRef, onCardEnter, onCardLeave };
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 function LinkHoverCard({
   visible,

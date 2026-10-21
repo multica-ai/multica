@@ -3,7 +3,10 @@ package ghsnapshot
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
+	"net/http"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,11 +120,19 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 	q := db.New(pool)
 	ctx := context.Background()
 	now := time.Unix(1_700_010_000, 0)
+	// Go runs DB-backed packages concurrently against one database. Keep this
+	// cursor test at the top of the BIGINT address space so ordinary fixtures
+	// from another package sort only after this test's bounded page wraps.
+	const (
+		firstInstallationID  int64 = 1<<63 - 2
+		secondInstallationID int64 = 1<<63 - 1
+		beforeFixtures       int64 = firstInstallationID - 1
+	)
 
-	settled := seedPRAt(t, pool, q, 111, "settled", 1, "S")
-	oldest := seedPRAt(t, pool, q, 111, "oldest", 2, "O")
-	running := seedPRAt(t, pool, q, 222, "running", 3, "R")
-	newer := seedPRAt(t, pool, q, 222, "newer", 4, "N")
+	settled := seedPRAt(t, pool, q, firstInstallationID, "settled", 1, "S")
+	oldest := seedPRAt(t, pool, q, firstInstallationID, "oldest", 2, "O")
+	running := seedPRAt(t, pool, q, secondInstallationID, "running", 3, "R")
+	newer := seedPRAt(t, pool, q, secondInstallationID, "newer", 4, "N")
 	prs := []db.GithubPullRequest{settled, oldest, running, newer}
 	t.Cleanup(func() {
 		for _, pr := range prs {
@@ -155,7 +166,7 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 
 	rows, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
 		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
-		AfterInstallationID: 0,
+		AfterInstallationID: beforeFixtures,
 		AfterRepoOwner:      "",
 		AfterRepoName:       "",
 		AfterPrNumber:       0,
@@ -179,7 +190,7 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 
 	first, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
 		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
-		AfterInstallationID: 0,
+		AfterInstallationID: beforeFixtures,
 		AfterRepoOwner:      "",
 		AfterRepoName:       "",
 		AfterPrNumber:       0,
@@ -405,5 +416,57 @@ func TestApplySnapshotReplacesRuns(t *testing.T) {
 	}
 	if n := checkRunCount(t, pool, pr.ID); n != 1 {
 		t.Fatalf("after replace: %d runs, want 1 (old runs deleted)", n)
+	}
+}
+
+func TestRESTSnapshotRefreshStoresResultsAndPreservesThemOnPermissionFailure(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+	pr := seedPRAt(t, pool, q, 1, "r", 5, "sha1")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM github_pull_request_check_run WHERE pr_id=$1`, pr.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM github_pull_request WHERE id=$1`, pr.ID)
+	})
+	var phase atomic.Int32
+	srv := snapshotServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/pulls/5":
+			writeTestPR(w, "sha1", true, "clean")
+		case "/repos/o/r/commits/sha1/check-runs":
+			if phase.Load() == 2 {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			conclusion := "success"
+			if phase.Load() == 1 {
+				conclusion = "failure"
+			}
+			_, _ = fmt.Fprintf(w, `{"total_count":1,"check_runs":[{"id":1,"head_sha":"sha1","name":"ci","status":"completed","conclusion":%q}]}`, conclusion)
+		case "/repos/o/r/commits/sha1/status":
+			_, _ = w.Write([]byte(`{"total_count":0,"statuses":[]}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	defer srv.Close()
+	applied := 0
+	m := NewManager(newTestClient(t, srv.URL), q, pool, func(context.Context, pgtype.UUID) { applied++ })
+	m.jitter = func() time.Duration { return 0 }
+	addr := address{InstallationID: 1, Owner: "o", Repo: "r", Number: 5}
+	for i, want := range []string{"SUCCESS", "FAILURE", "FAILURE"} {
+		phase.Store(int32(i))
+		m.process(ctx, addr)
+		got, err := q.GetGitHubPullRequestByID(ctx, pr.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.SnapshotHeadSha != "sha1" || !got.SnapshotFetchedAt.Valid || got.ChecksRollupState.String != want || checkRunCount(t, pool, pr.ID) != 1 {
+			t.Fatalf("phase %d: stored snapshot=%+v, want %s", i, got, want)
+		}
+	}
+	if applied != 2 || len(m.rateUntil) != 0 {
+		t.Fatalf("permission failure must preserve snapshot without notification or installation pause: applied=%d limits=%v", applied, m.rateUntil)
 	}
 }

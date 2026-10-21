@@ -14,7 +14,6 @@ function makeTeardown(
     reportAuthSession: vi.fn(),
     resetTabs: vi.fn(),
     closeOverlay: vi.fn(),
-    resetWelcome: vi.fn(),
     clearDaemonToken: vi.fn(async () => {}),
     stopDaemon: vi.fn(async () => {}),
     ...overrides,
@@ -33,7 +32,6 @@ describe("tearDownOnLogout", () => {
     expect(t.reportAuthSession).toHaveBeenCalledWith(null);
     expect(t.resetTabs).toHaveBeenCalledOnce();
     expect(t.closeOverlay).toHaveBeenCalledOnce();
-    expect(t.resetWelcome).toHaveBeenCalledOnce();
     expect(t.clearDaemonToken).toHaveBeenCalledOnce();
     expect(t.stopDaemon).toHaveBeenCalledOnce();
   });
@@ -82,6 +80,5 @@ describe("tearDownOnSessionExpiry", () => {
     expect(t.reportAuthSession).toHaveBeenCalledWith(null);
     expect(t.resetTabs).toHaveBeenCalledOnce();
     expect(t.closeOverlay).toHaveBeenCalledOnce();
-    expect(t.resetWelcome).toHaveBeenCalledOnce();
   });
 });

@@ -19,6 +19,16 @@
     "toast_deleted": "已删除任务",
     "toast_delete_failed": "删除任务失败"
   },
+  "rename_issue": {
+    "title": "重命名任务",
+    "placeholder": "任务标题",
+    "input_aria_label": "重命名 {{identifier}}",
+    "submit": "保存",
+    "saving": "保存中...",
+    "title_required": "请输入标题",
+    "toast_renamed": "任务名称已更新",
+    "toast_failed": "重命名任务失败"
+  },
   "feedback": {
     "title": "反馈",
     "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",

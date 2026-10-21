@@ -65,6 +65,7 @@ import {
   normalizeIssuePrefix,
 } from "../projects/components/issue-prefix";
 import { PillButton } from "../common/pill-button";
+import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
 import {
   GithubRefField,
@@ -320,6 +321,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setLocalMode(null);
   };
 
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
+
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
   const updateStatus = (v: ProjectStatus) => { setStatus(v); setDraft({ status: v }); };
@@ -407,6 +410,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         // Omit the key entirely while unset: an absent prefix is what "use the
         // workspace prefix" looks like on the wire.
         ...(issuePrefix ? { issue_prefix: issuePrefix } : {}),
+        ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -622,6 +626,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <WorkflowPill value={workflowId} onChange={setWorkflowId} />
 
           <Popover
             open={leadOpen}

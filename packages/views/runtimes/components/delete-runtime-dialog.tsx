@@ -232,12 +232,10 @@ export function DeleteRuntimeDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Persistence notice — informational banner shown when deleting the runtime
 // row may not permanently remove the runnable backend. Profile-backed custom
 // runtimes win over the generic local-daemon warning: stopping the daemon is
 // not sufficient when the workspace-level profile still exists.
-// ---------------------------------------------------------------------------
 
 function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
@@ -264,11 +262,9 @@ function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Light mode — no active agents, classic "are you sure" prompt. Title and
 // description match the legacy AlertDialog so existing screenshots / muscle
 // memory still apply.
-// ---------------------------------------------------------------------------
 
 function LightBody({
   runtime,
@@ -323,11 +319,9 @@ function LightBody({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cascade mode — destructive warning, agent table, checkbox-confirmed
 // destructive button. Copy follows 赵刚's English text verbatim per the
 // squad lead's directive.
-// ---------------------------------------------------------------------------
 
 function CascadeBody({
   runtime,
@@ -591,9 +585,7 @@ function VisibilityCell({ visibility }: { visibility: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Server response parsing
-// ---------------------------------------------------------------------------
 
 interface ActiveAgentsConflict {
   code: "runtime_has_active_agents" | "runtime_delete_plan_changed";

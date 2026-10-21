@@ -42,6 +42,34 @@ export function useUnbindAgentsAndDeleteRuntime(wsId: string) {
   });
 }
 
+// Confirmed public→private transition. Like runtime deletion, this changes
+// runtime rows, agent bindings, and task presence, so every affected server
+// projection is invalidated after the transaction settles.
+export function useRevokeRuntimeWorkspaceAccess(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runtimeId,
+      expectedNonownerAgentIds,
+      expectedTaskIds,
+    }: {
+      runtimeId: string;
+      expectedNonownerAgentIds: string[];
+      expectedTaskIds: string[];
+    }) =>
+      api.revokeRuntimeWorkspaceAccess(
+        runtimeId,
+        expectedNonownerAgentIds,
+        expectedTaskIds,
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    },
+  });
+}
+
 // useUpdateRuntime patches editable fields on a runtime (visibility, custom
 // name). Invalidates the runtime list so the picker disabled-state and
 // display names recompute.

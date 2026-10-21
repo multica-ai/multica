@@ -61,6 +61,7 @@
       "runtime_offline": "L'agent est actuellement hors ligne et n'a donc pas pu répondre. Veuillez réessayer dès son retour en ligne.",
       "runtime_access_denied": "Cet agent ne peut pas s'exécuter sur son runtime privé et n'a donc pas pu répondre. Passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser.",
       "runtime_recovery": "L'agent a redémarré avant d'avoir pu terminer. Veuillez réessayer.",
+      "runtime_access_revoked": "L'accès au runtime a été révoqué. Associez l'agent à un runtime accessible avant de lancer une nouvelle exécution.",
       "manual": "Cette réponse a été annulée.",
       "skill_bundle_unavailable": "Les skills de l'agent n'ont pas pu être téléchargés : il n'a donc jamais démarré. C'est généralement un problème de connexion — veuillez réessayer.",
       "runtime_cli_timeout": "L'outil OpenClaw local n'a pas répondu à temps, l'exécution n'a donc jamais démarré. C'est un délai de démarrage local, pas un problème de réseau — réessayer ne servira à rien tant que l'outil ne démarrera pas plus vite ou que le délai ne sera pas allongé (MULTICA_OPENCLAW_CLI_TIMEOUT).",
@@ -168,7 +169,9 @@
       "label": "Recommander une action",
       "prompt": "Examinez ce que vous savez de mon espace de travail et recommandez une première action utile."
     },
-    "customize": "Personnaliser les amorces"
+    "customize": "Personnaliser les amorces",
+    "uploading": "Attendez la fin des téléversements avant d’utiliser une amorce.",
+    "draft_in_progress": "Envoyez ou effacez votre brouillon avant d’utiliser une amorce."
   },
   "onboarding_cards": {
     "aria_label": "Façons de démarrer",

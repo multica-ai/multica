@@ -76,9 +76,7 @@ import {
   MessageSquarePlus,
 } from "lucide-react";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boolean {
   if (!editor.isEditable) return false;
@@ -92,9 +90,7 @@ function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boole
   return true;
 }
 
-// ---------------------------------------------------------------------------
 // Mark Toggle Button
-// ---------------------------------------------------------------------------
 
 type InlineMark = "bold" | "italic" | "strike" | "code" | "highlight";
 
@@ -144,9 +140,7 @@ function MarkButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // URL normalisation
-// ---------------------------------------------------------------------------
 
 /** Protocols that can execute code in the browser — the only ones we block. */
 const DANGEROUS_PROTOCOL_RE = /^(javascript|data|vbscript):/i;
@@ -174,9 +168,7 @@ function normalizeUrl(input: string): string {
   return `https://${trimmed}`;
 }
 
-// ---------------------------------------------------------------------------
 // Link Edit Bar
-// ---------------------------------------------------------------------------
 
 function LinkEditBar({
   editor,
@@ -257,9 +249,7 @@ function LinkEditBar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Heading Dropdown
-// ---------------------------------------------------------------------------
 
 function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor; onOpenChange: (open: boolean) => void; activeLevel: number | undefined }) {
   const { t } = useT("editor");
@@ -315,9 +305,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
   );
 }
 
-// ---------------------------------------------------------------------------
 // List Dropdown
-// ---------------------------------------------------------------------------
 
 function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean; isTask: boolean }) {
   const { t } = useT("editor");
@@ -393,9 +381,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create Sub-Issue Button
-// ---------------------------------------------------------------------------
 
 /**
  * Turns the current selection into a sub-issue of `parentIssueId` and replaces
@@ -488,9 +474,7 @@ function CreateSubIssueButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Main Bubble Menu — @floating-ui/dom + portal to body
-// ---------------------------------------------------------------------------
 
 function EditorBubbleMenu({
   editor,

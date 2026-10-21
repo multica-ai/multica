@@ -748,9 +748,7 @@ func init() {
 	issueSubscriberRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Issue commands
-// ---------------------------------------------------------------------------
 
 func runIssueList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -2018,9 +2016,7 @@ func recordedDuplicateOf(result map[string]any, ref string) (string, error) {
 	return ref, nil
 }
 
-// ---------------------------------------------------------------------------
 // Reorder command
-// ---------------------------------------------------------------------------
 
 // registerIssueReorderFlags wires the reorder command's flags and declares its
 // target selector as a cobra flag group: mutually exclusive so at most one of
@@ -2331,9 +2327,7 @@ func floatVal(m map[string]any, key string) float64 {
 	return 0
 }
 
-// ---------------------------------------------------------------------------
 // Comment commands
-// ---------------------------------------------------------------------------
 
 func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -2687,9 +2681,7 @@ func runIssueCommentResolution(cmd *cobra.Command, commentID string, resolve boo
 	return cli.PrintJSON(os.Stdout, result)
 }
 
-// ---------------------------------------------------------------------------
 // Execution history commands
-// ---------------------------------------------------------------------------
 
 func runIssueRuns(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -2934,9 +2926,7 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Search command
-// ---------------------------------------------------------------------------
 
 func runIssueRerun(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -3069,9 +3059,7 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Subscriber commands
-// ---------------------------------------------------------------------------
 
 func runIssueSubscriberList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -3175,9 +3163,7 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 	return cli.PrintJSON(os.Stdout, result)
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 type assigneeMatch struct {
 	Type string // "member", "agent", or "squad"

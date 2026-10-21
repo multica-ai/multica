@@ -204,13 +204,13 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | 空 | OpenAI 兼容 API key |
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 兼容 endpoint |
-| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 请求未指定模型时使用 |
+| `MULTICA_LLM_DEFAULT_MODEL` | `gpt-6-luna` | 请求未指定模型时使用 |
 | `MULTICA_LLM_MAX_RETRIES` | `2` | 单次调用的重试上限；`0` 表示禁用重试，`1`–`5` 表示最多重试 N 次 |
 | `MULTICA_LLM_DISABLE_THINKING` | `false` | 在每个请求中附带 `chat_template_kwargs: {"enable_thinking": false}`，供支持该字段的网关关闭模型思考 |
 
 `MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
 
-`MULTICA_LLM_DISABLE_THINKING` 面向"模型会先跑一段推理（thinking）并吃掉辅助调用延迟预算"的网关。设为 `true`（或 `1`）时，服务端会在每个请求体中附带 `chat_template_kwargs: {"enable_thinking": false}`；支持透传该字段的网关（vLLM/sglang 类部署、部分 GLM/Qwen 系的 LiteLLM 路由）会因此跳过思考阶段。标准 OpenAI 端点会拒绝未知的请求体字段，所以仅在上游接受时启用。GPT-5.6 系模型在后续提问建议请求中已由服务端附带 `reasoning_effort: none`。会话自动命名不发送推理字段；只有当所配置的上游接受 `chat_template_kwargs` 时，此项才会影响它。可接受的取值为 `true`/`false` 和 `1`/`0`（不区分大小写）；其它取值会让服务启动失败。启动日志会在重试策略旁打印生效状态。
+`MULTICA_LLM_DISABLE_THINKING` 面向"模型会先跑一段推理（thinking）并吃掉辅助调用延迟预算"的网关。设为 `true`（或 `1`）时，服务端会在每个请求体中附带 `chat_template_kwargs: {"enable_thinking": false}`；支持透传该字段的网关（vLLM/sglang 类部署、部分 GLM/Qwen 系的 LiteLLM 路由）会因此跳过思考阶段。标准 OpenAI 端点会拒绝未知的请求体字段，所以仅在上游接受时启用。GPT-5.6 系模型和 GPT-6 Luna 在后续提问建议请求中已由服务端附带 `reasoning_effort: none`。会话自动命名不发送推理字段；只有当所配置的上游接受 `chat_template_kwargs` 时，此项才会影响它。可接受的取值为 `true`/`false` 和 `1`/`0`（不区分大小写）；其它取值会让服务启动失败。启动日志会在重试策略旁打印生效状态。
 
 有两个功能会使用这一层，它们都会把聊天内容发送到你配置的 endpoint：
 
@@ -259,6 +259,8 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40
 ```
+
+Muse Code 支持 `MULTICA_MUSE_PATH` 和 `MULTICA_MUSE_MODEL`；模型值应使用运行时模型列表中的 ID。
 
 Cursor 已验证的后台清理需要 Linux 6.9 及以上（进程组 pidfd）、macOS 内核对进程身份查询与 audit token 发信号的支持，或 Windows 上成功分配的嵌套 Job Object。在 macOS 上，每个进程都按内核校验的 PID version 发信号，不需要加入同一 session 的进程组；这些 macOS 接口是私有的，会在捕获时做探测。无法认领的后台启动会返回它原本的工具结果并回到普通的 idle watchdog，工具 watchdog 为 `0` 时同样如此。已经认领的工作在清理无法确认时会继续算作执行中。当工具 watchdog 设为 `0` 时则完全没有这个边界：已认领的后台工作只要还活着就一直让运行处于执行中，此时运行仅受 `MULTICA_AGENT_TIMEOUT` 约束，而它默认也是 `0`。
 

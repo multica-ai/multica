@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Loader2, MessageSquare } from "lucide-react";
+import { Loader2, MessageSquare, X } from "lucide-react";
 import {
   applyDraftModelChange,
   applyDraftRuntimeChange,
@@ -18,6 +18,7 @@ import type {
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChatInput } from "../../chat/components/chat-input";
+import { CHAT_COLUMN, CHAT_GUTTER } from "../../chat/components/chat-column";
 import {
   ChatMessageList,
   ChatMessageSkeleton,
@@ -142,6 +143,7 @@ export function BuilderConversation({
   restoreDraftRequest,
   onRestoreDraftApplied,
   error,
+  onDismissError,
 }: {
   sessionId: string;
   messages: ChatMessage[];
@@ -157,8 +159,10 @@ export function BuilderConversation({
   restoreDraftRequest: BuilderRestore | null;
   onRestoreDraftApplied: () => void;
   error: string | null;
+  onDismissError?: () => void;
 }) {
   const { t } = useT("agents");
+  const { t: tModals } = useT("modals");
   const pending = !!pendingTask?.task_id;
   const draftKey = `agent-builder:${sessionId}`;
   const prompts = [
@@ -228,12 +232,29 @@ export function BuilderConversation({
       )}
 
       {error ? (
-        <div
-          role="alert"
-          aria-live="polite"
-          className="mx-5 mb-3 rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive"
-        >
-          {error}
+        <div className={cn("mb-3", CHAT_GUTTER)}>
+          <div
+            role="alert"
+            aria-live="polite"
+            className={cn(
+              CHAT_COLUMN,
+              "flex items-start gap-2 rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive",
+            )}
+          >
+            <span className="min-w-0 flex-1">{error}</span>
+            {onDismissError && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0"
+                aria-label={tModals(($) => $.common.close)}
+                onClick={onDismissError}
+              >
+                <X className="size-4" />
+              </Button>
+            )}
+          </div>
         </div>
       ) : null}
 

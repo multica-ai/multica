@@ -25,71 +25,20 @@ export interface RestoreDraftRequest {
 }
 
 /**
- * Owns the durable draft-restore lifecycle for one composer (#5219). Shared by
- * the chat page controller and the floating chat window — the two entry points
- * must not drift, because the state machine below is the only thing standing
- * between a cancelled prompt and losing it.
+ * Owns draft restoration for the chat page and floating composer.
+ * Durable cancellation restores remain on the server until applied. Failed-send
+ * and synchronous-cancel restores have no server copy, so persist them per session
+ * until the composer confirms application. The shared request slot exposes only
+ * the visible session's next offer.
  *
- * Two kinds of restore feed one composer, and they have different failure modes:
+ * Only visible composers participate. A nonempty draft defers the offer without
+ * consuming it. Record application in a persisted ledger before sending consume;
+ * retry consumption on later fetches and clear the ledger on server confirmation.
+ * This ordering prevents a lost response from offering an already-applied prompt.
  *
- * - Durable (a deferred-cancellation row, #5219): the server holds the text, so
- *   an offer that is never taken can simply be dropped and refetched.
- * - Server-less (a failed send, or a cancel that answered synchronously): the
- *   send already cleared the persisted draft, so this hook's queue is the ONLY
- *   copy of the user's text. It is therefore persisted per session
- *   (pendingSendRestores) from the moment it is created until the composer
- *   reports it applied — never parked in the shared slot, which is component
- *   state and dies with an unmount.
- *
- * The single `restoreDraftRequest` slot is only a view onto whichever of those
- * the composer can act on RIGHT NOW: it never holds a request for a session
- * other than the one on screen, so a restore for a session the user may never
- * return to cannot starve the one they are looking at.
- *
- * The hand-off is at-most-once and lossless:
- *
- * - A restore is offered to the composer, which either applies it (empty draft)
- *   or leaves it alone (the user has work in progress). A skipped restore stays
- *   pending — ChatInput re-evaluates as the draft changes and applies it the
- *   moment the draft is clear. It is never marked done, never consumed, and the
- *   server row (or queue entry) survives.
- * - Only an applied restore is recorded — in a *persisted* ledger, before the
- *   consume request goes out. A consume that is lost (offline, app closed, retries
- *   exhausted) therefore cannot cause the prompt to be restored a second time
- *   after the user has sent it; the ledger, not the server row, is what makes the
- *   offer at-most-once.
- * - Any row that outlives its ledger entry is reconciled: the consume is fired
- *   again on every fetch until the row is gone, and the ledger entry is dropped
- *   only when the server confirms it.
- *
- * Ownership. The restore belongs to the *user*, not to a device: the endpoints
- * are creator-authorized, so every client of theirs sees the row until one
- * consumes it. `enabled` is what decides which composers may take it: a client
- * only claims a restore into a composer the user can actually see. The cost of
- * getting this wrong is not a duplicate draft — it is a silent theft, where a
- * background composer applies (and consumes) the prompt the user is waiting for
- * on the device in front of them, and the row is gone before they ever see it.
- * A hidden composer must therefore never take part.
- *
- * Two *visible* composers on the same session, however, may both adopt it. That
- * is a deliberate product decision, not an accident of the implementation:
- *
- * - What happens: both write the prompt into their own device-local draft. The
- *   consume DELETE is idempotent, so the first one to reach the server takes the
- *   row and the other's call is a no-op. Nothing is lost; the user sees the
- *   restored prompt on both screens and could send it twice.
- * - Why we accept it: both composers being visible means the user is looking at
- *   one of them. A restored draft is not a sent message — it sits in the input
- *   until the user presses send — so the worst case is that they see their own
- *   prompt on their other open device and dismiss it there.
- * - Why not fix it: eliminating it needs a server-side claim/lease keyed on
- *   client identity, taken *before* the local draft is written. That inverts the
- *   ordering this whole state machine is built on (apply first, then consume) and
- *   reopens the hole it exists to close: a client that wins the claim and then
- *   dies — offline, closed, crashed — has taken the row without ever putting the
- *   prompt anywhere, and the text is gone for good. Trading a recoverable
- *   duplicate for an unrecoverable loss is the wrong side of that bet, and a
- *   lease with an expiry to bound the loss buys the duplicate right back.
+ * Two visible clients may restore the same prompt locally; consumption is
+ * idempotent. Apply before consume: claiming first could lose the only copy if
+ * the winning client closes before writing its draft.
  */
 export function useChatDraftRestore(activeSessionId: string | null, enabled = true) {
   const qc = useQueryClient();

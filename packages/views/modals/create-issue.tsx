@@ -63,6 +63,9 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { stepHandlerActor, useStepHandlerLabel } from "../workflows/step-handler";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
@@ -98,13 +101,11 @@ import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
-// ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
 // CreateIssueDialog so mode switching swaps only the inner panel without
 // remounting the Dialog Root (no overlay flash). `onSwitchMode` flips the
 // shell's local mode state.
-// ---------------------------------------------------------------------------
 
 // CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
 // whether saving will start a run, driven by the unified backend predicate
@@ -192,6 +193,29 @@ function CreateRunHint({
           <span className="truncate">{text}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Names who a new issue will be handed to when its project's workflow starts
+ * it on a step with a handler and no assignee was picked. (MUL-7420)
+ */
+function WorkflowHandoffHint({ projectId, status }: { projectId?: string; status: IssueStatus }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const workflow = useProjectWorkflow(wsId, projectId);
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: !!workflow });
+  const project = projects?.find((p) => p.id === projectId);
+  const handlerLabel = useStepHandlerLabel(project);
+  const step = workflowStep(workflow, status);
+  const label = handlerLabel(step);
+  if (!label) return null;
+  const actor = stepHandlerActor(step, project);
+  return (
+    <div aria-live="polite" className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground">
+      {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />}
+      <span className="truncate">{t(($) => $.workflows.create_handoff_hint, { name: label })}</span>
     </div>
   );
 }
@@ -386,6 +410,14 @@ export function ManualCreatePanel({
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
+  // A project using a named workflow only accepts its columns: a status it
+  // does not list moves to todo, which every workflow keeps. (MUL-7420)
+  const createWorkflow = useProjectWorkflow(wsId, projectId);
+  useEffect(() => {
+    if (createWorkflow && !workflowAllowsStatus(createWorkflow, status)) {
+      setStatus("todo");
+    }
+  }, [createWorkflow, status]);
   const updateStartDate = (v: string | null) => { setStartDate(v); setManual({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setShared({ dueDate: v }); };
   const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setManual({ labelIds: ids }); };
@@ -994,7 +1026,11 @@ export function ManualCreatePanel({
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
-            <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            {assigneeId ? (
+              <CreateRunHint assigneeType={assigneeType} assigneeId={assigneeId} status={status} />
+            ) : (
+              <WorkflowHandoffHint projectId={projectId} status={status} />
+            )}
 
             {/* Property toolbar — each field renders per the Settings → Preferences → Issue creation
                 selection (see showField above). */}
@@ -1003,6 +1039,7 @@ export function ManualCreatePanel({
               {showField.status && (
                 <StatusPicker
                   status={status}
+                  projectId={projectId ?? null}
                   onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
                   triggerRender={<PillButton />}
                   align="start"

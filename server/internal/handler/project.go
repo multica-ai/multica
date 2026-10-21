@@ -47,6 +47,9 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+	// WorkflowID is the workflow this project uses; null means the workspace
+	// Default workflow. (MUL-7420)
+	WorkflowID *string `json:"workflow_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -65,6 +68,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		IssuePrefix: p.IssuePrefix,
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
+		WorkflowID:  uuidToPtr(p.WorkflowID),
 	}
 }
 
@@ -116,6 +120,10 @@ type CreateProjectRequest struct {
 	// (PROA-1). Empty means the project inherits the workspace prefix.
 	IssuePrefix *string                               `json:"issue_prefix"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	// WorkflowID picks the project's workflow at creation; omitted or null
+	// uses the workspace Default workflow. A new project has no issues, so no
+	// status mapping is involved. (MUL-7420)
+	WorkflowID *string `json:"workflow_id,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -310,6 +318,24 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var workflowID pgtype.UUID
+	if req.WorkflowID != nil && *req.WorkflowID != "" {
+		if !h.requireProjectWorkflowsV1(w, r) {
+			return
+		}
+		id, ok := parseUUIDOrBadRequest(w, *req.WorkflowID, "workflow_id")
+		if !ok {
+			return
+		}
+		row, err := h.Queries.GetIssueWorkflow(r.Context(), db.GetIssueWorkflowParams{ID: id, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "workflow not found in this workspace")
+			return
+		}
+		if !row.IsDefault {
+			workflowID = id
+		}
+	}
 
 	var issuePrefix string
 	if req.IssuePrefix != nil {
@@ -398,6 +424,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		StartDate:   startDate,
 		DueDate:     dueDate,
 		IssuePrefix: issuePrefix,
+		WorkflowID:  workflowID,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -523,15 +550,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
-	params := db.UpdateProjectParams{
-		ID:          prevProject.ID,
-		Description: prevProject.Description,
-		Icon:        prevProject.Icon,
-		LeadType:    prevProject.LeadType,
-		LeadID:      prevProject.LeadID,
-		StartDate:   prevProject.StartDate,
-		DueDate:     prevProject.DueDate,
-	}
+	params := db.UpdateProjectParams{ID: prevProject.ID}
+	_, params.DescriptionSet = rawFields["description"]
+	_, params.IconSet = rawFields["icon"]
+	_, params.LeadTypeSet = rawFields["lead_type"]
+	_, params.LeadIDSet = rawFields["lead_id"]
+	_, params.StartDateSet = rawFields["start_date"]
+	_, params.DueDateSet = rawFields["due_date"]
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
@@ -984,6 +1009,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		return rows.Err()
 	})
 	if err != nil {
+		if writeSearchCancellation(w, r, err) {
+			return
+		}
 		// Statement-timeout surfaces as SQLSTATE 57014 — same
 		// fail-fast contract as SearchIssues (see runSearchQuery).
 		if isSearchStatementTimeout(err) {
@@ -996,6 +1024,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
+		return
+	}
+	if writeSearchCancellation(w, r, ctx.Err()) {
 		return
 	}
 
@@ -1051,6 +1082,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		resp[i] = spr
 	}
 
+	if writeSearchCancellation(w, r, ctx.Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects": resp,
 	})

@@ -161,9 +161,7 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Copy button + code row — mirrors onboarding/CliInstallInstructions
-// ---------------------------------------------------------------------------
 
 function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {
   const [copied, setCopied] = useState(false);
@@ -235,9 +233,7 @@ function CommandStep({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Step 1: Instructions
-// ---------------------------------------------------------------------------
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
@@ -361,9 +357,7 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Live-listening indicator
-// ---------------------------------------------------------------------------
 
 function LiveListening() {
   const { t } = useT("runtimes");
@@ -384,9 +378,7 @@ function LiveListening() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Step 2: Success
-// ---------------------------------------------------------------------------
 
 function SuccessStep({
   onGoToAgents,

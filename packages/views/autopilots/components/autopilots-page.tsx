@@ -128,11 +128,9 @@ function columnTrackVars(
   } as React.CSSProperties;
 }
 
-// ---------------------------------------------------------------------------
 // Templates for the empty state (unchanged from the previous page version).
 // Prompts stay raw English because they're injected directly into the
 // agent's task input.
-// ---------------------------------------------------------------------------
 
 type TemplateId =
   | "daily_news"
@@ -219,9 +217,7 @@ const TEMPLATES: AutopilotTemplate[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function CheckboxCell({
   checked,
@@ -439,9 +435,7 @@ function CreatorCell({ autopilot }: { autopilot: Autopilot }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header row
-// ---------------------------------------------------------------------------
 
 function AutopilotListHeader({
   sortField,
@@ -615,9 +609,7 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export function AutopilotsPage() {
   const navigation = useNavigation();

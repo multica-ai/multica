@@ -111,7 +111,7 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 // an operator opts in, and a daemon upgrade never starts deleting on its own.
 func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
@@ -144,7 +144,7 @@ func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *tes
 
 func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL", "")
 	base := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
@@ -184,7 +184,7 @@ func TestLoadConfig_WSClaimPollIntervalPrecedence(t *testing.T) {
 
 func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
 	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
 
@@ -518,7 +518,7 @@ func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
 	}
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	hooksDir := filepath.Join(home, ".multica", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatalf("create hooks dir: %v", err)
@@ -578,7 +578,7 @@ func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
 	}
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	hooksDir := filepath.Join(home, ".multica", "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatalf("create hooks dir: %v", err)
@@ -1637,7 +1637,7 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 func writeCLIConfigForProfile(t *testing.T, profile string, cfg cli.CLIConfig) {
 	t.Helper()
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	redirectTestHome(t, tmp)
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		t.Fatalf("write cli config: %v", err)
 	}
@@ -1782,7 +1782,7 @@ func TestLoadConfig_AppliesBackendOverridesFromConfigFile(t *testing.T) {
 	// Drop a CLI config under the user's HOME (already pointed at TempDir
 	// by stageFakeAgent's t.Setenv chain — but reassert here for clarity).
 	homeForCLIConfig := t.TempDir()
-	t.Setenv("HOME", homeForCLIConfig)
+	redirectTestHome(t, homeForCLIConfig)
 	cfg := cli.CLIConfig{
 		ServerURL: "http://localhost:8080",
 		Backends: &cli.BackendOverrides{
@@ -1824,7 +1824,7 @@ func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
 	stageFakeAgent(t)
 
 	// Point HOME at an empty dir — no config.json present.
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	os.Unsetenv("MULTICA_OPENCLAW_PATH")
 	os.Unsetenv("OPENCLAW_STATE_DIR")
 	t.Cleanup(func() {
@@ -1853,7 +1853,7 @@ func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
 func TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal(t *testing.T) {
 	stageFakeAgent(t)
 	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	redirectTestHome(t, homeDir)
 
 	// Write malformed JSON.
 	cfgDir := filepath.Join(homeDir, ".multica")

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -576,6 +577,299 @@ func TestTryDeliverInbox_NoBindingIsNoop(t *testing.T) {
 	}
 	if len(conn.frames) != 0 {
 		t.Errorf("no binding should push nothing, got %d frames", len(conn.frames))
+	}
+}
+
+// The multi-bot fallback (MUL-7687): the agent that acted has no bot this
+// member is bound in, so the notification still goes out through the member's
+// notification binding. Without this, preferring the agent's bot would
+// silently drop notifications for every agent the recipient never bound. The
+// agent-bot preference itself is covered rule-by-rule in
+// outbound_sender_route_test.go.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotIsUnbound(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding:  db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		senderInstallErr: pgx.ErrNoRows,
+		workspace:      db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the member's notification binding should still deliver")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the recipient's own bot", body["chatid"])
+	}
+	if q.senderInstallGets != 1 {
+		t.Errorf("agent-bot installation lookup ran %d times, want 1 before the fallback", q.senderInstallGets)
+	}
+}
+
+// A failed agent-bot read must not silence a notification the next rule can
+// still deliver: a non-ErrNoRows failure is logged and the chain continues.
+func TestTryDeliverInbox_AgentBotLookupFailureFallsBack(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding:    db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		senderInstallErr: errors.New("connection reset"),
+		workspace:        db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; a failed agent-bot read must fall back")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the fallback bot", body["chatid"])
+	}
+}
+
+// The other half of the multi-bot rule. Preferring the acting agent's bot must
+// not make a notification LESS deliverable than the member's own binding was:
+// when agent A's bot has no live socket anywhere in the fleet, the push has to
+// fall back down the routing chain — here, with no project lead in the way, to
+// the member's notification binding, the route that carried this notification
+// before the agent's bot was preferred.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotHasNoLiveSender(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111") // registered nowhere: no socket on any replica
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	reg := newSendersRegistry()
+	conn := &recordingConn{}
+	reg.set(fallbackInstID, conn.autoAck(newWSSender(conn, nil)))
+	o := NewOutbound(q, reg, nil, slog.Default())
+	q.senderInstallation = db.ChannelInstallation{ID: agentInstID}
+	q.perInstallationBindings = map[string]db.ChannelUserBinding{
+		uuidStringPub(agentInstID): {ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID},
+	}
+	q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the member's notification binding still has a live socket")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_LATEST_BOT" {
+		t.Errorf("inbox push chatid = %v, want the member's own bot", body["chatid"])
+	}
+}
+
+// A registered socket that refuses the write deadline is a second shape of the
+// same proof: SetWriteDeadline runs before WriteMessage, so nothing could have
+// reached the wire, and the next routing rule is still owed the push.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotWriteIsRefused(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111")
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	reg := newSendersRegistry()
+	// Agent A's socket is up, but it will not accept a frame.
+	refusing := &deadlineRefusingConn{recordingConn: &recordingConn{}}
+	reg.set(agentInstID, refusing.recordingConn.autoAck(newWSSender(refusing, nil)))
+	conn := &recordingConn{}
+	reg.set(fallbackInstID, conn.autoAck(newWSSender(conn, nil)))
+	o := NewOutbound(q, reg, nil, slog.Default())
+	q.senderInstallation = db.ChannelInstallation{ID: agentInstID}
+	q.perInstallationBindings = map[string]db.ChannelUserBinding{
+		uuidStringPub(agentInstID): {ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID},
+	}
+	q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; a refused write is provably undelivered and must fall back")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_LATEST_BOT" {
+		t.Errorf("inbox push chatid = %v, want the member's own bot", body["chatid"])
+	}
+}
+
+// The flip side of the fallback: a send whose fate is UNKNOWN — here, the
+// verdict never came back — may already be in the member's chat, so the next
+// routing rule is deliberately NOT tried. Duplicating the card is worse
+// than a late one.
+func TestTryDeliverInbox_DoesNotFallBackOnAnUncertainSend(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111")
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	reg := newSendersRegistry()
+	agentConn := &recordingConn{swallowAckFromSend: 1}
+	agentSender := newWSSender(agentConn, nil)
+	agentSender.ackTimeout = 50 * time.Millisecond
+	reg.set(agentInstID, agentConn.autoAck(agentSender))
+	fallbackConn := &recordingConn{}
+	reg.set(fallbackInstID, fallbackConn.autoAck(newWSSender(fallbackConn, nil)))
+	o := NewOutbound(q, reg, nil, slog.Default())
+	q.senderInstallation = db.ChannelInstallation{ID: agentInstID}
+	q.perInstallationBindings = map[string]db.ChannelUserBinding{
+		uuidStringPub(agentInstID): {ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID},
+	}
+	q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+	if o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Error("tryDeliverInbox returned true for a send whose verdict never came back")
+	}
+	if frames := fallbackConn.sendFrames(); len(frames) != 0 {
+		t.Errorf("the next routing rule was tried after an uncertain send: %d frames", len(frames))
+	}
+}
+
+// TestTryDeliverInbox_TriStateRelayMapping pins what each relay verdict means
+// to the fallback decision. Only a verdict that PROVES the card did not reach
+// WeCom may be re-routed: relayNotWired (no relay attached) and relayNoHolder
+// (published, but no replica ever took the delivery claim). relayAccepted is a
+// delivery; relayUncertain may already be one, so it must stay put.
+func TestTryDeliverInbox_TriStateRelayMapping(t *testing.T) {
+	t.Parallel()
+	const agentID = "55555555-5555-5555-5555-555555555555"
+	for _, tc := range []struct {
+		name          string
+		state         relayPublish
+		wantDelivered bool
+		wantFallback  int
+	}{
+		{"accepted is a delivery", relayAccepted, true, 0},
+		{"uncertain is not re-routed", relayUncertain, false, 0},
+		{"no holder falls back", relayNoHolder, true, 1},
+		{"no relay falls back", relayNotWired, true, 1},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+			agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111") // no socket here
+			fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+			reg := newSendersRegistry()
+			conn := &recordingConn{}
+			reg.set(fallbackInstID, conn.autoAck(newWSSender(conn, nil)))
+			relay := &scriptedRelay{state: tc.state}
+			o := NewOutbound(q, reg, nil, slog.Default(), WithRelay(relay))
+			q.senderInstallation = db.ChannelInstallation{ID: agentInstID}
+			q.perInstallationBindings = map[string]db.ChannelUserBinding{
+				uuidStringPub(agentInstID): {ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID},
+			}
+			q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+			got := o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", agentID),
+				"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444")
+			if got != tc.wantDelivered {
+				t.Errorf("tryDeliverInbox = %v, want %v", got, tc.wantDelivered)
+			}
+			if n := len(conn.sendFrames()); n != tc.wantFallback {
+				t.Errorf("the next routing rule was sent %d cards, want %d", n, tc.wantFallback)
+			}
+		})
+	}
+}
+
+// TestTryDeliverInbox_OnlyTheAttemptWithASecondRouteWaits pins the split the
+// latency tests are about: the relay is asked to WAIT for a verdict only on an
+// attempt the routing chain can continue past, because only that one has a
+// later rule behind it. The member's notification binding is last, so its
+// attempt — and every fallback attempt — must not hold the request's goroutine.
+func TestTryDeliverInbox_OnlyTheAttemptWithASecondRouteWaits(t *testing.T) {
+	t.Parallel()
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111")
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	const agentID = "55555555-5555-5555-5555-555555555555"
+
+	// Agent-authored, neither bot reachable here: the agent-bot attempt waits
+	// (and misses), then the fallback attempt runs -- and must not wait again.
+	t.Run("agent attributed", func(t *testing.T) {
+		t.Parallel()
+		q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+		relay := &scriptedRelay{state: relayNoHolder}
+		o := NewOutbound(q, newSendersRegistry(), nil, slog.Default(), WithRelay(relay))
+		q.senderInstallation = db.ChannelInstallation{ID: agentInstID}
+		q.perInstallationBindings = map[string]db.ChannelUserBinding{
+			uuidStringPub(agentInstID): {ChannelUserID: "T_AGENT_BOT", InstallationID: agentInstID},
+		}
+		q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+		if o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", agentID),
+			"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+			t.Error("tryDeliverInbox = true; neither bot is reachable and no verdict was a delivery")
+		}
+		if len(relay.awaited) != 2 || !relay.awaited[0] || relay.awaited[1] {
+			t.Errorf("awaited = %v, want the agent-bot attempt to wait and the fallback attempt not to", relay.awaited)
+		}
+	})
+
+	// Member-authored: the notification binding is the only route, so the one
+	// attempt must not wait for a verdict nothing could act on.
+	t.Run("member authored", func(t *testing.T) {
+		t.Parallel()
+		q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+		relay := &scriptedRelay{state: relayNoHolder}
+		o := NewOutbound(q, newSendersRegistry(), nil, slog.Default(), WithRelay(relay))
+		q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+		item := agentInboxItem("new_comment", agentID)
+		item["actor_type"] = util.TextToPtr(pgtype.Text{String: "member", Valid: true})
+		if o.tryDeliverInbox(context.Background(), item,
+			"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+			t.Error("tryDeliverInbox = true; the only bot is unreachable")
+		}
+		if len(relay.awaited) != 1 || relay.awaited[0] {
+			t.Errorf("awaited = %v, want the single member-authored attempt not to wait", relay.awaited)
+		}
+	})
+}
+
+// scriptedRelay is the router seam with a canned verdict, so the tri-state
+// mapping in pushInbox can be pinned without a bus or a claim store.
+type scriptedRelay struct {
+	state relayPublish
+	// awaited records whether the attempt that produced the verdict asked the
+	// relay to WAIT for it. Only the agent-attributed attempt may, which is the
+	// distinction the latency tests are about.
+	awaited []bool
+	frames  []relayFrame
+}
+
+func (r *scriptedRelay) publish(f relayFrame, _ string) relayPublish {
+	r.frames = append(r.frames, f)
+	r.awaited = append(r.awaited, false)
+	return r.state
+}
+
+func (r *scriptedRelay) publishAwaitingHolder(_ context.Context, f relayFrame, _ string) relayPublish {
+	r.frames = append(r.frames, f)
+	r.awaited = append(r.awaited, true)
+	return r.state
+}
+
+// deadlineRefusingConn is a socket whose write deadline cannot be set, which is
+// the one write failure raised before WriteMessage is entered (ws_sender.go's
+// writeLocked). It is the "provably nothing left this process" case the
+// fallback is owed for.
+type deadlineRefusingConn struct {
+	*recordingConn
+}
+
+func (c *deadlineRefusingConn) SetWriteDeadline(time.Time) error {
+	return errors.New("write deadline refused")
+}
+
+// agentInboxItem is one issue-comment notification as the listeners publish
+// it: a member recipient, and the agent whose comment it is as the actor —
+// behind pointers, which is how inboxItemToResponse builds the map.
+func agentInboxItem(notifType, agentID string) map[string]any {
+	return map[string]any{
+		"recipient_type": "member",
+		"recipient_id":   "33333333-3333-3333-3333-333333333333",
+		"workspace_id":   "44444444-4444-4444-4444-444444444444",
+		"type":           notifType,
+		"title":          "An issue",
+		"actor_type":     util.TextToPtr(pgtype.Text{String: "agent", Valid: true}),
+		"actor_id":       util.UUIDToPtr(mustUUID(agentID)),
 	}
 }
 

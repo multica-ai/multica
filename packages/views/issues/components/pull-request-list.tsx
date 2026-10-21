@@ -490,14 +490,46 @@ function PullRequestRow({
   );
 }
 
-function VerdictPill({ pill, stale, title }: { pill: VerdictPillConfig; stale: boolean; title?: string }) {
+/**
+ * One PR on a single line — state icon, `#number`, verdict pill — for
+ * surfaces with no room for PullRequestRow, such as the issue hover card.
+ * Not a link: the hover card that hosts it is read-only.
+ */
+export function PullRequestInlineSummary({ pr }: { pr: GitHubPullRequest }) {
+  const { t } = useT("issues");
+  const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
+  const StateIcon = cfg.icon;
+  const pill = getVerdictPill(derivePullRequestVerdict(pr), t);
+  const isTerminal = pr.state === "merged" || pr.state === "closed";
+  const stale = !isTerminal && pr.snapshot_stale === true;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5" title={pr.title}>
+      <StateIcon className={cn("size-3.5 shrink-0", cfg.className)} />
+      <span className="shrink-0 font-medium tabular-nums">{prLabel(pr)}</span>
+      {pill ? <VerdictPill pill={pill} stale={stale} inline /> : null}
+    </span>
+  );
+}
+
+function VerdictPill({
+  pill,
+  stale,
+  title,
+  inline = false,
+}: {
+  pill: VerdictPillConfig;
+  stale: boolean;
+  title?: string;
+  inline?: boolean;
+}) {
   const Icon = pill.icon;
   return (
     <span
       data-testid="pull-request-verdict"
       title={title ?? pill.title}
       className={cn(
-        "ml-auto inline-flex h-4.5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-micro font-medium tabular-nums",
+        inline ? null : "ml-auto",
+        "inline-flex h-4.5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-micro font-medium tabular-nums",
         TONE_CLASS[pill.tone],
         stale ? "opacity-60" : null,
       )}

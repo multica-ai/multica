@@ -723,7 +723,7 @@ daemon_task_marker() {
 }
 
 start_daemon() {
-  local status state
+  local status state build_commit
   ensure_credentials
 
   # Built, never `go run`: the daemon records its own executable path at startup
@@ -732,7 +732,8 @@ start_daemon() {
   # daemon registers, heartbeats, and then fails every task with
   # "fork/exec .../go-build.../exe/multica: no such file or directory".
   info "Building $MULTICA_BIN (a go run daemon would fail every task later)."
-  (cd "$REPO_ROOT/server" && go build -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
+  build_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  (cd "$REPO_ROOT/server" && go build -ldflags "-X main.buildCommit=$build_commit" -o bin/multica ./cmd/multica) || die "Failed to build the multica CLI."
 
   "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" \
     "$MULTICA_BIN" daemon start --profile "$PROFILE" 2>&1 | sed 's/^/    /' || true

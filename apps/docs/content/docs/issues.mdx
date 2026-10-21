@@ -61,9 +61,9 @@ Categories keep lifecycle reasoning simple. Boards, lists, filters, and sorting 
 | `blocked` | Cannot continue for now. |
 | `cancelled` | No longer pursued; the record stays. |
 
-There is no fixed flow between statuses — members and agents can change them directly.
+Members and agents can change statuses directly. In a project with a [workflow](/workflows), choose from that workflow’s steps. Moving into a step with a handoff can also change the assignee and ask an agent to start work.
 
-Agents write the status the issue is in as their work changes it: starting work on what the issue asks for — in whatever form, research, design, or a review the issue itself requests — moves it to `in_progress` right away, so the board shows the work while it runs; delivering moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; a turn that produces nothing of the issue's own deliverable — answering questions, consulting on work owned elsewhere — leaves the status untouched throughout. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a run starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or the merge of the issue's linked PRs when the workspace moves merged issues to `done`.
+Agents update the issue’s status as work progresses. By default, they mark work in progress when they begin and ready for review when they deliver. When a project has a workflow, they follow its steps and handoff instructions instead. A run ending does not complete the issue by itself; answering a question does not mean the issue’s work is finished.
 
 <Callout type="info">
 Two changes are made by the system:
@@ -74,27 +74,15 @@ Two changes are made by the system:
 
 ### Custom statuses
 
-A workspace owner or admin can add statuses under **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Every status belongs to one of four lifecycle categories:
+A workspace `owner` or `admin` can add statuses such as **Code Review**, **QA**, or **Rework**. If **Settings** includes **Workflows**, manage them in the status library below it. If not, use **Settings → Issue Statuses**.
 
-| Category | Lifecycle meaning |
-|---|---|
-| `unstarted` | Not started. Includes built-in Backlog and Todo. |
-| `started` | Ongoing, including review and waiting. |
-| `done` | Successfully completed; terminal. |
-| `closed` | Cancelled or no longer pursued; terminal, not successful completion. |
+Choose whether the status represents work that has not started, is underway, is finished, or is cancelled. That category cannot be changed after creation. A custom status does not automatically gain the special behavior of a built-in status: for example, naming one “Waiting” does not pause an agent.
 
-Custom statuses inherit lifecycle semantics only. They do not inherit built-in Backlog parking, In Review autopilot completion, Blocked failure, or In Progress recovery. Use the fixed built-in status when that behavior is required. Historical custom statuses follow the same rules: Awaiting Response is ongoing work, not automatic review completion. Assignment and creation still follow the general agent trigger rules.
+- Built-in statuses cannot be renamed, recolored, or archived.
+- Custom status names appear as you entered them. Changing a name or color updates it wherever that status is used.
+- Before archiving a status, move all issues using it to another suitable status, including completed or cancelled issues. Remove it from any custom workflows too. Archiving then removes it from future choices.
 
-For installed clients, existing API category fields retain the seven-value wire enum. New clients normalize that representation into four categories; wire values never grant behavior inheritance. The database stores only the four lifecycle values.
-
-Four things follow from that model:
-
-- **A status's category is fixed once the status exists.** Changing it later would change the lifecycle behavior of every issue already sitting on that status, so the editor keeps it read-only. Choose the lifecycle stage first, then name it.
-- **Status grouping uses individual statuses.** Board columns, List sections, and Swimlane status columns each distinguish built-in and custom statuses. `Code Review` and `QA` have separate columns even though both belong to Started. Categories are internal lifecycle classifications, not replacement column names.
-- **Built-in statuses are locked.** Their names, colors, and categories cannot be changed, and they cannot be archived — a workspace that never opens the page keeps exactly the board it had.
-- **Archiving retires a status, it does not delete it.** Issues already on it keep it, keep its name and color, and keep behaving the same. It only stops being offered the next time someone sets a status.
-
-Built-in statuses are translated into the interface language; a custom status always shows the name you typed. The API and the CLI address it by its key: `multica issue status MUL-42 code_review`. The settings page derives that key from the name; the API accepts an explicit one and only falls back to deriving it. Either way the key is fixed at creation — renaming the status later does not change it.
+The status library holds the available statuses. A project’s workflow chooses which ones its issues use and in what order.
 
 ## Issues and runs
 

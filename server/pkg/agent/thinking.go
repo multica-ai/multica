@@ -675,6 +675,10 @@ func catalogLoader(ctx context.Context, providerType string, cmd Command) func()
 // map. The function is intentionally pure of HTTP concerns so the
 // daemon's pre-execution guard and the server's UpdateAgent gate can
 // share the same source of truth.
+//
+// An explicit Claude model absent from both the selectable and unavailable
+// lists is also unknown: list_models is a picker, not an exhaustive list of
+// accepted --model values. Its saved effort passes through with a lookup error.
 func ValidateThinkingLevel(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
 	return ValidateThinkingLevelWith(catalogLoader(ctx, providerType, cmd), providerType, model, value)
 }
@@ -691,8 +695,24 @@ func ValidateThinkingLevel(ctx context.Context, providerType string, cmd Command
 // (#3729, MUL-5549), so each read costs the ceiling again on a logged-out or
 // timing-out runtime (MUL-6471 review).
 func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, model, value string) (bool, error) {
+	check, err := CheckThinkingLevelWith(loadCatalog, providerType, model, value)
+	return check.Valid, err
+}
+
+// ThinkingLevelCheck distinguishes a confirmed rejection from a capability
+// lookup that failed. Reason describes only confirmed rejections; lookup errors
+// leave the saved level for the CLI to resolve.
+type ThinkingLevelCheck struct {
+	Valid  bool
+	Reason string
+}
+
+// CheckThinkingLevelWith also explains a rejected level so the daemon can
+// disclose the fallback in the task transcript. The catalog is loaded at most
+// once, just as in ValidateThinkingLevelWith.
+func CheckThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, model, value string) (ThinkingLevelCheck, error) {
 	if value == "" {
-		return true, nil
+		return ThinkingLevelCheck{Valid: true}, nil
 	}
 	// Empty-model fail-closed, checked BEFORE the catalog load so the outcome is
 	// deterministic even when discovery would error. That ordering is the whole
@@ -700,17 +720,21 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 	// (see its thinking_level guard), which is exactly what must not happen for
 	// a provider whose effective model we cannot know.
 	if model == "" && ThinkingRequiresExplicitModel(providerType) {
-		return false, nil
+		return ThinkingLevelCheck{Reason: fmt.Sprintf("%s requires an explicit model", providerType)}, nil
 	}
 	catalog, err := loadCatalog()
 	if err != nil {
-		return false, err
+		return ThinkingLevelCheck{}, err
 	}
 	if catalog.CLIThinkingLevels != nil && !slices.Contains(catalog.CLIThinkingLevels, value) {
-		return false, nil
+		reason := "the installed CLI does not accept this thinking level"
+		if len(catalog.CLIThinkingLevels) == 0 {
+			reason = "the installed CLI does not support thinking-level control"
+		}
+		return ThinkingLevelCheck{Reason: reason}, nil
 	}
 	if !catalog.Verified() {
-		return false, fmt.Errorf("%w; cannot validate %s thinking level %q", errUnverifiedCatalog, providerType, value)
+		return ThinkingLevelCheck{}, fmt.Errorf("%w; cannot validate %s thinking level %q", errUnverifiedCatalog, providerType, value)
 	}
 	models := catalog.Models
 	target := modelIDForCapabilityLookup(providerType, model)
@@ -730,9 +754,19 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			// advertised model supports. Providers that instead require a pinned
 			// model never reach here — they were already rejected above.
 			if providerType == "opencode" {
-				return anyModelSupportsThinkingValue(models, value), nil
+				if anyModelSupportsThinkingValue(models, value) {
+					return ThinkingLevelCheck{Valid: true}, nil
+				}
+				return ThinkingLevelCheck{Reason: "no discovered model supports this thinking level"}, nil
 			}
-			return false, nil
+			return ThinkingLevelCheck{Reason: "the runtime's default model could not be resolved"}, nil
+		}
+	}
+	if providerType == "claude" {
+		for _, unavailable := range catalog.Unavailable {
+			if modelIDForCapabilityLookup(providerType, unavailable.ID) == target {
+				return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q is unavailable in the installed CLI", target)}, nil
+			}
 		}
 	}
 	for _, m := range models {
@@ -746,23 +780,29 @@ func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType
 			continue
 		}
 		if m.Thinking == nil {
-			return false, nil
+			return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q does not advertise thinking-level control", target)}, nil
 		}
 		for _, lvl := range m.Thinking.SupportedLevels {
 			if lvl.Value == value {
-				return true, nil
+				return ThinkingLevelCheck{Valid: true}, nil
 			}
 		}
-		return false, nil
+		return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q does not support this thinking level", target)}, nil
 	}
-	return false, nil
+	// Claude's picker lists selected family versions, not every model --model
+	// accepts. An omitted explicit model therefore has unknown capabilities.
+	// Keep malformed context modifiers rejected rather than treating them as
+	// independent model IDs, and never bypass an explicit unavailable row.
+	if providerType == "claude" && model != "" && !strings.ContainsAny(target, "[]") {
+		return ThinkingLevelCheck{}, fmt.Errorf("%w for model %q; cannot validate claude thinking level %q", errUnverifiedCatalog, model, value)
+	}
+	return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q was not found in the runtime catalog", target)}, nil
 }
 
-// errUnverifiedCatalog is what the capability checks answer when the catalog
-// they were handed is not the runtime's own (see Catalog.Verified). It is an
-// error rather than a "no" on purpose: the daemon passes a value it could not
-// check through to the CLI instead of discarding the user's saved choice.
-var errUnverifiedCatalog = errors.New("model discovery did not return the runtime's own catalog")
+// errUnverifiedCatalog means the catalog cannot establish the capability,
+// either because discovery failed or because Claude's picker omitted the
+// explicit model. The daemon passes the saved value through on this error.
+var errUnverifiedCatalog = errors.New("model discovery could not verify the capability")
 
 // ThinkingRequiresExplicitModel reports whether a provider refuses to carry an
 // effort unless a model is pinned, because its empty-model resolution happens
@@ -914,6 +954,20 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"high":    true,
 		"xhigh":   true,
 		"max":     true,
+	},
+	// muse takes Meta Muse Code's closed MSP vocabulary, declared on the
+	// `reasoningEffort` field of `turn/start`. The host re-validates the tier
+	// against the session model before it samples, so this list is the
+	// provider universe, not a per-model promise.
+	"muse": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+		"ultra":   true,
 	},
 	// omp (Oh-My-Pi) dispatches to the pi backend (see BuiltinRuntimes), so it
 	// inherits pi's fixed CLI vocabulary; discoverOmpModels narrows it to each

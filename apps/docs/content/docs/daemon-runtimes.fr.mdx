@@ -79,6 +79,10 @@ Un runtime local est **privé** par défaut : seul le propriétaire du runtime p
 
 Seul le propriétaire du runtime peut le rendre **public** — les administrateurs de l'espace de travail peuvent renommer ou supprimer un runtime, mais le partager relève de la décision du propriétaire. Les autres membres de l'espace de travail peuvent alors eux aussi sélectionner ce runtime ; cela ne partage pas les identifiants de connexion de l'outil de codage IA sous-jacent — cela permet seulement aux membres d'acheminer les exécutions de leurs agents vers cet ordinateur.
 
+Lorsque le propriétaire rend un runtime public à nouveau **privé**, Multica affiche d'abord les agents et les exécutions actives concernés, y compris les conversations de création d'agents avec Agent Builder. La confirmation dissocie les agents de ces autres membres, annule leurs exécutions en file d'attente, distribuées, en cours, en attente d'un répertoire local ou différées avec le motif `runtime_access_revoked`, et met en pause les automatisations actives assignées aux agents dissociés. Les agents et exécutions du propriétaire ne sont pas affectés. Si le plan change, une nouvelle confirmation est nécessaire ; des modifications simultanées de la discussion peuvent nécessiter de réessayer. Pour reprendre le travail, associez l'agent à un runtime accessible, puis reprenez explicitement ses automatisations en pause.
+
+L'annulation conserve l'historique de discussion et enregistre sur le serveur les données de restauration du brouillon et des pièces jointes. Les versions web et bureau utilisent l'interface de restauration existante ; la version mobile ne propose pas encore cette interface. Une exécution démarrée sans sortie attend l'accusé d'annulation du daemon ou la fin du délai de finalisation du serveur avant de décider si la saisie doit être restaurée. Un daemon connecté reçoit l'annulation lors de sa vérification habituelle. Si l'ordinateur est hors ligne, l'accès côté serveur est tout de même révoqué immédiatement, mais le processus local peut continuer jusqu'à sa reconnexion et à la réception de l'annulation ; le serveur ne peut pas garantir un arrêt à distance immédiat.
+
 ## Profils de runtime personnalisés
 
 Si votre équipe utilise un wrapper interne, un exécutable à version figée, ou a besoin d'arguments supplémentaires fixes pour un outil compatible, créez un **profil de runtime personnalisé**.
@@ -103,7 +107,7 @@ Le tableau liste les variables que les runtimes personnalisés peuvent utiliser 
 | `MULTICA_AGENT_NAME` | Nom affiché de l'agent assigné | Indicatif |
 | `MULTICA_DAEMON_PORT` | Port local de santé/API du daemon utilisé par les commandes réservées aux exécutions, comme `multica repo checkout` | Indicatif |
 | `MULTICA_TASK_SLOT` | Emplacement dans le pool de parallélisme global du daemon ; utile pour les ressources indexées par emplacement, comme les GPU | Indicatif |
-| `TMPDIR` | Répertoire temporaire privé de l'exécution en cours ; également fourni sous `TMP` et `TEMP` pour les outils multiplateformes | Indicatif |
+| `TMPDIR` | Répertoire temporaire privé de l'exécution ; également fourni sous `TMP` et `TEMP`, sauf sous Windows, où les tâches héritent des chemins temporaires utilisateur pour le `/tmp` partagé de Git Bash ; Claude Code sous Windows utilise par défaut le répertoire temporaire de la tâche pour `CLAUDE_CODE_TMPDIR` | Indicatif |
 
 Le serveur détermine l'auteur des requêtes effectuées avec `MULTICA_TOKEN` ; les écritures telles que les commentaires de tâche sont attribuées à l'agent assigné et à l'exécution en cours. Pour tout savoir sur le rattachement du jeton, ses permissions, l'attribution, sa durée de vie maximale de 24 heures et son nettoyage, consultez [Jetons temporaires pour les exécutions d'agents](/auth-tokens#jetons-temporaires-pour-les-exécutions-dagents).
 

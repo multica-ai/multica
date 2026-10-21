@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -245,7 +246,7 @@ func emitAutopilotPausedNotifications(
 		}
 		emitted[key] = true
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		item, inserted, err := inbox.CreateIfEligible(ctx, queries, db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
 			WorkspaceID:   autopilot.WorkspaceID,
 			RecipientType: r.Type,
@@ -266,6 +267,10 @@ func emitAutopilotPausedNotifications(
 				"recipient_id", util.UUIDToString(r.ID),
 				"error", err,
 			)
+			continue
+		}
+
+		if !inserted {
 			continue
 		}
 

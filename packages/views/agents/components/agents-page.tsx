@@ -253,9 +253,7 @@ export interface AgentsPageProps {
   hasLocalMachine?: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Page header
-// ---------------------------------------------------------------------------
 
 function PageHeaderBar({
   totalCount,
@@ -336,9 +334,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function CheckboxCell({
   checked,
@@ -576,9 +572,7 @@ function LastActiveCell({ row }: { row: AgentListRow }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header row + skeleton
-// ---------------------------------------------------------------------------
 
 function AgentListHeader({
   sortField,
@@ -770,10 +764,8 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
 // Page
-// ---------------------------------------------------------------------------
 
 export function AgentsPage(_props: AgentsPageProps = {}) {
   const { t } = useT("agents");

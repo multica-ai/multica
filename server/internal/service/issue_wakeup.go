@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -573,7 +574,11 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		return out, err
 	}
 	if len(out.Condition) > 0 && conditionFiresOnChange(out.Condition) {
-		if err = baselineCondition(ctx, tx, q, out, now); err != nil {
+		if err = s.baselineCondition(ctx, tx, q, out, now); err != nil {
+			return out, err
+		}
+		out, err = q.LockIssueWakeup(ctx, out.ID)
+		if err != nil {
 			return out, err
 		}
 	}
@@ -655,44 +660,301 @@ func (s *IssueWakeupService) TickWorkspaces(ctx context.Context, workspaceIDs ..
 	return s.tick(ctx, workspaceIDs)
 }
 
+// Scheduler pass limits. A pass used to visit a single batch of 100 rules, so
+// with more ready rules than that a status change waited several passes
+// (minutes) behind condition checks that had nothing new (MUL-7933, #9139).
+// A pass now keeps taking batches until both lanes are drained or a limit is
+// hit. The scheduler runs its jobs one after another, so the pass stops well
+// inside the job's 45s run timeout and leaves the rest of the 30s scheduler
+// tick to the other jobs; one dispatch is itself capped at 2s.
+const (
+	wakeupTickBatch = 100
+	// At most this many rules of a batch come from the input lane; the due
+	// lane fetches the rest.
+	wakeupTickInputShare = 50
+	wakeupTickBudget     = 15 * time.Second
+	// While the due lane still has work, the input lane may spend at most
+	// this much of the pass, so slow inputs cannot starve schedules,
+	// deadlines and condition checks. Either lane uses the whole budget once
+	// the other is drained.
+	wakeupTickInputBudget = wakeupTickBudget / 2
+	wakeupTickMaxRules    = 1500
+	// A pending input the scheduler could act on that is older than this is
+	// logged as a warning. Inputs a run holds are reported separately.
+	wakeupPendingWarnAge = 2 * time.Minute
+)
+
+// tickLimits are a pass's limits; zero fields take the defaults above. Tests
+// shrink them, and beforeDispatch lets a test make a dispatch slow.
+type tickLimits struct {
+	budget, inputBudget time.Duration
+	beforeDispatch      func(db.IssueWakeup)
+}
+
 // tick dispatches ready wakeups; nil workspaceIDs means every workspace.
+//
+// Two lanes feed the pass: rules with unprocessed inputs (an event, a
+// condition hint, "wake now") and rules whose schedule, deadline or condition
+// check is due. Dispatches alternate between the lanes, and the input lane's
+// time is capped while due work remains. Each rule is visited at most once.
 func (s *IssueWakeupService) tick(ctx context.Context, workspaceIDs []pgtype.UUID) error {
+	return s.tickWith(ctx, workspaceIDs, tickLimits{})
+}
+
+func (s *IssueWakeupService) tickWith(ctx context.Context, workspaceIDs []pgtype.UUID, lim tickLimits) error {
+	if lim.budget <= 0 {
+		lim.budget = wakeupTickBudget
+	}
+	if lim.inputBudget <= 0 {
+		lim.inputBudget = wakeupTickInputBudget
+	}
+	start := time.Now()
 	// Receipts are operational evidence, not the run history. Match the existing
 	// event telemetry's seven-day retention; never expire unprocessed inputs.
 	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 2*time.Second)
 	_, cleanupErr := s.Tasks.Queries.DeleteExpiredWakeupReceipts(cleanupCtx, pgtype.Timestamptz{Time: time.Now().Add(-7 * 24 * time.Hour), Valid: true})
 	cleanupCancel()
-	rows, err := s.Tasks.Queries.ListReadyWakeups(ctx, workspaceIDs)
-	if err != nil {
-		return err
-	}
 	var errs []error
 	if cleanupErr != nil {
 		errs = append(errs, fmt.Errorf("expire wakeup receipts: %w", cleanupErr))
 	}
-	for _, w := range rows {
+	// claimed holds every rule visited or queued in this pass. Never nil:
+	// "id = ANY(NULL)" is NULL and would exclude every rule.
+	claimed := []pgtype.UUID{}
+	var inputQ, dueQ []db.IssueWakeup
+	inputDrained, dueDrained := false, false
+	var inputSpent time.Duration
+	inputs, due := 0, 0
+	stop := "drained"
+	inputTurn := true
+	for {
 		if ctx.Err() != nil {
 			return errors.Join(append(errs, ctx.Err())...)
 		}
-		// Outcome writes must not turn a busy rule row into another batch-wide
-		// wait. Use the batch context, not dispatch's expired per-rule context.
-		dispatch := s.dispatch
-		if w.SystemRule.Valid {
-			dispatch = s.dispatchSystem
+		if time.Since(start) >= lim.budget {
+			stop = "time_budget"
+			break
 		}
-		if err = dispatch(ctx, w); err != nil {
-			errs = append(errs, fmt.Errorf("wakeup %s: %w", util.UUIDToString(w.ID), err))
-			outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-			_ = s.Tasks.Queries.NoteWakeupFailure(outcomeCtx, db.NoteWakeupFailureParams{ID: w.ID, LastError: pgtype.Text{String: truncateForSummary(err.Error(), 500), Valid: true}})
-			cancel()
+		if inputs+due >= wakeupTickMaxRules {
+			stop = "rule_cap"
+			break
 		}
-		outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-		if touchErr := s.Tasks.Queries.TouchWakeupDispatch(outcomeCtx, w.ID); touchErr != nil {
-			errs = append(errs, touchErr)
+		room := wakeupTickMaxRules - len(claimed)
+		if len(inputQ) == 0 && !inputDrained && room > 0 {
+			limit := min(wakeupTickInputShare, room)
+			rows, err := s.Tasks.Queries.ListInputWakeups(ctx, db.ListInputWakeupsParams{WorkspaceIds: workspaceIDs, SkipIds: claimed, RowLimit: int32(limit)})
+			if err != nil {
+				return errors.Join(append(errs, err)...)
+			}
+			inputDrained = len(rows) < limit
+			inputQ = rows
+			for _, w := range rows {
+				claimed = append(claimed, w.ID)
+			}
+			room -= len(rows)
 		}
-		cancel()
+		if len(dueQ) == 0 && !dueDrained && room > 0 {
+			limit := min(wakeupTickBatch-len(inputQ), room)
+			rows, err := s.Tasks.Queries.ListDueWakeups(ctx, db.ListDueWakeupsParams{WorkspaceIds: workspaceIDs, SkipIds: claimed, RowLimit: int32(limit)})
+			if err != nil {
+				return errors.Join(append(errs, err)...)
+			}
+			dueDrained = len(rows) < limit
+			dueQ = rows
+			for _, w := range rows {
+				claimed = append(claimed, w.ID)
+			}
+		}
+		// Due work is left while the lane has queued rules or can still fetch.
+		dueLeft := len(dueQ) > 0 || (!dueDrained && wakeupTickMaxRules > len(claimed))
+		inputAllowed := len(inputQ) > 0 && (inputSpent < lim.inputBudget || !dueLeft)
+		var w db.IssueWakeup
+		fromInput := false
+		switch {
+		case inputAllowed && (inputTurn || len(dueQ) == 0):
+			w, inputQ, fromInput = inputQ[0], inputQ[1:], true
+		case len(dueQ) > 0:
+			w, dueQ = dueQ[0], dueQ[1:]
+		default:
+			// Both lanes are empty: drained, or out of room under the cap.
+			if !inputDrained || !dueDrained {
+				stop = "rule_cap"
+			}
+			return s.finishTick(ctx, workspaceIDs, start, inputs, due, stop, errs)
+		}
+		inputTurn = !fromInput
+		began := time.Now()
+		if lim.beforeDispatch != nil {
+			lim.beforeDispatch(w)
+		}
+		errs = append(errs, s.dispatchFromTick(ctx, w)...)
+		if fromInput {
+			inputs++
+			inputSpent += time.Since(began)
+		} else {
+			due++
+		}
+	}
+	return s.finishTick(ctx, workspaceIDs, start, inputs, due, stop, errs)
+}
+
+// finishTick logs a global pass and returns its errors.
+func (s *IssueWakeupService) finishTick(ctx context.Context, workspaceIDs []pgtype.UUID, start time.Time, inputs, due int, stop string, errs []error) error {
+	if workspaceIDs == nil {
+		s.logTick(ctx, start, inputs, due, stop, len(errs))
 	}
 	return errors.Join(errs...)
+}
+
+// dispatchFromTick dispatches one rule for a scheduler pass and records the
+// outcome on the rule.
+func (s *IssueWakeupService) dispatchFromTick(ctx context.Context, w db.IssueWakeup) []error {
+	var errs []error
+	// Outcome writes must not turn a busy rule row into another batch-wide
+	// wait. Use the batch context, not dispatch's expired per-rule context.
+	dispatch := s.dispatch
+	if w.SystemRule.Valid {
+		dispatch = s.dispatchSystem
+	}
+	if err := dispatch(ctx, w); err != nil {
+		errs = append(errs, fmt.Errorf("wakeup %s: %w", util.UUIDToString(w.ID), err))
+		outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		_ = s.Tasks.Queries.NoteWakeupFailure(outcomeCtx, db.NoteWakeupFailureParams{ID: w.ID, LastError: pgtype.Text{String: truncateForSummary(err.Error(), 500), Valid: true}})
+		cancel()
+	}
+	// Move the rule to the back of its lane so one noisy issue cannot
+	// monopolize the batches. Only scan order depends on this write: dispatch
+	// already committed the rule's outcome, and an unfinished rule stays a
+	// candidate either way. A pass now visits many more rules than one batch,
+	// so under load this bounded write can time out without anything being
+	// wrong; that is logged, not reported as a failed pass.
+	outcomeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	if touchErr := s.Tasks.Queries.TouchWakeupDispatch(outcomeCtx, w.ID); touchErr != nil && ctx.Err() == nil {
+		slog.DebugContext(ctx, "issue wakeup: scan-order touch skipped", "wakeup_id", util.UUIDToString(w.ID), "error", touchErr)
+	}
+	cancel()
+	return errs
+}
+
+// logTick reports one global pass: how many rules each lane visited, how long
+// the pass took and why it stopped, plus the age of the oldest input the
+// scheduler could act on and how many inputs a run is holding. It logs at
+// warn level when a limit cut the pass short, a dispatch failed, an
+// actionable input has waited longer than wakeupPendingWarnAge, or the
+// pending scan could not finish (pending_scan=incomplete: the age may be
+// missing or too young, so silence must not be read as "no backlog").
+// Held inputs never warn on their own.
+func (s *IssueWakeupService) logTick(ctx context.Context, start time.Time, inputs, due int, stop string, failures int) {
+	attrs := []any{"input_rules", inputs, "due_rules", due, "duration_ms", time.Since(start).Milliseconds(), "stopped", stop, "failures", failures}
+	level := slog.LevelInfo
+	if stop != "drained" || failures > 0 {
+		level = slog.LevelWarn
+	}
+	pendingCtx, cancel := context.WithTimeout(ctx, wakeupPendingScanBudget)
+	pending, err := s.pendingInputs(pendingCtx, nil, wakeupPendingScanPage)
+	cancel()
+	attrs = append(attrs, "held_inputs", pending.Held)
+	if err != nil {
+		attrs = append(attrs, "pending_scan", "incomplete", "pending_scan_error", err.Error())
+		level = slog.LevelWarn
+	} else {
+		attrs = append(attrs, "pending_scan", "complete")
+	}
+	if age, ok := pending.age(time.Now()); ok {
+		attrs = append(attrs, "oldest_ready_input_age_s", int64(age.Seconds()))
+		if age > wakeupPendingWarnAge {
+			level = slog.LevelWarn
+		}
+	}
+	slog.Log(ctx, level, "issue wakeup dispatch pass", attrs...)
+}
+
+// The pending scan reads every group of unprocessed inputs, a page at a time,
+// within this budget. A scan that runs out of it reports itself incomplete.
+const (
+	wakeupPendingScanBudget = 3 * time.Second
+	wakeupPendingScanPage   = 1000
+)
+
+// pendingInputSummary splits unprocessed inputs into those a run is holding
+// on purpose and the backlog the scheduler could act on.
+type pendingInputSummary struct {
+	OldestReady pgtype.Timestamptz
+	Held        int
+}
+
+// age is how long the oldest actionable input has waited, if there is one.
+func (p pendingInputSummary) age(now time.Time) (time.Duration, bool) {
+	if !p.OldestReady.Valid {
+		return 0, false
+	}
+	return now.Sub(p.OldestReady.Time), true
+}
+
+// pendingInputs classifies every unprocessed input the way dispatch treats
+// it (see ListPendingWakeupInputGroups), paging until the groups run out. For
+// a platform rule an input is held only while a run of the issue's current
+// target agent, run as the person the platform rule's run would run as, waits
+// to start: the same check dispatchSystem makes before keeping its inputs.
+//
+// On an error, including ctx running out, it returns what it read so far
+// with the error: the summary is then a lower bound, not the answer.
+func (s *IssueWakeupService) pendingInputs(ctx context.Context, workspaceIDs []pgtype.UUID, pageSize int) (pendingInputSummary, error) {
+	var out pendingInputSummary
+	q := s.Tasks.Queries
+	systemWaiting := map[pgtype.UUID]bool{}
+	params := db.ListPendingWakeupInputGroupsParams{WorkspaceIds: workspaceIDs, PageSize: int32(pageSize)}
+	for {
+		groups, err := q.ListPendingWakeupInputGroups(ctx, params)
+		if err != nil {
+			return out, fmt.Errorf("list pending wakeup inputs: %w", err)
+		}
+		for _, g := range groups {
+			held := g.Reserved || g.OwnClaimed || g.UserWaiting
+			if !held && g.SystemRule {
+				waiting, known := systemWaiting[g.IssueID]
+				if !known {
+					if waiting, err = s.systemRuleRunWaiting(ctx, q, g.IssueID); err != nil {
+						return out, fmt.Errorf("resolve platform rule target: %w", err)
+					}
+					systemWaiting[g.IssueID] = waiting
+				}
+				held = waiting
+			}
+			switch {
+			case held:
+				out.Held += int(g.Inputs)
+			case !out.OldestReady.Valid || g.Oldest.Time.Before(out.OldestReady.Time):
+				out.OldestReady = g.Oldest
+			}
+		}
+		if len(groups) < pageSize {
+			return out, nil
+		}
+		last := groups[len(groups)-1]
+		params.AfterOldest, params.AfterWakeupID, params.AfterReserved = last.Oldest, last.WakeupID, last.Reserved
+	}
+}
+
+// systemRuleRunWaiting reports whether a platform rule on the issue would
+// keep its inputs for a run waiting to start (dispatchSystem's hasWaitingRun).
+func (s *IssueWakeupService) systemRuleRunWaiting(ctx context.Context, q *db.Queries, issueID pgtype.UUID) (bool, error) {
+	issue, err := q.GetIssue(ctx, issueID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	target, err := resolveWakeTarget(ctx, q, issue)
+	if err != nil || !target.Agent.ID.Valid {
+		return false, err
+	}
+	runAs, err := s.childDoneRunAs(ctx, issue, target.Agent)
+	if err != nil {
+		return false, err
+	}
+	return hasWaitingRun(ctx, q, issue.ID, target.Agent.ID, runAs.UserID)
 }
 
 func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) error {
@@ -832,7 +1094,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	// one condition.met input; a rule that ended only drops the hints.
 	if len(w.Condition) > 0 {
 		if w.Enabled && !timedOut {
-			if next, err = pollCondition(ctx, tx, q, w, now); err != nil {
+			if next, err = s.pollCondition(ctx, tx, q, w, now); err != nil {
 				return err
 			}
 		} else if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {

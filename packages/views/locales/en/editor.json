@@ -121,6 +121,7 @@
   },
   "code_block": {
     "html_preview": "HTML preview",
+    "close_preview": "Close",
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
@@ -168,5 +169,18 @@
     "export_png": "Download PNG",
     "export_svg": "Download SVG",
     "export_source": "Download .mmd"
+  },
+  "table": {
+    "reset_widths": "Reset widths",
+    "expand": "Expand table",
+    "copy_markdown": "Copy as Markdown",
+    "copy_csv": "Copy as CSV",
+    "copied": "Copied",
+    "resize_column": "Resize {{name}} column",
+    "expanded_title": "Table",
+    "filter_placeholder": "Filter rows",
+    "clear_filter": "Clear filter",
+    "no_matches": "No matching rows",
+    "close": "Close"
   }
 }

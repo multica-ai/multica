@@ -135,6 +135,9 @@ interface StatusDraft {
   icon: IssueStatusIcon | "";
 }
 
+/** Built-ins whose note says what moving an issue there does; the rest only restate the name. */
+const BEHAVIOR_STATUSES = new Set<string>(["backlog", "todo", "in_review"]);
+
 const EMPTY_DRAFT: StatusDraft = {
   name: "",
   description: "",
@@ -143,7 +146,18 @@ const EMPTY_DRAFT: StatusDraft = {
   icon: "",
 };
 
-export function IssueStatusesTab() {
+/**
+ * The status library. Rendered as its own settings tab, or `embedded` under
+ * Settings → Workflows (MUL-7420), where each row also says how many
+ * workflows use the status.
+ */
+export function IssueStatusesTab({
+  embedded,
+  workflowUsage,
+}: {
+  embedded?: { title: string };
+  workflowUsage?: (statusKey: string) => number;
+} = {}) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
@@ -196,49 +210,50 @@ export function IssueStatusesTab() {
     setInspectionOpen(true);
   };
 
-  return (
-    <SettingsTab
-      title={t(($) => $.page.tabs.issue_statuses)}
-      description={isAdmin ? t(($) => $.issue_statuses.reorder_hint) : undefined}
-      scope="workspace"
-      actions={
-        // Offered only once the workspace has something archived. A
-        // permanently disabled "Show archived (0)" is a control that can
-        // never do anything.
-        archivedCount > 0 ? (
-          <label className="flex items-center gap-2 text-caption text-muted-foreground">
-            {t(($) => $.issue_statuses.show_archived, { count: archivedCount })}
-            <Switch checked={showArchived} onCheckedChange={setShowArchived} />
-          </label>
-        ) : undefined
-      }
-    >
+  // Offered only once the workspace has something archived. A permanently
+  // disabled "Show archived (0)" is a control that can never do anything.
+  const archivedToggle = archivedCount > 0 ? (
+    <label className="flex items-center justify-end gap-2 text-caption text-muted-foreground">
+      {t(($) => $.issue_statuses.show_archived, { count: archivedCount })}
+      <Switch checked={showArchived} onCheckedChange={setShowArchived} />
+    </label>
+  ) : undefined;
+
+  const body = (
+    <>
       {myRole && !isAdmin ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
-      {isLoading ? (
-        <div className="rounded-lg border border-surface-border bg-card px-4 py-12 text-center text-body text-muted-foreground">
-          {t(($) => $.issue_statuses.loading)}
-        </div>
-      ) : (
-        // The four categories are sections of a single
-        // workflow, and separate borders made them read as unrelated
-        // settings.
-        <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-          {groups.map((group) => (
-            <CategorySection
-              key={`${wsId}:${group.category}`}
-              category={group.category}
-              entries={group.entries}
-              canManage={isAdmin}
-              mergeTarget={mergeTarget}
-              mergeSettingsHref={mergeSettingsHref}
-              onCreate={() => setCreateCategory(group.category)}
-              onEdit={(entry) => setEditing(entry)}
-              onArchive={(entry) => { setPendingArchive(entry); setArchiveOpen(true); }}
-              onViewIssues={viewIssues}
-            />
-          ))}
-        </div>
-      )}
+      <div className="space-y-4">
+        {embedded && archivedToggle}
+
+        {isLoading ? (
+          <div className="rounded-lg border border-surface-border bg-card px-4 py-12 text-center text-body text-muted-foreground">
+            {t(($) => $.issue_statuses.loading)}
+          </div>
+        ) : (
+          // The four categories are sections of a single
+          // workflow, and separate borders made them read as unrelated
+          // settings.
+          <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
+            {groups.map((group) => (
+              <CategorySection
+                key={`${wsId}:${group.category}`}
+                category={group.category}
+                entries={group.entries}
+                canManage={isAdmin}
+                workflowUsage={workflowUsage}
+                mergeTarget={mergeTarget}
+                mergeSettingsHref={mergeSettingsHref}
+                onCreate={() => setCreateCategory(group.category)}
+                onEdit={(entry) => setEditing(entry)}
+                onArchive={(entry) => {
+                  setPendingArchive(entry); setArchiveOpen(true);
+                }}
+                onViewIssues={viewIssues}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       <StatusEditorDialog
         open={createCategory !== null}
@@ -259,6 +274,22 @@ export function IssueStatusesTab() {
           {inspection?.workspaceId === wsId && <StatusIssueInspection key={`${wsId}:${inspection.status.key}`} status={inspection.status} onClose={() => setInspectionOpen(false)} />}
         </DialogContent>
       </Dialog>
+    </>
+  );
+
+  return embedded ? (
+    <section id="status-library" className="space-y-4">
+      <h3 className="text-title-sm font-semibold">{embedded.title}</h3>
+      {body}
+    </section>
+  ) : (
+    <SettingsTab
+      title={t(($) => $.page.tabs.issue_statuses)}
+      description={isAdmin ? t(($) => $.issue_statuses.reorder_hint) : undefined}
+      scope="workspace"
+      actions={archivedToggle}
+    >
+      {body}
     </SettingsTab>
   );
 }
@@ -267,6 +298,7 @@ function CategorySection({
   category,
   entries,
   canManage,
+  workflowUsage,
   mergeTarget,
   mergeSettingsHref,
   onCreate,
@@ -278,6 +310,7 @@ function CategorySection({
   entries: IssueStatusEntry[];
   canManage: boolean;
   /** Badge the built-in Done row: PR auto-complete writes that status. */
+  workflowUsage?: (statusKey: string) => number;
   mergeTarget: string;
   mergeSettingsHref: string;
   onCreate: () => void;
@@ -383,10 +416,14 @@ function CategorySection({
                   entry={entry}
                   mergeBadgeHref={entry.key === mergeTarget && !entry.archived_at ? mergeSettingsHref : null}
                   label={entry.is_system ? labelOf(entry.key) : entry.name}
-                  description={entry.is_system
-                    ? t(($) => $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus])
-                    : entry.description}
+                  description={!entry.is_system
+                    ? entry.description
+                    : workflowUsage && !BEHAVIOR_STATUSES.has(entry.key)
+                      ? ""
+                      : t(($) => $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus])}
                   canManage={canManage}
+                  workflowUsage={entry.is_system ? undefined : workflowUsage?.(entry.key)}
+                  showKey={Boolean(workflowUsage)}
                   canReorder={canReorder && !entry.archived_at}
                   isReordering={reorder.isPending}
                   onEdit={() => onEdit(entry)}
@@ -414,6 +451,8 @@ function StatusRow({
   label,
   description,
   canManage,
+  workflowUsage,
+  showKey,
   canReorder,
   isReordering,
   onEdit,
@@ -428,6 +467,9 @@ function StatusRow({
   label: string;
   description: string;
   canManage: boolean;
+  /** How many workflows list a custom status; undefined for built-ins and outside Workflows. */
+  workflowUsage?: number;
+  showKey: boolean;
   canReorder: boolean;
   isReordering: boolean;
   onEdit: () => void;
@@ -475,6 +517,14 @@ function StatusRow({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-body font-medium">{label}</span>
+          {showKey && entry.is_system && (
+            <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              {t(($) => $.issue_statuses.builtin_badge)}
+            </span>
+          )}
+          {showKey && (
+            <span className="shrink-0 font-mono text-caption text-muted-foreground">{entry.key}</span>
+          )}
           {mergeBadgeHref && (
             <AppLink
               href={mergeBadgeHref}
@@ -501,6 +551,13 @@ function StatusRow({
           <p className="truncate text-caption text-muted-foreground">{description}</p>
         )}
       </div>
+      {workflowUsage !== undefined && !archived && (
+        <span className="shrink-0 text-caption text-muted-foreground">
+          {workflowUsage > 0
+            ? t(($) => $.issue_statuses.workflow_usage, { count: workflowUsage })
+            : t(($) => $.issue_statuses.workflow_usage_none)}
+        </span>
+      )}
       {archived && <StatusIssuesButton variant="outline" onClick={onViewIssues} />}
       {canManage && !archived && (
         <DropdownMenu>

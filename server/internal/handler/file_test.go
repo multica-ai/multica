@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -755,6 +756,52 @@ func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *test
 	}
 	if got := dl.Query().Get("response-content-disposition"); !strings.HasPrefix(got, "attachment") {
 		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+}
+
+func TestGetAttachmentForDownload_UsesAttachmentWorkspaceMembership(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	store := &mockStorageNoCdn{}
+	origStorage, origCfg, origSigner := testHandler.Storage, testHandler.cfg, testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage, testHandler.cfg, testHandler.CFSigner = origStorage, origCfg, origSigner
+	})
+
+	slug := fmt.Sprintf("download-metadata-%d", time.Now().UnixNano())
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name": "Download metadata workspace", "slug": slug,
+		"description": "", "issue_prefix": "DMW",
+	})
+	id := dbfx.Insert(t, "attachment", testutil.Cols{
+		"workspace_id":  otherWorkspaceID,
+		"uploader_type": "member", "uploader_id": testUserID,
+		"filename": "report.pdf", "url": "https://s3.example.com/test-bucket/report.pdf",
+		"content_type": "application/pdf", "size_bytes": 12,
+	})
+
+	request := func() *http.Request {
+		req := httptest.NewRequest("GET", "/api/attachments/"+id+"/download-metadata", nil)
+		req.Header.Set("X-User-ID", testUserID)
+		req.Header.Set("X-Workspace-ID", testWorkspaceID) // viewing workspace A
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", id)
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	testutil.Call(t, testHandler.GetAttachmentForDownload, request()).Want(http.StatusNotFound)
+	dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": otherWorkspaceID, "user_id": testUserID, "role": "member",
+	})
+
+	var resp AttachmentResponse
+	testutil.Call(t, testHandler.GetAttachmentForDownload, request()).Want(http.StatusOK).JSON(&resp)
+	if resp.ID != id || !strings.Contains(resp.AttachmentDownloadURL, "/signed-download?") {
+		t.Fatalf("response missing attachment-specific signed URL: %+v", resp)
 	}
 }
 

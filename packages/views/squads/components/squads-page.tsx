@@ -82,9 +82,7 @@ import { useLocale, useT } from "../../i18n";
 import { PAGE_TOOLBAR } from "../../layout/page-header";
 import { SquadEnhancedRows } from "./squad-enhanced-rows";
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 export function SquadAvatar({ squad }: { squad: Squad }) {
   const initials = squad.name
@@ -119,7 +117,6 @@ export function SquadAvatar({ squad }: { squad: Squad }) {
 // Archive (= delete) dialog — reuses the existing archive_dialog copy.
 // Workspace owner/admin only (backend gate). No restore endpoint exists, so
 // once archived a squad is gone from the UI.
-// ---------------------------------------------------------------------------
 
 function ArchiveSquadDialog({
   squad,
@@ -239,9 +236,7 @@ export function SquadRowActions({ squad }: { squad: Squad }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header + toolbar
-// ---------------------------------------------------------------------------
 
 const SORT_FIELDS: SquadSortField[] = ["name", "members", "created"];
 
@@ -548,9 +543,7 @@ function SquadListToolbar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export function SquadsPage() {
   const { t } = useT("squads");

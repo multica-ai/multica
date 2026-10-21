@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	inboxwriter "github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -433,6 +434,11 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if w.Revision != prev.Revision {
 		return tx.Commit(ctx)
 	}
+	// Every commit below, including those that evaluate nothing, means this
+	// pass got the locks an earlier failed pass did not; an error rolls it back.
+	if _, err = tx.Exec(ctx, "UPDATE issue_wakeup SET last_error=NULL WHERE id=$1 AND last_error IS NOT NULL", w.ID); err != nil {
+		return err
+	}
 	current, err := resolveWakeTarget(ctx, q, issue)
 	if err != nil {
 		return err
@@ -473,7 +479,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
-	met, fingerprint, observed, err := evaluateCondition(ctx, tx, q, w)
+	met, fingerprint, observed, err := s.evaluateCondition(ctx, tx, q, w)
 	if err != nil {
 		return err
 	}
@@ -554,7 +560,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		if current.Type == "member" {
 			facts["outcome"] = "notified"
 			details, _ := json.Marshal(facts)
-			item, err := q.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			item, inserted, err := inboxwriter.CreateIfEligible(ctx, q, db.CreateInboxItemParams{
 				ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: current.ID,
 				Type: "children_done", Severity: "info", IssueID: issue.ID, Title: issue.Title,
 				ActorType: pgtype.Text{String: "system", Valid: true}, Details: details,
@@ -562,7 +568,11 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 			if err != nil {
 				return err
 			}
-			inbox = append(inbox, item)
+			if inserted {
+				inbox = append(inbox, item)
+			} else {
+				facts["outcome"] = "none"
+			}
 		}
 		if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
 			return err

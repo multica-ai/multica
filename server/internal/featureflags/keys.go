@@ -30,6 +30,12 @@ const (
 	// either way. Turning it off stops new intake and triage runs but leaves
 	// existing Triage issues workable.
 	TriageV1 = "triage_v1"
+	// ProjectWorkflowsV1 gates project workflows (MUL-7420): creating a
+	// workflow and pointing a project at one, plus the Settings → Workflows
+	// and project workflow UI. Turning it off stops new adoption but leaves
+	// workflows already in use working, and a project can always switch back
+	// to the Default workflow.
+	ProjectWorkflowsV1 = "project_workflows_v1"
 	// LocalSearchIndex gates the sync endpoints behind Web/Desktop local search
 	// (MUL-7754). On by default. Turning it off (FF_LOCAL_SEARCH_INDEX=off)
 	// makes those endpoints answer 404, so clients stop syncing and search
@@ -56,6 +62,7 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	ProjectWorkflowsV1,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -87,4 +94,8 @@ func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true
 	return out
+}
+
+func ProjectWorkflowsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ProjectWorkflowsV1, false)
 }
