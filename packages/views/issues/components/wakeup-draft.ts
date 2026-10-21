@@ -111,17 +111,7 @@ export type WakeupDraftError =
   | "future_time"
   | "until_future";
 
-function pad(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-export function localDate(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-export function emptyWakeupDraft(agentId: string, timezone: string, now = new Date()): WakeupDraft {
-  const until = new Date(now);
-  until.setDate(until.getDate() + 7);
+export function emptyWakeupDraft(agentId: string, timezone: string): WakeupDraft {
   return {
     condition: null,
     atPreset: "1h",
@@ -131,7 +121,7 @@ export function emptyWakeupDraft(agentId: string, timezone: string, now = new Da
     recurrenceWorkdaysOnly: false,
     recurrenceDays: [1, 2, 3, 4, 5],
     recurrenceDayOfMonth: 1,
-    until: localDate(until),
+    until: "",
     replyActor: null,
     runAgentId: "",
     events: [],
@@ -262,13 +252,17 @@ export function buildWakeupInput(
       return { input: { ...base, kind: "at", mode: "once", at: at.toISOString() } };
     }
     case "recurring": {
-      const end = new Date(`${d.until}T23:59:59`);
-      if (!Number.isFinite(end.getTime()) || end.getTime() <= now.getTime()) return { error: "until_future" };
       const schedule: Pick<IssueWakeupInput, "kind" | "cron_expression" | "timezone"> = {
         kind: "cron",
         cron_expression: recurrenceCron(d),
         timezone: d.timezone,
       };
+      // Empty until = no expiry; the rule runs indefinitely until stopped.
+      if (!d.until) {
+        return { input: { ...base, ...schedule, mode: "continuous" } };
+      }
+      const end = new Date(`${d.until}T23:59:59`);
+      if (!Number.isFinite(end.getTime()) || end.getTime() <= now.getTime()) return { error: "until_future" };
       return { input: { ...base, ...schedule, mode: "continuous", expires_at: end.toISOString() } };
     }
     default: {

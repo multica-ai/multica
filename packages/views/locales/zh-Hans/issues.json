@@ -1184,6 +1184,7 @@
       "hour": "小时",
       "minute": "分钟",
       "until": "截止",
+    "until_clear": "清除截止日",
       "anyone": "任何人",
       "members": "成员",
       "agents": "智能体",

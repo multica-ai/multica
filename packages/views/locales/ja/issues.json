@@ -1184,6 +1184,7 @@
       "hour": "時",
       "minute": "分",
       "until": "終了日",
+    "until_clear": "終了日をクリア",
       "anyone": "誰でも",
       "members": "メンバー",
       "agents": "エージェント",

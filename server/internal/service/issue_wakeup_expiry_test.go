@@ -15,7 +15,7 @@ import (
 func TestIssueWakeupExpiryValidation(t *testing.T) {
 	s := IssueWakeupService{}
 	now := time.Now()
-	past, far := now.Add(-time.Minute), now.Add(400*24*time.Hour)
+	past := now.Add(-time.Minute)
 	soon := now.Add(time.Hour)
 	for name, in := range map[string]WakeupInput{
 		"single time takes no deadline": {Kind: "at", ExpiresInSeconds: 3600},
@@ -25,14 +25,19 @@ func TestIssueWakeupExpiryValidation(t *testing.T) {
 		"unknown timeout":               {Kind: "event", ExpiresInSeconds: 3600, OnTimeout: "retry"},
 		"too short":                     {Kind: "event", ExpiresInSeconds: 30},
 		"past deadline":                 {Kind: "cron", ExpiresAt: &past},
-		"beyond a year":                 {Kind: "cron", ExpiresAt: &far},
 	} {
 		in := in
 		if _, _, err := s.Expiry(&in, now); !errors.Is(err, ErrWakeupInput) {
 			t.Errorf("%s: accepted %+v", name, in)
 		}
 	}
-	in := WakeupInput{Kind: "event", ExpiresInSeconds: 3600}
+	// A far-future absolute deadline is accepted; only past dates are rejected.
+	far := now.Add(400 * 24 * time.Hour)
+	in := WakeupInput{Kind: "cron", ExpiresAt: &far}
+	if at, _, err := s.Expiry(&in, now); err != nil || !at.Valid {
+		t.Fatalf("far-future deadline should be accepted: %v %v", at, err)
+	}
+	in = WakeupInput{Kind: "event", ExpiresInSeconds: 3600}
 	at, seconds, err := s.Expiry(&in, now)
 	if err != nil || !at.Time.Equal(now.Add(time.Hour)) || seconds.Int64 != 3600 || in.OnTimeout != "end" {
 		t.Fatalf("relative wait: %v %v %v %q", at, seconds, err, in.OnTimeout)

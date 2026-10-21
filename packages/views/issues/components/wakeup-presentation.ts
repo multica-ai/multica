@@ -344,11 +344,18 @@ export function useWakeupText() {
       err && typeof err === "object" && "status" in err
         ? err.status
         : undefined;
-    return status === 403
-      ? t(($) => $.wakeups.permission_error)
-      : status === 409
-        ? t(($) => $.wakeups.conflict_error)
-        : fallback;
+    if (status === 403) return t(($) => $.wakeups.permission_error);
+    if (status === 409) return t(($) => $.wakeups.conflict_error);
+    // Surface the server's error message for 400 Bad Request so the user
+    // knows what went wrong instead of seeing a generic "can't save".
+    if (status === 400 && err && typeof err === "object" && "body" in err) {
+      const body = (err as { body?: unknown }).body;
+      if (body && typeof body === "object" && "message" in body) {
+        const msg = (body as { message?: unknown }).message;
+        if (typeof msg === "string" && msg) return msg;
+      }
+    }
+    return fallback;
   };
   // What an issue is waiting for, in a few words, for cards and the header.
   const waiting = (w: WakeupPreview) => {

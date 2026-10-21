@@ -4,7 +4,7 @@ import { buildWakeupInput, emptyWakeupDraft, wakesAssigneeOnComments, type Wakeu
 
 const now = new Date(2026, 8, 24, 15, 0, 0);
 const draft = (patch: Partial<WakeupDraft>): WakeupDraft => ({
-  ...emptyWakeupDraft("agent", "Asia/Shanghai", now),
+  ...emptyWakeupDraft("agent", "Asia/Shanghai"),
   instruction: "Check the result",
   ...patch,
 });
@@ -37,6 +37,15 @@ describe("buildWakeupInput", () => {
       },
     });
     expect(buildWakeupInput(draft({ condition: "recurring", until: "2026-09-23" }), now)).toEqual({ error: "until_future" });
+  });
+
+  it("allows recurring checks without an end date (runs indefinitely)", () => {
+    const result = buildWakeupInput(draft({ condition: "recurring", until: "" }), now);
+    expect("input" in result).toBe(true);
+    if ("input" in result) {
+      expect(result.input.expires_at).toBeUndefined();
+      expect(result.input).toMatchObject({ kind: "cron", mode: "continuous" });
+    }
   });
 
   it("turns each recurrence choice into the cron the scheduler runs", () => {

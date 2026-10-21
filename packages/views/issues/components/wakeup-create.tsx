@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Plus,
   RefreshCw,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -271,13 +272,27 @@ export function WakeupCreateForm({
           <label htmlFor={`${id}-until`} className="text-caption text-muted-foreground">
             {t(($) => $.wakeups.create.until)}
           </label>
-          <Input
-            id={`${id}-until`}
-            type="date"
-            className="h-7 w-44"
-            value={draft.until}
-            onChange={(event) => update({ until: event.target.value })}
-          />
+          <div className="flex items-center gap-1.5">
+            <Input
+              id={`${id}-until`}
+              type="date"
+              className="h-7 w-44"
+              value={draft.until}
+              onChange={(event) => update({ until: event.target.value })}
+            />
+            {draft.until && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                aria-label={t(($) => $.wakeups.create.until_clear)}
+                onClick={() => update({ until: "" })}
+              >
+                <X className="size-3" />
+              </Button>
+            )}
+          </div>
         </div>
       )}
       {isEventCondition(draft.condition) && (

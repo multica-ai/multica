@@ -1184,6 +1184,7 @@
       "hour": "시",
       "minute": "분",
       "until": "종료일",
+    "until_clear": "종료일 지우기",
       "anyone": "누구나",
       "members": "멤버",
       "agents": "에이전트",

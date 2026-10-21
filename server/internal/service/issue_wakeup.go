@@ -96,8 +96,8 @@ func (s *IssueWakeupService) Expiry(in *WakeupInput, now time.Time) (pgtype.Time
 		return pgtype.Timestamptz{Time: now.Add(time.Duration(in.ExpiresInSeconds) * time.Second), Valid: true}, pgtype.Int8{Int64: in.ExpiresInSeconds, Valid: true}, nil
 	}
 	at := in.ExpiresAt.UTC()
-	if !at.After(now) || at.Sub(now) > maxWakeupSeconds*time.Second {
-		return bad("expires_at must be in the future and within one year")
+	if !at.After(now) {
+		return bad("expires_at must be in the future")
 	}
 	return pgtype.Timestamptz{Time: at, Valid: true}, pgtype.Int8{}, nil
 }

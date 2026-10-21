@@ -1223,6 +1223,7 @@
       "hour": "Heure",
       "minute": "Minute",
       "until": "Jusqu’au",
+    "until_clear": "Effacer la date de fin",
       "anyone": "N’importe qui",
       "members": "Membres",
       "agents": "Agents",
