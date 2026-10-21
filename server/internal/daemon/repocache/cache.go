@@ -26,6 +26,16 @@ import (
 // locate their config, and disables TTY prompting so auth failures produce
 // clear errors instead of blocking on a non-existent terminal.
 //
+// GIT_TERMINAL_PROMPT=0 does not stop GUI credential helpers: on Windows the
+// Git Credential Manager (credential.helper=manager) opens a login window —
+// for GitLab hosts a browser OAuth page — for every clone/fetch that has no
+// stored credential. Startup runs one sync goroutine per workspace in
+// parallel, so a first open on a fresh machine sprayed dozens of GCM dialogs
+// at once. GCM_INTERACTIVE=never keeps stored-credential lookup working but
+// makes GCM fail fast instead of prompting, so background sync reports a
+// clear error and the user authenticates deliberately once; the next sync
+// cycle picks up the stored credential automatically.
+//
 // safe.directory=* is set via GIT_CONFIG_* env vars so git trusts all
 // directories regardless of ownership. The daemon manages its own bare
 // caches and worktrees, so the ownership check adds no security value
@@ -49,6 +59,7 @@ func gitEnv() []string {
 	idx := strconv.Itoa(existing)
 	return append(base,
 		"GIT_TERMINAL_PROMPT=0",
+		"GCM_INTERACTIVE=never",
 		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
 		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
 		"GIT_CONFIG_VALUE_"+idx+"=*",
