@@ -45,7 +45,7 @@ func TestClaimTasksForRuntimes_PromotesDeferredAndEmitsQueuedEvent(t *testing.T)
 	svc := NewTaskService(db.New(pool), pool, nil, bus)
 	rt, deferredTaskID := deferredBatchFixture(t, ctx, pool)
 
-	got, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{util.MustParseUUID(rt)}, 5)
+	got, _, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{util.MustParseUUID(rt)}, 5)
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
