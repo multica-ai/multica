@@ -1,0 +1,34 @@
+openapi: 3.1.0
+info:
+  title: Multica API (Unofficial)
+  version: "0.1.0"
+  description: >-
+    **Unofficial, reverse-engineered documentation.** This is not published or
+    endorsed by the Multica team. It was built by reading the
+    `ppbstudios/multica` server source directly (handlers, middleware,
+    router) rather than any official spec, so gaps are marked explicitly
+    instead of guessed.
+
+
+    Baseline revision: `ba30324e10dfc69fb0f0a6732dd3d0f0559e01fe` (tag
+    `v0.6.0`, 2026-09-30). The upstream `multica-ai/multica` repository may
+    have moved ahead of this revision since.
+
+
+    Structure: this document is assembled from per-domain fragments under
+    `docs/unofficial-api/openapi/` by
+    `docs/unofficial-api/scripts/merge.mjs`. See
+    `docs/unofficial-api/README.md` for the directory layout and naming
+    convention new domain documents should follow.
+servers:
+  - url: https://app.multica.ai
+    description: Production (actual base URL not confirmed in source; placeholder)
+security:
+  - PersonalAccessToken: []
+  - BrowserSession: []
+tags: []
+paths: {}
+components:
+  securitySchemes: {}
+  parameters: {}
+  schemas: {}

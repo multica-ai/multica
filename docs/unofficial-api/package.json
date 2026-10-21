@@ -1,0 +1,14 @@
+{
+  "name": "multica-unofficial-openapi-docs",
+  "private": true,
+  "type": "module",
+  "description": "Tooling for docs/unofficial-api: merges domain OpenAPI fragments into one document and lints it. Not a pnpm workspace member (see README.md) — install with `pnpm install --ignore-workspace` from this directory.",
+  "scripts": {
+    "build": "node scripts/merge.mjs",
+    "lint": "pnpm run build && spectral lint dist/openapi.yaml --ruleset .spectral.yaml"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "^6.11.1",
+    "@stoplight/yaml": "^4.3.0"
+  }
+}

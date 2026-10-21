@@ -1,0 +1,145 @@
+# Reusable parameter components: cursor pagination + common headers.
+#
+# Header set is server/cmd/server/router.go's corsAllowedHeaders (~line 66)
+# intersected with headers actually read by a handler or middleware (not
+# merely CORS-allowed) — cross-checked with grep over server/internal and
+# server/cmd/server/router.go. X-CSRF-Token, X-Client-Platform,
+# X-Client-Version, X-Client-OS, X-Client-Capabilities, and
+# X-Multica-Plugin-Installation are also CORS-allowed but out of this
+# ticket's named header list; domain tickets may add them under this same
+# file if an endpoint depends on one.
+
+LimitParam:
+  name: limit
+  in: query
+  required: false
+  description: >-
+    Page size for cursor-paginated list endpoints. Default 50, maximum 200
+    per the originating ticket. Not every list endpoint in the handler
+    package honors this exact default/max (e.g.
+    server/internal/handler/search_index.go uses 200/500 and 500/1000
+    defaults/caps for its own two endpoints) — domain tickets documenting
+    a specific endpoint should override this value with the one its
+    handler actually enforces rather than assuming this default applies.
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 200
+    default: 50
+
+NextCursorParam:
+  name: next_cursor
+  in: query
+  required: false
+  description: >-
+    Opaque pagination cursor returned as `next_cursor` in a previous
+    page's response body; pass it back verbatim to fetch the next page.
+    Cursor shape is endpoint-specific (e.g.
+    server/internal/handler/issue_table_rows.go,
+    server/internal/handler/activity.go both expose their own
+    `next_cursor` of this kind) — treat it as an opaque string, not a
+    parseable value.
+  schema:
+    type: string
+
+AuthorizationHeader:
+  name: Authorization
+  in: header
+  required: false
+  description: >-
+    `Bearer <token>` — accepts a `mul_` PAT, `mat_` agent task token, or
+    `mcn_` Cloud Node PAT (see the securitySchemes components); a JWT is
+    also accepted on this header for parity with the cookie session. See
+    server/internal/middleware/auth.go `extractToken` (~line 300).
+  schema:
+    type: string
+
+WorkspaceIDHeader:
+  name: X-Workspace-ID
+  in: header
+  required: false
+  description: >-
+    Selects the active workspace for workspace-scoped requests; read by
+    server/internal/middleware/workspace.go. See also X-Workspace-Slug.
+  schema:
+    type: string
+    format: uuid
+
+WorkspaceSlugHeader:
+  name: X-Workspace-Slug
+  in: header
+  required: false
+  description: >-
+    Alternative to X-Workspace-ID for selecting the active workspace by
+    slug instead of id. Read by
+    server/internal/middleware/workspace.go (~line 81, ~line 134).
+  schema:
+    type: string
+
+IdempotencyKeyHeader:
+  name: Idempotency-Key
+  in: header
+  required: false
+  description: >-
+    Client-supplied idempotency key for safely retrying a write. Read by
+    several handlers independently (e.g.
+    server/internal/handler/autopilot.go,
+    server/internal/handler/autopilot_webhook.go,
+    server/internal/handler/webhook_delivery.go,
+    server/internal/handler/cloud_billing.go) rather than through one
+    shared middleware — support is endpoint-by-endpoint, not universal;
+    confirm per domain before documenting an endpoint as honoring it.
+  schema:
+    type: string
+
+IfMatchHeader:
+  name: If-Match
+  in: header
+  required: false
+  description: >-
+    Optimistic-concurrency precondition. Read directly in
+    server/internal/handler/plugin_action.go (~line 417); also defined as
+    a constant for the versioned Public API in
+    server/pkg/publicapi/v1/foundation.go. Support is endpoint-specific,
+    not a blanket guarantee across `/api/*`.
+  schema:
+    type: string
+
+XRequestIDHeader:
+  name: X-Request-ID
+  in: header
+  required: false
+  description: >-
+    Client-supplied request correlation id, echoed/logged for tracing.
+    CORS-allowed in server/cmd/server/router.go; chi's own `RequestID`
+    middleware (chimw.RequestID, mounted ~line 1406) generates a
+    server-side request id independently of this header.
+  schema:
+    type: string
+
+XAgentIDHeader:
+  name: X-Agent-ID
+  in: header
+  required: false
+  description: >-
+    Agent identity for a request. For requests authenticated with an
+    AgentTaskToken (mat_), the server OVERWRITES this header from the
+    token row and discards any client-supplied value — see
+    server/internal/middleware/auth.go (~line 83, ~line 127, MUL-2600).
+    Only meaningful as client input outside that auth path.
+  schema:
+    type: string
+    format: uuid
+
+XTaskIDHeader:
+  name: X-Task-ID
+  in: header
+  required: false
+  description: >-
+    Task-run identity for a request. Like X-Agent-ID, the server
+    overwrites this header from the AgentTaskToken (mat_) row when that
+    auth path is used, discarding any client-supplied value — see
+    server/internal/middleware/auth.go (~line 84, ~line 128, MUL-2600).
+  schema:
+    type: string
+    format: uuid

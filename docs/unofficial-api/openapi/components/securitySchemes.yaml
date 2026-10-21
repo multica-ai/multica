@@ -1,0 +1,87 @@
+# Security schemes, derived from server/internal/middleware/auth.go (~line 200)
+# and server/internal/middleware/daemon_auth.go (~line 79). Each scheme below
+# maps to one token-prefix branch in those files. See
+# docs/unofficial-api/README.md for how this file is merged.
+
+PersonalAccessToken:
+  type: http
+  scheme: bearer
+  bearerFormat: "mul_<token>"
+  description: >-
+    Personal Access Token (PAT). Issued from Settings -> API Token with an
+    expiry of 30 days / 90 days / 1 year / unlimited (expiry choices per the
+    originating ticket; not independently re-verified against the token
+    issuance handler). Sent as `Authorization: Bearer mul_<token>`. Verified
+    in server/internal/middleware/auth.go, the "mul_" prefix branch
+    (~line 201).
+
+AgentTaskToken:
+  type: http
+  scheme: bearer
+  bearerFormat: "mat_<token>"
+  description: >-
+    Agent task token. Minted by the server when a task run starts and
+    injected into the agent process by the daemon; maximum lifetime 24
+    hours (per the originating ticket; the 24h bound itself was not
+    re-derived from source). Sent as `Authorization: Bearer mat_<token>`.
+    Authoritative for actor identity: the server overwrites X-User-ID,
+    X-Agent-ID, X-Task-ID, X-Workspace-ID, and X-Actor-Source from the
+    token row, discarding any client-supplied values for those headers.
+    See server/internal/middleware/auth.go, the "mat_" prefix branch
+    (~line 110, MUL-2600).
+
+CloudNodePAT:
+  type: http
+  scheme: bearer
+  bearerFormat: "mcn_<token>"
+  description: >-
+    Cloud Node PAT ("mcn_" prefix). Verified by calling the Multica Cloud
+    Fleet service (MULTICA_CLOUD_URL) rather than the local
+    personal_access_tokens table; rejected with 401 when no Cloud URL is
+    configured, never falling through to the mul_/JWT paths. See
+    server/internal/middleware/auth.go, the "mcn_" prefix branch
+    (~line 160) and server/internal/auth/cloud_pat.go.
+
+
+    Deviation from the originating ticket: the ticket describes this
+    scheme as a "plugin install token" scoped to
+    `/api/plugin-bridge/v1/*`. That does not match the handler source —
+    `/api/plugin-bridge/v1/*` is mounted under `middleware.Auth` (i.e. the
+    PersonalAccessToken / BrowserSession schemes below), not under any
+    mcn_-checking middleware (server/cmd/server/router.go ~line 1629-1637).
+    The actual plugin-scoped bearer tokens are a separate "mpi_"/"mpc_"
+    pair consumed by `middleware.PluginBearerOnly` for the versioned
+    Public Plugin Action API (server/cmd/server/router.go ~line
+    1611-1623, server/pkg/publicapi/v1); those are not modeled as a
+    security scheme here because no handler/schema detail for them was in
+    scope for this ticket. Flagged for PM follow-up rather than silently
+    renamed.
+
+BrowserSession:
+  type: apiKey
+  in: cookie
+  name: multica_auth
+  description: >-
+    Browser session cookie. HttpOnly JWT, default 30-day lifetime
+    (sliding — refreshed in place by middleware.Auth once remaining TTL
+    drops below half, MUL-7436). State-changing requests additionally
+    require a valid CSRF token in the `X-CSRF-Token` header
+    (auth.ValidateCSRF). See server/internal/middleware/auth.go
+    (cookie branch, ~line 93 and ~line 252) and
+    server/internal/auth/cookie.go.
+
+DaemonAuth:
+  type: http
+  scheme: bearer
+  bearerFormat: "mdt_<token>"
+  description: >-
+    Daemon-only token ("mdt_" prefix) for `/api/daemon/*`, verified by
+    `middleware.DaemonAuth` (server/internal/middleware/daemon_auth.go,
+    ~line 79), mounted separately from the main `Auth` middleware
+    (server/cmd/server/router.go ~line 1556). This is a distinct code
+    path from the five schemes above, not a reuse of PersonalAccessToken:
+    `DaemonAuth` additionally accepts `mul_` PATs and `mcn_` Cloud Node
+    PATs as fallbacks on the same routes, but its primary credential is
+    the daemon-minted `mdt_` token, so `/api/daemon/*` operations should
+    reference this scheme (optionally alongside PersonalAccessToken /
+    CloudNodePAT) rather than PersonalAccessToken alone.

@@ -1,0 +1,6 @@
+# Domain: cloud/연동
+# Owner: dedicated domain ticket (see parent PPBM-2950).
+# Top-level keys are path strings merged verbatim into the document's
+# "paths" object by scripts/merge.mjs — add operations here, not under a
+# nested "paths:" key. Still empty: no domain ticket has landed yet.
+{}

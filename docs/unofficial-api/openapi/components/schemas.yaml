@@ -1,0 +1,151 @@
+# Common error schemas, derived from server/internal/handler/handler.go
+# (~line 580): writeError / writeErrorCode / writeFeatureDisabled /
+# writeRevisionConflict / writeEditConflict.
+
+Error:
+  type: object
+  description: >-
+    Generic error body written by writeError (handler.go ~line 580). Used
+    whenever a handler has no machine-readable code for the failure.
+  required: [error]
+  properties:
+    error:
+      type: string
+      description: Human-readable (English) error message.
+  additionalProperties: false
+
+ErrorCode:
+  type: object
+  description: >-
+    Error body written by writeErrorCode (handler.go ~line 588), plus its
+    writeFeatureDisabled wrapper (~line 595, always HTTP 403). `code` is a
+    stable, UI-translatable identifier.
+
+
+    The `code` enum below is every literal string passed to writeErrorCode
+    and writeFeatureDisabled anywhere under server/ as of the baseline
+    revision (grepped, not guessed) — 41 distinct values. The originating
+    ticket described this set as "24종 한정"; that count matches only the
+    direct writeErrorCode(...) call sites and misses the 17 additional
+    codes that reach the wire through the writeFeatureDisabled(...)
+    wrapper, which produces the identical {error, code} shape via the same
+    writeErrorCode function one level down. Implemented from source per
+    "구현이 정본" — flagged to PM as a ticket-body inaccuracy rather than
+    silently truncated to 24.
+
+
+    "revision_conflict" is intentionally excluded from this enum: every
+    response using that code also carries resource_type/resource_id (and,
+    for writeRevisionConflict, expected_revision/actual_revision), so it
+    is always one of the RevisionConflict / EditConflict schemas instead
+    of a bare ErrorCode.
+  required: [error, code]
+  properties:
+    error:
+      type: string
+      description: Human-readable (English) fallback message.
+    code:
+      type: string
+      enum:
+        - cloud_runtime_misconfigured
+        - cloud_runtime_not_configured
+        - composio_not_configured
+        - daemon_websocket_misconfigured
+        - dingtalk_not_configured
+        - duplicate_target_is_duplicate
+        - feature_disabled
+        - file_upload_not_configured
+        - github_repository_browsing_not_configured
+        - google_login_not_configured
+        - invitation_rate_limiter_unavailable
+        - invocation_not_allowed
+        - issue_has_duplicates
+        - issue_in_triage
+        - lark_not_configured
+        - plugin_api_disabled
+        - plugin_surfaces_misconfigured
+        - plugin_surfaces_not_configured
+        - seat_capacity_full
+        - seat_capacity_overcommitted
+        - seat_capacity_rate_limited
+        - seat_capacity_unavailable
+        - slack_not_configured
+        - storage_not_configured
+        - suggestions_not_available
+        - task_supplement_not_retryable
+        - task_supplement_turn_ended
+        - task_supplement_unsupported
+        - telegram_not_configured
+        - vcs_not_configured
+        - wakeup_capacity_exceeded
+        - wakeup_source_busy
+        - wecom_bot_owned_by_another_workspace
+        - wecom_bot_owned_by_archived_agent
+        - wecom_bot_owned_by_same_workspace
+        - wecom_credentials_rejected
+        - wecom_credentials_unverifiable
+        - wecom_install_failed
+        - wecom_install_rejected
+        - wecom_not_configured
+        - workspace_subscriptions_disabled
+  additionalProperties: false
+
+RevisionConflict:
+  type: object
+  description: >-
+    409 response written by writeRevisionConflict (handler.go ~line 599)
+    when a write's expected revision no longer matches the stored one
+    (optimistic concurrency on a resource's whole revision counter).
+  required:
+    - error
+    - code
+    - resource_type
+    - resource_id
+    - expected_revision
+    - actual_revision
+  properties:
+    error:
+      type: string
+      const: resource changed since it was loaded
+    code:
+      type: string
+      const: revision_conflict
+    resource_type:
+      type: string
+      description: >-
+        Caller-supplied label for the conflicting resource kind; values
+        are call-site-specific and not enumerated here (cross-domain).
+    resource_id:
+      type: string
+      format: uuid
+    expected_revision:
+      type: integer
+      format: int64
+    actual_revision:
+      type: integer
+      format: int64
+  additionalProperties: false
+
+EditConflict:
+  type: object
+  description: >-
+    409 response written by writeEditConflict (handler.go ~line 610) when
+    a specific field changed since it was loaded, independent of the
+    resource's overall revision counter.
+  required: [error, code, resource_type, resource_id]
+  properties:
+    error:
+      type: string
+      const: resource field changed since it was loaded
+    code:
+      type: string
+      const: revision_conflict
+    resource_type:
+      type: string
+      description: >-
+        Caller-supplied label for the conflicting resource kind; values
+        are call-site-specific and not enumerated here (cross-domain).
+    resource_id:
+      type: string
+      format: uuid
+  additionalProperties: false
