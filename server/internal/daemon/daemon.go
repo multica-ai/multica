@@ -8555,6 +8555,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	exactReplyPath, err := prepareExactReply(task, env.RootDir, agentEnv)
+	if err != nil {
+		return TaskResult{}, asEnvironmentSetupFailure(err)
+	}
+	defer func() {
+		if returnErr == nil {
+			taskResult = enforceExactReply(taskResult, exactReplyPath)
+		}
+	}()
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {

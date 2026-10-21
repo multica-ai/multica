@@ -375,3 +375,20 @@ State-changing (require an explicit instruction — do not run speculatively):
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all
   bindings; using it when you meant `add` silently removes capabilities.
+
+### Required handler receipts for chat tasks
+
+An agent can opt chat tasks into terminal handler receipts with
+`MULTICA_EXACT_REPLY_REQUIRED=1` in its owner-managed custom environment.
+A supporting daemon consumes this flag itself and injects a fresh private
+`MULTICA_EXACT_REPLY_FILE` path plus the required flag into the task environment.
+Custom receipt paths remain blocked. Issue tasks are unaffected.
+
+The handler atomically replaces this file with UTF-8 reply text (at most 64 KiB),
+or `MULTICA_EXACT_REPLY/1 state=provider\n` when it has already delivered through
+its provider and the native carrier must remain silent. The initial
+`MULTICA_EXACT_REPLY/1 state=idle\n` is incomplete. Missing, empty, non-regular,
+invalid or unfinished files block terminal completion instead of falling back
+to model-authored text. A receipt cannot promote a failed or cancelled task to
+success. The receipt controls terminal output, not intermediate task messages.
+Older daemons ignore the opt-in; verify runtime support before relying on it.
