@@ -533,6 +533,12 @@ jobs:
           check-latest: true
           cache-dependency-path: server/go.sum
 
+      - name: Test Windows worktree delivery, conflict replay and checkpoint CAS
+        working-directory: server
+        # Native Windows Git/worktree coverage for #8541, including isolated Prepare and conflict replay.
+        # Verbose output exposes a missing test selection or a skip.
+        run: go test ./internal/daemon/execenv -v -run '^(TestFinalizeFastForwardsConversationBranchToOffBranchDelivery|TestFinalizeFastForwardKeepsRefsWhenCheckpointIsLocked|TestFastForwardStateRejectsStaleConversationTip|TestFinalizeFastForwardRejectsConcurrentCheckpointUpdate|TestFinalizeFastForwardRejectsMissingPreparedCheckpoint|TestFinalizeRefusesFastForwardWhenConversationBranchIsCheckedOutElsewhere|TestFinalizeRefusesDivergedOffBranchDelivery|TestIsolatedPrepareFastForwardsOffBranchDelivery|TestFinalizeSameTipRetryRejectsConcurrentCheckpoint|TestFinalizeSameTipRetryAfterFastForwardSucceeds|TestFinalizeSameTipRetryRejectsConcurrentBranchMove|TestConflictResolvedByTheAgentIsDeliveredAndNotReplayedAgain|TestConflictAfterAUserCommitOnTheBranchStillOffersTheEditAgain|TestFinalizeConflictReplayRejectsConcurrentCheckpointUpdate)$' -count=1 -timeout=10m
+
       - name: Test Windows execution-environment isolation
         working-directory: server
         # Keep this job scoped to the runtime regression it exists to prove.
