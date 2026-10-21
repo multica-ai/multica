@@ -5053,11 +5053,70 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
-	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
-		t.Fatalf("expected sync failure error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced: git clone --bare:") {
+		t.Fatalf("expected sync failure error with git's output, got %v", err)
 	}
-	if got := d.workspaceLastRepoSyncErr("ws-1"); got == "" {
-		t.Fatal("expected lastRepoSyncErr to be recorded")
+}
+
+// syncRaceRepoCache fails the sync of failURL and, on the Lookup that
+// follows, runs a successful background sync of another repo: the window in
+// which a shared per-workspace error slot used to be cleared.
+type syncRaceRepoCache struct {
+	d          *Daemon
+	failURL    string
+	mu         sync.Mutex
+	failedOnce bool
+	raced      bool
+}
+
+func (c *syncRaceRepoCache) Lookup(string, string) string {
+	c.mu.Lock()
+	race := c.failedOnce && !c.raced
+	c.raced = c.raced || race
+	c.mu.Unlock()
+	if race {
+		c.d.syncWorkspaceRepos("ws-1", []RepoData{{URL: "https://example.com/other.git"}})
+	}
+	return ""
+}
+func (c *syncRaceRepoCache) BarePath(string, string) string { return "" }
+func (c *syncRaceRepoCache) Sync(_ string, repos []repocache.RepoInfo) error {
+	for _, r := range repos {
+		if r.URL == c.failURL {
+			c.mu.Lock()
+			c.failedOnce = true
+			c.mu.Unlock()
+			return errors.New("git clone --bare: server certificate verification failed")
+		}
+	}
+	return nil
+}
+func (c *syncRaceRepoCache) WithRepoLock(_ string, fn func() error) error { return fn() }
+func (c *syncRaceRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
+func TestEnsureRepoReadyKeepsSyncFailureDespiteConcurrentSuccess(t *testing.T) {
+	t.Parallel()
+
+	const repoURL = "https://devops.example.com/team/_git/app"
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: repoURL}},
+			ReposVersion: "v1",
+		})
+	})
+	cache := &syncRaceRepoCache{d: d, failURL: repoURL}
+	d.repoCache = cache
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+
+	err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
+	if !cache.raced {
+		t.Fatal("test did not exercise the concurrent sync")
+	}
+	if err == nil || !strings.Contains(err.Error(), "server certificate verification failed") {
+		t.Fatalf("expected the checkout's own sync failure, got %v", err)
 	}
 }
 

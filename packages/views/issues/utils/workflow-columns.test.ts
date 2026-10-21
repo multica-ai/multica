@@ -9,6 +9,7 @@ const workflow: IssueWorkflow = {
   name: "Delivery",
   description: "",
   is_default: false,
+  owner_id: null,
   steps: ["todo", "code_review", "in_progress", "done"].map((status_key) => ({
     status_key,
     handler: { type: "none" as const },
@@ -26,6 +27,7 @@ const { defaultWithoutBlocked } = vi.hoisted(() => ({
     name: "Default",
     description: "",
     is_default: true,
+    owner_id: null,
     steps: ["todo", "in_progress", "in_review", "done", "cancelled"].map((status_key) => ({
       status_key,
       handler: { type: "none" as const },

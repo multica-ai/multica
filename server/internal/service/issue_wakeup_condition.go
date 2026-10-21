@@ -502,23 +502,15 @@ func (s *IssueWakeupService) baselineCondition(ctx context.Context, tx pgx.Tx, q
 	return q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: fingerprint, NextFireAt: pgtype.Timestamptz{Time: now.Add(conditionPollInterval), Valid: true}})
 }
 
-// saveConditionDiagnostic owns only last_error values carrying its prefix.
-// Dispatch failures share the column and must survive a condition poll. Avoid
-// rewriting an unchanged diagnostic on every polling interval as well.
+// A completed evaluation replaces the previous pass's error with its current
+// diagnostic. Later dispatch failures roll this write back and are recorded
+// outside the transaction. Avoid rewriting unchanged diagnostics on every poll.
 func saveConditionDiagnostic(ctx context.Context, q *db.Queries, w db.IssueWakeup, diagnostic error) error {
-	owned := w.LastError.Valid && strings.HasPrefix(w.LastError.String, conditionDiagnosticPrefix)
 	var lastError pgtype.Text
 	if diagnostic != nil {
 		lastError = pgtype.Text{String: conditionDiagnosticPrefix + diagnostic.Error(), Valid: true}
-		if w.LastError.Valid {
-			if w.LastError.String == lastError.String {
-				return nil
-			}
-			if !owned {
-				return nil
-			}
-		}
-	} else if !owned {
+	}
+	if w.LastError == lastError {
 		return nil
 	}
 	return q.NoteWakeupFailure(ctx, db.NoteWakeupFailureParams{ID: w.ID, LastError: lastError})

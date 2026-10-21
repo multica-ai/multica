@@ -113,9 +113,11 @@ backend:
   # configMap to an existing ConfigMap in the release namespace whose keys are
   # PEM certificate files. The chart mounts it read-only and adds it to the
   # system trust store via SSL_CERT_DIR: public CAs stay trusted and TLS
-  # verification stays on. The backend reads the certificates at startup;
-  # `helm upgrade` rolls it when the ConfigMap changed, otherwise run
-  # `kubectl rollout restart` after updating it.
+  # verification stays on. The backend also sends these certificates to
+  # daemons, whose git then trusts them for repositories on the same hosts.
+  # The backend reads the certificates at startup; `helm upgrade` rolls it
+  # when the ConfigMap changed, otherwise run `kubectl rollout restart` after
+  # updating it.
   extraCACerts:
     configMap: ""
   # All non-secret backend env. Secret values come from `existingSecret`.

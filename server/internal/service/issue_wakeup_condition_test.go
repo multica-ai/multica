@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -280,6 +281,107 @@ func TestWakeupConditionValidation(t *testing.T) {
 	}
 }
 
+// A check that loses its lock wait records an error; the next unmet check that commits clears it.
+func TestWakeupConditionCheckClearsAnEarlierFailure(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	workspace := parseTestUUID(t, f.WorkspaceID)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Review when ready",
+		Condition: condition(t, map[string]any{"type": "issue_field", "field": "status", "value": "in_review"})})
+	due := func() {
+		f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()-interval '1 second' WHERE id=$1", w.ID)
+	}
+
+	due()
+	tx, err := f.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, "SELECT 1 FROM issue WHERE id=$1 FOR UPDATE", issue); err != nil {
+		t.Fatal(err)
+	}
+	tickErr := s.TickWorkspaces(ctx, workspace)
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if tickErr == nil {
+		t.Fatal("a check blocked on its issue row reported no error")
+	}
+	failed, err := f.q.LocklessWakeup(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !failed.LastError.Valid {
+		t.Fatal("the failed check recorded no error")
+	}
+
+	due()
+	if err = s.TickWorkspaces(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.q.LocklessWakeup(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastError.Valid {
+		t.Fatalf("the check that committed kept the earlier error %q", got.LastError.String)
+	}
+}
+
+type wakeupCommitFailureStarter struct {
+	TxStarter
+	err error
+}
+
+func (s wakeupCommitFailureStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return wakeupCommitFailureTx{Tx: tx, err: s.err}, nil
+}
+
+type wakeupCommitFailureTx struct {
+	pgx.Tx
+	err error
+}
+
+func (tx wakeupCommitFailureTx) Commit(context.Context) error { return tx.err }
+
+func TestWakeupConditionFailedCommitPreservesFailure(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := context.Background()
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Review when ready",
+		Condition: condition(t, map[string]any{"type": "issue_field", "field": "status", "value": "in_review"})})
+	f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()-interval '1 second',last_error='earlier dispatch failure' WHERE id=$1", w.ID)
+	commitErr := errors.New("dispatch commit failed")
+	s.Tasks.TxStarter = wakeupCommitFailureStarter{TxStarter: f.Pool, err: commitErr}
+	if err := s.dispatch(ctx, w); !errors.Is(err, commitErr) {
+		t.Fatalf("dispatch error=%v, want %v", err, commitErr)
+	}
+	got, err := f.q.LocklessWakeup(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.LastError.Valid || got.LastError.String != "earlier dispatch failure" {
+		t.Fatalf("failed commit cleared the earlier failure: %+v", got.LastError)
+	}
+	if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); !errors.Is(err, commitErr) {
+		t.Fatalf("tick error=%v, want %v", err, commitErr)
+	}
+	got, err = f.q.LocklessWakeup(ctx, w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.LastError.Valid || got.LastError.String != commitErr.Error() {
+		t.Fatalf("failed pass did not record the current failure: %+v", got.LastError)
+	}
+	s.Tasks.TxStarter = f.Pool
+	if got := wakeTick(t, f, s, w.ID); got.LastError.Valid {
+		t.Fatalf("successful retry kept the commit failure: %+v", got.LastError)
+	}
+}
+
 func TestWakeupConditionPRDiagnosticsRecover(t *testing.T) {
 	for _, event := range []string{"checks_finished", "merged"} {
 		t.Run(event, func(t *testing.T) {
@@ -306,17 +408,25 @@ func TestWakeupConditionPRDiagnosticsRecover(t *testing.T) {
 					t.Fatal("diagnostic stopped condition polling")
 				}
 			}
+			assertRecoveredFailure := func(diagnostic error) {
+				t.Helper()
+				f.Exec(t, "UPDATE issue_wakeup SET last_error='earlier dispatch failure' WHERE id=$1", w.ID)
+				assertWaiting(wakeTick(t, f, s, w.ID), diagnostic)
+			}
 			if event == "checks_finished" {
 				// A disabled snapshot client is visible even in the create response.
 				assertWaiting(w, errPRSnapshotsUnavailable)
 				assertWaiting(wakeTick(t, f, s, w.ID), errPRSnapshotsUnavailable)
+				assertRecoveredFailure(errPRSnapshotsUnavailable)
 				s.Tasks.PRSnapshotsEnabled = true
 			}
 			// Linking to the parent must never satisfy a child issue's rule.
 			assertWaiting(wakeTick(t, f, s, w.ID), errPRNotLinked)
+			assertRecoveredFailure(errPRNotLinked)
 			f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
 			if event == "checks_finished" {
 				assertWaiting(wakeTick(t, f, s, w.ID), errPRSnapshotPending)
+				assertRecoveredFailure(errPRSnapshotPending)
 				// Re-enabling also accepts a transiently missing snapshot.
 				disabled, err := s.Disable(ctx, issue, w.ID, parseTestUUID(t, f.UserID))
 				if err != nil {

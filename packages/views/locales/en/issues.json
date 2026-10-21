@@ -1563,6 +1563,7 @@
       "copy_name": "{{name}} copy",
       "more": "More actions",
       "steps_hint": "Drag to reorder the middle columns. Backlog and Blocked are optional. A new status is created when you save.",
+      "status_needs_admin": "{{names}} would be new statuses. Only workspace admins can add statuses: remove these columns or ask an admin to add the statuses first.",
       "reorder": "Reorder {{name}}",
       "card_hand_to": "Hand to",
       "card_then": "then → {{status}}",
@@ -1592,8 +1593,7 @@
       "step_off": "Switched off: this workflow leaves the status out. Turn it on in the step list to use it.",
       "status_new_hint": "A new status. It is added to the status library when you save.",
       "no_other_status": "Every status is already a step.",
-      "no_handoff_step": "This step doesn't hand off: issues entering it keep their assignee and start no run.",
-      "new_step_handoff": "Save the workflow first; the new status can hand off after that."
+      "no_handoff_step": "This step doesn't hand off: issues entering it keep their assignee and start no run."
     },
     "mapping": {
       "title": "Move issues into {{name}}",
@@ -1636,6 +1636,7 @@
     },
     "picker": {
       "header": "{{workflow}} · from project “{{project}}”",
+      "header_no_project": "{{workflow}} statuses · no project",
       "footer": "Only this issue’s workflow statuses are shown. The right side is who entering the status hands it to."
     },
     "confirm": {
@@ -1686,7 +1687,7 @@
       "next_default": "Next column ({{status}})",
       "saved": "Handoff saved",
       "error": "Couldn't save the handoff",
-      "read_only": "Handoffs belong to the workflow; workspace admins change them.",
+      "read_only": "Handoffs belong to the workflow; its owner and workspace admins change them.",
       "to": "Hand to",
       "members": "Members",
       "mode_none": "No handoff",

@@ -243,7 +243,9 @@ export function BatchActionToolbar({
         {/* Status */}
         <StatusPicker
           status={common.status}
-          projectId={sharedProjectId}
+          // No shared project spans projects (or none): not the Default-only
+          // list of a single issue outside a project. (MUL-8121)
+          projectId={sharedProjectId ?? undefined}
           allowedStatuses={allowedStatuses}
           onUpdate={handleBatchStatus}
           open={statusOpen}

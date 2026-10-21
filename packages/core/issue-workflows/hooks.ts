@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { projectListOptions } from "../projects/queries";
 import type { IssueWorkflow, Project } from "../types";
-import { issueWorkflowListOptions, resolveProjectWorkflow } from "./queries";
+import { defaultWorkflow, issueWorkflowListOptions, resolveProjectWorkflow } from "./queries";
 
 const EMPTY: IssueWorkflow[] = [];
 
@@ -16,11 +16,15 @@ export function useIssueWorkflows(wsId: string): { workflows: IssueWorkflow[]; i
  * A project and the workflow it uses. `workflow` is null for the Default
  * workflow — including while either list is still loading, which renders the
  * Default behavior rather than an empty board.
+ *
+ * `defaultWorkflow` is the workspace Default itself, null until loaded or on a
+ * server without workflows. An issue outside any project offers its statuses.
+ * (MUL-8121)
  */
 export function useProjectWithWorkflow(
   wsId: string,
   projectId: string | null | undefined,
-): { project: Project | null; workflow: IssueWorkflow | null } {
+): { project: Project | null; workflow: IssueWorkflow | null; defaultWorkflow: IssueWorkflow | null } {
   const { workflows } = useIssueWorkflows(wsId);
   const { data: projects } = useQuery({
     ...projectListOptions(wsId),
@@ -28,7 +32,11 @@ export function useProjectWithWorkflow(
   });
   return useMemo(() => {
     const project = projectId ? projects?.find((p) => p.id === projectId) ?? null : null;
-    return { project, workflow: resolveProjectWorkflow(workflows, project) };
+    return {
+      project,
+      workflow: resolveProjectWorkflow(workflows, project),
+      defaultWorkflow: defaultWorkflow(workflows),
+    };
   }, [projectId, projects, workflows]);
 }
 

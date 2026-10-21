@@ -58,11 +58,11 @@ export function HiddenColumnsPanel({
 function WorkflowColumnsNote() {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
-  const { isAdmin } = useWorkflowPermissions();
+  const { canCreateWorkflow } = useWorkflowPermissions();
   return (
     <p className="mt-3 px-2.5 text-caption leading-5 text-muted-foreground">
       {t(($) => $.board.workflow_columns_note)}
-      {isAdmin && (
+      {canCreateWorkflow && (
         <>
           {" "}
           <AppLink href={`${paths.settings()}?tab=workflows`} className="text-brand hover:underline">

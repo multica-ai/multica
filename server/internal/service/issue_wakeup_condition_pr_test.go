@@ -138,35 +138,39 @@ func TestWakeupConditionPRDiagnosticPolling(t *testing.T) {
 	}
 }
 
-func TestSaveConditionDiagnosticPreservesDispatchErrors(t *testing.T) {
+func TestSaveConditionDiagnosticReplacesEarlierFailures(t *testing.T) {
 	ctx := context.Background()
 	tx := &prConditionTx{}
 	q := db.New(tx)
 	realFailure := pgtype.Text{String: "dispatch failed", Valid: true}
+	tx.lastError = realFailure
 	w := db.IssueWakeup{ID: dbid.NewV7(), LastError: realFailure}
 
 	if err := saveConditionDiagnostic(ctx, q, w, errPRNotLinked); err != nil {
 		t.Fatal(err)
 	}
+	if tx.writes != 1 || tx.lastError.String != conditionDiagnosticPrefix+errPRNotLinked.Error() {
+		t.Fatalf("recovered evaluation kept the earlier dispatch failure: writes=%d error=%+v", tx.writes, tx.lastError)
+	}
 	if err := saveConditionDiagnostic(ctx, q, w, nil); err != nil {
 		t.Fatal(err)
 	}
-	if tx.writes != 0 || tx.lastError.Valid {
-		t.Fatalf("condition evaluation changed an unrelated error: writes=%d error=%+v", tx.writes, tx.lastError)
+	if tx.writes != 2 || tx.lastError.Valid {
+		t.Fatalf("recovered evaluation did not clear the earlier dispatch failure: writes=%d error=%+v", tx.writes, tx.lastError)
 	}
 
 	w.LastError = pgtype.Text{String: conditionDiagnosticPrefix + errPRNotLinked.Error(), Valid: true}
 	if err := saveConditionDiagnostic(ctx, q, w, errPRSnapshotPending); err != nil {
 		t.Fatal(err)
 	}
-	if tx.writes != 1 || tx.lastError.String != conditionDiagnosticPrefix+errPRSnapshotPending.Error() {
+	if tx.writes != 3 || tx.lastError.String != conditionDiagnosticPrefix+errPRSnapshotPending.Error() {
 		t.Fatalf("owned diagnostic was not updated: writes=%d error=%+v", tx.writes, tx.lastError)
 	}
 	w.LastError = tx.lastError
 	if err := saveConditionDiagnostic(ctx, q, w, nil); err != nil {
 		t.Fatal(err)
 	}
-	if tx.writes != 2 || tx.lastError.Valid {
+	if tx.writes != 4 || tx.lastError.Valid {
 		t.Fatalf("owned diagnostic was not cleared: writes=%d error=%+v", tx.writes, tx.lastError)
 	}
 }

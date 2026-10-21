@@ -422,34 +422,161 @@ func TestSetWorkflowHandoffValidatesAndClears(t *testing.T) {
 	}
 }
 
-// A workflow's handoffs apply to every project using it, so only workspace
-// admins change them; a project's lead may still switch its workflow.
-func TestWorkflowHandoffsNeedAdmin(t *testing.T) {
-	seedTestCatalog(t)
-	agentID := seededReadyAgentID(t)
-	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
+// addWorkflowTestMember adds a plain member to the test workspace and returns
+// its user id with a request decorator acting as that member.
+func addWorkflowTestMember(t *testing.T, label string) (string, func(*http.Request) *http.Request) {
+	t.Helper()
 	suffix := workflowTestSuffix()
-	userID := dbfx.User(t, "Workflow member "+suffix, "workflow-member-"+suffix+"@example.com")
+	userID := dbfx.User(t, "Workflow "+label+" "+suffix, "workflow-"+label+"-"+suffix+"@example.com")
 	dbfx.Member(t, testWorkspaceID, userID, "member")
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, userID)
 		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
 	})
-	wf := createTestWorkflow(t, "Permission "+suffix, "in_progress")
-	projectID := createWorkflowTestProject(t, "Workflow permission project")
-	dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, userID, projectID)
-	asMember := func(r *http.Request) *http.Request {
+	return userID, func(r *http.Request) *http.Request {
 		r.Header.Set("X-User-ID", userID)
 		return r
 	}
-	put := withURLParams(asMember(workflowRequest("PUT", "/api/issue-workflows/"+wf.ID+"/handoffs/in_progress", handToAgent(agentID, ""))),
-		"id", wf.ID, "status", "in_progress")
-	testutil.Call(t, testHandler.SetIssueWorkflowHandoff, put).Want(http.StatusForbidden)
-	patch := withURLParam(asMember(workflowRequest("PATCH", "/api/issue-workflows/"+wf.ID, map[string]any{"name": "Taken"})), "id", wf.ID)
-	testutil.Call(t, testHandler.UpdateIssueWorkflow, patch).Want(http.StatusForbidden)
+}
 
-	sw := withURLParam(asMember(workflowRequest("POST", "/api/projects/"+projectID+"/workflow", map[string]any{"workflow_id": wf.ID})), "id", projectID)
+// Any member may create a workflow and becomes its owner. Only the owner and
+// workspace admins edit or delete it, handoffs included (MUL-8120); a
+// project's lead may still switch its workflow.
+func TestWorkflowOwnerPermissions(t *testing.T) {
+	seedTestCatalog(t)
+	agentID := seededReadyAgentID(t)
+	withFeatureFlag(t, testHandler, featureflags.ProjectWorkflowsV1, true)
+	ownerID, asOwner := addWorkflowTestMember(t, "owner")
+	_, asOther := addWorkflowTestMember(t, "other")
+
+	var wf IssueWorkflowResponse
+	create := asOwner(workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Owned " + workflowTestSuffix(),
+		"steps": statusSteps("backlog", "in_progress", "blocked"),
+	}))
+	testutil.Call(t, testHandler.CreateIssueWorkflow, create).Want(http.StatusCreated).JSON(&wf)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE project SET workflow_id = NULL WHERE workflow_id = $1`, wf.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, wf.ID)
+	})
+	if wf.OwnerID == nil || *wf.OwnerID != ownerID {
+		t.Fatalf("owner_id = %v, want the creating member %s", wf.OwnerID, ownerID)
+	}
+
+	patch := func(as func(*http.Request) *http.Request, id, name string) *testutil.Response {
+		return testutil.Call(t, testHandler.UpdateIssueWorkflow,
+			withURLParam(as(workflowRequest("PATCH", "/api/issue-workflows/"+id, map[string]any{"name": name})), "id", id))
+	}
+	handoff := func(as func(*http.Request) *http.Request) *testutil.Response {
+		return testutil.Call(t, testHandler.SetIssueWorkflowHandoff,
+			withURLParams(as(workflowRequest("PUT", "/api/issue-workflows/"+wf.ID+"/handoffs/in_progress", handToAgent(agentID, ""))),
+				"id", wf.ID, "status", "in_progress"))
+	}
+	remove := func(as func(*http.Request) *http.Request) *testutil.Response {
+		return testutil.Call(t, testHandler.DeleteIssueWorkflow,
+			withURLParam(as(workflowRequest("DELETE", "/api/issue-workflows/"+wf.ID, nil)), "id", wf.ID))
+	}
+	asAdmin := func(r *http.Request) *http.Request { return r }
+
+	// Another member can read but not change it.
+	patch(asOther, wf.ID, "Taken "+workflowTestSuffix()).Want(http.StatusForbidden)
+	handoff(asOther).Want(http.StatusForbidden)
+	remove(asOther).Want(http.StatusForbidden)
+
+	// The owner and a workspace admin can.
+	patch(asOwner, wf.ID, "Renamed "+workflowTestSuffix()).Want(http.StatusOK)
+	handoff(asOwner).Want(http.StatusOK)
+	patch(asAdmin, wf.ID, "Admin renamed "+workflowTestSuffix()).Want(http.StatusOK)
+
+	// Default has no owner, so members cannot change it.
+	var list struct {
+		Workflows []IssueWorkflowResponse `json:"workflows"`
+	}
+	testutil.Call(t, testHandler.ListIssueWorkflows, asOther(workflowRequest("GET", "/api/issue-workflows", nil))).Want(http.StatusOK).JSON(&list)
+	for _, row := range list.Workflows {
+		if row.IsDefault {
+			if row.OwnerID != nil {
+				t.Fatalf("Default owner_id = %s, want null", *row.OwnerID)
+			}
+			patch(asOwner, row.ID, "").Want(http.StatusForbidden)
+		}
+	}
+
+	// Statuses are shared by every board, so a member's workflow write may
+	// reuse an existing status, by key or by name, but not add one.
+	existing := createTestCustomStatus(t, "wfreuse"+workflowTestSuffix(), "started")
+	newSteps := func(name string) map[string]any {
+		return map[string]any{"steps": []map[string]any{
+			{"status_key": "in_progress"},
+			{"new_status": map[string]any{"name": name, "category": "started"}},
+		}}
+	}
+	statusCount := func() int {
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM issue_status WHERE workspace_id = $1`, testWorkspaceID).Scan(&n)
+		return n
+	}
+	before := statusCount()
+	novel := "Member status " + workflowTestSuffix()
+	patchSteps := func(as func(*http.Request) *http.Request, body map[string]any) *testutil.Response {
+		return testutil.Call(t, testHandler.UpdateIssueWorkflow,
+			withURLParam(as(workflowRequest("PATCH", "/api/issue-workflows/"+wf.ID, body)), "id", wf.ID))
+	}
+	patchSteps(asOwner, newSteps(novel)).Want(http.StatusForbidden)
+	createBody := newSteps(novel)
+	createBody["name"] = "Member new " + workflowTestSuffix()
+	testutil.Call(t, testHandler.CreateIssueWorkflow, asOwner(workflowRequest("POST", "/api/issue-workflows", createBody))).Want(http.StatusForbidden)
+	if got := statusCount(); got != before {
+		t.Fatalf("a member's workflow write added %d status(es)", got-before)
+	}
+	patchSteps(asOwner, newSteps(existing.Name)).Want(http.StatusOK)
+	if got := statusCount(); got != before {
+		t.Fatal("reusing a status by name must not add one")
+	}
+	var adminWF IssueWorkflowResponse
+	patchSteps(asAdmin, newSteps(novel)).Want(http.StatusOK).JSON(&adminWF)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, novel)
+	})
+	if got := statusCount(); got != before+1 {
+		t.Fatalf("an admin's workflow write added %d status(es), want 1", got-before)
+	}
+	// Back to the steps the handoff checks below expect.
+	patchSteps(asAdmin, map[string]any{"steps": statusSteps("backlog", "in_progress", "blocked")}).Want(http.StatusOK)
+
+	// Copying the workflow for one project switches that project, which
+	// needs the project's lead or an admin, even for the workflow's owner.
+	projectID := createWorkflowTestProject(t, "Workflow owner project")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+	body := handToAgent(agentID, "Only here")
+	body["copy_for_project_id"] = projectID
+	copyReq := func() *http.Request {
+		return withURLParams(asOwner(workflowRequest("PUT", "/api/issue-workflows/"+wf.ID+"/handoffs/in_progress", body)),
+			"id", wf.ID, "status", "in_progress")
+	}
+	testutil.Call(t, testHandler.SetIssueWorkflowHandoff, copyReq()).Want(http.StatusForbidden)
+	dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, ownerID, projectID)
+	var copied IssueWorkflowResponse
+	testutil.Call(t, testHandler.SetIssueWorkflowHandoff, copyReq()).Want(http.StatusCreated).JSON(&copied)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, copied.ID)
+	})
+	if copied.OwnerID == nil || *copied.OwnerID != ownerID {
+		t.Fatalf("copy owner_id = %v, want %s", copied.OwnerID, ownerID)
+	}
+
+	// A lead who does not own the workflow switches the project but cannot
+	// edit the workflow.
+	otherID, _ := addWorkflowTestMember(t, "lead")
+	asLead := func(r *http.Request) *http.Request { r.Header.Set("X-User-ID", otherID); return r }
+	dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, otherID, projectID)
+	sw := withURLParam(asLead(workflowRequest("POST", "/api/projects/"+projectID+"/workflow", map[string]any{"workflow_id": wf.ID})), "id", projectID)
 	testutil.Call(t, testHandler.SetProjectWorkflow, sw).Want(http.StatusOK)
+	patch(asLead, wf.ID, "Lead renamed "+workflowTestSuffix()).Want(http.StatusForbidden)
+
+	// The owner deletes it once no project uses it.
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": nil}).Want(http.StatusOK)
+	remove(asOwner).Want(http.StatusNoContent)
 }
 
 // Backlog and blocked are optional: a workflow without them rejects them, and

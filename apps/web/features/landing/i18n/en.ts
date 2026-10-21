@@ -523,6 +523,30 @@ export function createEnDict(
     },
     entries: [
       {
+        version: "0.6.5",
+        date: "2026-10-21",
+        title: "Clearer statuses for Issues outside projects, private CA repo sync, lighter background tabs, and steadier runs",
+        changes: [],
+        features: [
+          "Issues outside a project list only the Default workflow's statuses by default; search still finds every status.",
+        ],
+        improvements: [
+          "Background browser tabs stop refreshing the unread count until you return; the desktop badge keeps updating when minimized.",
+        ],
+        fixes: [
+          "A new workflow step can get its handler and instruction right away, before you save.",
+          "The project sidebar shows the workflow name, with the handoff count on hover.",
+          "A private CA set on a self-hosted server is trusted when the daemon syncs repos, and failed syncs show the exact error.",
+          "Self-hosted Forgejo, Gitea, and GitLab PRs wake agents when checks finish or the PR merges.",
+          "A wakeup rule stops showing an old error once a later check goes through.",
+          "The desktop tab bar's right-click menu and buttons follow your language.",
+          "Copilot starts even with very long context.",
+          "OpenCode 2.x lets you pick a thinking level again.",
+          "Codex runs on the default model now show an estimated cost.",
+          "Scrolling to the bottom of an Issue no longer pushes the page up or leaves a blank gap.",
+        ],
+      },
+      {
         version: "0.6.4",
         date: "2026-10-20",
         title: "Interactive Markdown tables, Muse Code, safer private runtimes, and steadier runs",
