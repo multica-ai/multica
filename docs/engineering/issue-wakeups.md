@@ -579,7 +579,7 @@ the scheduler evaluates:
 | `issue_field` | `field=label`, `label_id` | it has that label |
 | `issue_field` | `field=property`, `property_id`, `value` | the property's stored value equals `value` |
 | `children_done` | optional `stage` | every sub-issue (or every one up to that stage) is closed |
-| `pull_request` | `event=checks_finished` or `merged` | a linked PR's checks finished on its current head, or it merged |
+| `pull_request` | `event=checks_finished`, `merged` or `conflicts` | a linked PR's checks finished on its current head, it merged, or an open one started conflicting with its base |
 | `other_issue` | `issue_id`, `state=done`, `ended` or `in_review` | another issue in the workspace reaches that state |
 
 A condition rule stays `kind=event`. Validation derives the same-issue events
@@ -590,7 +590,8 @@ predicate becomes one `condition.met` receipt carrying the observed facts; the
 fingerprint of those facts is kept in `condition_state`, so a repeating rule
 fires again only after the predicate turned false or its facts changed (a new PR
 head's result, another sub-issue set). States already true at registration fire
-on the first check; finished checks from before registration are ignored. The
+on the first check; finished checks and conflict verdicts from before
+registration are ignored. The
 watched issue's identifier is stored in the condition for display.
 
 **Runaway protection.** Repeating event rules default to `max_fires=20`

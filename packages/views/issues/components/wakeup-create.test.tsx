@@ -176,6 +176,18 @@ describe("platform conditions in the form", () => {
     );
   });
 
+  it("can wait for a linked PR to start conflicting", async () => {
+    await renderForm();
+    await chooseCondition("关联 PR 的 CI 结束");
+    fireEvent.click(screen.getByRole("button", { name: /关联 PR 的 CI 结束: CI 结束/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "冲突" }));
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "变基" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ condition: { type: "pull_request", event: "conflicts" } })),
+    );
+  });
+
   it("asks for the value a field has to reach", async () => {
     await renderForm();
     await chooseCondition("字段变为某个值");

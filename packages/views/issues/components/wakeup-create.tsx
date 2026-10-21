@@ -459,6 +459,7 @@ function ConditionParams({
           options={[
             { value: "checks_finished", label: t(($) => $.wakeups.create.pr_checks) },
             { value: "merged", label: t(($) => $.wakeups.create.pr_merged) },
+            { value: "conflicts", label: t(($) => $.wakeups.create.pr_conflicts) },
           ]}
           onChange={(prEvent) => update({ prEvent: prEvent as WakeupDraft["prEvent"] })}
         />

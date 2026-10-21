@@ -382,6 +382,84 @@ func TestWakeupConditionFailedCommitPreservesFailure(t *testing.T) {
 	}
 }
 
+// conflictPR links one open GitHub PR, snapshotted as mergeable, to the issue.
+func conflictPR(t *testing.T, f principalFixture, issue pgtype.UUID) string {
+	t.Helper()
+	pr := f.Insert(t, "github_pull_request", testutil.Cols{
+		"workspace_id": f.WorkspaceID, "installation_id": 1,
+		"repo_owner": "fixture", "repo_name": "wakeup", "pr_number": 1,
+		"title": "PR", "state": "open", "html_url": "https://example.test/pr/1",
+		"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+		"head_sha": "aaa", "snapshot_head_sha": "aaa", "snapshot_fetched_at": "2026-01-01T00:00:00Z",
+		"api_mergeable": "MERGEABLE", "api_merge_state_status": "CLEAN",
+	})
+	f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+	f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+	return pr
+}
+
+func TestWakeupConditionPullRequestConflictsWakesOnceOnANewConflict(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	s.Tasks.PRSnapshotsEnabled = true
+	pr := conflictPR(t, f, issue)
+	// A conflict GitHub already reported belongs to the head the agent just
+	// replaced, so registration baselines it away.
+	f.Exec(t, "UPDATE github_pull_request SET api_mergeable='CONFLICTING',api_merge_state_status='DIRTY' WHERE id=$1", pr)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Instruction: "Rebase the branch",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "conflicts"})})
+	wakeTick(t, f, s, w.ID)
+	f.Exec(t, "UPDATE github_pull_request SET api_mergeable='MERGEABLE',api_merge_state_status='CLEAN' WHERE id=$1", pr)
+	wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("known or resolved conflict started %d runs", n)
+	}
+	// A later base-branch update conflicts with the PR's current head.
+	f.Exec(t, "UPDATE github_pull_request SET api_mergeable='CONFLICTING',api_merge_state_status='DIRTY' WHERE id=$1", pr)
+	got := wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("new conflict started %d runs, want 1", n)
+	}
+	if got.Enabled {
+		t.Fatal("a once condition must be consumed")
+	}
+	task, err := f.q.GetAgentTask(context.Background(), got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"mergeable":"conflicting"`) || !strings.Contains(task.HandoffNote.String, `"head_sha":"aaa"`) {
+		t.Fatalf("conflict facts missing: %s", task.HandoffNote.String)
+	}
+	wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("once condition fired again: %d runs", n)
+	}
+}
+
+func TestWakeupConditionPullRequestConflictsRepeatsPerOccurrence(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	s.Tasks.PRSnapshotsEnabled = true
+	pr := conflictPR(t, f, issue)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", Instruction: "Rebase the branch",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "conflicts"})})
+	f.Exec(t, "UPDATE github_pull_request SET api_merge_state_status='DIRTY' WHERE id=$1", pr)
+	wakeTick(t, f, s, w.ID)
+	// The same conflict is one occurrence however often it is evaluated.
+	wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 1 {
+		t.Fatalf("continuous rule started %d runs for one conflict, want 1", n)
+	}
+	// The agent rebased; the conflict returns on the pushed head. Its first run
+	// has to end, or the new occurrence would join that queued run instead.
+	f.Exec(t, "UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE context->>'wakeup_id'=$1", util.UUIDToString(w.ID))
+	f.Exec(t, "UPDATE github_pull_request SET head_sha='bbb',snapshot_head_sha='bbb',api_merge_state_status='CLEAN' WHERE id=$1", pr)
+	wakeTick(t, f, s, w.ID)
+	f.Exec(t, "UPDATE github_pull_request SET api_merge_state_status='DIRTY' WHERE id=$1", pr)
+	got := wakeTick(t, f, s, w.ID)
+	if n := wakeRuns(t, f, w.ID); n != 2 || !got.Enabled {
+		t.Fatalf("second conflict started %d runs (enabled=%t), want 2", n, got.Enabled)
+	}
+}
+
 func TestWakeupConditionPRDiagnosticsRecover(t *testing.T) {
 	for _, event := range []string{"checks_finished", "merged"} {
 		t.Run(event, func(t *testing.T) {

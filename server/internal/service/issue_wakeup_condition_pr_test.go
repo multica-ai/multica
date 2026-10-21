@@ -21,6 +21,7 @@ type prConditionTx struct {
 	pgx.Tx
 	issue     pgtype.UUID
 	prs       [][]any
+	vcsPRs    [][]any
 	queryErr  error
 	lastError pgtype.Text
 	next      pgtype.Timestamptz
@@ -31,11 +32,11 @@ func (tx *prConditionTx) Query(_ context.Context, sql string, args ...any) (pgx.
 	if strings.Contains(sql, "UPDATE issue_wakeup_receipt") {
 		return &sliceRows{}, nil
 	}
-	// The canned GitHub rows below describe an issue with no self-hosted VCS
-	// pull requests; the VCS aggregation finds nothing to add. The VCS path
-	// itself is covered against PostgreSQL by the condition test suite.
+	// The canned GitHub rows below usually describe an issue with no self-hosted
+	// VCS pull requests; the VCS aggregation then finds nothing to add. The VCS
+	// rollup itself is covered against PostgreSQL by the condition test suite.
 	if strings.Contains(sql, "FROM vcs_pull_request") {
-		return &sliceRows{}, nil
+		return &sliceRows{rows: tx.vcsPRs}, nil
 	}
 	if !strings.Contains(sql, "WHERE ipr.issue_id=$1") || len(args) != 1 || args[0] != tx.issue {
 		return nil, fmt.Errorf("unexpected PR scope: %s %v", sql, args)
@@ -57,7 +58,11 @@ func (tx *prConditionTx) Exec(_ context.Context, sql string, args ...any) (pgcon
 }
 
 func TestWakeupConditionPREvaluation(t *testing.T) {
-	row := func(state, head, checks string) []any { return []any{int32(1), state, head, checks} }
+	row := func(state, head, checks string) []any { return []any{int32(1), state, head, checks, "", ""} }
+	// Mergeability rows carry GitHub's two readings of the same fact.
+	mergeRow := func(state, head, mergeable, mergeState string) []any {
+		return []any{int32(1), state, head, "", mergeable, mergeState}
+	}
 	for _, tc := range []struct {
 		name, event string
 		available   bool
@@ -77,6 +82,22 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 		{"one matching PR", "checks_finished", true, [][]any{row("open", "", ""), row("open", "head", "SUCCESS")}, nil, true},
 		{"merge without snapshots", "merged", false, [][]any{row("merged", "", "")}, nil, true},
 		{"open without snapshots", "merged", false, [][]any{row("open", "", "")}, nil, false},
+		{"conflicts unconfigured", "conflicts", false, [][]any{mergeRow("open", "head", "CONFLICTING", "DIRTY")}, errPRMergeUnavailable, false},
+		{"conflicts unlinked", "conflicts", true, nil, errPRNotLinked, false},
+		{"conflicts no snapshot", "conflicts", true, [][]any{mergeRow("open", "", "CONFLICTING", "DIRTY")}, errPRMergeSnapshotPending, false},
+		{"conflicts mergeable", "conflicts", true, [][]any{mergeRow("open", "head", "MERGEABLE", "CLEAN")}, nil, false},
+		{"conflicts undecided", "conflicts", true, [][]any{mergeRow("open", "head", "UNKNOWN", "UNKNOWN")}, nil, false},
+		// Blocked and behind are merge states a rebase does not fix; only a
+		// conflict counts.
+		{"conflicts blocked", "conflicts", true, [][]any{mergeRow("open", "head", "MERGEABLE", "BLOCKED")}, nil, false},
+		{"conflicts behind", "conflicts", true, [][]any{mergeRow("open", "head", "MERGEABLE", "BEHIND")}, nil, false},
+		{"conflicting", "conflicts", true, [][]any{mergeRow("open", "head", "CONFLICTING", "UNKNOWN")}, nil, true},
+		{"dirty merge state", "conflicts", true, [][]any{mergeRow("open", "head", "UNKNOWN", "DIRTY")}, nil, true},
+		{"conflicting draft", "conflicts", true, [][]any{mergeRow("draft", "head", "CONFLICTING", "DIRTY")}, nil, true},
+		// A merged or closed PR keeps its last verdict; it is no longer refreshed.
+		{"conflicting merged", "conflicts", true, [][]any{mergeRow("merged", "head", "CONFLICTING", "DIRTY")}, nil, false},
+		{"conflicting closed", "conflicts", true, [][]any{mergeRow("closed", "head", "CONFLICTING", "DIRTY")}, nil, false},
+		{"one conflicting PR", "conflicts", true, [][]any{mergeRow("open", "head", "MERGEABLE", "CLEAN"), mergeRow("open", "head", "CONFLICTING", "DIRTY")}, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: tc.available}}
@@ -90,6 +111,18 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 				t.Fatalf("missing terminal PR evidence: fingerprint=%q observed=%v", fingerprint, observed)
 			}
 		})
+	}
+}
+
+// Forgejo, Gitea and GitLab rows mirror commit statuses but no mergeability,
+// so a conflicts rule watching only those says so instead of waiting silently.
+func TestWakeupConditionConflictsNeedsGitHubMergeability(t *testing.T) {
+	s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: true}}
+	w := db.IssueWakeup{IssueID: dbid.NewV7(), Condition: condition(t, map[string]any{"type": "pull_request", "event": "conflicts"})}
+	tx := &prConditionTx{issue: w.IssueID, vcsPRs: [][]any{{dbid.NewV7(), int32(7), "forgejo", "open", "head", int64(0), int64(0), int64(0)}}}
+	met, _, _, err := s.evaluateCondition(context.Background(), tx, db.New(tx), w)
+	if met || !errors.Is(err, errPRMergeUnsupported) {
+		t.Fatalf("met=%t err=%v; want met=false err=%v", met, err, errPRMergeUnsupported)
 	}
 }
 
@@ -114,8 +147,8 @@ func TestWakeupConditionPRDiagnosticPolling(t *testing.T) {
 		want error
 	}{
 		{nil, errPRNotLinked},
-		{[][]any{{int32(1), "open", "", ""}}, errPRSnapshotPending},
-		{[][]any{{int32(1), "open", "head", "PENDING"}}, nil},
+		{[][]any{{int32(1), "open", "", "", "", ""}}, errPRSnapshotPending},
+		{[][]any{{int32(1), "open", "head", "PENDING", "", ""}}, nil},
 	} {
 		tx.prs = step.prs
 		w.LastError = tx.lastError

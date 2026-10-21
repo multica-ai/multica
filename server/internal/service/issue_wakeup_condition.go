@@ -47,7 +47,7 @@ type WakeupCondition struct {
 	// every stage closing while a later one waits, then every sub-issue
 	// closing. Only the platform sets it.
 	EachStage bool `json:"each_stage,omitempty"`
-	// pull_request: checks_finished | merged
+	// pull_request: checks_finished | merged | conflicts
 	Event string `json:"event,omitempty"`
 	// other_issue: the watched issue and done | ended | in_review. The
 	// identifier is recorded for display; clients never set it.
@@ -64,10 +64,14 @@ var (
 	errPRSnapshotsUnavailable = errors.New("PR checks cannot be evaluated: GitHub snapshot refresh is unavailable on this server; ask the server administrator to configure the GitHub App snapshot client")
 	errPRNotLinked            = errors.New("No pull request is linked to this issue; link the PR to this issue (a parent issue's PR is not included), or wait for the linking webhook")
 	errPRSnapshotPending      = errors.New("PR check snapshot is not available yet; inspect this issue's pull-requests snapshot_available field and ask the server administrator to check snapshot refresh if it persists")
+	errPRMergeUnavailable     = errors.New("PR merge conflicts cannot be evaluated: GitHub snapshot refresh is unavailable on this server; ask the server administrator to configure the GitHub App snapshot client")
+	errPRMergeSnapshotPending = errors.New("PR mergeability snapshot is not available yet; inspect this issue's pull-requests snapshot_available field and ask the server administrator to check snapshot refresh if it persists")
+	errPRMergeUnsupported     = errors.New("Merge conflicts are only reported for GitHub pull requests; self-hosted VCS pull requests do not mirror mergeability")
 )
 
 func conditionDiagnostic(err error) bool {
-	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending)
+	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending) ||
+		errors.Is(err, errPRMergeUnavailable) || errors.Is(err, errPRMergeSnapshotPending) || errors.Is(err, errPRMergeUnsupported)
 }
 
 func badCondition(msg string) error {
@@ -186,8 +190,8 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		}
 		out = WakeupCondition{Type: c.Type, Stage: c.Stage}
 	case "pull_request":
-		if c.Event != "checks_finished" && c.Event != "merged" {
-			return nil, nil, badCondition("event must be checks_finished or merged")
+		if c.Event != "checks_finished" && c.Event != "merged" && c.Event != "conflicts" {
+			return nil, nil, badCondition("event must be checks_finished, merged or conflicts")
 		}
 		out = WakeupCondition{Type: c.Type, Event: c.Event}
 	case "other_issue":
@@ -260,10 +264,12 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		return met, fingerprint, observed, nil
 	case "pull_request":
 		// Without the snapshot client GitHub rows are never refreshed, so their
-		// checks neither satisfy nor stall the rule. Self-hosted VCS rows carry
-		// their own commit statuses and are evaluated regardless (#9034).
-		githubChecks := c.Event != "checks_finished" || (s.Tasks != nil && s.Tasks.PRSnapshotsEnabled)
-		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,'')
+		// checks and mergeability neither satisfy nor stall the rule. Self-hosted
+		// VCS rows carry their own commit statuses and are evaluated regardless
+		// (#9034); they mirror no mergeability at all.
+		githubSnapshot := c.Event == "merged" || (s.Tasks != nil && s.Tasks.PRSnapshotsEnabled)
+		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,''),
+			COALESCE(pr.api_mergeable,''),COALESCE(pr.api_merge_state_status,'')
 			FROM github_pull_request pr JOIN issue_pull_request ipr ON ipr.pull_request_id=pr.id WHERE ipr.issue_id=$1`, w.IssueID)
 		if err != nil {
 			return false, "", nil, err
@@ -273,8 +279,8 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		var prs []map[string]any
 		for rows.Next() {
 			var number int32
-			var state, head, checks string
-			if err = rows.Scan(&number, &state, &head, &checks); err != nil {
+			var state, head, checks, mergeable, mergeState string
+			if err = rows.Scan(&number, &state, &head, &checks, &mergeable, &mergeState); err != nil {
 				rows.Close()
 				return false, "", nil, err
 			}
@@ -286,13 +292,37 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 					prs = append(prs, map[string]any{"number": number, "state": state})
 				}
 			case "checks_finished":
-				if !githubChecks {
+				if !githubSnapshot {
 					continue
 				}
 				missingSnapshot = missingSnapshot || head == ""
 				if head != "" && slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks) {
 					keys = append(keys, fmt.Sprintf("%d@%s:%s", number, head, checks))
 					prs = append(prs, map[string]any{"number": number, "head_sha": head, "checks": strings.ToLower(checks)})
+				}
+			case "conflicts":
+				if !githubSnapshot {
+					continue
+				}
+				// Only an open or draft PR keeps its mergeability refreshed; a
+				// merged or closed row keeps the last verdict it had, which must
+				// not read as a conflict to resolve.
+				if state != "open" && state != "draft" {
+					continue
+				}
+				missingSnapshot = missingSnapshot || head == ""
+				// GraphQL reports the same conflict two ways: mergeable
+				// CONFLICTING and mergeStateStatus DIRTY (see
+				// packages/core/github/pull-request-status.ts). Either answers
+				// "this branch no longer merges"; neither UNKNOWN nor a blocked,
+				// behind or unstable merge state does.
+				if head != "" && (mergeable == "CONFLICTING" || mergeState == "DIRTY") {
+					keys = append(keys, fmt.Sprintf("%d@%s:conflicting", number, head))
+					observation := map[string]any{"number": number, "head_sha": head, "mergeable": "conflicting"}
+					if mergeState != "" {
+						observation["merge_state_status"] = strings.ToLower(mergeState)
+					}
+					prs = append(prs, observation)
 				}
 			}
 		}
@@ -329,6 +359,8 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 				return false, "", nil, err
 			}
 			vcsLinked++
+			// conflicts has no case here: these providers mirror no mergeability,
+			// so such a PR can only ever produce the unsupported diagnostic below.
 			switch c.Event {
 			case "merged":
 				if state == "merged" {
@@ -355,15 +387,24 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		}
 		// Any matching PR satisfies the rule; diagnostics only explain a wait.
 		if len(keys) == 0 {
-			// GitHub-only (or unlinked) checks rules cannot progress without the
-			// snapshot client; a rule with VCS PRs waits for their statuses.
-			if !githubChecks && (linked > 0 || vcsLinked == 0) {
+			// GitHub-only (or unlinked) snapshot rules cannot progress without the
+			// snapshot client; a checks rule with VCS PRs waits for their statuses.
+			if !githubSnapshot && (linked > 0 || vcsLinked == 0) {
+				if c.Event == "conflicts" {
+					return false, "", nil, errPRMergeUnavailable
+				}
 				return false, "", nil, errPRSnapshotsUnavailable
 			}
 			if linked == 0 && vcsLinked == 0 {
 				return false, "", nil, errPRNotLinked
 			}
-			if c.Event == "checks_finished" && missingSnapshot {
+			if c.Event == "conflicts" && linked == 0 {
+				return false, "", nil, errPRMergeUnsupported
+			}
+			if missingSnapshot {
+				if c.Event == "conflicts" {
+					return false, "", nil, errPRMergeSnapshotPending
+				}
 				return false, "", nil, errPRSnapshotPending
 			}
 		}
@@ -477,13 +518,14 @@ func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db
 }
 
 // conditionFiresOnChange reports whether facts already true at registration
-// are ignored. Finished checks usually belong to the head the agent just
-// replaced, so a checks condition waits for a newer result; states such as a
-// status value, finished sub-issues or a merged PR fire as soon as they hold.
+// are ignored. A finished check and a conflict verdict both belong to the head
+// the agent just replaced, and GitHub recomputes mergeability asynchronously,
+// so both wait for a newer result; states such as a status value, finished
+// sub-issues or a merged PR fire as soon as they hold.
 func conditionFiresOnChange(raw []byte) bool {
 	var c WakeupCondition
 	_ = json.Unmarshal(raw, &c)
-	return c.Type == "pull_request" && c.Event == "checks_finished"
+	return c.Type == "pull_request" && (c.Event == "checks_finished" || c.Event == "conflicts")
 }
 
 // baselineCondition records which facts already satisfy a new or re-enabled
