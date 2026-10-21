@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import { useConfigStore } from "@multica/core/config";
+import { errorCode } from "@multica/core/api";
 import { AGENT_FOCUS_CONVERSATION_STARTERS } from "@multica/core/paths";
 import type { Agent, AgentConversationStarter } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -16,6 +17,16 @@ import { ConversationStartersEditor } from "../conversation-starters-editor";
 /** How long the deep-linked conversation-starters editor stays ringed. */
 const FOCUS_FLASH_MS = 1600;
 
+type PromptConflict = {
+  attemptedRevision?: number;
+  draftInstructions: string;
+  draftConversationStarters: AgentConversationStarter[];
+  serverInstructions: string;
+  serverConversationStarters: AgentConversationStarter[];
+  serverRevision?: number;
+  resolved: boolean;
+};
+
 export function InstructionsTab({
   agent,
   onSave,
@@ -24,6 +35,7 @@ export function InstructionsTab({
   agent: Agent;
   onSave: (updates: {
     instructions: string;
+    expected_revision?: number;
     conversation_starters?: AgentConversationStarter[];
   }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
@@ -41,6 +53,7 @@ export function InstructionsTab({
     agent.conversation_starters ?? [],
   );
   const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<PromptConflict | null>(null);
   const [conversationStartersFocused, setConversationStartersFocused] = useState(false);
   const conversationStartersRef = useRef<HTMLDivElement | null>(null);
   const focusHandledForAgentRef = useRef<string | null>(null);
@@ -71,6 +84,30 @@ export function InstructionsTab({
     conversationStarters.every(
       (item) => item.label.trim() && item.prompt.trim(),
     );
+
+  // Keep the attempted revision attached to a conflicted draft. A refetch may
+  // update the server snapshot, but never silently rebases the local editor.
+  useEffect(() => {
+    if (
+      !conflict ||
+      conflict.resolved ||
+      agent.revision === undefined ||
+      agent.revision === conflict.attemptedRevision ||
+      agent.revision === conflict.serverRevision
+    ) {
+      return;
+    }
+    setConflict((current) =>
+      current && !current.resolved
+        ? {
+            ...current,
+            serverInstructions: agent.instructions ?? "",
+            serverConversationStarters: agent.conversation_starters ?? [],
+            serverRevision: agent.revision,
+          }
+        : current,
+    );
+  }, [agent.conversation_starters, agent.instructions, agent.revision, conflict]);
 
   // A system agent's prompt has two halves: the product half ships with the
   // backend and updates on deploy, so it is shown read-only; the editable
@@ -172,15 +209,33 @@ export function InstructionsTab({
   }, [isDirty, onDirtyChange]);
 
   const handleSave = async () => {
+    if (conflict && !conflict.resolved) return;
     setSaving(true);
     try {
       await onSave({
         instructions: value,
+        ...(conflict?.serverRevision !== undefined
+          ? { expected_revision: conflict.serverRevision }
+          : agent.revision !== undefined
+            ? { expected_revision: agent.revision }
+            : {}),
         ...(conversationStartersSupported
           ? { conversation_starters: conversationStarters }
           : {}),
       });
-    } catch {
+      setConflict(null);
+    } catch (error) {
+      if (errorCode(error) === "revision_conflict") {
+        setConflict({
+          attemptedRevision: conflict?.serverRevision ?? agent.revision,
+          draftInstructions: value,
+          draftConversationStarters: conversationStarters,
+          serverInstructions: agent.instructions ?? "",
+          serverConversationStarters: agent.conversation_starters ?? [],
+          serverRevision: undefined,
+          resolved: false,
+        });
+      }
       // toast handled by parent
     } finally {
       setSaving(false);
@@ -194,6 +249,53 @@ export function InstructionsTab({
           ? t(($) => $.tab_body.instructions.workspace_notes_intro)
           : t(($) => $.tab_body.instructions.intro)}
       </p>
+
+      {conflict && !conflict.resolved && (
+        <div role="alert" className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+          <div>
+            <p className="text-body font-medium">{t(($) => $.tab_body.instructions.conflict_title)}</p>
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.instructions.conflict_hint)}
+            </p>
+          </div>
+          {conflict.serverRevision !== undefined ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="min-w-0 rounded-md border bg-background p-2">
+                <p className="mb-1 text-micro font-medium uppercase text-muted-foreground">
+                  {t(($) => $.tab_body.instructions.conflict_server, { revision: conflict.serverRevision })}
+                </p>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-caption">{conflict.serverInstructions || ""}</pre>
+              </div>
+              <div className="min-w-0 rounded-md border bg-background p-2">
+                <p className="mb-1 text-micro font-medium uppercase text-muted-foreground">
+                  {t(($) => $.tab_body.instructions.conflict_draft)}
+                </p>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-caption">{conflict.draftInstructions || ""}</pre>
+              </div>
+            </div>
+          ) : (
+            <p className="text-caption text-muted-foreground">{t(($) => $.tab_body.instructions.conflict_refreshing)}</p>
+          )}
+          {conflict.serverRevision !== undefined && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setValue(conflict.serverInstructions);
+                  setConversationStarters(conflict.serverConversationStarters);
+                  setConflict({ ...conflict, resolved: true });
+                }}
+              >
+                {t(($) => $.tab_body.instructions.conflict_use_server)}
+              </Button>
+              <Button size="sm" onClick={() => setConflict({ ...conflict, resolved: true })}>
+                {t(($) => $.tab_body.instructions.conflict_keep_draft)}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {hasSystemLayer && (
         <div className="rounded-lg border bg-muted/30">
@@ -273,7 +375,7 @@ export function InstructionsTab({
         <Button
           size="sm"
           onClick={handleSave}
-          disabled={!isDirty || !conversationStartersValid || saving}
+          disabled={!isDirty || !conversationStartersValid || saving || Boolean(conflict && !conflict.resolved)}
         >
           {saving ? (
             <Loader2

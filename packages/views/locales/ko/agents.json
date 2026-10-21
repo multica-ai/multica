@@ -367,7 +367,14 @@
       "system_layer_hide": "접기",
       "workspace_notes_label": "워크스페이스 메모",
       "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
-      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
+      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다.",
+      "conflict_title": "이 프롬프트가 다른 곳에서 변경되었습니다",
+      "conflict_hint": "다시 저장하기 전에 서버 버전을 사용하거나 초안을 유지하세요.",
+      "conflict_refreshing": "최신 서버 버전을 불러오는 중…",
+      "conflict_server": "서버 버전 · 리비전 {{revision}}",
+      "conflict_draft": "내 초안",
+      "conflict_use_server": "서버 버전 사용",
+      "conflict_keep_draft": "내 초안 유지"
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",

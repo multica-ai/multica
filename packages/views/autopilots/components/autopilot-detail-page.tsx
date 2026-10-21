@@ -1069,6 +1069,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           initial={{
             title: autopilot.title,
             description: autopilot.description ?? "",
+            revision: autopilot.revision,
             project_id: autopilot.project_id ?? null,
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
