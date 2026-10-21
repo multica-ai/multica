@@ -27,6 +27,7 @@ const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
+const mockSetLastProject = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 
 const sourceContextPanelData = {
@@ -91,6 +92,7 @@ const mockIssueDraftStore = {
   setManual: mockSetManual,
   setAgent: mockSetAgent,
   setActiveMode: mockSetActiveMode,
+  setLastProject: mockSetLastProject,
   clearDraft: mockClearDraft,
 };
 
