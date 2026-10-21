@@ -22,16 +22,29 @@ ErrorCode:
     stable, UI-translatable identifier.
 
 
-    The `code` enum below is every literal string passed to writeErrorCode
-    and writeFeatureDisabled anywhere under server/ as of the baseline
-    revision (grepped, not guessed) — 41 distinct values. The originating
-    ticket described this set as "24종 한정"; that count matches only the
-    direct writeErrorCode(...) call sites and misses the 17 additional
-    codes that reach the wire through the writeFeatureDisabled(...)
-    wrapper, which produces the identical {error, code} shape via the same
-    writeErrorCode function one level down. Implemented from source per
-    "구현이 정본" — flagged to PM as a ticket-body inaccuracy rather than
-    silently truncated to 24.
+    The `code` enum below is every machine-readable code actually reaching
+    the wire via writeErrorCode or writeFeatureDisabled in production
+    handlers as of the baseline revision — 50 distinct values. The
+    originating ticket described this set as "24종 한정"; that count
+    matches only the direct writeErrorCode(...) call sites with a literal
+    string argument, and misses two other sources: (1) 17 further codes
+    that reach the wire through the writeFeatureDisabled(...) wrapper,
+    which produces the identical {error, code} shape via the same
+    writeErrorCode function one level down, and (2) 10 codes passed to
+    writeErrorCode as a named constant rather than an inline literal —
+    server/internal/handler/auth.go's googleLoginCode* constants
+    (account_disabled, signup_prohibited, email_not_allowed,
+    google_account_no_email, oauth_code_invalid) and
+    server/internal/handler/autopilot.go's autopilot*Code constants
+    (autopilot_no_originator, autopilot_forbidden,
+    autopilot_actor_not_member, autopilot_trigger_no_originator,
+    autopilot_trigger_forbidden) — both missed by a literal-string-only
+    grep. "feature_disabled" is deliberately excluded even though an
+    earlier pass here included it: the only call site is
+    server/internal/handler/handler_writejson_test.go exercising the
+    writeFeatureDisabled helper itself; no production handler emits it.
+    Implemented from source per "구현이 정본" — flagged to PM rather than
+    silently truncated to 24 or left over-/under-counted.
 
 
     "revision_conflict" is intentionally excluded from this enum: every
@@ -47,21 +60,29 @@ ErrorCode:
     code:
       type: string
       enum:
+        - account_disabled
+        - autopilot_actor_not_member
+        - autopilot_forbidden
+        - autopilot_no_originator
+        - autopilot_trigger_forbidden
+        - autopilot_trigger_no_originator
         - cloud_runtime_misconfigured
         - cloud_runtime_not_configured
         - composio_not_configured
         - daemon_websocket_misconfigured
         - dingtalk_not_configured
         - duplicate_target_is_duplicate
-        - feature_disabled
+        - email_not_allowed
         - file_upload_not_configured
         - github_repository_browsing_not_configured
+        - google_account_no_email
         - google_login_not_configured
         - invitation_rate_limiter_unavailable
         - invocation_not_allowed
         - issue_has_duplicates
         - issue_in_triage
         - lark_not_configured
+        - oauth_code_invalid
         - plugin_api_disabled
         - plugin_surfaces_misconfigured
         - plugin_surfaces_not_configured
@@ -69,6 +90,7 @@ ErrorCode:
         - seat_capacity_overcommitted
         - seat_capacity_rate_limited
         - seat_capacity_unavailable
+        - signup_prohibited
         - slack_not_configured
         - storage_not_configured
         - suggestions_not_available
