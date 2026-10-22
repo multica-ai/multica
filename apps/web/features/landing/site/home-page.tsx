@@ -17,6 +17,7 @@ import {
   SectionHeader,
   focusRing,
 } from "./primitives";
+import { HeroVariants, useHeroVariant } from "./hero-variants";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
 
@@ -42,6 +43,10 @@ export function HomePage() {
 function Hero() {
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
+  const variant = useHeroVariant();
+  if (variant) {
+    return <HeroVariants variant={variant} ctaHref={ctaHref} ctaLabel={user ? "Open dashboard" : "Get started"} />;
+  }
 
   return (
     <section className="pt-site-hero pb-site-section">
