@@ -81,7 +81,7 @@ export function HeroVariants({ variant, ctaHref, ctaLabel }: { variant: HeroVari
         <Container>
           <Announcement />
           <div className="mt-5 grid items-end gap-6 lg:grid-cols-[1.25fr_1fr] lg:gap-16">
-            <h1 className="font-site-display text-site-display text-site-ink text-balance">
+            <h1 className="font-site-display text-site-heading text-site-ink text-balance">
               Your next ten hires won’t be human
             </h1>
             <div>
@@ -108,7 +108,7 @@ export function HeroVariants({ variant, ctaHref, ctaLabel }: { variant: HeroVari
         <Container>
           <Announcement />
           <div className="mt-5 grid gap-x-16 gap-y-6 lg:grid-cols-[1.25fr_1fr]">
-            <h1 className="font-site-display text-site-display text-site-ink text-balance lg:col-start-1 lg:row-start-1">
+            <h1 className="font-site-display text-site-heading text-site-ink text-balance lg:col-start-1 lg:row-start-1">
               Your next ten hires won’t be human
             </h1>
             <p
@@ -136,7 +136,7 @@ export function HeroVariants({ variant, ctaHref, ctaLabel }: { variant: HeroVari
       <section className="pt-12 pb-site-section lg:pt-14">
         <Container className="flex flex-col items-center text-center">
           <Announcement />
-          <h1 className="mt-5 font-site-display text-site-display text-site-ink text-balance">
+          <h1 className="mt-5 font-site-display text-site-heading text-site-ink text-balance">
             Your next hires won’t be human
           </h1>
           <p className="mt-4 max-w-[42rem] text-site-body text-site-muted text-pretty">
@@ -157,7 +157,7 @@ export function HeroVariants({ variant, ctaHref, ctaLabel }: { variant: HeroVari
       <Container className="grid items-center gap-10 lg:grid-cols-[5fr_7fr] lg:gap-12">
         <div>
           <Announcement />
-          <h1 className="mt-5 font-site-display text-site-display text-site-ink text-balance">
+          <h1 className="mt-5 font-site-display text-site-heading text-site-ink text-balance">
             Your next ten hires won’t be human
           </h1>
           <p className="mt-4 max-w-[28rem] text-site-body text-site-muted text-pretty">
