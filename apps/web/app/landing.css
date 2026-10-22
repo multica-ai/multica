@@ -246,6 +246,158 @@
     }
 }
 
+/* Isometric figures: solid parts filled in the card's colour and painted back
+   to front, four side tones by facing, a lighter top, one lit part in ink,
+   and amber lamps for agents at work. */
+.site-iso {
+    --iso-paper: var(--site-sunken);
+    --iso-top: oklch(0.995 0 0);
+    --iso-shade-0: oklch(0.87 0.003 286);
+    --iso-shade-1: oklch(0.9 0.003 286);
+    --iso-shade-2: oklch(0.935 0.002 286);
+    --iso-shade-3: oklch(0.962 0.002 286);
+    --iso-lit-top: oklch(1 0 0);
+    --iso-lit-shade: oklch(0.925 0.003 286);
+    --iso-hi: var(--site-ink);
+    --iso-mid: oklch(0.6 0.01 286);
+    --iso-lo: oklch(0.74 0.008 286);
+    --iso-faint: oklch(0.84 0.005 286);
+    --iso-dot: oklch(0.3 0.01 286);
+}
+
+.site-iso .iso-svg path,
+.site-iso .iso-svg circle {
+    vector-effect: non-scaling-stroke;
+}
+
+.site-iso .iso-fill {
+    fill: var(--iso-paper);
+}
+
+.site-iso .iso-shade[data-shade="0"] {
+    fill: var(--iso-shade-0);
+}
+
+.site-iso .iso-shade[data-shade="1"] {
+    fill: var(--iso-shade-1);
+}
+
+.site-iso .iso-shade[data-shade="2"] {
+    fill: var(--iso-shade-2);
+}
+
+.site-iso .iso-shade[data-shade="3"] {
+    fill: var(--iso-shade-3);
+}
+
+.site-iso .iso-top {
+    fill: var(--iso-top);
+}
+
+.site-iso .iso-solid[data-lit] > .iso-fill,
+.site-iso .iso-solid[data-lit] > .iso-top {
+    fill: var(--iso-lit-top);
+}
+
+.site-iso .iso-solid[data-lit] > .iso-shade {
+    fill: var(--iso-lit-shade);
+}
+
+.site-iso .iso-halo {
+    fill: oklch(0.5 0.01 286);
+    filter: blur(9px);
+    opacity: 0.3;
+    transform: translateY(3px);
+}
+
+.site-iso .iso-line {
+    fill: none;
+    stroke: var(--iso-lo);
+    stroke-width: 0.6px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.site-iso .iso-line[data-tone="hi"],
+.site-iso .iso-solid[data-lit] > .iso-edge {
+    stroke: var(--iso-hi);
+}
+
+.site-iso .iso-line[data-tone="mid"] {
+    stroke: var(--iso-mid);
+}
+
+.site-iso .iso-line[data-tone="faint"] {
+    stroke: var(--iso-faint);
+}
+
+.site-iso .iso-dots circle {
+    fill: var(--iso-dot);
+    opacity: 0.32;
+}
+
+.site-iso .iso-dots[data-tone="hi"] circle {
+    opacity: 0.85;
+}
+
+.site-iso .iso-dots[data-tone="mid"] circle {
+    opacity: 0.45;
+}
+
+.site-iso .iso-dots[data-tone="lo"] circle {
+    opacity: 0.22;
+}
+
+.site-iso [data-lamp] .iso-top,
+.site-iso [data-lamp] .iso-lamp {
+    fill: var(--iso-shade-1);
+    transition: fill 300ms;
+}
+
+.site-iso [data-on="agent"] [data-lamp] .iso-top,
+.site-iso [data-on="agent"] [data-lamp] .iso-lamp {
+    fill: var(--site-agent);
+}
+
+.site-iso [data-on="agent"] [data-lamp] .iso-shade {
+    fill: color-mix(in oklab, var(--site-agent) 70%, var(--site-ink));
+}
+
+.site-iso [data-on="ink"] [data-lamp] .iso-top {
+    fill: var(--site-ink-secondary);
+}
+
+@theme {
+    --animate-site-stamp: site-stamp 700ms cubic-bezier(0.65, 0, 0.35, 1) both;
+    --animate-site-token: site-token 700ms cubic-bezier(0.65, 0, 0.35, 1) both;
+
+    @keyframes site-stamp {
+        0%,
+        100% {
+            translate: 0 0;
+        }
+        45%,
+        60% {
+            translate: var(--site-press);
+        }
+    }
+
+    @keyframes site-token {
+        from {
+            translate: 0 0;
+            opacity: 0;
+        }
+        15%,
+        85% {
+            opacity: 1;
+        }
+        to {
+            translate: var(--site-to);
+            opacity: 0;
+        }
+    }
+}
+
 /* Logo wall: the track holds the list twice, so sliding it by half loops
    seamlessly. */
 @theme {
