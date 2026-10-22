@@ -15,6 +15,7 @@ import { dispatchReasonCode } from "@multica/core/api";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
@@ -148,11 +149,11 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
       </div> : undefined} />;
-  const stopButton = active && <Button size="icon-sm" variant="ghost" className="text-muted-foreground"
-    aria-label={stopLabel} title={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
+  const stopButton = active && <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
+    label={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
     onClick={() => setConfirmStop(true)}>
     {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
-  </Button>;
+  </IconButton>;
   const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
     showRunningNote={task.status !== "queued"}
     onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;

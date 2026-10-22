@@ -26,6 +26,7 @@ import {
   useUpdateRuntimeProfile,
 } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogClose,
@@ -147,17 +148,17 @@ export function RuntimeProfilesDialog({
               )}
               <DialogClose
                 render={
-                  <Button
+                  <IconButton
                     type="button"
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
-                    aria-label={t(($) => $.profiles.close)}
+                    label={t(($) => $.profiles.close)}
+                    tooltipSide="bottom"
                   />
                 }
               >
                 <X aria-hidden="true" className="h-4 w-4" />
-                <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>

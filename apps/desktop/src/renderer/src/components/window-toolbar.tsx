@@ -19,9 +19,16 @@ import {
   DropdownMenuLabel,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
+import {
   ResourceLeadingVisual,
   useTabPresentation,
 } from "@multica/views/layout";
+import { ActionShortcutKeycaps } from "@multica/views/common/shortcut-keycaps";
+import { useT } from "@multica/views/i18n";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 
@@ -168,6 +175,7 @@ function HistoryMenuItem({
 }
 
 export function WindowToolbar() {
+  const { t } = useT("layout");
   const { state: sidebarState, isCompact } = useSidebar();
   const sidebarHidden = sidebarState === "collapsed" || isCompact;
   const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
@@ -184,6 +192,7 @@ export function WindowToolbar() {
     goToHistoryIndex,
   } = useTabHistory();
   const [menu, setMenu] = useState<OpenHistoryMenu | null>(null);
+  const [tooltip, setTooltip] = useState<HistoryMenuMode | null>(null);
   const menuAnchorRef = useRef<HTMLElement | null>(null);
   const menuContentRef = useRef<HTMLDivElement | null>(null);
 
@@ -230,7 +239,9 @@ export function WindowToolbar() {
     [browsingHistory],
   );
   const menuLabel =
-    menu?.mode === "forward" ? "Forward history" : "Back history";
+    menu?.mode === "forward"
+      ? t(($) => $.window.forward_history)
+      : t(($) => $.window.back_history);
   const navButtonClassName =
     "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-30 motion-reduce:transition-none";
 
@@ -259,72 +270,100 @@ export function WindowToolbar() {
         className="flex items-center gap-2"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <button
-          type="button"
-          disabled={!canGoBack}
-          aria-label="Go back"
-          aria-haspopup="menu"
-          aria-expanded={menu?.mode === "back"}
-          title="Go back (press and hold for history)"
-          className={navButtonClassName}
-          onPointerDown={backPress.onPointerDown}
-          onPointerMove={backPress.onPointerMove}
-          onPointerUp={backPress.onPointerUp}
-          onPointerCancel={backPress.onPointerCancel}
-          onPointerLeave={backPress.onPointerLeave}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openMenu("back", event.currentTarget);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowDown") return;
-            event.preventDefault();
-            openMenu("back", event.currentTarget);
-          }}
-          onClick={(event) => {
-            if (backPress.consumeClick()) {
-              event.preventDefault();
-              return;
-            }
-            goBack();
-          }}
+        <Tooltip
+          // Stays shut while a history menu is open over the same button.
+          open={tooltip === "back" && menu === null}
+          onOpenChange={(open) => setTooltip(open ? "back" : null)}
         >
-          <ArrowLeft aria-hidden className="size-4" />
-        </button>
-        <button
-          type="button"
-          disabled={!canGoForward}
-          aria-label="Go forward"
-          aria-haspopup="menu"
-          aria-expanded={menu?.mode === "forward"}
-          title="Go forward (press and hold for history)"
-          className={navButtonClassName}
-          onPointerDown={forwardPress.onPointerDown}
-          onPointerMove={forwardPress.onPointerMove}
-          onPointerUp={forwardPress.onPointerUp}
-          onPointerCancel={forwardPress.onPointerCancel}
-          onPointerLeave={forwardPress.onPointerLeave}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            openMenu("forward", event.currentTarget);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowDown") return;
-            event.preventDefault();
-            openMenu("forward", event.currentTarget);
-          }}
-          onClick={(event) => {
-            if (forwardPress.consumeClick()) {
-              event.preventDefault();
-              return;
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                disabled={!canGoBack}
+                aria-label={t(($) => $.window.go_back)}
+                aria-haspopup="menu"
+                aria-expanded={menu?.mode === "back"}
+                className={navButtonClassName}
+                onPointerDown={backPress.onPointerDown}
+                onPointerMove={backPress.onPointerMove}
+                onPointerUp={backPress.onPointerUp}
+                onPointerCancel={backPress.onPointerCancel}
+                onPointerLeave={backPress.onPointerLeave}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openMenu("back", event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowDown") return;
+                  event.preventDefault();
+                  openMenu("back", event.currentTarget);
+                }}
+                onClick={(event) => {
+                  if (backPress.consumeClick()) {
+                    event.preventDefault();
+                    return;
+                  }
+                  goBack();
+                }}
+              >
+                <ArrowLeft aria-hidden className="size-4" />
+              </button>
             }
-            goForward();
-          }}
+          />
+          <TooltipContent side="bottom">
+            {t(($) => $.window.go_back)}
+            <ActionShortcutKeycaps action="goBack" />
+            <span className="text-muted-foreground">{t(($) => $.window.hold_for_history)}</span>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip
+          open={tooltip === "forward" && menu === null}
+          onOpenChange={(open) => setTooltip(open ? "forward" : null)}
         >
-          <ArrowRight aria-hidden className="size-4" />
-        </button>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                disabled={!canGoForward}
+                aria-label={t(($) => $.window.go_forward)}
+                aria-haspopup="menu"
+                aria-expanded={menu?.mode === "forward"}
+                className={navButtonClassName}
+                onPointerDown={forwardPress.onPointerDown}
+                onPointerMove={forwardPress.onPointerMove}
+                onPointerUp={forwardPress.onPointerUp}
+                onPointerCancel={forwardPress.onPointerCancel}
+                onPointerLeave={forwardPress.onPointerLeave}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  openMenu("forward", event.currentTarget);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowDown") return;
+                  event.preventDefault();
+                  openMenu("forward", event.currentTarget);
+                }}
+                onClick={(event) => {
+                  if (forwardPress.consumeClick()) {
+                    event.preventDefault();
+                    return;
+                  }
+                  goForward();
+                }}
+              >
+                <ArrowRight aria-hidden className="size-4" />
+              </button>
+            }
+          />
+          <TooltipContent side="bottom">
+            {t(($) => $.window.go_forward)}
+            <ActionShortcutKeycaps action="goForward" />
+            <span className="text-muted-foreground">{t(($) => $.window.hold_for_history)}</span>
+          </TooltipContent>
+        </Tooltip>
         <SidebarTrigger
           className="size-7 text-faint-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          shortcut={<ActionShortcutKeycaps action="toggleSidebar" />}
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         />
       </div>

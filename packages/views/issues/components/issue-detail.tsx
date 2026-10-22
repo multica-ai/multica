@@ -37,6 +37,8 @@ import {
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -67,6 +69,7 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PropRow } from "../../common/prop-row";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
@@ -1289,6 +1292,7 @@ export function IssueDetailSkeleton({
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
+  const { t: tCommon } = useT("common");
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -2893,15 +2897,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
                 <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
               </AppLink>
-              <button
-                type="button"
-                title={t(($) => $.actions.remove_parent_issue)}
-                aria-label={t(($) => $.actions.remove_parent_issue)}
-                onClick={() => actions.removeParent()}
-                className="shrink-0 rounded-xs p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                <Unlink className="h-3.5 w-3.5" />
-              </button>
+              <TooltipHint label={t(($) => $.actions.remove_parent_issue)}>
+                <button
+                  type="button"
+                  aria-label={t(($) => $.actions.remove_parent_issue)}
+                  onClick={() => actions.removeParent()}
+                  className="shrink-0 rounded-xs p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Unlink className="h-3.5 w-3.5" />
+                </button>
+              </TooltipHint>
             </div>
           </div>}
         </div>
@@ -3210,29 +3215,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // to the list we came from, falling back to all issues.
               onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
               trigger={
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                <IconButton
+                  label={tCommon(($) => $.more_actions)}
+                  tooltipSide="bottom"
+                  className="text-muted-foreground"
+                >
                   <MoreHorizontal />
-                </Button>
+                </IconButton>
               }
             />
             {isPeek ? (
               trailingActions
             ) : (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant={sidebarOpen ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      className={sidebarOpen ? "" : "text-muted-foreground"}
-                      onClick={handleToggleSidebar}
-                    >
-                      <PanelRight />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-              </Tooltip>
+              <IconButton
+                label={t(($) => $.detail.sidebar_tooltip)}
+                shortcut={<ActionShortcutKeycaps action="toggleRightSidebar" />}
+                tooltipSide="bottom"
+                variant={sidebarOpen ? "secondary" : "ghost"}
+                className={sidebarOpen ? "" : "text-muted-foreground"}
+                onClick={handleToggleSidebar}
+              >
+                <PanelRight />
+              </IconButton>
             )}
             </>
           }

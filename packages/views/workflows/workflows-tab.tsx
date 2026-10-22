@@ -51,6 +51,13 @@ export function WorkflowsTab() {
   const currentUser = useAuthStore((s) => s.user);
   const role = members.find((m) => m.user_id === currentUser?.id)?.role;
   const isAdmin = role === "owner" || role === "admin";
+  // Any member creates workflows; a workflow's owner and admins edit it
+  // (MUL-8120). Mirrors useWorkflowPermissions.
+  const canCreate = !!role;
+  const canEditWorkflow = (id: string) => {
+    const owner = workflows.find((w) => w.id === id)?.owner_id;
+    return isAdmin || (!!currentUser?.id && !!owner && owner === currentUser.id);
+  };
 
   const open = navigation.searchParams.get(WORKFLOW_PARAM);
   const duplicateOf = navigation.searchParams.get(DUPLICATE_PARAM);
@@ -86,7 +93,9 @@ export function WorkflowsTab() {
         workflowId={open === NEW_WORKFLOW ? null : open}
         seed={seed}
         template={open === NEW_WORKFLOW && !duplicateOf ? template : null}
-        canEdit={isAdmin}
+        canEdit={open === NEW_WORKFLOW ? canCreate : canEditWorkflow(open)}
+        canDuplicate={canCreate}
+        canCreateStatus={isAdmin}
         onBack={backToList}
         onOpen={(target) =>
           "id" in target
@@ -106,7 +115,7 @@ export function WorkflowsTab() {
     <SettingsTab
       title={t(($) => $.workflows.settings.title)}
       actions={
-        isAdmin && (
+        canCreate && (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

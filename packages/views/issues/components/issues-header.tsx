@@ -2322,7 +2322,6 @@ export function IssueDisplayControls({
                         act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
                       }
                       aria-label={sortDirectionLabel}
-                      title={sortDirectionLabel}
                     >
                       {sortDirectionLabel}
                     </Button>

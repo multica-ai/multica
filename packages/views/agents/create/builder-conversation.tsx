@@ -16,6 +16,7 @@ import type {
   RuntimeDevice,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChatInput } from "../../chat/components/chat-input";
 import { CHAT_COLUMN, CHAT_GUTTER } from "../../chat/components/chat-column";
@@ -243,16 +244,16 @@ export function BuilderConversation({
           >
             <span className="min-w-0 flex-1">{error}</span>
             {onDismissError && (
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-xs"
                 className="shrink-0"
-                aria-label={tModals(($) => $.common.close)}
+                label={tModals(($) => $.common.close)}
                 onClick={onDismissError}
               >
                 <X className="size-4" />
-              </Button>
+              </IconButton>
             )}
           </div>
         </div>

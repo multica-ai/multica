@@ -58,7 +58,7 @@ func outcomeFor(outcomes []CommentTriggerOutcome, agentID string) (CommentTrigge
 }
 
 func TestCreateCommentSteersTheThreadAgentsRunningTurn(t *testing.T) {
-	for _, provider := range []string{"codex", "cursor"} {
+	for _, provider := range []string{"codex", "grok", "cursor", "kiro"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newSupplementFixture(t, provider, "running", true)
 			dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, f.triggerID,

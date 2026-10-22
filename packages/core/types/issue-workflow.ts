@@ -42,6 +42,8 @@ export interface IssueWorkflow {
   description: string;
   /** The workspace Default: used by every project that names no workflow. */
   is_default: boolean;
+  /** The member who owns the workflow and may edit it; null for Default. */
+  owner_id: string | null;
   steps: IssueWorkflowStep[];
   /** Projects currently using this workflow. */
   project_ids: string[];

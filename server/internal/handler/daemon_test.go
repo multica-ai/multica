@@ -1586,6 +1586,62 @@ func TestGetDaemonWorkspaceRepos_WithDaemonToken_WorkspaceMismatch(t *testing.T)
 	testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusNotFound)
 }
 
+func TestGetDaemonWorkspaceRepos_CACerts(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	prev := testHandler.cfg.GitExtraCACerts
+	t.Cleanup(func() { testHandler.cfg.GitExtraCACerts = prev })
+
+	call := func() map[string]any {
+		req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
+		req = withURLParam(req, "workspaceId", testWorkspaceID)
+		var resp map[string]any
+		testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusOK).JSON(&resp)
+		return resp
+	}
+
+	testHandler.cfg.GitExtraCACerts = nil
+	if _, ok := call()["ca_certs"]; ok {
+		t.Fatal("ca_certs present without configured CAs")
+	}
+
+	const pemCerts = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+	testHandler.cfg.GitExtraCACerts = []byte(pemCerts)
+	if got := call()["ca_certs"]; got != pemCerts {
+		t.Fatalf("ca_certs = %v, want configured PEM", got)
+	}
+}
+
+func TestDaemonRegister_CACerts(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	prev := testHandler.cfg.GitExtraCACerts
+	t.Cleanup(func() { testHandler.cfg.GitExtraCACerts = prev })
+
+	const pemCerts = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+	testHandler.cfg.GitExtraCACerts = []byte(pemCerts)
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-ca",
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{"name": "test-runtime-ca", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	}, testWorkspaceID, "test-daemon-ca")
+	var resp map[string]any
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK).JSON(&resp)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, "test-daemon-ca")
+	})
+
+	if got := resp["ca_certs"]; got != pemCerts {
+		t.Fatalf("ca_certs = %v, want configured PEM", got)
+	}
+}
+
 func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

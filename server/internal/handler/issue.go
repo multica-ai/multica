@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -2984,6 +2985,12 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, sour
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":   "agent_unavailable",
 			"reason": "agent's runtime is no longer registered",
+		}
+	}
+	if rt.Provider == qoderruntime.Provider {
+		return http.StatusUnprocessableEntity, map[string]any{
+			"code":   "agent_unavailable",
+			"reason": "Qoder Cloud Agent supports existing issue runs only; create the issue manually and assign it to this agent",
 		}
 	}
 	current := readRuntimeCLIVersion(rt.Metadata)

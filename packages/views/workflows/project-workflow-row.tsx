@@ -140,6 +140,8 @@ export function WorkflowChoiceItems({
               </span>
               <span className="mt-0.5 block text-caption text-muted-foreground">
                 {t(($) => $.workflows.settings.statuses, { count: workflow.steps.length })}
+                {handoffStepCount(workflow) > 0 &&
+                  ` · ${t(($) => $.workflows.settings.handoffs, { count: handoffStepCount(workflow) })}`}
               </span>
               <span className="block truncate text-caption text-muted-foreground">
                 {usedBy
@@ -173,10 +175,11 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
   if (!enabled && !project.workflow_id) return null;
   const name = current?.name ?? t(($) => $.workflows.default_name);
   const handoffs = current ? handoffStepCount(current) : 0;
+  const handoffLabel = handoffs > 0 ? t(($) => $.workflows.settings.handoffs, { count: handoffs }) : null;
 
   if (!canManageProject) {
     return (
-      <span className="-ml-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
+      <span title={name} className="-ml-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
         <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate font-medium">{name}</span>
       </span>
@@ -191,15 +194,15 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
           render={
             <button
               type="button"
-              className="-ml-1 inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
+              title={handoffLabel ? `${name} · ${handoffLabel}` : name}
+              className="-ml-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
             >
               <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate font-medium">{name}</span>
-              {handoffs > 0 && (
-                <span className="shrink-0 text-muted-foreground">
-                  · {t(($) => $.workflows.settings.handoffs, { count: handoffs })}
-                </span>
-              )}
+              {/* Only the name competes for the narrow sidebar row (MUL-8119):
+                  a sibling summary, however it is weighted, still takes width
+                  from the name. The handoff count lives in the title and the
+                  picker items instead. */}
+              <span className="min-w-0 truncate font-medium">{name}</span>
               <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
             </button>
           }

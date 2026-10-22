@@ -56,7 +56,9 @@ import {
 } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { copyImage } from "@multica/ui/lib/clipboard";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
@@ -81,6 +83,7 @@ import {
 } from "./utils/preview";
 import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
 import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
@@ -1099,21 +1102,30 @@ function ChromeButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      className={cn(
-        "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
-        pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
-      )}
-      title={shortcut ? `${label} (${shortcut})` : label}
-      aria-label={label}
-      aria-keyshortcuts={shortcut}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
+    <TooltipHint
+      label={label}
+      shortcut={
+        shortcut ? (
+          <ShortcutKeycaps shortcut={createShortcutChord(shortcut)} decorative className="ml-1.5" />
+        ) : undefined
+      }
+      side="bottom"
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        className={cn(
+          "flex size-8 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+          pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+        )}
+        aria-label={label}
+        aria-keyshortcuts={shortcut}
+        aria-pressed={pressed}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -1139,24 +1151,24 @@ function ChromeSegmented<T extends string>({
         const pressed = option.value === value;
         const Icon = option.icon;
         return (
-          <button
-            key={option.value}
-            type="button"
-            className={cn(
-              "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
-              pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
-            )}
-            title={option.label}
-            aria-label={option.label}
-            aria-pressed={pressed}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-          >
-            <Icon className="size-4 shrink-0" />
-            <span className="hidden @7xl:inline" aria-hidden>
-              {option.label}
-            </span>
-          </button>
+          <TooltipHint key={option.value} label={option.label} side="bottom">
+            <button
+              type="button"
+              className={cn(
+                "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+                pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+              )}
+              aria-label={option.label}
+              aria-pressed={pressed}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span className="hidden @7xl:inline" aria-hidden>
+                {option.label}
+              </span>
+            </button>
+          </TooltipHint>
         );
       })}
     </div>
@@ -1183,19 +1195,20 @@ function SequenceButton({
 }) {
   const Icon = side === "prev" ? ChevronLeft : ChevronRight;
   return (
-    <button
-      type="button"
-      className={cn(
-        "dark absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-secondary/80 text-foreground transition-colors enabled:hover:bg-secondary disabled:opacity-30",
-        side === "prev" ? "left-3" : "right-3",
-      )}
-      title={label}
-      aria-label={label}
-      disabled={!onClick}
-      onClick={onClick}
-    >
-      <Icon className="size-5" />
-    </button>
+    <TooltipHint label={label}>
+      <button
+        type="button"
+        className={cn(
+          "dark absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-secondary/80 text-foreground transition-colors enabled:hover:bg-secondary disabled:opacity-30",
+          side === "prev" ? "left-3" : "right-3",
+        )}
+        aria-label={label}
+        disabled={!onClick}
+        onClick={onClick}
+      >
+        <Icon className="size-5" />
+      </button>
+    </TooltipHint>
   );
 }
 

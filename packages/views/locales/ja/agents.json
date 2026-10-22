@@ -154,6 +154,7 @@
   "inspector": {
     "section_profile": "プロフィール",
     "section_execution": "実行設定",
+    "qoder_execution_note": "モデル、ツール、Skills は Qoder の QCA エージェントで設定します。",
     "section_access": "アクセス",
     "section_properties": "プロパティ",
     "section_details": "詳細",
@@ -261,6 +262,7 @@
     "composio_mcp": "MCP アプリ",
     "integrations": "連携",
     "runtime_config": "ルーティング",
+    "qoder_agent": "QCA エージェント",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
     "discard_keep": "編集を続ける",
@@ -871,18 +873,8 @@
     "squad_title": "このスクワッド用のエージェントを作成",
     "duplicate_title": "{{name}} を複製",
     "back": "戻る",
-    "eyebrow": "エージェント作成",
-    "choose_title": "どの方法で始めますか？",
-    "recommended": "おすすめ",
-    "continue": "続ける",
-    "step_choose": "開始方法を選択",
-    "step_configure": "確認して設定",
     "step_ai": "会話で作成",
     "modes": {
-      "blank": {
-        "title": "空白から始める",
-        "description": "名前、指示、ランタイムを自分で設定します。"
-      },
       "template": {
         "title": "テンプレートを使用",
         "description": "整理された指示とスキルを基に、ワークスペースに合わせて詳細を調整します。"
@@ -944,12 +936,11 @@
     "live_draft_hint": "下書きは直接編集できます。",
     "duplicate_env_notice": "指示、スキル、コマンド引数がコピーされます。環境変数、MCP サーバー、マシンローカルのランタイム設定はコピーされません。",
     "duplicate_runtime_reset_notice": "元のランタイムが利用できないため、このコピーは別のランタイムで実行されます。モデル・思考レベル・速度は選択したランタイムでのみ有効なため、クリアされました。",
-    "create_and_open": "作成して開く",
+    "create_agent": "エージェントを作成",
     "create_and_add": "作成してスクワッドに追加",
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
     "name_conflict": "同じ名前のエージェントがすでに存在します。",
-    "created": "{{name}} を作成しました",
     "drafts": {
       "title": "下書き",
       "untitled": "無題の下書き",
@@ -959,6 +950,77 @@
       "discard_cancel": "編集を続ける",
       "banner": "未完了の下書きが {{count}} 件あります",
       "pick_hint": "続きを選んでください。"
+    },
+    "close": "閉じる",
+    "steps": {
+      "runtime": "ランタイムを選択",
+      "configure": "設定",
+      "done": "完了",
+      "aria": "エージェント作成の手順"
+    },
+    "configure_title": "エージェントを設定",
+    "configure_description": "名前と指示を入力します。あとからいつでも変更できます。",
+    "ask_ai": "AI に書いてもらう",
+    "change_runtime": "変更",
+    "runtime_label": "ランタイム",
+    "runtime_loading": "ランタイムを読み込み中…",
+    "runtime_missing": "このランタイムは利用できなくなりました。",
+    "cloud_fields_note": "Skills、MCP、会話のきっかけはローカルとリモートのランタイムでのみ利用できます。",
+    "done": {
+      "loading": "仕上げています…",
+      "title": "{{name}} の準備ができました",
+      "runs_on": "{{runtime}} で実行",
+      "joined_squad": "スクワッド {{squad}} に追加しました",
+      "next": "次にすること",
+      "assign_title": "最初のタスクを割り当てる",
+      "assign_description": "このエージェントを担当者にしてイシューを作成します。",
+      "mention_title": "イシューでメンションする",
+      "mention_description": "イシューのコメントで @{{name}} とメンションすると、作業を引き受けます。",
+      "squad_title": "スクワッドに追加",
+      "squad_description": "スクワッドリーダーの割り振りで、他のエージェントと一緒に働きます。",
+      "open_squad_title": "{{squad}} を開く",
+      "open_squad_description": "このエージェントが加わったスクワッドを表示します。",
+      "open_agent": "エージェントを開く",
+      "back_to_list": "エージェント一覧に戻る"
+    },
+    "runtime_step": {
+      "title": "このエージェントをどこで実行しますか？",
+      "search_placeholder": "ハーネスまたはマシンを検索",
+      "groups": {
+        "machines": "マシン",
+        "cloud": "クラウドサービス"
+      },
+      "this_machine": "このマシン",
+      "owner_you": "あなた",
+      "custom_badge": "カスタム",
+      "web_local_title": "このコンピューターのハーネスはデスクトップアプリで使えます",
+      "download_desktop": "デスクトップアプリをダウンロード",
+      "harness_count_other": "{{count}} 個のハーネス",
+      "local_starting": "ローカルデーモンを起動中…",
+      "local_empty_title": "このマシンにハーネスが見つかりません",
+      "local_empty_hint": "Claude Code や Codex などの CLI をインストールすると、ここに表示されます。",
+      "more_harnesses_other": "ほか {{count}} 件：{{names}}",
+      "add_remote": "マシンを接続",
+      "hidden_remote_other": "ほかに所有者のみ利用できるマシンが {{count}} 台あります",
+      "remote_warning": "タスクは {{owner}} のマシンで実行され、そのマシンのファイルを読み書きし、使用量は {{owner}} のアカウントに計上されます。",
+      "no_match": "「{{query}}」に一致する項目はありません",
+      "hosted_by": "提供：{{vendor}}",
+      "coming_soon": "近日公開",
+      "qoder_status": {
+        "not_configured": "未接続",
+        "starting": "起動中",
+        "ready": "接続済み",
+        "error": "エラー",
+        "stopped": "一時停止中"
+      },
+      "connect": "接続",
+      "settings": "設定",
+      "member_connect": "管理者に接続を依頼してください",
+      "member_fix": "管理者に対応を依頼してください",
+      "footer_selected": "選択中：",
+      "footer_hint": "続行するにはランタイムを選択してください",
+      "cancel": "キャンセル",
+      "next": "次へ"
     }
   },
   "actions": {

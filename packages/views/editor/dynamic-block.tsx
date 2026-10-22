@@ -36,6 +36,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -180,30 +181,28 @@ export function DynamicBlock({
             </TabsTrigger>
           </TabsList>
           {onFullscreen && (
-            <Button
+            <IconButton
               ref={fullscreenButtonRef}
               type="button"
               variant="ghost"
               size="icon-xs"
               className="text-muted-foreground"
               onClick={onFullscreen}
-              title={t(($) => $.code_block.fullscreen)}
-              aria-label={t(($) => $.code_block.fullscreen)}
+              label={t(($) => $.code_block.fullscreen)}
             >
               <Maximize2 />
-            </Button>
+            </IconButton>
           )}
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
             onClick={handleCopy}
-            title={t(($) => $.dynamic_block.copy_source)}
-            aria-label={t(($) => $.dynamic_block.copy_source)}
+            label={t(($) => $.dynamic_block.copy_source)}
           >
             {copied ? <Check /> : <Copy />}
-          </Button>
+          </IconButton>
         </div>
       </div>
       <TabsContent

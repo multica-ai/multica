@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { isDesktopShell } from "../platform/local-directory";
@@ -47,13 +48,14 @@ export function HelpLauncher() {
   const desktop = isDesktopShell();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t(($) => $.help.trigger)}
-        title={t(($) => $.help.trigger)}
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
-      >
-        <CircleHelp className="size-4" />
-      </DropdownMenuTrigger>
+      <TooltipHint label={t(($) => $.help.trigger)}>
+        <DropdownMenuTrigger
+          aria-label={t(($) => $.help.trigger)}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
+        >
+          <CircleHelp className="size-4" />
+        </DropdownMenuTrigger>
+      </TooltipHint>
       <DropdownMenuContent
         align="end"
         side="top"

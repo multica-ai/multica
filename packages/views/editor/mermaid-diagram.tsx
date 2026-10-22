@@ -41,6 +41,7 @@ import {
 } from "react";
 import { Check, Copy, Frame, Maximize2, Minus, Plus } from "lucide-react";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../i18n";
 import { DYNAMIC_BLOCK_COLLAPSE_AT_PX, DynamicBlockSkeleton } from "./dynamic-block";
 import { useDragToScroll } from "./hooks/use-drag-to-scroll";
@@ -522,14 +523,15 @@ export function MermaidDiagram({
       <div ref={containerRef} className="mermaid-diagram mermaid-diagram-error">
         <div className="mermaid-diagram-error-head">
           <p>{t(($) => $.mermaid.render_error)}</p>
-          <button
-            type="button"
-            onClick={handleCopySource}
-            title={t(($) => $.mermaid.copy_source)}
-            aria-label={t(($) => $.mermaid.copy_source)}
-          >
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          </button>
+          <TooltipHint label={t(($) => $.mermaid.copy_source)}>
+            <button
+              type="button"
+              onClick={handleCopySource}
+              aria-label={t(($) => $.mermaid.copy_source)}
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            </button>
+          </TooltipHint>
         </div>
         {/* The parser message is the only clue about which line is wrong;
             without it the fallback is just an unexplained code block. */}
@@ -596,23 +598,25 @@ export function MermaidDiagram({
           {!frame && (
             <div className="mermaid-diagram-toolbar">
               <MermaidZoomControls zoom={zoom} />
-              <button
-                type="button"
-                onClick={handleCopySource}
-                title={t(($) => $.mermaid.copy_source)}
-                aria-label={t(($) => $.mermaid.copy_source)}
-              >
-                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-              </button>
-              <button
-                ref={expandButtonRef}
-                type="button"
-                onClick={() => setViewerOpen(true)}
-                title={t(($) => $.mermaid.open_viewer)}
-                aria-label={t(($) => $.mermaid.open_viewer)}
-              >
-                <Maximize2 className="size-3.5" />
-              </button>
+              <TooltipHint label={t(($) => $.mermaid.copy_source)}>
+                <button
+                  type="button"
+                  onClick={handleCopySource}
+                  aria-label={t(($) => $.mermaid.copy_source)}
+                >
+                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                </button>
+              </TooltipHint>
+              <TooltipHint label={t(($) => $.mermaid.open_viewer)}>
+                <button
+                  ref={expandButtonRef}
+                  type="button"
+                  onClick={() => setViewerOpen(true)}
+                  aria-label={t(($) => $.mermaid.open_viewer)}
+                >
+                  <Maximize2 className="size-3.5" />
+                </button>
+              </TooltipHint>
             </div>
           )}
           <MermaidViewer
@@ -645,36 +649,39 @@ function MermaidZoomControls({ zoom }: { zoom: InlineZoom }) {
 
   return (
     <div className="mermaid-diagram-zoom">
-      <button
-        type="button"
-        onClick={zoom.zoomOut}
-        disabled={!zoom.canZoomOut}
-        title={t(($) => $.canvas.zoom_out)}
-        aria-label={t(($) => $.canvas.zoom_out)}
-      >
-        <Minus className="size-3.5" />
-      </button>
+      <TooltipHint label={t(($) => $.canvas.zoom_out)}>
+        <button
+          type="button"
+          onClick={zoom.zoomOut}
+          disabled={!zoom.canZoomOut}
+          aria-label={t(($) => $.canvas.zoom_out)}
+        >
+          <Minus className="size-3.5" />
+        </button>
+      </TooltipHint>
       {/* Not a live region: a fitted preview's percent follows the column's
           width, and every diagram on the page would announce each resize. */}
       <span>{zoom.zoomPercent}%</span>
-      <button
-        type="button"
-        onClick={zoom.zoomIn}
-        disabled={!zoom.canZoomIn}
-        title={t(($) => $.canvas.zoom_in)}
-        aria-label={t(($) => $.canvas.zoom_in)}
-      >
-        <Plus className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        onClick={zoom.fit}
-        disabled={zoom.fitted}
-        title={t(($) => $.canvas.zoom_fit)}
-        aria-label={t(($) => $.canvas.zoom_fit)}
-      >
-        <Frame className="size-3.5" />
-      </button>
+      <TooltipHint label={t(($) => $.canvas.zoom_in)}>
+        <button
+          type="button"
+          onClick={zoom.zoomIn}
+          disabled={!zoom.canZoomIn}
+          aria-label={t(($) => $.canvas.zoom_in)}
+        >
+          <Plus className="size-3.5" />
+        </button>
+      </TooltipHint>
+      <TooltipHint label={t(($) => $.canvas.zoom_fit)}>
+        <button
+          type="button"
+          onClick={zoom.fit}
+          disabled={zoom.fitted}
+          aria-label={t(($) => $.canvas.zoom_fit)}
+        >
+          <Frame className="size-3.5" />
+        </button>
+      </TooltipHint>
     </div>
   );
 }

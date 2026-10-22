@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
 import type { SystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
@@ -163,11 +164,11 @@ function InstructionEditor({
       <div>
         <div className="flex items-center justify-between gap-2">
           <p className="text-caption font-medium">{label}</p>
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
-            aria-label={t(($) => $.wakeups.system.instruction_edit)}
+            label={t(($) => $.wakeups.system.instruction_edit)}
             onClick={() => {
               setValue(rule.instruction);
               setError("");
@@ -175,7 +176,7 @@ function InstructionEditor({
             }}
           >
             <Pencil aria-hidden="true" />
-          </Button>
+          </IconButton>
         </div>
         {rule.instruction ? (
           <p className="whitespace-pre-wrap break-words text-caption">{rule.instruction}</p>

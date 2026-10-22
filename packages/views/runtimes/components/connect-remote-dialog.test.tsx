@@ -142,7 +142,7 @@ describe("ConnectRemoteDialog", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Computer connected")).toBeInTheDocument();
+      expect(screen.getByText("Machine connected")).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Create an agent" }),
       ).toBeInTheDocument();

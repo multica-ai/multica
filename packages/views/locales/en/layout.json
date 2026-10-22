@@ -40,6 +40,13 @@
     "loading_workspace": "Loading workspace…",
     "loading_named_prefix": "Loading"
   },
+  "window": {
+    "go_back": "Go back",
+    "go_forward": "Go forward",
+    "hold_for_history": "Hold for history",
+    "back_history": "Back history",
+    "forward_history": "Forward history"
+  },
   "sidebar": {
     "unpin_tooltip": "Unpin",
     "workspaces_label": "Workspaces",

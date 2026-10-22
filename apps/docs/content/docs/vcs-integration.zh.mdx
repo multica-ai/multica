@@ -56,7 +56,7 @@ Webhook 密钥只显示一次，请在离开页面前复制。重新连接同一
 
 ### 实例使用私有 CA
 
-如果点击 **连接** 后提示提供方的证书 "is signed by a certificate authority this server does not trust"，说明实例的 HTTPS 证书由内部 CA 签发（或是自签名证书），而 Multica 服务端不信任这个 CA。需要由服务端管理员把该 CA 加入后端的信任库：使用 Helm 时设置 `backend.extraCACerts.configMap`；使用 Docker Compose 时挂载 CA 并设置 `SSL_CERT_DIR`。具体步骤见 [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional)。
+如果点击 **连接** 后提示提供方的证书 "is signed by a certificate authority this server does not trust"，说明实例的 HTTPS 证书由内部 CA 签发（或是自签名证书），而 Multica 服务端不信任这个 CA。需要由服务端管理员把该 CA 加入后端的信任库：使用 Helm 时设置 `backend.extraCACerts.configMap`；使用 Docker Compose 时挂载 CA 并设置 `SSL_CERT_DIR`。具体步骤见 [Private CA certificates](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional)。后端还会把该 CA 下发给守护进程，使守护进程的 git 也能克隆同一实例上的仓库。
 
 Multica 不提供跳过证书校验的选项，因为连接请求会携带你的访问令牌。如果提示证书与主机名不匹配，或证书校验失败（例如已过期），需要修复证书本身，信任 CA 解决不了。
 

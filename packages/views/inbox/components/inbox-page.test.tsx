@@ -479,7 +479,12 @@ describe("InboxPage", () => {
     render(<InboxPage />);
 
     expect(screen.queryByTestId("row")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
+    // The test's `useT` names every control "Inbox"; the header's batch menu
+    // shares the name, so skip the menu trigger.
+    const clearFilters = screen
+      .getAllByRole("button", { name: "Inbox" })
+      .find((button) => !button.hasAttribute("aria-haspopup"));
+    fireEvent.click(clearFilters!);
     expect(screen.getByTestId("row")).toHaveTextContent("todo-high");
   });
 

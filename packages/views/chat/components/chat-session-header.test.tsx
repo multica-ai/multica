@@ -59,7 +59,7 @@ function startRename(): HTMLInputElement {
       <button type="button">{OUTSIDE_LABEL}</button>
     </>,
   );
-  fireEvent.click(screen.getByTitle(RENAME_LABEL));
+  fireEvent.click(screen.getByRole("button", { name: "Original title" }));
   return screen.getByRole("textbox", { name: RENAME_LABEL });
 }
 

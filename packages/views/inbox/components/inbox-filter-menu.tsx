@@ -19,6 +19,7 @@ import { archivedInboxFacetsOptions } from "@multica/core/inbox/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -215,11 +216,11 @@ export function InboxFilterMenu({
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
-          <Button
+          <IconButton
             variant={activeCount > 0 ? "default" : "ghost"}
             size="icon-sm"
-            aria-label={triggerLabel}
-            title={triggerLabel}
+            label={triggerLabel}
+            tooltipSide="bottom"
             className={cn(
               "text-muted-foreground",
               activeCount > 0 &&

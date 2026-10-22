@@ -34,10 +34,14 @@ function workspaceScoped(slug: string) {
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
+    // Step 1 of agent creation: choose where the agent runs.
     newAgent: () => `${ws}/agents/new`,
-    // The two creation methods behind the chooser. Each is a real route so a
+    // Step 2: configure the agent on the chosen runtime. A real route so a
     // half-filled form survives a refresh and can be linked to directly.
     newAgentManual: () => `${ws}/agents/new/manual`,
+    // Step 3: the agent exists; offer its first uses.
+    newAgentDone: (agentId: string) =>
+      `${ws}/agents/new/done/${encode(agentId)}`,
     newAgentAi: () => `${ws}/agents/new/ai`,
     // One creation conversation. It is a durable object, not a step of the
     // route above: it survives leaving the studio and is resumed later, so it

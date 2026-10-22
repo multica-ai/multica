@@ -49,6 +49,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useComposerSubmit } from "../editor";
@@ -951,6 +952,7 @@ export function ManualCreatePanel({
                       <button
                         type="button"
                         onClick={() => setIsExpanded(!isExpanded)}
+                        aria-label={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -969,6 +971,7 @@ export function ManualCreatePanel({
                       <button
                         type="button"
                         onClick={onClose}
+                        aria-label={t(($) => $.common.close)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         <XIcon className="size-4" />
@@ -1042,6 +1045,7 @@ export function ManualCreatePanel({
                   projectId={projectId ?? null}
                   onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_status)}
                   align="start"
                   open={fieldPickerOpen === "status" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
@@ -1054,6 +1058,7 @@ export function ManualCreatePanel({
                   priority={priority}
                   onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_priority)}
                   align="start"
                   open={fieldPickerOpen === "priority" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
@@ -1070,6 +1075,7 @@ export function ManualCreatePanel({
                     u.assignee_id ?? undefined,
                   )}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_assignee)}
                   align="start"
                   open={fieldPickerOpen === "assignee" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
@@ -1085,6 +1091,7 @@ export function ManualCreatePanel({
                   selectedIds={labelIds}
                   onSelectedIdsChange={updateLabelIds}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_labels)}
                   align="start"
                   open={fieldPickerOpen === "labels" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "labels" : null)}
@@ -1102,6 +1109,7 @@ export function ManualCreatePanel({
                       clearLabel={tProjects(($) => $.picker.clear_aria)}
                     />
                   }
+                  tooltip={tIssues(($) => $.detail.prop_project)}
                   align="start"
                   open={fieldPickerOpen === "project" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
@@ -1115,6 +1123,7 @@ export function ManualCreatePanel({
                   onUpdate={(u) => setStage(u.stage ?? null)}
                   maxStage={maxSiblingStage(parentChildren)}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_stage)}
                   align="start"
                 />
               )}
@@ -1130,6 +1139,7 @@ export function ManualCreatePanel({
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_start_date)}
                   align="start"
                   open={startDatePickerOpen}
                   onOpenChange={setStartDatePickerOpen}
@@ -1144,6 +1154,7 @@ export function ManualCreatePanel({
                   dueDate={dueDate}
                   onUpdate={(u) => updateDueDate(u.due_date ?? null)}
                   triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_due_date)}
                   align="start"
                   open={dueDatePickerOpen}
                   onOpenChange={setDueDatePickerOpen}
@@ -1220,14 +1231,16 @@ export function ManualCreatePanel({
                       {t(($) => $.create_issue.subissue_of, { identifier: parentIssue.identifier })}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setParentIssueId(undefined)}
-                    className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    aria-label={t(($) => $.create_issue.remove_parent_aria)}
-                  >
-                    <XIcon className="size-3" />
-                  </button>
+                  <TooltipHint label={t(($) => $.create_issue.remove_parent_aria)}>
+                    <button
+                      type="button"
+                      onClick={() => setParentIssueId(undefined)}
+                      className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      aria-label={t(($) => $.create_issue.remove_parent_aria)}
+                    >
+                      <XIcon className="size-3" />
+                    </button>
+                  </TooltipHint>
                 </div>
               ) : null}
 
@@ -1242,29 +1255,33 @@ export function ManualCreatePanel({
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setChildIssues((prev) => prev.filter((x) => x.id !== c.id))
-                    }
-                    className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    aria-label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}
-                  >
-                    <XIcon className="size-3" />
-                  </button>
+                  <TooltipHint label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChildIssues((prev) => prev.filter((x) => x.id !== c.id))
+                      }
+                      className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      aria-label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}
+                    >
+                      <XIcon className="size-3" />
+                    </button>
+                  </TooltipHint>
                 </div>
               ))}
 
               {/* Overflow — always the last child so DOM order keeps it at the
                   end of the wrap flow, no matter how many chips are present. */}
               <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <PillButton aria-label={t(($) => $.create_issue.more_options_aria)}>
-                      <MoreHorizontal className="size-3.5" />
-                    </PillButton>
-                  }
-                />
+                <TooltipHint label={t(($) => $.create_issue.more_options_aria)}>
+                  <DropdownMenuTrigger
+                    render={
+                      <PillButton aria-label={t(($) => $.create_issue.more_options_aria)}>
+                        <MoreHorizontal className="size-3.5" />
+                      </PillButton>
+                    }
+                  />
+                </TooltipHint>
                 <DropdownMenuContent align="start" className="w-auto">
                   {/* Re-entry points for toolbar fields hidden via
                       Settings → Preferences → Issue creation. Listed in toolbar order; each opens
@@ -1447,19 +1464,20 @@ export function ManualCreatePanel({
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
-              <button
-                type="button"
-                onClick={switchToAgent}
-                disabled={gate.uploading}
-                aria-disabled={gate.uploading || undefined}
-                aria-busy={gate.uploading || undefined}
-                title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
-                {t(($) => $.create_issue.switch_to_agent)}
-                <BorderBeam />
-              </button>
+              <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
+                <button
+                  type="button"
+                  onClick={switchToAgent}
+                  disabled={gate.uploading}
+                  aria-disabled={gate.uploading || undefined}
+                  aria-busy={gate.uploading || undefined}
+                  className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                  {t(($) => $.create_issue.switch_to_agent)}
+                  <BorderBeam />
+                </button>
+              </TooltipHint>
               <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                 <Switch
                   size="sm"
