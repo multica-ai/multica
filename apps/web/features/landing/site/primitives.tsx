@@ -52,7 +52,7 @@ export function SectionHeader({
 export function Eyebrow({ className, ...props }: ComponentProps<"p">) {
   return (
     <p
-      className={cn("text-site-small text-site-muted", className)}
+      className={cn("font-site-mono text-site-label text-site-muted uppercase", className)}
       {...props}
     />
   );
@@ -132,21 +132,17 @@ export function SiteTextLink({
   );
 }
 
-export type VisualTone = "sky" | "dusk" | "sage" | "stone";
-
 /**
  * Frame for product imagery. Pass a screenshot or a token-built product mockup
  * as children; without children it renders a labelled placeholder so layouts
  * can be reviewed before the art exists.
  */
 export function ProductFrame({
-  tone = "sky",
   label,
   aspectRatio,
   className,
   children,
 }: {
-  tone?: VisualTone;
   label: string;
   aspectRatio?: CSSProperties["aspectRatio"];
   className?: string;
@@ -156,13 +152,12 @@ export function ProductFrame({
     <div
       role={children ? undefined : "img"}
       aria-label={children ? undefined : label}
-      data-tone={tone}
       className={cn("site-visual rounded-site-panel", className)}
       style={{ aspectRatio }}
     >
       {children ?? (
-        <div className="absolute inset-[7%] flex items-end rounded-site-card border border-dashed border-site-line-strong bg-site-surface/60 p-4">
-          <span className="rounded-site-inner bg-site-surface px-2 py-1 text-site-small text-site-muted">
+        <div className="absolute inset-[7%] flex items-end rounded-site-card border border-dashed border-site-line-strong p-4">
+          <span className="rounded-site-inner border border-site-line bg-site-surface px-2 py-1 font-site-mono text-site-label text-site-muted uppercase">
             {label}
           </span>
         </div>

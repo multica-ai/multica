@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, Menu, X } from "lucide-react";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Sheet, SheetContent, SheetTitle } from "@multica/ui/components/ui/sheet";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
@@ -11,6 +10,7 @@ import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl } from "../components/shared";
+import { BrandLogo } from "./brand-logo";
 import { ActionLink, SiteTextLink, focusRing } from "./primitives";
 import { TOP_LINKS, buildMenus, type SiteMenu, type SiteMenuId } from "./sitemap";
 
@@ -93,13 +93,10 @@ export function SiteHeader() {
             <Link
               href="/"
               aria-label="Multica home"
-              className={cn("flex shrink-0 items-center gap-2.5 rounded-sm text-site-ink", focusRing)}
+              className={cn("flex shrink-0 items-center rounded-sm", focusRing)}
               onClick={() => close()}
             >
-              <MulticaIcon className="size-[18px]" noSpin />
-              <span className="text-site-logo font-medium lowercase">
-                multica
-              </span>
+              <BrandLogo />
             </Link>
 
             <nav aria-label="Primary" className="hidden items-center gap-0.5 lg:flex">
@@ -268,11 +265,8 @@ function MobileMenu({
       >
         <SheetTitle className="sr-only">Menu</SheetTitle>
         <div className="flex h-site-header shrink-0 items-center justify-between px-site-gutter">
-          <Link href="/" onClick={close} className={cn("flex items-center gap-2.5 rounded-sm", focusRing)}>
-            <MulticaIcon className="size-[18px]" noSpin />
-            <span className="text-site-logo font-medium lowercase">
-              multica
-            </span>
+          <Link href="/" aria-label="Multica home" onClick={close} className={cn("flex items-center rounded-sm", focusRing)}>
+              <BrandLogo />
           </Link>
           <button type="button" aria-label="Close menu" onClick={close} className={cn(navItemClassName, "px-2")}>
             <X className="size-5" aria-hidden />

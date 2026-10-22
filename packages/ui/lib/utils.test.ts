@@ -5,6 +5,7 @@ describe("cn", () => {
   it.each([
     ["text-muted-foreground text-body", "text-muted-foreground text-body"],
     ["text-site-inverse-ink text-site-small", "text-site-inverse-ink text-site-small"],
+    ["text-site-label text-site-muted", "text-site-label text-site-muted"],
   ])("keeps a colour and a role-named size together: %s", (input, expected) => {
     expect(cn(input)).toBe(expected);
   });

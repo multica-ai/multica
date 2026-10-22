@@ -150,7 +150,7 @@ export function PlaceholderPage({ eyebrow, page }: { eyebrow: string; page: Site
           <div className="mt-site-block grid gap-site-grid-col md:grid-cols-3">
             {OUTLINE.map((item, index) => (
               <div key={item.title} className="rounded-site-card border border-site-line bg-site-surface p-6">
-                <p className="text-site-small text-site-muted tabular-nums">
+                <p className="font-site-mono text-site-label text-site-muted tabular-nums">
                   {String(index + 1).padStart(2, "0")}
                 </p>
                 <h3 className="mt-6 text-site-card text-site-ink">{item.title}</h3>

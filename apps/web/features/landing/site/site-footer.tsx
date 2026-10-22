@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { docsHrefForLocale, localeLabels, locales, useLocale } from "../i18n";
 import {
@@ -13,6 +12,7 @@ import {
   githubUrl,
   twitterUrl,
 } from "../components/shared";
+import { BrandLogo } from "./brand-logo";
 import { Container, SiteTextLink, focusRing } from "./primitives";
 import { buildFooterGroups } from "./sitemap";
 
@@ -30,9 +30,8 @@ export function SiteFooter() {
     <footer className="border-t border-site-line bg-site-canvas text-site-ink">
       <Container className="grid gap-site-block py-site-section lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:gap-16">
         <div>
-          <Link href="/" aria-label="Multica home" className={cn("inline-flex items-center gap-2.5 rounded-sm", focusRing)}>
-            <MulticaIcon className="size-[18px]" noSpin />
-            <span className="text-site-logo font-medium lowercase">multica</span>
+          <Link href="/" aria-label="Multica home" className={cn("inline-flex items-center rounded-sm", focusRing)}>
+              <BrandLogo />
           </Link>
           <p className="mt-4 max-w-[18rem] text-site-small text-site-muted">
             The workspace for human and agent teams.

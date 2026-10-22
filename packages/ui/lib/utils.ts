@@ -37,7 +37,7 @@ const twMerge = extendTailwindMerge({
             "site-card",
             "site-body",
             "site-small",
-            "site-logo",
+            "site-label",
           ],
         },
       ],

@@ -11,10 +11,13 @@
  * `site-*` spacing roles cover the structural rhythm that must match across
  * pages (gutters, section padding, header height, heading-to-content gaps).
  *
+ * Colour follows the brand: ink and paper carry the page, neutrals the rest.
  * Text hierarchy is expressed by the four solid ink roles. Do not dim text with
  * opacity — `site-muted` is the floor for readable copy on `site-canvas` and
  * `site-surface`; `site-faint` is for decoration (dividers in text, disabled
- * glyphs) only.
+ * glyphs) only. Colour paints graphics, never text: `site-accent` is for focus
+ * rings and link graphics, and `site-agent` (amber) belongs to agents alone —
+ * the logo's centre dot and live agent signals, never buttons or decoration.
  * ============================================================================= */
 
 @theme inline {
@@ -29,6 +32,7 @@
     --color-site-line: var(--site-line);
     --color-site-line-strong: var(--site-line-strong);
     --color-site-accent: var(--site-accent);
+    --color-site-agent: var(--site-agent);
     --color-site-inverse: var(--site-inverse);
     --color-site-inverse-ink: var(--site-inverse-ink);
     --color-site-inverse-muted: var(--site-inverse-muted);
@@ -84,9 +88,10 @@
     --text-site-small: 0.875rem;
     --text-site-small--line-height: 1.4;
 
-    --text-site-logo: 1.3125rem;
-    --text-site-logo--line-height: 1;
-    --text-site-logo--letter-spacing: -0.02em;
+    /* Mono label: eyebrows, numbering, tags. Set uppercase in markup. */
+    --text-site-label: 0.75rem;
+    --text-site-label--line-height: 1rem;
+    --text-site-label--letter-spacing: 0.08em;
 }
 
 /* Typefaces. One sans family carries the whole site: Inter's optical-size axis
@@ -105,20 +110,21 @@
 }
 
 .landing-light {
-    --site-canvas: oklch(0.985 0.002 250);
+    --site-canvas: oklch(0.988 0 0);
     --site-surface: oklch(1 0 0);
-    --site-sunken: oklch(0.965 0.004 250);
-    --site-hover: oklch(0.945 0.005 250);
-    --site-ink: oklch(0.19 0.012 262);
-    --site-ink-secondary: oklch(0.36 0.012 262);
-    --site-muted: oklch(0.5 0.012 262);
-    --site-faint: oklch(0.7 0.008 262);
-    --site-line: oklch(0.915 0.005 250);
-    --site-line-strong: oklch(0.86 0.006 250);
-    --site-accent: oklch(0.55 0.16 255);
-    --site-inverse: oklch(0.19 0.012 262);
-    --site-inverse-ink: oklch(0.985 0.002 250);
-    --site-inverse-muted: oklch(0.74 0.01 262);
+    --site-sunken: oklch(0.964 0.0013 286.4);
+    --site-hover: oklch(0.945 0.003 286.3);
+    --site-ink: oklch(0.141 0.005 285.823);
+    --site-ink-secondary: oklch(0.37 0.013 285.805);
+    --site-muted: oklch(0.505 0.016 285.938);
+    --site-faint: oklch(0.606 0.016 285.938);
+    --site-line: oklch(0.925 0.004 286.32);
+    --site-line-strong: oklch(0.871 0.006 286.286);
+    --site-accent: oklch(0.59 0.18 250);
+    --site-agent: oklch(0.8 0.165 68);
+    --site-inverse: oklch(0.141 0.005 285.823);
+    --site-inverse-ink: oklch(0.985 0 0);
+    --site-inverse-muted: oklch(0.705 0.015 286.067);
 
     /* Controls are pills; containers step 6 → 12 → 16 with size. */
     --site-radius-control: 9999px;
@@ -152,53 +158,18 @@
     }
 }
 
-/* Placeholder visual: a soft tinted field with film grain. Stands in for
-   product shots and illustration until real art direction lands. */
+/* Placeholder visual: the brand's dot texture — a screen that is still off.
+   Stands in for product shots until real screenshots or token-built mockups
+   land. 16px pitch, 2.2px dots, ink at the logo's 8%. */
 .site-visual {
     position: relative;
-    isolation: isolate;
     overflow: hidden;
-    background-color: oklch(0.9 0.02 250);
-}
-.site-visual::before {
-    content: "";
-    position: absolute;
-    inset: -15%;
-    z-index: -1;
-    filter: blur(24px);
-    background:
-        radial-gradient(38% 32% at 22% 28%, oklch(0.99 0.005 250) 0%, transparent 70%),
-        radial-gradient(44% 40% at 78% 70%, var(--site-visual-deep) 0%, transparent 70%),
-        radial-gradient(32% 30% at 64% 22%, var(--site-visual-mid) 0%, transparent 70%),
-        radial-gradient(30% 32% at 14% 82%, var(--site-visual-mid) 0%, transparent 70%),
-        linear-gradient(160deg, var(--site-visual-light) 0%, var(--site-visual-mid) 55%, var(--site-visual-light) 100%);
-}
-.site-visual::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    opacity: 0.3;
-    mix-blend-mode: soft-light;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-}
-.site-visual[data-tone="sky"] {
-    --site-visual-light: oklch(0.93 0.025 245);
-    --site-visual-mid: oklch(0.84 0.05 250);
-    --site-visual-deep: oklch(0.7 0.08 258);
-}
-.site-visual[data-tone="dusk"] {
-    --site-visual-light: oklch(0.94 0.02 300);
-    --site-visual-mid: oklch(0.85 0.045 290);
-    --site-visual-deep: oklch(0.72 0.07 275);
-}
-.site-visual[data-tone="sage"] {
-    --site-visual-light: oklch(0.94 0.015 180);
-    --site-visual-mid: oklch(0.86 0.03 200);
-    --site-visual-deep: oklch(0.72 0.05 220);
-}
-.site-visual[data-tone="stone"] {
-    --site-visual-light: oklch(0.94 0.006 250);
-    --site-visual-mid: oklch(0.86 0.01 250);
-    --site-visual-deep: oklch(0.7 0.016 255);
+    background-color: var(--site-sunken);
+    background-image: radial-gradient(
+        circle at center,
+        color-mix(in oklab, var(--site-ink) 8%, transparent) 1.1px,
+        transparent 1.3px
+    );
+    background-size: 16px 16px;
+    background-position: 8px 8px;
 }

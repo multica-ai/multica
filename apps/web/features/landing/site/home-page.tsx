@@ -16,7 +16,6 @@ import {
   Section,
   SectionHeader,
   focusRing,
-  type VisualTone,
 } from "./primitives";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
@@ -113,12 +112,12 @@ function WorksWith() {
   );
 }
 
-const FEATURES: { title: string; body: string; href: string; tone: VisualTone }[] = [
-  { title: "Assign work to agents like teammates", body: "Placeholder: agents sit in the same assignee picker as your people.", href: productHref("agents"), tone: "sky" },
-  { title: "Bring any coding agent", body: "Placeholder: 27 coding tools register as runtimes on your machines.", href: productHref("runtimes"), tone: "stone" },
-  { title: "Squads split big work", body: "Placeholder: a leader agent routes each piece to the right teammate.", href: productHref("squads"), tone: "dusk" },
-  { title: "Agents join the thread", body: "Placeholder: mention an agent in Slack or Lark and it gets to work.", href: productHref("chat"), tone: "sage" },
-  { title: "Autopilots run on a schedule", body: "Placeholder: recurring reports, upgrades, and triage.", href: productHref("autopilots"), tone: "sky" },
+const FEATURES: { title: string; body: string; href: string }[] = [
+  { title: "Assign work to agents like teammates", body: "Placeholder: agents sit in the same assignee picker as your people.", href: productHref("agents") },
+  { title: "Bring any coding agent", body: "Placeholder: 27 coding tools register as runtimes on your machines.", href: productHref("runtimes") },
+  { title: "Squads split big work", body: "Placeholder: a leader agent routes each piece to the right teammate.", href: productHref("squads") },
+  { title: "Agents join the thread", body: "Placeholder: mention an agent in Slack or Lark and it gets to work.", href: productHref("chat") },
+  { title: "Autopilots run on a schedule", body: "Placeholder: recurring reports, upgrades, and triage.", href: productHref("autopilots") },
 ];
 
 function Features() {
@@ -145,22 +144,21 @@ function FeatureCard({
   title,
   body,
   href,
-  tone,
   aspectRatio,
 }: (typeof FEATURES)[number] & { aspectRatio: string }) {
   return (
     <Link href={href} className={cn("group block rounded-site-panel", focusRing)}>
-      <ProductFrame tone={tone} label={`${title} visual`} aspectRatio={aspectRatio} />
+      <ProductFrame label={`${title} visual`} aspectRatio={aspectRatio} />
       <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
       <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
     </Link>
   );
 }
 
-const STEPS: { title: string; body: string; tone: VisualTone }[] = [
-  { title: "Plan the work", body: "Placeholder: write issues, or let an agent break a spec into them.", tone: "stone" },
-  { title: "Assign it to an agent", body: "Placeholder: the agent claims the task, works in your repo, and reports progress.", tone: "sky" },
-  { title: "Review and ship", body: "Placeholder: review the PR, leave feedback, and merge.", tone: "dusk" },
+const STEPS: { title: string; body: string }[] = [
+  { title: "Plan the work", body: "Placeholder: write issues, or let an agent break a spec into them." },
+  { title: "Assign it to an agent", body: "Placeholder: the agent claims the task, works in your repo, and reports progress." },
+  { title: "Review and ship", body: "Placeholder: review the PR, leave feedback, and merge." },
 ];
 
 function HowItWorks() {
@@ -172,13 +170,13 @@ function HowItWorks() {
           {STEPS.map((step, index) => (
             <li key={step.title} className="grid items-center gap-8 md:grid-cols-2 md:gap-16">
               <div className={cn(index % 2 === 1 && "md:order-2")}>
-                <p className="font-site-display text-site-title text-site-muted tabular-nums">
+                <p className="font-site-mono text-site-label text-site-muted tabular-nums">
                   {String(index + 1).padStart(2, "0")}
                 </p>
-                <h3 className="mt-3 font-site-display text-site-title text-site-ink">{step.title}</h3>
+                <h3 className="mt-4 font-site-display text-site-title text-site-ink">{step.title}</h3>
                 <p className="mt-1 max-w-[28rem] text-site-body text-site-muted">{step.body}</p>
               </div>
-              <ProductFrame tone={step.tone} label={`Step ${index + 1} visual`} aspectRatio="4 / 3" />
+              <ProductFrame label={`Step ${index + 1} visual`} aspectRatio="4 / 3" />
             </li>
           ))}
         </ol>
