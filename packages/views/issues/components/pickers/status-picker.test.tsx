@@ -242,6 +242,7 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     name: "Default",
     description: "",
     is_default: true,
+    owner_id: null,
     steps: [
       { status_key: "todo", handler: { type: "none" }, instructions: "" },
       // A handoff on Default never fires outside a project, so it is not hinted.
