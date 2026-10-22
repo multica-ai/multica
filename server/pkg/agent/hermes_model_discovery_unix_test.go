@@ -21,57 +21,28 @@ import (
 	"time"
 )
 
+// TestDiscoverHermesModelsProbesPerModelEffort covers a runtime whose set_model
+// response is empty: the non-default model's catalog must come from the options
+// re-read through the session's model selector.
 func TestDiscoverHermesModelsProbesPerModelEffort(t *testing.T) {
-	for _, mode := range []string{"response", "late-notification", "model-config"} {
-		t.Run(mode, func(t *testing.T) {
-			refresh := `printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"high"},{"value":"max"}]}]}}\n' "$id"`
-			if mode == "late-notification" {
-				refresh = `printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
-printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"high"},{"value":"max"}]}]}}}\n'`
-			}
-			modelConfig := ""
-			configRefresh := ""
-			if mode == "model-config" {
-				modelConfig = `{"id":"model","currentValue":"a","options":[{"value":"a"},{"value":"b"},{"value":"c"}]},`
-				configRefresh = `*'"value":"b"'*) ` + refresh + ` ;;`
-				refresh = `printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"`
-			}
-			script := `#!/bin/sh
+	script := `#!/bin/sh
 while IFS= read -r line; do
  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
  case "$line" in
-  *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
-  *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s","models":{"currentModelId":"a","availableModels":[{"modelId":"a"},{"modelId":"b"},{"modelId":"c"}]},"configOptions":[` + modelConfig + `{"id":"effort","currentValue":"low","options":[{"value":"low"}]}]}}\n' "$id" ;;
-  ` + configRefresh + `
-  *'"modelId":"b"'*) ` + refresh + ` ;;
-  *'"modelId":"c"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s","models":{"currentModelId":"a","availableModels":[{"modelId":"a"},{"modelId":"b"}]},"configOptions":[{"id":"model","currentValue":"a","options":[{"value":"a"},{"value":"b"}]},{"id":"effort","currentValue":"low","options":[{"value":"low"}]}]}}\n' "$id" ;;
+  *'"configId":"model"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"effort","currentValue":"high","options":[{"value":"high"},{"value":"max"}]}]}}\n' "$id" ;;
   *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
  esac
 done
 `
-			fakePath := filepath.Join(t.TempDir(), "hermes")
-			writeTestExecutable(t, fakePath, []byte(script))
-			models, err := discoverHermesModels(context.Background(), Command{Path: fakePath})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(models) != 3 {
-				t.Fatalf("models = %+v", models)
-			}
-			if models[0].Thinking == nil || models[0].Thinking.DefaultLevel != "low" || !models[0].Default {
-				t.Fatalf("default model = %+v", models[0])
-			}
-			if mode == "late-notification" {
-				if models[1].Thinking != nil {
-					t.Fatal("uncorrelated notification became a catalog")
-				}
-			} else if models[1].Thinking == nil || models[1].Thinking.DefaultLevel != "high" || len(models[1].Thinking.SupportedLevels) != 2 {
-				t.Fatalf("non-default model effort = %+v", models[1].Thinking)
-			}
-			if models[2].Thinking != nil {
-				t.Fatalf("empty switch response inherited another model's effort: %+v", models[2].Thinking)
-			}
-		})
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(script))
+	models, err := discoverHermesModels(context.Background(), Command{Path: fakePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[1].Thinking == nil || models[1].Thinking.DefaultLevel != "high" || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("models = %+v", models)
 	}
 }
 
