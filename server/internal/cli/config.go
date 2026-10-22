@@ -173,6 +173,28 @@ type CLIConfig struct {
 // load/save round-trip (see TestCLIConfig_UnknownFieldsArePreserved).
 type BackendOverrides struct {
 	OpenClaw *OpenClawOverride `json:"openclaw,omitempty"`
+	Codex    *CodexOverride    `json:"codex,omitempty"`
+}
+
+const CodexAuthModeChatGPTPlan = "chatgpt-plan"
+
+// CodexOverride selects a local ChatGPT registration for Codex app-server.
+// Only the mode and account reference live here; OAuth credentials stay in
+// a separate protected file. Empty AuthMode preserves Codex's own login.
+// Logout retains the selection so a stopped session cannot change billing.
+type CodexOverride struct {
+	AuthMode        string `json:"auth_mode,omitempty"`
+	ChatGPTClientID string `json:"chatgpt_client_id,omitempty"`
+}
+
+// ChatGPTStorePathForProfile returns the local credential path without
+// creating files or reading the user's Codex authentication state.
+func ChatGPTStorePathForProfile(profile string) (string, error) {
+	dir, err := ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "chatgpt", "accounts.json"), nil
 }
 
 // OpenClawOverride configures the OpenClaw backend. All fields are optional;
