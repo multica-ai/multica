@@ -3,15 +3,41 @@
     Full-bleed source for the generated home-screen icons (apple-touch-icon.png,
     icon-maskable-512.png). Full-bleed because both surfaces mask the artwork
     themselves: iOS rounds the corners, Android crops to the launcher shape.
-    The mark is /favicon.svg's polygon, inverted to the dark app-icon treatment
-    the desktop and mobile builds already ship, and held at 52% of the canvas so
-    it stays inside the maskable safe zone (the centre circle of 80% diameter).
-    See app/manifest.ts for the regeneration commands.
+    The mark is held at 50% of the canvas so it stays inside the maskable safe
+    zone (the centre circle of 80% diameter).
   -->
-  <rect width="512" height="512" fill="#111827"/>
-  <polygon
-    fill="#ffffff"
-    transform="translate(122.88 122.88) scale(2.6624)"
-    points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
-  />
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#25252a"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#ground)"/>
+  <g transform="translate(128 128) scale(5.12)">
+    <circle cx="5" cy="5" r="4.5" fill="#fafafa"/>
+    <circle cx="15" cy="5" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="25" cy="5" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="35" cy="5" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="45" cy="5" r="4.5" fill="#fafafa"/>
+    <circle cx="5" cy="15" r="4.5" fill="#fafafa"/>
+    <circle cx="15" cy="15" r="4.5" fill="#fafafa"/>
+    <circle cx="25" cy="15" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="35" cy="15" r="4.5" fill="#fafafa"/>
+    <circle cx="45" cy="15" r="4.5" fill="#fafafa"/>
+    <circle cx="5" cy="25" r="4.5" fill="#fafafa"/>
+    <circle cx="15" cy="25" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="25" cy="25" r="4.5" fill="#ffa629"/>
+    <circle cx="35" cy="25" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="45" cy="25" r="4.5" fill="#fafafa"/>
+    <circle cx="5" cy="35" r="4.5" fill="#fafafa"/>
+    <circle cx="15" cy="35" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="25" cy="35" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="35" cy="35" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="45" cy="35" r="4.5" fill="#fafafa"/>
+    <circle cx="5" cy="45" r="4.5" fill="#fafafa"/>
+    <circle cx="15" cy="45" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="25" cy="45" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="35" cy="45" r="4.5" fill="#fafafa" fill-opacity="0.1"/>
+    <circle cx="45" cy="45" r="4.5" fill="#fafafa"/>
+  </g>
 </svg>
