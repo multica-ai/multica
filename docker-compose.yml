@@ -1,4 +1,4 @@
-name: multica
+name: ${COMPOSE_PROJECT_NAME:-multica}
 
 services:
   postgres:
