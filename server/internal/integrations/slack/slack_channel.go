@@ -1,11 +1,13 @@
 package slack
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"time"
 
@@ -31,13 +33,14 @@ import (
 // EventChatDone subscriber (NewOutbound); Send satisfies the Channel contract
 // and posts with this installation's bot token.
 type slackChannel struct {
-	appID     string
-	botUserID string
-	appToken  string        // decrypted xapp- — authorizes the Socket Mode connection
-	botAPI    *slack.Client // bot-token client for outbound Send
-	handler   channel.InboundHandler
-	slash     *SlashCommandProcessor // nil disables /issue and /new slash-command handling
-	logger    *slog.Logger
+	appID       string
+	botUserID   string
+	appToken    string        // decrypted xapp- — authorizes the Socket Mode connection
+	botAPI      *slack.Client // bot-token client for outbound Send
+	handler     channel.InboundHandler
+	slash       *SlashCommandProcessor // nil disables /issue and /new slash-command handling
+	interactURL string                 // nil/empty disables block_actions forwarding
+	logger      *slog.Logger
 }
 
 // slashCommandTimeout bounds detached `/issue`, `/new`, and `/clear` processing
@@ -45,6 +48,18 @@ type slackChannel struct {
 // off the socket receive loop on its own context, so a slow DB or Slack HTTP
 // call cannot wedge event delivery.
 const slashCommandTimeout = 10 * time.Second
+
+// interactionTimeout bounds detached `block_actions` forwarding (the webhook
+// POST to interactURL). Mirrors slashCommandTimeout: it runs off the socket
+// receive loop on its own context, so a slow or unreachable sink cannot wedge
+// event delivery.
+const interactionTimeout = 10 * time.Second
+
+// interactionHTTPClient is shared across every slackChannel's forwarded
+// block_actions POSTs. Plain client with no client-level timeout — each
+// request's context (interactionTimeout, via dispatchInteraction) already
+// bounds it, the same division of responsibility as the rest of this package.
+var interactionHTTPClient = &http.Client{}
 
 func (c *slackChannel) Type() channel.Type { return TypeSlack }
 
@@ -162,6 +177,21 @@ func (c *slackChannel) handleSocketEvent(ctx context.Context, sm *socketmode.Cli
 			c.dispatchSlashCommand(cmd, envelopeID)
 		}
 		return nil
+	case socketmode.EventTypeInteractive:
+		// ACK first: like Events API and slash-command envelopes, Slack expires
+		// an un-ACKed interactive envelope (button/select click) in ~3s. The
+		// reply, if any, goes out-of-band via the callback's response_url, so an
+		// empty ACK is correct here too.
+		if evt.Request != nil {
+			if err := sm.Ack(*evt.Request); err != nil {
+				c.logger.WarnContext(ctx, "slack: ack interactive failed", "error", err)
+			}
+		}
+		cb, ok := evt.Data.(slack.InteractionCallback)
+		if ok {
+			c.dispatchInteraction(cb)
+		}
+		return nil
 	case socketmode.EventTypeConnecting, socketmode.EventTypeConnected, socketmode.EventTypeHello:
 		c.logger.DebugContext(ctx, "slack: socket mode", "event", evt.Type, "app_id", c.appID)
 	case socketmode.EventTypeIncomingError, socketmode.EventTypeErrorBadMessage:
@@ -214,6 +244,76 @@ func (c *slackChannel) dispatchSlashCommand(cmd slack.SlashCommand, envelopeID s
 	}()
 }
 
+// interactionForward is the subset of a `block_actions` InteractionCallback
+// forwarded to interactURL. Field names/shape are this channel's own
+// contract (not a Slack API shape) — kept deliberately small, just what a
+// downstream handler needs to act on the click and reply via response_url.
+type interactionForward struct {
+	ResponseURL string `json:"response_url"`
+	ActionID    string `json:"action_id"`
+	Value       string `json:"value"`
+	UserID      string `json:"user_id"`
+	ChannelID   string `json:"channel_id"`
+	MessageTs   string `json:"message_ts"`
+}
+
+// dispatchInteraction forwards an already-ACKed `block_actions` callback to
+// interactURL on a detached goroutine with its own bounded context, mirroring
+// dispatchSlashCommand: the webhook POST must never block the socket receive
+// loop. Interactive buttons are additive — an unconfigured interactURL, a
+// non-block_actions callback (view_submission and friends are out of scope
+// for now), or a click with no block action are all silently dropped, never
+// affecting the mention/DM/slash-command paths this shares a connection with.
+// Only the first block action is forwarded: Slack sends exactly one per
+// click in every case this package handles.
+func (c *slackChannel) dispatchInteraction(cb slack.InteractionCallback) {
+	if c.interactURL == "" {
+		return
+	}
+	if cb.Type != slack.InteractionTypeBlockActions || len(cb.ActionCallback.BlockActions) == 0 {
+		return
+	}
+	action := cb.ActionCallback.BlockActions[0]
+	payload := interactionForward{
+		ResponseURL: cb.ResponseURL,
+		ActionID:    action.ActionID,
+		Value:       action.Value,
+		UserID:      cb.User.ID,
+		ChannelID:   cb.Channel.ID,
+		MessageTs:   cb.Container.MessageTs,
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), interactionTimeout)
+		defer cancel()
+		if err := c.postInteraction(ctx, payload); err != nil {
+			c.logger.WarnContext(ctx, "slack: interaction forward failed",
+				"app_id", c.appID, "action_id", payload.ActionID, "error", err)
+		}
+	}()
+}
+
+// postInteraction POSTs one interactionForward to interactURL as JSON.
+func (c *slackChannel) postInteraction(ctx context.Context, payload interactionForward) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode interaction payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.interactURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := interactionHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("http do: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // ChannelDeps are the shared dependencies the Slack Factory closes over. The
 // engine inbound handler is supplied per-build via channel.Config.Handler; the
 // Decrypter turns the installation's stored ciphertext tokens into plaintext.
@@ -224,6 +324,11 @@ type ChannelDeps struct {
 	// leaves slash-command handling off (the connection still serves messages
 	// and @-mentions); tests that only exercise inbound messages pass nil.
 	Slash *SlashCommandProcessor
+	// InteractionWebhookURL receives one JSON POST (interactionForward) per
+	// `block_actions` click (button/select) delivered over Socket Mode. Empty
+	// leaves interactive-component handling off — the connection still serves
+	// messages, @-mentions, and slash commands.
+	InteractionWebhookURL string
 }
 
 // RegisterSlack registers the per-installation Slack Factory so the
@@ -256,13 +361,14 @@ func newSlackFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("slack: decrypt bot token: %w", err)
 		}
 		return &slackChannel{
-			appID:     ic.AppID,
-			botUserID: ic.BotUserID,
-			appToken:  appToken,
-			botAPI:    slack.New(botToken),
-			handler:   cfg.Handler,
-			slash:     deps.Slash,
-			logger:    logger,
+			appID:       ic.AppID,
+			botUserID:   ic.BotUserID,
+			appToken:    appToken,
+			botAPI:      slack.New(botToken),
+			handler:     cfg.Handler,
+			slash:       deps.Slash,
+			interactURL: deps.InteractionWebhookURL,
+			logger:      logger,
 		}, nil
 	}
 }
