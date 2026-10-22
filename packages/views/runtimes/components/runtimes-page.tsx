@@ -311,7 +311,6 @@ export function RuntimesPage({
         icon={Server}
         title={t(($) => $.page.title)}
         count={totalCount}
-        description={t(($) => $.page.tagline)}
         learnMore={{
           href: daemonRuntimesDocsHref(i18n.language),
           label: t(($) => $.page.learn_more),

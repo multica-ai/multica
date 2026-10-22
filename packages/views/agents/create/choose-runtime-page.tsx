@@ -280,9 +280,7 @@ export function ChooseRuntimePage({
               {t(($) => $.creation_studio.runtime_step.footer_selected)}{" "}
               <span className="font-medium text-foreground">{summary}</span>
             </>
-          ) : (
-            t(($) => $.creation_studio.runtime_step.footer_hint)
-          )}
+          ) : null}
         </p>
         <Button variant="ghost" onClick={() => backOrReplace(paths.agents())}>
           {t(($) => $.creation_studio.runtime_step.cancel)}

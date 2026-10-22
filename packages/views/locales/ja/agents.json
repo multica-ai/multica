@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "エージェント",
-    "tagline": "タスクを引き受け、コメントし、ステータスを更新する AI チームメイトです。",
     "learn_more": "詳細はこちら →",
     "new_agent": "新規エージェント",
     "search_placeholder": "エージェントを検索...",
@@ -972,7 +971,6 @@
       "aria": "エージェント作成の手順"
     },
     "configure_title": "エージェントを設定",
-    "configure_description": "名前と指示を入力します。あとからいつでも変更できます。",
     "ask_ai": "AI に書いてもらう",
     "change_runtime": "変更",
     "runtime_label": "ランタイム",
@@ -986,13 +984,9 @@
       "joined_squad": "スクワッド {{squad}} に追加しました",
       "next": "次にすること",
       "assign_title": "最初のタスクを割り当てる",
-      "assign_description": "このエージェントを担当者にしてイシューを作成します。",
       "mention_title": "イシューでメンションする",
-      "mention_description": "イシューのコメントで @{{name}} とメンションすると、作業を引き受けます。",
       "squad_title": "スクワッドに追加",
-      "squad_description": "スクワッドリーダーの割り振りで、他のエージェントと一緒に働きます。",
       "open_squad_title": "{{squad}} を開く",
-      "open_squad_description": "このエージェントが加わったスクワッドを表示します。",
       "open_agent": "エージェントを開く",
       "back_to_list": "エージェント一覧に戻る"
     },
@@ -1031,7 +1025,6 @@
       "member_connect": "管理者に接続を依頼してください",
       "member_fix": "管理者に対応を依頼してください",
       "footer_selected": "選択中：",
-      "footer_hint": "続行するにはランタイムを選択してください",
       "cancel": "キャンセル",
       "next": "次へ"
     }

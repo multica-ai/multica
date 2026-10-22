@@ -378,7 +378,6 @@ export function RepositoriesSection() {
   return (
     <SettingsSection
       title={t(($) => $.repositories.section_title)}
-      description={t(($) => $.repositories.description)}
       anchor="repositories"
       action={
         canManageWorkspace ? (

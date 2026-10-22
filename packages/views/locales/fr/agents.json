@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Agents",
-    "tagline": "Des coéquipiers IA qui prennent des tâches, commentent et mettent à jour les statuts.",
     "learn_more": "En savoir plus →",
     "new_agent": "Nouvel agent",
     "search_placeholder": "Rechercher des agents…",
@@ -377,7 +376,6 @@
       "aria": "Étapes de création de l'agent"
     },
     "configure_title": "Configurer l'agent",
-    "configure_description": "Donnez-lui un nom et des instructions. Tout reste modifiable ensuite.",
     "ask_ai": "Laisser l'IA rédiger",
     "change_runtime": "Changer",
     "runtime_label": "Runtime",
@@ -391,13 +389,9 @@
       "joined_squad": "Ajouté à l'escouade {{squad}}",
       "next": "Et ensuite",
       "assign_title": "Lui confier une première tâche",
-      "assign_description": "Créez un ticket assigné à cet agent.",
       "mention_title": "Le mentionner dans un ticket",
-      "mention_description": "Mentionnez @{{name}} dans un commentaire de ticket et il prend le travail en charge.",
       "squad_title": "L'ajouter à une escouade",
-      "squad_description": "Travailler avec d'autres agents, sous la répartition du chef d'escouade.",
       "open_squad_title": "Ouvrir {{squad}}",
-      "open_squad_description": "Voir l'escouade que cet agent vient de rejoindre.",
       "open_agent": "Ouvrir l'agent",
       "back_to_list": "Retour aux agents"
     },
@@ -439,7 +433,6 @@
       "member_connect": "Demandez à un admin de le connecter",
       "member_fix": "Demandez à un admin de corriger",
       "footer_selected": "Sélection :",
-      "footer_hint": "Choisissez un runtime pour continuer",
       "cancel": "Annuler",
       "next": "Suivant"
     }

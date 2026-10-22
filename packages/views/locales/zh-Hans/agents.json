@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "智能体",
-    "tagline": "能领取任务、留下评论、推进状态的 AI 队友。",
     "learn_more": "了解更多 →",
     "new_agent": "新建智能体",
     "search_placeholder": "搜索智能体...",
@@ -367,7 +366,6 @@
       "aria": "创建智能体步骤"
     },
     "configure_title": "配置智能体",
-    "configure_description": "给它起个名字，写下指令。之后都可以再改。",
     "ask_ai": "让 AI 帮我写",
     "change_runtime": "更换",
     "runtime_label": "运行时",
@@ -381,13 +379,9 @@
       "joined_squad": "已加入小队：{{squad}}",
       "next": "接下来",
       "assign_title": "指派第一个任务",
-      "assign_description": "新建一个任务，负责人设为这个智能体。",
       "mention_title": "在任务里 @ 它",
-      "mention_description": "在任何任务的评论里 @{{name}}，它会接手处理。",
       "squad_title": "加入小队",
-      "squad_description": "和其他智能体一起，由小队负责人分派。",
       "open_squad_title": "打开 {{squad}}",
-      "open_squad_description": "查看它刚加入的小队。",
       "open_agent": "打开智能体",
       "back_to_list": "返回智能体列表"
     },
@@ -426,7 +420,6 @@
       "member_connect": "需要管理员连接",
       "member_fix": "需要管理员处理",
       "footer_selected": "已选：",
-      "footer_hint": "选择一个运行时以继续",
       "cancel": "取消",
       "next": "下一步"
     }

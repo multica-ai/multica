@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Agents",
-    "tagline": "AI teammates that pick up issues, comment, and update status.",
     "learn_more": "Learn more →",
     "new_agent": "New agent",
     "search_placeholder": "Search agents…",
@@ -377,7 +376,6 @@
       "aria": "Agent creation steps"
     },
     "configure_title": "Configure the agent",
-    "configure_description": "Give it a name and instructions. Everything can be changed later.",
     "ask_ai": "Let AI write it",
     "change_runtime": "Change",
     "runtime_label": "Runtime",
@@ -391,13 +389,9 @@
       "joined_squad": "Added to squad {{squad}}",
       "next": "What next",
       "assign_title": "Assign its first task",
-      "assign_description": "Create an issue with this agent as the assignee.",
       "mention_title": "Mention it in an issue",
-      "mention_description": "@{{name}} in any issue comment and it picks the work up.",
       "squad_title": "Add it to a squad",
-      "squad_description": "Work alongside other agents, dispatched by the squad leader.",
       "open_squad_title": "Open {{squad}}",
-      "open_squad_description": "See the squad this agent just joined.",
       "open_agent": "Open agent",
       "back_to_list": "Back to agents"
     },
@@ -439,7 +433,6 @@
       "member_connect": "Ask an admin to connect",
       "member_fix": "Ask an admin to fix it",
       "footer_selected": "Selected:",
-      "footer_hint": "Pick a runtime to continue",
       "cancel": "Cancel",
       "next": "Next"
     }

@@ -1578,7 +1578,7 @@
       "target_squad": "Squad · le leader répartit",
       "target_member": "Membre",
       "instructions_hint": "Envoyées au responsable avec cette exécution, avec la description et les commentaires de la tâche.",
-      "next_hint": "Les deux choix sont inscrits dans les consignes du responsable. C’est lui qui déplace le ticket : vers le premier quand son étape est terminée, vers le second quand le travail reçu doit être repris (pas pour un blocage). Le système ne change jamais l’état à la fin d’une exécution.",
+      "next_hint": "C’est le responsable qui déplace le ticket, et il ne le renvoie que pour une reprise, pas pour un blocage. La fin d’une exécution ne change jamais l’état.",
       "preview_brief": "Aperçu des consignes de l’agent",
       "preview_title": "Consignes de l’étape « {{status}} »",
       "preview_description": "Ce que reçoit l’exécution du responsable quand une tâche entre dans cette étape. Pas besoin d’enregistrer pour prévisualiser.",
@@ -1678,8 +1678,7 @@
     },
     "detail": {
       "follows_project": "(selon le projet)",
-      "card_title": "{{workflow}} · selon {{project}}",
-      "card_hint": "Le workflow du projet décide de ces colonnes et transferts."
+      "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",
     "handoff": {

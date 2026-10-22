@@ -1578,7 +1578,7 @@
       "target_squad": "Squad · leader dispatches",
       "target_member": "Member",
       "instructions_hint": "Sent to the handler with this run, alongside the issue description and comments.",
-      "next_hint": "Both choices are written into the handler’s brief. The handler moves the issue: to the first when its step is done, to the second when the work it received needs rework (not for blockers). The system never moves the status when a run ends.",
+      "next_hint": "The handler moves the issue itself and sends it back only for rework, not blockers. A run ending never changes the status.",
       "preview_brief": "Preview the agent’s brief",
       "preview_title": "Brief for the “{{status}}” step",
       "preview_description": "What the handler’s run receives when an issue enters this step. Saved changes are not required to preview.",
@@ -1678,8 +1678,7 @@
     },
     "detail": {
       "follows_project": "(from project)",
-      "card_title": "{{workflow}} · from {{project}}",
-      "card_hint": "The project’s workflow decides these columns and handoffs."
+      "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
     "handoff": {

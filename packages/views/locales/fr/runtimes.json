@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Runtimes",
-    "tagline": "Les machines et services cloud sur lesquels vos agents exécutent leurs tâches.",
     "learn_more": "En savoir plus →",
     "connect_remote": "Ajouter une machine",
     "search_placeholder": "Rechercher…",
@@ -540,7 +539,7 @@
     "region_hint": "Choisissez le site où vous avez créé le PAT ; un PAT ne fonctionne que dans sa région.",
     "keep_secret": "Laissez vide pour conserver le jeton enregistré",
     "repositories": "Autorisation GitHub",
-    "repositories_hint": "Associez un jeton à chaque dépôt. Choisissez le dépôt et la branche de départ dans votre projet. Le serveur ne renvoie jamais les jetons.",
+    "repositories_hint": "Associez un jeton à chaque dépôt. Choisissez le dépôt et la branche de départ dans votre projet.",
     "remove": "Supprimer",
     "add_repository": "Ajouter un dépôt",
     "saved": "Enregistré. Le serveur démarrera automatiquement l’environnement d’exécution.",
@@ -614,14 +613,13 @@
       "description_agents_other": "Ces {{count}} agents gardent leurs instructions et leur historique, mais ne peuvent plus prendre de tâches tant que Qoder n'est pas relancé ou qu'ils ne sont pas déplacés vers un autre environnement."
     },
     "connect_title": "Connecter Qoder Cloud Agents",
-    "connect_description": "Connectez-vous une fois avec un PAT Qoder. Multica exécute les tâches dans les sandboxes Qoder et chiffre les identifiants.",
+    "connect_description": "Multica exécute les tâches dans les sandboxes Qoder.",
     "page": {
       "configuration": "Configuration",
       "agents_title": "Agents",
       "pause_title": "Mettre Qoder en pause",
       "pause_hint": "Plus aucune nouvelle tâche n'est envoyée à Qoder. Les identifiants et les agents sont conservés, et vous pouvez relancer à tout moment.",
       "resume_title": "Relancer Qoder",
-      "resume_hint": "Reprendre les tâches avec la configuration enregistrée.",
       "resume": "Relancer",
       "resumed": "Qoder démarre.",
       "disconnect_title": "Déconnecter Qoder",

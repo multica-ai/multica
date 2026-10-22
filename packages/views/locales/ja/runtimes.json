@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "ランタイム",
-    "tagline": "エージェントがタスクを実行するマシンとクラウドサービス。",
     "learn_more": "詳しく見る →",
     "connect_remote": "マシンを追加",
     "search_placeholder": "検索…",
@@ -524,7 +523,7 @@
     "region_hint": "PAT を作成したサイトを選択してください。PAT はそのリージョンでのみ使用できます。",
     "keep_secret": "Leave blank to keep the saved token",
     "repositories": "GitHub authorization",
-    "repositories_hint": "Bind a token to each repository. Select the repository and starting branch in your project. Tokens are never returned by the server.",
+    "repositories_hint": "リポジトリごとにトークンを紐付けます。リポジトリと開始ブランチはプロジェクトで選択します。",
     "remove": "Remove",
     "add_repository": "Add repository",
     "saved": "Saved. The server will start the runtime automatically.",
@@ -595,14 +594,13 @@
       "description_agents_other": "次の {{count}} 件のエージェントは指示と履歴を保持しますが、Qoder を再開するか別のランタイムに移すまで新しいタスクを受けられません。"
     },
     "connect_title": "Qoder Cloud Agents を接続",
-    "connect_description": "Qoder の PAT で一度接続します。Multica は Qoder のサンドボックスでタスクを実行し、認証情報は暗号化して保存します。",
+    "connect_description": "Multica は Qoder のサンドボックスでタスクを実行します。",
     "page": {
       "configuration": "設定",
       "agents_title": "エージェント",
       "pause_title": "Qoder を一時停止",
       "pause_hint": "Qoder への新しいタスクの送信を止めます。認証情報とエージェントは残り、いつでも再開できます。",
       "resume_title": "Qoder を再開",
-      "resume_hint": "保存済みの設定でタスクの受け付けを再開します。",
       "resume": "再開",
       "resumed": "Qoder を起動しています。",
       "disconnect_title": "Qoder の接続を解除",
