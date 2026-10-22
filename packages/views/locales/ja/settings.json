@@ -677,8 +677,7 @@
     },
     "system": {
       "title": "システム通知",
-      "description": "Multica がバックグラウンドにあるときにシステム通知を表示します。",
-      "label": "システム通知を表示"
+      "label": "Multica がバックグラウンドにあるときにシステム通知を表示"
     },
     "browser": {
       "label": "ブラウザ通知",
