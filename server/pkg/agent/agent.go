@@ -133,6 +133,8 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// ClaudePluginDirs holds daemon-owned, filtered plugin copies for this run.
+	ClaudePluginDirs []string
 	// CursorHookCommand is the argv of the multica hook relay (the daemon's own
 	// binary followed by CursorHookHelperArg). The cursor backend needs it, with
 	// EnableTaskSupplement, to accept additional messages; other providers
