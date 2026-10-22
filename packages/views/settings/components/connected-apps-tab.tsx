@@ -33,7 +33,6 @@ export function ConnectedAppsTab() {
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.apps)}
-      description={t(($) => $.composio.page_description)}
       scope="account"
     >
       <ComposioTab />

@@ -639,7 +639,6 @@ describe("SwimLaneView", () => {
         issues={mockIssues.filter((i) => i.status === "todo")}
         unfilteredIssues={mockIssues}
         visibleStatuses={["todo"]}
-        hiddenStatuses={["in_progress", "done"]}
         onMoveIssue={vi.fn()}
       />,
     );
@@ -693,7 +692,6 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={[parent]}
         visibleStatuses={["todo"]}
-        hiddenStatuses={["done"]}
         groupBranches={makeServerBranches(descriptors, [parent])}
         onMoveIssue={vi.fn()}
       />,
@@ -795,28 +793,6 @@ describe("SwimLaneView", () => {
     expect(links[0]).toHaveAttribute("href", expect.stringContaining("parent-1"));
   });
 
-  it("renders HiddenColumnsPanel only when hiddenStatuses is non-empty", () => {
-    const { unmount } = renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-    expect(screen.queryByText("Hidden columns")).not.toBeInTheDocument();
-    unmount();
-
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        visibleStatuses={["todo", "in_progress", "cancelled"]}
-        hiddenStatuses={["done"]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Hidden columns")).toBeInTheDocument();
-    expect(screen.getByText("Done")).toBeInTheDocument();
-  });
-
   it("calls onMoveIssue on drag-and-drop end", () => {
     const mockOnMoveIssue = vi.fn();
     renderWithI18n(
@@ -900,54 +876,6 @@ describe("SwimLaneView", () => {
     );
     // Moving lanes within Unstarted must preserve the concrete Backlog key.
     expect(mockOnMoveIssue.mock.calls[0]![1]).toHaveProperty("status", "todo");
-  });
-
-  it("renders count for hidden statuses from in-memory statusTotals", () => {
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        visibleStatuses={["in_progress", "done", "cancelled"]}
-        hiddenStatuses={["backlog"]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-
-    const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    expect(panel).toHaveTextContent("Backlog");
-    expect(panel).not.toHaveTextContent("In Progress");
-    // The parent represented by a lane header is not counted as a card.
-    expect(panel).toHaveTextContent("1");
-  });
-
-  it("hidden-column totals come from unfilteredIssues when provided", () => {
-    const unfiltered: Issue[] = [
-      ...mockIssues,
-      {
-        ...mockIssues[2]!,
-        id: "blocked-1",
-        identifier: "PROJ-99",
-        title: "Blocked Issue",
-        status: "blocked",
-        position: 500,
-      },
-    ];
-
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        unfilteredIssues={unfiltered}
-        visibleStatuses={["done", "cancelled"]}
-        hiddenStatuses={["backlog", "in_progress", "blocked"]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-
-    const panel = screen.getByText("Hidden columns").parentElement!.parentElement!;
-    expect(panel).toHaveTextContent("Backlog");
-    expect(panel).toHaveTextContent("In Progress");
-    const counts = [...panel.querySelectorAll("span")].map((el) => el.textContent);
-    expect(counts).toContain("1");
-    expect(counts.filter((count) => count === "1")).toHaveLength(3);
   });
 
   const multiParentIssues: Issue[] = [

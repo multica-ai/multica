@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "ランタイム",
-    "tagline": "エージェントがタスクを実行するマシンとクラウドサービス。",
     "learn_more": "詳しく見る →",
     "connect_remote": "マシンを追加",
     "search_placeholder": "検索…",
@@ -510,7 +509,7 @@
   },
   "qoder": {
     "title": "QCA runtime",
-    "description": "Connect Qoder Cloud Agent. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
+    "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
     "loading": "Loading…",
     "unavailable": "サーバーの設定が必要です：MULTICA_VCS_SECRET_KEY を設定してください。",
     "online": "Online",
@@ -524,7 +523,7 @@
     "region_hint": "PAT を作成したサイトを選択してください。PAT はそのリージョンでのみ使用できます。",
     "keep_secret": "Leave blank to keep the saved token",
     "repositories": "GitHub authorization",
-    "repositories_hint": "Bind a token to each repository. Select the repository and starting branch in your project. Tokens are never returned by the server.",
+    "repositories_hint": "リポジトリごとにトークンを紐付けます。リポジトリと開始ブランチはプロジェクトで選択します。",
     "remove": "Remove",
     "add_repository": "Add repository",
     "saved": "Saved. The server will start the runtime automatically.",
@@ -548,7 +547,7 @@
     "save_agent": "関連付けを保存",
     "agent_saved": "QCA エージェントの関連付けを保存しました",
     "agent_save_failed": "QCA エージェントの関連付けを保存できませんでした",
-    "cloud_title": "Qoder Cloud Agent",
+    "cloud_title": "Qoder Cloud Agents",
     "managed": "マネージドサービス",
     "cloud_description": "共有接続を使って Qoder クラウドでエージェントを実行します。ローカルホストの管理は不要です。",
     "configure_credentials": "認証情報を設定",
@@ -589,27 +588,26 @@
       "execution_summary": "同時に最大 {{concurrency}} 件 · タイムアウト {{timeout}} 分"
     },
     "stop_confirm": {
-      "title": "Qoder Cloud Agent を一時停止しますか？",
+      "title": "Qoder Cloud Agents を一時停止しますか？",
       "description": "再開するまで、新しいタスクは Qoder に送られません。",
       "cancel": "キャンセル",
       "description_agents_other": "次の {{count}} 件のエージェントは指示と履歴を保持しますが、Qoder を再開するか別のランタイムに移すまで新しいタスクを受けられません。"
     },
-    "connect_title": "Qoder Cloud Agent を接続",
-    "connect_description": "Qoder の PAT で一度接続します。Multica は Qoder のサンドボックスでタスクを実行し、認証情報は暗号化して保存します。",
+    "connect_title": "Qoder Cloud Agents を接続",
+    "connect_description": "Multica は Qoder のサンドボックスでタスクを実行します。",
     "page": {
       "configuration": "設定",
       "agents_title": "エージェント",
       "pause_title": "Qoder を一時停止",
       "pause_hint": "Qoder への新しいタスクの送信を止めます。認証情報とエージェントは残り、いつでも再開できます。",
       "resume_title": "Qoder を再開",
-      "resume_hint": "保存済みの設定でタスクの受け付けを再開します。",
       "resume": "再開",
       "resumed": "Qoder を起動しています。",
       "disconnect_title": "Qoder の接続を解除",
       "disconnect_hint": "保存済みの PAT とリポジトリトークンを削除し、このランタイムを取り除きます。使用中のエージェントは割り当てが解除され、履歴は残ります。",
       "disconnect": "接続を解除",
       "not_connected_title": "Qoder は未接続です",
-      "not_connected_hint": "ワークスペース管理者に Qoder Cloud Agent の接続を依頼してください。",
+      "not_connected_hint": "ワークスペース管理者に Qoder Cloud Agents の接続を依頼してください。",
       "workload_idle": "待機中",
       "connection_title": "接続",
       "edit": "編集",
@@ -632,7 +630,7 @@
       "minutes_other": "{{count}} 分"
     },
     "disconnect_confirm": {
-      "title": "Qoder Cloud Agent の接続を解除しますか？",
+      "title": "Qoder Cloud Agents の接続を解除しますか？",
       "description": "保存済みの PAT とリポジトリトークンは削除され、Qoder ランタイムは取り除かれます。再び使うには最初から接続し直す必要があります。",
       "description_agents_other": "次の {{count}} 件のエージェントの割り当てが解除されます。指示と履歴は残り、別のランタイムに移せます。",
       "plan_changed": "Qoder 上のエージェントが変わりました。最新の一覧を確認してから、もう一度実行してください。",

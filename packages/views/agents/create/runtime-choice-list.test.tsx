@@ -161,7 +161,7 @@ describe("RuntimeChoiceList", () => {
     const props = mount();
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(props.onConnectQoder).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: /Qoder Cloud Agent/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Qoder Cloud Agents/ })).toBeNull();
 
     cleanup();
     mount({ canManage: false });

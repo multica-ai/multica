@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Agents",
-    "tagline": "AI teammates that pick up issues, comment, and update status.",
     "learn_more": "Learn more →",
     "new_agent": "New agent",
     "search_placeholder": "Search agents…",
@@ -377,7 +376,6 @@
       "aria": "Agent creation steps"
     },
     "configure_title": "Configure the agent",
-    "configure_description": "Give it a name and instructions. Everything can be changed later.",
     "ask_ai": "Let AI write it",
     "change_runtime": "Change",
     "runtime_label": "Runtime",
@@ -391,13 +389,9 @@
       "joined_squad": "Added to squad {{squad}}",
       "next": "What next",
       "assign_title": "Assign its first task",
-      "assign_description": "Create an issue with this agent as the assignee.",
       "mention_title": "Mention it in an issue",
-      "mention_description": "@{{name}} in any issue comment and it picks the work up.",
       "squad_title": "Add it to a squad",
-      "squad_description": "Work alongside other agents, dispatched by the squad leader.",
       "open_squad_title": "Open {{squad}}",
-      "open_squad_description": "See the squad this agent just joined.",
       "open_agent": "Open agent",
       "back_to_list": "Back to agents"
     },
@@ -439,7 +433,6 @@
       "member_connect": "Ask an admin to connect",
       "member_fix": "Ask an admin to fix it",
       "footer_selected": "Selected:",
-      "footer_hint": "Pick a runtime to continue",
       "cancel": "Cancel",
       "next": "Next"
     }
@@ -511,7 +504,7 @@
   },
   "conversation_starters": {
     "label": "Conversation starters",
-    "hint": "Up to three. Selecting one fills the composer without sending.",
+    "hint": "Suggested in a new chat with this agent. Picking one fills the composer without sending.",
     "add": "Add suggestion",
     "item_label": "Suggestion {{number}} label",
     "prompt_label": "Suggestion {{number}} prompt",
@@ -519,14 +512,23 @@
     "prompt_placeholder": "Review the open pull request, summarize the risks, and recommend next steps.",
     "incomplete": "Complete or remove each suggestion before saving.",
     "remove": "Remove suggestion {{number}}",
-    "preview_label": "Preview of a new chat",
-    "preview_defaults": "These are the built-in defaults. Add a suggestion above to replace all three."
+    "preview_label": "New chat preview",
+    "preview_defaults": "These are the built-in suggestions. Add your own to replace all three.",
+    "create_hint": "Optional. Shown in a new chat with this agent.",
+    "edit": "Edit suggestion {{number}}",
+    "remove_short": "Remove",
+    "done": "Done",
+    "untitled": "Untitled suggestion",
+    "customize": "Customize",
+    "defaults_summary_one": "Using {{count}} built-in suggestion",
+    "defaults_summary_other": "Using {{count}} built-in suggestions"
   },
   "tab_body": {
     "common": {
       "save": "Save",
       "add": "Add",
-      "unsaved_changes": "Unsaved changes"
+      "unsaved_changes": "Unsaved changes",
+      "discard": "Discard"
     },
     "instructions": {
       "intro": "Set the system prompt used for every run. Markdown is supported.",
@@ -538,7 +540,13 @@
       "system_layer_hide": "Hide",
       "workspace_notes_label": "Workspace notes",
       "workspace_notes_intro": "Add your team's context and preferences below. They apply on top of the instructions Multica maintains for this agent. Markdown is supported.",
-      "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays."
+      "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays.",
+      "mode_aria": "Editor mode",
+      "mode_write": "Write",
+      "mode_preview": "Preview",
+      "preview_empty": "Nothing to preview yet.",
+      "char_count_one": "{{count}} character",
+      "char_count_other": "{{count}} characters"
     },
     "env": {
       "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",

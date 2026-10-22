@@ -33,7 +33,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
-const DEFAULT_NAME = "Qoder Cloud Agent";
+const DEFAULT_NAME = "Qoder Cloud Agents";
 
 export function regionOf(baseUrl: string): QoderRegion {
   return (

@@ -18,7 +18,7 @@ import (
 
 func claimWorkerReplyRun(t *testing.T, runtimeID string) *AgentTaskResponse {
 	t.Helper()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "worker-reply-handoff")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityCoalescedCommentsV1)
 	var response struct {
@@ -30,7 +30,7 @@ func claimWorkerReplyRun(t *testing.T, runtimeID string) *AgentTaskResponse {
 
 func completeWorkerReplyRun(t *testing.T, taskID string) {
 	t.Helper()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete", map[string]any{"output": "Processed the inputs delivered to this run"}, testWorkspaceID, "worker-reply-handoff")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete", map[string]any{"output": "Processed the inputs delivered to this run"})
 	req = withURLParam(req, "taskId", taskID)
 	testutil.Call(t, testHandler.CompleteTask, req).Want(http.StatusOK)
 }

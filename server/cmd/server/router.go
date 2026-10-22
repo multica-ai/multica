@@ -1706,7 +1706,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
-		r.Post("/api/cli-token", h.IssueCliToken)
+		// Credential minting is human-only (MUL-8154): an agent task token
+		// (mat_) or cloud-node PAT (mcn_) authenticates as its owner, so
+		// without this guard a prompt-injected agent could trade its scoped,
+		// short-lived credential for a 30-day session JWT.
+		r.With(handler.RequireHumanActor).Post("/api/cli-token", h.IssueCliToken)
 		// Sliding session renewal for clients that hold the session as a
 		// string (Desktop, mobile). Browsers get theirs re-issued inline by
 		// middleware.Auth and never call this (MUL-7436).
@@ -1979,7 +1983,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
 		r.Post("/api/share-links/join", h.JoinByShareLink)
 
+		// PAT management is human-only (MUL-8154): a machine credential must
+		// not mint a non-expiring PAT, enumerate the owner's PATs, or revoke
+		// them. /current/renew already accepts only mul_ PATs, which are human
+		// credentials, so the group-wide guard does not change its behavior.
 		r.Route("/api/tokens", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
 			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)

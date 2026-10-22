@@ -459,7 +459,14 @@ export function AgentOverviewPane({
             </aside>
 
             <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
+              {/* General is wider: its profile sits beside a preview of the
+                  new chat it produces. */}
+              <div
+                className={cn(
+                  "w-full p-4 sm:p-6 md:p-8",
+                  effectiveView === "general" ? "max-w-5xl" : "max-w-3xl",
+                )}
+              >
                 <header>
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
@@ -472,7 +479,6 @@ export function AgentOverviewPane({
                       agent={agent}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
-                      showConversationStarters={!qoderRuntime}
                     />
                   )}
                   {effectiveView === "skills" && (

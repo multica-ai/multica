@@ -122,6 +122,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { useStatusOptions } from "../utils/status-options";
+import { useColumnStatuses } from "../surface/column-statuses-context";
 import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
@@ -1923,8 +1924,19 @@ export function IssueDisplayControls({
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const hiddenStatuses = useViewStore((s) => s.hiddenStatuses);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
+  const columnStatuses = useColumnStatuses();
+  const statusOptions = useStatusOptions(headerWsId);
+  const columnOptions = useMemo(() => {
+    if (!columnStatuses) return [];
+    const optionByKey = new Map(statusOptions.map((option) => [option.key, option]));
+    return columnStatuses.flatMap((key) => optionByKey.get(key) ?? []);
+  }, [columnStatuses, statusOptions]);
+  const showColumnToggles =
+    columnOptions.length > 0 &&
+    (viewMode === "list" || viewMode === "swimlane" || (viewMode === "board" && grouping === "status"));
   // Active custom-property catalog: drives the filter sections, dynamic
   // sort/grouping options, and the card-property toggles below.
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
@@ -2252,6 +2264,45 @@ export function IssueDisplayControls({
                     </SelectGroup>
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+              {showColumnToggles && (
+                <div>
+                  <span className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.columns_section)}
+                  </span>
+                  {/* Same chip grammar as Card properties: pressed = column shown.
+                      A status filter picks the columns itself and overrides
+                      these, so the chips lock rather than flip to no effect. */}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {columnOptions.map((option) => (
+                      <Toggle
+                        key={option.key}
+                        size="sm"
+                        variant="outline"
+                        pressed={!hiddenStatuses.includes(option.key)}
+                        disabled={statusFilters.length > 0}
+                        onPressedChange={(pressed) =>
+                          pressed ? act.showStatus(option.key) : act.hideStatus(option.key)
+                        }
+                        className="h-6 max-w-40 gap-1.5 rounded-md px-2 text-caption text-muted-foreground hover:bg-muted/60 aria-pressed:border-transparent aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent/80"
+                      >
+                        <StatusIcon
+                          status={option.key}
+                          category={option.category}
+                          color={option.color}
+                          icon={option.icon}
+                          className="size-3 shrink-0"
+                        />
+                        <span className="truncate">{option.label}</span>
+                      </Toggle>
+                    ))}
+                  </div>
+                  {statusFilters.length > 0 && (
+                    <p className="mt-1.5 text-caption text-faint-foreground">
+                      {t(($) => $.display.columns_locked_by_filter)}
+                    </p>
+                  )}
                 </div>
               )}
               {viewMode === "table" && (

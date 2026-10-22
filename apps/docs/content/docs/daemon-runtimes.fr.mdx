@@ -7,32 +7,32 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica enregistre et coordonne le travail ; ce sont les ordinateurs connectés qui l'exécutent. Le **daemon** d'un ordinateur prend en charge les exécutions et invoque les outils de codage IA installés sur cette machine.
 
-## Runtime distant Qoder Cloud Agent
+## Runtime distant Qoder Cloud Agents
 
-Qoder Cloud Agent exécute les tickets assignés dans des sessions QCA distantes. Le serveur Multica supervise un pont qui utilise le protocole de tâches existant du daemon ; aucun daemon local n'est nécessaire pour ce runtime.
+Qoder Cloud Agents exécute les tickets assignés dans des sessions QCA distantes. Le serveur Multica supervise un pont qui utilise le protocole de tâches existant du daemon ; aucun daemon local n'est nécessaire pour ce runtime.
 
 ### Avant de commencer
 
 - Vous devez être administrateur de l'espace de travail. Chaque espace de travail a une seule connexion Qoder.
 - Dans Qoder, créez un jeton d'accès personnel (PAT), au moins un environnement et les agents QCA à utiliser. Les modèles, outils et skills se configurent sur l'agent QCA dans Qoder, pas dans Multica.
-- Les installations auto-hébergées doivent définir `MULTICA_VCS_SECRET_KEY` sur le serveur : une clé de 32 octets encodée en base64, identique d'un redémarrage à l'autre. Sans elle, Qoder Cloud Agent n'apparaît pas dans le menu **Ajouter**.
+- Les installations auto-hébergées doivent définir `MULTICA_VCS_SECRET_KEY` sur le serveur : une clé de 32 octets encodée en base64, identique d'un redémarrage à l'autre. Sans elle, Qoder Cloud Agents n'apparaît pas dans le menu **Ajouter**.
 
 ### Connecter Qoder
 
-1. Sur la page **Runtimes**, cliquez sur **Ajouter** et choisissez **Qoder Cloud Agent** sous **Services cloud**.
+1. Sur la page **Runtimes**, cliquez sur **Ajouter** et choisissez **Qoder Cloud Agents** sous **Services cloud**.
 2. Sous **Région**, choisissez le site qui a émis votre PAT : **International (qoder.com)** ou **Chine (qoder.com.cn)**. Un PAT ne fonctionne que dans sa propre région ; s'il est refusé, utilisez le bouton qui réessaie sur l'autre site.
 3. Collez le PAT dans **Jeton d'accès personnel**. Une fois vérifié, la liste **Environnement** est chargée depuis Qoder. Un environnement unique est sélectionné automatiquement ; sinon, choisissez-en un.
 4. Facultatif : ouvrez **Autorisation GitHub** et ajoutez l'URL et un jeton pour chaque dépôt que les agents peuvent cloner. Les agents ne peuvent cloner que les dépôts autorisés ici.
 5. Facultatif : ouvrez **Exécution** pour régler le nombre d'exécutions simultanées (3 par défaut, 10 au maximum) et le délai d'expiration (60 minutes par défaut, de 5 à 240).
-6. Cliquez sur **Connecter**. Qoder Cloud Agent apparaît dans la section cloud de la page Runtimes et passe en ligne en quelques secondes.
+6. Cliquez sur **Connecter**. Qoder Cloud Agents apparaît dans la section cloud de la page Runtimes et passe en ligne en quelques secondes.
 
 ### Ajouter un agent
 
-Ouvrez Qoder Cloud Agent depuis la page Runtimes et cliquez sur **Créer un agent avec**, ou créez un agent comme d'habitude en choisissant le runtime Qoder. Dans le formulaire de l'agent, sélectionnez l'agent distant sous **Agent QCA**. Pour un agent existant, modifiez l'agent QCA ou son dépôt par défaut dans l'onglet **Routage**. Plusieurs agents Multica peuvent partager une connexion, chacun lié à un agent QCA différent.
+Ouvrez Qoder Cloud Agents depuis la page Runtimes et cliquez sur **Créer un agent avec**, ou créez un agent comme d'habitude en choisissant le runtime Qoder. Dans le formulaire de l'agent, sélectionnez l'agent distant sous **Agent QCA**. Pour un agent existant, modifiez l'agent QCA ou son dépôt par défaut dans l'onglet **Routage**. Plusieurs agents Multica peuvent partager une connexion, chacun lié à un agent QCA différent.
 
 Les identifiants de connexion sont chiffrés et partagés dans l'espace de travail. Les administrateurs gèrent la connexion ; les membres peuvent sélectionner les agents QCA accessibles. Les projets choisissent le dépôt et la branche de départ ; le jeton du dépôt est transmis à QCA à la création d'une session de code. Les PAT ne sont jamais renvoyés au navigateur après l'enregistrement.
 
-Sur la page Qoder Cloud Agent, les administrateurs peuvent modifier la connexion et les dépôts, **Mettre en pause** pour ne plus envoyer de nouvelles tâches en conservant identifiants et agents, ou **Déconnecter** pour supprimer les jetons enregistrés, retirer le runtime et délier ses agents.
+Sur la page Qoder Cloud Agents, les administrateurs peuvent modifier la connexion et les dépôts, **Mettre en pause** pour ne plus envoyer de nouvelles tâches en conservant identifiants et agents, ou **Déconnecter** pour supprimer les jetons enregistrés, retirer le runtime et délier ses agents.
 
 ### Fonctionnement des exécutions
 

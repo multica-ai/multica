@@ -73,7 +73,7 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 	}
 	for _, res := range t.ProjectResources {
 		if res.ResourceType == "local_directory" {
-			return nil, fmt.Errorf("local directory resources cannot be executed by Qoder Cloud Agent")
+			return nil, fmt.Errorf("local directory resources cannot be executed by Qoder Cloud Agents")
 		}
 		if res.ResourceType != "github_repo" {
 			continue
@@ -88,7 +88,7 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 		}
 		r.Resources = append(r.Resources, resource)
 		if len(r.Resources) > 1 {
-			return nil, fmt.Errorf("Qoder Cloud Agent supports one project repository per run")
+			return nil, fmt.Errorf("Qoder Cloud Agents supports one project repository per run")
 		}
 	}
 	// Project repositories win; otherwise use the agent's default repository,
@@ -149,7 +149,7 @@ func repositoryResource(ref Repository) (map[string]any, error) {
 	}
 	resource := map[string]any{"type": "github_repository", "url": ref.URL}
 	if strings.HasPrefix(ref.Ref, "refs/tags/") || commitRef.MatchString(ref.Ref) {
-		return nil, fmt.Errorf("Qoder Cloud Agent supports branch refs only")
+		return nil, fmt.Errorf("Qoder Cloud Agents supports branch refs only")
 	}
 	if name := strings.TrimPrefix(ref.Ref, "refs/heads/"); name != "" {
 		resource["checkout"] = map[string]string{"type": "branch", "name": name}

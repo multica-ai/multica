@@ -31,9 +31,9 @@ func startClaimFixture(t *testing.T, status string) (string, string, time.Time) 
 }
 
 func startClaimRequest(taskID, runtimeID string, generation time.Time) *http.Request {
-	return withURLParam(newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]string{
+	return withURLParam(newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]string{
 		"runtime_id": runtimeID, "dispatched_at": generation.Format(time.RFC3339Nano),
-	}, testWorkspaceID, "start-claim-test"), "taskId", taskID)
+	}), "taskId", taskID)
 }
 
 func TestStartClaimLostResponseAndOwnership(t *testing.T) {
@@ -171,11 +171,11 @@ func TestStartClaimInvalidBodiesAndLegacy(t *testing.T) {
 		map[string]string{"runtime_id": "invalid", "dispatched_at": generation.Format(time.RFC3339Nano)},
 		map[string]string{"runtime_id": runtimeID, "dispatched_at": generation.Add(time.Nanosecond).Format(time.RFC3339Nano)},
 	} {
-		req := withURLParam(newDaemonTokenRequest("POST", "/start", body, testWorkspaceID, "legacy-test"), "taskId", id)
+		req := withURLParam(newOwnerDaemonRequest("POST", "/start", body), "taskId", id)
 		testutil.Call(t, testHandler.StartTask, req).Want(http.StatusBadRequest)
 	}
 	for _, code := range []int{http.StatusOK, http.StatusBadRequest} {
-		req := withURLParam(newDaemonTokenRequest("POST", "/start", nil, testWorkspaceID, "legacy-test"), "taskId", id)
+		req := withURLParam(newOwnerDaemonRequest("POST", "/start", nil), "taskId", id)
 		testutil.Call(t, testHandler.StartTask, req).Want(code)
 	}
 }
@@ -190,7 +190,7 @@ func TestStartClaimWirePrecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := newDaemonTokenRequest("POST", "/claim", nil, testWorkspaceID, "claim-wire-test")
+	req := newOwnerDaemonRequest("POST", "/claim", nil)
 	// Exercise non-UTC database timestamp locations even on a UTC CI runner.
 	for _, zone := range []*time.Location{time.UTC, time.FixedZone("UTC+08", 8*60*60), time.FixedZone("UTC-07", -7*60*60)} {
 		t.Run(zone.String(), func(t *testing.T) {

@@ -87,9 +87,8 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
             );
           })}
         </ol>
-        <p className="mt-2 text-caption text-muted-foreground">{t(($) => $.workflows.detail.card_hint)}</p>
         {canCreateWorkflow && enabled && (
-          <div className="-mx-3 -mb-3 mt-1 border-t border-surface-border p-1">
+          <div className="-mx-3 -mb-3 mt-2 border-t border-surface-border p-1">
             <Button
               variant="ghost"
               size="sm"

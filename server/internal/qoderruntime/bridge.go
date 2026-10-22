@@ -92,7 +92,7 @@ func New(cfg Config, log *slog.Logger) (*Bridge, error) {
 		return nil, fmt.Errorf("max concurrency must be between 1 and %d", MaxConcurrencyLimit)
 	}
 	if cfg.Name == "" {
-		cfg.Name = "Qoder Cloud Agent"
+		cfg.Name = "Qoder Cloud Agents"
 	}
 	m, err := newAPI(cfg.MulticaURL, cfg.MulticaToken, cfg.WorkspaceID)
 	if err != nil {

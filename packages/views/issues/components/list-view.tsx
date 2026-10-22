@@ -50,7 +50,6 @@ import type {
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
-import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { toast } from "sonner";
 
 // The seed must use the same CSS height as ListRow before scroll restoration
@@ -76,7 +75,6 @@ function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
 function ListViewImpl({
   issues,
   visibleStatuses,
-  hiddenStatuses = [],
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
   statusPagination,
@@ -86,7 +84,6 @@ function ListViewImpl({
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
-  hiddenStatuses?: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   statusPagination: IssueStatusPagination;
@@ -424,20 +421,6 @@ function ListViewImpl({
           );
         })}
       </Accordion.Root>
-      {hiddenStatuses.length > 0 && (
-        <div className="mt-4 px-1 pb-4">
-          <HiddenColumnsPanel
-            hiddenStatuses={hiddenStatuses}
-            renderRow={(status) => (
-              <HiddenColumnRow
-                key={status}
-                status={status}
-                total={statusPagination[status]?.total}
-              />
-            )}
-          />
-        </div>
-      )}
     </>
   );
 

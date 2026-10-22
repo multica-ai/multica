@@ -685,9 +685,16 @@ WHERE id = $1;
 -- Hot-path status polling needs only the task status and the owning agent's
 -- workspace for authorization. Keep this independent of optional source links
 -- (issue, chat session, autopilot run) so it needs no source-entity lookup.
-SELECT atq.status, a.workspace_id
+-- The bound runtime's workspace / daemon / owner ride along (LEFT JOIN: a
+-- terminal task outlives a deleted runtime) so the daemon route can enforce
+-- runtime ownership without a second round trip (MUL-8154).
+SELECT atq.status, a.workspace_id, atq.runtime_id,
+       rt.workspace_id AS runtime_workspace_id,
+       rt.daemon_id AS runtime_daemon_id,
+       rt.owner_id AS runtime_owner_id
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN agent_runtime rt ON rt.id = atq.runtime_id
 WHERE atq.id = $1;
 
 -- name: GetAgentTaskForDelegatedFailureUpdate :one

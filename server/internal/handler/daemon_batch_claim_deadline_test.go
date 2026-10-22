@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -77,7 +76,7 @@ func TestClaimTasksByRuntime_PartialSuccessFitsClientDeadlines(t *testing.T) {
 					return status, response, err
 				})
 				identity := daemonws.ClientIdentity{
-					DaemonID: batchClaimTestDaemonID, UserID: testUserID,
+					UserID:      testUserID, // user-credential connection: no daemon id
 					WorkspaceID: testWorkspaceID, WorkspaceIDs: []string{testWorkspaceID},
 					RuntimeIDs: []string{runtimeID}, Capabilities: protocol.DaemonCapabilityClaimPollHintsV1,
 				}
@@ -88,7 +87,7 @@ func TestClaimTasksByRuntime_PartialSuccessFitsClientDeadlines(t *testing.T) {
 					}
 					defer close(completed)
 					r.Header.Set("X-Client-Capabilities", identity.Capabilities)
-					h.ClaimTasksByRuntime(w, r.WithContext(middleware.WithDaemonContext(r.Context(), testWorkspaceID, batchClaimTestDaemonID)))
+					h.ClaimTasksByRuntime(w, asRuntimeOwner(r))
 				}))
 				defer server.Close()
 				body, err := json.Marshal(map[string]any{

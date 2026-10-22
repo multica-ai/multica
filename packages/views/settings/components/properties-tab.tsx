@@ -141,7 +141,6 @@ export function PropertiesTab() {
   return (
     <SettingsTab
       title={t(($) => $.properties.title)}
-      description={t(($) => $.properties.description)}
       scope="workspace"
     >
       {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}

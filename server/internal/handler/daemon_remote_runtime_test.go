@@ -30,7 +30,7 @@ func TestDaemonRegisterExecutionMode(t *testing.T) {
 			}(), "runtime_mode": "local"})
 			req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
 				"workspace_id": testWorkspaceID, "daemon_id": daemonID,
-				"runtimes": []map[string]any{{"name": "Qoder Cloud Agent", "type": func() string {
+				"runtimes": []map[string]any{{"name": "Qoder Cloud Agents", "type": func() string {
 					if tc.name == "legacy" {
 						return "claude"
 					}

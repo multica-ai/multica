@@ -6,7 +6,7 @@
   "qoder_token": "",
   "environment_id": "",
   "state_dir": "/var/lib/multica-qoder",
-  "name": "Qoder Cloud Agent",
+  "name": "Qoder Cloud Agents",
   "github_token_files": {
     "https://github.com/OWNER/REPO": "/path/to/private/github-token"
   }

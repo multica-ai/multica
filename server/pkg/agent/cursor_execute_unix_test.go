@@ -31,6 +31,38 @@ import (
 // structured-stream-error cases rank above it and are unaffected.
 const drainStdin = "cat > /dev/null"
 
+func TestCursorExecuteConnectionStalledDiagnostics(t *testing.T) {
+	t.Parallel()
+	script := `#!/bin/sh
+` + drainStdin + `
+i=0
+while [ "$i" -lt 500 ]; do
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-stalled"}'
+  i=$((i + 1))
+done
+printf '%s\n' 'RetriableError: Connection stalled' >&2
+exit 1
+`
+	result := executeFakeCursor(t, script)
+	if result.Status != "failed" || result.Output != "" {
+		t.Fatalf("stalled run must remain a failure without final output: %+v", result)
+	}
+	if result.SessionID != "sess-stalled" {
+		t.Fatalf("session id = %q, want sess-stalled", result.SessionID)
+	}
+	for _, want := range []string{"event_count=500", "cursor stderr: RetriableError: Connection stalled", cursorIncompleteFinalizationWarning} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("error = %q, want substring %q", result.Error, want)
+		}
+	}
+	if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("adapter error classified as %s, want provider_network", got)
+	}
+	if got := taskfailure.NormalizeDaemonReason(taskfailure.ReasonAgentProviderServerError.String(), result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("legacy daemon reason normalized to %s, want provider_network", got)
+	}
+}
+
 func TestCursorExecuteStopsAfterTerminalResult(t *testing.T) {
 	t.Parallel()
 

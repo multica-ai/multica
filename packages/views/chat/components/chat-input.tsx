@@ -695,7 +695,7 @@ export function ChatInput({
                     title={t(($) => $.input.change_project_context)}
                     onClear={() => onProjectChange?.(null)}
                     clearLabel={t(($) => $.input.remove_project_context)}
-                    className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
+                    className="border-surface-border bg-surface-raised font-medium text-foreground"
                   />
                 }
               />
