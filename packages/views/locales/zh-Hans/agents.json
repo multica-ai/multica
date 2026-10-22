@@ -162,6 +162,7 @@
   "inspector": {
     "section_profile": "资料",
     "section_execution": "执行配置",
+    "qoder_execution_note": "模型、工具和 skill 在 Qoder 的 QCA 智能体上设置。",
     "section_access": "访问权限",
     "section_properties": "属性",
     "section_details": "详情",
@@ -269,6 +270,7 @@
     "composio_mcp": "MCP 应用",
     "integrations": "集成",
     "runtime_config": "路由",
+    "qoder_agent": "QCA 智能体",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -279,18 +281,8 @@
     "squad_title": "为小队创建智能体",
     "duplicate_title": "复制 {{name}}",
     "back": "返回",
-    "eyebrow": "创建智能体",
-    "choose_title": "你想从哪里开始？",
-    "recommended": "推荐",
-    "continue": "继续",
-    "step_choose": "选择起点",
-    "step_configure": "检查并配置",
     "step_ai": "通过对话创建",
     "modes": {
-      "blank": {
-        "title": "从空白开始",
-        "description": "手动填写名称、指令和运行时。"
-      },
       "template": {
         "title": "使用模板",
         "description": "从整理好的指令和 skill 开始，再根据工作区需要修改每个细节。"
@@ -352,12 +344,11 @@
     "live_draft_hint": "可直接修改草稿。",
     "duplicate_env_notice": "指令、skill 和命令行参数会被复制。环境变量、MCP 服务器和本机运行时配置不会复制。",
     "duplicate_runtime_reset_notice": "原运行时当前不可用，副本已改用其他运行时。模型、思考等级和速度只在所选运行时上有效，因此已被清空。",
-    "create_and_open": "创建并打开",
+    "create_agent": "创建智能体",
     "create_and_add": "创建并加入小队",
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
     "name_conflict": "工作区中已存在同名智能体。",
-    "created": "已创建 {{name}}",
     "drafts": {
       "title": "创建草稿",
       "untitled": "未命名草稿",
@@ -367,6 +358,77 @@
       "discard_cancel": "继续编辑",
       "banner": "您有 {{count}} 条未完成的创建",
       "pick_hint": "选一条继续。"
+    },
+    "close": "关闭",
+    "steps": {
+      "runtime": "选择运行时",
+      "configure": "配置",
+      "done": "完成",
+      "aria": "创建智能体步骤"
+    },
+    "configure_title": "配置智能体",
+    "configure_description": "给它起个名字，写下指令。之后都可以再改。",
+    "ask_ai": "让 AI 帮我写",
+    "change_runtime": "更换",
+    "runtime_label": "运行时",
+    "runtime_loading": "正在加载运行时…",
+    "runtime_missing": "这个运行时已不可用。",
+    "cloud_fields_note": "Skills、MCP 和聊天开场白只在本机和远端运行时可用，这里不显示。",
+    "done": {
+      "loading": "正在完成…",
+      "title": "{{name}} 已就绪",
+      "runs_on": "运行在 {{runtime}}",
+      "joined_squad": "已加入小队：{{squad}}",
+      "next": "接下来",
+      "assign_title": "指派第一个任务",
+      "assign_description": "新建一个任务，负责人设为这个智能体。",
+      "mention_title": "在任务里 @ 它",
+      "mention_description": "在任何任务的评论里 @{{name}}，它会接手处理。",
+      "squad_title": "加入小队",
+      "squad_description": "和其他智能体一起，由小队负责人分派。",
+      "open_squad_title": "打开 {{squad}}",
+      "open_squad_description": "查看它刚加入的小队。",
+      "open_agent": "打开智能体",
+      "back_to_list": "返回智能体列表"
+    },
+    "runtime_step": {
+      "title": "这个智能体在哪里运行？",
+      "search_placeholder": "搜索 harness 或机器",
+      "groups": {
+        "machines": "机器",
+        "cloud": "云服务"
+      },
+      "this_machine": "本机",
+      "owner_you": "你",
+      "custom_badge": "自定义",
+      "web_local_title": "在桌面端可以使用这台电脑上的 harness",
+      "download_desktop": "下载桌面端",
+      "harness_count_other": "{{count}} 个 harness",
+      "local_starting": "正在启动本机守护进程…",
+      "local_empty_title": "这台机器上没有找到 harness",
+      "local_empty_hint": "安装 Claude Code、Codex 等 CLI 后，会出现在这里。",
+      "more_harnesses_other": "其余 {{count}} 个：{{names}}",
+      "add_remote": "连接机器",
+      "hidden_remote_other": "另有 {{count}} 台机器仅所有者可用，不在这里显示",
+      "remote_warning": "任务会在 {{owner}} 的机器上执行，读写那台机器上的文件，用量计入 {{owner}} 的账号。",
+      "no_match": "没有与「{{query}}」匹配的结果",
+      "hosted_by": "由 {{vendor}} 提供",
+      "coming_soon": "即将推出",
+      "qoder_status": {
+        "not_configured": "未连接",
+        "starting": "启动中",
+        "ready": "已连接",
+        "error": "出错",
+        "stopped": "已暂停"
+      },
+      "connect": "连接",
+      "settings": "设置",
+      "member_connect": "需要管理员连接",
+      "member_fix": "需要管理员处理",
+      "footer_selected": "已选：",
+      "footer_hint": "选择一个运行时以继续",
+      "cancel": "取消",
+      "next": "下一步"
     }
   },
   "create_dialog": {

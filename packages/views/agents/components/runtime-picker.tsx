@@ -21,6 +21,7 @@ import {
   filterRuntimeMachines,
   runtimeRowLabel,
 } from "../../runtimes/components/runtime-machines";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 export type RuntimeFilter = "mine" | "all";
 
@@ -251,72 +252,72 @@ export function RuntimePicker({
                       ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
                       : undefined;
                     return (
-                      <button
-                        key={device.id}
-                        type="button"
-                        disabled={disabled}
-                        title={disabledTitle}
-                        onClick={() => {
-                          if (disabled) return;
-                          onSelect(device.id);
-                          setOpen(false);
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${
-                          disabled
-                            ? "cursor-not-allowed opacity-50"
-                            : device.id === selectedRuntimeId
-                              ? "bg-accent"
-                              : "hover:bg-accent/50"
-                        }`}
-                      >
-                        <ProviderLogo
-                          provider={device.provider}
-                          className="h-4 w-4 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate font-medium">
-                              {runtimeRowLabel(device, machine.title)}
-                            </span>
-                            {device.runtime_mode === "cloud" && (
-                              <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
-                                {t(($) => $.create_dialog.runtime_cloud_badge)}
-                              </span>
-                            )}
-                            {disabled && (
-                              <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
-                                <Lock className="h-3 w-3" />
-                                {t(($) => $.create_dialog.runtime_private_badge)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground">
-                            {ownerMember ? (
-                              <>
-                                <ActorAvatar
-                                  actorType="member"
-                                  actorId={ownerMember.user_id}
-                                  size="xs"
-                                />
-                                <span className="truncate">
-                                  {ownerMember.name}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="truncate">
-                                {device.device_info}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            device.status === "online"
-                              ? "bg-success"
-                              : "bg-muted-foreground/40"
+                      <TooltipHint key={device.id} label={disabledTitle}>
+                        <button
+                          type="button"
+                          aria-disabled={disabled || undefined}
+                          onClick={() => {
+                            if (disabled) return;
+                            onSelect(device.id);
+                            setOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${
+                            disabled
+                              ? "cursor-not-allowed opacity-50"
+                              : device.id === selectedRuntimeId
+                                ? "bg-accent"
+                                : "hover:bg-accent/50"
                           }`}
-                        />
-                      </button>
+                        >
+                          <ProviderLogo
+                            provider={device.provider}
+                            className="h-4 w-4 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-medium">
+                                {runtimeRowLabel(device, machine.title)}
+                              </span>
+                              {device.runtime_mode === "cloud" && (
+                                <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">
+                                  {t(($) => $.create_dialog.runtime_cloud_badge)}
+                                </span>
+                              )}
+                              {disabled && (
+                                <span className="shrink-0 inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
+                                  <Lock className="h-3 w-3" />
+                                  {t(($) => $.create_dialog.runtime_private_badge)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1 text-caption text-muted-foreground">
+                              {ownerMember ? (
+                                <>
+                                  <ActorAvatar
+                                    actorType="member"
+                                    actorId={ownerMember.user_id}
+                                    size="xs"
+                                  />
+                                  <span className="truncate">
+                                    {ownerMember.name}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="truncate">
+                                  {device.device_info}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              device.status === "online"
+                                ? "bg-success"
+                                : "bg-muted-foreground/40"
+                            }`}
+                          />
+                        </button>
+                      </TooltipHint>
                     );
                   })}
                 </div>

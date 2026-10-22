@@ -25,6 +25,7 @@ export function StatusPicker({
   onUpdate,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -44,6 +45,8 @@ export function StatusPicker({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -58,7 +61,9 @@ export function StatusPicker({
   /**
    * The issue's project. When it uses a workflow, only that workflow's steps
    * are offered, in workflow order, each naming who entering it hands the
-   * issue to. Omit when the surface spans projects. (MUL-7420)
+   * issue to. (MUL-7420) `null` is an issue outside any project: it offers
+   * the Default workflow's statuses, and search still reaches every status.
+   * (MUL-8121) Omit (`undefined`) when the surface spans projects.
    */
   projectId?: string | null;
   /**
@@ -87,7 +92,13 @@ export function StatusPicker({
 
   // The project workflow's steps, or the catalog in canonical category order
   // without archived statuses (MUL-6243).
-  const { options: projectOptions, workflow, project } = useIssueStatusOptions(wsId, projectId);
+  const {
+    options: projectOptions,
+    workflow,
+    project,
+    defaultScope,
+    catalog,
+  } = useIssueStatusOptions(wsId, projectId, status);
   const allOptions = useMemo(
     () => (allowedStatuses ? projectOptions.filter((o) => allowedStatuses.has(o.key)) : projectOptions),
     [projectOptions, allowedStatuses],
@@ -96,10 +107,13 @@ export function StatusPicker({
   const options = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return allOptions;
-    return allOptions.filter((o) => o.label.toLowerCase().includes(q));
-  }, [allOptions, query]);
+    // Outside a project only the list is narrowed to Default, not what the
+    // issue may take: search reaches every status. (MUL-8121)
+    const pool = defaultScope ? catalog : allOptions;
+    return pool.filter((o) => o.label.toLowerCase().includes(q));
+  }, [allOptions, catalog, defaultScope, query]);
 
-  const searchable = !!workflow || allOptions.length > SEARCH_THRESHOLD;
+  const searchable = !!workflow || !!defaultScope || allOptions.length > SEARCH_THRESHOLD;
   const [pendingStatus, setPendingStatus] = useState<IssueStatus | null>(null);
 
   const markDuplicate = onMarkDuplicate ? (
@@ -131,9 +145,10 @@ export function StatusPicker({
         if (!v) setQuery("");
         setOpen(v);
       }}
-      width={workflow ? "w-60" : "w-52"}
+      width={workflow || defaultScope ? "w-60" : "w-52"}
       align={align}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       searchable={searchable}
       searchPlaceholder={t(($) => $.filters.search_status)}
       onSearchChange={setQuery}
@@ -143,6 +158,10 @@ export function StatusPicker({
             {project
               ? t(($) => $.workflows.picker.header, { workflow: workflow.name, project: project.title })
               : workflow.name}
+          </div>
+        ) : defaultScope ? (
+          <div className="truncate px-2 pb-1 pt-1.5 text-caption text-muted-foreground">
+            {t(($) => $.workflows.picker.header_no_project, { workflow: defaultScope.name })}
           </div>
         ) : undefined
       }

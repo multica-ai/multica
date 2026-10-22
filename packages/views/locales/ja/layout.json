@@ -40,6 +40,13 @@
     "loading_workspace": "ワークスペースを読み込み中…",
     "loading_named_prefix": "読み込み中"
   },
+  "window": {
+    "go_back": "戻る",
+    "go_forward": "進む",
+    "hold_for_history": "長押しで履歴を表示",
+    "back_history": "戻る履歴",
+    "forward_history": "進む履歴"
+  },
   "sidebar": {
     "unpin_tooltip": "ピン留めを解除",
     "workspaces_label": "ワークスペース",

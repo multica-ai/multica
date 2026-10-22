@@ -1033,6 +1033,40 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	}
 }
 
+func TestCodexResultUsageMapUsesSessionModelForDefaultAgent(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "default-model-thread"
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := fmt.Sprintf(
+		`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`+"\n",
+		startTime.Add(time.Second).UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	jsonRPCUsage := TokenUsage{
+		InputTokens:      321,
+		OutputTokens:     42,
+		CacheReadTokens:  1000,
+		CacheWriteTokens: 7,
+	}
+	got := codexResultUsageMap(startTime, taskHome, threadID, false, "", jsonRPCUsage)
+	want := map[string]TokenUsage{"gpt-5.6-sol": jsonRPCUsage}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("usage map = %#v, want session model with unchanged JSON-RPC usage %#v", got, want)
+	}
+}
+
 func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()

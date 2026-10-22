@@ -55,8 +55,14 @@ func TestHermesEscapedPipeHolderHelper(t *testing.T) {
 	if _, err := syscall.Setsid(); err != nil {
 		t.Fatalf("setsid: %v", err)
 	}
-	if err := os.WriteFile(statePath, []byte(fmt.Sprintf("%d %d", os.Getpid(), syscall.Getpgrp())), 0o600); err != nil {
+	// Both readers use file existence as the ready signal. Publish only after
+	// the full identity is written, so neither can observe an empty file.
+	pendingPath := statePath + ".pending"
+	if err := os.WriteFile(pendingPath, []byte(fmt.Sprintf("%d %d", os.Getpid(), syscall.Getpgrp())), 0o600); err != nil {
 		t.Fatalf("record holder identity: %v", err)
+	}
+	if err := os.Rename(pendingPath, statePath); err != nil {
+		t.Fatalf("publish holder identity: %v", err)
 	}
 	time.Sleep(hermesEscapedHolderLifetime)
 }

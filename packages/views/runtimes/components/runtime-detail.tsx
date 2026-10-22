@@ -399,7 +399,7 @@ function Fact({
   );
 }
 
-function ServingAgentsCard({
+export function ServingAgentsCard({
   agents,
   presenceMap,
   agentHref,

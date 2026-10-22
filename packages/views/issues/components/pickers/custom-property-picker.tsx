@@ -20,7 +20,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { useLocale, useT } from "../../../i18n";
 import { PropertyPicker, PickerItem } from "./property-picker";
@@ -468,15 +468,15 @@ function TextishPropertyEditor({
             className="h-8"
           />
           {property.type === "url" && typeof value === "string" && (
-            <Button
+            <IconButton
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={t(($) => $.pickers.custom_property.open_link)}
+              label={t(($) => $.pickers.custom_property.open_link)}
               onClick={() => window.open(value, "_blank", "noopener,noreferrer")}
             >
               <ExternalLink className="size-3.5" />
-            </Button>
+            </IconButton>
           )}
         </form>
       </PopoverContent>
@@ -574,26 +574,26 @@ function ListPropertyEditor({
               <li key={item} className="flex min-w-0 items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-accent/40">
                 <span className="min-w-0 flex-1 truncate text-body">{item}</span>
                 {property.type === "multi_url" && (
-                  <Button
+                  <IconButton
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={t(($) => $.pickers.custom_property.open_link)}
+                    label={t(($) => $.pickers.custom_property.open_link)}
                     onClick={() => window.open(item, "_blank", "noopener,noreferrer")}
                   >
                     <ExternalLink className="size-3.5" />
-                  </Button>
+                  </IconButton>
                 )}
-                <Button
+                <IconButton
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t(($) => $.pickers.custom_property.remove_item, { value: item })}
+                  label={t(($) => $.pickers.custom_property.remove_item, { value: item })}
                   disabled={saving}
                   onClick={() => void save(items.filter((entry) => entry !== item))}
                 >
                   <X className="size-3.5" />
-                </Button>
+                </IconButton>
               </li>
             ))}
           </ul>

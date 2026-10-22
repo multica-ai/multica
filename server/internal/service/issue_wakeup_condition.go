@@ -47,7 +47,7 @@ type WakeupCondition struct {
 	// every stage closing while a later one waits, then every sub-issue
 	// closing. Only the platform sets it.
 	EachStage bool `json:"each_stage,omitempty"`
-	// pull_request: checks_finished | merged
+	// pull_request: checks_finished | merged | conflicts
 	Event string `json:"event,omitempty"`
 	// other_issue: the watched issue and done | ended | in_review. The
 	// identifier is recorded for display; clients never set it.
@@ -64,10 +64,11 @@ var (
 	errPRSnapshotsUnavailable = errors.New("PR checks cannot be evaluated: GitHub snapshot refresh is unavailable on this server; ask the server administrator to configure the GitHub App snapshot client")
 	errPRNotLinked            = errors.New("No pull request is linked to this issue; link the PR to this issue (a parent issue's PR is not included), or wait for the linking webhook")
 	errPRSnapshotPending      = errors.New("PR check snapshot is not available yet; inspect this issue's pull-requests snapshot_available field and ask the server administrator to check snapshot refresh if it persists")
+	errPRConflictsUnsupported = errors.New("Merge conflicts can only be detected on GitHub pull requests; this issue links only self-hosted (Forgejo/Gitea/GitLab) pull requests")
 )
 
 func conditionDiagnostic(err error) bool {
-	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending)
+	return errors.Is(err, errPRSnapshotsUnavailable) || errors.Is(err, errPRNotLinked) || errors.Is(err, errPRSnapshotPending) || errors.Is(err, errPRConflictsUnsupported)
 }
 
 func badCondition(msg string) error {
@@ -186,8 +187,8 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		}
 		out = WakeupCondition{Type: c.Type, Stage: c.Stage}
 	case "pull_request":
-		if c.Event != "checks_finished" && c.Event != "merged" {
-			return nil, nil, badCondition("event must be checks_finished or merged")
+		if c.Event != "checks_finished" && c.Event != "merged" && c.Event != "conflicts" {
+			return nil, nil, badCondition("event must be checks_finished, merged or conflicts")
 		}
 		out = WakeupCondition{Type: c.Type, Event: c.Event}
 	case "other_issue":
@@ -259,10 +260,15 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		met, fingerprint, observed := childrenDone(c, children)
 		return met, fingerprint, observed, nil
 	case "pull_request":
-		if c.Event == "checks_finished" && (s.Tasks == nil || !s.Tasks.PRSnapshotsEnabled) {
-			return false, "", nil, errPRSnapshotsUnavailable
-		}
-		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,'')
+		// Without the snapshot client GitHub rows are never refreshed, so their
+		// checks and mergeability neither satisfy nor stall the rule. Self-hosted VCS rows carry
+		// their own commit statuses and are evaluated regardless (#9034).
+		githubChecks := c.Event == "merged" || (s.Tasks != nil && s.Tasks.PRSnapshotsEnabled)
+		// GitHub reports UNKNOWN while it recomputes mergeability (after any
+		// base-branch move). On the same head that keeps the previous verdict,
+		// so a recompute does not read as resolved-then-conflicting again.
+		previous := prConditionKeys(w.ConditionState)
+		rows, err := tx.Query(ctx, `SELECT pr.pr_number,pr.state,COALESCE(pr.snapshot_head_sha,''),COALESCE(pr.checks_rollup_state,''),pr.head_sha,COALESCE(pr.api_mergeable,''),pr.id::text
 			FROM github_pull_request pr JOIN issue_pull_request ipr ON ipr.pull_request_id=pr.id WHERE ipr.issue_id=$1`, w.IssueID)
 		if err != nil {
 			return false, "", nil, err
@@ -272,13 +278,12 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		var prs []map[string]any
 		for rows.Next() {
 			var number int32
-			var state, head, checks string
-			if err = rows.Scan(&number, &state, &head, &checks); err != nil {
+			var state, head, checks, currentHead, mergeable, id string
+			if err = rows.Scan(&number, &state, &head, &checks, &currentHead, &mergeable, &id); err != nil {
 				rows.Close()
 				return false, "", nil, err
 			}
 			linked++
-			missingSnapshot = missingSnapshot || head == ""
 			switch c.Event {
 			case "merged":
 				if state == "merged" {
@@ -286,9 +291,28 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 					prs = append(prs, map[string]any{"number": number, "state": state})
 				}
 			case "checks_finished":
+				if !githubChecks {
+					continue
+				}
+				missingSnapshot = missingSnapshot || head == ""
 				if head != "" && slices.Contains([]string{"SUCCESS", "FAILURE", "ERROR"}, checks) {
 					keys = append(keys, fmt.Sprintf("%d@%s:%s", number, head, checks))
 					prs = append(prs, map[string]any{"number": number, "head_sha": head, "checks": strings.ToLower(checks)})
+				}
+			case "conflicts":
+				if !githubChecks || (state != "open" && state != "draft") {
+					continue
+				}
+				// A verdict for an older head says nothing about the pushed one.
+				if head == "" || head != currentHead {
+					missingSnapshot = true
+					continue
+				}
+				// PR numbers and heads can repeat across repositories (forks).
+				key := fmt.Sprintf("%s@%s:conflicting", id, head)
+				if mergeable == "CONFLICTING" || ((mergeable == "UNKNOWN" || mergeable == "") && previous[key] > 0) {
+					keys = append(keys, key)
+					prs = append(prs, map[string]any{"number": number, "head_sha": head, "mergeable": "conflicting"})
 				}
 			}
 		}
@@ -296,12 +320,75 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		if err = rows.Err(); err != nil {
 			return false, "", nil, err
 		}
-		if linked == 0 {
-			return false, "", nil, errPRNotLinked
+		// Self-hosted VCS pull requests (Forgejo/Gitea/GitLab) live in their own
+		// tables. Roll up each PR's commit statuses for its current head sha,
+		// grouped by PR id like ListVCSPullRequestsByIssue: any failed status =
+		// FAILURE, all passed (at least one) = SUCCESS, pending or none = not
+		// finished. PR numbers and shas can repeat across connections and
+		// repositories, so both the rollup and the fingerprint key on the PR id.
+		vcsLinked := 0
+		vcsRows, err := tx.Query(ctx, `SELECT pr.id,pr.pr_number,pr.provider,pr.state,pr.head_sha,
+				COALESCE(SUM(CASE WHEN cs.state='failed' THEN 1 ELSE 0 END),0),
+				COALESCE(SUM(CASE WHEN cs.state='pending' THEN 1 ELSE 0 END),0),
+				COUNT(cs.state)
+			FROM vcs_pull_request pr
+			JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id=pr.id
+			LEFT JOIN vcs_commit_status cs ON cs.connection_id=pr.connection_id AND cs.sha=pr.head_sha AND pr.head_sha<>''
+			WHERE ipr.issue_id=$1
+			GROUP BY pr.id`, w.IssueID)
+		if err != nil {
+			return false, "", nil, err
 		}
-		// Any matching PR satisfies the rule, even if another awaits a snapshot.
-		if c.Event == "checks_finished" && len(keys) == 0 && missingSnapshot {
-			return false, "", nil, errPRSnapshotPending
+		for vcsRows.Next() {
+			var id pgtype.UUID
+			var number int32
+			var provider, state, head string
+			var failed, pending, total int64
+			if err = vcsRows.Scan(&id, &number, &provider, &state, &head, &failed, &pending, &total); err != nil {
+				vcsRows.Close()
+				return false, "", nil, err
+			}
+			vcsLinked++
+			switch c.Event {
+			case "merged":
+				if state == "merged" {
+					keys = append(keys, "vcs:"+util.UUIDToString(id))
+					prs = append(prs, map[string]any{"number": number, "provider": provider, "state": state})
+				}
+			case "checks_finished":
+				checks := ""
+				switch {
+				case failed > 0:
+					checks = "FAILURE"
+				case total > 0 && pending == 0:
+					checks = "SUCCESS"
+				}
+				if head != "" && checks != "" {
+					keys = append(keys, fmt.Sprintf("vcs:%s@%s:%s", util.UUIDToString(id), head, checks))
+					prs = append(prs, map[string]any{"number": number, "provider": provider, "head_sha": head, "checks": strings.ToLower(checks)})
+				}
+			}
+		}
+		vcsRows.Close()
+		if err = vcsRows.Err(); err != nil {
+			return false, "", nil, err
+		}
+		// Any matching PR satisfies the rule; diagnostics only explain a wait.
+		if len(keys) == 0 {
+			// GitHub-only (or unlinked) checks rules cannot progress without the
+			// snapshot client; a rule with VCS PRs waits for their statuses.
+			if !githubChecks && (linked > 0 || vcsLinked == 0) {
+				return false, "", nil, errPRSnapshotsUnavailable
+			}
+			if linked == 0 && vcsLinked == 0 {
+				return false, "", nil, errPRNotLinked
+			}
+			if c.Event == "conflicts" && linked == 0 {
+				return false, "", nil, errPRConflictsUnsupported
+			}
+			if c.Event != "merged" && missingSnapshot {
+				return false, "", nil, errPRSnapshotPending
+			}
 		}
 		sort.Strings(keys)
 		return len(keys) > 0, "pr:" + strings.Join(keys, ","), map[string]any{"pull_requests": prs}, nil
@@ -400,16 +487,48 @@ func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db
 	// condition_state dedups a satisfied predicate; each new satisfaction
 	// gets its own receipt key.
 	state := w.ConditionState
-	if met && fingerprint != state {
-		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
-			return w.NextFireAt, err
+	if met {
+		if conditionNewlyMet(state, fingerprint) {
+			if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
+				return w.NextFireAt, err
+			}
 		}
 		state = fingerprint
-	} else if !met {
+	} else {
 		state = ""
 	}
 	next := pgtype.Timestamptz{Time: now.Add(conditionPollInterval), Valid: true}
 	return next, q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: state, NextFireAt: next})
+}
+
+// prConditionKeys counts the per-PR keys of a linked-PR fingerprint. Checks
+// and merged keys carry only the PR number, so two satisfying PRs from
+// different repositories can share a key; the count keeps both.
+func prConditionKeys(fingerprint string) map[string]int {
+	keys := map[string]int{}
+	if rest, ok := strings.CutPrefix(fingerprint, "pr:"); ok && rest != "" {
+		for _, key := range strings.Split(rest, ",") {
+			keys[key]++
+		}
+	}
+	return keys
+}
+
+// conditionNewlyMet reports whether a satisfied predicate is news to the rule.
+// A linked-PR fingerprint holds one key per satisfying PR, and only a key that
+// occurs more often than the rule has seen is news: one PR leaving the set
+// (resolved, closed, unlinked) must not wake the agent again for the others.
+func conditionNewlyMet(previous, current string) bool {
+	if !strings.HasPrefix(current, "pr:") {
+		return current != previous
+	}
+	seen := prConditionKeys(previous)
+	for key, n := range prConditionKeys(current) {
+		if n > seen[key] {
+			return true
+		}
+	}
+	return false
 }
 
 // conditionFiresOnChange reports whether facts already true at registration
@@ -438,23 +557,15 @@ func (s *IssueWakeupService) baselineCondition(ctx context.Context, tx pgx.Tx, q
 	return q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: fingerprint, NextFireAt: pgtype.Timestamptz{Time: now.Add(conditionPollInterval), Valid: true}})
 }
 
-// saveConditionDiagnostic owns only last_error values carrying its prefix.
-// Dispatch failures share the column and must survive a condition poll. Avoid
-// rewriting an unchanged diagnostic on every polling interval as well.
+// A completed evaluation replaces the previous pass's error with its current
+// diagnostic. Later dispatch failures roll this write back and are recorded
+// outside the transaction. Avoid rewriting unchanged diagnostics on every poll.
 func saveConditionDiagnostic(ctx context.Context, q *db.Queries, w db.IssueWakeup, diagnostic error) error {
-	owned := w.LastError.Valid && strings.HasPrefix(w.LastError.String, conditionDiagnosticPrefix)
 	var lastError pgtype.Text
 	if diagnostic != nil {
 		lastError = pgtype.Text{String: conditionDiagnosticPrefix + diagnostic.Error(), Valid: true}
-		if w.LastError.Valid {
-			if w.LastError.String == lastError.String {
-				return nil
-			}
-			if !owned {
-				return nil
-			}
-		}
-	} else if !owned {
+	}
+	if w.LastError == lastError {
 		return nil
 	}
 	return q.NoteWakeupFailure(ctx, db.NoteWakeupFailureParams{ID: w.ID, LastError: lastError})

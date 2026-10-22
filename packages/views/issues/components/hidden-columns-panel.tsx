@@ -2,7 +2,7 @@
 
 import { Eye, Filter, MoreHorizontal } from "lucide-react";
 import type { IssueStatus } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -58,11 +58,11 @@ export function HiddenColumnsPanel({
 function WorkflowColumnsNote() {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
-  const { isAdmin } = useWorkflowPermissions();
+  const { canCreateWorkflow } = useWorkflowPermissions();
   return (
     <p className="mt-3 px-2.5 text-caption leading-5 text-muted-foreground">
       {t(($) => $.board.workflow_columns_note)}
-      {isAdmin && (
+      {canCreateWorkflow && (
         <>
           {" "}
           <AppLink href={`${paths.settings()}?tab=workflows`} className="text-brand hover:underline">
@@ -111,15 +111,15 @@ export function HiddenColumnRow({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => $.board.show_column)}
+                label={t(($) => $.board.show_column)}
                 className="rounded-full text-muted-foreground"
               >
                 <MoreHorizontal className="size-3.5" />
-              </Button>
+              </IconButton>
             }
           />
           <DropdownMenuContent align="end">

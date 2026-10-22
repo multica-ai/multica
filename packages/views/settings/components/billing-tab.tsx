@@ -48,6 +48,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -1461,13 +1462,13 @@ function BillingTabContent() {
                   <Popover>
                     <PopoverTrigger
                       render={
-                        <Button
+                        <IconButton
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={t(($) => $.workspace.seats.available_help)}
+                          label={t(($) => $.workspace.seats.available_help)}
                         >
                           <Info className="size-3.5" />
-                        </Button>
+                        </IconButton>
                       }
                     />
                     <PopoverContent align="start">

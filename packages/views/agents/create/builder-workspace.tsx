@@ -166,6 +166,7 @@ export function BuilderWorkspace({
   const submit = useCreateAgentSubmit({
     draft,
     runtimeId: selectedRuntime?.id ?? null,
+    runtimeProvider: selectedRuntime?.provider,
     squadId,
     template: "agent_builder",
     // The agent is already committed here, so builder cleanup must never turn

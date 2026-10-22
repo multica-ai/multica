@@ -1254,6 +1254,7 @@
       "children_stage": "{{stage}}단계",
       "pr_checks": "CI 종료",
       "pr_merged": "병합",
+      "pr_conflicts": "병합 충돌 발생",
       "choose_issue": "태스크 선택",
       "pick_issue_title": "지켜볼 태스크",
       "pick_issue_description": "이 태스크가 선택한 상태가 되면 에이전트를 깨웁니다.",
@@ -1309,6 +1310,7 @@
       "children_stage": "{{stage}}단계 하위 태스크가 모두 끝나면",
       "pr_checks": "연결된 PR의 CI가 끝나면",
       "pr_merged": "연결된 PR이 병합되면",
+      "pr_conflicts": "연결된 PR에 병합 충돌이 생기면",
       "other_done": "{{issue}}이(가) 완료되면",
       "other_ended": "{{issue}}이(가) 완료되거나 취소되면",
       "other_in_review": "{{issue}}이(가) 검토 중으로 바뀌면",
@@ -1331,6 +1333,7 @@
       "children_stage": "{{stage}}단계 대기",
       "pr_checks": "CI 대기",
       "pr_merged": "PR 병합 대기",
+      "pr_conflicts": "병합 충돌 감시 중",
       "other_done": "{{issue}} 완료 대기",
       "other_ended": "{{issue}} 종료 대기",
       "other_in_review": "{{issue}} 검토 대기",
@@ -1505,6 +1508,7 @@
       "copy_name": "{{name}} 사본",
       "more": "더 보기",
       "steps_hint": "드래그해 가운데 열의 순서를 바꿉니다. Backlog와 Blocked는 선택 사항입니다. 새 상태는 저장할 때 만들어집니다.",
+      "status_needs_admin": "{{names}}은(는) 새 상태가 됩니다. 상태는 워크스페이스 관리자만 추가할 수 있습니다. 이 열을 제거하거나 먼저 관리자에게 상태 추가를 요청하세요.",
       "reorder": "{{name}} 순서 변경",
       "card_hand_to": "인계 대상",
       "card_then": "완료 후 → {{status}}",
@@ -1534,8 +1538,7 @@
       "step_off": "꺼짐: 이 워크플로는 이 상태를 쓰지 않습니다. 왼쪽 목록에서 켜면 사용할 수 있습니다.",
       "status_new_hint": "새 상태입니다. 저장할 때 상태 라이브러리에 추가됩니다.",
       "no_other_status": "모든 상태가 이미 단계입니다.",
-      "no_handoff_step": "이 단계는 인계하지 않습니다. 들어와도 담당자는 그대로이고 실행도 시작되지 않습니다.",
-      "new_step_handoff": "먼저 워크플로를 저장하세요. 저장한 뒤 새 상태의 인계를 설정할 수 있습니다."
+      "no_handoff_step": "이 단계는 인계하지 않습니다. 들어와도 담당자는 그대로이고 실행도 시작되지 않습니다."
     },
     "mapping": {
       "title": "{{name}}(으)로 태스크 이동",
@@ -1571,6 +1574,7 @@
     },
     "picker": {
       "header": "{{workflow}} · 프로젝트 “{{project}}” 기준",
+      "header_no_project": "{{workflow}} 상태 · 프로젝트 없음",
       "footer": "이 태스크 워크플로의 상태만 표시합니다. 오른쪽은 해당 상태에 들어갈 때의 처리자입니다."
     },
     "confirm": {
@@ -1619,7 +1623,7 @@
       "next_default": "다음 열 ({{status}})",
       "saved": "인계를 저장했습니다",
       "error": "인계를 저장하지 못했습니다",
-      "read_only": "인계는 워크플로에 속하며 워크스페이스 관리자가 변경합니다.",
+      "read_only": "인계는 워크플로에 속하며 워크플로 소유자와 워크스페이스 관리자가 변경합니다.",
       "to": "넘길 대상",
       "members": "멤버",
       "mode_none": "넘기지 않음",

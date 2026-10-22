@@ -221,6 +221,178 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 	}
 }
 
+// watchPR links pr to a new issue carrying a pull_request wakeup rule for
+// event, as a "wake on merge conflict" rule does.
+func watchPR(t *testing.T, pool *pgxpool.Pool, pr db.GithubPullRequest, event string, enabled bool) {
+	t.Helper()
+	ctx := context.Background()
+	var issueID pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO issue (workspace_id,title,creator_type,creator_id)
+		VALUES ($1,'watch','member',gen_random_uuid()) RETURNING id`, pr.WorkspaceID).Scan(&issueID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_wakeup WHERE issue_id=$1`, issueID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE issue_id=$1`, issueID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM issue WHERE id=$1`, issueID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)`, issueID, pr.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_wakeup(id,workspace_id,issue_id,instruction,kind,mode,enabled,condition)
+		VALUES(gen_random_uuid(),$1,$2,'go','event','once',$3,jsonb_build_object('type','pull_request','event',$4::text))`,
+		pr.WorkspaceID, issueID, enabled, event); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A watched address whose fetches keep failing never gets a newer snapshot.
+// The bounded sweep must still move past it to the others.
+func TestConflictWatchSweepRotatesPastFailingAddresses(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+	now := time.Now()
+	const installationID int64 = 7_313_000_002
+	repo := "rotate-" + randHex(t)
+	for number := int32(1); number <= 2; number++ {
+		pr := seedPRAt(t, pool, q, installationID, repo, number, "H")
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID) })
+		if _, err := pool.Exec(ctx, `UPDATE github_pull_request
+			SET snapshot_head_sha=head_sha, snapshot_fetched_at=$2, api_mergeable='MERGEABLE', checks_rollup_state='SUCCESS'
+			WHERE id=$1`, pr.ID, now.Add(time.Duration(number-3)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		watchPR(t, pool, pr, "conflicts", true)
+	}
+
+	m := NewManager(enabledClient(t), q, pool, nil)
+	m.sweepMaxRows = 1
+	seen := map[int32]bool{}
+	// Other packages' fixtures share this database, so allow enough passes
+	// to wrap past them; fetches never run, as if every one failed.
+	for sweep := 0; sweep < 50 && !(seen[1] && seen[2]); sweep++ {
+		m.sweepConflictWatched(ctx)
+		for len(m.queue) > 0 {
+			addr := <-m.queue
+			if addr.InstallationID == installationID && addr.Repo == repo {
+				seen[addr.Number] = true
+			}
+			m.mu.Lock()
+			delete(m.active, addr)
+			m.mu.Unlock()
+		}
+	}
+	if !seen[1] || !seen[2] {
+		t.Fatalf("bounded sweeps visited %v; a failing address starved the rest", seen)
+	}
+}
+
+func TestConflictWatchedGitHubPRQueries(t *testing.T) {
+	pool := testDBPool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+	now := time.Now()
+	const installationID int64 = 7_313_000_001
+	repo := "watch-" + randHex(t)
+
+	seed := func(number int32, state string, fetchedAt time.Time) db.GithubPullRequest {
+		t.Helper()
+		pr := seedPRAt(t, pool, q, installationID, repo, number, fmt.Sprintf("H%d", number))
+		if _, err := pool.Exec(ctx, `UPDATE github_pull_request
+			SET state=$2, snapshot_head_sha=head_sha, snapshot_fetched_at=$3, api_mergeable='MERGEABLE', checks_rollup_state='SUCCESS'
+			WHERE id=$1`, pr.ID, state, fetchedAt); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID) })
+		return pr
+	}
+	watch := func(pr db.GithubPullRequest, event string, enabled bool) {
+		t.Helper()
+		watchPR(t, pool, pr, event, enabled)
+	}
+
+	stale := now.Add(-time.Hour)
+	watched := seed(1, "open", stale)
+	watch(watched, "conflicts", true)
+	draft := seed(2, "draft", stale)
+	watch(draft, "conflicts", true)
+	fresh := seed(3, "open", now)
+	watch(fresh, "conflicts", true)
+	checksOnly := seed(4, "open", stale)
+	watch(checksOnly, "checks_finished", true)
+	disabled := seed(5, "open", stale)
+	watch(disabled, "conflicts", false)
+	closed := seed(6, "closed", stale)
+	watch(closed, "conflicts", true)
+	seed(7, "open", stale)
+
+	rows, err := q.ListStaleConflictWatchedGitHubPRs(ctx, db.ListStaleConflictWatchedGitHubPRsParams{
+		OlderThan: tsFromTime(now.Add(-5 * time.Minute)),
+		MaxRows:   1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var swept []int32
+	for _, r := range rows {
+		if r.InstallationID == installationID && r.RepoName == repo {
+			swept = append(swept, r.PrNumber)
+		}
+	}
+	// Decided snapshots stay in this sweep; only stale, open, watched PRs.
+	if fmt.Sprint(swept) != "[1 2]" && fmt.Sprint(swept) != "[2 1]" {
+		t.Fatalf("watched sweep = %v, want PRs 1 and 2", swept)
+	}
+
+	numbers, err := q.ListConflictWatchedGitHubPRNumbersInRepo(ctx, db.ListConflictWatchedGitHubPRNumbersInRepoParams{
+		InstallationID: installationID, RepoOwner: "o", RepoName: repo, PrNumber: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// After PR 2 merges: every other open watched PR, fresh or not.
+	if fmt.Sprint(numbers) != "[1 3]" {
+		t.Fatalf("watched PRs after a merge = %v, want [1 3]", numbers)
+	}
+	other, err := q.ListConflictWatchedGitHubPRNumbersInRepo(ctx, db.ListConflictWatchedGitHubPRNumbersInRepoParams{
+		InstallationID: installationID, RepoOwner: "o", RepoName: repo + "-other", PrNumber: 0,
+	})
+	if err != nil || len(other) != 0 {
+		t.Fatalf("another repository's merge must not reach these PRs: %v %v", other, err)
+	}
+
+	// Workers are not started, so the queue shows what each trigger enqueued.
+	m := NewManager(enabledClient(t), q, pool, nil)
+	m.mergeDelays = []time.Duration{time.Millisecond, 2 * time.Millisecond}
+	queued := func() []int32 {
+		t.Helper()
+		var got []int32
+		for {
+			select {
+			case addr := <-m.queue:
+				if addr.InstallationID == installationID && addr.Repo == repo {
+					got = append(got, addr.Number)
+				}
+			default:
+				m.mu.Lock()
+				m.active = map[address]bool{}
+				m.mu.Unlock()
+				return got
+			}
+		}
+	}
+	m.RefreshConflictWatchers(ctx, installationID, "o", repo, 2)
+	time.Sleep(50 * time.Millisecond)
+	if got := queued(); fmt.Sprint(got) != "[1 3]" && fmt.Sprint(got) != "[3 1]" {
+		t.Fatalf("merge refreshed %v, want PRs 1 and 3 once each", got)
+	}
+	m.sweepOnce(ctx)
+	if got := queued(); fmt.Sprint(got) != "[1 2]" && fmt.Sprint(got) != "[2 1]" {
+		t.Fatalf("sweep refreshed %v, want stale watched PRs 1 and 2", got)
+	}
+}
+
 // TestApplySnapshotHeadSHAGuard is the acceptance-criterion-1 regression: a slow
 // response for an old head must never overwrite a newer head's snapshot.
 func TestApplySnapshotHeadSHAGuard(t *testing.T) {

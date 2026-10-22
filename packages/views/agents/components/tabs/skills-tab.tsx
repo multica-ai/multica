@@ -31,6 +31,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -211,18 +212,18 @@ export function SkillsTab({
                           })}
                         />
                       )}
-                      <Button
+                      <IconButton
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => handleRemove(skill.id)}
                         disabled={busyId !== null}
-                        aria-label={t(($) => $.tab_body.skills.remove_aria, {
+                        label={t(($) => $.tab_body.skills.remove_aria, {
                           name: skill.name,
                         })}
                         className="text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </IconButton>
                     </>
                   )}
                 </li>

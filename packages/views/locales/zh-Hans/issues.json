@@ -1254,6 +1254,7 @@
       "children_stage": "第 {{stage}} 阶段",
       "pr_checks": "CI 结束",
       "pr_merged": "合并",
+      "pr_conflicts": "出现合并冲突",
       "choose_issue": "选择任务",
       "pick_issue_title": "选择要关注的任务",
       "pick_issue_description": "该任务达到所选状态时唤醒智能体。",
@@ -1309,6 +1310,7 @@
       "children_stage": "当第 {{stage}} 阶段的子任务全部结束时",
       "pr_checks": "当关联 PR 的 CI 结束时",
       "pr_merged": "当关联 PR 合并时",
+      "pr_conflicts": "当关联 PR 出现合并冲突时",
       "other_done": "当 {{issue}} 完成时",
       "other_ended": "当 {{issue}} 完成或取消时",
       "other_in_review": "当 {{issue}} 进入审核中时",
@@ -1331,6 +1333,7 @@
       "children_stage": "等第 {{stage}} 阶段完成",
       "pr_checks": "等 CI 结束",
       "pr_merged": "等 PR 合并",
+      "pr_conflicts": "监视合并冲突",
       "other_done": "等 {{issue}} 完成",
       "other_ended": "等 {{issue}} 结束",
       "other_in_review": "等 {{issue}} 进入审核",
@@ -1505,6 +1508,7 @@
       "copy_name": "{{name}} 副本",
       "more": "更多操作",
       "steps_hint": "拖动调整中间列的顺序。Backlog 和 Blocked 可以关闭。新建的状态会在保存时创建。",
+      "status_needs_admin": "{{names}} 是新的状态。只有工作区管理员可以添加状态：请移除这些列，或请管理员先添加这些状态。",
       "reorder": "调整「{{name}}」的顺序",
       "card_hand_to": "交给",
       "card_then": "完成后 → {{status}}",
@@ -1534,8 +1538,7 @@
       "step_off": "已关闭：这个工作流不使用这个状态。在左侧列表打开开关即可使用。",
       "status_new_hint": "新状态，保存时加入状态库。",
       "no_other_status": "所有状态都已经是步骤了。",
-      "no_handoff_step": "这一步不交接：任务进入时负责人不变，也不会启动运行。",
-      "new_step_handoff": "先保存工作流，新状态保存后就可以设置交接。"
+      "no_handoff_step": "这一步不交接：任务进入时负责人不变，也不会启动运行。"
     },
     "mapping": {
       "title": "将任务移入「{{name}}」",
@@ -1571,6 +1574,7 @@
     },
     "picker": {
       "header": "{{workflow}} · 跟随项目「{{project}}」",
+      "header_no_project": "{{workflow}} 状态 · 无项目",
       "footer": "只显示这个任务所在工作流里的状态。右侧是进入该状态时的处理人。"
     },
     "confirm": {
@@ -1619,7 +1623,7 @@
       "next_default": "下一列（{{status}}）",
       "saved": "交接已保存",
       "error": "无法保存交接",
-      "read_only": "交接属于工作流，由工作区管理员修改。",
+      "read_only": "交接属于工作流，由工作流所有者和工作区管理员修改。",
       "to": "交给谁",
       "members": "成员",
       "mode_none": "不交接",

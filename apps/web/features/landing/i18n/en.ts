@@ -196,7 +196,7 @@ export function createEnDict(
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends.",
+          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agent as a managed remote runtime for issue runs, using a QCA PAT and an existing QCA agent.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -522,6 +522,30 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.6.5",
+        date: "2026-10-21",
+        title: "Clearer statuses for Issues outside projects, private CA repo sync, lighter background tabs, and steadier runs",
+        changes: [],
+        features: [
+          "Issues outside a project list only the Default workflow's statuses by default; search still finds every status.",
+        ],
+        improvements: [
+          "Background browser tabs stop refreshing the unread count until you return; the desktop badge keeps updating when minimized.",
+        ],
+        fixes: [
+          "A new workflow step can get its handler and instruction right away, before you save.",
+          "The project sidebar shows the workflow name, with the handoff count on hover.",
+          "A private CA set on a self-hosted server is trusted when the daemon syncs repos, and failed syncs show the exact error.",
+          "Self-hosted Forgejo, Gitea, and GitLab PRs wake agents when checks finish or the PR merges.",
+          "A wakeup rule stops showing an old error once a later check goes through.",
+          "The desktop tab bar's right-click menu and buttons follow your language.",
+          "Copilot starts even with very long context.",
+          "OpenCode 2.x lets you pick a thinking level again.",
+          "Codex runs on the default model now show an estimated cost.",
+          "Scrolling to the bottom of an Issue no longer pushes the page up or leaves a blank gap.",
+        ],
+      },
       {
         version: "0.6.4",
         date: "2026-10-20",

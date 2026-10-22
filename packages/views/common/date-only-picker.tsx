@@ -14,6 +14,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 import { DeferredPopup } from "./deferred-popup";
 import { useLocale } from "../i18n";
 
@@ -41,6 +42,8 @@ interface DateOnlyPickerProps {
   trigger?: React.ReactNode;
   /** Custom trigger element (e.g. a pill button). */
   triggerRender?: React.ReactElement<Record<string, unknown>>;
+  /** Hover tooltip naming the field; hidden while the popover is open. */
+  tooltip?: React.ReactNode;
   /** Controlled open state — lets a ⋯ overflow menu reveal + open the pill. */
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
@@ -76,6 +79,7 @@ export function DateOnlyPicker(props: DateOnlyPickerProps) {
       trigger={props.trigger ?? <DateTriggerContent {...props} />}
       triggerRender={props.triggerRender}
       triggerClassName={DATE_TRIGGER_CLASS}
+      tooltip={props.tooltip}
     >
       {(open, onOpenChange) => (
         <DateOnlyPickerImpl {...props} open={open} onOpenChange={onOpenChange} />
@@ -117,6 +121,7 @@ function DateOnlyPickerImpl({
   highlightOverdue = false,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align = "start",
@@ -127,21 +132,29 @@ function DateOnlyPickerImpl({
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const date = dateOnlyToLocalDate(value);
 
+  const popoverTrigger = (
+    <PopoverTrigger
+      className={triggerRender ? undefined : DATE_TRIGGER_CLASS}
+      render={triggerRender}
+    >
+      {customTrigger ?? (
+        <DateTriggerContent
+          value={value}
+          icon={icon}
+          placeholder={placeholder}
+          highlightOverdue={highlightOverdue}
+        />
+      )}
+    </PopoverTrigger>
+  );
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        className={triggerRender ? undefined : DATE_TRIGGER_CLASS}
-        render={triggerRender}
-      >
-        {customTrigger ?? (
-          <DateTriggerContent
-            value={value}
-            icon={icon}
-            placeholder={placeholder}
-            highlightOverdue={highlightOverdue}
-          />
-        )}
-      </PopoverTrigger>
+      {tooltip == null ? (
+        popoverTrigger
+      ) : (
+        <DeferredTooltip trigger={popoverTrigger} content={tooltip} />
+      )}
       <PopoverContent className="w-auto p-0" align={align}>
         {/* Empty value first, above the calendar — the same position every
             list-backed picker puts it in, so clearing a field is always the

@@ -197,7 +197,7 @@ export function createKoDict(
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다. 셀프 호스팅에서는 QCA PAT와 기존 QCA 에이전트를 사용하여 태스크 실행용 관리형 원격 런타임으로 Qoder Cloud Agent를 설정할 수 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -278,6 +278,30 @@ export function createKoDict(
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.6.5",
+          date: "2026-10-21",
+          title: "프로젝트 밖 Issue 상태 정리, 비공개 CA로 저장소 동기화, 백그라운드 부담 감소, 더 안정적인 실행",
+          changes: [],
+          features: [
+            "프로젝트에 속하지 않은 Issue의 상태 선택에는 기본으로 Default 워크플로의 상태만 보이고, 검색하면 모든 상태를 고를 수 있습니다.",
+          ],
+          improvements: [
+            "백그라운드 탭에서는 읽지 않은 수를 갱신하지 않고 돌아오면 가져옵니다. 데스크톱 앱은 최소화해도 배지가 계속 갱신됩니다.",
+          ],
+          fixes: [
+            "새로 추가한 워크플로 단계도 저장하기 전에 처리자와 지시를 정할 수 있습니다.",
+            "프로젝트 사이드바에 워크플로 이름이 보이고, 인계 수는 마우스를 올리면 보입니다.",
+            "셀프 호스팅 서버에 설정한 비공개 CA를 데몬도 저장소 동기화에 신뢰하고, 동기화가 실패하면 구체적인 원인을 보여 줍니다.",
+            "셀프 호스팅 Forgejo, Gitea, GitLab에서도 PR 체크 완료나 병합으로 에이전트를 깨울 수 있습니다.",
+            "재개 규칙의 이후 확인이 정상적으로 끝나면 이전 오류가 계속 남지 않습니다.",
+            "데스크톱 앱의 탭 바 오른쪽 클릭 메뉴와 버튼이 표시 언어를 따릅니다.",
+            "Copilot이 긴 컨텍스트에서도 시작됩니다.",
+            "OpenCode 2.x에서 다시 사고 수준을 고를 수 있습니다.",
+            "Codex를 기본 모델로 실행해도 예상 비용이 표시됩니다.",
+            "Issue 상세를 맨 아래까지 스크롤해도 페이지가 밀려 올라가거나 빈 공간이 남지 않습니다.",
+          ],
+        },
         {
           version: "0.6.4",
           date: "2026-10-20",

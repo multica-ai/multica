@@ -6,6 +6,7 @@ import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useLocale, useT, useTimeAgo } from "../../../i18n";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { formatBytes } from "../../../common/format-bytes";
@@ -233,15 +234,16 @@ function OverviewBody({
           <SegmentedToggle value={filter} options={filterOptions} onChange={setFilter} />
         </div>
         <div className="flex items-center justify-self-end" style={NO_DRAG}>
-          <button
-            type="button"
-            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            title={t(($) => $.deliverables.overview_close)}
-            aria-label={t(($) => $.deliverables.overview_close)}
-            onClick={onClose}
-          >
-            <X className="size-4" />
-          </button>
+          <TooltipHint label={t(($) => $.deliverables.overview_close)} side="bottom">
+            <button
+              type="button"
+              className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              aria-label={t(($) => $.deliverables.overview_close)}
+              onClick={onClose}
+            >
+              <X className="size-4" />
+            </button>
+          </TooltipHint>
         </div>
       </header>
 

@@ -1254,6 +1254,7 @@
       "children_stage": "ステージ {{stage}}",
       "pr_checks": "CI 終了",
       "pr_merged": "マージ",
+      "pr_conflicts": "マージコンフリクト発生",
       "choose_issue": "タスクを選択",
       "pick_issue_title": "見守るタスク",
       "pick_issue_description": "このタスクが選んだ状態になったらエージェントを起こします。",
@@ -1309,6 +1310,7 @@
       "children_stage": "ステージ {{stage}} のサブタスクがすべて終わったとき",
       "pr_checks": "関連 PR の CI が終わったとき",
       "pr_merged": "関連 PR がマージされたとき",
+      "pr_conflicts": "関連 PR にマージコンフリクトが発生したとき",
       "other_done": "{{issue}} が完了したとき",
       "other_ended": "{{issue}} が完了またはキャンセルされたとき",
       "other_in_review": "{{issue}} がレビュー中になったとき",
@@ -1331,6 +1333,7 @@
       "children_stage": "ステージ {{stage}} 待ち",
       "pr_checks": "CI 待ち",
       "pr_merged": "PR のマージ待ち",
+      "pr_conflicts": "マージコンフリクトを監視中",
       "other_done": "{{issue}} の完了待ち",
       "other_ended": "{{issue}} の終了待ち",
       "other_in_review": "{{issue}} のレビュー待ち",
@@ -1505,6 +1508,7 @@
       "copy_name": "{{name}} のコピー",
       "more": "その他の操作",
       "steps_hint": "ドラッグで中間の列を並べ替えます。Backlog と Blocked は任意です。新しいステータスは保存時に作成されます。",
+      "status_needs_admin": "{{names}} は新しいステータスになります。ステータスを追加できるのはワークスペース管理者のみです。これらの列を削除するか、先に管理者にステータスの追加を依頼してください。",
       "reorder": "「{{name}}」を並べ替え",
       "card_hand_to": "引き継ぎ先",
       "card_then": "完了後 → {{status}}",
@@ -1534,8 +1538,7 @@
       "step_off": "オフ：このワークフローはこのステータスを使いません。左のリストでオンにすると使えます。",
       "status_new_hint": "新しいステータスです。保存時にステータスライブラリに追加されます。",
       "no_other_status": "すべてのステータスがすでにステップです。",
-      "no_handoff_step": "このステップは引き継ぎません。入っても担当者は変わらず、実行も始まりません。",
-      "new_step_handoff": "先にワークフローを保存してください。保存後に新しいステータスの引き継ぎを設定できます。"
+      "no_handoff_step": "このステップは引き継ぎません。入っても担当者は変わらず、実行も始まりません。"
     },
     "mapping": {
       "title": "タスクを「{{name}}」に移動",
@@ -1571,6 +1574,7 @@
     },
     "picker": {
       "header": "{{workflow}} · プロジェクト「{{project}}」に従う",
+      "header_no_project": "{{workflow}} のステータス · プロジェクトなし",
       "footer": "このタスクのワークフローのステータスだけを表示しています。右側はそのステータスに入ったときの引き継ぎ先です。"
     },
     "confirm": {
@@ -1619,7 +1623,7 @@
       "next_default": "次の列（{{status}}）",
       "saved": "引き継ぎを保存しました",
       "error": "引き継ぎを保存できませんでした",
-      "read_only": "引き継ぎはワークフローに属し、ワークスペース管理者が変更します。",
+      "read_only": "引き継ぎはワークフローに属し、ワークフローのオーナーとワークスペース管理者が変更します。",
       "to": "引き継ぎ先",
       "members": "メンバー",
       "mode_none": "引き継がない",

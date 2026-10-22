@@ -1463,6 +1463,7 @@ function SwimLaneViewImpl({
                       DeferredPopup. */}
                   <DeferredPopup
                     ariaHasPopup="menu"
+                    tooltip={t(($) => $.board.hide_column)}
                     triggerRender={
                       <Button
                         type="button"
@@ -1477,17 +1478,22 @@ function SwimLaneViewImpl({
                   >
                     {(open, onOpenChange) => (
                       <DropdownMenu open={open} onOpenChange={onOpenChange}>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={t(($) => $.board.hide_column)}
-                              className="rounded-full text-muted-foreground"
-                            >
-                              <MoreHorizontal className="size-3.5" />
-                            </Button>
+                        <DeferredTooltip
+                          content={t(($) => $.board.hide_column)}
+                          trigger={
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={t(($) => $.board.hide_column)}
+                                  className="rounded-full text-muted-foreground"
+                                >
+                                  <MoreHorizontal className="size-3.5" />
+                                </Button>
+                              }
+                            />
                           }
                         />
                         <DropdownMenuContent align="end">

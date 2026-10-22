@@ -197,7 +197,7 @@ export function createJaDict(
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の27種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の27種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。ソースコードが公開されているので、独自のバックエンドを追加することもできます。 セルフホストでは、QCA PAT と既存の QCA エージェントを使い、タスク実行用のマネージドリモートランタイムとして Qoder Cloud Agent を設定できます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -279,6 +279,30 @@ export function createJaDict(
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.6.5",
+          date: "2026-10-21",
+          title: "プロジェクト外の Issue のステータス整理、プライベート CA でのリポジトリ同期、バックグラウンドの負荷軽減、より安定した実行",
+          changes: [],
+          features: [
+            "プロジェクトに属さない Issue のステータス選択には、既定で Default ワークフローのステータスだけが並び、検索ではすべてのステータスを選べます。",
+          ],
+          improvements: [
+            "バックグラウンドのタブでは未読数を更新せず、戻ったときに取得します。デスクトップ版は最小化中もバッジが更新されます。",
+          ],
+          fixes: [
+            "新しく追加したワークフローのステップも、保存前に処理者と指示を設定できます。",
+            "プロジェクトのサイドバーにワークフロー名が表示され、引き継ぎの数はホバーで分かります。",
+            "セルフホストのサーバーに設定したプライベート CA を、デーモンもリポジトリの同期で信頼し、同期に失敗すると具体的な原因を表示します。",
+            "セルフホストの Forgejo、Gitea、GitLab でも、PR のチェック完了やマージでエージェントを起動できます。",
+            "再開ルールで、その後のチェックが正常に終われば、以前のエラーが残り続けません。",
+            "デスクトップ版のタブバーの右クリックメニューとボタンが、表示言語に合わせて表示されます。",
+            "Copilot は長いコンテキストでも起動できます。",
+            "OpenCode 2.x で再び思考レベルを選べます。",
+            "Codex を既定のモデルで実行しても、費用の見積もりが表示されます。",
+            "Issue の詳細を一番下までスクロールしても、ページが押し上げられたり余白が残ったりしません。",
+          ],
+        },
         {
           version: "0.6.4",
           date: "2026-10-20",
