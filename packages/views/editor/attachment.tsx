@@ -41,6 +41,7 @@ import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
 import { usePreviewSequence } from "./preview-sequence-context";
@@ -503,19 +504,39 @@ function ImageAttachmentView({
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={onView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
-            </button>
-            <button type="button" onClick={onDownload} title={t(($) => $.image.download)}>
-              <Download className="size-3.5" />
-            </button>
-            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
-              <LinkIcon className="size-3.5" />
-            </button>
+            <DeferredTooltip
+              content={t(($) => $.image.view)}
+              trigger={
+                <button type="button" onClick={onView} aria-label={t(($) => $.image.view)}>
+                  <Maximize2 className="size-3.5" />
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={t(($) => $.image.download)}
+              trigger={
+                <button type="button" onClick={onDownload} aria-label={t(($) => $.image.download)}>
+                  <Download className="size-3.5" />
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={t(($) => $.image.copy_link)}
+              trigger={
+                <button type="button" onClick={handleCopyLink} aria-label={t(($) => $.image.copy_link)}>
+                  <LinkIcon className="size-3.5" />
+                </button>
+              }
+            />
             {editable && onDelete && (
-              <button type="button" onClick={onDelete} title={t(($) => $.image.delete)}>
-                <Trash2 className="size-3.5" />
-              </button>
+              <DeferredTooltip
+                content={t(($) => $.image.delete)}
+                trigger={
+                  <button type="button" onClick={onDelete} aria-label={t(($) => $.image.delete)}>
+                    <Trash2 className="size-3.5" />
+                  </button>
+                }
+              />
             )}
           </span>
         )}

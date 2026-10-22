@@ -74,6 +74,7 @@ import {
   pendingRuntimeCommandName,
 } from "./pending-runtime";
 import { useT, useTimeAgo } from "../../i18n";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
 // pieces are taken À LA CARTE here: subgrid template + var-width tracks +
@@ -581,15 +582,20 @@ export function RuntimeRowMenu({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.list.row_actions_aria)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.list.row_actions_aria)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.list.row_actions_aria)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-40">

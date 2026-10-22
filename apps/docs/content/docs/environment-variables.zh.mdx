@@ -113,6 +113,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `ALLOWED_EMAILS` | 空 | 允许注册的完整邮箱，逗号分隔 |
 | `ALLOWED_EMAIL_DOMAINS` | 空 | 允许注册的邮箱域名，逗号分隔 |
 | `DISABLE_WORKSPACE_CREATION` | `false` | 禁止所有用户新建工作区；没有 owner/admin 例外 |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | 空 | 允许新建工作区的完整邮箱地址，逗号分隔。设置后其他用户新建会返回 403。`DISABLE_WORKSPACE_CREATION=true` 优先。不授予访问其他工作区的权限 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | 非 production 环境使用的固定 6 位测试验证码 |
 
 白名单的准确判断顺序见[登录与注册](/auth-setup#注册范围控制)。

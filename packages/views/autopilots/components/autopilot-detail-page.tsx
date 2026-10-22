@@ -27,6 +27,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -326,15 +327,15 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
   // trash icon visually floats above the URL action buttons because the
   // outer flex uses `items-start`.
   const deleteButton = canWrite ? (
-    <Button
+    <IconButton
       size="icon"
       variant="ghost"
       className="h-7 w-7 shrink-0"
       onClick={() => setConfirmOpen(true)}
-      title={t(($) => $.trigger_row.delete_dialog.confirm)}
+      label={t(($) => $.trigger_row.delete_dialog.confirm)}
     >
       <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-    </Button>
+    </IconButton>
   ) : null;
 
   // Schedule rows only: cron and timezone are the fields this dialog edits, and
@@ -343,15 +344,15 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
   // an autopilot with two schedules has no editable schedule at all (MUL-7478).
   const editButton =
     canWrite && trigger.kind === "schedule" ? (
-      <Button
+      <IconButton
         size="icon"
         variant="ghost"
         className="h-7 w-7 shrink-0"
         onClick={() => setEditOpen(true)}
-        title={t(($) => $.trigger_row.edit_schedule)}
+        label={t(($) => $.trigger_row.edit_schedule)}
       >
         <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-      </Button>
+      </IconButton>
     ) : null;
 
   return (
@@ -413,16 +414,16 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
               actions={
                 <>
                   {canWrite && (
-                    <Button
+                    <IconButton
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7 shrink-0"
                       onClick={() => setRotateOpen(true)}
-                      title={t(($) => $.trigger_row.rotate_url)}
+                      label={t(($) => $.trigger_row.rotate_url)}
                       disabled={rotateToken.isPending}
                     >
                       <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
-                    </Button>
+                    </IconButton>
                   )}
                   {deleteButton}
                 </>

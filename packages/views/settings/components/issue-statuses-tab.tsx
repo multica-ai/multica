@@ -61,6 +61,8 @@ import type {
 } from "@multica/core/types";
 import { ISSUE_STATUS_ICONS } from "@multica/core/types/issue-status";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label as FieldLabel } from "@multica/ui/components/ui/label";
@@ -493,16 +495,18 @@ function StatusRow({
       className={`group/row relative flex min-h-12 items-center gap-2 bg-card py-2 pl-2 pr-4 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
     >
       {canReorder ? (
-        <button
-          type="button"
-          disabled={isReordering}
-          aria-label={t(($) => $.issue_statuses.actions.reorder, { name: label })}
-          className="flex size-6 shrink-0 touch-none items-center justify-center rounded-md cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-4" />
-        </button>
+        <TooltipHint label={t(($) => $.issue_statuses.actions.reorder, { name: label })}>
+          <button
+            type="button"
+            disabled={isReordering}
+            aria-label={t(($) => $.issue_statuses.actions.reorder, { name: label })}
+            className="flex size-6 shrink-0 touch-none items-center justify-center rounded-md cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-4" />
+          </button>
+        </TooltipHint>
       ) : <span className="size-6 shrink-0 [@media(pointer:coarse)]:size-11" />}
       <StatusIcon
         status={entry.key}
@@ -563,14 +567,14 @@ function StatusRow({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => $.issue_statuses.actions.open, { name: label })}
+                label={t(($) => $.issue_statuses.actions.open, { name: label })}
                 className="shrink-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 data-popup-open:opacity-100 [@media(hover:hover)]:opacity-0 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100"
               >
                 <MoreHorizontal className="size-4" />
-              </Button>
+              </IconButton>
             }
           />
           <DropdownMenuContent align="end">
@@ -822,24 +826,24 @@ function StatusEditorDialog({
               </legend>
               <div className="flex flex-wrap gap-2">
                 {(["", ...ISSUE_STATUS_ICONS] as const).map((icon) => (
-                  <Button
-                    key={icon}
-                    type="button"
-                    variant={draft.icon === icon ? "secondary" : "outline"}
-                    size={icon ? "icon" : "default"}
-                    className={`${icon ? "size-11" : "h-11"} aria-pressed:ring-2 aria-pressed:ring-ring`}
-                    aria-label={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
-                    aria-pressed={draft.icon === icon}
-                    title={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
-                    onClick={() => {
-                      setIconChanged(true);
-                      setDraft((current) => ({ ...current, icon }));
-                    }}
-                  >
-                    {icon
-                      ? <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
-                      : t(($) => $.issue_statuses.editor.icon_shapes.default)}
-                  </Button>
+                  <TooltipHint key={icon} label={icon ? t(($) => $.issue_statuses.editor.icon_shapes[icon]) : undefined}>
+                    <Button
+                      type="button"
+                      variant={draft.icon === icon ? "secondary" : "outline"}
+                      size={icon ? "icon" : "default"}
+                      className={`${icon ? "size-11" : "h-11"} aria-pressed:ring-2 aria-pressed:ring-ring`}
+                      aria-label={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
+                      aria-pressed={draft.icon === icon}
+                      onClick={() => {
+                        setIconChanged(true);
+                        setDraft((current) => ({ ...current, icon }));
+                      }}
+                    >
+                      {icon
+                        ? <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
+                        : t(($) => $.issue_statuses.editor.icon_shapes.default)}
+                    </Button>
+                  </TooltipHint>
                 ))}
               </div>
             </fieldset>

@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -60,17 +60,16 @@ export function ChatAddMenu({
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button
+            <IconButton
               type="button"
               variant="ghost"
               size="icon-sm"
               disabled={disabled}
-              aria-label={t(($) => $.input.add_tooltip)}
-              title={t(($) => $.input.add_tooltip)}
+              label={t(($) => $.input.add_tooltip)}
               className="rounded-full text-muted-foreground"
             >
               <Plus />
-            </Button>
+            </IconButton>
           }
         />
         <DropdownMenuContent align="start" side="top" sideOffset={6}>

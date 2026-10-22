@@ -35,6 +35,7 @@ import { Check, Copy, Maximize2, RotateCcw } from "lucide-react";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import { RichTableDialog } from "./rich-table-dialog";
 import {
   columnWidthKey,
@@ -406,24 +407,32 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
             {t(($) => $.table.reset_widths)}
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          className={cn(toolbarButton, "w-6")}
-          title={t(($) => $.table.expand)}
-          aria-label={t(($) => $.table.expand)}
-        >
-          <Maximize2 className="size-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={copyMarkdown}
-          className={cn(toolbarButton, "w-6")}
-          title={copied ? t(($) => $.table.copied) : t(($) => $.table.copy_markdown)}
-          aria-label={t(($) => $.table.copy_markdown)}
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </button>
+        <DeferredTooltip
+          content={t(($) => $.table.expand)}
+          trigger={
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className={cn(toolbarButton, "w-6")}
+              aria-label={t(($) => $.table.expand)}
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          }
+        />
+        <DeferredTooltip
+          content={copied ? t(($) => $.table.copied) : t(($) => $.table.copy_markdown)}
+          trigger={
+            <button
+              type="button"
+              onClick={copyMarkdown}
+              className={cn(toolbarButton, "w-6")}
+              aria-label={t(($) => $.table.copy_markdown)}
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            </button>
+          }
+        />
       </div>
       <div className="relative">
         <div ref={wrapperRef} className="tableWrapper">

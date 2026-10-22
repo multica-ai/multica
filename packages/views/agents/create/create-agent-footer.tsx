@@ -65,7 +65,7 @@ export function CreateAgentFooter({
           ? t(($) => $.creation_studio.creating)
           : squad
             ? t(($) => $.creation_studio.create_and_add)
-            : t(($) => $.creation_studio.create_and_open)}
+            : t(($) => $.creation_studio.create_agent)}
       </Button>
     </div>
   );

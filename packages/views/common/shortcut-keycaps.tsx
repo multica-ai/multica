@@ -17,6 +17,8 @@ import {
 import {
   formatShortcut,
   getShortcutPlatform,
+  useShortcut,
+  type ShortcutActionId,
   type ShortcutChord,
   type ShortcutPlatform,
 } from "@multica/core/shortcuts";
@@ -123,4 +125,13 @@ export function ShortcutKeycaps({
       ))}
     </span>
   );
+}
+
+/**
+ * Decorative keycaps for a registered action's current binding, for a tooltip
+ * whose text already names the action. Renders nothing when it is unbound.
+ */
+export function ActionShortcutKeycaps({ action }: { action: ShortcutActionId }) {
+  const shortcut = useShortcut(action);
+  return shortcut ? <ShortcutKeycaps shortcut={shortcut} decorative /> : null;
 }

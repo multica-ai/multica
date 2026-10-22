@@ -186,6 +186,168 @@ func TestWakeupConditionRepeatsOnlyWhenItBecomesTrueAgain(t *testing.T) {
 	}
 }
 
+func TestWakeupConditionPRConflictsWakesOnEachNewConflict(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	s.Tasks.PRSnapshotsEnabled = true
+	pr := f.Insert(t, "github_pull_request", testutil.Cols{
+		"workspace_id": f.WorkspaceID, "installation_id": 1,
+		"repo_owner": "fixture", "repo_name": "conflicts", "pr_number": 7,
+		"title": "PR", "state": "open", "html_url": "https://example.test/pr/7",
+		"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+		"head_sha": "a", "snapshot_head_sha": "a", "api_mergeable": "MERGEABLE",
+	})
+	f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+	f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", Instruction: "Resolve the conflict",
+		Condition: condition(t, map[string]any{"type": "pull_request", "event": "conflicts"})})
+	finishRuns := func() {
+		f.Exec(t, "UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE context->>'wakeup_id'=$1 AND status<>'completed'", util.UUIDToString(w.ID))
+	}
+	snapshot := func(head, snapshotHead, mergeable string) db.IssueWakeup {
+		t.Helper()
+		f.Exec(t, "UPDATE github_pull_request SET head_sha=$2,snapshot_head_sha=$3,api_mergeable=$4 WHERE id=$1", pr, head, snapshotHead, mergeable)
+		return wakeTick(t, f, s, w.ID)
+	}
+	expectRuns := func(want int, step string) {
+		t.Helper()
+		if n := wakeRuns(t, f, w.ID); n != want {
+			t.Fatalf("%s: %d runs, want %d", step, n, want)
+		}
+	}
+
+	snapshot("a", "a", "MERGEABLE")
+	expectRuns(0, "mergeable")
+	got := snapshot("a", "a", "CONFLICTING")
+	expectRuns(1, "conflict")
+	task, err := f.q.GetAgentTask(context.Background(), got.LastTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(task.HandoffNote.String, `"mergeable":"conflicting"`) || !strings.Contains(task.HandoffNote.String, `"head_sha":"a"`) {
+		t.Fatalf("conflict facts missing from the run: %s", task.HandoffNote.String)
+	}
+	finishRuns()
+	// GitHub recomputing after another base move is not a new conflict.
+	snapshot("a", "a", "UNKNOWN")
+	snapshot("a", "a", "CONFLICTING")
+	expectRuns(1, "recompute")
+	// The agent pushed a fix; until the new head is fetched the old verdict
+	// does not count, and the pending snapshot is visible on the rule.
+	got = snapshot("b", "a", "CONFLICTING")
+	expectRuns(1, "pushed head awaiting a snapshot")
+	if !got.LastError.Valid || got.LastError.String != conditionDiagnosticPrefix+errPRSnapshotPending.Error() {
+		t.Fatalf("pending snapshot diagnostic = %+v", got.LastError)
+	}
+	snapshot("b", "b", "MERGEABLE")
+	expectRuns(1, "resolved")
+	got = snapshot("b", "b", "CONFLICTING")
+	expectRuns(2, "conflict again")
+	if !got.Enabled || got.FireCount != 2 || got.LastError.Valid {
+		t.Fatalf("continuous rule after two conflicts: enabled=%t fire_count=%d error=%+v", got.Enabled, got.FireCount, got.LastError)
+	}
+	finishRuns()
+	f.Exec(t, "UPDATE github_pull_request SET state='merged' WHERE id=$1", pr)
+	wakeTick(t, f, s, w.ID)
+	expectRuns(2, "merged PR")
+}
+
+func TestWakeupConditionPRConflictsAcrossSeveralPRs(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		sameNumber bool
+		wantRuns   int
+	}{
+		{"resolving one PR does not re-wake for the other", false, 1},
+		{"PRs in different repositories keep distinct identities", true, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, s, issue, agent := conditionFixture(t)
+			s.Tasks.PRSnapshotsEnabled = true
+			insertPR := func(repo string, number int, mergeable string) string {
+				pr := f.Insert(t, "github_pull_request", testutil.Cols{
+					"workspace_id": f.WorkspaceID, "installation_id": 1,
+					"repo_owner": "fixture", "repo_name": repo, "pr_number": number,
+					"title": "PR", "state": "open", "html_url": "https://example.test/" + repo,
+					"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+					"head_sha": "shared-head", "snapshot_head_sha": "shared-head", "api_mergeable": mergeable,
+				})
+				f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+				f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+				return pr
+			}
+			a := insertPR("repo-a", 1, "CONFLICTING")
+			bNumber, bMergeable := 2, "CONFLICTING"
+			if tc.sameNumber {
+				// A fork's PR can share both the number and the head commit.
+				bNumber, bMergeable = 1, "MERGEABLE"
+			}
+			b := insertPR("repo-b", bNumber, bMergeable)
+			w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", Instruction: "Resolve conflicts",
+				Condition: condition(t, map[string]any{"type": "pull_request", "event": "conflicts"})})
+			wakeTick(t, f, s, w.ID)
+			if n := wakeRuns(t, f, w.ID); n != 1 {
+				t.Fatalf("initial conflict runs = %d, want 1", n)
+			}
+			f.Exec(t, "UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE context->>'wakeup_id'=$1", util.UUIDToString(w.ID))
+			f.Exec(t, "UPDATE github_pull_request SET api_mergeable='MERGEABLE' WHERE id=$1", a)
+			if tc.sameNumber {
+				f.Exec(t, "UPDATE github_pull_request SET api_mergeable='CONFLICTING' WHERE id=$1", b)
+			}
+			wakeTick(t, f, s, w.ID)
+			if n := wakeRuns(t, f, w.ID); n != tc.wantRuns {
+				t.Fatalf("after the conflict moved runs = %d, want %d", n, tc.wantRuns)
+			}
+		})
+	}
+}
+
+// Checks and merged keys carry only the PR number, so same-numbered PRs from
+// two repositories share a key. The second one satisfying still wakes.
+func TestWakeupConditionPRSharedNumberWakesForEachPR(t *testing.T) {
+	for _, event := range []string{"merged", "checks_finished"} {
+		t.Run(event, func(t *testing.T) {
+			f, s, issue, agent := conditionFixture(t)
+			s.Tasks.PRSnapshotsEnabled = true
+			insertPR := func(repo string) string {
+				pr := f.Insert(t, "github_pull_request", testutil.Cols{
+					"workspace_id": f.WorkspaceID, "installation_id": 1,
+					"repo_owner": "fixture", "repo_name": repo, "pr_number": 7,
+					"title": "PR", "state": "open", "html_url": "https://example.test/" + repo,
+					"pr_created_at": "2026-01-01T00:00:00Z", "pr_updated_at": "2026-01-01T00:00:00Z",
+					"head_sha": "shared-head", "snapshot_head_sha": "shared-head", "checks_rollup_state": "PENDING",
+				})
+				f.Cleanup(t, "DELETE FROM issue_pull_request WHERE pull_request_id=$1", pr)
+				f.Exec(t, "INSERT INTO issue_pull_request(issue_id,pull_request_id) VALUES($1,$2)", issue, pr)
+				return pr
+			}
+			a, b := insertPR("repo-a"), insertPR("repo-b")
+			w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous", Instruction: "Follow each pull request",
+				Condition: condition(t, map[string]any{"type": "pull_request", "event": event})})
+			wakeTick(t, f, s, w.ID)
+			if n := wakeRuns(t, f, w.ID); n != 0 {
+				t.Fatalf("before either PR satisfies: %d runs, want 0", n)
+			}
+			satisfy := func(pr string) {
+				if event == "merged" {
+					f.Exec(t, "UPDATE github_pull_request SET state='merged' WHERE id=$1", pr)
+				} else {
+					f.Exec(t, "UPDATE github_pull_request SET checks_rollup_state='SUCCESS' WHERE id=$1", pr)
+				}
+				wakeTick(t, f, s, w.ID)
+			}
+			satisfy(a)
+			if n := wakeRuns(t, f, w.ID); n != 1 {
+				t.Fatalf("after the first PR: %d runs, want 1", n)
+			}
+			f.Exec(t, "UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE context->>'wakeup_id'=$1", util.UUIDToString(w.ID))
+			satisfy(b)
+			if n := wakeRuns(t, f, w.ID); n != 2 {
+				t.Fatalf("after the second PR: %d runs, want 2", n)
+			}
+		})
+	}
+}
+
 func TestWakeupConditionChildrenAndOtherIssue(t *testing.T) {
 	f, s, issue, agent := conditionFixture(t)
 	first := f.Issue(t, "Stage 1 child", testutil.Cols{"parent_issue_id": issue, "status": "todo", "stage": 1})

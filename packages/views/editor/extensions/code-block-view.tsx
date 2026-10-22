@@ -4,7 +4,8 @@ import { useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Code as CodeIcon, Copy, Check, Eye, Maximize2 } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { HtmlPreviewSurface } from "../html-preview-surface";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -104,54 +105,57 @@ function CodeBlockView({ node }: NodeViewProps) {
           </span>
         )}
         {isHtml && (
-          <button
-            type="button"
-            onClick={toggleView}
-            className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            title={
-              view === "preview"
-                ? t(($) => $.code_block.show_source)
-                : t(($) => $.code_block.show_preview)
-            }
-            aria-label={
+          <TooltipHint
+            label={
               view === "preview"
                 ? t(($) => $.code_block.show_source)
                 : t(($) => $.code_block.show_preview)
             }
           >
-            {view === "preview" ? (
-              <CodeIcon className="h-3.5 w-3.5" />
-            ) : (
-              <Eye className="h-3.5 w-3.5" />
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={toggleView}
+              className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              aria-label={
+                view === "preview"
+                  ? t(($) => $.code_block.show_source)
+                  : t(($) => $.code_block.show_preview)
+              }
+            >
+              {view === "preview" ? (
+                <CodeIcon className="h-3.5 w-3.5" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </TooltipHint>
         )}
         {isHtml && (
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
-            title={t(($) => $.code_block.fullscreen)}
-            aria-label={t(($) => $.code_block.fullscreen)}
+            label={t(($) => $.code_block.fullscreen)}
             onClick={() => setFullscreen(true)}
           >
             <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
+          </IconButton>
         )}
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title={t(($) => $.code_block.copy_code)}
-          aria-label={t(($) => $.code_block.copy_code)}
-        >
-          {copied ? (
-            <Check className="h-3.5 w-3.5" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
-        </button>
+        <TooltipHint label={t(($) => $.code_block.copy_code)}>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label={t(($) => $.code_block.copy_code)}
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </TooltipHint>
       </div>
       {/* `<pre>` + NodeViewContent must remain mounted so the user can keep
           editing the code block contents. When the HTML preview is showing

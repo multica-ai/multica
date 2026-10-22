@@ -56,6 +56,8 @@ import type {
   IssueWorkflowStepInput,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -471,9 +473,9 @@ export function WorkflowEditorPage({
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
-                      <Button variant="ghost" size="icon" aria-label={t(($) => $.workflows.editor.more)}>
+                      <IconButton variant="ghost" size="icon" label={t(($) => $.workflows.editor.more)} tooltipSide="bottom">
                         <MoreHorizontal className="size-4" />
-                      </Button>
+                      </IconButton>
                     }
                   />
                   <DropdownMenuContent align="end" className="w-56">
@@ -719,14 +721,16 @@ function StepCard({
       )}
     >
       {sortable?.handle ? (
-        <button
-          type="button"
-          aria-label={t(($) => $.workflows.editor.reorder, { name: label })}
-          className="flex h-5 w-4 shrink-0 touch-none items-center justify-center rounded-xs cursor-grab text-muted-foreground active:cursor-grabbing"
-          {...sortable.handle}
-        >
-          <GripVertical className="size-3.5" />
-        </button>
+        <TooltipHint label={t(($) => $.workflows.editor.reorder, { name: label })}>
+          <button
+            type="button"
+            aria-label={t(($) => $.workflows.editor.reorder, { name: label })}
+            className="flex h-5 w-4 shrink-0 touch-none items-center justify-center rounded-xs cursor-grab text-muted-foreground active:cursor-grabbing"
+            {...sortable.handle}
+          >
+            <GripVertical className="size-3.5" />
+          </button>
+        </TooltipHint>
       ) : (
         <span className="h-5 w-4 shrink-0" />
       )}
@@ -854,15 +858,15 @@ function StepDetail({
           <Badge>{t(($) => $.workflows.editor.new_badge)}</Badge>
         )}
         {onRemove && (
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-sm"
             className="ml-auto text-muted-foreground"
-            aria-label={t(($) => $.workflows.editor.remove)}
+            label={t(($) => $.workflows.editor.remove)}
             onClick={onRemove}
           >
             <Trash2 className="size-3.5" />
-          </Button>
+          </IconButton>
         )}
       </header>
       <div className="space-y-6 p-5">

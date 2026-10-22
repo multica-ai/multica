@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -213,6 +214,25 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.DisableWorkspaceCreation {
 		writeError(w, http.StatusForbidden, "workspace creation is disabled for this instance")
 		return
+	}
+
+	// Self-host allowlist (#9400): when WORKSPACE_CREATION_ALLOWED_EMAILS is
+	// set, only those accounts may create workspaces. The UI does not hide
+	// the entry points for other users; this 403 is the enforcement point.
+	if len(h.cfg.WorkspaceCreationAllowedEmails) > 0 {
+		user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusUnauthorized, "user not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load user")
+			return
+		}
+		if !contains(h.cfg.WorkspaceCreationAllowedEmails, strings.TrimSpace(user.Email)) {
+			writeError(w, http.StatusForbidden, "workspace creation is restricted to selected users on this instance")
+			return
+		}
 	}
 
 	var req CreateWorkspaceRequest
@@ -1088,6 +1108,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stop remote work before deleting the only durable session journal.
+	// A pending step/cancellation leaves the workspace intact for a safe retry.
+	if err := h.prepareQoderWorkspaceDeletion(r.Context(), uuidToString(requester.WorkspaceID)); err != nil {
+		writeError(w, http.StatusConflict, "Qoder cleanup is pending; retry workspace deletion shortly")
+		return
+	}
+
 	// Invalidate membership cache for all workspace members before deletion.
 	// After CASCADE deletes the member rows, cache entries become harmless
 	// orphans (downstream lookups for the deleted workspace will fail), but
@@ -1227,6 +1254,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			// data statement and the separate whole-workspace task delete.
 			name: "delete tasks",
 			run:  func() error { return deleteWorkspaceTasks(ctx, qtx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete QCA connection",
+			run: func() error {
+				if _, err := tx.Exec(ctx, `DELETE FROM daemon_token WHERE id IN (SELECT token_id FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1)`, requester.WorkspaceID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `DELETE FROM cloud_agent_connection WHERE provider='qoder_cloud' AND workspace_id=$1`, requester.WorkspaceID)
+				return err
+			},
 		},
 		{
 			name: "delete leaf data",

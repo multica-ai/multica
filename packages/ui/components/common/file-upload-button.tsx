@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 
 interface FileUploadButtonProps {
@@ -38,18 +38,17 @@ function FileUploadButton({
 
   return (
     <>
-      <Button
+      <IconButton
         type="button"
         variant="ghost"
         size={buttonSize}
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
-        aria-label={attachLabel}
-        title={attachLabel}
+        label={attachLabel}
         className={cn("text-muted-foreground", className)}
       >
         <Paperclip className={iconSize} />
-      </Button>
+      </IconButton>
       <input
         ref={inputRef}
         type="file"

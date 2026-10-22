@@ -23,9 +23,10 @@ import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import {
   AiCreateAgentPage,
-  ChooseCreateMethodPage,
   ManualCreateAgentPage,
 } from "@multica/views/agents";
+import { DesktopChooseRuntimePage } from "./components/desktop-choose-runtime-page";
+import { AgentCreatedPage } from "./pages/agent-created-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
@@ -186,7 +187,12 @@ export const appRoutes: RouteObject[] = [
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
           {
             path: "agents/new",
-            element: <ChooseCreateMethodPage />,
+            element: <DesktopChooseRuntimePage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/done/:agentId",
+            element: <AgentCreatedPage />,
             handle: { title: "Create Agent" },
           },
           {

@@ -230,7 +230,7 @@ describe("ThinkingPropRow", () => {
     // matching the i18n `thinking_clear_title` copy.
     await screen.findByText("xhigh");
     fireEvent.click(screen.getByRole("button"));
-    const clearButton = await screen.findByTitle(/Clear the override/i);
+    const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
 
     expect(onChange).toHaveBeenCalledWith("");
@@ -302,7 +302,7 @@ describe("ThinkingPropRow", () => {
     await screen.findByText("Thinking");
     expect(await screen.findByText("ultra")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
-    const clearButton = await screen.findByTitle(/Clear the override/i);
+    const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
   });
@@ -361,7 +361,7 @@ describe("ThinkingPropRow", () => {
     await screen.findByText("Thinking");
     expect(await screen.findByText("max")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
-    const clearButton = await screen.findByTitle(/Clear the override/i);
+    const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
   });

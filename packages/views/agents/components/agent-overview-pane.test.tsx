@@ -287,6 +287,38 @@ describe("AgentOverviewPane Environment tab visibility", () => {
   });
 });
 
+describe("AgentOverviewPane on a Qoder Cloud Agent runtime", () => {
+  const tabNames = () =>
+    screen
+      .getAllByRole("tab")
+      .filter((tab) => tab.closest("aside"))
+      .map((tab) => tab.textContent);
+
+  it("offers only Instructions under Capabilities", () => {
+    larkListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("qoder_cloud")]);
+    openCapabilities();
+    expect(tabNames()).toEqual(["Instructions"]);
+  });
+
+  it("drops Environment and Custom Args and names the QCA agent tab", () => {
+    renderPane([makeRuntime("qoder_cloud")]);
+    openSettings();
+    expect(tabNames()).toEqual(["General", "Access", "QCA Agent"]);
+  });
+
+  it("keeps Routing off for other runtimes", () => {
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    expect(tabNames()).toEqual([
+      "General",
+      "Access",
+      "Environment",
+      "Custom Args",
+    ]);
+  });
+});
+
 // MUL-7107: the header, the tab bar and every panel share one leading edge.
 // The regression these guard against is a centred width cap: `mx-auto` plus a
 // `max-w-*` moves an element's edge as the viewport grows, so chrome on a

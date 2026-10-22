@@ -110,7 +110,7 @@ vi.mock("@multica/core/issues/config", () => ({
   PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
-    high: { label: "High", bars: 3, color: "text-warning" },
+    high: { label: "High", bars: 3, color: "text-priority-high" },
     medium: { label: "Medium", bars: 2, color: "text-warning" },
     low: { label: "Low", bars: 1, color: "text-info" },
     none: { label: "No priority", bars: 0, color: "text-muted-foreground" },

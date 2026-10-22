@@ -21,6 +21,7 @@ import {
 } from "@tanstack/react-table";
 import { Check, Copy, Search, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import {
   Dialog,
@@ -184,16 +185,17 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
               className="h-7 pr-7 pl-7 text-caption"
             />
             {filter && (
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                aria-label={t(($) => $.table.clear_filter)}
+                label={t(($) => $.table.clear_filter)}
+                tooltipSide="bottom"
                 onClick={() => setFilter("")}
                 className="absolute top-0.5 right-0.5 text-muted-foreground"
               >
                 <X className="size-3" />
-              </Button>
+              </IconButton>
             )}
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => copy("markdown", getMarkdown())}>
@@ -210,7 +212,14 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
             {t(($) => $.table.copy_csv)}
           </Button>
           <DialogClose
-            render={<Button variant="ghost" size="icon-sm" aria-label={t(($) => $.table.close)} />}
+            render={
+              <IconButton
+                variant="ghost"
+                size="icon-sm"
+                label={t(($) => $.table.close)}
+                tooltipSide="bottom"
+              />
+            }
           >
             <X />
           </DialogClose>

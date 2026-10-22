@@ -18,6 +18,7 @@ import {
 } from "@multica/core/autopilots";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // Delete dialog — single row (kebab) and batch share one implementation.
 
@@ -159,15 +161,20 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
       className="flex items-center"
     >
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.actions.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.actions.row_menu)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.actions.row_menu)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-48">
@@ -242,14 +249,16 @@ export function AutopilotBatchToolbar({
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.actions.clear_selection)}>
+            <button
+              type="button"
+              aria-label={t(($) => $.actions.clear_selection)}
+              onClick={onClear}
+              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
 
         {anyActive && (

@@ -25,6 +25,7 @@ import { CharCounter } from "../components/char-counter";
 import { ServiceTierSettingField } from "../components/inspector/service-tier-setting-field";
 import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
 import { ModelDropdown } from "../components/model-dropdown";
+import { QoderAgentSelect } from "../components/qoder-agent-select";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
@@ -49,6 +50,7 @@ export function AgentConfigurationPanel({
   onRuntimeSelect,
   runtimeSwitchPending = false,
   runtimeSwitchInFlight = false,
+  runtimeSummary,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -69,6 +71,9 @@ export function AgentConfigurationPanel({
   runtimeSwitchPending?: boolean;
   /** A rebind request is in flight. */
   runtimeSwitchInFlight?: boolean;
+  /** Replaces the runtime picker when the runtime was chosen in an earlier
+   *  step and changing it means going back there. */
+  runtimeSummary?: ReactNode;
 }) {
   const { t } = useT("agents");
   const conversationStartersSupported = useConfigStore(
@@ -82,6 +87,9 @@ export function AgentConfigurationPanel({
     (member) => member.user_id !== currentUserId,
   );
   const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  // The Qoder bridge refuses tasks from agents with skills or per-agent
+  // config, so the fields that would produce them are not offered.
+  const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
   const handleRuntimeSelect = (id: string) => {
     if (id === draft.runtimeId) return;
     if (onRuntimeSelect) {
@@ -176,7 +184,7 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          {conversationStartersSupported ? (
+          {conversationStartersSupported && !qoderRuntime ? (
             <div className="px-4 py-4">
               <ConversationStartersEditor
                 value={draft.conversationStarters}
@@ -184,12 +192,18 @@ export function AgentConfigurationPanel({
               />
             </div>
           ) : null}
-          <div className="px-4 py-4">
-            <SkillMultiSelect
-              selectedIds={draft.skillIds}
-              onChange={(ids) => set("skillIds", ids)}
-            />
-          </div>
+          {qoderRuntime ? (
+            <p className="px-4 py-3 text-caption text-muted-foreground">
+              {t(($) => $.creation_studio.cloud_fields_note)}
+            </p>
+          ) : (
+            <div className="px-4 py-4">
+              <SkillMultiSelect
+                selectedIds={draft.skillIds}
+                onChange={(ids) => set("skillIds", ids)}
+              />
+            </div>
+          )}
         </SettingsCard>
       </SettingsSection>
 
@@ -202,6 +216,7 @@ export function AgentConfigurationPanel({
             className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}
           >
             <div className="min-w-0">
+              {runtimeSummary ?? (
               <RuntimePicker
                 runtimes={runtimes}
                 runtimesLoading={runtimesLoading}
@@ -212,6 +227,7 @@ export function AgentConfigurationPanel({
                 disabled={runtimeLocked}
                 autoSelect={!onRuntimeSelect}
               />
+              )}
               {/* A silently greyed-out picker is the worst version of this: the
                   user reaches for it exactly when the current runtime has gone
                   wrong, so say what unblocks it instead of just refusing. */}
@@ -221,18 +237,28 @@ export function AgentConfigurationPanel({
                 </p>
               )}
             </div>
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={draft.model}
-              onChange={(value) => onChange(applyDraftModelChange(draft, value))}
-              onAutomaticChange={(value) =>
-                onAutomaticChange(applyDraftModelChange(draft, value))
-              }
-              // A successful switch clears the model, so an edit made while the
-              // rebind is in flight would be silently discarded.
-              disabled={!selectedRuntime || runtimeSwitchInFlight}
-            />
+            {qoderRuntime ? (
+              <QoderAgentSelect
+                value={draft.qoderAgentId}
+                onChange={(value) => set("qoderAgentId", value)}
+                disabled={runtimeLocked}
+              />
+            ) : (
+              <ModelDropdown
+                runtimeId={selectedRuntime?.id ?? null}
+                runtimeOnline={selectedRuntime?.status === "online"}
+                value={draft.model}
+                onChange={(value) =>
+                  onChange(applyDraftModelChange(draft, value))
+                }
+                onAutomaticChange={(value) =>
+                  onAutomaticChange(applyDraftModelChange(draft, value))
+                }
+                // A successful switch clears the model, so an edit made while the
+                // rebind is in flight would be silently discarded.
+                disabled={!selectedRuntime || runtimeSwitchInFlight}
+              />
+            )}
           </div>
           {/* Both fields fail closed: they render only when the exact selected
               model's live catalog advertises the capability (or a value is

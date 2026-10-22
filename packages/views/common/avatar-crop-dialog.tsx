@@ -5,6 +5,7 @@ import Cropper, { type Area, type Point } from "react-easy-crop";
 import { Loader2, Minus, Plus, RotateCw } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Slider } from "@multica/ui/components/ui/slider";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   Dialog,
   DialogContent,
@@ -142,15 +143,17 @@ export function AvatarCropDialog({
                   setCroppedAreaPixels(areaPixels)
                 }
               />
-              <button
-                type="button"
-                onClick={() => setRotation((r) => (r + 90) % 360)}
-                disabled={busy}
-                aria-label={t(($) => $.avatar_crop.rotate)}
-                className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
-              >
-                <RotateCw className="h-4 w-4" />
-              </button>
+              <TooltipHint label={t(($) => $.avatar_crop.rotate)}>
+                <button
+                  type="button"
+                  onClick={() => setRotation((r) => (r + 90) % 360)}
+                  disabled={busy}
+                  aria-label={t(($) => $.avatar_crop.rotate)}
+                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+              </TooltipHint>
             </>
           ) : (
             <div className="flex h-full w-full items-center justify-center text-caption text-muted-foreground">
@@ -162,15 +165,17 @@ export function AvatarCropDialog({
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
-            disabled={disabled}
-            aria-label={t(($) => $.avatar_crop.zoom_out)}
-            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          >
-            <Minus className="h-4 w-4" />
-          </button>
+          <TooltipHint label={t(($) => $.avatar_crop.zoom_out)}>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => clampZoom(z - ZOOM_STEP))}
+              disabled={disabled}
+              aria-label={t(($) => $.avatar_crop.zoom_out)}
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+          </TooltipHint>
           <Slider
             value={[zoom]}
             min={MIN_ZOOM}
@@ -183,15 +188,17 @@ export function AvatarCropDialog({
             aria-label={t(($) => $.avatar_crop.zoom)}
             className="flex-1"
           />
-          <button
-            type="button"
-            onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
-            disabled={disabled}
-            aria-label={t(($) => $.avatar_crop.zoom_in)}
-            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <TooltipHint label={t(($) => $.avatar_crop.zoom_in)}>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => clampZoom(z + ZOOM_STEP))}
+              disabled={disabled}
+              aria-label={t(($) => $.avatar_crop.zoom_in)}
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </TooltipHint>
         </div>
 
         <div className="flex items-center justify-between">

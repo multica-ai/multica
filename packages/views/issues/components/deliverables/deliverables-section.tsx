@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronRight, LayoutGrid } from "lucide-react";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../../../i18n";
 import { formatBytes } from "../../../common/format-bytes";
 import { fileIcon } from "../../../editor/utils/file-icon";
@@ -64,20 +65,20 @@ export function DeliverablesSection({
           {images.length > 0 && (
             <div className="mb-1.5 grid grid-cols-3 gap-1.5">
               {images.map((file) => (
-                <button
-                  key={file.key}
-                  type="button"
-                  className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  title={file.latest.filename}
-                  aria-label={versionedName(file, t)}
-                  onClick={() => openAttachment(file.latest)}
-                >
-                  <DeliverableThumbnail
-                    attachment={file.latest}
-                    showTypeLabel={false}
-                    className="size-full"
-                  />
-                </button>
+                <TooltipHint key={file.key} label={file.latest.filename}>
+                  <button
+                    type="button"
+                    className="relative aspect-[4/3] overflow-hidden rounded-md ring-1 ring-border transition-shadow hover:ring-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={versionedName(file, t)}
+                    onClick={() => openAttachment(file.latest)}
+                  >
+                    <DeliverableThumbnail
+                      attachment={file.latest}
+                      showTypeLabel={false}
+                      className="size-full"
+                    />
+                  </button>
+                </TooltipHint>
               ))}
             </div>
           )}

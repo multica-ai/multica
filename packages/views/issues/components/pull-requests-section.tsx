@@ -13,6 +13,7 @@ import {
 } from "@multica/core/github";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -121,9 +122,9 @@ function LinkPullRequestPopover({
     >
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.pr_automation.link_action)}>
+          <IconButton variant="ghost" size="icon-xs" label={t(($) => $.pr_automation.link_action)}>
             <Plus />
-          </Button>
+          </IconButton>
         }
       />
       <PopoverContent align="end" className="w-80">
@@ -210,9 +211,9 @@ function AutoCompleteMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon-xs" aria-label={t(($) => $.pr_automation.section_menu)}>
+          <IconButton variant="ghost" size="icon-xs" label={t(($) => $.pr_automation.section_menu)}>
             <MoreHorizontal />
-          </Button>
+          </IconButton>
         }
       />
       <DropdownMenuContent align="end" className="w-60">

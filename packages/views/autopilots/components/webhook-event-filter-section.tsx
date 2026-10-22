@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Plus, Filter, ExternalLink } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import type { WebhookEventFilter } from "@multica/core/types";
 import { useT } from "../../i18n";
 
@@ -74,15 +75,16 @@ export function WebhookEventFilterSection({
                   : {f.actions.join(", ")}
                 </span>
               )}
-              <button
-                type="button"
-                onClick={() => removeFilter(idx)}
-                aria-label={t(($) => $.dialog.event_filter_remove_label)}
-                title={t(($) => $.dialog.event_filter_remove_label)}
-                className="ml-auto rounded-xs p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <X className="size-3" />
-              </button>
+              <TooltipHint label={t(($) => $.dialog.event_filter_remove_label)}>
+                <button
+                  type="button"
+                  onClick={() => removeFilter(idx)}
+                  aria-label={t(($) => $.dialog.event_filter_remove_label)}
+                  className="ml-auto rounded-xs p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <X className="size-3" />
+                </button>
+              </TooltipHint>
             </div>
           ))}
         </div>

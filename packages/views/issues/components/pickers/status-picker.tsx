@@ -25,6 +25,7 @@ export function StatusPicker({
   onUpdate,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -44,6 +45,8 @@ export function StatusPicker({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -145,6 +148,7 @@ export function StatusPicker({
       width={workflow || defaultScope ? "w-60" : "w-52"}
       align={align}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       searchable={searchable}
       searchPlaceholder={t(($) => $.filters.search_status)}
       onSearchChange={setQuery}

@@ -1318,6 +1318,9 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// only the doorbell — its own mergeable/checks payload is not used for
 	// display anymore (MUL-5265).
 	h.PRRefresh.Enqueue(p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number)
+	if p.Action == "closed" && p.PullRequest.Merged {
+		h.PRRefresh.RefreshConflictWatchers(ctx, p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number)
+	}
 }
 
 // prLinkPolicy decides which (identifier, workspace) pairs this delivery may

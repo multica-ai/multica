@@ -14,6 +14,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
@@ -465,10 +466,10 @@ export function RepositoriesSection() {
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
-                        <Button
+                        <IconButton
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={t(($) => $.repositories.actions_aria, {
+                          label={t(($) => $.repositories.actions_aria, {
                             url: repository.url,
                           })}
                         />
