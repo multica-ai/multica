@@ -97,11 +97,11 @@ const issue = {
   updated_at: "2026-09-27T00:00:00Z",
 } as unknown as Issue;
 
-function renderCard({ withPeek = true, peekedId = null as string | null } = {}) {
+function renderCard({ withPeek = true, peekedId = null as string | null, cardIssue = issue } = {}) {
   const card = (
     <DndContext>
       <SortableContext items={[issue.id]}>
-        <DraggableBoardCard issue={issue} />
+        <DraggableBoardCard issue={cardIssue} />
       </SortableContext>
     </DndContext>
   );
@@ -154,6 +154,33 @@ describe("DraggableBoardCard side peek", () => {
     expect(fireEvent.keyDown(cardRoot(container), { key: " " })).toBe(false);
     fireEvent.keyDown(link(), { key: " " });
     expect(peek.toggle).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps linked PR keyboard gestures separate from the card's Space peek", () => {
+    const { container } = renderCard({
+      cardIssue: {
+        ...issue,
+        linked_pull_requests: [{
+          provider: "github",
+          number: 7,
+          title: "Linked work",
+          state: "open",
+          html_url: "https://github.com/acme/repo/pull/7",
+        }],
+      },
+    });
+    const prLink = screen.getByRole("link", { name: "Translated #7 · Translated" });
+
+    expect(fireEvent.keyDown(prLink, { key: " " })).toBe(true);
+    expect(fireEvent.keyDown(prLink, { key: "Enter" })).toBe(true);
+    expect(prLink).toHaveAttribute("href", "https://github.com/acme/repo/pull/7");
+    expect(prLink).toHaveAttribute("target", "_blank");
+    expect(peek.toggle).not.toHaveBeenCalled();
+    expect(navigation.push).not.toHaveBeenCalled();
+
+    const issueLink = container.querySelector<HTMLAnchorElement>('a[href="/acme/issues/issue-1"]')!;
+    expect(fireEvent.keyDown(issueLink, { key: " " })).toBe(false);
+    expect(peek.toggle).toHaveBeenCalledWith("issue-1");
   });
 
   it("reacts immediately to the preference and keeps repeated plain clicks open", () => {

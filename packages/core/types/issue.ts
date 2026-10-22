@@ -167,6 +167,18 @@ export interface IssueDuplicateOf {
   status: IssueStatus;
 }
 
+/** Compact PR projection bulk-loaded with an issue list page. */
+export interface IssueLinkedPullRequest {
+  provider: string;
+  number: number;
+  title: string;
+  state: string;
+  html_url: string;
+  checks_rollup?: "success" | "failure" | "pending" | "error" | "expected";
+  checks_conclusion?: "passed" | "failed" | "pending";
+  snapshot_available?: boolean;
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -219,6 +231,8 @@ export interface Issue {
   properties: IssuePropertyValues;
   reactions?: IssueReaction[];
   labels?: Label[];
+  /** Absent on older backends and non-list issue responses. */
+  linked_pull_requests?: IssueLinkedPullRequest[];
   created_at: string;
   updated_at: string;
   /** Monotonic server revision; absent when connected to an older backend. */
