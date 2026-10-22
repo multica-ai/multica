@@ -218,6 +218,34 @@
     }
 }
 
+/* Mockup motion: a dot that rides its `offset-path` once, and a card that
+   flies in from `--site-fly-from` to where it is laid out. */
+@theme {
+    --animate-site-travel: site-travel 800ms cubic-bezier(0.65, 0, 0.35, 1) both;
+    --animate-site-fly: site-fly 700ms cubic-bezier(0.32, 0.72, 0, 1) both;
+
+    @keyframes site-travel {
+        from {
+            offset-distance: 0%;
+            opacity: 0;
+        }
+        15%,
+        85% {
+            opacity: 1;
+        }
+        to {
+            offset-distance: 100%;
+            opacity: 0;
+        }
+    }
+
+    @keyframes site-fly {
+        from {
+            translate: var(--site-fly-from);
+        }
+    }
+}
+
 /* Logo wall: the track holds the list twice, so sliding it by half loops
    seamlessly. */
 @theme {

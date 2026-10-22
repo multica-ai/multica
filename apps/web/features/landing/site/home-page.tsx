@@ -130,57 +130,67 @@ function LogoWall() {
   );
 }
 
-const FEATURES: { title: string; body: string; href: string; visual: ComponentType; alt: string }[] = [
+export type FeatureId = "runtimes" | "workflows" | "chat" | "autopilots" | "skills";
+
+const FEATURES: { id: FeatureId; title: string; body: string; alt: string }[] = [
   {
+    id: "runtimes",
     title: "Runs on your machines, or in our cloud",
     body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
-    href: productHref("runtimes"),
-    visual: RuntimesVisual,
-    alt: "The Runtimes page listing a MacBook, a Linux server, Multica Cloud, and a Windows laptop, each with its coding agents",
+    alt: "A workspace connected to a MacBook, a Linux server, and Multica Cloud, sending each one work while a fourth machine connects",
   },
   {
+    id: "workflows",
     title: "Workflows hand off every step",
     body: "Lay out the steps a project’s issues follow and who owns each one. Moving an issue to the next step hands it to that step’s person or agent.",
-    href: productHref("workflows"),
-    visual: WorkflowVisual,
-    alt: "A Feature delivery workflow with four steps, each with an owner, and an issue being handed from one step to the next",
+    alt: "A four-step workflow drawn as connected nodes, with an issue moving from owner to owner and being sent back once from review",
   },
   {
+    id: "chat",
     title: "Mention an agent in chat",
     body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
-    href: productHref("chat"),
-    visual: ChatVisual,
-    alt: "A chat thread where a teammate mentions Backend Agent, which replies with the issue it filed",
+    alt: "A chat thread where a teammate mentions Backend Agent, which files an issue that lands on the In Progress column",
   },
   {
+    id: "autopilots",
     title: "Autopilots run on a schedule",
     body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
-    href: productHref("autopilots"),
-    visual: AutopilotsVisual,
-    alt: "A list of autopilots with their schedules and the agent that runs each one",
+    alt: "A timeline of today with four scheduled triggers; as the playhead passes each one, an issue is filed for its agent",
   },
   {
+    id: "skills",
     title: "Skills the whole team shares",
     body: "Write down how your team does a thing once, and every agent follows it.",
-    href: productHref("skills"),
-    visual: SkillsVisual,
-    alt: "A list of team skills and the agents that use each one",
+    alt: "A release-checklist skill connected to four agents; a new line is added and every agent picks up the change",
   },
 ];
 
+const FEATURE_VISUALS: Record<FeatureId, ComponentType> = {
+  runtimes: RuntimesVisual,
+  workflows: WorkflowVisual,
+  chat: ChatVisual,
+  autopilots: AutopilotsVisual,
+  skills: SkillsVisual,
+};
+
 function Features() {
+  return <FeatureSection visuals={FEATURE_VISUALS} />;
+}
+
+/** The features band; `visuals` picks the mockup drawn for each feature. */
+export function FeatureSection({ visuals }: { visuals: Record<FeatureId, ComponentType> }) {
   return (
     <Section>
       <Container>
         <SectionHeader title="Built for teams of people and agents" />
         <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
-            <FeatureCard key={feature.title} {...feature} aspect="aspect-[4/3]" />
+            <FeatureCard key={feature.id} {...feature} visual={visuals[feature.id]} aspect="aspect-[4/3]" />
           ))}
         </div>
         <div className="mt-site-grid-row grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-3">
           {FEATURES.slice(2).map((feature) => (
-            <FeatureCard key={feature.title} {...feature} aspect="aspect-[3/2]" />
+            <FeatureCard key={feature.id} {...feature} visual={visuals[feature.id]} aspect="aspect-[3/2]" />
           ))}
         </div>
       </Container>
@@ -191,19 +201,18 @@ function Features() {
 function FeatureCard({
   title,
   body,
-  href,
   visual: Visual,
   alt,
   aspect,
-}: (typeof FEATURES)[number] & { aspect: string }) {
+}: (typeof FEATURES)[number] & { visual: ComponentType; aspect: string }) {
   return (
-    <Link href={href} className={cn("group block rounded-site-panel", focusRing)}>
+    <div>
       <div role="img" aria-label={alt} className={cn("relative overflow-hidden rounded-site-panel bg-site-sunken", aspect)}>
         <Visual />
       </div>
       <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
       <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
-    </Link>
+    </div>
   );
 }
 

@@ -153,11 +153,15 @@ export function Working({ label = "Working" }: { label?: string }) {
   );
 }
 
-export function OutlineButton({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
+/**
+ * A dot that rides `path` (canvas coordinates) once when it mounts; key it to
+ * replay. Hidden under reduced motion, where nothing travels.
+ */
+export function Pulse({ path, delay = 0 }: { path: string; delay?: number }) {
   return (
-    <span className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-caption">
-      {Icon ? <Icon className="size-3.5 text-muted-foreground" /> : null}
-      {children}
-    </span>
+    <span
+      className="absolute top-0 left-0 size-2 animate-site-travel rounded-full bg-site-agent ring-2 ring-background motion-reduce:hidden"
+      style={{ offsetPath: `path("${path}")`, offsetRotate: "0deg", animationDelay: `${delay}ms` }}
+    />
   );
 }
