@@ -169,7 +169,7 @@ const utilityNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 ];
 
 const NAV_ITEM_CLASS_NAME =
-  "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground";
+  "text-body text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground";
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => s.hasDraft());
