@@ -65,6 +65,11 @@ export function SiteHeader() {
   }
 
   const openMenu = menus.find((menu) => menu.id === openId) ?? null;
+  // The panel stays mounted so it can animate out; it keeps showing the last
+  // menu while it fades.
+  const [lastId, setLastId] = useState<SiteMenuId>(menus[0]!.id);
+  if (openId && openId !== lastId) setLastId(openId);
+  const panelMenu = openMenu ?? menus.find((menu) => menu.id === lastId) ?? menus[0]!;
   const ctaLabel = user ? "Dashboard" : "Get started";
 
   return (
@@ -159,9 +164,6 @@ export function SiteHeader() {
                 <span className="text-site-muted tabular-nums">{formatStarCount(stars)}</span>
               ) : null}
             </Link>
-            <Link href="/contact-sales" className={cn(navItemClassName, "hidden xl:inline-flex")}>
-              Contact sales
-            </Link>
             {user ? null : (
               <ActionLink href="/login" tone="secondary" className="hidden sm:inline-flex">
                 Log in
@@ -180,16 +182,19 @@ export function SiteHeader() {
           </div>
         </div>
 
-        {openMenu ? <MegaPanel menu={openMenu} onNavigate={() => close()} /> : null}
+        <MegaPanel menu={panelMenu} open={openMenu != null} onNavigate={() => close()} />
       </header>
 
-      {openMenu ? (
-        <div
-          aria-hidden
-          onClick={() => close()}
-          className="fixed inset-x-0 top-site-header bottom-0 z-30 hidden bg-site-canvas/70 backdrop-blur-md lg:block"
-        />
-      ) : null}
+      <div
+        aria-hidden
+        data-open={openMenu != null}
+        onClick={() => close()}
+        className={cn(
+          "fixed inset-x-0 top-site-header bottom-0 z-30 hidden bg-site-canvas/40 backdrop-blur-[2px] lg:block",
+          menuMotion,
+          openMenu ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+      />
 
       <MobileMenu
         open={mobileOpen}
@@ -208,32 +213,64 @@ const navItemClassName = cn(
   focusRing,
 );
 
-function MegaPanel({ menu, onNavigate }: { menu: SiteMenu; onNavigate: () => void }) {
+// Enter eases out over 200ms; exit is quicker and quieter. Switching menus
+// resizes the open panel and cross-fades its content.
+const menuMotion = cn(
+  "transition-[opacity,translate] duration-150 ease-in",
+  "data-[open=true]:duration-200 data-[open=true]:ease-[cubic-bezier(0.32,0.72,0,1)]",
+  "motion-reduce:transition-none",
+);
+
+function MegaPanel({ menu, open, onNavigate }: { menu: SiteMenu; open: boolean; onNavigate: () => void }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(() => setHeight(content.offsetHeight));
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
       id={`site-menu-${menu.id}`}
-      className="absolute inset-x-0 top-full hidden border-b border-site-line bg-site-canvas lg:block"
+      data-open={open}
+      inert={!open}
+      style={height == null ? undefined : { height }}
+      className={cn(
+        "absolute inset-x-0 top-full hidden overflow-hidden border-b border-site-line bg-site-canvas lg:block",
+        menuMotion,
+        open ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-1 opacity-0",
+        open && "transition-[opacity,translate,height] motion-reduce:transition-none",
+      )}
     >
-      <div className="mx-auto grid w-full max-w-site grid-cols-5 gap-8 px-site-gutter pt-6 pb-10">
-        {menu.groups.map((group) => (
-          <div key={group.title}>
-            <p className="text-site-small text-site-muted">{group.title}</p>
-            <ul className="mt-3 flex flex-col">
-              {group.links.map((link) => (
-                <li key={`${group.title}-${link.label}`}>
-                  <SiteTextLink
-                    href={link.href}
-                    external={link.external}
-                    onClick={onNavigate}
-                    className="py-1.5 text-site-body text-site-ink hover:text-site-ink-secondary"
-                  >
-                    {link.label}
-                  </SiteTextLink>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+      <div ref={contentRef}>
+        <div
+          key={menu.id}
+          className="mx-auto grid w-full max-w-site grid-cols-5 gap-8 px-site-gutter pt-6 pb-10 animate-in fade-in duration-200 motion-reduce:animate-none"
+        >
+          {menu.groups.map((group) => (
+            <div key={group.title}>
+              <p className="text-site-small text-site-muted">{group.title}</p>
+              <ul className="mt-3 flex flex-col">
+                {group.links.map((link) => (
+                  <li key={`${group.title}-${link.label}`}>
+                    <SiteTextLink
+                      href={link.href}
+                      external={link.external}
+                      onClick={onNavigate}
+                      className="py-1.5 text-site-body text-site-ink hover:text-site-ink-secondary"
+                    >
+                      {link.label}
+                    </SiteTextLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
