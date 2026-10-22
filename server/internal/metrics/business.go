@@ -27,6 +27,21 @@ const (
 	RuntimeGCSkipEligibilityChanged = "eligibility_changed"
 	RuntimeGCSkipNonTerminalTask    = "non_terminal_task"
 	RuntimeGCSkipWorkspaceMismatch  = "workspace_mismatch"
+
+	// Bounded label values for the agent task retention sweeper. status is the
+	// terminal status a retention window applies to; mode is whether the round
+	// only reported candidates or actually deleted; result is how the round
+	// ended. Keeping these as a closed set is what makes the metric labels
+	// bounded — the enum is enforced by businessMetricLabels in labels.go.
+	TaskRetentionStatusFailed    = "failed"
+	TaskRetentionStatusCompleted = "completed"
+
+	TaskRetentionModeDryRun = "dry_run"
+	TaskRetentionModeDelete = "delete"
+
+	TaskRetentionResultSuccess     = "success"
+	TaskRetentionResultFailure     = "failure"
+	TaskRetentionResultSkippedLock = "skipped_lock"
 )
 
 type activeTaskLabels struct {
@@ -63,13 +78,19 @@ type BusinessMetrics struct {
 	runtimeGCDeleted               prometheus.Counter
 	runtimeGCFailed                prometheus.Counter
 	runtimeGCSkipped               *prometheus.CounterVec
-	entitlementConfigError         prometheus.Counter
-	entitlementCache               *prometheus.CounterVec
-	entitlementRefresh             *prometheus.CounterVec
-	entitlementRefreshDuration     *prometheus.HistogramVec
-	entitlementDecision            *prometheus.CounterVec
-	entitlementVersionRegression   prometheus.Counter
-	autopilotQuotaDecision         *prometheus.CounterVec
+
+	taskRetentionCandidateRows *prometheus.GaugeVec
+	taskRetentionPurged        *prometheus.CounterVec
+	taskRetentionRuns          *prometheus.CounterVec
+	taskRetentionDuration      *prometheus.HistogramVec
+
+	entitlementConfigError       prometheus.Counter
+	entitlementCache             *prometheus.CounterVec
+	entitlementRefresh           *prometheus.CounterVec
+	entitlementRefreshDuration   *prometheus.HistogramVec
+	entitlementDecision          *prometheus.CounterVec
+	entitlementVersionRegression prometheus.Counter
+	autopilotQuotaDecision       *prometheus.CounterVec
 
 	// agentRuntimeLookup counts logical agent_runtime lookups by product
 	// source — one increment per requested runtime id, whether that id was
@@ -257,6 +278,31 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "skipped_total",
 			Help:      "Total runtime garbage-collection candidates safely skipped by reason.",
 		}, metricLabels("multica_runtime_gc_skipped_total")),
+		taskRetentionCandidateRows: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task_retention",
+			Name:      "candidate_rows",
+			Help:      "Rows eligible for deletion at the last retention round, by terminal status (exact count, before any batch cap).",
+		}, metricLabels("multica_agent_task_retention_candidate_rows")),
+		taskRetentionPurged: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task_retention",
+			Name:      "purged_total",
+			Help:      "Total agent task rows deleted by the retention sweeper, by terminal status. Only ever incremented in delete mode.",
+		}, metricLabels("multica_agent_task_retention_purged_total")),
+		taskRetentionRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task_retention",
+			Name:      "runs_total",
+			Help:      "Total agent task retention sweeper rounds by mode and result.",
+		}, metricLabels("multica_agent_task_retention_runs_total")),
+		taskRetentionDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task_retention",
+			Name:      "duration_seconds",
+			Help:      "Wall-clock duration of a full agent task retention round by mode.",
+			Buckets:   runtimeSweepStageDurationBuckets,
+		}, metricLabels("multica_agent_task_retention_duration_seconds")),
 		entitlementConfigError: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "entitlement", Name: "config_error_total",
 			Help: "Total startup failures caused by a malformed Multica Cloud URL for entitlement policy.",
@@ -313,6 +359,17 @@ func NewBusinessMetrics() *BusinessMetrics {
 			m.agentRuntimeLookup.WithLabelValues(source, result).Add(0)
 		}
 	}
+	// Prewarm the retention grids so a status/mode/result that has not fired
+	// since boot reads as a visible zero rather than an absent series.
+	for _, status := range []string{TaskRetentionStatusFailed, TaskRetentionStatusCompleted} {
+		m.taskRetentionCandidateRows.WithLabelValues(status).Set(0)
+		m.taskRetentionPurged.WithLabelValues(status).Add(0)
+	}
+	for _, mode := range []string{TaskRetentionModeDryRun, TaskRetentionModeDelete} {
+		for _, result := range []string{TaskRetentionResultSuccess, TaskRetentionResultFailure, TaskRetentionResultSkippedLock} {
+			m.taskRetentionRuns.WithLabelValues(mode, result).Add(0)
+		}
+	}
 	return m
 }
 
@@ -344,6 +401,10 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.runtimeGCDeleted,
 		m.runtimeGCFailed,
 		m.runtimeGCSkipped,
+		m.taskRetentionCandidateRows,
+		m.taskRetentionPurged,
+		m.taskRetentionRuns,
+		m.taskRetentionDuration,
 		m.entitlementConfigError,
 		m.entitlementCache,
 		m.entitlementRefresh,
@@ -505,6 +566,68 @@ func normalizeRuntimeSweepStage(stage string) string {
 		return stage
 	default:
 		return "other"
+	}
+}
+
+// SetTaskRetentionCandidateRows records the exact number of rows eligible for
+// deletion for a terminal status at the end of the count phase. It is a gauge:
+// each round overwrites the last reading rather than accumulating, so a backlog
+// that is being drained shows as a falling line.
+func (m *BusinessMetrics) SetTaskRetentionCandidateRows(status string, rows int64) {
+	if m == nil {
+		return
+	}
+	if rows < 0 {
+		rows = 0
+	}
+	m.taskRetentionCandidateRows.WithLabelValues(normalizeTaskRetentionStatus(status)).Set(float64(rows))
+}
+
+// RecordTaskRetentionPurged adds the number of rows actually deleted for a
+// terminal status. The sweeper only calls this in delete mode; dry-run rounds
+// delete nothing and must leave this counter untouched.
+func (m *BusinessMetrics) RecordTaskRetentionPurged(status string, rows int) {
+	if m == nil || rows <= 0 {
+		return
+	}
+	m.taskRetentionPurged.WithLabelValues(normalizeTaskRetentionStatus(status)).Add(float64(rows))
+}
+
+// RecordTaskRetentionRun records one completed retention round by mode and
+// result, and observes its wall-clock duration by mode.
+func (m *BusinessMetrics) RecordTaskRetentionRun(mode, result string, duration time.Duration) {
+	if m == nil {
+		return
+	}
+	mode = normalizeTaskRetentionMode(mode)
+	m.taskRetentionRuns.WithLabelValues(mode, normalizeTaskRetentionResult(result)).Inc()
+	m.taskRetentionDuration.WithLabelValues(mode).Observe(duration.Seconds())
+}
+
+func normalizeTaskRetentionStatus(status string) string {
+	switch status {
+	case TaskRetentionStatusFailed, TaskRetentionStatusCompleted:
+		return status
+	default:
+		return "other"
+	}
+}
+
+func normalizeTaskRetentionMode(mode string) string {
+	switch mode {
+	case TaskRetentionModeDryRun, TaskRetentionModeDelete:
+		return mode
+	default:
+		return TaskRetentionModeDryRun
+	}
+}
+
+func normalizeTaskRetentionResult(result string) string {
+	switch result {
+	case TaskRetentionResultSuccess, TaskRetentionResultFailure, TaskRetentionResultSkippedLock:
+		return result
+	default:
+		return TaskRetentionResultFailure
 	}
 }
 

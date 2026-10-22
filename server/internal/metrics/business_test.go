@@ -188,6 +188,9 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordEntitlementVersionRegression()
 	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
 	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
+	m.SetTaskRetentionCandidateRows(TaskRetentionStatusFailed, 3)
+	m.RecordTaskRetentionPurged(TaskRetentionStatusFailed, 2)
+	m.RecordTaskRetentionRun(TaskRetentionModeDelete, TaskRetentionResultSuccess, 250*time.Millisecond)
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -240,6 +243,52 @@ func TestBusinessMetricsRuntimeSweepStage(t *testing.T) {
 	}
 	if got := testutil.CollectAndCount(m.runtimeSweepStageDuration); got != 2 {
 		t.Fatalf("runtime sweep duration series = %d, want 2", got)
+	}
+}
+
+func TestBusinessMetricsTaskRetention(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	// candidate_rows is a gauge: the last reading wins, so a drain shows as a
+	// falling value rather than an accumulating sum.
+	m.SetTaskRetentionCandidateRows(TaskRetentionStatusFailed, 120)
+	m.SetTaskRetentionCandidateRows(TaskRetentionStatusFailed, 20)
+	m.SetTaskRetentionCandidateRows(TaskRetentionStatusCompleted, 5)
+	if got := testutil.ToFloat64(m.taskRetentionCandidateRows.WithLabelValues(TaskRetentionStatusFailed)); got != 20 {
+		t.Fatalf("failed candidate rows = %v, want 20 (last reading)", got)
+	}
+	if got := testutil.ToFloat64(m.taskRetentionCandidateRows.WithLabelValues(TaskRetentionStatusCompleted)); got != 5 {
+		t.Fatalf("completed candidate rows = %v, want 5", got)
+	}
+
+	// purged accumulates only actual deletions; zero and negative are no-ops.
+	m.RecordTaskRetentionPurged(TaskRetentionStatusFailed, 20)
+	m.RecordTaskRetentionPurged(TaskRetentionStatusFailed, 0)
+	m.RecordTaskRetentionPurged(TaskRetentionStatusCompleted, 5)
+	if got := testutil.ToFloat64(m.taskRetentionPurged.WithLabelValues(TaskRetentionStatusFailed)); got != 20 {
+		t.Fatalf("failed purged = %v, want 20", got)
+	}
+
+	m.RecordTaskRetentionRun(TaskRetentionModeDelete, TaskRetentionResultSuccess, 100*time.Millisecond)
+	m.RecordTaskRetentionRun(TaskRetentionModeDryRun, TaskRetentionResultSuccess, 50*time.Millisecond)
+	if got := testutil.ToFloat64(m.taskRetentionRuns.WithLabelValues(TaskRetentionModeDelete, TaskRetentionResultSuccess)); got != 1 {
+		t.Fatalf("delete/success runs = %v, want 1", got)
+	}
+
+	// Unknown values collapse onto the closed enum instead of minting a new
+	// series, keeping the label cardinality bounded.
+	m.SetTaskRetentionCandidateRows("bogus-status", 9)
+	if got := testutil.ToFloat64(m.taskRetentionCandidateRows.WithLabelValues("other")); got != 9 {
+		t.Fatalf("normalized status gauge = %v, want 9", got)
+	}
+	m.RecordTaskRetentionRun("bogus-mode", "bogus-result", time.Second)
+	if got := testutil.ToFloat64(m.taskRetentionRuns.WithLabelValues(TaskRetentionModeDryRun, TaskRetentionResultFailure)); got != 1 {
+		t.Fatalf("normalized run counter = %v, want 1", got)
+	}
+
+	// candidate_rows is a two-status gauge plus the one normalized fallback.
+	if got := testutil.CollectAndCount(m.taskRetentionCandidateRows); got != 3 {
+		t.Fatalf("candidate rows series = %d, want 3", got)
 	}
 }
 

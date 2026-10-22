@@ -35,6 +35,7 @@ const (
 	labelGate         = "gate"
 	labelOutcome      = "outcome"
 	labelStage        = "stage"
+	labelMode         = "mode"
 )
 
 var businessMetricLabels = map[string][]string{
@@ -61,6 +62,10 @@ var businessMetricLabels = map[string][]string{
 	"multica_runtime_sweeper_stage_duration_seconds":   {labelStage},
 	"multica_runtime_sweeper_candidate_rows_total":     {labelStage},
 	"multica_runtime_sweeper_rows_changed_total":       {labelStage},
+	"multica_agent_task_retention_candidate_rows":      {labelStatus},
+	"multica_agent_task_retention_purged_total":        {labelStatus},
+	"multica_agent_task_retention_runs_total":          {labelMode, labelResult},
+	"multica_agent_task_retention_duration_seconds":    {labelMode},
 	"multica_agent_runtime_lookup_total":               {labelSource, labelResult},
 	"multica_issue_metadata_mutation_total":            {labelOp, labelResult},
 	"multica_issue_metadata_mutation_duration_seconds": {labelOp, labelResult},
