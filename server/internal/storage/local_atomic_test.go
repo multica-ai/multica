@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type failingReader struct {
@@ -22,6 +23,193 @@ func (r *failingReader) Read(p []byte) (int, error) {
 		return n, nil
 	}
 	return 0, errors.New("injected stream failure")
+}
+
+type countingReader struct {
+	reads int
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	r.reads++
+	return copy(p, "payload"), io.EOF
+}
+
+type blockingFirstReader struct {
+	started chan struct{}
+	release chan struct{}
+	reads   int
+}
+
+func (r *blockingFirstReader) Read(p []byte) (int, error) {
+	r.reads++
+	switch r.reads {
+	case 1:
+		close(r.started)
+		<-r.release
+		return copy(p, "new-first-"), nil
+	case 2:
+		return copy(p, "new-second"), nil
+	default:
+		return 0, io.EOF
+	}
+}
+
+func TestLocalStorageUploadsRejectCanceledContext(t *testing.T) {
+	tests := []struct {
+		name   string
+		upload func(*LocalStorage, context.Context, string, io.Reader) error
+	}{
+		{
+			name: "Upload",
+			upload: func(s *LocalStorage, ctx context.Context, key string, _ io.Reader) error {
+				_, err := s.Upload(ctx, key, []byte("payload"), "text/plain", "payload.txt")
+				return err
+			},
+		},
+		{
+			name: "UploadStream",
+			upload: func(s *LocalStorage, ctx context.Context, key string, reader io.Reader) error {
+				_, err := s.UploadStream(ctx, key, reader, 7, "text/plain", "payload.txt")
+				return err
+			},
+		},
+		{
+			name: "UploadFromReader",
+			upload: func(s *LocalStorage, ctx context.Context, key string, reader io.Reader) error {
+				_, err := s.UploadFromReader(ctx, key, reader, "text/plain", "payload.txt")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s := &LocalStorage{uploadDir: dir}
+			key := "nested/cancelled.txt"
+			dest := filepath.Join(dir, key)
+			reader := &countingReader{}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err := tt.upload(s, ctx, key, reader)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want errors.Is(context.Canceled)", err)
+			}
+			if reader.reads != 0 {
+				t.Fatalf("source reads = %d, want 0", reader.reads)
+			}
+			for _, path := range []string{dest, tempPath(dest), dest + metaSuffix} {
+				if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+					t.Errorf("cancelled upload created %q (stat error = %v)", path, statErr)
+				}
+			}
+			if _, statErr := os.Stat(filepath.Dir(dest)); !os.IsNotExist(statErr) {
+				t.Errorf("cancelled upload started filesystem work (parent stat error = %v)", statErr)
+			}
+		})
+	}
+}
+
+func TestLocalStorageReaderUploadsStopOnContextCancellation(t *testing.T) {
+	methods := []struct {
+		name   string
+		upload func(*LocalStorage, context.Context, string, io.Reader) error
+	}{
+		{
+			name: "UploadStream",
+			upload: func(s *LocalStorage, ctx context.Context, key string, reader io.Reader) error {
+				_, err := s.UploadStream(ctx, key, reader, 21, "application/octet-stream", "payload.bin")
+				return err
+			},
+		},
+		{
+			name: "UploadFromReader",
+			upload: func(s *LocalStorage, ctx context.Context, key string, reader io.Reader) error {
+				_, err := s.UploadFromReader(ctx, key, reader, "application/octet-stream", "payload.bin")
+				return err
+			},
+		},
+	}
+
+	for _, method := range methods {
+		for _, deadline := range []bool{false, true} {
+			contextName := "canceled"
+			if deadline {
+				contextName = "deadline"
+			}
+			t.Run(method.name+"/"+contextName, func(t *testing.T) {
+				dir := t.TempDir()
+				s := &LocalStorage{uploadDir: dir}
+				key := "workspaces/ws/existing"
+				dest := filepath.Join(dir, key)
+				if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(dest, []byte("previous-object"), 0644); err != nil {
+					t.Fatal(err)
+				}
+
+				reader := &blockingFirstReader{
+					started: make(chan struct{}),
+					release: make(chan struct{}),
+				}
+				var ctx context.Context
+				var cancel context.CancelFunc
+				wantErr := context.Canceled
+				if deadline {
+					ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+					wantErr = context.DeadlineExceeded
+				} else {
+					ctx, cancel = context.WithCancel(context.Background())
+				}
+				defer cancel()
+
+				result := make(chan error, 1)
+				go func() {
+					result <- method.upload(s, ctx, key, reader)
+				}()
+				select {
+				case <-reader.started:
+				case <-time.After(5 * time.Second):
+					t.Fatal("upload did not start reading")
+				}
+				if deadline {
+					select {
+					case <-ctx.Done():
+					case <-time.After(5 * time.Second):
+						t.Fatal("context deadline did not expire")
+					}
+				} else {
+					cancel()
+				}
+				close(reader.release)
+
+				var uploadErr error
+				select {
+				case uploadErr = <-result:
+				case <-time.After(5 * time.Second):
+					t.Fatal("upload did not return after context cancellation")
+				}
+				if !errors.Is(uploadErr, wantErr) {
+					t.Errorf("error = %v, want errors.Is(%v)", uploadErr, wantErr)
+				}
+				if reader.reads != 1 {
+					t.Errorf("source reads = %d, want 1", reader.reads)
+				}
+				body, err := os.ReadFile(dest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(body) != "previous-object" {
+					t.Errorf("destination = %q, want previous object intact", body)
+				}
+				if _, statErr := os.Stat(tempPath(dest)); !os.IsNotExist(statErr) {
+					t.Errorf("cancelled upload left staging file (stat error = %v)", statErr)
+				}
+			})
+		}
+	}
 }
 
 // A failed UploadStream must never destroy an object a previous successful
