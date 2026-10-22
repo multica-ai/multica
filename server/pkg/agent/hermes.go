@@ -835,19 +835,22 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				return
 			}
+			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
+			// Effort options may depend on the model, so re-read them once
+			// the switch lands. A runtime that exposes no post-switch state
+			// leaves sessionResult describing the previous model; flag that
+			// so step 3b skips its local vocabulary check.
 			if opts.ThinkingLevel != "" {
-				refreshed, err := refreshACPModelOptions(runCtx, c.request, sessionID, opts.Model, sessionResult, modelResult)
+				options, err := acpOptionsAfterModelSwitch(runCtx, c.request, sessionID, opts.Model, sessionResult, modelResult)
 				if err != nil {
 					b.cfg.Logger.Warn("hermes could not refresh model options", "error", err, "requested_model", opts.Model)
+				}
+				if options != nil {
+					sessionResult = options
 				} else {
-					modelResult = refreshed
+					effortStateIsCurrent = false
 				}
 			}
-			effortStateIsCurrent = hasACPConfigOptions(modelResult)
-			if effortStateIsCurrent {
-				sessionResult = modelResult
-			}
-			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
 
 		// 3b. Apply a persisted thinking override through whichever effort
@@ -858,8 +861,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// above this must NOT fail the task — an effort we could not apply
 		// still runs the prompt at the runtime's own default.
 		//
-		// Prefer the refreshed options after a switch. Older runtimes return
-		// no state; in that case the helper lets the runtime validate the level.
+		// sessionResult is the post-switch state when the runtime exposed one;
+		// otherwise effortStateIsCurrent is false and the helper lets the
+		// runtime validate the level itself.
 		applyACPEffortOption(runCtx, c.request, "hermes", b.cfg.Logger,
 			sessionID, sessionResult, opts.ThinkingLevel, effortStateIsCurrent)
 
