@@ -34,6 +34,12 @@ export function OpenSourceSection() {
                 <GitHubMark className="size-4" />
                 {t.openSource.cta}
               </Link>
+              <Link
+                href="/licensing"
+                className="inline-flex items-center justify-center rounded-(--landing-radius-action) px-4 py-3 text-body font-semibold text-[#0a0d12]/70 transition-colors hover:text-[#0a0d12]"
+              >
+                {t.openSource.licensingCta}
+              </Link>
             </div>
           </div>
 

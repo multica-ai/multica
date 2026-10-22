@@ -177,6 +177,98 @@ rewrite configuration. Its backend fallback therefore accepts
 `BACKEND_PORT` → `API_PORT` → `SERVER_PORT` → `8080`, while an explicit
 `REMOTE_API_URL` or `NEXT_PUBLIC_API_URL` still takes priority.
 
+### Private CA Certificates (Optional)
+
+The backend checks the TLS certificates of the HTTPS services it calls against
+the system trust store in its image. A service whose certificate comes from an
+internal CA — for example a [self-hosted Gitea, Forgejo, or GitLab](https://multica.ai/docs/vcs-integration)
+— fails until the backend trusts that CA. Connecting such a Git provider reports
+that its certificate is signed by a certificate authority the server does not
+trust.
+
+Add the CA to the backend's trust store rather than turning verification off.
+The backend is a Go program: on Linux it loads the system certificate bundle
+plus every PEM file in the directories listed in `SSL_CERT_DIR`. Mount the CA
+into its own read-only directory and list it after the system directory:
+
+```
+SSL_CERT_DIR=/etc/ssl/certs:/etc/multica/ca-certs
+```
+
+**Kubernetes (Helm):** create a ConfigMap whose keys are PEM files, then point
+`backend.extraCACerts.configMap` at it. The chart mounts it at
+`/etc/multica/ca-certs` and sets `SSL_CERT_DIR` as above.
+
+```bash
+kubectl -n multica create configmap multica-extra-ca --from-file=internal-ca.crt
+helm upgrade multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> -n multica --reuse-values \
+  --set backend.extraCACerts.configMap=multica-extra-ca
+```
+
+**Docker Compose:** put the PEM files in a directory next to
+`docker-compose.selfhost.yml` (here `./ca-certs`) and add an override file,
+`docker-compose.ca.yml`:
+
+```yaml
+services:
+  backend:
+    environment:
+      SSL_CERT_DIR: /etc/ssl/certs:/etc/multica/ca-certs
+    volumes:
+      - ./ca-certs:/etc/multica/ca-certs:ro
+```
+
+```bash
+docker compose -f docker-compose.selfhost.yml -f docker-compose.ca.yml up -d backend
+```
+
+Pass both files every time you run a command that recreates the backend. A
+command with only `docker-compose.selfhost.yml`, such as `make selfhost`,
+recreates the backend without the CA.
+
+Things to know:
+
+- **The backend reads the CA only when it starts.** After you add or replace a
+  CA file, restart the backend: `kubectl -n multica rollout restart deploy/multica-backend`,
+  or `docker compose -f docker-compose.selfhost.yml -f docker-compose.ca.yml restart backend`.
+  With Compose, `up -d` is not enough here: the container's configuration has
+  not changed, so Compose keeps the running container. With Helm, a
+  `helm upgrade` also restarts the backend when the ConfigMap has changed.
+- **The CA applies to the whole backend process**, not only the Git provider
+  integration: every outbound TLS client in the backend that uses the system
+  trust store trusts it too.
+- **Daemons get the CA for git too.** Daemons clone and fetch workspace
+  repositories with the `git` installed on their machine, which never sees the
+  backend's `SSL_CERT_DIR`. The backend therefore sends the certificates from
+  the directories you added to `SSL_CERT_DIR` (the system directories
+  `/etc/ssl/certs` and `/etc/pki/tls/certs` are left out) to every daemon with
+  the workspace repositories. The daemon adds them to the trust git already
+  has on its machine and records the result in each workspace repository's
+  git config, which its own clone and fetch and the git commands agents run in
+  their checkouts all read. Nothing needs to be installed on the daemon's
+  machine. Things to know about it:
+  - The trust git already has is kept. If the daemon's machine sets a general
+    `http.sslCAInfo` in its system or global git config, the certificates in
+    that file are combined with the backend's; otherwise the system CA bundle
+    is. The daemon writes the combination to a file of its own and does not
+    change the system trust store or that git config.
+  - Narrower settings on the daemon's machine win and are not combined: an
+    `http.<url>.sslCAInfo` for a host, an `http.sslCAInfo` set in a
+    repository's own config, and `GIT_SSL_CAINFO`.
+  - Daemons pick up an added, replaced, or removed CA, and changes to the
+    machine's own trust, the next time they refresh the workspace
+    repositories, which happens before every checkout; they do not need a
+    restart. The backend still does. Checkouts created while a CA was
+    present keep working after it is removed.
+  - Within those repositories, git trusts the backend's CAs for every host,
+    not only the one that needs them.
+  - Daemons on Windows do not apply it: Git for Windows verifies certificates
+    against the Windows certificate store by default, so add the CA there.
+- **Only the trust problem is fixed.** An expired certificate, or one that does
+  not cover the host name in the URL, is still rejected; fix the certificate
+  itself.
+
 ### WeCom frame tracing
 
 | Variable | Default | Description |
@@ -363,7 +455,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 — a stock install is enough, see [Database Setup](#database-setup).
+**Prerequisites:** Go 1.26.9, Node.js 22, pnpm 10.28.2, PostgreSQL 17 — a stock install is enough, see [Database Setup](#database-setup).
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)

@@ -40,6 +40,13 @@
     "loading_workspace": "Chargement de l'espace de travail…",
     "loading_named_prefix": "Chargement"
   },
+  "window": {
+    "go_back": "Précédent",
+    "go_forward": "Suivant",
+    "hold_for_history": "Maintenir pour l'historique",
+    "back_history": "Historique précédent",
+    "forward_history": "Historique suivant"
+  },
   "sidebar": {
     "unpin_tooltip": "Détacher",
     "workspaces_label": "Espaces de travail",

@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 // copilotBackend implements Backend by spawning the GitHub Copilot CLI
 // with --output-format json and parsing its JSONL event stream.
 //
-// The v1 integration uses the -p (pipe) mode which is the stable
-// automation/CI channel. The prompt is passed as a CLI argument (not stdin).
+// The integration runs Copilot non-interactively with the prompt piped on
+// stdin and no -p, never as a CLI argument: an argv prompt dies at fork/exec
+// once it clears the OS argument size limit (#9362; see buildCopilotArgs).
 // Events arrive as newline-delimited JSON on stdout in the Copilot CLI's
 // own envelope format: { "type": "dotted.event.name", "data": {...}, ... }
 type copilotBackend struct {
@@ -40,6 +43,9 @@ type copilotEventState struct {
 	activeModel  string
 	finalStatus  string
 	finalError   string
+	// sawResult records that the terminal "result" event arrived, i.e. the CLI
+	// consumed the whole stdin prompt and ran to completion.
+	sawResult bool
 
 	// Token usage arrives on up to three different events, so each source is
 	// accumulated separately and resolved once at the end by resolveUsage.
@@ -310,6 +316,7 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		}
 
 	case "result":
+		st.sawResult = true
 		if evt.SessionID != "" {
 			st.sessionID = evt.SessionID
 		}
@@ -344,13 +351,20 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("copilot executable not found at %q: %w", execName, err)
 	}
 
+	// Without -p the CLI takes its prompt from stdin; an empty stdin would
+	// leave it nothing to run, so refuse before spawning anything.
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("copilot: empty prompt")
+	}
+
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
+	// The task prompt is delivered on stdin, never argv (see buildCopilotArgs).
+	args := buildCopilotArgs(opts, b.cfg.Logger)
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseCopilotInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
-	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
+	b.cfg.logAgentCommandWithPrompt(cmd, newAgentCommandLogArgs(args), len(prompt))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -362,13 +376,32 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		cancel()
 		return nil, fmt.Errorf("copilot stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("copilot stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[copilot:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start copilot: %w", err)
 	}
+
+	// Write the prompt from its own goroutine so it cannot deadlock against the
+	// stdout reader: a prompt larger than the OS pipe buffer blocks mid-write
+	// until Copilot drains it, and Copilot cannot drain while nobody consumes
+	// its stdout. Closing stdin is what ends the prompt, so close on every path.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
 
 	b.cfg.Logger.Info("copilot started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -389,6 +422,8 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		go func() {
 			<-runCtx.Done()
+			// Release a prompt write still blocked on a full stdin pipe.
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -418,6 +453,10 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
+		// Wait closes the process pipes, so a prompt write still blocked when
+		// Copilot exited has returned by now. The writer sends exactly once.
+		writeErr := <-writeErrCh
+
 		if runCtx.Err() == context.DeadlineExceeded {
 			st.finalStatus = "timeout"
 			st.finalError = fmt.Sprintf("copilot timed out after %s", timeout)
@@ -427,6 +466,19 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		} else if exitErr != nil && st.finalStatus == "completed" {
 			st.finalStatus = "failed"
 			st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
+		} else if writeErr != nil && !st.sawResult {
+			// A broken prompt write is benign only once the run is proven to have
+			// finished: Copilot reads stdin to EOF before it starts, so a run that
+			// reached its terminal "result" event received the whole prompt and a
+			// late EPIPE just means the pipe closed on the way out. Without that
+			// proof the prompt may never have landed — never report that as a
+			// clean success.
+			st.finalStatus = "failed"
+			if st.finalError == "" {
+				st.finalError = fmt.Sprintf("copilot prompt write failed: %v", writeErr)
+			} else {
+				st.finalError = fmt.Sprintf("%s; copilot prompt write failed: %v", st.finalError, writeErr)
+			}
 		}
 		if st.finalError != "" {
 			st.finalError = withAgentStderr(st.finalError, "copilot", stderrBuf.Tail())
@@ -625,11 +677,18 @@ var copilotBlockedArgs = map[string]blockedArgMode{
 
 // buildCopilotArgs assembles the argv for a one-shot copilot invocation.
 //
-//	copilot -p "<prompt>" --output-format json --allow-all --no-ask-user
+//	copilot --output-format json --allow-all --no-ask-user
 //	        [--resume <session-id>] [--model <model>]
-func buildCopilotArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
+//
+// The prompt is NOT on argv: Copilot CLI enters non-interactive mode when its
+// stdin is piped and no -p is given, running the piped text as the entire
+// prompt (verified on Copilot CLI 1.0.98, including --resume). Inlining it as
+// `-p <prompt>` fails at fork/exec with E2BIG on Linux once the prompt clears
+// MAX_ARG_STRLEN (131,072 bytes) — a long issue thread is enough (#9362) — and
+// hits the 32,767-character CreateProcess ceiling on Windows. "-p" stays in
+// copilotBlockedArgs so custom_args cannot reintroduce that path.
+func buildCopilotArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"-p", prompt,
 		"--output-format", "json",
 		"--allow-all", // tools + paths + URLs — full headless mode
 		"--no-ask-user",

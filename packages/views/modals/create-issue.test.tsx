@@ -42,6 +42,7 @@ const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockBeginBatchContinuation = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
+const mockEndBatchContinuation = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
@@ -157,6 +158,7 @@ const mockDraftStore = {
   setAgent: mockSetAgent,
   setActiveMode: mockSetActiveMode,
   beginBatchContinuation: mockBeginBatchContinuation,
+  endBatchContinuation: mockEndBatchContinuation,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
   hasDraft: () => !!(
@@ -686,11 +688,33 @@ describe("CreateIssueModal", () => {
     mockBeginBatchContinuation.mockImplementation(() => {
       mockDraftStore.batchContinuationBaseline = mockDraftStore.draft;
     });
-    mockClearDraft.mockImplementation(() => {
+    const resetMockDraft = () => {
       const next = emptyIssueDraft();
       next.manual.assigneeType = mockDraftStore.lastAssigneeType;
       next.manual.assigneeId = mockDraftStore.lastAssigneeId;
       mockDraftStore.draft = next;
+      mockDraftStore.batchContinuationBaseline = undefined;
+    };
+    mockClearDraft.mockImplementation(resetMockDraft);
+    // Mirrors the store's close-time cleanup: nothing to end without a live
+    // continuation snapshot (a source-context close restored the ordinary
+    // draft), a continuation whose manual form is still what the reset wrote
+    // loses only the status the batch inherited, and one the user actually
+    // edited closes as it is — inherited status included. The agent slot and
+    // `activeMode` stay out of the comparison: a mode switch is not an edit.
+    mockEndBatchContinuation.mockImplementation(() => {
+      const baseline = mockDraftStore.batchContinuationBaseline;
+      if (!baseline) return;
+      const { draft } = mockDraftStore;
+      const unchanged =
+        JSON.stringify({ shared: draft.shared, manual: draft.manual }) ===
+        JSON.stringify({ shared: baseline.shared, manual: baseline.manual });
+      if (unchanged) {
+        mockDraftStore.draft = {
+          ...draft,
+          manual: { ...draft.manual, status: "todo" },
+        };
+      }
       mockDraftStore.batchContinuationBaseline = undefined;
     });
     mockApiUploadFile.mockResolvedValue({
@@ -966,9 +990,9 @@ describe("CreateIssueModal", () => {
 
     // An untouched continuation is not a draft: closing it drops the batch
     // defaults so the next fresh create starts from todo again.
-    const clearsAfterSubmit = mockClearDraft.mock.calls.length;
+    const endsAfterSubmit = mockEndBatchContinuation.mock.calls.length;
     modal.unmount();
-    expect(mockClearDraft).toHaveBeenCalledTimes(clearsAfterSubmit + 1);
+    expect(mockEndBatchContinuation).toHaveBeenCalledTimes(endsAfterSubmit + 1);
     expect(mockDraftStore.draft.manual.status).toBe("todo");
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Fresh issue");
@@ -989,7 +1013,7 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
     // The submitted draft is consumed, leaving an untouched continuation.
     await waitFor(() => expect(mockClearDraft).toHaveBeenCalledTimes(1));
-    const clearsAfterSubmit = mockClearDraft.mock.calls.length;
+    const endsAfterSubmit = mockEndBatchContinuation.mock.calls.length;
 
     // Priority only — no title, body or attachment to mark the draft as content.
     await user.click(screen.getByTestId("priority-picker"));
@@ -997,9 +1021,10 @@ describe("CreateIssueModal", () => {
 
     modal.unmount();
 
-    // The explicit selection survives the close instead of being reset away.
-    expect(mockClearDraft).toHaveBeenCalledTimes(clearsAfterSubmit);
+    // The explicit selection survives alongside this batch's todo status.
+    expect(mockEndBatchContinuation).toHaveBeenCalledTimes(endsAfterSubmit + 1);
     expect(mockDraftStore.draft.shared.priority).toBe("high");
+    expect(mockDraftStore.draft.manual.status).toBe("todo");
 
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
     await user.type(screen.getByPlaceholderText("Issue title"), "Carried priority issue");

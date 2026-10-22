@@ -359,9 +359,11 @@ type LinkIssueToPullRequestParams struct {
 // =====================
 // Issue ↔ Pull Request link
 // =====================
-// Automatic link from a PR title or branch. Returns 1 only when the link is
-// new, so the webhook evaluates auto-complete on the link event and not on
-// every redelivery. An existing link (automatic or manual) is left untouched.
+// Automatic link from a PR title, branch, or closing keyword. Returns 1 only
+// when the link is new, so the webhook evaluates the merge automation on the
+// link event and not on every redelivery. An existing link (automatic or
+// manual) is left untouched. close_intent is no longer read or written
+// (MUL-7726).
 func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPullRequestParams) (int64, error) {
 	result, err := q.db.Exec(ctx, linkIssueToPullRequest, arg.IssueID, arg.PullRequestID)
 	if err != nil {

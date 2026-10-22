@@ -86,6 +86,46 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const getRealtimeMemberships = `-- name: GetRealtimeMemberships :many
+SELECT m.user_id, m.workspace_id
+FROM member m
+JOIN (
+    SELECT unnest($1::uuid[]) AS user_id,
+           unnest($2::uuid[]) AS workspace_id
+) AS requested
+    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+`
+
+type GetRealtimeMembershipsParams struct {
+	UserIds      []pgtype.UUID `json:"user_ids"`
+	WorkspaceIds []pgtype.UUID `json:"workspace_ids"`
+}
+
+type GetRealtimeMembershipsRow struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMembershipsParams) ([]GetRealtimeMembershipsRow, error) {
+	rows, err := q.db.Query(ctx, getRealtimeMemberships, arg.UserIds, arg.WorkspaceIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetRealtimeMembershipsRow{}
+	for rows.Next() {
+		var i GetRealtimeMembershipsRow
+		if err := rows.Scan(&i.UserID, &i.WorkspaceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE workspace_id = $1

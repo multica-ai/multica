@@ -7,7 +7,6 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
-// ---------------------------------------------------------------------------
 // Agent invocation permissions (MUL-3963)
 //
 // `permission_mode` + `invocation_targets` are the AUTHORITATIVE gate for who
@@ -24,7 +23,6 @@ export type AgentVisibility = "workspace" | "private";
 //   - permission_mode "public_to" + workspace target: any workspace member
 //   - permission_mode "public_to" + member target: only the matching user
 //   - team target: reserved, INERT in v1 (never grants)
-// ---------------------------------------------------------------------------
 
 export type AgentPermissionMode = "private" | "public_to";
 
@@ -93,7 +91,6 @@ export interface RuntimeDevice {
 
 export type AgentRuntime = RuntimeDevice;
 
-// ---------------------------------------------------------------------------
 // Custom runtime profiles (MUL-3284)
 //
 // A RuntimeProfile is a workspace-level *definition* of a custom runtime
@@ -101,7 +98,6 @@ export type AgentRuntime = RuntimeDevice;
 // *instance*. An admin authors a profile (display name + base protocol
 // family + the CLI command to launch), and daemons can then register
 // runtimes against it; those instances carry `profile_id` pointing back here.
-// ---------------------------------------------------------------------------
 
 // The fixed allow-list of base protocol families a custom runtime can wrap.
 // These are the only backends the create flow may select; the server rejects
@@ -132,6 +128,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qwen",
   "qwenpaw",
   "mcode",
+  "muse",
   "zeroclaw",
 ] as const;
 
@@ -198,6 +195,7 @@ export type TaskFailureReason =
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
+  | "runtime_access_revoked"
   | "runtime_reconnect_timeout"
   | "runtime_recovery"
   | "manual";
@@ -216,6 +214,9 @@ export interface AgentActivityBucket {
   // back-end always reports all three.
   completed_count: number;
   cancelled_count: number;
+  // Absent on older servers; do not estimate duration from a task page.
+  duration_ms?: number;
+  duration_count?: number;
 }
 
 // 30-day total run count per agent, drives the Agents-list RUNS column.
@@ -714,6 +715,7 @@ export type AgentPermissionScope = "private" | "workspace" | "members";
  * over edits the user made after it.
  */
 export interface StoredAgentDraft {
+  qoder_agent_id?: string;
   name: string;
   description: string;
   instructions: string;
@@ -727,6 +729,8 @@ export interface StoredAgentDraft {
   member_ids: string[];
   team_ids: string[];
   applied_message_id: string | null;
+  /** Recovery notice acknowledged by manual editing or dismissal. */
+  dismissed_message_id?: string | null;
 }
 
 /** One unfinished agent-creation conversation, as listed by the studio. */

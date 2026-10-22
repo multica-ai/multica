@@ -20,6 +20,7 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { cn } from "@/lib/utils";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 import { continuousCorners } from "@/lib/radius";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   visible: boolean;
@@ -36,6 +37,8 @@ export function AgentPickerSheet({
   onPick,
   onClose,
 }: Props) {
+  const { t } = useT("chat");
+
   return (
     <Modal
       visible={visible}
@@ -52,7 +55,7 @@ export function AgentPickerSheet({
             >
               <View className="px-4 py-3 border-b border-border">
                 <Text className="text-base font-semibold text-foreground">
-                  Choose an agent
+                  {t("picker.title")}
                 </Text>
               </View>
 
@@ -60,7 +63,7 @@ export function AgentPickerSheet({
                 {agents.length === 0 ? (
                   <View className="px-4 py-8">
                     <Text className="text-sm text-muted-foreground text-center">
-                      No agents available.
+                      {t("picker.empty")}
                     </Text>
                   </View>
                 ) : (
@@ -100,7 +103,7 @@ export function AgentPickerSheet({
                         </View>
                         {!runtimeBound ? (
                           <Text className="text-xs font-medium text-warning">
-                            Needs runtime
+                            {t("picker.needs_runtime")}
                           </Text>
                         ) : null}
                         {selected ? (

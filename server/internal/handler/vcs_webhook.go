@@ -217,17 +217,18 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	workspaceID := uuidToString(conn.WorkspaceID)
 	resp := vcsPullRequestToResponse(pr)
 
-	// Auto-link to issues by identifiers in the title and branch. Connecting a
-	// provider is the opt-in, so there is no separate per-workspace flag. The
-	// issue-side machinery is shared with GitHub (reconcileAutoLinks,
-	// maybeAutoCompleteIssue). A connection belongs to exactly one workspace, so
-	// there is no cross-workspace ambiguity to settle.
+	// Auto-link to issues by identifiers in the title, branch, and closing
+	// keywords. Connecting a provider is the opt-in, so there is no separate
+	// per-workspace flag. The issue-side machinery is shared with GitHub
+	// (reconcileAutoLinks, maybeAutoCompleteIssue). A connection belongs to
+	// exactly one workspace, so there is no cross-workspace ambiguity to settle.
 	linkedIssueIDs := make([]string, 0)
 	ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID)
 	if err == nil {
 		var touched map[pgtype.UUID]struct{}
+		idents := prClaimedIdentifiers(ev.Title, ev.Body, ev.Branch)
 		linkedIssueIDs, touched = h.reconcileAutoLinks(ctx, ws, pr.ID, ev.State, prAutoLinkInput{
-			idents:    extractIdentifiers(ev.Title, ev.Branch),
+			idents:    idents,
 			permits:   func(string) bool { return true },
 			ambiguous: func(string) bool { return false },
 			link: func(issueID pgtype.UUID) (int64, error) {

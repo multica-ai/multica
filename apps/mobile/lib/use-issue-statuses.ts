@@ -23,11 +23,25 @@ import { issueStatusListOptions } from "@/data/queries/issue-statuses";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import {
   buildIssueStatusCatalog,
+  isBuiltInIssueStatus,
   type IssueStatusCatalog,
 } from "@/lib/issue-status";
+import { useT } from "@/lib/i18n";
 
 export function useIssueStatuses(): IssueStatusCatalog {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT();
   const { data } = useQuery(issueStatusListOptions(wsId));
-  return useMemo(() => buildIssueStatusCatalog(data), [data]);
+  return useMemo(() => {
+    const catalog = buildIssueStatusCatalog(data);
+    return {
+      ...catalog,
+      labelOf: (key: string) => {
+        const label = catalog.labelOf(key);
+        // Only i18next keys are translatable. A custom status name may itself
+        // contain a colon, so its catalog name must pass through unchanged.
+        return isBuiltInIssueStatus(key) ? t(label) : label;
+      },
+    };
+  }, [data, t]);
 }

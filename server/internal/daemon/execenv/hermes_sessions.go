@@ -11,49 +11,15 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// Background
+// Persist Hermes ACP session databases by agent, profile, and conversation under
+// hermes-sessions. Tasks for one conversation are serialized; separate conversations
+// get separate SQLite databases. This keeps resumable transcripts across task homes
+// without sharing a live database among an agent's concurrent issues.
 //
-// Hermes persists every ACP session — the actual conversation transcript — in
-// the SQLite database at `<HERMES_HOME>/state.db` (acp_adapter/session.py).
-// Because Multica has to take over HERMES_HOME to inject bound skills, that
-// database landed inside the per-task overlay, which made a Hermes agent's
-// conversation last exactly one task.
-//
-// The failure was silent, which is what made it expensive. `session/resume`
-// against a database that does not hold the session does not fail: Hermes
-// creates a fresh session and answers with an ordinary success frame
-// (acp_adapter/server.py resume_session), so the daemon believed it had
-// resumed, re-sent the same dead id on every later turn, and the user saw a
-// conversation that restarted from zero with nothing in the logs (GH #6806).
-// The backend now detects that rebind (resolveHermesResumedSessionID), and
-// this file removes the cause.
-//
-// The store is keyed by (agent, hermes profile, conversation):
-//
-//	<multica profile dir>/hermes-sessions/<agent>/<hermes profile>/<conversation>/state.db
-//
-// Keying to the conversation — the issue, or `chat_<id>` for a chat session —
-// is what makes this safe to share where #6693 could not. Its stated reason
-// for leaving state.db task-local was concurrency: one agent's parallel tasks
-// would write one live SQLite database, which needs lock and consistency work
-// (plus Windows byte-range locks on `-shm`) that plain memory files do not.
-// Tasks of the SAME conversation are serial by construction — a follow-up is
-// dispatched after its predecessor reports — so the shard has one writer at a
-// time, while two different issues get two different databases and never meet.
-//
-// The (agent, profile) prefix matches the memory store's scoping exactly, so
-// pointing an agent at another Hermes profile gives it a fresh conversation
-// line just as it gives it a fresh memory line. It is a sibling root rather
-// than a subdirectory of `hermes-state/<agent>/<profile>` because that
-// directory IS the agent's memories dir (the overlay links `memories/`
-// straight at it), so nesting sessions inside it would surface them to Hermes
-// as a memory entry.
-//
-// The overlay mounts the shard by symlinking `<overlay>/state.db` at
-// `<store>/state.db`. SQLite resolves the link when it derives the `-wal` and
-// `-shm` paths, so the journal sidecars are created in the store next to the
-// database rather than in the task directory, and a task teardown can never
-// take the write-ahead log with it.
+// Keep session storage outside the memories root. Link overlay/state.db to the
+// store so SQLite places WAL and SHM sidecars beside the persistent database and
+// task teardown cannot remove them. Detect provider session-ID rebinding when a
+// requested session is absent.
 
 // hermesSessionStoreRoot is the directory under the daemon's Multica profile
 // dir that holds every agent's persistent Hermes conversation shards.
@@ -210,10 +176,27 @@ func mountHermesSessionDB(hermesHome, storeDir string, logger *slog.Logger) (her
 const hermesSessionLinkStagingEntry = ".multica-session-link"
 
 // hermesStoreHasSessionDB reports whether storeDir holds a session database
-// with content. A zero-length file is what SQLite leaves after an `open` that
-// never wrote a page, and resuming against it is the same amnesia as an absent
-// one — so it counts as no history, not as history.
+// with readable content. A zero-length file is what SQLite leaves after an
+// `open` that never wrote a page; resuming against it is the same as an absent
+// database, so it counts as no history.
 func hermesStoreHasSessionDB(storeDir string) bool {
+	path := filepath.Join(storeDir, hermesSessionDBEntry)
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {
+		return false
+	}
+	db, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	return true
+}
+
+// hermesStoreContainsSessionDB protects existing history during migration,
+// even when it cannot currently be opened for resume. Read permissions do not
+// prevent unlinking a database from a writable directory.
+func hermesStoreContainsSessionDB(storeDir string) bool {
 	fi, err := os.Stat(filepath.Join(storeDir, hermesSessionDBEntry))
 	return err == nil && fi.Mode().IsRegular() && fi.Size() > 0
 }
@@ -234,7 +217,7 @@ func hermesStoreHasSessionDB(storeDir string) bool {
 // Only an empty store is migrated into — a store that already holds a database
 // is this conversation's real history and must never be overwritten.
 func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger) error {
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return nil // store already holds this conversation — never overwrite it
 	}
 
@@ -306,7 +289,7 @@ func migrateHermesTaskSessionDB(hermesHome, storeDir string, logger *slog.Logger
 func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	hermesSessionPublishMu.Lock()
 	defer hermesSessionPublishMu.Unlock()
-	if hermesStoreHasSessionDB(storeDir) {
+	if hermesStoreContainsSessionDB(storeDir) {
 		return false, nil // a competitor published a real transcript first
 	}
 	if hermesSessionPublishBarrier != nil {
@@ -315,7 +298,7 @@ func publishHermesSessionStaging(staging, storeDir string) (bool, error) {
 	if err := removeHermesSessionDBFamily(storeDir); err != nil {
 		return false, err
 	}
-	return promoteHermesStoreStaging(staging, storeDir, hermesStoreHasSessionDB)
+	return promoteHermesStoreStaging(staging, storeDir, hermesStoreContainsSessionDB)
 }
 
 // hermesSessionPublishMu serializes every session-store publish in this

@@ -19,7 +19,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isAgentRuntimeBound } from "@multica/core/agents";
-import { api } from "@multica/core/api";
+import { searchIssues, searchProjects } from "@multica/core/search-index";
 import {
   isIssueDirectHit,
   isProjectDirectHit,
@@ -66,9 +66,7 @@ import {
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface MentionItem {
   id: string;
@@ -106,9 +104,7 @@ export interface MentionListRef {
   onKeyDown: (props: { event: KeyboardEvent }) => boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Group items by section
-// ---------------------------------------------------------------------------
 
 interface MentionGroup {
   label: string;
@@ -150,9 +146,7 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   return groups;
 }
 
-// ---------------------------------------------------------------------------
 // MentionList — the popup rendered inside the editor
-// ---------------------------------------------------------------------------
 
 const MAX_ITEMS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
@@ -306,13 +300,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           try {
             if (includeProjectSearch) {
               const [issues, projects] = await Promise.all([
-                api.searchIssues({
+                searchIssues({
                   q,
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
                   signal: controller.signal,
                 }),
-                api.searchProjects({
+                searchProjects({
                   q,
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
@@ -326,7 +320,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                 ]);
               }
             } else {
-              const res = await api.searchIssues({
+              const res = await searchIssues({
                 q,
                 limit: SERVER_ISSUE_SEARCH_LIMIT,
                 include_closed: true,
@@ -531,9 +525,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   },
 );
 
-// ---------------------------------------------------------------------------
 // MentionRow — single item in the list
-// ---------------------------------------------------------------------------
 
 function MentionRow({
   item,
@@ -674,9 +666,7 @@ function MentionRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Suggestion config factory
-// ---------------------------------------------------------------------------
 
 function issueToMention(
   i: Pick<Issue, "id" | "identifier" | "title" | "status"> & Partial<Pick<Issue, "status_category">>,

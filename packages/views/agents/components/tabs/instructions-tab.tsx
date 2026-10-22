@@ -20,6 +20,7 @@ export function InstructionsTab({
   agent,
   onSave,
   onDirtyChange,
+  showConversationStarters = true,
 }: {
   agent: Agent;
   onSave: (updates: {
@@ -27,15 +28,19 @@ export function InstructionsTab({
     conversation_starters?: AgentConversationStarter[];
   }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  /** False for runtimes that never open a chat, where starters do nothing. */
+  showConversationStarters?: boolean;
 }) {
   const { t } = useT("agents");
   // Optional read: this tab is a leaf that tests mount in isolation, and its
   // only navigation-dependent behaviour (the deep-link focus below) degrades
   // to "no highlight" when there is no adapter.
   const navigation = useOptionalNavigation();
-  const conversationStartersSupported = useConfigStore(
+  const conversationStartersEnabled = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
+  const conversationStartersSupported =
+    conversationStartersEnabled && showConversationStarters;
   const [value, setValue] = useState(agent.instructions ?? "");
   const [conversationStarters, setConversationStarters] = useState<AgentConversationStarter[]>(
     agent.conversation_starters ?? [],

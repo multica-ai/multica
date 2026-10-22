@@ -373,35 +373,76 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	timeout := opts.Timeout
 
-	// Pi's --session flag expects a file path where events are appended.
-	// The path doubles as our opaque session identifier: we return it as
-	// SessionID and expect it back as ResumeSessionID on the next turn.
+	// The persisted JSONL path is our opaque session identifier. OMP's
+	// --session is strictly resume-only; let it create fresh sessions in a
+	// private directory, then return the transcript it actually persisted.
 	sessionPath := opts.ResumeSessionID
-	if sessionPath == "" {
-		p, err := newPiSessionPath()
+	var sessionDir string
+	var sessionLock *os.File
+	if label == "omp" && sessionPath == "" {
+		dir, err := piSessionDir()
 		if err != nil {
-			return nil, fmt.Errorf("%s session path: %w", label, err)
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
 		}
-		sessionPath = p
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
+		}
+		sessionDir, err = os.MkdirTemp(dir, "omp-")
+		if err != nil {
+			return nil, fmt.Errorf("%s session directory: %w", label, err)
+		}
+	} else {
+		if sessionPath == "" {
+			sessionPath, err = newPiSessionPath()
+			if err != nil {
+				return nil, fmt.Errorf("%s session path: %w", label, err)
+			}
+		}
+		if label != "omp" {
+			if err := ensurePiSessionFile(sessionPath); err != nil {
+				return nil, fmt.Errorf("%s session file: %w", label, err)
+			}
+		}
+		var locked bool
+		sessionLock, locked, err = tryLockPiSessionFile(sessionPath)
+		if err != nil {
+			return nil, fmt.Errorf("%s session lock: %w", label, err)
+		}
+		if !locked {
+			if opts.ResumeSessionID != "" {
+				return piSessionBusyResult(label, sessionPath), nil
+			}
+			return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+		}
 	}
-	if err := ensurePiSessionFile(sessionPath); err != nil {
-		return nil, fmt.Errorf("%s session file: %w", label, err)
-	}
-	sessionLock, locked, err := tryLockPiSessionFile(sessionPath)
+
+	extensionPath, err := b.preparePiMcpExtension(opts.McpConfig)
 	if err != nil {
-		return nil, fmt.Errorf("%s session lock: %w", label, err)
+		releasePiSessionFileLock(sessionLock)
+		return nil, fmt.Errorf("%s mcp extension: %w", label, err)
 	}
-	if !locked {
-		if opts.ResumeSessionID != "" {
-			return piSessionBusyResult(label, sessionPath), nil
+	// Execute owns the temp extension until the process is running. The
+	// reader goroutine takes ownership after start so a launch failure still
+	// deletes the directory, and a running process can read it until exit.
+	releaseExtension := func() { removePiMcpExtension(extensionPath) }
+	defer func() {
+		if releaseExtension != nil {
+			releaseExtension()
 		}
-		return nil, fmt.Errorf("%s session file %q is already in use", label, sessionPath)
+	}()
+	if extensionPath != "" {
+		opts.piMcpExtensionPath = extensionPath
 	}
 
 	runCtx, cancel := runContext(ctx, timeout)
 	processCtx, cancelProcess := context.WithCancel(runCtx)
 
-	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	var args []string
+	if label == "omp" {
+		args = buildOmpArgs(sessionPath, sessionDir, opts, b.cfg.Logger)
+	} else {
+		args = buildPiArgs(sessionPath, opts, b.cfg.Logger)
+	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
@@ -505,7 +546,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		closePiReadPipe(stderrRead)
 	}()
 
+	releaseExtension = nil
 	go func() {
+		defer removePiMcpExtension(extensionPath)
 		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancelProcess()
 		defer cancel()
@@ -613,6 +656,23 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					turnErrors.clear()
 				}
 
+			case "agent_end":
+				// agent_end closes the run, and its last assistant message holds
+				// the run's terminal state. Pi 0.74.0 and earlier report a
+				// failure raised outside a model stream, such as an API key they
+				// cannot resolve, only here: no turn_end, no error event, and
+				// print mode still exits 0. Record it like a turn_end error, so
+				// an automatic retry or a later successful turn still clears it.
+				msg := lastPiAssistantMessage(evt.Messages)
+				if msg == nil || msg.StopReason != "error" {
+					continue
+				}
+				runError := msg.ErrorMessage
+				if runError == "" {
+					runError = label + " ended the run with an error"
+				}
+				turnErrors.record(runError)
+
 			case "error":
 				errText := decodePiString(evt.Message)
 				trySend(msgCh, Message{Type: MessageError, Content: errText})
@@ -633,6 +693,13 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					}
 				}
 			}
+		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			// Scanner stopped consuming stdout. Close the pipe before Wait so Pi,
+			// still writing an oversized event, cannot deadlock on the full OS
+			// pipe; the scanner error remains the primary failure.
+			closePiReadPipe(stdout)
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
 			output.WriteString(d)
@@ -682,6 +749,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalStatus = "failed"
 			finalError = lastTurnError
 			authoritativeTerminal = true
+		} else if scanErr != nil && finalStatus == "completed" {
+			// The unread rest of the stream may hold the run's terminal state
+			// (agent_end repeats every message of the run, so it is the line
+			// most likely to overflow), so the run cannot count as a success.
+			// Ranked above waitErr: closing stdout is what made Pi exit.
+			authoritativeTerminal = true
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("%s stdout read error: %v", label, scanErr)
+			if lastTurnError != "" {
+				finalError = lastTurnError + "; " + finalError
+			}
 		} else if waitErr != nil && finalStatus == "completed" {
 			authoritativeTerminal = true
 			finalStatus = "failed"
@@ -712,6 +790,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = lastTurnError
 		} else if runCtx.Err() == nil {
 			authoritativeTerminal = true
+		}
+
+		if sessionDir != "" {
+			var sessionErr error
+			sessionPath, sessionErr = findOmpSessionFile(sessionDir)
+			if sessionErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("omp session file: %v", sessionErr)
+			}
 		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -843,6 +930,9 @@ type piStreamEvent struct {
 	// error: Message is a string. turn_end: Message is an object.
 	Message json.RawMessage `json:"message,omitempty"`
 
+	// agent_end: the messages the agent run produced, oldest first.
+	Messages json.RawMessage `json:"messages,omitempty"`
+
 	// auto_retry_end
 	Success    bool   `json:"success,omitempty"`
 	FinalError string `json:"finalError,omitempty"`
@@ -858,9 +948,10 @@ type piMessage struct {
 	Model string   `json:"model,omitempty"`
 	Usage *piUsage `json:"usage,omitempty"`
 
-	// turn_end carries the terminal state of the turn. Pi sets StopReason to
-	// "error" for a provider call it could not complete, whether or not it
-	// goes on to retry, and puts the provider's message in ErrorMessage.
+	// turn_end carries the terminal state of the turn, and agent_end's last
+	// assistant message that of the run. Pi sets StopReason to "error" for a
+	// provider call it could not complete, whether or not it goes on to retry,
+	// and puts the provider's message in ErrorMessage.
 	StopReason   string `json:"stopReason,omitempty"`
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
@@ -882,6 +973,22 @@ func decodePiMessage(raw json.RawMessage) *piMessage {
 		return nil
 	}
 	return &m
+}
+
+// lastPiAssistantMessage returns the newest assistant message in agent_end's
+// messages, or nil when there is none. Messages are decoded one at a time so
+// an unexpected shape elsewhere in the run cannot hide the last one.
+func lastPiAssistantMessage(raw json.RawMessage) *piMessage {
+	var messages []json.RawMessage
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if m := decodePiMessage(messages[i]); m != nil && m.Role == "assistant" {
+			return m
+		}
+	}
+	return nil
 }
 
 func decodePiString(raw json.RawMessage) string {
@@ -1025,7 +1132,139 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	// inlining the same runtime brief would duplicate it on every turn.
 	// Verified against Pi 0.67.2 (MUL-5392).
 	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
+	// The extension is explicit, so Pi loads it without trusting the project.
+	// It stays after custom args so the managed path cannot be mistaken for the
+	// value of an extension-defined flag. A user-provided --approve remains
+	// independent and continues to opt into all project-local Pi resources.
+	if opts.piMcpExtensionPath != "" {
+		args = append(args, "--extension", opts.piMcpExtensionPath)
+	}
 	return args
+}
+
+const (
+	piMcpExtensionDirPrefix = "multica-pi-mcp-"
+	// Pi 0.99.0 introduced the built-in MCP extension and the
+	// registerMcpServer API used by the task-local adapter below. This is a
+	// capability floor, not a global Pi floor: older Pi installations keep
+	// working for agents without managed MCP configuration.
+	piMcpMinVersion = "0.99.0"
+)
+
+// preparePiMcpExtension writes Pi's own temporary extension. omp shares this
+// backend but keeps its project mcp.json, so it never gets this file.
+func (b *piBackend) preparePiMcpExtension(raw json.RawMessage) (string, error) {
+	if b.providerLabel == "omp" || !hasManagedMcpConfig(raw) {
+		return "", nil
+	}
+	servers, err := piMcpExtensionServers(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(servers) == 0 {
+		return "", nil
+	}
+	if err := b.validatePiMcpVersion(); err != nil {
+		return "", err
+	}
+	return writePiMcpExtension(raw)
+}
+
+func (b *piBackend) validatePiMcpVersion() error {
+	// Custom runtime profiles only promise Pi's JSON protocol, not the vendor's
+	// version scheme. Their explicit extension load remains the capability
+	// probe; applying Pi's vendor floor would reject compatible wrappers.
+	if !b.cfg.BuiltinRuntime {
+		return nil
+	}
+	detected, err := parseSemver(b.cfg.CLIVersion)
+	if err != nil {
+		return fmt.Errorf("pi MCP requires a newer version: %s or later; could not verify detected version %q; upgrade Pi or remove the MCP configuration", piMcpMinVersion, b.cfg.CLIVersion)
+	}
+	minimum, _ := parseSemver(piMcpMinVersion)
+	if detected.lessThan(minimum) {
+		return fmt.Errorf("pi MCP requires a newer version: %s or later (detected %s); upgrade Pi or remove the MCP configuration", piMcpMinVersion, b.cfg.CLIVersion)
+	}
+	return nil
+}
+
+// writePiMcpExtension writes mcp-extension.mjs under a multica-pi-mcp-*
+// directory. An empty server list returns an empty path and leaves no
+// directory behind. The caller deletes the directory with
+// removePiMcpExtension. Pi validates each server; the generated extension
+// isolates those errors so one malformed entry cannot suppress valid servers.
+func writePiMcpExtension(raw json.RawMessage) (string, error) {
+	if !hasManagedMcpConfig(raw) {
+		return "", nil
+	}
+	servers, err := piMcpExtensionServers(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(servers) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(servers)
+	if err != nil {
+		return "", err
+	}
+	literal, err := json.Marshal(string(encoded))
+	if err != nil {
+		return "", err
+	}
+	script := "const servers = JSON.parse(" + string(literal) + ");\n" +
+		"export default function (pi) {\n" +
+		"  if (typeof pi.registerMcpServer !== \"function\") {\n" +
+		"    throw new Error(\"Multica MCP delivery requires Pi " + piMcpMinVersion + " or newer\");\n" +
+		"  }\n" +
+		"  for (const [name, config] of Object.entries(servers)) {\n" +
+		"    try {\n" +
+		"      pi.registerMcpServer(name, config);\n" +
+		"    } catch (error) {\n" +
+		"      const reason = error instanceof Error ? error.message : String(error);\n" +
+		"      console.error(\"[multica] could not register MCP server \" + JSON.stringify(name) + \": \" + reason);\n" +
+		"    }\n" +
+		"  }\n" +
+		"}\n"
+	dir, err := os.MkdirTemp("", piMcpExtensionDirPrefix)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-extension.mjs")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		removePiMcpExtension(path)
+		return "", err
+	}
+	return path, nil
+}
+
+// removePiMcpExtension deletes the temporary extension directory. It refuses
+// any path whose parent is not a multica-pi-mcp-* directory.
+func removePiMcpExtension(path string) {
+	if path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if !strings.HasPrefix(filepath.Base(dir), piMcpExtensionDirPrefix) {
+		return
+	}
+	_ = os.RemoveAll(dir)
+}
+
+func piMcpExtensionServers(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse mcp_config: %w", err)
+	}
+	rawServers, ok := doc["mcpServers"]
+	if !ok || bytes.Equal(bytes.TrimSpace(rawServers), []byte("null")) {
+		return nil, nil
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(rawServers, &servers); err != nil {
+		return nil, fmt.Errorf("parse mcp_config mcpServers: %w", err)
+	}
+	return servers, nil
 }
 
 // filterPiCustomArgs removes @file and positional message inputs from

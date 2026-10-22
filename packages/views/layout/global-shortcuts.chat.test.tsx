@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { configureShortcutPlatform } from "@multica/core/shortcuts";
+import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
+import { useRef } from "react";
+import { useChatInputFocus } from "../chat/components/use-chat-input-focus";
 import { GlobalShortcuts } from "./global-shortcuts";
 
 // The floating chat overlay is reachable from the keyboard (MUL-5522). What
@@ -75,6 +78,30 @@ afterEach(() => {
 });
 
 describe("chat toggle shortcut", () => {
+  it("lets C create an issue after the focused floating composer closes", () => {
+    function Composer({ isOpen }: { isOpen: boolean }) {
+      const windowRef = useRef<HTMLDivElement>(null);
+      useChatInputFocus(isOpen, windowRef);
+      return <div ref={windowRef} inert={!isOpen}><div data-testid="composer" contentEditable tabIndex={0} /></div>;
+    }
+    const { getByTestId, rerender } = render(<><GlobalShortcuts /><Composer isOpen /></>);
+    const editor = getByTestId("composer");
+    editor.focus();
+    expect(document.activeElement).toBe(editor);
+
+    const pressCreate = () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "c", bubbles: true, cancelable: true,
+    }));
+    pressCreate();
+    expect(openCreateIssueWithPreference).not.toHaveBeenCalled();
+
+    rerender(<><GlobalShortcuts /><Composer isOpen={false} /></>);
+    expect(document.activeElement).toBe(document.body);
+    expect(getByTestId("composer").parentElement).toHaveAttribute("inert");
+    pressCreate();
+    expect(openCreateIssueWithPreference).toHaveBeenCalledTimes(1);
+  });
+
   it("toggles the floating window and consumes the chord", () => {
     render(<GlobalShortcuts />);
 

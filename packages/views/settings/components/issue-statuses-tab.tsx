@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   ArrowLeft,
   ArrowDown,
   ArrowUp,
   GripVertical,
+  Lock,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -33,10 +34,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { api } from "@multica/core/api";
-import { derivePRAutoCompleteEnabled } from "@multica/core/github";
+import { derivePRMergeStatus } from "@multica/core/github";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueStatusArchiveConflictCount, createIssueStatusListStore } from "@multica/core/issue-statuses";
 import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { IssueSurfaceWithStore } from "../../issues/surface/issue-surface";
@@ -59,10 +58,11 @@ import type {
   IssueStatusCategory,
   IssueStatusEntry,
   IssueStatusIcon,
-  Workspace,
 } from "@multica/core/types";
 import { ISSUE_STATUS_ICONS } from "@multica/core/types/issue-status";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label as FieldLabel } from "@multica/ui/components/ui/label";
@@ -107,7 +107,12 @@ import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { useT } from "../../i18n";
-import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./settings-layout";
+import { AppLink, useNavigation } from "../../navigation";
+import {
+  SettingsReadOnlyNotice,
+  SettingsTab,
+} from "./settings-layout";
+import { settingsHref } from "./settings-navigation";
 
 /**
  * Workspace issue status catalog management (MUL-6243).
@@ -132,6 +137,9 @@ interface StatusDraft {
   icon: IssueStatusIcon | "";
 }
 
+/** Built-ins whose note says what moving an issue there does; the rest only restate the name. */
+const BEHAVIOR_STATUSES = new Set<string>(["backlog", "todo", "in_review"]);
+
 const EMPTY_DRAFT: StatusDraft = {
   name: "",
   description: "",
@@ -140,9 +148,21 @@ const EMPTY_DRAFT: StatusDraft = {
   icon: "",
 };
 
-export function IssueStatusesTab() {
+/**
+ * The status library. Rendered as its own settings tab, or `embedded` under
+ * Settings → Workflows (MUL-7420), where each row also says how many
+ * workflows use the status.
+ */
+export function IssueStatusesTab({
+  embedded,
+  workflowUsage,
+}: {
+  embedded?: { title: string };
+  workflowUsage?: (statusKey: string) => number;
+} = {}) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
+  const navigation = useNavigation();
 
   const [showArchived, setShowArchived] = useState(false);
   const [createCategory, setCreateCategory] = useState<IssueStatusCategory | null>(null);
@@ -151,7 +171,6 @@ export function IssueStatusesTab() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [inspection, setInspection] = useState<{ workspaceId: string; status: IssueStatusEntry } | null>(null);
   const [inspectionOpen, setInspectionOpen] = useState(false);
-  const [showBuiltInNotice, setShowBuiltInNotice] = useState(false);
 
   const { data: statuses = [], isLoading } = useQuery(issueStatusListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -161,7 +180,12 @@ export function IssueStatusesTab() {
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [members, currentUser]);
   const isAdmin = myRole === "owner" || myRole === "admin";
-  const prAutoComplete = derivePRAutoCompleteEnabled(useCurrentWorkspace());
+  // The status a merge moves issues to is set on the Code page (MUL-7726);
+  // its row carries a badge linking there.
+  const mergeTarget = derivePRMergeStatus(useCurrentWorkspace());
+  const mergeSettingsHref = settingsHref(navigation.pathname, navigation.searchParams, "code", {
+    section: "pr-merge-status",
+  });
 
   const groups = useMemo(
     () =>
@@ -188,23 +212,20 @@ export function IssueStatusesTab() {
     setInspectionOpen(true);
   };
 
-  return (
-    <SettingsTab
-      title={t(($) => $.issue_statuses.title)}
-    >
+  // Offered only once the workspace has something archived. A permanently
+  // disabled "Show archived (0)" is a control that can never do anything.
+  const archivedToggle = archivedCount > 0 ? (
+    <label className="flex items-center justify-end gap-2 text-caption text-muted-foreground">
+      {t(($) => $.issue_statuses.show_archived, { count: archivedCount })}
+      <Switch checked={showArchived} onCheckedChange={setShowArchived} />
+    </label>
+  ) : undefined;
+
+  const body = (
+    <>
+      {myRole && !isAdmin ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
       <div className="space-y-4">
-        {isAdmin && (
-          <p className="text-caption text-muted-foreground">{t(($) => $.issue_statuses.reorder_hint)}</p>
-        )}
-        {/* Offered only once the workspace has something archived. A permanently
-            disabled "Show archived (0)" is a control that can never do
-            anything. */}
-        {archivedCount > 0 && (
-          <label className="flex items-center justify-end gap-2 text-caption text-muted-foreground">
-            {t(($) => $.issue_statuses.show_archived, { count: archivedCount })}
-            <Switch checked={showArchived} onCheckedChange={setShowArchived} />
-          </label>
-        )}
+        {embedded && archivedToggle}
 
         {isLoading ? (
           <div className="rounded-lg border border-surface-border bg-card px-4 py-12 text-center text-body text-muted-foreground">
@@ -221,12 +242,13 @@ export function IssueStatusesTab() {
                 category={group.category}
                 entries={group.entries}
                 canManage={isAdmin}
-                prAutoComplete={prAutoComplete}
+                workflowUsage={workflowUsage}
+                mergeTarget={mergeTarget}
+                mergeSettingsHref={mergeSettingsHref}
                 onCreate={() => setCreateCategory(group.category)}
-                onEdit={(entry) => entry.is_system ? setShowBuiltInNotice(true) : setEditing(entry)}
+                onEdit={(entry) => setEditing(entry)}
                 onArchive={(entry) => {
-                  if (entry.is_system) setShowBuiltInNotice(true);
-                  else { setPendingArchive(entry); setArchiveOpen(true); }
+                  setPendingArchive(entry); setArchiveOpen(true);
                 }}
                 onViewIssues={viewIssues}
               />
@@ -234,8 +256,6 @@ export function IssueStatusesTab() {
           </div>
         )}
       </div>
-
-      <PRAutoCompleteSection canManage={isAdmin} />
 
       <StatusEditorDialog
         open={createCategory !== null}
@@ -256,19 +276,22 @@ export function IssueStatusesTab() {
           {inspection?.workspaceId === wsId && <StatusIssueInspection key={`${wsId}:${inspection.status.key}`} status={inspection.status} onClose={() => setInspectionOpen(false)} />}
         </DialogContent>
       </Dialog>
-      <AlertDialog open={showBuiltInNotice} onOpenChange={setShowBuiltInNotice}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.issue_statuses.built_in_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>{t(($) => $.issue_statuses.built_in_dialog.description)}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel variant="default">
-              {t(($) => $.issue_statuses.built_in_dialog.confirm)}
-            </AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+    </>
+  );
+
+  return embedded ? (
+    <section id="status-library" className="space-y-4">
+      <h3 className="text-title-sm font-semibold">{embedded.title}</h3>
+      {body}
+    </section>
+  ) : (
+    <SettingsTab
+      title={t(($) => $.page.tabs.issue_statuses)}
+      description={isAdmin ? t(($) => $.issue_statuses.reorder_hint) : undefined}
+      scope="workspace"
+      actions={archivedToggle}
+    >
+      {body}
     </SettingsTab>
   );
 }
@@ -277,7 +300,9 @@ function CategorySection({
   category,
   entries,
   canManage,
-  prAutoComplete,
+  workflowUsage,
+  mergeTarget,
+  mergeSettingsHref,
   onCreate,
   onEdit,
   onArchive,
@@ -287,7 +312,9 @@ function CategorySection({
   entries: IssueStatusEntry[];
   canManage: boolean;
   /** Badge the built-in Done row: PR auto-complete writes that status. */
-  prAutoComplete: boolean;
+  workflowUsage?: (statusKey: string) => number;
+  mergeTarget: string;
+  mergeSettingsHref: string;
   onCreate: () => void;
   onEdit: (status: IssueStatusEntry) => void;
   onArchive: (status: IssueStatusEntry) => void;
@@ -389,12 +416,16 @@ function CategorySection({
                 <StatusRow
                   key={entry.id}
                   entry={entry}
-                  autoCompleteBadge={prAutoComplete && entry.is_system && entry.key === "done"}
+                  mergeBadgeHref={entry.key === mergeTarget && !entry.archived_at ? mergeSettingsHref : null}
                   label={entry.is_system ? labelOf(entry.key) : entry.name}
-                  description={entry.is_system
-                    ? t(($) => $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus])
-                    : entry.description}
+                  description={!entry.is_system
+                    ? entry.description
+                    : workflowUsage && !BEHAVIOR_STATUSES.has(entry.key)
+                      ? ""
+                      : t(($) => $.issue_statuses.built_in_descriptions[entry.key as BuiltInIssueStatus])}
                   canManage={canManage}
+                  workflowUsage={entry.is_system ? undefined : workflowUsage?.(entry.key)}
+                  showKey={Boolean(workflowUsage)}
                   canReorder={canReorder && !entry.archived_at}
                   isReordering={reorder.isPending}
                   onEdit={() => onEdit(entry)}
@@ -418,10 +449,12 @@ function CategorySection({
 
 function StatusRow({
   entry,
-  autoCompleteBadge,
+  mergeBadgeHref,
   label,
   description,
   canManage,
+  workflowUsage,
+  showKey,
   canReorder,
   isReordering,
   onEdit,
@@ -431,10 +464,14 @@ function StatusRow({
   onMoveDown,
 }: {
   entry: IssueStatusEntry;
-  autoCompleteBadge: boolean;
+  /** Where the "set when PRs merge" badge links, or null for no badge. */
+  mergeBadgeHref: string | null;
   label: string;
   description: string;
   canManage: boolean;
+  /** How many workflows list a custom status; undefined for built-ins and outside Workflows. */
+  workflowUsage?: number;
+  showKey: boolean;
   canReorder: boolean;
   isReordering: boolean;
   onEdit: () => void;
@@ -458,16 +495,18 @@ function StatusRow({
       className={`group/row relative flex min-h-12 items-center gap-2 bg-card py-2 pl-2 pr-4 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
     >
       {canReorder ? (
-        <button
-          type="button"
-          disabled={isReordering}
-          aria-label={t(($) => $.issue_statuses.actions.reorder, { name: label })}
-          className="flex size-6 shrink-0 touch-none items-center justify-center rounded-md cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-4" />
-        </button>
+        <TooltipHint label={t(($) => $.issue_statuses.actions.reorder, { name: label })}>
+          <button
+            type="button"
+            disabled={isReordering}
+            aria-label={t(($) => $.issue_statuses.actions.reorder, { name: label })}
+            className="flex size-6 shrink-0 touch-none items-center justify-center rounded-md cursor-grab text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring active:cursor-grabbing [@media(pointer:coarse)]:size-11"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-4" />
+          </button>
+        </TooltipHint>
       ) : <span className="size-6 shrink-0 [@media(pointer:coarse)]:size-11" />}
       <StatusIcon
         status={entry.key}
@@ -482,11 +521,22 @@ function StatusRow({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-body font-medium">{label}</span>
-          {autoCompleteBadge && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 text-micro font-medium text-info">
+          {showKey && entry.is_system && (
+            <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              {t(($) => $.issue_statuses.builtin_badge)}
+            </span>
+          )}
+          {showKey && (
+            <span className="shrink-0 font-mono text-caption text-muted-foreground">{entry.key}</span>
+          )}
+          {mergeBadgeHref && (
+            <AppLink
+              href={mergeBadgeHref}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 text-micro font-medium text-info transition-colors hover:bg-info/15 focus-visible:outline-2 focus-visible:outline-ring"
+            >
               <Zap className="size-3" aria-hidden="true" />
               {t(($) => $.issue_statuses.pr_auto_complete_badge)}
-            </span>
+            </AppLink>
           )}
           {archived && (
             <Tooltip>
@@ -505,19 +555,26 @@ function StatusRow({
           <p className="truncate text-caption text-muted-foreground">{description}</p>
         )}
       </div>
+      {workflowUsage !== undefined && !archived && (
+        <span className="shrink-0 text-caption text-muted-foreground">
+          {workflowUsage > 0
+            ? t(($) => $.issue_statuses.workflow_usage, { count: workflowUsage })
+            : t(($) => $.issue_statuses.workflow_usage_none)}
+        </span>
+      )}
       {archived && <StatusIssuesButton variant="outline" onClick={onViewIssues} />}
       {canManage && !archived && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => $.issue_statuses.actions.open, { name: label })}
+                label={t(($) => $.issue_statuses.actions.open, { name: label })}
                 className="shrink-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 data-popup-open:opacity-100 [@media(hover:hover)]:opacity-0 [@media(pointer:coarse)]:size-11 [@media(pointer:coarse)]:opacity-100"
               >
                 <MoreHorizontal className="size-4" />
-              </Button>
+              </IconButton>
             }
           />
           <DropdownMenuContent align="end">
@@ -530,14 +587,23 @@ function StatusRow({
               {t(($) => $.issue_statuses.actions.move_down)}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onEdit}>
+            {/* Built-ins drive system behavior, so their definition is locked.
+                Say so where the actions are instead of offering them and
+                refusing afterwards. */}
+            <DropdownMenuItem disabled={entry.is_system} onClick={onEdit}>
               <Pencil className="size-4" />
               {t(($) => $.issue_statuses.actions.edit)}
             </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onClick={onArchive}>
+            <DropdownMenuItem variant="destructive" disabled={entry.is_system} onClick={onArchive}>
               <Archive className="size-4" />
               {t(($) => $.issue_statuses.actions.archive)}
             </DropdownMenuItem>
+            {entry.is_system && (
+              <p className="flex max-w-64 gap-1.5 px-2 pb-1 pt-1.5 text-caption leading-4 text-muted-foreground">
+                <Lock className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                {t(($) => $.issue_statuses.built_in_locked)}
+              </p>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -760,24 +826,24 @@ function StatusEditorDialog({
               </legend>
               <div className="flex flex-wrap gap-2">
                 {(["", ...ISSUE_STATUS_ICONS] as const).map((icon) => (
-                  <Button
-                    key={icon}
-                    type="button"
-                    variant={draft.icon === icon ? "secondary" : "outline"}
-                    size={icon ? "icon" : "default"}
-                    className={`${icon ? "size-11" : "h-11"} aria-pressed:ring-2 aria-pressed:ring-ring`}
-                    aria-label={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
-                    aria-pressed={draft.icon === icon}
-                    title={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
-                    onClick={() => {
-                      setIconChanged(true);
-                      setDraft((current) => ({ ...current, icon }));
-                    }}
-                  >
-                    {icon
-                      ? <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
-                      : t(($) => $.issue_statuses.editor.icon_shapes.default)}
-                  </Button>
+                  <TooltipHint key={icon} label={icon ? t(($) => $.issue_statuses.editor.icon_shapes[icon]) : undefined}>
+                    <Button
+                      type="button"
+                      variant={draft.icon === icon ? "secondary" : "outline"}
+                      size={icon ? "icon" : "default"}
+                      className={`${icon ? "size-11" : "h-11"} aria-pressed:ring-2 aria-pressed:ring-ring`}
+                      aria-label={t(($) => $.issue_statuses.editor.icon_shapes[icon || "default"])}
+                      aria-pressed={draft.icon === icon}
+                      onClick={() => {
+                        setIconChanged(true);
+                        setDraft((current) => ({ ...current, icon }));
+                      }}
+                    >
+                      {icon
+                        ? <StatusIcon status="" category={draft.category} color={draft.color} icon={icon} className="size-5" />
+                        : t(($) => $.issue_statuses.editor.icon_shapes.default)}
+                    </Button>
+                  </TooltipHint>
                 ))}
               </div>
             </fieldset>
@@ -883,67 +949,5 @@ function ArchiveStatusDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
-}
-
-/**
- * The one PR automation setting (MUL-7429): when every PR linked to an issue
- * is merged, the issue moves to Done. It lives with the statuses because it
- * decides a status change, and it is shared by every code host. Saves on
- * toggle, like the other workspace switches; it only affects merges from now
- * on, so there is no preview.
- */
-function PRAutoCompleteSection({ canManage }: { canManage: boolean }) {
-  const { t } = useT("settings");
-  const workspace = useCurrentWorkspace();
-  const qc = useQueryClient();
-  const [saving, setSaving] = useState(false);
-  const enabled = derivePRAutoCompleteEnabled(workspace);
-
-  async function persist(next: boolean) {
-    if (!workspace || saving) return;
-    setSaving(true);
-    try {
-      const updated = await api.updateWorkspace(workspace.id, {
-        settings: { ...((workspace.settings as Record<string, unknown>) ?? {}), pr_auto_complete_enabled: next },
-      });
-      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-      toast.success(t(($) => $.auto_save.toast_saved), { id: "settings-auto-save" });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.auto_save.failed));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <SettingsSection title={t(($) => $.issue_statuses.automation_title)}>
-      <SettingsCard>
-        <SettingsRow
-          label={<label htmlFor="pr-auto-complete">{t(($) => $.issue_statuses.pr_auto_complete_label)}</label>}
-          description={
-            <>
-              {t(($) => $.issue_statuses.pr_auto_complete_description)}
-              <span className="mt-1.5 block">
-                {t(($) => $.issue_statuses.pr_auto_complete_example)}{" "}
-                <code className="rounded-xs bg-muted px-1 py-0.5 text-micro text-foreground">
-                  {t(($) => $.issue_statuses.pr_auto_complete_example_title)}
-                </code>
-              </span>
-            </>
-          }
-        >
-          <Switch
-            id="pr-auto-complete"
-            checked={enabled}
-            disabled={!canManage || saving}
-            aria-busy={saving || undefined}
-            onCheckedChange={(v) => void persist(v)}
-          />
-        </SettingsRow>
-      </SettingsCard>
-    </SettingsSection>
   );
 }

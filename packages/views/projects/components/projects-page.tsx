@@ -91,6 +91,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import type {
   MemberWithUser,
   Project,
@@ -111,6 +113,7 @@ import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
 import { PAGE_GUTTER, PAGE_TOOLBAR } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // Sort order maps for the enum columns (header sort needs a total order).
 const PRIORITY_ORDER: Record<ProjectPriority, number> = {
@@ -137,12 +140,10 @@ function leadFilterValue(p: Project): string | null {
   return p.lead_type && p.lead_id ? `${p.lead_type}:${p.lead_id}` : null;
 }
 
-// ---------------------------------------------------------------------------
 // Table (compact) view — ListGrid. Name + status are the core columns;
 // priority/progress/lead/issues/created collapse below @2xl, with min-width
 // + the wrapper's overflow as the escape valve. Rows use whole-row mouse
 // navigation; inline controls stop propagation so edit/menu clicks stay local.
-// ---------------------------------------------------------------------------
 
 const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
   priority: 116,
@@ -247,15 +248,20 @@ function ProjectRowActions({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.page.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.page.row_menu)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.page.row_menu)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-44">
@@ -572,9 +578,7 @@ function ProjectTableHeader({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Card (comfortable) view — kept from the prior page.
-// ---------------------------------------------------------------------------
 
 function ProjectCard({
   project,
@@ -670,10 +674,8 @@ function ProjectCard({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Toolbar — search + result count + filter + display (compact only) + view
 // toggle.
-// ---------------------------------------------------------------------------
 
 const STATUS_VALUES: ProjectStatus[] = [
   "planned",
@@ -722,14 +724,16 @@ function ProjectBatchToolbar({
           <span className="text-body font-medium">
             {t(($) => $.page.selected, { count: rows.length })}
           </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.page.clear_selection)}
-            onClick={onClear}
-            className="rounded-xs p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.page.clear_selection)}>
+            <button
+              type="button"
+              aria-label={t(($) => $.page.clear_selection)}
+              onClick={onClear}
+              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
         {anyUnpinned && (
           <Button
@@ -790,9 +794,7 @@ function ProjectBatchToolbar({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Page
-// ---------------------------------------------------------------------------
 
 export function ProjectsPage() {
   const { t } = useT("projects");
@@ -1146,14 +1148,14 @@ export function ProjectsPage() {
                             </DropdownMenuRadioGroup>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                        <Button
+                        <IconButton
                           variant="outline"
                           size="icon-sm"
                           onClick={() => setSortDirection(sortDirection === "asc" ? "desc" : "asc")}
-                          title={sortDirection === "asc" ? t(($) => $.toolbar.direction_asc) : t(($) => $.toolbar.direction_desc)}
+                          label={sortDirection === "asc" ? t(($) => $.toolbar.direction_asc) : t(($) => $.toolbar.direction_desc)}
                         >
                           {sortDirection === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}
-                        </Button>
+                        </IconButton>
                       </div>
                     </div>
                     {isCompact && (

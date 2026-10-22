@@ -248,46 +248,6 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 	return i, err
 }
 
-const setStarterContentState = `-- name: SetStarterContentState :one
-UPDATE "user" SET
-    starter_content_state = $2,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
-`
-
-type SetStarterContentStateParams struct {
-	ID                  pgtype.UUID `json:"id"`
-	StarterContentState pgtype.Text `json:"starter_content_state"`
-}
-
-// Atomically transition starter_content_state. The handler is
-// responsible for checking the current value first (to decide between
-// "transition NULL -> imported and run the seeding" vs "already
-// decided, short-circuit"). Using COALESCE here would swallow the
-// transition, so this is a straight assignment.
-func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterContentStateParams) (User, error) {
-	row := q.db.QueryRow(ctx, setStarterContentState, arg.ID, arg.StarterContentState)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.AvatarUrl,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OnboardedAt,
-		&i.OnboardingQuestionnaire,
-		&i.CloudWaitlistEmail,
-		&i.CloudWaitlistReason,
-		&i.StarterContentState,
-		&i.Language,
-		&i.ProfileDescription,
-		&i.Timezone,
-	)
-	return i, err
-}
-
 const updateUser = `-- name: UpdateUser :one
 UPDATE "user" SET
     name = COALESCE($2, name),

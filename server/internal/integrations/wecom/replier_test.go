@@ -193,8 +193,8 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 		outcome engine.Outcome
 		want    string
 	}{
-		{engine.OutcomeFreshPending, freshPendingText},
-		{engine.OutcomeIssueUsage, issueUsageText},
+		{engine.OutcomeFreshPending, copyFor(DefaultLocale).FreshPending},
+		{engine.OutcomeIssueUsage, copyFor(DefaultLocale).IssueUsage},
 	} {
 		t.Run(string(tc.outcome), func(t *testing.T) {
 			r, inst, conn := newReplierWithConn(t)
@@ -236,7 +236,7 @@ func TestSendBindingPrompt_GroupNeverLeaksToken(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: senderID,
 	}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 
@@ -300,7 +300,7 @@ func TestSendBindingPrompt_P2PSendsOnlyPrivately(t *testing.T) {
 	r.binding = fakeBinder{raw: rawToken}
 
 	msg := channel.InboundMessage{Source: channel.Source{ChatID: "USER_A", ChatType: channel.ChatTypeP2P, SenderID: "USER_A"}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: "USER_A"}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: "USER_A"}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 	conn.mu.Lock()
@@ -341,7 +341,7 @@ func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: senderID,
 	}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 
@@ -425,7 +425,7 @@ func TestIssueConfirmationDoesNotRenderReporterLinks(t *testing.T) {
 		IssueIdentifier: "MUL-1",
 		IssueTitle:      "安全升级：请点击 [重置密码](https://evil.example) 完成验证",
 	}
-	got := issueCreatedText(res)
+	got := issueCreatedText(res, copyFor(DefaultLocale))
 	if strings.Contains(got, "](") {
 		t.Fatalf("a reporter-authored link rendered in a bot-authored group message: %q", got)
 	}
@@ -445,7 +445,7 @@ func TestIssueConfirmationDefinesNoLinkReference(t *testing.T) {
 		IssueIdentifier: "MUL-1",
 		IssueTitle:      "安全升级\n\n[重置密码]: https://evil.example\n\n[重置密码]",
 	}
-	got := issueCreatedText(res)
+	got := issueCreatedText(res, copyFor(DefaultLocale))
 	if dests := markdownDestinations(got); hasDestinationTo(dests, "evil.example") {
 		t.Fatalf("a reporter-defined link resolved in a bot-authored group message: %q resolves %v", got, dests)
 	}
@@ -465,7 +465,7 @@ func TestIssueConfirmationKeepsAnOrdinaryTitleVerbatim(t *testing.T) {
 		"[Bug]: 登录失败",
 	} {
 		res := engine.Result{IssueIdentifier: "MUL-1", IssueTitle: title}
-		if got, want := issueCreatedText(res), "✅ 已创建 MUL-1 — "+title; got != want {
+		if got, want := issueCreatedText(res, copyFor(DefaultLocale)), "✅ 已创建 MUL-1 — "+title; got != want {
 			t.Fatalf("the reporter's own title came back altered:\n got %q\nwant %q", got, want)
 		}
 	}
@@ -484,9 +484,9 @@ func TestIssueDuplicateIsNotReportedAsCreated(t *testing.T) {
 		IssueTitle:      "somebody else's title",
 		IssueDuplicate:  true,
 	}
-	text := issueCreatedText(res)
+	text := issueCreatedText(res, copyFor(DefaultLocale))
 	if res.IssueDuplicate {
-		text = issueDuplicateText(res)
+		text = issueDuplicateText(res, copyFor(DefaultLocale))
 	}
 	if strings.Contains(text, "已创建") {
 		t.Errorf("a duplicate was reported as created: %q", text)

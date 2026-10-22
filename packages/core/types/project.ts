@@ -1,3 +1,4 @@
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
@@ -21,6 +22,11 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  /**
+   * The workflow this project uses; null for the workspace Default workflow.
+   * Optional because older servers do not send it. (MUL-7420)
+   */
+  workflow_id?: string | null;
 }
 
 export interface CreateProjectRequest {
@@ -33,6 +39,8 @@ export interface CreateProjectRequest {
   lead_id?: string;
   start_date?: string;
   due_date?: string;
+  /** Workflow to use from the start; omitted uses the Default workflow. */
+  workflow_id?: string | null;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];

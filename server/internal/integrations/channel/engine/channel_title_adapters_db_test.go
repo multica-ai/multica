@@ -67,7 +67,7 @@ func TestChannelStartTitleCommandMappingDB(t *testing.T) {
 			case "feishu":
 				binder = lark.NewFeishuResolverSet(nil, session, nil, nil, nil, nil).Session
 			case "telegram":
-				binder = telegram.NewTelegramResolverSet(q, pool, nil, nil).Session
+				binder = telegram.NewTelegramResolverSet(q, pool, nil, nil, nil).Session
 			case "dingtalk":
 				binder = dingtalk.NewDingTalkResolverSet(q, pool, nil, nil, nil, nil).Session
 			case "slack":

@@ -20,6 +20,7 @@ Un travail qu'une seule tâche suffit à décrire n'a pas besoin de projet. Les 
 | **Dates de début et d'échéance** | La période prévue du projet. |
 | **Tâches et avancement** | Le travail du projet et la part déjà terminée. |
 | **Ressources** | Dépôts GitHub rattachés ou répertoires locaux sur des ordinateurs précis. |
+| **Workflow** | Les étapes des tâches et qui prend le relais à chacune. |
 
 ![Détail d'un projet : tâches regroupées par statut, avancement et description du projet](/images/docs/project-detail.webp)
 
@@ -48,9 +49,13 @@ Les ressources du projet indiquent aux agents quel code et quels répertoires de
 
 Voir [Ressources de projet](/project-resources) pour savoir comment choisir et connaître les limites de sécurité.
 
+## Choisir un workflow
+
+Le **Workflow** du projet définit les colonnes du tableau et qui prend le relais à chaque étape. Le développement peut ainsi aller à un agent, la revue à un autre et la validation à un membre. Sans autre choix, le projet utilise **Default** : tous les statuts sont disponibles et rien n’est confié automatiquement. Voir [Workflows](/workflows) pour la configuration et le changement d’un projet existant.
+
 ## Responsable du projet
 
-Le responsable peut être un membre ou un agent, et indique qui coordonne le projet. Ce n'est pas un paramètre de permission : il n'assigne pas automatiquement les tâches du projet, et désigner un agent comme responsable ne le lance pas automatiquement. Démarrer une exécution nécessite toujours l'assignation d'une tâche, une @mention ou un déclencheur d'automatisation.
+Le responsable peut être un membre ou un agent et coordonne le projet. Un membre responsable peut aussi changer le workflow du projet. Désigner un responsable ne lui assigne pas toutes les tâches et ne lance pas de travail automatiquement. Pour lui confier une étape, choisissez le responsable du projet dans le workflow.
 
 ## Épingler à la barre latérale
 

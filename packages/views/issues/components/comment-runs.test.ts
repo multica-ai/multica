@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
-import { commentRunOutput, buildCommentRunView, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
+import { commentRunOutput, buildCommentRunView, isRunFailureNotice, orderThreadWithRuns, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
 import { collectThreadReplies } from "./thread-utils";
 
 const groupCommentRuns = (...args: Parameters<typeof buildCommentRunView>) => buildCommentRunView(...args).runs;
@@ -139,7 +139,7 @@ describe("groupCommentRuns", () => {
       .toBe(latest.id);
   });
 
-  it("projects chained answers and assignment subtrees before finding run roots", () => {
+  it("projects chained answers while preserving an assignment reply's thread", () => {
     const first = task("first", { trigger_comment_id: "root" });
     const second = task("second", { trigger_comment_id: "answer-a" });
     const assigned = task("assigned");
@@ -150,12 +150,45 @@ describe("groupCommentRuns", () => {
       comment("assigned-answer", { parent_id: "root", actor_type: "agent", source_task_id: assigned.id }),
       comment("nested", { parent_id: "assigned-answer" })];
     const view = buildCommentRunView([followup, second, assigned, first], timeline);
-    expect(view.runs.get("root")?.map((run) => run.task.id)).toEqual(["first", "second"]);
-    expect(view.runs.get("assigned-answer")?.map((run) => run.task.id)).toEqual(["assigned", "followup"]);
+    expect(view.runs.get("root")?.map((run) => run.task.id)).toEqual(["assigned", "first", "followup", "second"]);
+    expect(view.runs.has("assigned-answer")).toBe(false);
+    expect(view.standaloneRuns).toEqual([]);
     expect(view.timeline.find((entry) => entry.id === "answer-a")?.parent_id).toBe("root");
     expect(view.timeline.find((entry) => entry.id === "answer-b")?.parent_id).toBe("answer-a");
-    expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBeUndefined();
+    expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
     expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
+  });
+
+  it("keeps an assignment's outputs in their explicit threads and its log with the latest reply", () => {
+    const run = task("assigned", { kind: "direct", delivered_comment_ids: [] });
+    const root = comment("root");
+    const nested = comment("nested", { parent_id: root.id });
+    const timeline = [root, nested, comment("other-thread"),
+      comment("progress", { actor_type: "agent", source_task_id: run.id }),
+      comment("other-reply", { parent_id: "other-thread", actor_type: "agent", source_task_id: run.id }),
+      comment("answer", { parent_id: nested.id, actor_type: "agent", source_task_id: run.id,
+        created_at: "2026-09-07T00:01:00Z" })];
+
+    const view = buildCommentRunView([run], timeline);
+    expect(view.timeline).toEqual(timeline);
+    const placement = { task: run, commentId: "answer", anchorCommentId: nested.id, hasReply: true };
+    expect(view.runs.get(root.id)).toEqual([placement]);
+    expect(view.standaloneRuns).toEqual([]);
+    expect(orderThreadWithRuns(root, [nested, timeline[5]!], view.runs.get(root.id)!))
+      .toEqual([nested, { run: placement, reply: timeline[5]!, replyTo: undefined }]);
+  });
+
+  it("waits for a missing assignment reply parent without promoting the reply", () => {
+    const run = task("assigned", { kind: "direct", delivered_comment_ids: [] });
+    const answer = comment("answer", { parent_id: "pending-parent", actor_type: "agent", source_task_id: run.id });
+    const pending = buildCommentRunView([run], [answer]);
+    expect(pending.timeline).toEqual([answer]);
+    expect(pending.runs.size).toBe(0);
+    expect(pending.standaloneRuns).toEqual([]);
+
+    const loaded = buildCommentRunView([run], [comment("pending-parent"), answer], pending.runs);
+    expect(loaded.runs.get("pending-parent")?.[0]?.anchorCommentId).toBe("pending-parent");
+    expect(loaded.standaloneRuns).toEqual([]);
   });
 
   it("moves a run's earlier top-level comments into the thread with its reply", () => {
@@ -301,6 +334,20 @@ describe("commentRunOutput", () => {
       expect(commentRunOutput(task("r", { status: "completed", result }))).toBeNull();
     }
     expect(commentRunOutput(task("r", { result: { comment: "Still working" } }))).toBeNull();
+  });
+});
+
+describe("isRunFailureNotice", () => {
+  const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: "run", content: "task cancelled by server" });
+  it("matches the platform's failure comment for its own ended run", () => {
+    expect(isRunFailureNotice(notice, task("run", { status: "failed" }))).toBe(true);
+    expect(isRunFailureNotice(notice, task("run", { status: "cancelled" }))).toBe(true);
+  });
+  it("leaves authored replies, other runs, and live runs alone", () => {
+    expect(isRunFailureNotice({ ...notice, comment_type: "comment" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice({ ...notice, actor_type: "system" }, task("run", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("other", { status: "failed" }))).toBe(false);
+    expect(isRunFailureNotice(notice, task("run", { status: "running" }))).toBe(false);
   });
 });
 
@@ -487,6 +534,24 @@ describe("orderThreadWithRuns", () => {
     expect(thread([run], [root, progress, final])).toEqual(["progress", "final"]);
     const aside = comment("aside", { parent_id: root.id, created_at: at("10:02:00") });
     expect(thread([run], [root, progress, aside, final])).toEqual(["progress", "aside", "final ↩ root"]);
+  });
+
+  // A retry answers the same input as the attempt it retries, but it starts
+  // after that attempt ended; it reads below it, not above (MUL-7692).
+  it("keeps a retry below the attempt it retries", () => {
+    const root = comment("root", { created_at: at("10:00:00") });
+    const ask = comment("ask", { parent_id: root.id, created_at: at("10:01:00") });
+    const failed = asked("failed", ask, { status: "failed", started_at: at("10:01:05"), completed_at: at("10:14:00") });
+    const notice = comment("notice", { actor_type: "agent", comment_type: "system", source_task_id: failed.id,
+      parent_id: ask.id, created_at: at("10:14:00") });
+    const retry = asked("retry", ask, { status: "running", created_at: at("10:20:00"), parent_task_id: failed.id });
+    const later = comment("later", { parent_id: root.id, created_at: at("10:25:00") });
+    expect(thread([failed, retry], [root, ask, notice])).toEqual(["ask", "notice", "run:retry ↩ ask"]);
+    expect(thread([failed, retry], [root, ask, notice, later])).toEqual(["ask", "notice", "run:retry ↩ ask", "later"]);
+    const unanswered = asked("unanswered", ask, { status: "failed", completed_at: at("10:14:00") });
+    const again = asked("again", ask, { status: "queued", delivered_comment_ids: [], created_at: at("10:20:00"),
+      parent_task_id: unanswered.id });
+    expect(thread([unanswered, again], [root, ask])).toEqual(["ask", "run:unanswered", "run:again ↩ ask"]);
   });
 
   it("settles a run that ended without replying at the time it ended", () => {

@@ -20,6 +20,7 @@ Work that a single issue can describe does not need a project. Projects fit a gr
 | **Start and target dates** | The project's planned time range. |
 | **Issues and progress** | The work in the project and how much of it is finished. |
 | **Resources** | Linked GitHub repositories or local directories on specific computers. |
+| **Workflow** | The steps its issues follow and who takes over at each step. |
 
 ![Project detail: issues grouped by status, progress, and the project description](/images/docs/project-detail.webp)
 
@@ -48,9 +49,13 @@ Project resources tell agents which code and working directories to use:
 
 See [Project resources](/project-resources) for how to choose and for the safety boundaries.
 
+## Choose a workflow
+
+Choose the project’s **Workflow** to set its board columns and who takes over at each step. For example, development can go to one agent, review to another, and acceptance to a team member. Projects without another choice use **Default**: every status is available and nothing is handed off automatically. See [Workflows](/workflows) for setup and switching an existing project.
+
 ## Project lead
 
-The lead can be a member or an agent, and marks who coordinates the project. It is not a permission setting: it does not auto-assign the project's issues, and making an agent the lead does not automatically run it. Starting a run still takes an issue assignment, an @mention, or an automation trigger.
+The lead can be a member or an agent and coordinates the project. A member who is the lead can also switch the project’s workflow. Making someone the lead does not assign every issue to them or start work automatically. A workflow step can hand issues to the project lead when you choose that option.
 
 ## Pin to the sidebar
 

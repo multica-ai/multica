@@ -263,6 +263,8 @@ When developing from a checkout, use the local chart path instead:
 helm install multica deploy/helm/multica -n multica
 ```
 
+If the backend has to reach services whose certificates come from an internal CA, such as a self-hosted Gitea, set `backend.extraCACerts.configMap`. See [Advanced Configuration → Private CA Certificates](SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional).
+
 Watch the pods come up:
 
 ```bash

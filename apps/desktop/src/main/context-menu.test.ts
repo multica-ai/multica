@@ -61,6 +61,10 @@ type ContextMenuParams = {
   selectionText: string;
   isEditable: boolean;
   linkURL: string;
+  mediaType: string;
+  hasImageContents: boolean;
+  x: number;
+  y: number;
   editFlags: {
     canCut: boolean;
     canCopy: boolean;
@@ -78,6 +82,7 @@ type Listener = (event: unknown, params: ContextMenuParams) => void;
 function makeWebContents() {
   const handlers: Listener[] = [];
   return {
+    copyImageAt: vi.fn(),
     on(event: string, fn: Listener) {
       if (event === "context-menu") handlers.push(fn);
     },
@@ -148,12 +153,12 @@ describe("installContextMenu — link items", () => {
   it("does NOT add link items when there is no link under the cursor", () => {
     const wc = makeWebContents();
     installContextMenu(wc as never);
-    wc.fire({
-      selectionText: "hello",
-      isEditable: false,
-      linkURL: "",
-      editFlags: { ...baseEditFlags, canCopy: true },
-    });
+    wc.fire(
+      baseSelection({
+        selectionText: "hello",
+        editFlags: { ...baseEditFlags, canCopy: true },
+      }),
+    );
     const labels = lastMenuLabelsOrEmpty();
     expect(labels).not.toContain("Open Link in Browser");
     // Selection-only context still surfaces copy as before — guards
@@ -184,6 +189,63 @@ describe("installContextMenu — link items", () => {
   });
 });
 
+describe("installContextMenu — image items", () => {
+  beforeEach(() => {
+    ctx.capturedItems.length = 0;
+    ctx.popupSpy.mockClear();
+    ctx.preferredLanguagesRef.current = ["en-US"];
+  });
+
+  it("adds 'Copy Image' on a loaded image and copies the pixels under the cursor", () => {
+    // MUL-7759: the attachment viewer and inline images had no way to
+    // copy the picture itself — Electron shows no menu at all by default.
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({ mediaType: "image", hasImageContents: true, x: 120, y: 48 }),
+    );
+
+    expect(lastMenuLabels()).toEqual(["Copy Image"]);
+    invokeByLabel("Copy Image");
+    expect(wc.copyImageAt).toHaveBeenCalledWith(120, 48);
+    expect(ctx.popupSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT add 'Copy Image' before the image has loaded", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ mediaType: "image", hasImageContents: false }));
+    expect(lastMenuLabelsOrEmpty()).not.toContain("Copy Image");
+    expect(ctx.popupSpy).not.toHaveBeenCalled();
+  });
+
+  it("lists the image items after the link items for an image inside a link", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({
+        linkURL: "https://multica.ai",
+        mediaType: "image",
+        hasImageContents: true,
+      }),
+    );
+    expect(lastMenu().map((i) => i.label ?? i.type)).toEqual([
+      "Open Link in Browser",
+      "Copy Link Address",
+      "separator",
+      "Copy Image",
+    ]);
+  });
+
+  it("uses zh-Hans labels when the OS preferred language is Chinese", () => {
+    ctx.preferredLanguagesRef.current = ["zh-CN"];
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ mediaType: "image", hasImageContents: true }));
+    expect(lastMenuLabels()).toContain("复制图片");
+  });
+});
+
 // --- helpers ---
 
 function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
@@ -191,6 +253,10 @@ function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
     selectionText: "",
     isEditable: false,
     linkURL: "",
+    mediaType: "none",
+    hasImageContents: false,
+    x: 0,
+    y: 0,
     editFlags: { ...baseEditFlags },
     ...over,
   };

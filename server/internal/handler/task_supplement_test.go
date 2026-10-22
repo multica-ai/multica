@@ -179,6 +179,9 @@ func TestTaskSupplementNegotiationFailsClosed(t *testing.T) {
 	}{
 		{name: "codex negotiated", provider: "codex", daemonAdvertises: true, wantCapabilityRow: true},
 		{name: "claude negotiated", provider: "claude", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "grok negotiated", provider: "grok", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "cursor negotiated", provider: "cursor", daemonAdvertises: true, wantCapabilityRow: true},
+		{name: "kiro negotiated", provider: "kiro", daemonAdvertises: true, wantCapabilityRow: true},
 		{name: "claude old daemon", provider: "claude", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "old daemon", provider: "codex", daemonAdvertises: false, wantCapabilityRow: false},
 		{name: "unsupported runtime", provider: "kimi", daemonAdvertises: true, wantCapabilityRow: false},
@@ -211,7 +214,7 @@ func TestTaskSupplementCapabilityDoesNotBreakNonIssueStarts(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	for _, provider := range []string{"codex", "claude"} {
+	for _, provider := range []string{"codex", "claude", "grok", "cursor", "kiro"} {
 		t.Run(provider, func(t *testing.T) {
 			runtimeID := dbfx.Runtime(t, "supplement-no-issue", testutil.Cols{"provider": provider})
 			agentID := dbfx.Agent(t, "Supplement no issue", runtimeID)
@@ -228,7 +231,7 @@ func TestTaskSupplementCapabilityDoesNotBreakNonIssueStarts(t *testing.T) {
 }
 
 func TestTaskSupplementCompletionDoesNotReplayBoundComments(t *testing.T) {
-	for _, provider := range []string{"codex", "claude"} {
+	for _, provider := range []string{"codex", "claude", "grok", "cursor", "kiro"} {
 		for _, status := range []string{"pending", "delivering", "delivered", "failed"} {
 			for _, ordinary := range []string{"none", "unhandled", "queued"} {
 				t.Run(provider+"/"+status+"/"+ordinary, func(t *testing.T) {
@@ -265,8 +268,8 @@ func TestTaskSupplementCompletionDoesNotReplayBoundComments(t *testing.T) {
 						map[string]any{"output": "done"}, testWorkspaceID, "legit-daemon")
 					testutil.Call(t, testHandler.CompleteTask, withURLParam(req, "taskId", fixture.taskID)).Want(http.StatusOK)
 					if status == "pending" || status == "delivering" {
-						receipt, err := testHandler.Queries.GetTaskSupplementByComment(t.Context(), db.GetTaskSupplementByCommentParams{
-							CommentID: parseUUID(supplement.ID), WorkspaceID: parseUUID(testWorkspaceID),
+						receipt, err := testHandler.Queries.GetTaskSupplementForRun(t.Context(), db.GetTaskSupplementForRunParams{
+							CommentID: parseUUID(supplement.ID), TaskID: parseUUID(fixture.taskID), WorkspaceID: parseUUID(testWorkspaceID),
 						})
 						if err != nil || receipt.Status != "failed" || receipt.FailureReason.String != protocol.TaskSupplementFailureTurnEnded {
 							t.Fatalf("completion did not settle pending delivery: %#v: %v", receipt, err)
@@ -529,8 +532,8 @@ func TestTaskSupplementStopRemainsIndependent(t *testing.T) {
 	cancelReq := withURLParams(newRequest(http.MethodPost, "/cancel", nil),
 		"id", fixture.issueID, "taskId", fixture.taskID)
 	testutil.Call(t, testHandler.CancelTask, cancelReq).Want(http.StatusOK)
-	receipt, err := testHandler.Queries.GetTaskSupplementByComment(context.Background(), db.GetTaskSupplementByCommentParams{
-		CommentID: parseUUID(comment.ID), WorkspaceID: parseUUID(testWorkspaceID),
+	receipt, err := testHandler.Queries.GetTaskSupplementForRun(context.Background(), db.GetTaskSupplementForRunParams{
+		CommentID: parseUUID(comment.ID), TaskID: parseUUID(fixture.taskID), WorkspaceID: parseUUID(testWorkspaceID),
 	})
 	if err != nil || receipt.Status != "failed" || receipt.FailureReason.String != "turn_ended" {
 		t.Fatalf("stop receipt = %#v, err %v", receipt, err)
@@ -550,8 +553,8 @@ func TestTaskSupplementFailureSettlesPendingReceipt(t *testing.T) {
 	if w := failTaskViaHandler(t, fixture.taskID); w.Code != http.StatusOK {
 		t.Fatalf("fail task: status %d: %s", w.Code, w.Body.String())
 	}
-	receipt, err := testHandler.Queries.GetTaskSupplementByComment(t.Context(), db.GetTaskSupplementByCommentParams{
-		CommentID: parseUUID(comment.ID), WorkspaceID: parseUUID(testWorkspaceID),
+	receipt, err := testHandler.Queries.GetTaskSupplementForRun(t.Context(), db.GetTaskSupplementForRunParams{
+		CommentID: parseUUID(comment.ID), TaskID: parseUUID(fixture.taskID), WorkspaceID: parseUUID(testWorkspaceID),
 	})
 	if err != nil || receipt.Status != "failed" || receipt.FailureReason.String != protocol.TaskSupplementFailureTurnEnded {
 		t.Fatalf("failed task receipt = %#v, err %v", receipt, err)

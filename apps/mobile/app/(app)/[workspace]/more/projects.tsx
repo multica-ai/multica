@@ -28,10 +28,12 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ProjectRow } from "@/components/project/project-row";
 import { projectListOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 
 export default function ProjectsPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("projects");
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
     projectListOptions(wsId),
@@ -64,11 +66,12 @@ export default function ProjectsPage() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load projects:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {t("errors.load_failed", {
+              message: error instanceof Error ? error.message : "unknown",
+            })}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{t("common:actions.retry")}</Text>
           </Button>
         </View>
       ) : sorted.length === 0 ? (
@@ -99,23 +102,25 @@ export default function ProjectsPage() {
 }
 
 function PlusButton({ onPress }: { onPress: () => void }) {
+  const { t } = useT("projects");
   return (
     <IconButton
       name="add"
       onPress={onPress}
-      accessibilityLabel="New project"
+      accessibilityLabel={t("navigation:routes.new_project")}
     />
   );
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useT("projects");
   return (
     <View className="flex-1 items-center justify-center px-6 gap-4">
       <Text className="text-base font-medium text-foreground">
-        No projects yet
+        {t("list.empty")}
       </Text>
       <Button variant="default" onPress={onCreate}>
-        <Text>Create project</Text>
+        <Text>{t("common:actions.create")}</Text>
       </Button>
     </View>
   );

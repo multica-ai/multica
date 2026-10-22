@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import { ExternalLink, Copy } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useAppOrigin } from "../navigation";
@@ -34,9 +34,7 @@ function truncateUrl(url: string, max = 48): string {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Hook — manages hover state with enter/leave delays
-// ---------------------------------------------------------------------------
 
 const SHOW_DELAY = 300;
 const HIDE_DELAY = 150;
@@ -123,9 +121,7 @@ function useLinkHover(containerRef: React.RefObject<HTMLElement | null>, disable
   return { ...state, cardRef, onCardEnter, onCardLeave };
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 function LinkHoverCard({
   visible,
@@ -213,24 +209,24 @@ function LinkHoverCard({
       >
         {truncateUrl(href)}
       </span>
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleCopy}
-        title={t(($) => $.link_hover.copy_link)}
+        label={t(($) => $.link_hover.copy_link)}
       >
         <Copy className="size-3.5" />
-      </Button>
-      <Button
+      </IconButton>
+      <IconButton
         size="icon-xs"
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleOpen}
-        title={t(($) => $.link_hover.open_link)}
+        label={t(($) => $.link_hover.open_link)}
       >
         <ExternalLink className="size-3.5" />
-      </Button>
+      </IconButton>
     </div>,
     document.body,
   );

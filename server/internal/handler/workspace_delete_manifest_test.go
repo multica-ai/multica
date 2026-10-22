@@ -19,6 +19,7 @@ const (
 // teardown. Adding a table requires an explicit ownership decision here; the
 // handler deletion graph must then implement that decision before CI passes.
 var workspaceDeletionManifest = map[string]workspaceDeleteAction{
+	"cloud_agent_connection":             workspaceDelete,
 	"activity_log":                       workspaceDelete,
 	"agent":                              workspaceDelete,
 	"agent_builder_draft":                workspaceDelete,
@@ -47,6 +48,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"channel_outbound_message":           workspaceDelete,
 	"channel_reply_delivery":             workspaceDelete,
 	"channel_task_delivery":              workspaceDelete,
+	"channel_typing_reaction":            workspaceDeleteSettle, // Source deletion makes retained anchors eligible for the cleanup worker.
 	"channel_user_binding":               workspaceDelete,
 	"chat_draft_restore":                 workspaceDelete,
 	"chat_message":                       workspaceDelete,
@@ -73,6 +75,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue":                              workspaceDelete,
 	"issue_wakeup":                       workspaceDelete,
 	"issue_wakeup_receipt":               workspaceDelete,
+	"issue_child_event":                  workspaceDelete,
 	"issue_view":                         workspaceDelete,
 	"issue_view_preference":              workspaceDelete,
 	"issue_dependency":                   workspaceDelete,
@@ -85,6 +88,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_source_context":               workspaceDelete,
 	"issue_source_context_object_intent": workspaceDeleteSettle,
 	"issue_status":                       workspaceDelete,
+	"issue_workflow":                     workspaceDelete,
 	"issue_subscriber":                   workspaceDelete,
 	"issue_to_label":                     workspaceDelete,
 	"issue_vcs_pull_request":             workspaceDelete,
@@ -115,6 +119,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"quick_action":                       workspaceDelete,
 	"runtime_profile":                    workspaceDelete,
 	"schema_migrations":                  workspaceDeleteKeep,
+	"search_index_change":                workspaceDelete,
+	"search_index_prune_mark":            workspaceDeleteKeep,
 	"seat_capacity_outbox":               workspaceDeleteSettle,
 	"skill":                              workspaceDelete,
 	"skill_file":                         workspaceDelete,

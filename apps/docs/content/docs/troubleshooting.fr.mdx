@@ -97,6 +97,20 @@ Un daemon en ligne ne signifie pas que l'outil lui-même fonctionne. Ouvrez l'en
 
 Exécutez d'abord ce même outil directement dans un terminal sur l'ordinateur d'exécution. Si l'outil ne démarre pas seul, corrigez sa connexion ou sa configuration, puis relancez l'exécution depuis le journal d'exécution.
 
+## Les exécutions se bloquent sur macOS après une mise à jour du CLI
+
+Après la mise à jour du CLI `multica` installé avec Homebrew, par `brew upgrade`, `multica update`, **Mettre à jour** sur la page **Runtimes** ou la mise à jour automatique du daemon, une exécution qui lit `~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive ou un autre dossier protégé peut cesser de progresser : le processus de l'agent n'utilise plus de CPU, et l'exécution ne se termine ni n'échoue.
+
+Cela se produit lorsque macOS attribue les autorisations de confidentialité (TCC) au daemon lui-même, comme pour un daemon lancé par launchd (par exemple un LaunchAgent) : la boîte de dialogue en attente affiche `multica`, et chaque outil lancé par un agent utilise les autorisations du daemon. Le binaire du CLI Homebrew n'est pas signé avec une identité stable : macOS lie donc ces autorisations à ce build précis et à son chemin résolu, par exemple `/opt/homebrew/Cellar/multica/<version>/bin/multica`. Après une mise à jour, macOS considère le nouveau binaire comme une autre application et redemande l'autorisation. L'accès au fichier reste bloqué jusqu'à ce que quelqu'un réponde, et le daemon ne peut pas savoir qu'une demande est en attente.
+
+Pour rétablir l'accès :
+
+1. Sur ce Mac, répondez **Autoriser** à la boîte de dialogue « souhaite accéder » en attente. L'exécution bloquée reprend.
+2. Pour un Mac sans surveillance, accordez l'accès complet au disque au nouveau binaire. Affichez son chemin avec `realpath "$(command -v multica)"`, puis dans **Réglages Système → Confidentialité et sécurité → Accès complet au disque**, supprimez l'ancienne entrée `multica` et ajoutez ce chemin (appuyez sur ⌘⇧G dans le sélecteur de fichiers pour le coller).
+3. Redémarrez le daemon de la même façon que vous l'avez lancé : `multica daemon restart`, ou `launchctl kickstart -k gui/$(id -u)/<label>` pour un LaunchAgent.
+
+Répétez ces étapes après chaque mise à jour du CLI. La mise à jour automatique n'est activée par défaut que pour les daemons connectés à Multica Cloud ; démarrez le daemon avec `--no-auto-update` pour que les mises à jour n'aient lieu que lorsque vous les lancez. Le CLI intégré à [Multica Desktop](/desktop-app) est signé avec un Developer ID, ses autorisations survivent donc aux mises à jour.
+
 ## Les mises à jour en temps réel ne fonctionnent plus
 
 Si les exécutions se déroulent toujours mais que les commentaires et les changements de statut n'apparaissent plus en direct, c'est généralement que le WebSocket n'est pas connecté.

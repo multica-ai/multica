@@ -18,6 +18,7 @@ import {
 } from "@multica/core/autopilots/stores";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -511,7 +512,7 @@ export function AutopilotListToolbar({
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button
+                <IconButton
                   variant="outline"
                   size="icon-sm"
                   onClick={() =>
@@ -519,7 +520,7 @@ export function AutopilotListToolbar({
                       sortDirection === "asc" ? "desc" : "asc",
                     )
                   }
-                  title={
+                  label={
                     sortDirection === "asc"
                       ? t(($) => $.toolbar.direction_asc)
                       : t(($) => $.toolbar.direction_desc)
@@ -530,7 +531,7 @@ export function AutopilotListToolbar({
                   ) : (
                     <ArrowDown className="size-3.5" />
                   )}
-                </Button>
+                </IconButton>
               </div>
             </div>
 

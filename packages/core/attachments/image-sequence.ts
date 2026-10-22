@@ -72,9 +72,7 @@ export function isImageAttachment(
   return ext !== "" && IMAGE_EXTENSIONS.has(ext);
 }
 
-// ---------------------------------------------------------------------------
 // URL → attachment matching
-// ---------------------------------------------------------------------------
 
 function stripQueryAndFragment(url: string): string {
   return url.split(/[?#]/, 1)[0] ?? "";
@@ -150,9 +148,34 @@ export function selectStandaloneAttachments(
   });
 }
 
-// ---------------------------------------------------------------------------
+/**
+ * How a standalone attachment is laid out under its body (MUL-7649): images
+ * at full size, everything else — HTML included — as file cards.
+ */
+export type StandaloneAttachmentGroup = "image" | "file";
+
+export function standaloneAttachmentGroup(
+  attachment: Pick<Attachment, "content_type" | "filename">,
+): StandaloneAttachmentGroup {
+  return isImageAttachment(attachment.content_type, attachment.filename) ? "image" : "file";
+}
+
+/**
+ * The order a surface renders its standalone attachments in (MUL-7649):
+ * images first (each at full size), then everything else (a grid of file
+ * cards). Stable within each group. The sequence builder walks standalone
+ * attachments in this same order, so paging through the viewer follows the
+ * screen.
+ */
+export function orderStandaloneAttachments<T extends Pick<Attachment, "content_type" | "filename">>(
+  attachments: ReadonlyArray<T>,
+): T[] {
+  const groups: Record<StandaloneAttachmentGroup, T[]> = { image: [], file: [] };
+  for (const a of attachments) groups[standaloneAttachmentGroup(a)].push(a);
+  return [...groups.image, ...groups.file];
+}
+
 // Inline image references
-// ---------------------------------------------------------------------------
 
 function blankOut(text: string): string {
   // Newlines survive so line-anchored patterns below keep their line numbers.
@@ -272,9 +295,7 @@ function extractInlineRefs(rawContent: string): InlineRef[] {
   return refs.sort((a, b) => a.index - b.index);
 }
 
-// ---------------------------------------------------------------------------
 // Sequence
-// ---------------------------------------------------------------------------
 
 /** One attachment the viewer can page to. */
 export interface ImageSequenceItem {
@@ -295,10 +316,17 @@ export interface ImageSequenceItem {
    * markdown caption, which is prose with no extension to read (MUL-7518).
    */
   imageByConstruction: boolean;
+  /**
+   * `id` of the block the item first appeared in, when the caller named its
+   * blocks — lets a viewer say where a file came from (MUL-7649).
+   */
+  blockId?: string;
 }
 
 /** One renderable unit: an issue description, a comment, a chat message. */
 export interface ImageSequenceBlock {
+  /** Caller-chosen identity, copied onto each item as `blockId`. */
+  id?: string;
   content?: string | null;
   attachments?: ReadonlyArray<Attachment> | null;
   /**
@@ -322,7 +350,8 @@ export interface SequenceCandidate {
  * Flatten blocks into the ordered sequence a viewer walks.
  *
  * Order is render order: for each block, references inline in the body in
- * text order, then the standalone attachment cards rendered under it. Repeats
+ * text order, then the standalone attachments rendered under it, grouped as
+ * `orderStandaloneAttachments` lays them out. Repeats
  * of the same attachment collapse to their first position, so the counter
  * matches the number of distinct files rather than the number of references.
  *
@@ -370,11 +399,14 @@ export function collectAttachmentSequence(
         filename: attachment?.filename || ref.filename,
         attachment,
         imageByConstruction: !ref.isFileCard,
+        blockId: block.id,
       });
     }
 
     if (block.standalone === false) continue;
-    for (const attachment of selectStandaloneAttachments(content, attachments)) {
+    for (const attachment of orderStandaloneAttachments(
+      selectStandaloneAttachments(content, attachments),
+    )) {
       if (
         !include({
           contentType: attachment.content_type,
@@ -391,6 +423,7 @@ export function collectAttachmentSequence(
         filename: attachment.filename,
         attachment,
         imageByConstruction: false,
+        blockId: block.id,
       });
     }
   }

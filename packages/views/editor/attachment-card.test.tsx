@@ -9,19 +9,20 @@ vi.mock("../i18n", () => ({
         attachment: {
           preview: "Preview",
           preview_loading: "Loading preview…",
+          remove: "Remove attachment",
         },
         file_card: { uploading: "Uploading {{filename}}" },
       }),
   }),
 }));
 
-import { AttachmentCard } from "./attachment-card";
+import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.restoreAllMocks());
 
 describe("AttachmentCard — chrome row", () => {
-  it("renders chrome only and never an inline iframe (HTML rich preview lives in HtmlAttachmentPreview)", () => {
+  it("renders chrome only and never an inline iframe", () => {
     render(
       <AttachmentCard
         filename="report.html"
@@ -49,9 +50,9 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
     // Download stays available — the underlying URL is still reachable.
-    expect(screen.getByTitle("Download")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
   });
 
   it("shows the Eye button for an html source when an attachmentId is available", () => {
@@ -65,7 +66,7 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
   });
 
   it("shows the Eye button for a URL-only pdf source (modal renders pdfs directly from URL)", () => {
@@ -81,7 +82,7 @@ describe("AttachmentCard — chrome row", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
   });
 });
 
@@ -98,7 +99,7 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={() => {}}
       />,
     );
-    fireEvent.mouseDown(screen.getByTitle("Preview"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Preview" }));
     expect(onPreview).toHaveBeenCalled();
   });
 
@@ -114,7 +115,7 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={onDownload}
       />,
     );
-    fireEvent.mouseDown(screen.getByTitle("Download"));
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Download" }));
     expect(onDownload).toHaveBeenCalled();
   });
 
@@ -130,12 +131,88 @@ describe("AttachmentCard — Eye / Download buttons", () => {
         onDownload={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Preview")).toBeNull();
-    expect(screen.queryByTitle("Download")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
     // The mock `t()` returns the i18n template as-is; the production t-fn
     // interpolates {{filename}} → "report.html". Asserting the template
     // proves the uploading branch was selected without depending on the
     // interpolation behavior of the mock.
     expect(screen.getByText("Uploading {{filename}}")).toBeTruthy();
+  });
+});
+
+describe("AttachmentFileCard — a file in a grid of cards (MUL-7649)", () => {
+  it("shows the name, its badge and TYPE · size", () => {
+    render(
+      <AttachmentFileCard
+        filename="实现说明.md"
+        contentType="text/markdown"
+        sizeBytes={6 * 1024}
+        canPreview
+        canDownload
+        badge={<span>v2</span>}
+        onPreview={() => {}}
+        onDownload={() => {}}
+      />,
+    );
+    expect(screen.getByText("实现说明.md")).toBeTruthy();
+    expect(screen.getByText("v2")).toBeTruthy();
+    expect(screen.getByText("MD · 6 KB")).toBeTruthy();
+  });
+
+  it("opens the file when the card is clicked, and downloads from its own button", () => {
+    const onPreview = vi.fn();
+    const onDownload = vi.fn();
+    render(
+      <AttachmentFileCard
+        filename="spec.pdf"
+        canPreview
+        canDownload
+        onPreview={onPreview}
+        onDownload={onDownload}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "spec.pdf" }));
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    expect(onPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads on click when the viewer cannot show the file", () => {
+    const onPreview = vi.fn();
+    const onDownload = vi.fn();
+    render(
+      <AttachmentFileCard
+        filename="bundle.zip"
+        canPreview={false}
+        canDownload
+        onPreview={onPreview}
+        onDownload={onDownload}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "bundle.zip" }));
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    expect(onPreview).not.toHaveBeenCalled();
+  });
+
+  it("offers remove only when the surface is editable", () => {
+    const onDelete = vi.fn();
+    const { rerender } = render(
+      <AttachmentFileCard filename="a.csv" canPreview canDownload onPreview={() => {}} onDownload={() => {}} />,
+    );
+    expect(screen.queryByRole("button", { name: "Remove attachment" })).toBeNull();
+    rerender(
+      <AttachmentFileCard
+        filename="a.csv"
+        canPreview
+        canDownload
+        onPreview={() => {}}
+        onDownload={() => {}}
+        onDelete={onDelete}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove attachment" }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 });

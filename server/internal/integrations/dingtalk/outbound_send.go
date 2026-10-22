@@ -173,14 +173,13 @@ func escapeMarkdownQuoteInlineText(text string) string {
 	).Replace(text)
 }
 
-func escapeMarkdownText(text string) string {
-	// Escaping brackets already prevents Markdown links. Leave parentheses
-	// literal: DingTalk can include a trailing escape in its automatic URL link.
+func escapeMarkdownLinkLabel(text string) string {
+	// Link labels need inline formatting and bracket characters escaped, but
+	// block markers such as # and - are literal inside a label. DingTalk can
+	// display unnecessary escapes as visible backslashes.
 	return strings.NewReplacer(
 		`\`, `\\`, "`", "\\`", "*", "\\*", "_", "\\_",
 		"[", "\\[", "]", "\\]",
-		"#", "\\#", "+", "\\+", "-", "\\-", "!", "\\!",
-		">", "\\>", "|", "\\|",
 	).Replace(text)
 }
 

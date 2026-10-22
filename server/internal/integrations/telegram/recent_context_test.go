@@ -88,13 +88,17 @@ func TestRecentContextBufferTruncatesLongMessages(t *testing.T) {
 }
 
 func TestRecentEntryFromMessageRendersMediaPlaceholder(t *testing.T) {
-	e := recentEntryFromMessage(&Message{MessageID: 4, From: &User{ID: 1, FirstName: "Ada"}, Photo: []any{1}})
-	if e.Sender != "Ada" || e.Text != "[image message]" {
-		t.Fatalf("media without caption should render a typed placeholder, got %+v", e)
+	e := recentEntryFromMessage(&Message{MessageID: 4, From: &User{ID: 1, FirstName: "Ada"}, Photo: []PhotoSize{{FileID: "p"}}})
+	if e.Sender != "Ada" || e.Text != "[Image]" {
+		t.Fatalf("media without caption should render its placeholder, got %+v", e)
 	}
-	e = recentEntryFromMessage(&Message{MessageID: 5, Photo: []any{1}, Caption: "see this"})
-	if e.Sender != "Unknown user" || e.Text != "see this" {
-		t.Fatalf("caption should win and a missing sender should fall back, got %+v", e)
+	e = recentEntryFromMessage(&Message{MessageID: 5, Photo: []PhotoSize{{FileID: "p"}}, Caption: "see this"})
+	if e.Sender != "Unknown user" || e.Text != "[Image]\nsee this" {
+		t.Fatalf("the placeholder should lead the caption and a missing sender should fall back, got %+v", e)
+	}
+	e = recentEntryFromMessage(&Message{MessageID: 6, From: &User{ID: 1, FirstName: "Ada"}, Sticker: &struct{}{}})
+	if e.Text != "[unknown message]" {
+		t.Fatalf("a kind without a file should keep the typed placeholder, got %+v", e)
 	}
 }
 
@@ -210,7 +214,7 @@ func TestDispatchBuffersGroupMessagesForLaterMentions(t *testing.T) {
 	if err := c.dispatch(ctx, groupUpdate(1, ada, "deploy is failing on staging", nil, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.dispatch(ctx, Update{UpdateID: 2, Message: &Message{MessageID: 2, From: bob, Chat: Chat{ID: -100200, Type: "supergroup"}, Photo: []any{1}}}); err != nil {
+	if err := c.dispatch(ctx, Update{UpdateID: 2, Message: &Message{MessageID: 2, From: bob, Chat: Chat{ID: -100200, Type: "supergroup"}, Photo: []PhotoSize{{FileID: "p"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	// Another bot's message is never buffered.
@@ -223,7 +227,7 @@ func TestDispatchBuffersGroupMessagesForLaterMentions(t *testing.T) {
 	if len(seen) != 2 || seen[0].AddressedToBot || !seen[1].AddressedToBot {
 		t.Fatalf("handler calls = %+v", seen)
 	}
-	want := "<recent_context count=\"2\">\n[Ada]: deploy is failing on staging\n[Bob]: [image message]\n</recent_context>\n\nwhat should we check first?"
+	want := "<recent_context count=\"2\">\n[Ada]: deploy is failing on staging\n[Bob]: [Image]\n</recent_context>\n\nwhat should we check first?"
 	if seen[1].Text != want {
 		t.Fatalf("mention Text =\n%s\nwant\n%s", seen[1].Text, want)
 	}

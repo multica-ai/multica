@@ -24,9 +24,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -75,8 +77,8 @@ type IssueResponse struct {
 	ProjectID   *string           `json:"project_id"`
 	Position    float64           `json:"position"`
 	// Stage groups sub-issues under the same parent into ordered barrier
-	// groups (null = unstaged). See issue_child_done.go for how a closed
-	// stage gates the child-done -> parent wake.
+	// groups (null = unstaged). See service/issue_wakeup_system.go for how a
+	// closed stage wakes the parent's assignee.
 	Stage     *int32  `json:"stage"`
 	StartDate *string `json:"start_date"`
 	DueDate   *string `json:"due_date"`
@@ -123,17 +125,8 @@ type IssueRefResponse struct {
 // instead of a database CHECK violation bubbling up as a 500.
 var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
 
-// validIssueStatuses is the 7 BUILT-IN status keys. Since MUL-6243 it is no
-// longer the set of writable statuses — write paths validate against the
-// workspace's catalog via validateIssueStatusKey — and it survives only for the
-// issue-table grouping/filtering paths, which key their group descriptors and
-// compound cells off a fixed status list.
-//
-// KNOWN LIMITATION: a custom status is therefore not yet selectable as an
-// issue-table group or filter value. That is a self-contained follow-up (the
-// table's group descriptors and compound cell keys need to become catalog
-// driven); it is scoped out here so this change cannot alter the table view for
-// workspaces that have no custom statuses.
+// validIssueStatuses contains the built-in status keys. Workspace writes,
+// grouping, and filters also support custom keys from the workspace catalog.
 var validIssueStatuses = issuestatus.Canonical()
 var validIssueStatusCategories = issuestatus.Categories()
 
@@ -774,11 +767,11 @@ func splitSearchTerms(q string) []string {
 	return terms
 }
 
-// identifierNumberRe matches patterns like "MUL-123" or "ABC-45".
-var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+-(\d+)$`)
+// identifierNumberRe matches letter-leading prefixes like "MUL-123" or "V2-12".
+var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9]*-(\d+)$`)
 
 // parseQueryNumber extracts an issue number from the query if it looks like
-// an identifier (e.g. "MUL-123") or a bare number (e.g. "123").
+// an identifier (e.g. "MUL-123" or "V2-12") or a bare number (e.g. "123").
 func parseQueryNumber(q string) (int, bool) {
 	q = strings.TrimSpace(q)
 	// Check for identifier pattern like "MUL-123"
@@ -1156,6 +1149,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	if !includeClosed {
 		resolvedKeys, err := h.terminalIssueStatusKeys(ctx, wsUUID)
 		if err != nil {
+			if writeSearchCancellation(w, r, err) {
+				return
+			}
 			slog.Warn("expand terminal status categories failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
 			return
@@ -1207,6 +1203,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return rows.Err()
 	})
 	if err != nil {
+		if writeSearchCancellation(w, r, err) {
+			return
+		}
 		// Statement-timeout surfaces as SQLSTATE 57014. Return a 503
 		// so the frontend can distinguish a timeout ("try a more
 		// specific query") from a generic 500. This is the fail-fast
@@ -1222,6 +1221,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search issues")
+		return
+	}
+	if writeSearchCancellation(w, r, ctx.Err()) {
 		return
 	}
 
@@ -1257,6 +1259,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		resp[i] = sir
 	}
 
+	if writeSearchCancellation(w, r, ctx.Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -2982,6 +2987,12 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, sour
 			"reason": "agent's runtime is no longer registered",
 		}
 	}
+	if rt.Provider == qoderruntime.Provider {
+		return http.StatusUnprocessableEntity, map[string]any{
+			"code":   "agent_unavailable",
+			"reason": "Qoder Cloud Agent supports existing issue runs only; create the issue manually and assign it to this agent",
+		}
+	}
 	current := readRuntimeCLIVersion(rt.Metadata)
 	switch err := agentpkg.CheckMinCLIVersionFor(current, minimum); {
 	case err == nil:
@@ -3273,6 +3284,45 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = id
 	}
+
+	// Project workflow (MUL-7420). A new issue in a project on a named
+	// workflow must start on a status the workflow lists, and a column the
+	// project hands off gives the new issue to its handler unless the caller
+	// chose an assignee. A sub-issue without its own project inherits the
+	// parent's, as IssueService.Create does.
+	workflowProjectID := projectID
+	if !workflowProjectID.Valid && parentIssueID.Valid {
+		if parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID: parentIssueID, WorkspaceID: wsUUID,
+		}); err == nil {
+			workflowProjectID = parent.ProjectID
+		}
+	}
+	createWorkflow, createWorkflowProject, err := issueworkflow.ForProject(r.Context(), h.Queries, wsUUID, workflowProjectID)
+	if err != nil {
+		slog.Error("create issue: resolve project workflow", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve project workflow")
+		return
+	}
+	if createWorkflow != nil {
+		if err := issueworkflow.CheckStatus(createWorkflow, status); err != nil {
+			writeIssueWorkflowError(w, err)
+			return
+		}
+		if req.AssigneeType == nil && req.AssigneeID == nil {
+			if step, ok := createWorkflow.Step(status); ok && step.HandsOff() {
+				handoffCreatorType, handoffCreatorID := h.resolveActor(r, creatorID, workspaceID)
+				if t, id, ok := issueworkflow.ResolveHandler(step, createWorkflowProject, handoffCreatorType, parseUUID(handoffCreatorID)); ok {
+					assigneeType = pgtype.Text{String: t, Valid: true}
+					assigneeID = id
+					if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
+						writeError(w, status, msg)
+						return
+					}
+				}
+			}
+		}
+	}
 	// Project existence and the final parent boundary check are enforced inside
 	// IssueService.Create atomically with the create. The handler preloads a
 	// supplied parent only because the assignee gate must bind any autopilot
@@ -3478,7 +3528,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to create issue")
 		return
 	}
 
@@ -3534,6 +3584,16 @@ type UpdateIssueRequest struct {
 	// predate the handoff UI removal. It is consumed only when this write starts
 	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
+	// StopPreviousAssigneeRuns, when a status change hands the issue off to a
+	// project workflow step's handler, cancels the active runs of the agent or
+	// squad it was taken from. Ignored when the write does not hand off.
+	// (MUL-7420)
+	StopPreviousAssigneeRuns bool `json:"stop_previous_assignee_runs,omitempty"`
+	// EnterWorkflowStep makes a project move enter the destination workflow's
+	// step the issue lands on, handing it off like a status change would. A
+	// project move without it is administrative. Batch updates ignore it.
+	// (MUL-7420)
+	EnterWorkflowStep bool `json:"enter_workflow_step,omitempty"`
 	// DuplicateOfIssueID marks this issue as a duplicate of another issue in
 	// the same workspace (MUL-7349). A duplicate is an ordinary cancelled issue
 	// that remembers its original, so this also sets status to cancelled.
@@ -3950,7 +4010,27 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// the identical lineage was accepted on the create path.
 	_, touchedType := rawFields["assignee_type"]
 	_, touchedID := rawFields["assignee_id"]
-	if touchedType || touchedID {
+
+	// Project workflow (MUL-7420): keep the status inside the project's
+	// workflow, and hand the issue off when it enters a step with a handler.
+	// A handoff assignee passes the same gate as a hand-picked one.
+	// An agent's run may only move the issue from the step it works on.
+	callerType, _ := h.resolveActor(r, userID, workspaceID)
+	callerRun := h.agentRunOnIssue(r, callerType, prevIssue)
+	handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Status != nil, touchedType || touchedID, req.EnterWorkflowStep, callerRun)
+	if err != nil {
+		if writeIssueWorkflowError(w, err) {
+			return
+		}
+		slog.Error("update issue: resolve project workflow", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve project workflow")
+		return
+	}
+	if params.Status.Valid && params.Status.String != statusKeyForGuard {
+		// A project move remapped the status; guard the key actually written.
+		statusKeyForGuard = params.Status.String
+	}
+	if touchedType || touchedID || handoff != nil {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
 			return
@@ -3962,18 +4042,21 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The agent this write hands the issue to gets the change as its own run,
+	// not also through its event wakeups.
+	writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
 	var issue db.Issue
 	attachmentsChanged := false
 	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
 		}
 	} else {
-		issue, err = h.updateIssueWithStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, params)
+		issue, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params)
 	}
 	if err != nil {
 		if writeIssueStatusRaceError(w, err) {
@@ -3994,21 +4077,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
 		return
 	}
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
+	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil || handoff != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
+	statusChanged := (req.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	// project_changed gates the client's per-project issue-list refetch the way
 	// status/assignee flags gate theirs. Without it the client must diff
@@ -4024,7 +4108,25 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+	// A workflow handoff (MUL-7420) is decided before the event goes out so
+	// the timeline can record it as one entry: the status change, who the
+	// issue went to, whether their run started, and the brief it reads. The
+	// run gets that brief from its claim; its handoff note stays the
+	// caller's own.
+	handoffNote := req.HandoffNote
+	trigger, willRun := h.IssueService.WillEnqueueRun(r.Context(),
+		service.IssueTriggerInput{
+			Issue:              issue,
+			PrevStatus:         prevIssue.Status,
+			AssigneeChanged:    assigneeChanged || handoff != nil,
+			StatusChanged:      statusChanged,
+			EnteredHandoffStep: handoff != nil,
+		},
+		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
+	)
+	willRun = willRun && !req.SuppressRun
+
+	updatedPayload := map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
 		"status_changed":      statusChanged,
@@ -4048,7 +4150,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		// and clients refresh the two issues' relations from it.
 		"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 		"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
-	})
+	}
+	if handoff != nil {
+		updatedPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
+	}
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, updatedPayload)
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
 		// the same revision. Otherwise clients advance only the revision here and
@@ -4076,25 +4182,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// it stops in-flight agent runs, so that implicit coupling is gone
 	// (MUL-4465). Deleting an issue still cancels its tasks (see DeleteIssue),
 	// because the tasks' owning issue ceases to exist.
-	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
-		service.IssueTriggerInput{
-			Issue:           issue,
-			PrevStatus:      prevIssue.Status,
-			AssigneeChanged: assigneeChanged,
-			StatusChanged:   statusChanged,
-		},
-		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-	); ok && !req.SuppressRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
+	//
+	// A workflow handoff counts as a fresh assignment even when the step's
+	// handler already owns the issue: entering the step is the handler's cue
+	// to work on it, with the step's brief as the handoff note. (MUL-7420)
+	if handoff != nil && req.StopPreviousAssigneeRuns {
+		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
+	}
+	if willRun {
+		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
 	}
 
-	// Platform-driven parent notification: when this issue transitions into
-	// `done` and has a parent, post a top-level system comment on the parent
-	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
-	// loops in PR #2918). The helper guards on transition + parent state and
-	// fails best-effort.
-	if statusChanged {
-		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+	// Sub-issue rules on the parent (the child_done system rule and sub-issue
+	// conditions): the write recorded the change; process it now. A failure
+	// is retried by the scheduler sweep.
+	if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
+		h.processChildEvents(r.Context(), issue.ParentIssueID, prevIssue.ParentIssueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -4475,9 +4578,7 @@ func (h *Handler) publishClearedDuplicates(ctx context.Context, cleared []cleare
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Batch operations
-// ---------------------------------------------------------------------------
 
 type BatchUpdateIssuesRequest struct {
 	IssueIDs []string           `json:"issue_ids"`
@@ -4599,10 +4700,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID)
-	// Children that transitioned into a terminal status this batch, collected so
-	// the parent/stage notification is evaluated once against the final state
-	// after the loop (MUL-4155) rather than per-child mid-batch.
-	var childDoneCompleted []db.Issue
+	// Parents whose sub-issues changed this batch. Their rules are evaluated
+	// once after the loop against the final state (MUL-4155), not per child
+	// against a mid-batch snapshot.
+	var changedParents []pgtype.UUID
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4749,12 +4850,26 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// resolveActor still classifies the caller as an agent (MUL-6691).
 		_, batchTouchedType := rawUpdates["assignee_type"]
 		_, batchTouchedID := rawUpdates["assignee_id"]
-		if batchTouchedType || batchTouchedID {
+		// Project workflow (MUL-7420), per issue: an issue whose workflow does
+		// not list the batch status is skipped like the other per-item guards;
+		// entering a handoff step reassigns this issue to the step's handler.
+		callerType, _ := h.resolveActor(r, userID, workspaceID)
+		callerRun := h.agentRunOnIssue(r, callerType, prevIssue)
+		handoff, err := h.applyIssueWorkflow(r.Context(), prevIssue, &params, req.Updates.Status != nil, batchTouchedType || batchTouchedID, false, callerRun)
+		if err != nil {
+			continue
+		}
+		issueStatusGuard := batchStatusKey
+		if params.Status.Valid {
+			issueStatusGuard = params.Status.String
+		}
+		if batchTouchedType || batchTouchedID || handoff != nil {
 			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 				continue
 			}
 		}
 
+		writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
 		var issue db.Issue
 		if req.Updates.Description != nil {
 			// One batch-level base cannot describe multiple issue documents.
@@ -4762,13 +4877,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, issueStatusGuard,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
 			}
 		} else {
-			issue, err = h.updateIssueWithStatusGuard(r.Context(), wsUUID, batchStatusKey, params)
+			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
 		}
 		if err != nil {
 			// The archive race is a property of the batch's shared target
@@ -4784,23 +4899,41 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
 
 		fillBatch(&resp)
-		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
+		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil || handoff != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
+		statusChanged := (req.Updates.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
+		batchHandoffNote := req.Updates.HandoffNote
+		trigger, willRun := h.IssueService.WillEnqueueRun(r.Context(),
+			service.IssueTriggerInput{
+				Issue:              issue,
+				PrevStatus:         prevIssue.Status,
+				AssigneeChanged:    assigneeChanged || handoff != nil,
+				StatusChanged:      statusChanged,
+				EnteredHandoffStep: handoff != nil,
+			},
+			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
+		)
+		willRun = willRun && !req.Updates.SuppressRun
+		batchPayload := map[string]any{
 			"issue":                      resp,
 			"assignee_changed":           assigneeChanged,
 			"status_changed":             statusChanged,
 			"priority_changed":           priorityChanged,
 			"project_changed":            projectChanged,
+			"prev_status":                prevIssue.Status,
 			"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 			"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
-		})
+		}
+		if handoff != nil {
+			batchPayload["workflow_handoff"] = workflowHandoffPayload(issue, handoff, h.workflowHandoffBrief(r.Context(), issue, handoff), willRun)
+		}
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, batchPayload)
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.
@@ -4808,52 +4941,28 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Same single predicate as UpdateIssue — batch must not grow its own
 		// copy of the enqueue rule (the historical source of four-entry-point
 		// drift, MUL-3375). suppress_run applies batch-wide.
-		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
-			service.IssueTriggerInput{
-				Issue:           issue,
-				PrevStatus:      prevIssue.Status,
-				AssigneeChanged: assigneeChanged,
-				StatusChanged:   statusChanged,
-			},
-			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-		); ok && !req.Updates.SuppressRun {
-			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
+		if handoff != nil && req.Updates.StopPreviousAssigneeRuns {
+			h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
+		}
+		if willRun {
+			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
 		}
 
 		// No status change — not even → cancelled — cancels active tasks here,
 		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
 
-		// Platform-driven parent notification, mirrored from UpdateIssue
-		// (MUL-2538) but DEFERRED to after the loop. Evaluating the stage
-		// barrier here, per-child, would read a mid-batch sibling snapshot and
-		// fire a stale "advance Stage N+1" wake when one batch closes several
-		// stages at once (MUL-4155). Collect the terminal transitions and let
-		// notifyParentsOfBatchChildDone below evaluate each parent once against
-		// the batch's final committed state. Same transition guard as
-		// notifyParentOfChildDone: a non-terminal -> terminal move on a child.
-		// Resolve both sides to the canonical status they inherit before the
-		// terminal test, so a batch that moves the last child onto a CUSTOM
-		// done/cancelled status still enters the stage barrier below. A literal
-		// comparison here left childDoneCompleted empty and silently skipped
-		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
-		if statusChanged && issue.ParentIssueID.Valid {
-			prevTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
-			nowTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
-			if !prevTerminal && nowTerminal {
-				childDoneCompleted = append(childDoneCompleted, issue)
-			}
+		if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
+			changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
 		}
 
 		updated++
 	}
 
-	// Aggregate parent/stage notification over the whole batch's final state so
-	// each affected parent gets at most one accurate comment + wake, independent
-	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
-	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
-	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
+	// Each write recorded its sub-issue change; processing claims them per
+	// parent, so each parent is evaluated once against the batch's final
+	// state, independent of issue_ids order (MUL-4155). A failure is retried
+	// by the sweep.
+	h.processChildEvents(r.Context(), changedParents...)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})

@@ -249,17 +249,44 @@ func TestDelegatedFailureRecoveryPreservesSignalWhenStatusUnavailable(t *testing
 				t.Fatalf("unresolved recovery: tasks=%d; want no dispatch or permanent receipt", count)
 			}
 			if !readError {
-				if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-					t.Fatalf("unresolved signal occupies the batch: %+v, %v", result, err)
+				pending, err := queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, candidate := range pending {
+					if candidate.ID == comment.ID {
+						t.Fatal("unresolved signal occupies the batch")
+					}
+				}
+				if _, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil {
+					t.Fatalf("sweep with unresolved signal: %v", err)
 				}
 				createStatus()
 			}
-			svc.Queries = queries
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
-				t.Fatalf("catalog repaired: %+v, %v; want one replay without repeating the failure hook", result, err)
+			// Packages share DATABASE_URL in CI. Keep another workspace's
+			// signal pending to exercise the global sweep without assuming
+			// this fixture is its only candidate.
+			other, otherSvc := seedDelegatedFailureFixture(t)
+			otherFailedID := other.insertWorkerTask(t, "failed", "comment", 1, 2)
+			if target, created, err := otherSvc.ensureDelegatedFailureRecoveryComment(ctx, otherFailedID); err != nil || target == nil || !created {
+				t.Fatalf("seed unrelated recovery signal: created=%v err=%v", created, err)
 			}
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-				t.Fatalf("repeat sweep: %+v, %v; want no duplicate", result, err)
+			svc.Queries = queries
+			for _, phase := range []string{"catalog repaired", "repeat sweep"} {
+				result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
+				if err != nil {
+					t.Fatalf("%s: %+v, %v", phase, result, err)
+				}
+				// Sweep totals include other workspaces. Each signal must have
+				// exactly one recovery task, including after the second sweep.
+				for _, sourceID := range []pgtype.UUID{failedID, otherFailedID} {
+					fx.QueryRow(t, `SELECT count(*) FROM agent_task_queue
+						WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, sourceID).Scan(&count)
+					if count != 1 {
+						t.Fatalf("%s: source %s has %d recovery tasks; want one replay without repeating the failure hook",
+							phase, util.UUIDToString(sourceID), count)
+					}
+				}
 			}
 		})
 	}

@@ -15,6 +15,7 @@ const TEST_RESOURCES = {
 };
 
 const mockUpdateRuntime = vi.hoisted(() => vi.fn());
+const mockUpdateRuntimeError = vi.hoisted(() => ({ value: null as unknown }));
 const mockDeleteRuntimeProfile = vi.hoisted(() => vi.fn());
 const mockQueryData = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
@@ -25,15 +26,16 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/api")>(),
   api: {
     updateRuntime: (...args: unknown[]) => mockUpdateRuntime(...args),
+    revokeRuntimeWorkspaceAccess: vi.fn(),
     deleteRuntime: vi.fn(),
     unbindAgentsAndDeleteRuntime: vi.fn(),
     deleteRuntimeProfile: (...args: unknown[]) =>
       mockDeleteRuntimeProfile(...args),
   },
-  ApiError: class ApiError extends Error {},
 }));
 
 vi.mock("sonner", () => ({
@@ -86,6 +88,8 @@ vi.mock("@multica/core/runtimes", async () => ({
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
+  runtimeDisplayLabel: (rt: { name: string; custom_name?: string | null }) =>
+    rt.custom_name?.trim() || rt.name,
   runtimeProfileListOptions: (wsId: string) => ({
     queryKey: ["runtime-profiles", wsId],
   }),
@@ -112,11 +116,19 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
   useUpdateRuntime: () => ({
     mutate: (
       args: { runtimeId: string; patch: Record<string, unknown> },
-      opts?: { onSuccess?: () => void; onError?: () => void },
+      opts?: { onSuccess?: () => void; onError?: (error: unknown) => void },
     ) => {
       mockUpdateRuntime(args.runtimeId, args.patch);
-      opts?.onSuccess?.();
+      if (mockUpdateRuntimeError.value) {
+        opts?.onError?.(mockUpdateRuntimeError.value);
+      } else {
+        opts?.onSuccess?.();
+      }
     },
+    isPending: false,
+  }),
+  useRevokeRuntimeWorkspaceAccess: () => ({
+    mutate: vi.fn(),
     isPending: false,
   }),
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
@@ -145,6 +157,7 @@ vi.mock("../../navigation", () => ({
 }));
 
 import { RuntimeDetail } from "./runtime-detail";
+import { ApiError } from "@multica/core/api";
 
 function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
   return {
@@ -207,6 +220,7 @@ describe("RuntimeDetail visibility section", () => {
     vi.clearAllMocks();
     mockQueryData.members = [];
     mockQueryData.profiles = [];
+    mockUpdateRuntimeError.value = null;
     mockDeleteRuntimeProfile.mockResolvedValue(undefined);
   });
 
@@ -215,6 +229,22 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getByText("Visibility")).toBeInTheDocument();
     expect(screen.getByText("Private")).toBeInTheDocument();
     expect(screen.getByText("Public")).toBeInTheDocument();
+  });
+
+  it("opens a reviewed revocation plan instead of silently making an in-use public runtime private", async () => {
+    mockUpdateRuntimeError.value = new ApiError("conflict", 409, "Conflict", {
+      code: "runtime_has_nonowner_dependents",
+      nonowner_agents: [{ id: "00000000-0000-4000-8000-000000000001", name: "Teammate Agent" }],
+      active_task_ids: ["00000000-0000-4000-8000-000000000002"],
+    });
+    renderDetail(makeRuntime({ visibility: "public" }));
+
+    fireEvent.click(screen.getByText("Private"));
+
+    expect(await screen.findByText("Make this Runtime private?")).toBeInTheDocument();
+    expect(screen.getByText("Teammate Agent")).toBeInTheDocument();
+    expect(screen.getByText(/Your own agents and runs are unaffected/)).toBeInTheDocument();
+    expect(screen.getByText(/pause active autopilots assigned to those agents/)).toBeInTheDocument();
   });
 
   it("keeps daemon CLI version details without rendering update controls", () => {

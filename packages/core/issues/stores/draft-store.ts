@@ -102,11 +102,12 @@ interface IssueDraftStore {
    *  backup, so a reload cannot leak the source draft into normal create. */
   isolatedDraftBackup?: IssueCreateDraft;
   /** In-memory only. Snapshot of the draft a successful "Create another"
-   *  create reset into the next issue of the batch. Compared by value against
-   *  the live draft, so an untouched continuation — which merely inherits the
-   *  submitted status/assignee — is not recoverable content, while any field
-   *  the user actually changed is. Never persisted: untouched continuations reload as todo;
-   *  explicitly edited drafts retain their selections. */
+   *  create reset into the next issue of the batch. Compared by value over the
+   *  manual form's fields, so an untouched continuation — which merely
+   *  inherits the submitted status/assignee, and may be rewritten by a mode
+   *  switch — is not recoverable content, while any field the user actually
+   *  changed is. Never persisted: untouched continuations reload as todo;
+   *  genuinely edited drafts retain their selections. */
   batchContinuationBaseline?: IssueCreateDraft;
   // Last assignee picked at submit time. Persisted across drafts so the
   // create-issue modal can prefill the picker with the user's most recent
@@ -123,6 +124,10 @@ interface IssueDraftStore {
    *  rebuilds `draft` instead of mutating it. Cleared whenever the draft
    *  stops being that continuation (fresh draft, isolated session, rehydrate). */
   beginBatchContinuation: () => void;
+  /** Normalize an untouched continuation on close, preserving real edits and
+   *  agent data. No-op after a source-context close restores the ordinary draft
+   *  and clears the continuation snapshot. */
+  endBatchContinuation: () => void;
   clearDraft: () => void;
   beginIsolatedDraft: () => void;
   endIsolatedDraft: () => void;
@@ -227,6 +232,26 @@ function draftValuesEqual(a: unknown, b: unknown): boolean {
   return true;
 }
 
+// Mode switches may seed the agent slot without editing the manual form.
+// Compare only shared/manual values when deciding whether that form changed.
+function manualFormChanged(draft: IssueCreateDraft, baseline: IssueCreateDraft): boolean {
+  return !draftValuesEqual(
+    { shared: draft.shared, manual: draft.manual },
+    { shared: baseline.shared, manual: baseline.manual },
+  );
+}
+
+// Only untouched manual continuations have an inherited status to normalize.
+function hasInheritedStatus(
+  draft: IssueCreateDraft,
+  batchContinuationBaseline?: IssueCreateDraft,
+): boolean {
+  return (
+    batchContinuationBaseline !== undefined &&
+    !manualFormChanged(draft, batchContinuationBaseline)
+  );
+}
+
 // Whether the draft holds anything worth recovering: explicit content, or a
 // change away from the untouched keep-open continuation it started from. A
 // batch continuation inherits the submitted status and assignee, so those
@@ -239,7 +264,7 @@ function hasRecoverableIntent(
   return (
     hasDraftContent(draft) ||
     (batchContinuationBaseline !== undefined &&
-      !draftValuesEqual(draft, batchContinuationBaseline))
+      manualFormChanged(draft, batchContinuationBaseline))
   );
 }
 
@@ -259,6 +284,19 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         set((s) => ({ draft: { ...s.draft, activeMode: mode } })),
       beginBatchContinuation: () =>
         set((s) => ({ batchContinuationBaseline: s.draft })),
+      endBatchContinuation: () =>
+        set((s) => {
+          const baseline = s.batchContinuationBaseline;
+          // Outer layout cleanup may already have restored the ordinary draft.
+          if (!baseline) return s;
+          // Genuine manual edits remain an unfinished draft, including status.
+          return {
+            draft: hasInheritedStatus(s.draft, baseline)
+              ? { ...s.draft, manual: { ...s.draft.manual, status: "todo" } }
+              : s.draft,
+            batchContinuationBaseline: undefined,
+          };
+        }),
       clearDraft: () =>
         set((s) => ({
           draft: {
@@ -310,17 +348,13 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       // restores the user's normal create draft, not source-specific input.
       partialize: (state) => {
         const draft = state.isolatedDraftBackup ?? state.draft;
-        // A batch's status must not outlive the batch: an untouched
-        // continuation rehydrates as a fresh todo create. A continuation the
-        // user actually edited — even if only a field outside the recovery
-        // predicate, such as priority or status — is a real draft, as is every
-        // draft that is not a batch continuation at all.
-        const untouchedContinuation =
+        // Normalize only untouched continuations; preserve edited drafts and
+        // the ordinary backup throughout an isolated source-context session.
+        const inheritedStatus =
           state.isolatedDraftBackup === undefined &&
-          state.batchContinuationBaseline !== undefined &&
-          !hasRecoverableIntent(state.draft, state.batchContinuationBaseline);
+          hasInheritedStatus(state.draft, state.batchContinuationBaseline);
         return {
-          draft: untouchedContinuation
+          draft: inheritedStatus
             ? { ...draft, manual: { ...draft.manual, status: "todo" as const } }
             : draft,
           lastAssigneeType: state.lastAssigneeType,

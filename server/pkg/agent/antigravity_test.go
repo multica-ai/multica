@@ -845,6 +845,33 @@ exit 1
 `
 }
 
+// fakeAgyTrailingTransportErrorScript reproduces the real agy 1.2.13/1.2.14
+// sequence observed on 2026-09-30: the agent emits a complete DONE reply, agy
+// then makes one more streamGenerateContent call whose round trip never
+// produces a response, and reports the exhausted retries as
+// `API error (attempt N): request failed: Post "...": EOF`. This is the same
+// shape as the trailing network error above — a finished answer followed by a
+// transport failure — spelled differently, so it must be preserved too.
+func fakeAgyTrailingTransportErrorScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"67a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Complete answer before the transport failure."}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"67a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Complete answer before the transport failure.","error":"API error (attempt 3): request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"}}'
+exit 1
+`
+}
+
+// fakeAgyTrailingNonTransportErrorScript is the negative control for the above:
+// the answer is complete and DONE, but the trailing failure is a provider-side
+// quota/capacity error rather than a transport one. That is a real failure the
+// user must see, so it must stay failed.
+func fakeAgyTrailingNonTransportErrorScript() string {
+	return `#!/bin/sh
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"77a6d8f2-8523-46fc-8fc9-87e630cbe295","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"Answer produced before quota ran out."}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"77a6d8f2-8523-46fc-8fc9-87e630cbe295","status":"ERROR","response":"Answer produced before quota ran out.","error":"API error (attempt 3): model capacity exhausted, retry later"}}'
+exit 1
+`
+}
+
 // fakeAgyTrailingNetworkErrorAfterNewPartialResponseScript guards against a
 // completed earlier answer making a later, interrupted answer look complete.
 func fakeAgyTrailingNetworkErrorAfterNewPartialResponseScript() string {
@@ -961,6 +988,181 @@ func TestAntigravityBackendIgnoresStaleActiveStepAfterDoneResponse(t *testing.T)
 	}
 	if result.Status != "completed" || result.Output != "Complete answer after cancelling the background task." || result.Error != "" {
 		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// A complete DONE answer followed by an exhausted-retry transport error is a
+// finished turn. agy spells such a failure `API error (attempt N): request
+// failed: Post "...": EOF` rather than the network-issue sentence, and matching
+// only the latter discarded an answer that had already been produced and
+// streamed (2026-09-30: every turn of one conversation reported
+// blocked/agent_error.unknown while the reply sat in result.response).
+func TestAntigravityBackendIgnoresTrailingTransportErrorAfterDoneResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingTransportErrorScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "completed" || result.Output != "Complete answer before the transport failure." || result.Error != "" {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// The negative control: a complete DONE answer does not on its own make a turn
+// successful. When the trailing failure is provider-side (quota, capacity,
+// policy, auth) rather than transport, the turn must stay failed so the user
+// sees the real cause instead of an answer presented as a finished result.
+func TestAntigravityBackendKeepsNonTransportFailureAfterDoneResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyTrailingNonTransportErrorScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		t.Fatal("result channel closed without a value")
+	}
+	if result.Status != "failed" || result.Output != "Answer produced before quota ran out." || !strings.Contains(result.Error, "model capacity exhausted") {
+		t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+	}
+}
+
+// TestAntigravityTrailingTransportErrorClassification pins both edges of the
+// classifier. The "want true" half is the field-observed spelling plus the
+// other causes Go's http client reports for a round trip that never produced a
+// response. The "want false" half is the one that matters: a provider
+// rejection that happens to travel inside agy's `request failed:` wrapper must
+// stay a failure, otherwise a quota or overload error would be laundered into a
+// successful turn just because the model had already emitted some text.
+func TestAntigravityTrailingTransportErrorClassification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  string
+		want bool
+	}{
+		{
+			name: "field observed EOF after exhausted retries",
+			err:  `API error (attempt 3): request failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse": EOF`,
+			want: true,
+		},
+		{
+			name: "legacy provider sentence",
+			err:  antigravityNetworkIssueError,
+			want: true,
+		},
+		{
+			name: "legacy provider sentence in other case and padding",
+			err:  "  THERE WAS A NETWORK ISSUE CONNECTING TO THE SERVER, PLEASE TRY AGAIN.  ",
+			want: true,
+		},
+		{name: "unexpected EOF", err: `Post "https://host/v1": unexpected EOF`, want: true},
+		{name: "connection reset", err: `read tcp 1.2.3.4:443: connection reset by peer`, want: true},
+		{name: "broken pipe", err: `write tcp 1.2.3.4:443: broken pipe`, want: true},
+		{name: "connection refused", err: `dial tcp 1.2.3.4:443: connection refused`, want: true},
+		{name: "socket i/o timeout", err: `read tcp 1.2.3.4:443: i/o timeout`, want: true},
+		{name: "tls handshake timeout", err: `net/http: TLS handshake timeout`, want: true},
+		{name: "tls handshake failure", err: `remote error: tls: handshake failure`, want: true},
+		{name: "closed connection", err: `use of closed network connection`, want: true},
+		{name: "dns no such host", err: `dial tcp: lookup host: no such host`, want: true},
+		{name: "dns server misbehaving", err: `lookup host: server misbehaving`, want: true},
+		{name: "network unreachable", err: `connect: network is unreachable`, want: true},
+		{name: "malformed response", err: `malformed HTTP response`, want: true},
+		{name: "http2 connection lost", err: `http2: client connection lost`, want: true},
+		{name: "http2 goaway", err: `http2: server sent GOAWAY and closed the connection`, want: true},
+
+		{name: "empty", err: "", want: false},
+		{name: "whitespace only", err: "   ", want: false},
+		{
+			name: "quota rejection inside the request-failed wrapper",
+			err:  `API error (attempt 3): request failed: 429 Too Many Requests`,
+			want: false,
+		},
+		{
+			name: "status error inside the request-failed wrapper",
+			err:  `API error (attempt 3): request failed: unexpected status code 503`,
+			want: false,
+		},
+		{name: "model capacity exhausted", err: `API error (attempt 3): model capacity exhausted, retry later`, want: false},
+		{name: "prefill queue overloaded", err: `PREFILL_QUEUE_OVERLOADED: Overloaded`, want: false},
+		{name: "resource exhausted", err: `RESOURCE_EXHAUSTED: Quota exceeded for quota group`, want: false},
+		{name: "safety policy", err: `The request was rejected by the safety filter`, want: false},
+		{name: "auth", err: `unauthenticated: invalid API key`, want: false},
+		{name: "invalid argument", err: `INVALID_ARGUMENT: request contains an invalid argument`, want: false},
+		{name: "permission denied", err: `permission denied`, want: false},
+		{name: "tool crash", err: `agent executor error: tool crashed`, want: false},
+		{name: "bare status text", err: `agy returned status ERROR`, want: false},
+		{name: "cancelled", err: `execution cancelled`, want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := antigravityTrailingTransportError(tc.err); got != tc.want {
+				t.Fatalf("antigravityTrailingTransportError(%q) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// The classifier must not fire on a complete answer alone. Each of these has a
+// non-empty response and a DONE agent_response step, so the error class is the
+// only thing standing between a preserved answer and a laundered failure.
+func TestAntigravityCompletedDespiteTrailingNetworkErrorRequiresAllThree(t *testing.T) {
+	t.Parallel()
+
+	const transport = `API error (attempt 3): request failed: Post "https://host/v1": EOF`
+	const quota = `API error (attempt 3): model capacity exhausted`
+
+	tests := []struct {
+		name              string
+		err               string
+		response          string
+		agentResponseDone bool
+		want              bool
+	}{
+		{name: "all three hold", err: transport, response: "answer", agentResponseDone: true, want: true},
+		{name: "response whitespace only", err: transport, response: "  \n ", agentResponseDone: true, want: false},
+		{name: "response empty", err: transport, response: "", agentResponseDone: true, want: false},
+		{name: "answer still being written", err: transport, response: "partial", agentResponseDone: false, want: false},
+		{name: "provider rejection", err: quota, response: "answer", agentResponseDone: true, want: false},
+		{name: "no error at all", err: "", response: "answer", agentResponseDone: true, want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := antigravityCompletedDespiteTrailingNetworkError(tc.err, tc.response, tc.agentResponseDone)
+			if got != tc.want {
+				t.Fatalf("antigravityCompletedDespiteTrailingNetworkError(%q, %q, %v) = %v, want %v",
+					tc.err, tc.response, tc.agentResponseDone, got, tc.want)
+			}
+		})
 	}
 }
 

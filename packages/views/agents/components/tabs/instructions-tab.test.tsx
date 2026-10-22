@@ -175,6 +175,30 @@ describe("InstructionsTab persisted-state synchronization", () => {
       instructions: "Updated instructions.",
     });
   });
+
+  it("leaves starters out for a runtime that never opens a chat", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <InstructionsTab
+          agent={baseAgent}
+          onSave={onSave}
+          showConversationStarters={false}
+        />
+      </I18nProvider>,
+    );
+
+    expect(screen.queryByLabelText("Suggestion 1 label")).toBeNull();
+    const instructions = screen.getByLabelText("System prompt");
+    await user.clear(instructions);
+    await user.type(instructions, "Updated instructions.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      instructions: "Updated instructions.",
+    });
+  });
 });
 
 // The "customize" link in a chat's empty state lands here with ?focus=. The

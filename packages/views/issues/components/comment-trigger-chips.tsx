@@ -1,13 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { TriangleAlert, Users } from "lucide-react";
+import { useMemo, useState, type ReactElement } from "react";
+import { ChevronDown, TriangleAlert, Users } from "lucide-react";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
+import type { AgentRunState, RecipientAction } from "@multica/core/issues/run-steering";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { mentionLabelsByTarget } from "@multica/core/issues/comment-trigger-outcomes";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverContent,
@@ -18,22 +27,22 @@ import { cn } from "@multica/ui/lib/utils";
 import { AgentStatusDot } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { blockedReasonLabel, blockedShortReasonLabel } from "../blocked-trigger-copy";
+import type { RecipientEntry } from "../hooks/use-recipient-actions";
 
-// One agent renders in full ("Walt will start working", avatar + presence
-// dot, click toggles). Several agents collapse to an overlapping avatar
-// stack + count sentence, mirroring WorkspaceAgentWorkingChip on the issues
-// header. Hover layers stay read-only (Tooltip); per-agent toggling lives in
-// a click-opened Popover so the layer survives consecutive clicks.
-// Suppression is communicated by brightness alone: lit = will trigger,
-// dimmed = skipped.
-// The single-agent avatar renders at the `xs` tier; the `+N` overflow chip
-// and stack overlap below reuse that tier's pixel diameter so the collapsed
-// stack lines up exactly with the avatars.
+// Each recipient's chip says what Send will do to it, and its menu offers only
+// what that recipient's current state allows: a running turn can take the
+// message now, after the turn, or instead of it; an idle or queued agent can
+// only start (or fold the message into its queued run) or be skipped.
+// One recipient renders as a single chip. Several collapse to an overlapping
+// avatar stack, mirroring WorkspaceAgentWorkingChip on the issues header, with
+// one row and menu per agent in a click-opened Popover.
+// The avatars render at the `xs` tier; the `+N` overflow chip and stack
+// overlap reuse that tier's pixel diameter so the stack lines up exactly.
 const AVATAR_SIZE = AVATAR_SIZE_PX.xs;
 const MAX_STACK_HEADS = 4;
 
 interface CommentTriggerChipsProps {
-  agents: CommentTriggerPreviewAgent[];
+  recipients: RecipientEntry[];
   // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
   // (MUL-4525 §2). Each renders as a named warning chip so the user sees WHICH
   // target won't run and why, not a silent no-op after sending.
@@ -44,8 +53,7 @@ interface CommentTriggerChipsProps {
   // user typed in its mention markup. The server omits blocked target names
   // (enumeration-safety); this is the user's own text, so it discloses nothing new.
   draftContent?: string;
-  suppressedAgentIds: Set<string>;
-  onToggle: (agentId: string) => void;
+  onActionChange: (agentId: string, action: RecipientAction) => void;
 }
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
@@ -63,22 +71,6 @@ function sourceLabel(source: string, t: IssuesT): string {
   }
 }
 
-// Assignee / @mention reasons are intentionally omitted: the header
-// (name · source) already says why they fire, so a reason line there would
-// just restate it. Only the squad-leader link (non-obvious) and the unknown
-// fallback carry information the header doesn't.
-function sourceReason(agent: CommentTriggerPreviewAgent, t: IssuesT): string | null {
-  switch (agent.source) {
-    case "issue_assignee":
-    case "mention_agent":
-      return null;
-    case "mention_squad_leader":
-      return t(($) => $.comment.trigger_reason_mention_squad_leader);
-    default:
-      return agent.reason || t(($) => $.comment.trigger_reason_unknown);
-  }
-}
-
 // Presence is display metadata only — the trigger list itself is always the
 // backend preview. Online-ish agents start right away; offline ones queue.
 function useTriggerPresenceLine(agentId: string, t: IssuesT): string | null {
@@ -90,48 +82,69 @@ function useTriggerPresenceLine(agentId: string, t: IssuesT): string | null {
     : t(($) => $.comment.trigger_starts_when_online);
 }
 
-// One tooltip body for every trigger surface (single chip, popover rows):
-// who · why it fires (+ presence) · what a click does.
-function TriggerAgentTooltipBody({
-  agent,
-  suppressed,
-  t,
-}: {
-  agent: CommentTriggerPreviewAgent;
-  suppressed: boolean;
-  t: IssuesT;
-}) {
-  const presenceLine = useTriggerPresenceLine(agent.id, t);
-  return (
-    <div className="space-y-0.5">
-      <div className="flex items-baseline gap-1.5">
-        <span className="font-medium">{agent.name}</span>
-        <span className="text-micro text-muted-foreground">{sourceLabel(agent.source, t)}</span>
-      </div>
-      {suppressed ? (
-        <div>{t(($) => $.comment.trigger_click_to_restore)}</div>
-      ) : (
-        <>
-          {(() => {
-            // Reason (when present) and presence share one line; either may be
-            // absent, so join only the parts that exist to avoid a stray space.
-            const line = [sourceReason(agent, t), presenceLine].filter(Boolean).join(" ");
-            return line ? <div>{line}</div> : null;
-          })()}
-          <div className="text-muted-foreground">{t(($) => $.comment.trigger_click_to_skip)}</div>
-        </>
-      )}
-    </div>
-  );
+function stateLabel(state: AgentRunState, t: IssuesT): string | null {
+  switch (state.kind) {
+    case "running":
+      return t(($) => $.comment.recipient_state_running);
+    case "starting":
+      return t(($) => $.comment.recipient_state_starting);
+    case "queued":
+      return t(($) => $.comment.recipient_state_queued);
+    default:
+      return null;
+  }
+}
+
+function actionLabel(action: RecipientAction, state: AgentRunState, t: IssuesT): string {
+  switch (action) {
+    case "steer":
+      return t(($) => $.comment.recipient_steer);
+    case "after_run":
+      return t(($) => $.comment.recipient_after_run);
+    case "restart":
+      return t(($) => $.comment.recipient_restart);
+    case "skip":
+      return t(($) => $.comment.trigger_wont_trigger);
+    default:
+      return state.kind === "queued"
+        ? t(($) => $.comment.recipient_join)
+        : t(($) => $.comment.trigger_will_start);
+  }
+}
+
+// Only choices whose consequence is not obvious from the label carry a line.
+function actionDescription(action: RecipientAction, entry: RecipientEntry, presenceLine: string | null, t: IssuesT): string | null {
+  const name = entry.agent.name;
+  switch (action) {
+    case "steer":
+      return t(($) => $.comment.recipient_steer_desc, { name });
+    case "after_run":
+      return t(($) => $.comment.recipient_after_run_desc);
+    case "restart":
+      return t(($) => $.comment.recipient_restart_desc);
+    case "start":
+      return entry.state.kind === "queued" ? t(($) => $.comment.recipient_join_desc, { name }) : presenceLine;
+    default:
+      return null;
+  }
+}
+
+function chipToneClass(action: RecipientAction): string {
+  if (action === "steer") {
+    return "border-brand/28 bg-brand/7 text-foreground hover:bg-brand/12 aria-expanded:bg-brand/12 dark:border-brand/45 dark:bg-brand/12 dark:hover:bg-brand/18";
+  }
+  if (action === "restart") {
+    return "text-destructive hover:bg-destructive/10 hover:text-destructive aria-expanded:bg-destructive/10";
+  }
+  return "text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground";
 }
 
 export function CommentTriggerChips({
-  agents,
+  recipients,
   blocked = [],
   hasAllMembersMention = false,
   draftContent = "",
-  suppressedAgentIds,
-  onToggle,
+  onActionChange,
 }: CommentTriggerChipsProps) {
   const { t } = useT("issues");
   // Blocked outcomes carry no name (enumeration-safety); recover the label the
@@ -140,23 +153,13 @@ export function CommentTriggerChips({
 
   // Loading and errors render nothing: the preview is an enhancement, and
   // any interim chrome here reads as composer noise.
-  if (agents.length === 0 && blocked.length === 0 && !hasAllMembersMention) return null;
+  if (recipients.length === 0 && blocked.length === 0 && !hasAllMembersMention) return null;
 
   const allowed =
-    agents.length === 1 ? (
-      <SingleTriggerChip
-        agent={agents[0]!}
-        suppressed={suppressedAgentIds.has(agents[0]!.id)}
-        onToggle={onToggle}
-        t={t}
-      />
-    ) : agents.length > 1 ? (
-      <MultiTriggerChip
-        agents={agents}
-        suppressedAgentIds={suppressedAgentIds}
-        onToggle={onToggle}
-        t={t}
-      />
+    recipients.length === 1 ? (
+      <SingleRecipientChip entry={recipients[0]!} onActionChange={onActionChange} t={t} />
+    ) : recipients.length > 1 ? (
+      <MultiRecipientChip recipients={recipients} onActionChange={onActionChange} t={t} />
     ) : null;
 
   if (blocked.length === 0 && !hasAllMembersMention) return allowed;
@@ -228,105 +231,134 @@ function BlockedTriggerChip({
   );
 }
 
-function SingleTriggerChip({
-  agent,
-  suppressed,
-  onToggle,
+// The per-recipient choice menu. `trigger` is the element that opens it: the
+// chip itself for a single recipient, a row button inside the stack popover.
+function RecipientActionMenu({
+  entry,
+  onActionChange,
+  trigger,
   t,
 }: {
-  agent: CommentTriggerPreviewAgent;
-  suppressed: boolean;
-  onToggle: (agentId: string) => void;
+  entry: RecipientEntry;
+  onActionChange: (agentId: string, action: RecipientAction) => void;
+  trigger: ReactElement;
   t: IssuesT;
 }) {
-  const state = suppressed
-    ? t(($) => $.comment.trigger_skipped_label)
-    : sourceLabel(agent.source, t);
-  // The avatar carries "who"; the sentence carries only condition + outcome,
-  // so it stays fixed-width and never truncates on long agent names.
-  const sentence = suppressed
-    ? t(($) => $.comment.trigger_wont_trigger)
-    : t(($) => $.comment.trigger_will_start);
-
+  const presenceLine = useTriggerPresenceLine(entry.agent.id, t);
+  const state = stateLabel(entry.state, t);
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-pressed={suppressed}
-            aria-label={t(($) => $.comment.trigger_chip_aria, { name: agent.name, state })}
-            onClick={() => onToggle(agent.id)}
-            className={cn(
-              // Sidebar-style resting state: muted until hover so the strip
-              // reads as metadata, not content (see app-sidebar nav items).
-              "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground",
-            )}
-          >
-            <TriggerAgentAvatar agent={agent} suppressed={suppressed} />
-            <span className="truncate">{sentence}</span>
-          </button>
-        }
-      />
-      <TooltipContent side="top" className="max-w-72 text-caption">
-        <TriggerAgentTooltipBody agent={agent} suppressed={suppressed} t={t} />
-      </TooltipContent>
-    </Tooltip>
+    <DropdownMenu>
+      <DropdownMenuTrigger render={trigger} />
+      <DropdownMenuContent side="top" align="start" className="w-80">
+        <div className="flex min-w-0 items-center gap-2 px-1.5 pt-1 pb-1.5 text-caption text-muted-foreground">
+          <TriggerAgentAvatar agent={entry.agent} suppressed={false} />
+          <span className="min-w-0 truncate font-medium text-foreground">{entry.agent.name}</span>
+          <span className="shrink-0">{state ?? sourceLabel(entry.agent.source, t)}</span>
+        </div>
+        <DropdownMenuRadioGroup
+          value={entry.action}
+          onValueChange={(value) => onActionChange(entry.agent.id, value as RecipientAction)}
+        >
+          {entry.actions.map((action) => {
+            const description = actionDescription(action, entry, presenceLine, t);
+            return (
+              <div key={action}>
+                {action === "skip" && <DropdownMenuSeparator />}
+                <DropdownMenuRadioItem value={action} className="items-start py-1.5">
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>{actionLabel(action, entry.state, t)}</span>
+                    {description && <span className="text-caption text-muted-foreground">{description}</span>}
+                  </span>
+                </DropdownMenuRadioItem>
+              </div>
+            );
+          })}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-function MultiTriggerChip({
-  agents,
-  suppressedAgentIds,
-  onToggle,
+function SingleRecipientChip({
+  entry,
+  onActionChange,
   t,
 }: {
-  agents: CommentTriggerPreviewAgent[];
-  suppressedAgentIds: Set<string>;
-  onToggle: (agentId: string) => void;
+  entry: RecipientEntry;
+  onActionChange: (agentId: string, action: RecipientAction) => void;
+  t: IssuesT;
+}) {
+  const label = actionLabel(entry.action, entry.state, t);
+  // The avatar carries "who"; the sentence carries only the outcome, so it
+  // stays fixed-width and never truncates on long agent names.
+  return (
+    <RecipientActionMenu
+      entry={entry}
+      onActionChange={onActionChange}
+      t={t}
+      trigger={
+        <button
+          type="button"
+          aria-label={t(($) => $.comment.trigger_chip_aria, { name: entry.agent.name, state: label })}
+          className={cn(
+            "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 text-micro font-medium transition-colors duration-200",
+            chipToneClass(entry.action),
+          )}
+        >
+          <TriggerAgentAvatar agent={entry.agent} suppressed={entry.action === "skip"} />
+          <span className="truncate">{label}</span>
+          <ChevronDown aria-hidden className="size-3 shrink-0 text-faint-foreground" />
+        </button>
+      }
+    />
+  );
+}
+
+function MultiRecipientChip({
+  recipients,
+  onActionChange,
+  t,
+}: {
+  recipients: RecipientEntry[];
+  onActionChange: (agentId: string, action: RecipientAction) => void;
   t: IssuesT;
 }) {
   const [open, setOpen] = useState(false);
   const [tooltipHover, setTooltipHover] = useState(false);
-  const activeCount = agents.filter((a) => !suppressedAgentIds.has(a.id)).length;
-  const heads = agents.slice(0, MAX_STACK_HEADS);
-  const overflow = agents.length - heads.length;
+  const activeCount = recipients.filter((r) => r.action !== "skip").length;
+  const heads = recipients.slice(0, MAX_STACK_HEADS);
+  const overflow = recipients.length - heads.length;
   // Mirror AgentAvatarStack: ~30% overlap reads as "stacked" without
   // obscuring the next avatar.
   const overlap = Math.round(AVATAR_SIZE * 0.3);
-  // The avatar stack shows who; the sentence promises only what WILL happen,
-  // so the count covers non-suppressed agents — skipped ones read as the
-  // dimmed heads right next to the number.
   const sentence =
     activeCount === 0
       ? t(($) => $.comment.trigger_none_will_trigger)
-      : t(($) => $.comment.trigger_will_start_count, { count: activeCount });
+      : t(($) => $.comment.recipient_count, { count: activeCount });
+  const tone = recipients.some((r) => r.action === "restart")
+    ? "restart"
+    : recipients.some((r) => r.action === "steer") ? "steer" : "start";
 
   const popoverTrigger = (
     <PopoverTrigger
       render={
-        // Ghost-button affordance (hover fill + aria-expanded pin) so the
-        // stack reads as clickable, matching pickers across the app.
         <button
           type="button"
           className={cn(
-            "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+            "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 text-micro font-medium transition-colors duration-200",
+            chipToneClass(tone),
           )}
         />
       }
     >
       <span className="inline-flex items-center">
-        {heads.map((agent, i) => (
+        {heads.map((entry, i) => (
           <span
-            key={agent.id}
+            key={entry.agent.id}
             style={{ marginLeft: i === 0 ? 0 : -overlap }}
             className="inline-flex rounded-full ring-2 ring-background"
           >
-            <TriggerAgentAvatar
-              agent={agent}
-              suppressed={suppressedAgentIds.has(agent.id)}
-              showDot={false}
-            />
+            <TriggerAgentAvatar agent={entry.agent} suppressed={entry.action === "skip"} showDot={false} />
           </span>
         ))}
         {overflow > 0 && (
@@ -355,46 +387,40 @@ function MultiTriggerChip({
           {t(($) => $.comment.trigger_click_to_manage)}
         </TooltipContent>
       </Tooltip>
-      <PopoverContent align="start" className="w-64 p-2">
+      <PopoverContent align="start" className="w-80 p-2">
         <div className="px-1.5 pb-1 text-caption font-medium text-muted-foreground">
           {t(($) => $.comment.trigger_preview_title)}
         </div>
         <div className="flex flex-col">
-          {agents.map((agent) => {
-            const suppressed = suppressedAgentIds.has(agent.id);
-            const state = suppressed
-              ? t(($) => $.comment.trigger_skipped_label)
-              : sourceLabel(agent.source, t);
+          {recipients.map((entry) => {
+            const label = actionLabel(entry.action, entry.state, t);
+            const state = stateLabel(entry.state, t);
             return (
-              <Tooltip key={agent.id}>
-                <TooltipTrigger
-                  render={
+              <div key={entry.agent.id} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1">
+                <TriggerAgentAvatar agent={entry.agent} suppressed={entry.action === "skip"} />
+                <span className="min-w-0 flex-1 truncate text-caption">
+                  {entry.agent.name}
+                  {state && <span className="text-muted-foreground"> · {state}</span>}
+                </span>
+                <RecipientActionMenu
+                  entry={entry}
+                  onActionChange={onActionChange}
+                  t={t}
+                  trigger={
                     <button
                       type="button"
-                      aria-pressed={suppressed}
-                      aria-label={t(($) => $.comment.trigger_chip_aria, { name: agent.name, state })}
-                      onClick={() => onToggle(agent.id)}
+                      aria-label={t(($) => $.comment.trigger_chip_aria, { name: entry.agent.name, state: label })}
                       className={cn(
-                        "flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted",
+                        "inline-flex h-6 max-w-40 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-transparent px-1.5 text-micro font-medium transition-colors",
+                        chipToneClass(entry.action),
                       )}
                     >
-                      <TriggerAgentAvatar agent={agent} suppressed={suppressed} />
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-caption",
-                          suppressed && "text-muted-foreground",
-                        )}
-                      >
-                        {agent.name}
-                      </span>
-                      <span className="shrink-0 text-micro text-muted-foreground">{state}</span>
+                      <span className="truncate">{label}</span>
+                      <ChevronDown aria-hidden className="size-3 shrink-0 text-faint-foreground" />
                     </button>
                   }
                 />
-                <TooltipContent side="right" className="max-w-72 text-caption">
-                  <TriggerAgentTooltipBody agent={agent} suppressed={suppressed} t={t} />
-                </TooltipContent>
-              </Tooltip>
+              </div>
             );
           })}
         </div>

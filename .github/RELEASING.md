@@ -10,6 +10,14 @@ formulae, and container images.
 The verification job runs the Go tests and `govulncheck` before any publishing
 job starts. The vulnerability scan is fail-closed by default.
 
+CI and release jobs require Go `~1.26.9`: at least 1.26.9, while accepting
+newer 1.26 patches. This security floor is independent of the development
+minimum in `server/go.mod`. A plain `1.26.x` can resolve to an older patch
+while the `setup-go` version manifest catches up with an official Go release.
+When raising the security floor, update all Go workflows and the pinned
+Go builder image in `Dockerfile` together so shipped binaries also receive
+the fixes.
+
 ## Emergency vulnerability-scan bypass
 
 Use the bypass only when `govulncheck` itself or its live vulnerability database

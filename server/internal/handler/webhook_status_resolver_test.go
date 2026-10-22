@@ -79,7 +79,7 @@ func TestWebhookStatusResolver(t *testing.T) {
 						var ids, closing []string
 						for i, status := range tc.statuses {
 							ids = append(ids, fixture.Issue(t, "Resolver fixture", testutil.Cols{"status": status, "number": i + 1}))
-							closing = append(closing, fmt.Sprintf("RSL-%d", i+1))
+							closing = append(closing, fmt.Sprintf("Closes RSL-%d", i+1))
 						}
 						// Mirroring creates rows outside the fixture builders.
 						for _, table := range []string{"issue_pull_request", "issue_vcs_pull_request"} {
@@ -88,7 +88,7 @@ func TestWebhookStatusResolver(t *testing.T) {
 						fixture.Cleanup(t, "DELETE FROM github_pull_request WHERE workspace_id = $1", ws)
 						fixture.Cleanup(t, "DELETE FROM vcs_pull_request WHERE workspace_id = $1", ws)
 						const timestamp = "2026-09-08T00:00:00Z"
-						// mirror delivers a merged PR whose title names every
+						// mirror delivers a merged PR whose body closes every
 						// fixture issue. Each PR number is a separate delivery.
 						var mirror func(number int32)
 						if provider == "github" {
@@ -96,7 +96,8 @@ func TestWebhookStatusResolver(t *testing.T) {
 								p := &ghPullRequestPayload{}
 								p.Action = "closed"
 								p.Repository.Owner.Login, p.Repository.Name = "fixture", "resolver"
-								p.PullRequest.Number, p.PullRequest.Title = number, "Resolve "+strings.Join(closing, " ")
+								p.PullRequest.Number, p.PullRequest.Title = number, "Resolve linked issues"
+								p.PullRequest.Body = strings.Join(closing, "\n")
 								p.PullRequest.State, p.PullRequest.Merged = "closed", true
 								p.PullRequest.HTMLURL = fmt.Sprintf("https://github.test/fixture/resolver/pull/%d", number)
 								p.PullRequest.CreatedAt, p.PullRequest.UpdatedAt = timestamp, timestamp
@@ -106,7 +107,7 @@ func TestWebhookStatusResolver(t *testing.T) {
 							connID := fixture.Insert(t, "vcs_connection", testutil.Cols{"workspace_id": ws, "provider": provider, "instance_url": "https://forgejo.test", "account_login": "fixture", "access_token_encrypted": "unused", "webhook_secret_encrypted": "unused"})
 							conn := db.VcsConnection{ID: parseUUID(connID), WorkspaceID: wsID, Provider: provider}
 							mirror = func(number int32) {
-								ev := vcs.PullRequestEvent{Action: "closed", State: "merged", RepoOwner: "fixture", RepoName: "resolver", Number: number, Title: "Resolve " + strings.Join(closing, " "), HTMLURL: fmt.Sprintf("https://forgejo.test/fixture/resolver/pulls/%d", number), CreatedAt: timestamp, UpdatedAt: timestamp}
+								ev := vcs.PullRequestEvent{Action: "closed", State: "merged", RepoOwner: "fixture", RepoName: "resolver", Number: number, Title: "Resolve linked issues", Body: strings.Join(closing, "\n"), HTMLURL: fmt.Sprintf("https://forgejo.test/fixture/resolver/pulls/%d", number), CreatedAt: timestamp, UpdatedAt: timestamp}
 								h.mirrorVCSPullRequest(ctx, conn, ev)
 							}
 						}

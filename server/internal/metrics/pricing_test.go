@@ -58,7 +58,7 @@ func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 	}
 }
 
-func TestPriceForModelAliasCodexGPT56(t *testing.T) {
+func TestPriceForModelAliasCodexCurrentGeneration(t *testing.T) {
 	// Official rates from OpenAI's GPT-5.6 announcement: cache read = 0.1x
 	// input (90% cached-input discount), cache write = 1.25x input.
 	cases := []struct {
@@ -72,6 +72,22 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 		{
 			model: "gpt-5.6-sol",
 			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 30},
+		},
+		{
+			model: "gpt-6.1-sol",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "openai:gpt-6.1-sol[1m]",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6.1-sol", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "openai:gpt-6-sol",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6-sol", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "openai/gpt-6-luna",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-6-luna", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.5},
 		},
 		{
 			model: "openai:gpt-5.6-terra",
@@ -100,6 +116,10 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 	// sides surface these as unmapped instead of silently pricing them.
 	for _, model := range []string{
 		"gpt-6-astra-pro",
+		"gpt-6.1-sol-pro",
+		"gpt-6-1-sol",
+		"gpt-6-sol-high",
+		"gpt-6-luna-pro",
 		"gpt-6-astra/unknown",
 		"gpt-6-astra-high",
 		"gpt-5.6-luna-pro",
@@ -490,6 +510,143 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 	for _, model := range []string{
 		"claude-fable-5[1m][2m]",
 		"claude-fable-5-1[1m][2m]",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
+}
+
+func TestPriceForModelAliasAnthropicSonnetAndHaiku55(t *testing.T) {
+	cases := []struct {
+		aliases []string
+		want    ModelPrice
+	}{
+		{
+			aliases: []string{
+				"claude-sonnet-5",
+				"claude-5-sonnet",
+				"anthropic/claude-sonnet-5",
+				"claude-sonnet-5[1m]",
+				"claude-sonnet-5-20261001",
+				"claude-sonnet-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			aliases: []string{
+				"claude-sonnet-5-5",
+				"claude-sonnet-5.5",
+				"anthropic/claude-sonnet-5-5",
+				"anthropic:claude-sonnet-5.5",
+				"claude-sonnet-5-5[1m]",
+				"claude-sonnet-5-5-20261001",
+				"claude-sonnet-5-5-2026-10-01[1m]",
+				"claude-sonnet-5-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5-5", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			aliases: []string{
+				"claude-haiku-5-5",
+				"claude-haiku-5.5",
+				"anthropic/claude-haiku-5-5",
+				"anthropic:claude-haiku-5.5",
+				"claude-haiku-5-5[1m]",
+				"claude-haiku-5-5-20261001",
+				"claude-haiku-5-5-2026-10-01[1m]",
+				"claude-haiku-5-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.5},
+		},
+	}
+	for _, tc := range cases {
+		for _, model := range tc.aliases {
+			t.Run(model, func(t *testing.T) {
+				got, ok := PriceForModelAlias(model)
+				if !ok || got != tc.want {
+					t.Fatalf("PriceForModelAlias(%q) = %+v, %v; want %+v, true", model, got, ok, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestPriceForModelAliasAnthropicSonnetAndHaikuUnknownVariants(t *testing.T) {
+	for _, model := range []string{
+		"claude-sonnet-5-6",
+		"claude-sonnet-5.6",
+		"claude-sonnet-5-55",
+		"claude-haiku-5-6",
+		"claude-haiku-5.6",
+		"claude-haiku-5-55",
+		"claude-5-sonnet-preview",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
+	for _, base := range []string{"claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+		for _, suffix := range []string{"x", "-preview", "-latest-preview", "-20261001x", "[1m]junk", "[1m][2m]", "[]"} {
+			model := base + suffix
+			if got, ok := PriceForModelAlias(model); ok {
+				t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+			}
+		}
+	}
+}
+
+func TestPriceForModelAliasAnthropicOpus55(t *testing.T) {
+	// Opus 5.5 is its own SKU at $4 / $20 with cache reads at 0.05x input
+	// ($0.20). An Opus 5 alias that did not stop at the version would swallow
+	// the `-5` suffix and bill 5.5 at Opus 5's 5/25 tier, so every spelling
+	// below must land on the Opus 5.5 row specifically.
+	opus55 := ModelPrice{Provider: "anthropic", Model: "claude-opus-5-5", InputPerM: 4, CacheReadPerM: 0.2, CacheWritePerM: 5, OutputPerM: 20}
+	opus5 := ModelPrice{Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 25}
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{model: "claude-opus-5-5", want: opus55},
+		{model: "anthropic/claude-opus-5-5", want: opus55},
+		{model: "anthropic:claude-opus-5-5", want: opus55},
+		// Copilot reports Claude models dotted.
+		{model: "claude-opus-5.5", want: opus55},
+		// Claude Code reports the 1M-context variant with a bracketed suffix.
+		{model: "claude-opus-5-5[1m]", want: opus55},
+		{model: "claude-opus-5-5-20260901", want: opus55},
+		{model: "claude-opus-5-5-latest", want: opus55},
+		{model: "claude-opus-5-5-20260901[1m]", want: opus55},
+		// Opus 5 must keep resolving to its own row in every suffix form the
+		// frontend resolver also strips.
+		{model: "claude-opus-5", want: opus5},
+		{model: "claude-opus-5[1m]", want: opus5},
+		{model: "claude-opus-5-20260401", want: opus5},
+		{model: "claude-opus-5-latest", want: opus5},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	// Another Opus 5 minor is a distinct SKU at an unknown rate: it must stay
+	// unmapped rather than borrow Opus 5's or 5.5's tier, matching the
+	// frontend's exact-key lookup.
+	for _, model := range []string{
+		"claude-opus-5-1",
+		"claude-opus-5.6",
+		"claude-opus-5-55",
+		"claude-opus-5-5x",
+		"claude-opus-5-5-latest-preview",
+		"claude-opus-5-5[1m]junk",
+		"claude-opus-5[1m][2m]",
+		"claude-opus-5-5[1m][2m]",
 	} {
 		if got, ok := PriceForModelAlias(model); ok {
 			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)

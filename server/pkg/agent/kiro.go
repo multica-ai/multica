@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,74 @@ var kiroBlockedArgs = map[string]blockedArgMode{
 // only provider-specific launch and tool-name normalization.
 type kiroBackend struct {
 	cfg Config
+}
+
+// kiroSupplementTimeout bounds the wait for a `_session/steer` acknowledgement.
+// A var so tests can shorten it.
+var kiroSupplementTimeout = 8 * time.Second
+
+// kiroSupplementSession exposes Kiro CLI's `_session/steer` ACP extension only
+// while the matching session/prompt request is in flight. Kiro does not
+// advertise the extension in initialize, so the daemon gates the feature by
+// CLI version (see SupportsTaskSupplement).
+//
+// Observed contract (kiro-cli 2.33.0): `_session/steer {sessionId, message}`
+// returns `{"queued": true}` immediately. Kiro then injects the message into
+// the running turn at the next boundary: after the in-flight tool call
+// finishes, or after the model's current message if no tool is running. The
+// same session/prompt keeps going and answers it, so "queued" already means
+// the current turn will see the message.
+type kiroSupplementSession struct {
+	client    *hermesClient
+	mu        sync.RWMutex
+	sessionID string
+	active    atomic.Bool
+}
+
+func (s *kiroSupplementSession) stop() {
+	s.active.Store(false)
+}
+
+func (s *kiroSupplementSession) ready() bool {
+	if !s.active.Load() {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sessionID != ""
+}
+
+func (s *kiroSupplementSession) send(ctx context.Context, text string) error {
+	if !s.active.Load() {
+		return fmt.Errorf("kiro turn is no longer active")
+	}
+	s.mu.RLock()
+	sessionID := s.sessionID
+	s.mu.RUnlock()
+	if sessionID == "" {
+		return fmt.Errorf("kiro session is not ready for steering")
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, kiroSupplementTimeout)
+	defer cancel()
+	response, err := s.client.request(rpcCtx, "_session/steer", map[string]any{
+		"sessionId": sessionID,
+		"message":   text,
+	})
+	if err != nil {
+		return fmt.Errorf("kiro _session/steer failed: %w", err)
+	}
+	// A successful JSON-RPC frame alone is not proof of delivery: only
+	// queued=true means Kiro accepted the message for the running turn.
+	var result struct {
+		Queued bool `json:"queued"`
+	}
+	if err := json.Unmarshal(response, &result); err != nil {
+		return fmt.Errorf("kiro _session/steer returned an invalid result: %w", err)
+	}
+	if !result.Queued {
+		return fmt.Errorf("kiro _session/steer did not queue the message: %s", strings.TrimSpace(string(response)))
+	}
+	return nil
 }
 
 func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -139,6 +208,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	promptDone := make(chan hermesPromptResult, 1)
 	activity := make(chan struct{}, 1)
+	supplements := &kiroSupplementSession{}
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -200,6 +270,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 		},
 	}
+
+	supplements.client = c
 
 	readerDone := make(chan struct{})
 	go func() {
@@ -321,6 +393,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		c.sessionID = sessionID
+		supplements.mu.Lock()
+		supplements.sessionID = sessionID
+		supplements.mu.Unlock()
 		b.cfg.Logger.Info("kiro session created", "session_id", sessionID)
 
 		if opts.Model != "" {
@@ -370,11 +445,19 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// shape can drive the turn.
 		// TODO: drop one field once Kiro lands on a single canonical payload.
 		streamingCurrentTurn.Store(true)
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
+		// Steering opens only once the prompt is on the wire and closes as
+		// soon as it answers, so a supplement can never target setup or a
+		// finished turn.
+		_, err = c.requestAndNotifySent(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"content":   promptBlocks,
 			"prompt":    promptBlocks,
+		}, func() {
+			if opts.EnableTaskSupplement {
+				supplements.active.Store(true)
+			}
 		})
+		supplements.stop()
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
@@ -490,7 +573,12 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	session := &Session{Messages: msgCh, Result: resCh}
+	if opts.EnableTaskSupplement {
+		session.Supplement = supplements.send
+		session.SupplementReady = supplements.ready
+	}
+	return session, nil
 }
 
 func isKiroGoalCompleteCloseError(err error) bool {

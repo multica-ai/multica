@@ -22,7 +22,7 @@ export function createZhDict(
     headlineLine1: "\u4f60\u7684\u4e0b\u4e00\u6279\u5458\u5de5",
     headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
     subheading:
-      "Multica \u662f\u4e00\u4e2a\u5f00\u6e90\u5e73\u53f0\uff0c\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
+      "Multica 是一个源码公开的平台，\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
     cta: "免费开始",
     downloadDesktop: "下载桌面端",
     talkToSales: "联系商务",
@@ -104,7 +104,7 @@ export function createZhDict(
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 26 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 27 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -119,7 +119,7 @@ export function createZhDict(
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 26 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 27 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -139,7 +139,7 @@ export function createZhDict(
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 26 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 27 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -158,17 +158,18 @@ export function createZhDict(
   },
 
   openSource: {
-    label: "\u5f00\u6e90",
-    headlineLine1: "\u5f00\u6e90",
-    headlineLine2: "\u4e3a\u6240\u6709\u4eba\u3002",
+    label: "源码公开",
+    headlineLine1: "每一行代码，",
+    headlineLine2: "都由你掌控。",
     description:
-      "Multica \u5b8c\u5168\u5f00\u6e90\u3002\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6309\u4f60\u7684\u65b9\u5f0f\u81ea\u6258\u7ba1\uff0c\u5851\u9020\u4eba\u7c7b + 智能体 \u534f\u4f5c\u7684\u672a\u6765\u3002",
-    cta: "\u5728 GitHub \u4e0a Star",
+      "Multica 的源代码完全公开。审查每一行代码，免费自托管，塑造人类 + 智能体 协作的未来。把 Multica 作为托管服务提供给他人，需要商业授权。",
+    cta: "在 GitHub 上 Star",
+    licensingCta: "了解授权方式 →",
     highlights: [
       {
         title: "\u968f\u5904\u81ea\u6258\u7ba1",
         description:
-          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Multica\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes\u2014\u2014\u4f60\u7684\u6570\u636e\u6c38\u8fdc\u4e0d\u4f1a\u79bb\u5f00\u4f60\u7684\u7f51\u7edc\u3002",
+          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Multica\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes——工作区数据始终保存在你自己掌控的服务器上。",
       },
       {
         title: "\u65e0\u4f9b\u5e94\u5546\u9501\u5b9a",
@@ -195,12 +196,17 @@ export function createZhDict(
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 26 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 27 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。 自托管部署还可以使用 QCA PAT 和已有 QCA 智能体，将 Qoder Cloud Agent 配置为执行任务的托管远端运行时。",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
         answer:
-          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Multica\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002\u4f60\u7684\u6570\u636e\uff0c\u4f60\u9009\u62e9\u3002",
+          "\u4e24\u8005\u90fd\u6709\u3002\u4f60\u53ef\u4ee5\u7528 Docker Compose \u6216 Kubernetes \u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u81ea\u6258\u7ba1 Multica\uff0c\u4e5f\u53ef\u4ee5\u4f7f\u7528\u6211\u4eec\u7684\u6258\u7ba1\u4e91\u7248\u672c\u3002你的数据，你选择。",
+      },
+      {
+        question: "可以商用吗？",
+        answer:
+          "可以。在你自己的组织内部使用 Multica 是免费的，包括为整个团队自托管。只有两种情况需要商业授权：把 Multica 提供给组织外部的人使用（比如作为托管服务或代运维服务），或者把它嵌入你销售或分发的产品中。常见场景见[授权说明](/licensing)。",
       },
       {
         question:
@@ -216,19 +222,19 @@ export function createZhDict(
       {
         question: "\u6211\u7684\u4ee3\u7801\u5b89\u5168\u5417\uff1f智能体 \u5728\u54ea\u91cc\u6267\u884c\uff1f",
         answer:
-          "智能体 \u5728\u4f60\u7684\u673a\u5668\uff08\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\uff09\u6216\u4f60\u81ea\u5df1\u7684\u4e91\u57fa\u7840\u8bbe\u65bd\u4e0a\u6267\u884c\u3002\u4ee3\u7801\u6c38\u8fdc\u4e0d\u4f1a\u7ecf\u8fc7 Multica \u670d\u52a1\u5668\u3002\u5e73\u53f0\u53ea\u534f\u8c03\u4efb\u52a1\u72b6\u6001\u548c\u5e7f\u64ad\u4e8b\u4ef6\u3002",
+          "智能体在你的机器（通过本地守护进程）或你连接的运行时上运行，直接在你的代码仓库里工作。工作区里的内容——任务、评论、聊天消息、附件，以及智能体上报的进度——由 Multica 存储；智能体所用的编码工具会把提示词和代码发送给你配置的模型服务商。想让工作区数据留在自己的服务器上，可以自托管 Multica。详见[隐私政策](/privacy)。",
       },
       {
         question: "\u6211\u53ef\u4ee5\u8fd0\u884c\u591a\u5c11\u4e2a 智能体\uff1f",
         answer:
-          "\u53d6\u51b3\u4e8e\u4f60\u7684\u786c\u4ef6\u3002\u6bcf\u4e2a 智能体 \u6709\u53ef\u914d\u7f6e\u7684\u5e76\u53d1\u9650\u5236\uff0c\u4f60\u53ef\u4ee5\u8fde\u63a5\u591a\u53f0\u673a\u5668\u4f5c\u4e3a\u8fd0\u884c\u65f6\u3002\u5f00\u6e90\u7248\u672c\u6ca1\u6709\u4efb\u4f55\u4eba\u4e3a\u9650\u5236\u3002",
+          "\u53d6\u51b3\u4e8e\u4f60\u7684\u786c\u4ef6\u3002\u6bcf\u4e2a 智能体 \u6709\u53ef\u914d\u7f6e\u7684\u5e76\u53d1\u9650\u5236\uff0c\u4f60\u53ef\u4ee5\u8fde\u63a5\u591a\u53f0\u673a\u5668\u4f5c\u4e3a\u8fd0\u884c\u65f6\u3002自托管时没有任何人为限制。",
       },
     ],
   },
 
   footer: {
     tagline:
-      "\u4eba\u7c7b + 智能体 \u56e2\u961f\u7684\u9879\u76ee\u7ba1\u7406\u3002\u5f00\u6e90\u3001\u53ef\u81ea\u6258\u7ba1\u3001\u4e3a\u672a\u6765\u7684\u5de5\u4f5c\u65b9\u5f0f\u800c\u5efa\u3002",
+      "\u4eba\u7c7b + 智能体 团队的项目管理。源码公开、可自托管、\u4e3a\u672a\u6765\u7684\u5de5\u4f5c\u65b9\u5f0f\u800c\u5efa\u3002",
     cta: "\u5f00\u59cb\u4f7f\u7528",
     groups: {
       product: {
@@ -253,8 +259,9 @@ export function createZhDict(
       company: {
         label: "\u5173\u4e8e",
         links: [
-          { label: "\u5173\u4e8e\u6211\u4eec", href: "/about" },
-          { label: "\u5f00\u6e90", href: "#open-source" },
+          { label: "关于我们", href: "/about" },
+          { label: "授权说明", href: "/licensing" },
+          { label: "隐私政策", href: "/privacy" },
           { label: "\u8054\u7cfb\u5546\u52a1", href: "/contact-sales" },
           { label: "GitHub", href: githubUrl },
         ],
@@ -281,9 +288,213 @@ export function createZhDict(
       "\u6211\u4eec\u8ba4\u4e3a\uff0c\u7c7b\u4f3c\u7684\u8f6c\u6298\u70b9\u6b63\u5728\u518d\u6b21\u51fa\u73b0\u3002\u51e0\u5341\u5e74\u6765\uff0c\u8f6f\u4ef6\u56e2\u961f\u4e00\u76f4\u5904\u4e8e\u4e00\u79cd\u5355\u7ebf\u7a0b\u7684\u5de5\u4f5c\u6a21\u5f0f\uff0c\u4e00\u4e2a\u5de5\u7a0b\u5e08\u5904\u7406\u4e00\u4e2a\u4efb\u52a1\uff0c\u4e00\u6b21\u53ea\u4e13\u6ce8\u4e8e\u4e00\u4e2a\u4e0a\u4e0b\u6587\u3002AI agents \u6539\u53d8\u4e86\u8fd9\u4e2a\u7b49\u5f0f\u3002Multica \u5c06\u201c\u5206\u65f6\u201d\u91cd\u65b0\u5e26\u56de\u8fd9\u4e2a\u65f6\u4ee3\uff0c\u53ea\u4e0d\u8fc7\u4eca\u5929\u5728\u7cfb\u7edf\u4e2d\u8fdb\u884c\u591a\u8def\u590d\u7528\u7684\u201c\u7528\u6237\u201d\uff0c\u65e2\u5305\u62ec\u4eba\u7c7b\uff0c\u4e5f\u5305\u62ec\u81ea\u4e3b\u4ee3\u7406\u3002",
       "在 Multica 中，agents 是一级团队成员。它们会被分配任务，汇报进展，提出阻塞，并交付代码，就像人类同事一样。任务分配、活动时间线、task 生命周期，以及运行时基础设施，Multica 从第一天起就是围绕这一理念构建的。",
       "\u548c\u5f53\u5e74\u7684 Multics \u4e00\u6837\uff0c\u8fd9\u4e00\u5224\u65ad\u5efa\u7acb\u5728\u201c\u591a\u8def\u590d\u7528\u201d\u4e4b\u4e0a\u3002\u4e00\u4e2a\u5c0f\u56e2\u961f\u4e0d\u8be5\u56e0\u4e3a\u4eba\u6570\u5c11\u5c31\u663e\u5f97\u80fd\u529b\u6709\u9650\u3002\u6709\u4e86\u5408\u9002\u7684\u7cfb\u7edf\uff0c\u4e24\u540d\u5de5\u7a0b\u5e08\u52a0\u4e0a\u4e00\u7ec4 agents\uff0c\u5c31\u80fd\u53d1\u6325\u51fa\u4e8c\u5341\u4eba\u56e2\u961f\u7684\u63a8\u8fdb\u901f\u5ea6\u3002",
-      "\u8fd9\u4e2a\u5e73\u53f0\u662f\u5b8c\u5168\u5f00\u6e90\u5e76\u652f\u6301\u81ea\u6258\u7ba1\u7684\u3002\u4f60\u7684\u6570\u636e\u59cb\u7ec8\u4fdd\u7559\u5728\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e2d\u3002\u4f60\u53ef\u4ee5\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6269\u5c55 API\uff0c\u63a5\u5165\u81ea\u5df1\u7684 LLM providers\uff0c\u4e5f\u53ef\u4ee5\u5411\u793e\u533a\u8d21\u732e\u4ee3\u7801\u3002",
+      "Multica 的源代码公开，并且可以免费自托管，工作区数据始终保存在你自己的基础设施中。\u4f60\u53ef\u4ee5\u5ba1\u67e5\u6bcf\u4e00\u884c\u4ee3\u7801\uff0c\u6269\u5c55 API\uff0c\u63a5\u5165\u81ea\u5df1\u7684 LLM providers\uff0c\u4e5f\u53ef\u4ee5\u5411\u793e\u533a\u8d21\u732e\u4ee3\u7801\u3002",
     ],
-    cta: "\u5728 GitHub \u4e0a\u67e5\u770b",
+    cta: "在 GitHub 上查看",
+    team: {
+      title: "Multica 背后的团队",
+      paragraphs: [
+        "Multica 由一支从 2021 年起就一起工作的小团队打造。在 Multica 之前，我们做过面向开发者的 AI 搜索引擎 devv.ai。2025 年，我们开始解决自己反复遇到的问题：一个小团队到底该怎样和 AI 智能体一起把事情做完。这就是 Multica。",
+        "Multica 的源代码公开，也可以自托管：在基于它构建之前，你可以读完每一行代码；自托管的部署完全运行在你自己的基础设施上。商业使用的规则，我们在[授权说明](/licensing)里写清楚了。",
+      ],
+      contacts: [
+        { label: "商业授权与合作", linkLabel: "联系商务", href: "/contact-sales" },
+        { label: "授权规则", linkLabel: "授权说明", href: "/licensing" },
+        { label: "社区与支持", linkLabel: "Discord", href: discordUrl },
+        { label: "源代码与问题反馈", linkLabel: "GitHub", href: githubUrl },
+      ],
+    },
+  },
+
+  licensing: {
+    title: "授权说明",
+    intro: [
+      "Multica 采用 [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE) 发布：在 Apache License 2.0 的基础上附加了几项条件。源代码公开，在你自己的组织内部使用 Multica 是免费的，包括为整个团队自托管。",
+      "最主要的附加条件针对托管使用：把 Multica 提供给组织外部的人使用，需要商业授权。这一页用大家最常问的问题，说明这条线划在哪里。这是一份通俗说明，不构成法律意见；如与 LICENSE 原文不一致，以 LICENSE 为准。",
+    ],
+    rule: {
+      title: "一条判断标准",
+      text: "看组织外部的人有没有在驱动这个实例——创建任务、和智能体对话、触发工作。只要有，不管通过什么界面（Web、Slack 还是 API），都算托管服务；如果他们只是收到你的团队用 Multica 做出来的成果，就属于内部使用。",
+    },
+    scenarios: {
+      title: "常见场景",
+      scenarioColumn: "场景",
+      licenseColumn: "商业授权",
+      required: "需要",
+      notRequired: "不需要",
+      items: [
+        {
+          scenario: "你的组织内部使用 Multica",
+          example: "自托管，不限工作区数量。",
+          required: false,
+        },
+        {
+          scenario: "你帮客户部署 Multica，由客户自己拥有、在其组织内部使用",
+          example: "实施、培训、咨询或定制开发。",
+          required: false,
+        },
+        {
+          scenario: "你的团队用 Multica 为客户干活，客户只收到交付物",
+          example: "例如 agency 在 Multica 里管理内容生产，向客户交付成品。",
+          required: false,
+        },
+        {
+          scenario: "智能体只向客户的 Slack 频道单向推送报告或通知",
+          example: "客户只看消息，不与实例做任何交互。",
+          required: false,
+        },
+        {
+          scenario: "你在自己的基础设施上替客户运行和管理 Multica 实例",
+          example: "即代运维服务（managed service），无论是否收费。",
+          required: true,
+        },
+        {
+          scenario: "组织外部的人登录你的实例",
+          example: "客户、合作伙伴或公众拥有自己的账号。",
+          required: true,
+        },
+        {
+          scenario: "组织外部的人通过其他入口驱动你的实例",
+          example: "例如接入 Multica 后端的公开网站、Slack 集成或 API，免费提供也一样。",
+          required: true,
+        },
+        {
+          scenario: "你把 Multica 嵌入到你销售或分发的产品中",
+          example: "Multica 作为另一个商业产品的组件一起交付。",
+          required: true,
+        },
+      ],
+    },
+    sections: [
+      {
+        heading: "其他条件",
+        bullets: [
+          "品牌：除非获得我们的书面品牌豁免，请保留 Multica 界面中显示的 Multica Logo、产品名称以及版权和署名信息。",
+          "署名：如果你只基于 Multica 的后端、守护进程或 CLI 构建产品、不使用 Multica 界面，需要保留版权和 NOTICE 信息，并在面向用户的文档中注明产品基于 Multica 构建，附上 [GitHub 仓库](https://github.com/multica-ai/multica)链接。",
+          "Fork：公开发布 fork 的源代码不算托管服务，不需要商业授权。但任何用这个 fork 运营托管服务的人，都需要各自获得商业授权。",
+          "商业授权和品牌豁免是两项独立的授权，获得其中一项不代表获得另一项。",
+        ],
+      },
+      {
+        heading: "获取商业授权",
+        paragraphs: [
+          "通过[联系商务](/contact-sales)告诉我们你的使用场景，我们会在三个工作日内回复。不确定自己的情况是否需要授权？可以在 [Discord](" + discordUrl + ") 上问我们，也可以通过同一个表单咨询。",
+        ],
+      },
+    ],
+  },
+
+  privacy: {
+    title: "隐私政策",
+    lastUpdated: "最后更新：2026 年 9 月 24 日",
+    intro: [
+      "本隐私政策说明 Index Labs (Hong Kong) Limited（下称「Multica」或「我们」）在你访问 multica.ai、联系我们或使用我们的托管服务 Multica Cloud（包括网页端、桌面端和移动端）时，如何收集、使用和共享个人信息。",
+      "本政策不适用于你自行部署的 Multica。自托管部署的数据由部署方控制，它使用哪些 AI 服务商、集成或分析工具，取决于部署方的配置。自托管服务器唯一会发送给我们的是每天一次的使用快照，内容包括：一个随机生成的部署 ID（用于关联同一台服务器的历次快照）、服务器版本、工作区、成员、智能体和已连接守护进程的大致数量，以及当天开始、完成、失败和取消的运行次数。快照不含任何姓名、邮箱或内容。设置 DO_NOT_TRACK=1 即可关闭这份快照。",
+      "本政策以英文版本为准。如中文版本与英文版本不一致，以英文版本为准。",
+    ],
+    sections: [
+      {
+        heading: "我们收集的信息",
+        bullets: [
+          "账户信息：你的姓名、邮箱地址和头像。如果你使用 Google 登录，我们会从 Google 获得你的姓名、邮箱地址和头像。你也可以填写语言、时区、个人简介等资料，以及回答上手引导中的问题，例如你的角色、使用场景、从哪里了解到 Multica。",
+          "你创建的内容：工作区、任务、评论、聊天消息、附件、智能体指令，以及你或你的智能体放进 Multica Cloud 的其他内容。",
+          "联系商务表单：你的姓名、工作邮箱、公司名称和规模、国家或地区、使用场景、目标，以及你的沟通偏好。为了防止滥用，我们还会记录提交表单时的 IP 地址和浏览器 user agent。",
+          "账单信息：订阅付款由 Stripe 在其托管的页面上处理，我们不会接收或存储你的完整银行卡信息。",
+          "使用和设备信息：应用版本、操作系统、客户端类型和一个随机生成的安装 ID；你连接为运行时的每台机器的名称（默认是其主机名）；以及崩溃和错误报告。报告发送前，我们会从错误信息中过滤掉能识别出的邮箱地址和凭据，但报告仍可能包含与出错情况相关的其他细节。",
+          "反馈：你提交反馈时，我们会收到反馈内容，以及所在页面、应用版本、操作系统和相关的错误信息。",
+        ],
+      },
+      {
+        heading: "我们如何使用信息",
+        bullets: [
+          "提供、运营和保护 Multica Cloud，包括登录、同步工作区、发送通知和邀请。",
+          "回复联系商务表单和支持请求。",
+          "发送服务消息，例如登录验证码和工作区邀请。只有在你主动同意后，我们才会发送产品动态或营销信息，你可以随时退订。",
+          "了解 Multica 的使用情况、修复问题并改进产品。",
+          "防止滥用，并履行法律义务。",
+        ],
+      },
+      {
+        heading: "法律依据",
+        paragraphs: [
+          "在法律要求说明处理依据的地区，我们依据以下几点处理个人信息：履行与你之间的合同，以提供 Multica Cloud；我们在保障安全、提供支持、改进 Multica 和回复咨询方面的正当利益；你对接收营销信息的同意；以及履行我们的法律义务。",
+        ],
+      },
+      {
+        heading: "AI 功能",
+        paragraphs: [
+          "你的编码智能体运行在你自己的机器或你连接的运行时上，使用的是你配置的编码工具和账户。智能体在本机运行，不代表模型也在本机推理：这些工具会把提示词、代码、文件和工具调用结果发送给各自的模型服务商，并受你所用工具和账户的条款约束。Multica 负责协调智能体的工作。",
+          "Multica Cloud 的部分功能（如生成聊天标题和推荐后续操作）会把你的第一条聊天消息或最近几条消息，发送给我们选用的第三方大语言模型服务商来生成结果。Multica 不会用你的内容训练 AI 模型。",
+        ],
+      },
+      {
+        heading: "Cookie 与分析",
+        paragraphs: [
+          "我们使用必要的 Cookie 来保持你的登录状态、防范跨站请求伪造，以及让你访问自己上传的文件。我们还会用 Cookie 记住你是通过哪个推广活动或网站来到这里的（最长 30 天），以及你选择的语言和最近打开的工作区。",
+          "我们使用 PostHog 了解产品使用情况并收集崩溃报告。你登录后，PostHog 会收到你账户的姓名和邮箱，以便我们把报告和你的账户对应起来。我们不使用广告 Cookie，也不出售你的个人信息。",
+        ],
+      },
+      {
+        heading: "我们与谁共享信息",
+        paragraphs: [
+          "你放进工作区的信息，会按工作区的权限设置，被其他成员和管理员，以及他们授权的智能体和集成看到。如果你的工作区属于某个组织，其中的内容由该组织管理，相关请求也可能由该组织处理。",
+          "在法律要求时，我们会披露相关信息；如果 Multica 发生合并、收购或资产出售，相关信息也可能转移给买方或继任方。",
+          "除此之外，我们只会与帮助我们运营 Multica 的服务商，以及你选择连接的集成共享个人信息：",
+        ],
+        bullets: [
+          "Amazon Web Services：托管、文件存储和内容分发",
+          "Vercel：网站和网页应用托管",
+          "Stripe：付款和账单",
+          "Resend：登录和邀请邮件",
+          "PostHog：产品分析和崩溃报告",
+          "Google：当你选择使用 Google 登录时",
+          "大语言模型服务商：上文所述的 AI 功能",
+          "你连接的集成，如 Slack、飞书、钉钉、企业微信、Telegram、GitHub、GitLab、通过 Composio 连接的应用：你选择通过它们收发的数据，同时受这些服务商自身条款的约束",
+        ],
+      },
+      {
+        heading: "信息的存储位置",
+        paragraphs: [
+          "Multica Cloud 托管在 Amazon Web Services 和 Vercel 上。我们和我们的服务商可能会在美国及其他国家或地区处理你的信息。无论在哪里处理，我们都会按照本政策保护这些信息。",
+        ],
+      },
+      {
+        heading: "信息的保留期限",
+        paragraphs: [
+          "账户信息和工作区内容会在你的账户或工作区存在期间一直保留。工作区所有者删除工作区后，其中的任务、评论等内容会从 Multica Cloud 中移除，但用于恢复的备份在之后一段时间内仍可能包含副本。如需从我们的文件存储中清除已删除工作区里上传的文件，请发邮件至 [support@multica.ai](mailto:support@multica.ai)。账单记录按会计和税务规定要求的期限保留；产品分析数据、崩溃报告、联系商务表单和反馈，会在为你提供支持和改进 Multica 所需的期间内保留。你可以要求我们删除联系商务表单和反馈。",
+        ],
+      },
+      {
+        heading: "你的选择和权利",
+        paragraphs: [
+          "根据你所在地的法律，你可能有权访问、更正、删除或导出你的个人信息，反对或限制某些处理，撤回你已给出的同意（例如接收营销信息的同意），以及向当地的数据保护机构投诉。你可以随时在 Multica 中更新个人资料，也可以在设置中删除你拥有的工作区。其他请求（包括删除账户），请发邮件至 [support@multica.ai](mailto:support@multica.ai)，我们会在 30 天内回复。",
+        ],
+      },
+      {
+        heading: "安全",
+        paragraphs: [
+          "我们通过传输加密、访问控制以及对集成凭据的加密存储来保护你的信息。没有任何系统是绝对安全的；如果你认为自己的账户已被盗用，请尽快联系我们。",
+        ],
+      },
+      {
+        heading: "儿童",
+        paragraphs: [
+          "Multica 并非面向 16 岁以下的儿童，我们也不会在知情的情况下收集他们的个人信息。",
+        ],
+      },
+      {
+        heading: "政策变更",
+        paragraphs: [
+          "我们可能会不时更新本政策。新版本会发布在本页面，并更新页首的日期。如有重大变更，我们会在生效前通知你。",
+        ],
+      },
+      {
+        heading: "联系我们",
+        paragraphs: [
+          "Multica 由 Index Labs (Hong Kong) Limited 运营，并由其负责你的个人信息。如有隐私相关的问题或请求，请发邮件至 [support@multica.ai](mailto:support@multica.ai)。",
+        ],
+      },
+    ],
   },
 
   changelog: {
@@ -296,6 +507,232 @@ export function createZhDict(
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.6.5",
+        date: "2026-10-21",
+        title: "项目外 Issue 状态更清楚、私有 CA 可同步仓库、后台更省、运行更稳",
+        changes: [],
+        features: [
+          "不在项目里的 Issue，状态选择默认只列 Default 工作流的状态，搜索仍能找到全部状态。",
+        ],
+        improvements: [
+          "网页在后台标签页时不再刷新未读数，回到页面再更新；桌面端最小化时角标照常更新。",
+        ],
+        fixes: [
+          "新建的工作流步骤不用先保存，就能设置处理人和指令。",
+          "项目侧栏优先显示工作流名称，交接数量移到悬停提示里。",
+          "自托管服务器配置的私有 CA，守护进程同步仓库时也会信任，同步失败会显示具体原因。",
+          "自托管的 Forgejo、Gitea、GitLab 上，PR 检查完成或合并时也能唤醒智能体。",
+          "唤醒规则在后续检查恢复正常后，不再一直显示之前的错误。",
+          "桌面端标签栏的右键菜单和按钮会跟随界面语言。",
+          "Copilot 遇到很长的上下文也能正常启动。",
+          "OpenCode 2.x 又能选择思考级别了。",
+          "Codex 使用默认模型时也能估算花费。",
+          "Issue 详情滚到底部时，页面不再被顶起或留出空白。",
+        ],
+      },
+      {
+        version: "0.6.4",
+        date: "2026-10-20",
+        title: "Markdown 表格交互、Muse Code、运行时转私有更安全、运行更稳",
+        changes: [],
+        features: [
+          "Markdown 表格可以拖动列宽、放大查看、排序筛选和复制。",
+          "Issue 引用卡片显示更多信息，Shift+点击可在侧边预览。",
+          "Muse Code 1.4.10+ 装好并登录后，可用它运行任务、续接会话。",
+          "macOS/Linux 上的新版 Cursor 运行中可补充指导，本地目录除外。",
+          "快捷操作可以不指定智能体或小队，直接发送预设评论。",
+          "收件箱可以只看没有智能体在工作的 Issue。",
+          "在列表和看板的 Issue 操作菜单里可以直接重命名。",
+        ],
+        improvements: [
+          "放大 HTML 预览时会保留输入和交互状态，Issue 描述里的预览也能放大。",
+          "评论大纲默认折叠已解决的讨论，需要时仍可展开。",
+          "页面频繁更新时，切换页面更顺畅。",
+          "Gemini 的更多模型和别名能估算花费了。",
+          "文档新增快捷操作使用指南。",
+        ],
+        fixes: [
+          "把共享运行时改为私有前会先说明影响，并解绑其他成员的智能体、取消其运行。",
+          "运行时改为私有后，这些成员智能体的 Autopilot 会暂停，等你手动恢复。",
+          "智能体选了别人的私有运行时，保存时就会提示，不会等到运行才失败。",
+          "运行中补充给智能体的评论，后续回复仍会交给原来的智能体。",
+          "你取消的评论触发任务，不会再被自动重新排队。",
+          "指派任务的回复会留在原讨论串里，和执行记录在一起。",
+          "Claude 启动较慢时，运行中也能正常补充指导。",
+          "缺少必要信息的 Codex 用户技能能正常加载，损坏的会跳过并提示。",
+          "DeepSeek Harness 配置装失败后显示未安装，可重试且保留文件。",
+          "关闭悬浮聊天后它不再在后台空转，草稿和上传都会保留。",
+          "桌面端能打开一些较早创建的工作区，标签页也会保留。",
+          "Linux 上新建本地项目时能正常打开文件夹选择器。",
+          "只看未读时，打开的通知不会因自动标为已读而立刻消失。",
+          "桌面端的评论链接会准确跳到对应评论。",
+          "浏览器标签页始终显示当前工作区页面的标题。",
+          "归档名字很长的智能体时，名称和确认按钮不再超出弹窗。",
+          "企业微信里引用的图片也会交给智能体，并和文字对应。",
+          "企业微信连接被撤销后，不会再继续发送文件。",
+          "企业微信通知不再有重复发送的风险。",
+          "GitHub App 无 Contents 权限时，PR 检查和唤醒照常工作。",
+          "英文文档页面打开时不再闪烁。",
+          "取消任务时不再多出一句英文说明。",
+        ],
+      },
+      {
+        version: "0.6.3",
+        date: "2026-10-16",
+        title: "单次运行花费明细、更短的上手引导、离开工作区后的访问撤销、任务运行更稳",
+        changes: [],
+        features: [
+          "执行记录里每次运行一根花费柱，还能看到 token、耗时和模型。",
+          "运行详情可以按花费、token 或耗时对比各次运行，也能切回累计视图。",
+          "展开任意一次运行，就能看到它的 token 和花费明细。",
+        ],
+        improvements: [
+          "上手时跳过运行时设置，会直接打开安装指南 Issue。",
+        ],
+        fixes: [
+          "离开或被移出工作区的成员，不再收到该工作区的通知和实时更新。",
+          "智能体构建器的草稿格式略有出入时，也能填入配置。",
+          "智能体构建器的重试提示关掉或手动修改后，不会再次弹出。",
+          "已领取但没送到本机的任务会回到队列，不再卡住。",
+          "本地目录续接不再把已提交的改动当成草稿重放，其他草稿也会保留。",
+          "清理缓存时，仓库跟踪的 .next 等目录和其中的 Git 仓库不再被误删。",
+          "Claude Sonnet 5.5 和 Haiku 5.5 的运行也能估算花费了。",
+          "阿拉伯语、希伯来语等从右到左的文字夹着英文时，阅读顺序也正确。",
+        ],
+      },
+      {
+        version: "0.6.2",
+        date: "2026-10-13",
+        title: "文本与链接列表属性、Cmd+K 切换工作区、开场建议一键发送、任务运行更稳",
+        changes: [],
+        features: [
+          "自定义属性可以保存文本列表或链接列表，也能按值精确筛选。",
+          "按 Cmd/Ctrl+K 就能切换到其他工作区。",
+          "桌面端切换工作区时，会回到你上次在那里打开的标签页。",
+          "空白聊天里点击开场建议会直接发送，不会覆盖已有草稿。",
+          "命令行可以为本机守护进程开启开机自启，默认关闭。",
+        ],
+        improvements: [
+          "Issues 列表首屏加载更快。",
+          "桌面端导航栏和标签栏现在对齐了。",
+        ],
+        fixes: [
+          "Codex 长线程能跨本地目录续接，遇到限流也不再卡住。",
+          "装在 ChatGPT.app 里的 Codex CLI 也能被识别。",
+          "Pi 任务能用上你配置的 MCP 服务器。",
+          "Pi 和 Kimi 运行失败时会显示为失败，不再悄悄结束。",
+          "Antigravity 在连接最后断开时也能保住回答。",
+          "CodeBuddy 启动出错不再中断正在进行的运行。",
+          "Oh My Pi 需要新会话时会新建，不再接着旧会话。",
+          "Windows 上的任务能正常使用系统临时目录。",
+          "电脑休眠唤醒后，任务不再被误判为无响应而中止。",
+          "健康检查端口被占用时，本机守护进程也能恢复。",
+          "Hermes 在不同本地目录间也能接着之前的会话。",
+          "频繁触发的 Autopilot 不再悄悄停摆，运行也保留来源。",
+          "PR 唤醒不再漏掉变化，遇到可恢复的问题会说明原因。",
+          "任务结束后，Lark 上的「正在输入」表情会被清掉。",
+          "企业微信的 Issue 通知由实际干活的智能体机器人发送。",
+          "带数字的 Issue 前缀也能被搜索到。",
+          "多人同时编辑项目时，不再覆盖别人改过的字段。",
+          "聊天还在加载时发出的后续消息不再丢失。",
+          "普通附件下载链接可用，运行详情的文字步骤标注正确。",
+          "服务端出错时不再暴露内部错误细节。",
+        ],
+      },
+      {
+        version: "0.6.1",
+        date: "2026-10-01",
+        title: "运行累计花费曲线、Issues 列表更快、工作区切换更稳",
+        changes: [],
+        features: [
+          "运行图表会跟着鼠标走，运行之间的空闲时段也看得到。",
+          "Issue 侧栏用一条曲线显示这个 Issue 的累计花费。",
+          "命令行可以把 Issue 标记为重复，并保留与原 Issue 的关联。",
+        ],
+        improvements: [
+          "运行来去时 Issues 列表更稳，「工作中的智能体」筛选也更快。",
+        ],
+        fixes: [
+          "Codex 的模型列表里能选到 GPT-6.1 Sol，花费也按当前价格统计。",
+          "用量额度用完时会显示为服务商限额，不再提示凭据有问题。",
+          "关掉浮动聊天窗口后，快捷键照常可用，草稿也还在。",
+          "Windows 上工作区目录换过位置，仓库检出也能正常完成。",
+          "从聊天里切换工作区会停在目标工作区，会话和项目的选择也保留。",
+        ],
+      },
+      {
+        version: "0.6.0",
+        date: "2026-09-28",
+        title: "条件唤醒、搜索秒回、交付物浏览、全新设置页面",
+        changes: [],
+        features: [
+          "Issue 可以在状态变化、子 Issue 完成或 PR 变动时唤醒智能体。",
+          "唤醒可以设置到期时间，也能看到每次检查的记录。",
+          "Issue 和项目搜索在网页端和桌面端秒回结果。",
+          "回复运行中的智能体时，可以追加到当前运行、排队新运行或重启它。",
+          "追加的回复有没有被智能体收到，现在有回执可看。",
+          "Issue 的交付物集中在一个侧栏里，能看版本和详情。",
+          "附件以网格排列，HTML、Markdown、CSV、JSON、YAML 都能就地预览。",
+          "Mermaid 图会完整显示，可以放大细看，图片也能一键复制。",
+          "Issue 上能看到运行的时间线，以及失败和取消的状态。",
+          "关联的 PR 全部合并后，Issue 会按你设定的方式自动流转。",
+          "在列表旁边就能预览 Issue，不用离开当前页面。",
+          "企业微信的通知会按每个人自己的语言发送。",
+          "模型里可以选到 Claude Opus 5.5 和 GPT-6 Sol/Luna。",
+          "挑选仓库时能看到它的项目描述。",
+        ],
+        improvements: [
+          "设置按个人、工作区和当前设备重新分好，还能直接搜索。",
+          "智能体的任务历史可以翻页，并会汇总花掉的时间。",
+          "桌面端的返回、前进和侧栏开关都收到了左侧。",
+          "MCP 页面能看到每个服务分配给了多少智能体。",
+        ],
+        fixes: [
+          "保存过的模型设置不会再被还原。",
+          "Hermes 的任务会按你选的设置运行。",
+          "MCP 工具的输入参数会完整显示。",
+          "Telegram 里引用的附件会和你的消息一起交给智能体。",
+          "企业微信不会再对同一条消息回复两次。",
+          "不同插件里同名的工具不会再互相顶掉。",
+          "用 Issue 标识打开的链接会展开对应的评论。",
+          "移动端打开项目会直接看到它的 Issue 列表。",
+          "全选之后，选中的 Issue 会被全部删除。",
+          "运行状态显示得更准确。",
+          "保存视图后会沿用你输入的名字。",
+          "唤醒菜单的选项显示正常。",
+          "PR 那一行会完整显示改动量，检查进行中时转圈提示。",
+        ],
+      },
+      {
+        version: "0.5.3",
+        date: "2026-09-24",
+        title: "Telegram 媒体收发、移动端简体中文、Issue 与 PR 自动完成、用量统计更准",
+        changes: [],
+        features: [
+          "Telegram 里可以把照片、视频、音频和文件交给智能体。",
+          "智能体产出的附件也会回传到 Telegram。",
+          "移动端可以选简体中文、英文，或跟随系统语言。",
+          "Issue 能看到关联的 PR，全部合并后自动完成。",
+          "使用 Antigravity 时能实时看到智能体的工具执行过程。",
+          "Grok Build 的任务在运行过程中也能补充新的指导。",
+          "Issue 的附件可以在全屏视图里逐个翻看。",
+          "文档站现在有完整的法语内容。",
+          "官网可以查到许可说明、隐私政策，以及 Multica 背后的团队。",
+          "自托管的管理员可以让自动标题和快捷操作响应更快。",
+        ],
+        improvements: [
+          "评论的操作按使用意图分组，编辑和解决排在最前。",
+        ],
+        fixes: [
+          "续接的 Claude 会话只统计本次运行的用量。",
+          "Issue 和运行时的缓存命中率不再显示偏高。",
+          "线程里智能体的回复按实际发送时间排列。",
+          "Windows 上的任务在文件被短暂占用时也能启动。",
+          "钉钉里的 Issue 链接不再带多余的字符。",
+          "自托管遇到不受信任的证书时会说明原因，也可以信任自己的 CA。",
+        ],
+      },
       {
         version: "0.5.2",
         date: "2026-09-23",
@@ -3724,17 +4161,17 @@ export function createZhDict(
     ],
     consent: {
       intro:
-        "Multica, Inc. 尊重你的隐私。我们仅会将你的个人信息用于管理账户，以及提供你所请求的产品或服务。我们偶尔也希望与你分享产品更新、最佳实践或行业洞察，如果你愿意接收，请在下方勾选。",
+        "Multica 尊重你的隐私。我们仅会将你的个人信息用于管理账户，以及提供你所请求的产品或服务。我们偶尔也希望与你分享产品更新、最佳实践或行业洞察，如果你愿意接收，请在下方勾选。",
       outreach:
-        "我希望接收来自 Multica, Inc. 的一对一沟通，包括服务更新、支持咨询以及业务相关的跟进。",
+        "我希望接收来自 Multica 的一对一沟通，包括服务更新、支持咨询以及业务相关的跟进。",
       updates:
         "我希望接收 Multica 的产品更新、洞察以及活动邀请。",
       unsubscribe:
         "你可以随时取消订阅我们的邮件。关于我们如何处理你的数据以及隐私权利，请参阅",
       submitConsent:
-        "点击「提交」即表示你同意 Multica, Inc. 存储并处理你提交的信息，以便交付你请求的内容。",
+        "点击「提交」即表示你同意 Multica 存储并处理你提交的信息，以便交付你请求的内容。",
       privacyLinkLabel: "隐私政策。",
-      privacyLinkHref: "/about",
+      privacyLinkHref: "/privacy",
     },
     success: {
       title: "已收到，谢谢！",

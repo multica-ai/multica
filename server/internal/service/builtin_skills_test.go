@@ -471,10 +471,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"stop editing the PR blind",
 				"whether the installation is bound to this workspace",
 				"redelivered once the receiving side is fixed",
-				// MUL-7429: every linked PR counts toward auto-complete, and the
-				// exception is a person's per-issue switch, not a keyword.
-				"Every linked PR is delivery",
-				"a person can turn auto-complete off for that issue",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
 				"--status backlog",
@@ -489,7 +485,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// playbook — if they leave, the brief pointer dangles.
 				"todo starts work now, backlog parks it",
 				"`--stage <N>`",
-				"when a whole stage finishes",
+				"wakes the parent assignee when a stage",
 				"multica issue status <child-id> todo",
 				// MUL-6966 phase 1 retired the metadata write discipline
 				// along with the brief section that pointed here. What the

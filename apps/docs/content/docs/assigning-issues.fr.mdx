@@ -36,9 +36,9 @@ Pendant l'exécution, l'agent peut :
 
 Ce qu'il peut réellement faire reste limité par la configuration de l'agent, l'environnement du runtime et votre droit de l'exécuter.
 
-Pendant l'exécution, l'agent gère le statut de la tâche en évaluant ce que son travail change : commencer à traiter la demande propre à la tâche la fait passer immédiatement à `in_progress`, une livraison la fait passer à `in_review`, un travail qui se poursuit au-delà du tour la maintient en `in_progress`, et une consultation ou une discussion laisse le statut inchangé — ces actions apparaissent sous l'identité de l'agent dans la chronologie. Le cycle de vie de l'exécution et le statut de la tâche sont distincts : la fin d'une exécution ne change pas à elle seule le statut de la tâche.
+Les agents mettent à jour le statut au fil du travail. Par défaut, ils indiquent le travail en cours au démarrage et la relecture à la livraison. Si le projet utilise un workflow, ils suivent ses étapes et ses consignes. La fin d’une exécution ne termine pas la tâche à elle seule ; répondre à une question ne signifie pas que tout le travail est livré.
 
-Lorsque l'assigné est un [squad](/squads), la même règle s'applique : Multica met le chef en file, et répartir le travail entre les membres n'est pas une livraison — un tour de répartition laisse la tâche parente en `in_progress`, et le chef ne la passe en `in_review` qu'une fois l'objectif global atteint.
+Si le projet passe régulièrement le travail entre plusieurs personnes ou agents, utilisez un [workflow](/workflows) pour organiser les relais. Pour enregistrer une demande fréquente sans changer le responsable, utilisez une [action rapide](/quick-actions).
 
 ## Assigner sans démarrer
 
@@ -65,7 +65,7 @@ Les propriétaires et administrateurs de l'espace de travail peuvent gérer les 
 Passer l'assignation à un autre agent lance une nouvelle exécution pour le nouvel assigné ; choisir un membre change seulement l'assigné et ne lance aucun outil de codage IA. Retirer l'assigné ne crée pas non plus d'exécution.
 
 <Callout type="warning">
-Changer l'assigné, retirer l'assignation ou changer le statut de la tâche n'arrête pas une exécution déjà démarrée. Pour l'interrompre, arrêtez l'exécution correspondante dans le journal d'exécution.
+Changer ou retirer le responsable n’arrête généralement pas une exécution en cours. Arrêtez-la dans le journal d’exécution si nécessaire. Lors d’un [passage de relais de workflow](/workflows), la confirmation permet aussi d’arrêter ou d’annuler l’exécution de l’agent précédent en déplaçant la tâche.
 </Callout>
 
 ## Utiliser le CLI

@@ -232,12 +232,10 @@ export function DeleteRuntimeDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Persistence notice — informational banner shown when deleting the runtime
 // row may not permanently remove the runnable backend. Profile-backed custom
 // runtimes win over the generic local-daemon warning: stopping the daemon is
 // not sufficient when the workspace-level profile still exists.
-// ---------------------------------------------------------------------------
 
 function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
@@ -264,11 +262,9 @@ function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Light mode — no active agents, classic "are you sure" prompt. Title and
 // description match the legacy AlertDialog so existing screenshots / muscle
 // memory still apply.
-// ---------------------------------------------------------------------------
 
 function LightBody({
   runtime,
@@ -323,11 +319,9 @@ function LightBody({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cascade mode — destructive warning, agent table, checkbox-confirmed
 // destructive button. Copy follows 赵刚's English text verbatim per the
 // squad lead's directive.
-// ---------------------------------------------------------------------------
 
 function CascadeBody({
   runtime,
@@ -591,11 +585,9 @@ function VisibilityCell({ visibility }: { visibility: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Server response parsing
-// ---------------------------------------------------------------------------
 
-interface ActiveAgentsConflict {
+export interface ActiveAgentsConflict {
   code: "runtime_has_active_agents" | "runtime_delete_plan_changed";
   activeAgents: Agent[];
 }
@@ -603,7 +595,9 @@ interface ActiveAgentsConflict {
 // parseActiveAgentsConflict pulls the structured 409 fields off an ApiError.
 // Non-409s, non-active-agents codes, and missing bodies all collapse to
 // `null` so callers can fall through to the generic error toast.
-function parseActiveAgentsConflict(err: unknown): ActiveAgentsConflict | null {
+export function parseActiveAgentsConflict(
+  err: unknown,
+): ActiveAgentsConflict | null {
   if (!(err instanceof ApiError)) return null;
   if (err.status !== 409) return null;
   const body = err.body;

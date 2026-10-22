@@ -13,6 +13,7 @@ import { useState, useEffect, useImperativeHandle, forwardRef } from "react";
 import { View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { toDateOnly, dateOnlyToLocalDate } from "@multica/core/issues/date";
+import { i18n } from "@/lib/i18n";
 
 interface Props {
   value: string | null;
@@ -45,6 +46,7 @@ export const DueDatePickerBody = forwardRef<DueDatePickerBodyHandle, Props>(
           value={draft}
           mode="date"
           display="inline"
+          locale={i18n.resolvedLanguage ?? i18n.language}
           onChange={(_event, selected) => {
             if (selected) setDraft(selected);
           }}

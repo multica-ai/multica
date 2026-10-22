@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -321,11 +322,11 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 // moved downstream; otherwise enqueue exactly the same assignee path used by
 // the original dispatch.
 func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun) error {
-	tasks, err := s.Queries.ListTasksByIssue(ctx, run.IssueID)
+	hasTasks, err := s.Queries.HasTaskForIssue(ctx, run.IssueID)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: inspect issue tasks: %w", err)
 	}
-	if len(tasks) > 0 {
+	if hasTasks {
 		return nil
 	}
 	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
@@ -898,7 +899,7 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 		if sub.UserType != "member" {
 			continue
 		}
-		item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		item, inserted, err := inbox.CreateIfEligible(ctx, s.Queries, db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
 			WorkspaceID:   ap.WorkspaceID,
 			RecipientType: "member",
@@ -919,6 +920,9 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 				"recipient_id", util.UUIDToString(sub.UserID),
 				"error", err,
 			)
+			continue
+		}
+		if !inserted {
 			continue
 		}
 		s.Bus.Publish(events.Event{
@@ -1161,13 +1165,10 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
-		reason := "task " + task.Status
-		if task.Error.Valid {
-			reason = task.Error.String
-		}
+		reason := taskFailureReasonForAutopilotRun(task)
 		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,
-			FailureReason: pgtype.Text{String: reason, Valid: true},
+			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
 		})
 		if err != nil {
 			slog.Warn("failed to fail autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)

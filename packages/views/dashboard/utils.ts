@@ -31,7 +31,6 @@ import type {
   FailureClassCounts,
 } from "../runtimes/components/charts";
 
-// ---------------------------------------------------------------------------
 // Dashboard data aggregations
 //
 // The workspace dashboard returns the same per-(date, model) and
@@ -41,7 +40,6 @@ import type {
 // which carries a `provider` field) we replicate here with a tighter
 // type — fewer optional fields, less conditional logic on the consumer
 // side.
-// ---------------------------------------------------------------------------
 
 // Mirrors `DailyCostStackData` in the runtimes utils, including its cache-read
 // segment — the dashboard feeds the very same DailyCostChart, so a category
@@ -359,14 +357,12 @@ export function isSyntheticAgentRow(agentId: string): boolean {
   return agentId === DELETED_AGENTS_ROW_ID || agentId === RESTRICTED_AGENTS_ROW_ID;
 }
 
-// ---------------------------------------------------------------------------
 // Weekly fold for run-time + tasks. Mirrors `aggregateByWeek` in
 // `runtimes/utils.ts` which already covers cost / tokens — same calendar
 // week semantics (Mon–Sun anchored at today-in-tz), same pre-zeroed buckets,
 // same partial-week metadata. Workspace dashboard uses the user-chosen
 // timezone here; the runtime page uses the runtime's IANA tz. Behaviour is
 // identical apart from where the tz comes from.
-// ---------------------------------------------------------------------------
 
 interface WeekShell {
   weekStart: string;
@@ -525,7 +521,6 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
   return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
-// ---------------------------------------------------------------------------
 // Failure aggregations
 //
 // The two failure rollups ship every terminal task, with `failure_reason: ""`
@@ -539,7 +534,6 @@ export function formatDuration(seconds: number, lessThanMinuteLabel: string): st
 // `@multica/core/dashboard`; the raw reason survives only in
 // `aggregateFailureReasons`, which powers the detail rows under the class
 // summary.
-// ---------------------------------------------------------------------------
 
 function emptyClassCounts(): FailureClassCounts {
   return Object.fromEntries(

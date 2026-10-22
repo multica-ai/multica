@@ -9,6 +9,7 @@ import {
 } from "@multica/core/agents";
 import type { AgentConversationStarter } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
@@ -73,12 +74,12 @@ export function ConversationStartersEditor({
               placeholder={t(($) => $.conversation_starters.label_placeholder)}
               onChange={(event) => update(index, "label", event.target.value)}
             />
-            <Button
+            <IconButton
               type="button"
               variant="ghost"
               size="icon-sm"
               disabled={disabled}
-              aria-label={t(($) => $.conversation_starters.remove, {
+              label={t(($) => $.conversation_starters.remove, {
                 number: index + 1,
               })}
               onClick={() =>
@@ -86,7 +87,7 @@ export function ConversationStartersEditor({
               }
             >
               <Trash2 className="size-4" aria-hidden="true" />
-            </Button>
+            </IconButton>
           </div>
           <Textarea
             value={item.prompt}

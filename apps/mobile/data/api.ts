@@ -143,8 +143,8 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
 if (!API_URL) {
   throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to apps/mobile/.env.development.local " +
-      "(see apps/mobile/.env.staging for an example).",
+    "EXPO_PUBLIC_API_URL is not set. Add it to the apps/mobile env file for " +
+      "the variant you are running (see apps/mobile/README.md).",
   );
 }
 

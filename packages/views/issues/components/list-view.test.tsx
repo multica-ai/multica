@@ -74,6 +74,7 @@ const mockViewState: {
   listCollapsedStatuses: IssueStatus[];
   toggleListCollapsed: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
+  hiddenStatuses: IssueStatus[];
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -87,6 +88,7 @@ const mockViewState: {
         : [...mockViewState.listCollapsedStatuses, status];
   }),
   showStatus: vi.fn(),
+  hiddenStatuses: ["cancelled"],
 };
 
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({

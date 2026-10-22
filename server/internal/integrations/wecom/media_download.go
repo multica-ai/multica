@@ -228,58 +228,13 @@ func hasExtendedFilename(raw string) bool {
 	return strings.Contains(strings.ToLower(raw), "filename*")
 }
 
-// decodeFormEncodedFilename undoes application/x-www-form-urlencoding on a
-// filename that provably carries it, and leaves every other name byte for
-// byte.
+// decodeFormEncodedFilename decodes only names that round-trip through
+// url.QueryEscape. Unconditional QueryUnescape would corrupt literal pluses.
 //
-// Why this is needed: a live tenant sent "PC D&T Strategy 2026.docx" and it
-// was stored as "PC+D%26T+Strategy+2026.docx" — space as '+', '&' as %26,
-// which is exactly url.QueryEscape of the original. COS form-encodes the
-// plain filename parameter because that parameter is ASCII-only by
-// specification, and Chinese names take the same route: a non-ASCII name
-// cannot legally sit there, so it arrives as a run of percent escapes, and
-// without this the user is shown the escapes.
-//
-// Why it is conditional: url.QueryUnescape on its own reads '+' as a space,
-// so it would rewrite "C++ notes.docx" to "C   notes.docx". Both readings of
-// a bare '+' are legitimate and no header field distinguishes them. What does
-// distinguish them is self-consistency — a genuine form-encoding survives a
-// round trip through the encoder, and an accidental one usually does not:
-// "C++ notes.docx" re-encodes to "C+++notes.docx" (the literal space would
-// have been a '+' too) and is therefore left alone. So the rule is: decode
-// only when re-encoding the result reproduces the header value.
-//
-// What this does NOT handle, and why:
-//
-//   - Any name whose only encoder-touched character is a '+' IS a canonical
-//     encoding of the same name with spaces, so the round trip cannot rule it
-//     out and this decodes it, losing the pluses. That is a wider class than
-//     one odd example: "C++.docx" → "C  .docx", and so do "React+Redux.md",
-//     "Q1+Q2.xlsx", "C++11.pdf", "10+1.pdf". The ambiguity is irreducible from
-//     the header alone, and this is the side chosen deliberately — a name with
-//     a space is far more common than one with a '+' and no space, and a name
-//     with both is already safe by the round trip above.
-//   - A name percent-encoded in the RFC 3986 style, with %20 for space rather
-//     than '+' ("PC%20D&T.docx"), re-encodes to "PC+D%26T.docx", fails the
-//     check, and keeps its escapes.
-//   - A name from a server whose unreserved set is not Go's. The round trip
-//     re-encodes with url.QueryEscape, which leaves A-Za-z0-9-_.~ alone, so
-//     the check silently assumes the sender agreed on that set. Java's
-//     URLEncoder also passes '*', and PHP's urlencode escapes '~' as %7E, so
-//     "backup~.docx" from either arrives as "backup%7E.docx", re-encodes to
-//     "backup~.docx", and the lengths no longer match. The failure is
-//     all-or-nothing rather than partial: ONE character outside Go's set and
-//     the entire name keeps its escapes, so "Q1 report~.docx" is shown as
-//     "Q1+report%7E.docx" — the unreadable state this decode exists to
-//     remove, with the '+' still in it. Widening the comparison to tolerate
-//     an escape on either side would mean deciding which of several encoders
-//     wrote the header, and the evidence for that decision does not exist
-//     yet.
-//
-// The gaps stay open because one stored filename is all the evidence there
-// is, and the URL that produced it is long expired. traceMediaHeaders records
-// the header as it arrives, so the next live run settles what COS really
-// sends with bytes rather than with another inference from one sample.
+// This cannot disambiguate plus-only names such as C++.docx from encoded spaces;
+// the chosen policy decodes them. RFC 3986 encodings using %20 and encoders with
+// a different unreserved set may fail the round trip and remain unchanged.
+// traceMediaHeaders provides evidence for changing that policy.
 func decodeFormEncodedFilename(name string) string {
 	// Nothing an encoder produces looks like this, so there is nothing to
 	// undo and no round trip worth running.

@@ -9,7 +9,7 @@ import {
   afterEach,
   vi,
 } from "vitest";
-import { render, screen, act, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, act, cleanup, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -54,6 +54,23 @@ vi.mock("@multica/core/i18n/react", async () => {
   };
 });
 
+// The chat store is registered by the app shell; a callable stand-in with the
+// Zustand shape is enough for the one toggle this page owns.
+const chatState = vi.hoisted(() => ({
+  floatingChatEnabled: true,
+  setFloatingChatEnabled: vi.fn(),
+}));
+vi.mock("@multica/core/chat", () => ({
+  useChatStore: Object.assign(
+    (selector: (state: typeof chatState) => unknown) => selector(chatState),
+    { getState: () => chatState },
+  ),
+}));
+
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),
+}));
+
 vi.mock("@multica/core/api", () => ({
   api: { updateMe: mockUpdateMe },
 }));
@@ -88,6 +105,13 @@ vi.mock("@multica/core/auth", async () => {
 
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
+import {
+  DEFAULT_MANUAL_CREATE_FIELDS,
+  DEFAULT_QUICK_CREATE_FIELDS,
+  useIssueCreateSettingsStore,
+} from "@multica/core/issues/stores/issue-create-settings-store";
+
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -136,44 +160,35 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockReload).not.toHaveBeenCalled();
   });
 
-  it("shows a confirmation toast when the theme is saved locally", async () => {
+  it("applies the theme on this device without announcing success", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("combobox", { name: "Theme" }));
-    await user.click(await screen.findByRole("option", { name: "Dark" }));
+    const group = screen.getByRole("group", { name: "Theme" });
+    expect(within(group).getByRole("button", { name: "Light" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(group).getByRole("button", { name: "Dark" }));
 
     expect(mockSetTheme).toHaveBeenCalledWith("dark");
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+    expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
-  it("when not logged in: persists + reloads, no PATCH", async () => {
+  it.each([
+    { name: "한국어", locale: "ko" },
+    { name: "日本語", locale: "ja" },
+  ])("when not logged in: persists $locale and reloads, no PATCH", async ({ name, locale }) => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickLanguage(user, "한국어");
+    await pickLanguage(user, name);
 
-    expect(mockPersist).toHaveBeenCalledWith("ko");
+    expect(mockPersist).toHaveBeenCalledWith(locale);
     expect(mockUpdateMe).not.toHaveBeenCalled();
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
-    expect(mockReload).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(900));
+    // The reload is the confirmation; no success toast precedes it.
     expect(mockReload).toHaveBeenCalledTimes(1);
-    expect(mockToastWarning).not.toHaveBeenCalled();
-  });
-
-  it("when not logged in: selecting Japanese persists ja + reloads, no PATCH", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<PreferencesTab />, { wrapper: I18nWrapper });
-
-    await pickLanguage(user, "日本語");
-
-    expect(mockPersist).toHaveBeenCalledWith("ja");
-    expect(mockUpdateMe).not.toHaveBeenCalled();
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
-    expect(mockReload).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(900));
-    expect(mockReload).toHaveBeenCalledTimes(1);
+    expect(mockToastSuccess).not.toHaveBeenCalled();
     expect(mockToastWarning).not.toHaveBeenCalled();
   });
 
@@ -191,10 +206,7 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockPersist).toHaveBeenCalledWith(locale);
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: locale });
     expect(mockToastWarning).not.toHaveBeenCalled();
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
-    expect(mockReload).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(900));
-    expect(mockReload).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockReload).toHaveBeenCalledTimes(1));
   });
 
   it("when logged in + PATCH fails: shows toast and delays reload by 2.5s", async () => {
@@ -220,12 +232,11 @@ describe("PreferencesTab — Language switcher", () => {
   });
 });
 
-describe("PreferencesTab — Timezone section", () => {
-  // Shrink the picker to the curated COMMON_TIMEZONES fallback. With the
-  // real Intl.supportedValuesOf the popup renders ~600 options, and
-  // userEvent traversal of that list blew past the per-test timeout on
-  // slow CI runners (MUL-4427). Everything these tests pick — Asia/Tokyo
-  // and the "(browser)" sentinel — exists in the fallback list too.
+describe("PreferencesTab — Time zone", () => {
+  // Shrink the picker to the curated COMMON_TIMEZONES fallback so the list
+  // stays small enough for fast userEvent traversal (MUL-4427). Everything
+  // these tests pick — Asia/Tokyo and the "(browser)" entry — exists in the
+  // fallback list too.
   const intlWithValues = Intl as typeof Intl & {
     supportedValuesOf?: (key: "timeZone") => string[];
   };
@@ -242,51 +253,46 @@ describe("PreferencesTab — Timezone section", () => {
     userRef.current = null;
   });
 
-  // Base UI Select portals its popup onto document.body; unmount each
-  // render fully between tests so a prior test's trigger/popup can't
-  // shadow the next one's.
   afterEach(() => {
     cleanup();
   });
 
-  // Opens the Select popup and clicks the option whose accessible name
-  // matches. Re-queries the trigger each call so it operates on the
-  // current render, never a stale node.
   async function pickTimezone(
     user: ReturnType<typeof userEvent.setup>,
+    search: string,
     name: RegExp | string,
   ) {
-    await user.click(
-      screen.getByRole("combobox", { name: "Viewing Timezone" }),
+    await user.click(screen.getByRole("button", { name: "Time zone" }));
+    await user.type(
+      await screen.findByPlaceholderText("Search time zones..."),
+      search,
     );
     await user.click(await screen.findByRole("option", { name }));
   }
 
-  it("renders the stored timezone in the trigger", () => {
+  it("renders the stored time zone in the trigger", () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
     expect(
-      screen.getByRole("combobox", { name: "Viewing Timezone" }).textContent,
+      screen.getByRole("button", { name: "Time zone" }).textContent,
     ).toContain("Asia/Shanghai");
   });
 
-  // handleChange PATCHes then updates the store asynchronously, so the
-  // post-pick assertions must waitFor it to settle.
-  it("saving a new timezone PATCHes /api/me and updates the auth store", async () => {
+  it("searches the list and saves the chosen zone to the account", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
     const updatedUser = { id: "user-1", timezone: "Asia/Tokyo" };
     mockUpdateMe.mockResolvedValueOnce(updatedUser);
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickTimezone(user, "Asia/Tokyo");
+    await pickTimezone(user, "tokyo", /Asia\/Tokyo/);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
       expect(mockSetUser).toHaveBeenCalledWith(updatedUser);
-      expect(mockToastSuccess).toHaveBeenCalledTimes(1);
     });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
   it("surfaces a toast when the PATCH fails", async () => {
@@ -295,7 +301,7 @@ describe("PreferencesTab — Timezone section", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await pickTimezone(user, "Asia/Tokyo");
+    await pickTimezone(user, "tokyo", /Asia\/Tokyo/);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
@@ -311,9 +317,9 @@ describe("PreferencesTab — Timezone section", () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    // The "(browser)" sentinel option resets the preference to NULL; the
-    // wire payload is an empty string the backend translates to NULL.
-    await pickTimezone(user, /browser/i);
+    // The "(browser)" entry resets the preference to NULL; the wire payload
+    // is an empty string the backend translates to NULL.
+    await pickTimezone(user, "browser", /browser/i);
 
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "" });
@@ -324,53 +330,122 @@ describe("PreferencesTab — Timezone section", () => {
   });
 });
 
-describe("PreferencesTab — Sticky comment bar", () => {
+describe("PreferencesTab — Comments & chat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
-    useCommentComposerStore.setState({ sticky: true });
+    useCommentComposerStore.setState({ runningAgentReply: "steer", sticky: true });
+    chatState.floatingChatEnabled = true;
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("renders on by default and toggles the preference off with a saved toast", async () => {
+  it("defaults to adding the reply to the current run and saves starting after it", async () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    const toggle = screen.getByRole("switch", { name: "Pin comment bar to bottom" });
-    expect(toggle).toHaveAttribute("aria-checked", "true");
+    const select = screen.getByRole("combobox", { name: "When replying to a running agent" });
+    expect(select).toHaveTextContent("Add to current run");
 
-    await user.click(toggle);
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "Start after this run" }));
 
+    expect(useCommentComposerStore.getState().runningAgentReply).toBe("after_run");
+    expect(select).toHaveTextContent("Start after this run");
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("toggles the sticky comment bar and the floating chat silently", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const sticky = screen.getByRole("switch", { name: "Pin comment bar to bottom" });
+    expect(sticky).toHaveAttribute("aria-checked", "true");
+    await user.click(sticky);
     expect(useCommentComposerStore.getState().sticky).toBe(false);
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("switch", { name: enSettings.chat.floating_label }));
+    expect(chatState.setFloatingChatEnabled).toHaveBeenCalledWith(false);
+    expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 });
 
-describe("Preferences sections", () => {
+describe("PreferencesTab — Create-issue fields", () => {
+  function resetStore() {
+    useIssueCreateSettingsStore.setState({
+      quickCreateFields: DEFAULT_QUICK_CREATE_FIELDS,
+      manualCreateFields: DEFAULT_MANUAL_CREATE_FIELDS,
+    });
+  }
+  beforeEach(resetStore);
   afterEach(() => {
-    navigationState.search = "";
+    cleanup();
+    resetStore();
+  });
+
+  it("shows one row per field with a column per create dialog", () => {
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+    const table = screen.getByRole("table");
+    // 7 fields; quick create supports 3 of them, manual create all 7.
+    expect(within(table).getAllByRole("checkbox")).toHaveLength(10);
+    expect(
+      within(table).getByRole("checkbox", { name: "Project · Create with agent" }),
+    ).toBeChecked();
+    expect(
+      within(table).getByRole("checkbox", { name: "Due date · Manual create" }),
+    ).not.toBeChecked();
+    // Unsupported cells explain themselves instead of rendering a dead box.
+    expect(
+      within(table).getAllByLabelText(enSettings.preferences.issue_fields.unsupported),
+    ).toHaveLength(4);
+  });
+
+  it("persists each dialog's fields independently", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("checkbox", { name: "Priority · Create with agent" }));
+    await user.click(screen.getByRole("checkbox", { name: "Labels · Manual create" }));
+
+    expect(useIssueCreateSettingsStore.getState().quickCreateFields).toEqual([
+      "project",
+      "priority",
+    ]);
+    expect(useIssueCreateSettingsStore.getState().manualCreateFields).toEqual([
+      "status",
+      "priority",
+      "assignee",
+      "project",
+    ]);
+  });
+});
+
+describe("PreferencesTab — Scope", () => {
+  afterEach(() => {
     cleanup();
   });
-  it("opens the issue creation controls from an old bookmark", () => {
-    navigationState.search = "tab=issue";
-    render(
-      <I18nWrapper>
-        <PreferencesTab />
-      </I18nWrapper>,
-    );
-    expect(screen.getByRole("tab", { name: "Issue creation" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(
-      screen.getByText(enSettings.preferences.issue_scope),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("combobox", { name: "Theme" }),
-    ).not.toBeInTheDocument();
+
+  it("labels where each group of settings is stored", () => {
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+    expect(screen.getByText("Account · synced")).toBeInTheDocument();
+    // Appearance, opening issues, comments & chat.
+    expect(screen.getAllByText("This device only")).toHaveLength(3);
+  });
+
+  it("switches what clicking a card or row opens, and says what Shift does", async () => {
+    useIssueOpeningStore.setState({ openMode: "page" });
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+    const group = screen.getByRole("group", { name: "Clicking a card or row opens" });
+    const fullPage = within(group).getByRole("button", { name: "Full page" });
+    const preview = within(group).getByRole("button", { name: "Side preview" });
+    expect(fullPage).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Shift+Click opens the other one.")).toBeInTheDocument();
+
+    await user.click(preview);
+    expect(useIssueOpeningStore.getState().openMode).toBe("peek");
+    expect(preview).toHaveAttribute("aria-pressed", "true");
   });
 });

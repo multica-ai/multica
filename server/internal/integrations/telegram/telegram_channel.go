@@ -29,6 +29,10 @@ type telegramChannel struct {
 	// recent buffers the group messages this loop has seen so an @-mention can
 	// carry the surrounding conversation (see recent_context.go). Nil disables.
 	recent *recentContextBuffer
+	// acceptsMedia says a photo or file a member sends can actually be
+	// stored (see ChannelDeps.AcceptsMedia). Without it media keeps getting
+	// the unsupported notice instead of a placeholder nothing stands behind.
+	acceptsMedia bool
 }
 
 // pollRetryDelay spaces retries after a transient getUpdates failure inside
@@ -39,7 +43,7 @@ func (c *telegramChannel) Type() channel.Type { return TypeTelegram }
 
 func (c *telegramChannel) Capabilities() channel.Capability {
 	return channel.CapText | channel.CapThreadReply | channel.CapQuoteReply |
-		channel.CapTypingIndicator | channel.CapMessageEdit
+		channel.CapTypingIndicator | channel.CapMessageEdit | channel.CapAttachment
 }
 
 // Disconnect is a no-op: the polling loop's whole lifetime is scoped to
@@ -112,8 +116,11 @@ func (c *telegramChannel) Connect(ctx context.Context) error {
 // dispatch translates one update and hands it to the engine. A non-nil
 // handler error is an infrastructure failure and propagates (Supervisor
 // reconnects; the un-advanced updates re-deliver and dedup absorbs
-// duplicates). Product drops return nil. Unsupported media in a private chat,
-// or explicitly addressed to the bot in a group, gets a courteous notice.
+// duplicates). Product drops return nil. Photos, files, video and audio go
+// through with a placeholder body the media resolver fills in — where there
+// is storage to fill it from; otherwise, like an unsupported kind (sticker,
+// location, …), they get a courteous notice in a private chat or when
+// explicitly addressed to the bot in a group.
 func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
 	msg, ok := inboundFromUpdateWithContext(u, c.botID, c.botUsername, c.recent)
 	if !ok {
@@ -121,10 +128,16 @@ func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
 	}
 	c.recordRecent(u.Message, msg)
 	if msg.Type != channel.MsgTypeText {
-		if msg.Source.ChatType == channel.ChatTypeP2P || msg.AddressedToBot {
-			c.notifyUnsupported(ctx, u)
+		if msg.Source.ChatType == channel.ChatTypeGroup && !msg.AddressedToBot {
+			// Unaddressed group media is buffered above and never a turn — the
+			// same silence unaddressed text gets from the Router, decided here
+			// so a photo nobody asked about costs no pipeline run.
+			return nil
 		}
-		return nil
+		if msg.Type == channel.MsgTypeUnknown || !c.acceptsMedia {
+			c.notifyUnsupported(ctx, u)
+			return nil
+		}
 	}
 	if msg.Text == "" {
 		return nil
@@ -237,6 +250,11 @@ type ChannelDeps struct {
 	// wiring sets DefaultRecentContextSize. Mirrors
 	// lark.InboundEnricherConfig.RecentContextSize.
 	RecentContextSize int
+	// AcceptsMedia says the deployment stores what members send: object
+	// storage is configured and a media resolver is registered. The wiring
+	// sets it from the same condition, so the loop never accepts a photo the
+	// pipeline cannot keep.
+	AcceptsMedia bool
 }
 
 // RegisterTelegram registers the per-installation Telegram Factory so the
@@ -269,12 +287,13 @@ func newTelegramFactory(deps ChannelDeps) channel.Factory {
 			return nil, fmt.Errorf("telegram: installation app_id is not a bot id: %w", err)
 		}
 		return &telegramChannel{
-			botID:       botID,
-			botUsername: ic.BotUsername,
-			api:         newBotAPI(deps.APIBase, token, deps.HTTPClient),
-			handler:     cfg.Handler,
-			logger:      logger,
-			recent:      newRecentContextBuffer(deps.RecentContextSize),
+			botID:        botID,
+			botUsername:  ic.BotUsername,
+			api:          newBotAPI(deps.APIBase, token, deps.HTTPClient),
+			handler:      cfg.Handler,
+			logger:       logger,
+			recent:       newRecentContextBuffer(deps.RecentContextSize),
+			acceptsMedia: deps.AcceptsMedia,
 		}, nil
 	}
 }

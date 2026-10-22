@@ -26,6 +26,7 @@ import type {
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Select,
@@ -39,7 +40,12 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { mcpHooks, PluginHookActivity, PluginMCPApproval, PluginScheduleActivity } from "../../plugins";
 import { useLocale, useT } from "../../i18n";
-import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
+import {
+  SettingsCard,
+  SettingsReadOnlyNotice,
+  SettingsSection,
+  SettingsTab,
+} from "./settings-layout";
 
 /**
  * The scope list is the entire trust model: there is no signature, no
@@ -502,15 +508,15 @@ function PublishedPackage({
           <div className="text-body font-medium">{pluginPackage.name}</div>
           <p className="text-caption text-muted-foreground">{pluginPackage.plugin_key}</p>
         </div>
-        <Button
+        <IconButton
           size="icon"
           variant="ghost"
-          aria-label={t(($) => $.plugins.publish.delete)}
+          label={t(($) => $.plugins.publish.delete)}
           disabled={!canManage || busy}
           onClick={() => onDelete(pluginPackage.id)}
         >
           <Trash2 />
-        </Button>
+        </IconButton>
       </div>
 
       <ul className="space-y-1.5">
@@ -605,17 +611,17 @@ function InstalledPlugin({
                   : t(($) => $.plugins.disabled)))
                 .catch(reportError)}
             />
-            <Button
+            <IconButton
               size="icon"
               variant="ghost"
-              aria-label={t(($) => $.plugins.uninstall)}
+              label={t(($) => $.plugins.uninstall)}
               disabled={!canManage || isMutating}
               onClick={() => uninstallMutation.mutateAsync(installation.id)
                 .then(() => toast.success(t(($) => $.plugins.uninstalled)))
                 .catch(reportError)}
             >
               {uninstallMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            </Button>
+            </IconButton>
           </div>
         </div>
 
@@ -679,14 +685,8 @@ export function PluginsTab() {
   const installations = useMemo(() => data?.plugins ?? [], [data]);
 
   return (
-    <SettingsTab title={t(($) => $.plugins.title)} >
-      {!canManage ? (
-        <Alert>
-          <AlertCircle />
-          <AlertTitle>{t(($) => $.plugins.read_only)}</AlertTitle>
-          <AlertDescription>{t(($) => $.plugins.read_only_description)}</AlertDescription>
-        </Alert>
-      ) : null}
+    <SettingsTab title={t(($) => $.plugins.title)} scope="workspace">
+      {role && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
 
       {canManage ? <PublishAndInstall wsId={wsId} canManage={canManage} /> : null}
 

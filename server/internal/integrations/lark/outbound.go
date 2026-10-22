@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -235,51 +236,14 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 	p.typingIndicator = m
 }
 
-// Register subscribes the patcher to the task-lifecycle events it
-// cares about on the supplied bus. Idempotent only if you call it
-// against a fresh bus; call sites should invoke it exactly once
-// during server boot (after the bus + patcher are constructed and
-// before HTTP traffic starts).
+// Register attaches the patcher once during boot, before traffic starts.
+// ChatDone sends the reply, TaskFailed sends an error, and TaskCancelled clears
+// typing state without an answer. Every cancellation path must publish its event
+// after commit, including deletion paths whose workspace must come from the caller.
 //
-// Subscriptions are deliberately minimal:
-//
-//   - EventChatDone — the agent finished replying. The Patcher sends
-//     the reply as a plain text IM message (Lark's `msg_type=text`),
-//     not as an interactive card. The earlier card-based design (with
-//     thinking → running → final patches) made every reply look like
-//     a system notification nested in card chrome; flipping to plain
-//     text makes free-form chat feel native.
-//
-//   - EventTaskFailed — the run failed; surface a short error card
-//     so the failure is visually distinct from a successful reply.
-//
-//   - EventTaskCancelled — the run ended without an answer. Nothing is
-//     sent for it; the subscription exists so the Typing reaction comes
-//     off. A cancellation publishes no chat-done and no task-failed, so
-//     without this the badge sits on the user's message for good.
-//     task:cancelled is broadcast once per cancelled row by CancelTask,
-//     the queued follow-up cancel behind it, the agent- and issue-level
-//     bulk cancels, the runtime and member revocations, and deleting the
-//     chat session. The delete is the one that used to publish nothing:
-//     BroadcastCancelledTasks resolved each task's workspace through its
-//     chat_session, the same row its transaction had just deleted, and an
-//     event with no workspace is dropped before it reaches the bus. It now
-//     takes the workspace from its caller. Archiving an agent also publishes
-//     task:cancelled for chat tasks after commit, clearing their reactions
-//     through this subscription. An ending during Add can still clear
-//     nothing, because Add records its state only after the Lark call
-//     returns, so the badge lands after the clear with nothing left to
-//     take it off. This race predates task:cancelled — chat-done
-//     and task-failed race the add the same way — and closing it needs a
-//     per-session generation the add can check when its call returns.
-//
-// We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
-// (no thinking-card lifecycle anymore — adds noise without value) or to
-// EventTaskCompleted (chat tasks always emit EventChatDone first, which
-// is what we care about; non-chat tasks have no Lark binding anyway and
-// would early-return). Leaving EventTaskCompleted unsubscribed also
-// avoids the prior "Done." overwrite regression where the no-content
-// EventTaskCompleted payload would wipe the real reply.
+// Do not subscribe to TaskCompleted: chat tasks already emit ChatDone, and the
+// empty completion payload must not overwrite the reply. Queued/running events
+// do not drive a thinking-card lifecycle.
 func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
@@ -311,37 +275,24 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks have no chat_session.
 		return nil
 	}
-	// A cancelled run has no reply to place, so the only thing owed to the user
-	// is taking the Typing badge off. That runs before every lookup below,
-	// because each of them can answer "no" for a run that still has a badge on
-	// screen:
-	//
-	//   - the binding is gone by the time a session delete's cancels are
-	//     broadcast (they fire after the transaction that dropped it commits);
-	//
-	//   - the origin classification answers "does this answer belong on Lark",
-	//     and a task cancelled for owning an empty input batch — the failure
-	//     #6611 fixed the cause of — reports no channel-ingested messages, so a
-	//     clear behind it would be skipped on exactly the run that most needs
-	//     it. A cancellation has no answer to misroute, so the question does not
-	//     arise.
-	//
-	// Nothing is posted here, so neither gate is protecting anything: the badge
-	// is Lark's own, and Clear only touches sessions this process put one on.
-	// The clear is keyed by session rather than by turn, so cancelling one of
-	// two turns in a session takes the badge off both; the worst that costs is a
-	// missing badge on a turn still running.
+	// Cleanup runs after reply delivery (including failed sends and early
+	// returns), with its own budget. A slow reaction API cannot consume the
+	// reply's context deadline. The bus still waits for bounded cleanup.
+	if p.typingIndicator != nil {
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), typingCleanupTimeout)
+			defer cancel()
+			covered := p.typingIndicator.Reconcile(cleanupCtx, chatSessionID)
+			p.sweepTypingForTask(cleanupCtx, taskID, e.ChannelReactionTarget, covered)
+		}()
+	}
 	if e.Type == protocol.EventTaskCancelled {
-		if p.typingIndicator != nil {
-			p.typingIndicator.Clear(ctx, chatSessionID)
-		}
 		return nil
 	}
 
 	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Direct Multica task or violated snapshot invariant — fail closed.
 			return nil
 		}
 		return fmt.Errorf("lookup lark task delivery: %w", err)
@@ -393,13 +344,6 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		agentName = agent.Name
 	}
 
-	// Clear the "processing" reaction before the reply is visible so the
-	// user sees a clean transition. Best-effort: a failure here is logged
-	// but does not block the actual reply.
-	if p.typingIndicator != nil {
-		p.typingIndicator.Clear(ctx, chatSessionID)
-	}
-
 	switch e.Type {
 	case protocol.EventChatDone:
 		return p.sendChatReply(ctx, creds, binding, mentionOpenID(binding), e.Payload)
@@ -407,6 +351,55 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
 	return nil
+}
+
+// sweepTypingForTask uses the frozen trigger message. Session deletion carries
+// that anchor on the internal event before deleting the delivery row.
+func (p *Patcher) sweepTypingForTask(ctx context.Context, taskID pgtype.UUID, target *events.ChannelReactionTarget, covered map[string]bool) {
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) && target != nil {
+		installationID, parseErr := util.ParseUUID(target.InstallationID)
+		if parseErr != nil {
+			return
+		}
+		delivery = db.ChannelTaskDelivery{
+			ChannelType: target.ChannelType, InstallationID: installationID,
+			ChannelMessageID: pgtype.Text{String: target.MessageID, Valid: target.MessageID != ""},
+		}
+		err = nil
+	}
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			p.cfg.Logger.Warn("lark patcher: typing sweep delivery lookup failed",
+				"task_id", uuidString(taskID),
+				"error", err,
+			)
+		}
+		return
+	}
+	if delivery.ChannelType != channelTypeFeishu || !delivery.ChannelMessageID.Valid || delivery.ChannelMessageID.String == "" {
+		return
+	}
+	if covered[uuidString(delivery.InstallationID)+"/"+delivery.ChannelMessageID.String] {
+		return
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, delivery.InstallationID)
+	if err != nil {
+		p.cfg.Logger.Warn("lark patcher: typing sweep installation lookup failed",
+			"task_id", uuidString(taskID),
+			"error", err,
+		)
+		return
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		p.cfg.Logger.Warn("lark patcher: typing sweep credentials resolution failed",
+			"task_id", uuidString(taskID),
+			"error", err,
+		)
+		return
+	}
+	p.typingIndicator.SweepMessage(ctx, creds, delivery.ChannelMessageID.String)
 }
 
 // mentionOpenID returns the Feishu open_id to @-mention on this reply, or ""

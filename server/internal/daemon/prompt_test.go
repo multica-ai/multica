@@ -1765,9 +1765,9 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 		// What this test cares about is that the section reaches the per-turn
 		// message at all, not which variant it is.
 		"could not be restored",
-		"## Task Initiator",
-		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
-		"credentials stay scoped to the runtime owner",
+		"## On Behalf Of",
+		"acting on behalf of **Bohan** (bohan@example.com)",
+		"credentials and access remain scoped to the runtime owner",
 		"## Connected Apps",
 		"- Notion (`notion`) via MCP server `composio`",
 	} {
@@ -1784,7 +1784,7 @@ func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	prompt := BuildPrompt(Task{IssueID: "issue-1"}, "claude")
 	for _, banned := range []string{
 		"## Session Continuity Notice",
-		"## Task Initiator",
+		"## On Behalf Of",
 		"## Connected Apps",
 	} {
 		if strings.Contains(prompt, banned) {
@@ -1793,18 +1793,66 @@ func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
-// An assignment-triggered run carries the initiator too — it is not a
-// comment-path-only block.
+// An assignment-triggered run also carries the authorization human.
 func TestPerTurnContextBlocksOnAssignmentPath(t *testing.T) {
 	t.Parallel()
 
 	prompt := BuildPrompt(Task{
 		IssueID:       "issue-1",
-		InitiatorType: "agent",
-		InitiatorName: "GPT-Boy",
+		InitiatorType: "member",
+		InitiatorName: "Alice",
 	}, "claude")
-	if !strings.Contains(prompt, "initiated by **GPT-Boy**, another agent in this workspace") {
-		t.Errorf("assignment-triggered prompt lost the initiator block\n---\n%s", prompt)
+	if !strings.Contains(prompt, "acting on behalf of **Alice**") {
+		t.Errorf("assignment-triggered prompt lost the authorization human\n---\n%s", prompt)
+	}
+}
+
+func TestPerTurnContextBlocksOnDelegatedPath(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-1",
+		TriggerCommentID:      "comment-1",
+		TriggerCommentContent: "Please take over",
+		TriggerAuthorType:     "agent",
+		TriggerAuthorName:     "Agent A",
+		InitiatorType:         "member",
+		InitiatorID:           "user-alice",
+		InitiatorName:         "Alice",
+		InitiatorEmail:        "alice@example.com",
+	}, "claude")
+
+	for _, want := range []string{
+		"Agent A",
+		"## On Behalf Of",
+		"acting on behalf of **Alice** (alice@example.com)",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("delegated prompt must contain %q\n---\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "## Task Initiator") || strings.Contains(prompt, "## Original Requester") {
+		t.Errorf("delegated prompt must use one identity block\n---\n%s", prompt)
+	}
+}
+
+func TestTaskDecodesAndRendersOnBehalfOf(t *testing.T) {
+	t.Parallel()
+
+	var task Task
+	if err := json.Unmarshal([]byte(`{
+		"issue_id":"issue-1",
+		"initiator_type":"member", "initiator_id":"user-alice",
+		"initiator_name":"Alice", "initiator_email":"alice@example.com"
+	}`), &task); err != nil {
+		t.Fatal(err)
+	}
+	prompt := BuildPrompt(task, "claude")
+	if !strings.Contains(prompt, "## On Behalf Of") || !strings.Contains(prompt, "**Alice** (alice@example.com)") {
+		t.Errorf("daemon claim JSON lost authorization human\n---\n%s", prompt)
+	}
+	if strings.Contains(prompt, "## Task Initiator") || strings.Contains(prompt, "## Original Requester") {
+		t.Errorf("daemon must not render old identity blocks\n---\n%s", prompt)
 	}
 }
 
@@ -2186,5 +2234,23 @@ func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
 				t.Errorf("nothing may claim the issue is unchanged here, got:\n%s", out)
 			}
 		})
+	}
+}
+
+// A wakeup the server folded into this run reaches the agent whatever started
+// the run, and nothing is added when none joined.
+func TestPromptCarriesJoinedWakeups(t *testing.T) {
+	note := "Wakeup w1 fired while this run was waiting to start. Instruction:\nSummarize the discussion"
+	for name, task := range map[string]Task{
+		"assignment": {IssueID: "issue-1", WakeupJoined: note},
+		"comment":    {IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look", WakeupJoined: note},
+	} {
+		out := BuildPrompt(task, "claude")
+		if !strings.Contains(out, "[WAKEUP — joined this run]\n"+note) {
+			t.Errorf("%s prompt lacks the joined wakeup:\n%s", name, out)
+		}
+	}
+	if out := BuildPrompt(Task{IssueID: "issue-1"}, "claude"); strings.Contains(out, "joined this run") {
+		t.Errorf("prompt without joined wakeups mentions them:\n%s", out)
 	}
 }

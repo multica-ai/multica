@@ -33,7 +33,7 @@ func TestPRAutoComplete_PRLinkedDuringCompletionKeepsIssueOpen(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 	const inst int64 = 8758002
 	issue := prAutoCompleteTestIssue(t, "PR linked during completion", inst)
-	firePRWebhook(t, secret, inst, 1, issue.Identifier, "", "fix/a", "opened")
+	firePRWebhook(t, secret, inst, 1, "Closes "+issue.Identifier, "", "fix/a", "opened")
 	original := testHandler.TxStarter
 	t.Cleanup(func() { testHandler.TxStarter = original })
 	// Schedule the second webhook after the first decision but before its write.
@@ -42,7 +42,7 @@ func TestPRAutoComplete_PRLinkedDuringCompletionKeepsIssueOpen(t *testing.T) {
 		firePRWebhook(t, secret, inst, 2, issue.Identifier, "", "fix/b", "opened")
 		return nil
 	}}
-	firePRWebhook(t, secret, inst, 1, issue.Identifier, "", "fix/a", "merged")
+	firePRWebhook(t, secret, inst, 1, "Closes "+issue.Identifier, "", "fix/a", "merged")
 	if n := linkedPRCountForTest(t, issue.ID); n != 2 {
 		t.Fatalf("want 2 linked PRs, got %d", n)
 	}
@@ -51,14 +51,15 @@ func TestPRAutoComplete_PRLinkedDuringCompletionKeepsIssueOpen(t *testing.T) {
 	}
 }
 
-// fireTimedPRWebhook delivers a pull_request event with an explicit updated_at.
+// fireTimedPRWebhook delivers a pull_request event that closes identifier,
+// with an explicit updated_at.
 func fireTimedPRWebhook(t *testing.T, inst int64, identifier, state, timestamp string) {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
 		"action":       "edited",
 		"installation": map[string]any{"id": inst},
 		"repository":   map[string]any{"name": "widget", "owner": map[string]any{"login": "acme"}},
-		"pull_request": map[string]any{"number": 1, "html_url": "https://github.com/acme/widget/pull/1", "title": identifier, "state": state, "merged": state == "closed", "created_at": "2026-09-22T00:00:00Z", "updated_at": timestamp, "head": map[string]any{"ref": "fix/a"}},
+		"pull_request": map[string]any{"number": 1, "html_url": "https://github.com/acme/widget/pull/1", "title": "Closes " + identifier, "state": state, "merged": state == "closed", "created_at": "2026-09-22T00:00:00Z", "updated_at": timestamp, "head": map[string]any{"ref": "fix/a"}},
 	})
 	if err != nil {
 		t.Fatal(err)

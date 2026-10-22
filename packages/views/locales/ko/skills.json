@@ -112,7 +112,9 @@
     "sort_by": "정렬",
     "direction_asc": "오름차순",
     "direction_desc": "내림차순",
-    "section_columns": "표시 열"
+    "section_columns": "표시 열",
+    "manage_labels": "라벨 관리...",
+    "manage_labels_title": "스킬 라벨"
   },
   "detail": {
     "all_skills": "모든 스킬",

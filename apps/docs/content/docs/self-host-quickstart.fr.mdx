@@ -315,7 +315,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 La version que vous exécutez au final est déterminée par `docker compose pull`, qui demande à GHCR vers quoi pointe le tag à cet instant. Une copie locale en retard de plusieurs mois téléchargera quand même les images `latest` du jour ; à l'inverse, `git pull` seul ne change rien tant que vous n'avez pas téléchargé les images et recréé les conteneurs.
 
 <Callout type="warning">
-**Si vous avez figé `MULTICA_IMAGE_TAG`, aucune des deux commandes ne met quoi que ce soit à niveau.** Les deux images sont résolues en `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml:42`, `:125`), et `.env.example` fournit `MULTICA_IMAGE_TAG=latest`. Si votre `.env` fige une version précise, `pull` récupère simplement de nouveau ce même tag et vous restez sur l'ancienne version — sans erreur ni avertissement. Vérifiez avant de mettre à niveau :
+**Si vous avez figé `MULTICA_IMAGE_TAG`, aucune des deux commandes ne met quoi que ce soit à niveau.** Les deux images sont résolues en `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml`, `services.backend.image` / `services.frontend.image`), et `.env.example` fournit `MULTICA_IMAGE_TAG=latest`. Si votre `.env` fige une version précise, `pull` récupère simplement de nouveau ce même tag et vous restez sur l'ancienne version — sans erreur ni avertissement. Vérifiez avant de mettre à niveau :
 
 ```bash
 grep MULTICA_IMAGE_TAG .env
@@ -354,7 +354,7 @@ Les migrations s'exécutent automatiquement au démarrage du backend ; celles qu
 
 ### Vérifier avec `/readyz`, pas `/health`
 
-`/health` est une sonde de **vivacité** (liveness) — elle renvoie `{"status":"ok"}` tant que le processus tourne, y compris lorsque les migrations ont échoué. `/readyz` (`server/cmd/server/router.go:680` ; `/healthz` en est un alias) vérifie la base de données et l'ensemble des migrations appliquées : c'est donc elle qui détecte une mise à niveau ratée :
+`/health` est une sonde de **vivacité** (liveness) — elle renvoie `{"status":"ok"}` tant que le processus tourne, y compris lorsque les migrations ont échoué. `/readyz` (`readyHandler`, enregistré dans `server/cmd/server/router.go` ; `/healthz` en est un alias) vérifie la base de données et l'ensemble des migrations appliquées : c'est donc elle qui détecte une mise à niveau ratée :
 
 ```bash
 curl -s localhost:8080/readyz

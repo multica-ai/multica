@@ -33,11 +33,13 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import { useT } from "@multica/views/i18n";
 import {
   useTabPresentation,
   ResourceLeadingVisual,
@@ -47,33 +49,11 @@ import { parseIssueWindowPath } from "../../../shared/issue-window";
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
-// Chrome-style merged tab: the active tab shares the content surface's fill and
-// flares into it through concave bottom corners. Each flare is a small square
-// whose radial gradient carves a quarter-circle notch (transparent, so the
-// strip behind the flare shows through), strokes a 1px arc that continues the
-// tab's side border into the content card's top ring, and fills the rest with
-// the surface colour. The 0.4px spread on either side of the --surface-border
-// pair anti-aliases that arc.
-//
-// That background-color is load-bearing, not decoration: the flare's bottom row
-// overlaps the content card's top ring, and in dark mode --surface-border is
-// translucent (oklch(1 0 0 / 10%)), so without an opaque layer beneath it the
-// arc would composite over the ring instead of replacing it and the two keylines
-// would stack into a markedly lighter line right where the straight ring meets
-// the curve. It therefore has to be the strip's real backdrop — the sidebar
-// wrapper's fill, which is conditional and not this file's to re-derive.
-// SIDEBAR_WRAPPER_FILL_CLASS reads it off the wrapper itself.
-//
-// The backing may only reach as far as it is needed, though. A flare hangs 9px
-// past the tab's edge, over the neighbouring tab, so an opaque square there
-// prints over whatever that neighbour draws: its hover pill lost the whole
-// corner it shares with the flare and read as a dark bite (MUL-6160). Masking
-// the notch away removes the backing exactly where the gradient is transparent
-// anyway, so the notch is a hole rather than a painted-on copy of the strip and
-// shows whatever is actually behind it — bare strip usually, the neighbour's
-// pill where it reaches in. The mask is opaque again by the radius where the
-// arc's anti-aliasing starts, so every pixel the arc and the canvas fill cover
-// keeps its backing.
+// Concave tab flares need an opaque backing beneath translucent border arcs
+// to avoid compositing a second keyline over the content ring. Read that backdrop
+// from SIDEBAR_WRAPPER_FILL_CLASS rather than duplicating the wrapper's fill rule.
+// Mask the transparent notch so the backing cannot paint over a neighboring hover
+// pill, while retaining backing beneath the arc's antialiasing.
 const TAB_FLARE_RADIUS = 10;
 const tabFlareGradient = (side: "left" | "right") => {
   const r = TAB_FLARE_RADIUS;
@@ -203,6 +183,7 @@ function SortableTabItem({
    */
   showSeparator: boolean;
 }) {
+  const { t } = useT("settings");
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
@@ -215,6 +196,15 @@ function SortableTabItem({
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
   const { visual, title } = useTabPresentation(tab.url, tab.title);
+  const pinLabel = tab.pinned
+    ? t(($) => $.desktop.tab_bar.unpin)
+    : t(($) => $.desktop.tab_bar.pin);
+  const closeLabel = t(($) => $.desktop.tab_bar.close);
+  const closeOthersLabel = t(($) => $.desktop.tab_bar.close_others);
+  const openWindowLabel = t(($) => $.desktop.tab_bar.open_window);
+  const tabName = tab.pinned
+    ? t(($) => $.desktop.tab_bar.pinned_name, { title })
+    : title;
 
   // Persist the active tab's resolved title so it survives as the next
   // session's first-frame fallback. The tab strip itself always renders the
@@ -301,13 +291,15 @@ function SortableTabItem({
         e.preventDefault();
         handleClose(e);
       }}
-      aria-label={tab.pinned ? `${title} (pinned)` : title}
+      aria-label={tabName}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
-      title={tab.pinned ? `${title} (pinned)` : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
-        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
+        // The 36px frame contains a centered 32px content row and a 4px
+        // bottom connector. Keep the connector clickable without letting it
+        // shift the icon, title, or hover actions below the toolbar center.
+        "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 pb-1 text-caption transition-colors",
         "select-none cursor-default",
         isActive
           ? "font-medium text-foreground"
@@ -329,8 +321,8 @@ function SortableTabItem({
         onClick={handleTogglePin}
         onPointerDown={stopDragOnAction}
         role="button"
-        aria-label={tab.pinned ? "Unpin tab" : "Pin tab"}
-        title={tab.pinned ? "Unpin tab" : "Pin tab"}
+        aria-label={pinLabel}
+        title={pinLabel}
         className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
       >
         {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
@@ -340,7 +332,7 @@ function SortableTabItem({
           onClick={handleClose}
           onPointerDown={stopDragOnAction}
           role="button"
-          aria-label="Close tab"
+          aria-label={closeLabel}
           className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
         >
           <X className="size-2.5" />
@@ -392,7 +384,7 @@ function SortableTabItem({
         ) : (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-sidebar-accent opacity-0 transition-opacity group-hover/tab:opacity-100"
+            className="pointer-events-none absolute inset-x-0.5 top-0 bottom-1 rounded-lg bg-sidebar-accent opacity-0 transition-opacity group-hover/tab:opacity-100"
           />
         )}
         {showSeparator && (
@@ -401,17 +393,19 @@ function SortableTabItem({
           // arrives rather than lingering 2px off its rounded edge.
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
+            className="pointer-events-none absolute left-0 top-2 h-4 w-px bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
           />
         )}
         <ContextMenu>
-          <ContextMenuTrigger render={tabButton} />
+          <TooltipHint label={tab.pinned ? tabName : undefined} side="bottom">
+            <ContextMenuTrigger render={tabButton} />
+          </TooltipHint>
           <ContextMenuContent>
             {issueWindowPath && (
               <>
                 <ContextMenuItem onClick={handleOpenAsWindow}>
                   <AppWindow />
-                  Open as new window
+                  {openWindowLabel}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
               </>
@@ -420,12 +414,12 @@ function SortableTabItem({
               {tab.pinned ? (
                 <>
                   <PinOff />
-                  Unpin tab
+                  {pinLabel}
                 </>
               ) : (
                 <>
                   <Pin />
-                  Pin tab
+                  {pinLabel}
                 </>
               )}
             </ContextMenuItem>
@@ -436,7 +430,7 @@ function SortableTabItem({
               onClick={() => closeTab(tab.id)}
             >
               <X />
-              Close tab
+              {closeLabel}
             </ContextMenuItem>
             <ContextMenuItem
               variant="destructive"
@@ -444,14 +438,14 @@ function SortableTabItem({
               onClick={() => closeOtherTabs(tab.id)}
             >
               <ListX />
-              Close other tabs
+              {closeOthersLabel}
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
         {showAddedHighlight && (
           <motion.span
             aria-hidden
-            className="pointer-events-none absolute inset-x-0.5 top-1 bottom-1 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
+            className="pointer-events-none absolute inset-x-0.5 top-0 bottom-1 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/20"
             initial={{ opacity: shouldReduceMotion ? 0.25 : 0.65 }}
             animate={{ opacity: 0 }}
             transition={{ duration: shouldReduceMotion ? 0.16 : 0.42 }}
@@ -497,7 +491,7 @@ function NewTabEdgeFeedback({
       key={`${signal.tabId}-${signal.sequence}`}
       aria-hidden
       data-new-tab-edge-feedback="true"
-      className="pointer-events-none absolute top-4 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
+      className="pointer-events-none absolute top-1 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
       initial={{
         opacity: shouldReduceMotion ? 0.45 : 0,
         x: shouldReduceMotion ? 0 : 4,
@@ -527,8 +521,10 @@ function NewTabEdgeFeedback({
 }
 
 function NewTabButton() {
+  const { t } = useT("settings");
   const addTab = useTabStore((s) => s.addTab);
   const setActiveTab = useTabStore((s) => s.setActiveTab);
+  const newTabLabel = t(($) => $.desktop.tab_bar.new);
 
   const handleClick = () => {
     // New tab opens in the currently active workspace — tabs are scoped
@@ -541,16 +537,17 @@ function NewTabButton() {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      aria-label="New tab"
-      title="New tab"
-      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-      className="mb-1 flex size-7 shrink-0 items-center justify-center self-end rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
-    >
-      <Plus className="size-3.5" />
-    </button>
+    <TooltipHint label={newTabLabel} side="bottom">
+      <button
+        type="button"
+        onClick={handleClick}
+        aria-label={newTabLabel}
+        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        className="flex size-7 shrink-0 items-center justify-center self-center rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
+      >
+        <Plus className="size-3.5" />
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -693,7 +690,7 @@ export function TabBar() {
                       unpinnedCount > 0 && (
                         <div
                           aria-hidden
-                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-surface-border"
+                          className="mx-1 mb-3 h-4 w-px shrink-0 self-end bg-surface-border"
                         />
                       )}
                   </Fragment>

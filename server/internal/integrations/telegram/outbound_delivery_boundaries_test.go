@@ -41,6 +41,10 @@ func (q *review8545Queries) GetChannelInstallation(ctx context.Context, p db.Get
 	return q.routing.GetChannelInstallation(ctx, p)
 }
 
+func (q *review8545Queries) ListAttachmentsByChatMessage(ctx context.Context, p db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	return q.routing.ListAttachmentsByChatMessage(ctx, p)
+}
+
 func review8545ID() pgtype.UUID {
 	id := pgtype.UUID{Valid: true}
 	_, _ = rand.Read(id.Bytes[:])

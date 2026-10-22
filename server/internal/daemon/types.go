@@ -65,6 +65,13 @@ type IssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ProjectWorkflowData mirrors the claim payload's project workflow (MUL-7420).
+// Brief is rendered by the server for this run — the assignee's or an
+// observer's — and goes into the per-turn prompt as is.
+type ProjectWorkflowData struct {
+	Brief string `json:"brief"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -98,6 +105,7 @@ type Task struct {
 	// the built-in-only form. IssueStatusesOmitted is the cap overflow count.
 	IssueStatuses                 []IssueStatusData      `json:"issue_statuses,omitempty"`
 	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
+	ProjectWorkflow               *ProjectWorkflowData   `json:"project_workflow,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
@@ -147,7 +155,9 @@ type Task struct {
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
 	WakeupID                      string                 `json:"wakeup_id,omitempty"`
-	HandoffNote                   string                 `json:"handoff_note,omitempty"` // legacy assignment handoff instruction; rendered only in the per-turn prompt
+	WakeupSystemRule              string                 `json:"wakeup_system_rule,omitempty"` // a platform rule (e.g. child_done) started the run
+	WakeupJoined                  string                 `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own
+	HandoffNote                   string                 `json:"handoff_note,omitempty"`       // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -161,17 +171,11 @@ type Task struct {
 	// when description is empty so the agent doesn't see a useless heading.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
-	// Initiator* identify the actor who triggered THIS task (the real
-	// requester behind the current comment/mention or chat message) as
-	// distinct from the runtime owner whose credentials the agent runs with.
-	// Comment-triggered tasks resolve to the triggering comment's author;
-	// chat tasks resolve to the chat session creator. Empty for task kinds
-	// with no attributable human initiator (on-assign, autopilot,
-	// quick-create). InitiatorEmail is set only for member initiators. The
-	// daemon emits these into the brief under `## Task Initiator` so a
-	// workspace-visible agent can attribute the request per person. The
-	// agent's effective credentials stay owner-scoped — this is an attested
-	// identity, not a credential. See MUL-2645.
+	// Initiator* are the existing claim fields for the human whose authority
+	// this run uses (originator_user_id). The direct comment trigger author is
+	// carried separately in trigger_author_*. Empty when no originator exists.
+	// The daemon renders ## On Behalf Of per turn; its effective credentials
+	// remain scoped to the runtime owner. See MUL-2645, GH-8674.
 	InitiatorType  string `json:"initiator_type,omitempty"`
 	InitiatorID    string `json:"initiator_id,omitempty"`
 	InitiatorName  string `json:"initiator_name,omitempty"`

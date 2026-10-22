@@ -61,6 +61,11 @@ const (
 	// work, so such a daemon keeps getting a fresh directory and the parent's
 	// stays untouched on disk.
 	DaemonCapabilityCheckoutKeepsWorkV1 = "checkout-keeps-work-v1"
+	// DaemonCapabilityJoinedWakeupsV1 advertises that the daemon renders the
+	// claim's wakeup_joined field into the prompt. Only such a claim takes
+	// along the inputs of wakeup rules that waited for this run; for any other
+	// daemon those rules keep their inputs and start a run of their own.
+	DaemonCapabilityJoinedWakeupsV1 = "joined-wakeups-v1"
 	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
 	// an additional text instruction without cancelling or starting a task.
 	// It is persisted when this exact task enters running; absence always means

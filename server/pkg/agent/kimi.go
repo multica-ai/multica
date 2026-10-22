@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -520,6 +522,31 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 		}
 
+		// kimi's own wire log is authoritative on turn outcome: its ACP
+		// adapter can answer session/prompt successfully while the turn's
+		// `agent.turn.ended` record says failed — a bare
+		// "OAuthConnectionError: ..." carries none of the stderr sniffer's
+		// terminal signatures (#9054). Without this flip the run publishes
+		// its partial narration as a successfully delivered result and the
+		// retry/continuation policy never sees the failure. Only a
+		// completed run is promoted: timeout/abort/already-failed keep
+		// their own terminal semantics.
+		if finalStatus == "completed" {
+			if turnErr, failed := scanKimiMainTurnFailure(kimiUsageScan{
+				startTime:     startTime,
+				kimiHome:      b.cfg.Env["KIMI_CODE_HOME"],
+				sessionID:     sessionID,
+				resumed:       opts.ResumeSessionID != "",
+				fallbackModel: fallbackModel,
+			}); failed {
+				finalStatus = "failed"
+				finalError = "kimi turn failed"
+				if turnErr != "" {
+					finalError = fmt.Sprintf("kimi turn failed: %s", turnErr)
+				}
+			}
+		}
+
 		resCh <- Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
@@ -757,6 +784,93 @@ func kimiWireRecordInTurn(recordTimeMillis int64, startTime time.Time, resumed b
 		return true
 	}
 	return recordTimeMillis >= startTime.UnixMilli()
+}
+
+// kimiTurnEndedRecordType is the wire record kimi-code appends when a turn
+// terminates, with its own verdict in `outcome`.
+const kimiTurnEndedRecordType = "agent.turn.ended"
+
+// kimiWireTurnEnd is the parsed shape of one `agent.turn.ended` record.
+// Turn ids alternate between number and string across kimi builds, so they
+// are deliberately not modeled — only the outcome and diagnostic matter.
+type kimiWireTurnEnd struct {
+	Type         string `json:"type"`
+	Outcome      string `json:"outcome"`
+	ErrorMessage string `json:"errorMessage"`
+	Time         int64  `json:"time"`
+}
+
+// scanKimiMainTurnFailure reports whether the main agent's wire log recorded
+// a failed turn for this run, carrying kimi's own diagnostic message. It
+// reads the same wire logs with the same turn-boundary rules as
+// scanKimiSessionUsage, and only the structured `outcome:"failed"` verdict
+// counts — conversation text merely echoing failure words must not flip a
+// healthy run (see the anchoring lesson in #7920). A delegated agent's
+// failed turn is that agent's own task path; only the main agent's terminal
+// event fails this run.
+func scanKimiMainTurnFailure(scan kimiUsageScan) (string, bool) {
+	root := kimiSessionRoot(scan.kimiHome)
+	if root == "" {
+		return "", false
+	}
+	for _, path := range kimiSessionWireLogs(root, scan.sessionID) {
+		if filepath.Base(filepath.Dir(path)) != "main" {
+			continue
+		}
+		if detail, failed := kimiWireTurnFailure(path, scan); failed {
+			return detail, true
+		}
+	}
+	return "", false
+}
+
+// kimiWireTurnFailure walks one wire log for a failed main turn. A malformed
+// or truncated line is skipped: the log is appended to live, so reporting
+// what is readable beats failing the scan (same policy as the usage scan).
+// A record beyond the scan bound is discarded rather than ending the walk —
+// an oversized context.append ahead of the terminal event must not hide the
+// failed outcome (review on #9057).
+func kimiWireTurnFailure(path string, scan kimiUsageScan) (string, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+
+	detail := ""
+	found := false
+	reader := bufio.NewReaderSize(file, agentStreamInitialBufferBytes)
+	for {
+		line, err := readAgentStreamLine(reader)
+		if err != nil && !errors.Is(err, bufio.ErrTooLong) && !errors.Is(err, io.EOF) {
+			// Any other read failure ends the walk; the records read so
+			// far are the answer (same best-effort policy as a truncated
+			// tail above).
+			break
+		}
+		if line != nil && bytes.Contains(line, []byte(kimiTurnEndedRecordType)) {
+			var record kimiWireTurnEnd
+			if err := json.Unmarshal(line, &record); err != nil || record.Type != kimiTurnEndedRecordType {
+				continue
+			}
+			if !kimiWireRecordInTurn(record.Time, scan.startTime, scan.resumed) {
+				continue
+			}
+			if record.Outcome == "failed" {
+				// kimi's diagnostic is provider-authored text: a JSON
+				// credential in it (request={"api_key":...}) survives both
+				// the raw string and the shared redact.Text, so it takes
+				// the same sanitize pass as every child-process diagnostic
+				// before this reaches Result.Error (review on #9057).
+				detail = sanitizeAgentDiagnostic(record.ErrorMessage)
+				found = true
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+	return detail, found
 }
 
 // kimiSessionRoot resolves kimi's session directory: an explicitly configured

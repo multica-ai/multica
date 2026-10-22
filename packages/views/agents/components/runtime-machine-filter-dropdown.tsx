@@ -10,13 +10,11 @@ import {
 import type { RuntimeMachine, RuntimeMachineSection } from "../../runtimes/components/runtime-machines";
 import { useT } from "../../i18n";
 
-// ---------------------------------------------------------------------------
 // Runtime machine filter — dropdown next to the search input. The trigger
 // shows the active machine's title (or "All runtimes"); the menu groups
 // machines by section (Local / Remote / Cloud) the same way the
 // Runtimes page sidebar does, so a user moving between the two pages
 // sees consistent labels and counts.
-// ---------------------------------------------------------------------------
 
 const RUNTIME_MACHINE_SECTIONS: RuntimeMachineSection[] = [
   "local",

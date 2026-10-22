@@ -74,28 +74,28 @@ export const BOARD_CATEGORIES: IssueStatusCategory[] = STATUS_CATEGORIES.filter(
  * statuses through the catalog (`useStatusLabel`).
  */
 export const STATUS_LABEL: Record<BuiltInIssueStatus, string> = {
-  backlog: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  done: "Done",
-  blocked: "Blocked",
-  cancelled: "Cancelled",
+  backlog: "issues:status.backlog",
+  todo: "issues:status.todo",
+  in_progress: "issues:status.in_progress",
+  in_review: "issues:status.in_review",
+  done: "issues:status.done",
+  blocked: "issues:status.blocked",
+  cancelled: "issues:status.cancelled",
 };
 
 export const CATEGORY_LABEL: Record<IssueStatusCategory, string> = {
-  unstarted: "Unstarted",
-  started: "Started",
-  done: "Done",
-  closed: "Closed",
+  unstarted: "issues:category.unstarted",
+  started: "issues:category.started",
+  done: "issues:category.done",
+  closed: "issues:category.closed",
 };
 
 export const PRIORITY_LABEL: Record<IssuePriority, string> = {
-  none: "No priority",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  urgent: "Urgent",
+  none: "issues:priority.none",
+  low: "issues:priority.low",
+  medium: "issues:priority.medium",
+  high: "issues:priority.high",
+  urgent: "issues:priority.urgent",
 };
 
 const CATEGORY_SET = new Set<string>(STATUS_CATEGORIES);

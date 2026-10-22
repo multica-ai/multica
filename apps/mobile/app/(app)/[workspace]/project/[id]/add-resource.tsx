@@ -25,12 +25,14 @@ import {
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { useCreateProjectResource } from "@/data/mutations/projects";
+import { i18n, useT } from "@/lib/i18n";
 
 const GITHUB_PATTERN = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\/|$)/i;
 
 export default function AddResourceRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const createResource = useCreateProjectResource(id);
+  const { t } = useT("issues");
 
   const [url, setUrl] = useState("");
   const [ref, setRef] = useState("");
@@ -71,19 +73,19 @@ export default function AddResourceRoute() {
         onSuccess: () => router.back(),
         onError: (err) => {
           Alert.alert(
-            "Failed to attach resource",
-            err instanceof Error ? err.message : "Unknown error",
+            t("resources.failed"),
+            err instanceof Error ? err.message : t("resources.error"),
           );
         },
       },
     );
-  }, [valid, submitting, createResource, url, ref, label]);
+  }, [valid, submitting, createResource, url, ref, label, t]);
 
   return (
     <View className="flex-1">
       <View className="flex-row items-center justify-between px-4 pt-4 pb-2">
         <Text className="text-base font-semibold text-foreground">
-          Attach repository
+          {t("resources.title")}
         </Text>
         <Pressable
           onPress={onSubmit}
@@ -94,13 +96,15 @@ export default function AddResourceRoute() {
           }`}
         >
           <Text className="text-sm font-semibold text-primary">
-            {submitting ? "Attaching…" : "Attach"}
+            {submitting ? t("resources.attaching") : t("resources.attach")}
           </Text>
         </Pressable>
       </View>
       <View className="px-4 pt-4 gap-4">
         <View className="gap-1">
-          <Text className="text-xs text-muted-foreground">Repository URL</Text>
+          <Text className="text-xs text-muted-foreground">
+            {t("resources.url")}
+          </Text>
           <TextField
             value={url}
             onChangeText={onUrlChange}
@@ -113,7 +117,7 @@ export default function AddResourceRoute() {
         </View>
         <View className="gap-1">
           <Text className="text-xs text-muted-foreground">
-            Starting branch (optional)
+            {t("resources.branch")}
           </Text>
           <TextField
             value={ref}
@@ -125,13 +129,12 @@ export default function AddResourceRoute() {
           <Text
             className={`text-xs ${refMessage === null ? "text-muted-foreground" : "text-destructive"}`}
           >
-            {refMessage ??
-              "Tasks start from this branch and open their pull requests against it. Leave empty to use the repository's default branch."}
+            {refMessage ?? t("resources.branch_hint")}
           </Text>
         </View>
         <View className="gap-1">
           <Text className="text-xs text-muted-foreground">
-            Label (optional)
+            {t("resources.label")}
           </Text>
           <TextField
             value={label}
@@ -153,17 +156,18 @@ export default function AddResourceRoute() {
  * makes it wrong here is that this field names a branch to deliver back to.
  */
 function refErrorMessage(value: string): string | null {
+  const t = i18n.t.bind(i18n);
   if (looksLikeCommitSha(value)) {
-    return "That's a commit, not a branch. Tasks deliver back to the branch they start from — for a one-off revision, pass --ref to multica repo checkout.";
+    return t("issues:resources.commit");
   }
   const validation = validateGitRef(value);
   if (validation.ok) return null;
   switch (validation.reason) {
     case "too_long":
-      return "Use at most 255 characters.";
+      return t("issues:resources.too_long");
     case "invalid_characters":
-      return "A branch name can't contain spaces or any of ~ ^ : ? * [ \\";
+      return t("issues:resources.invalid_characters");
     default:
-      return "Not a valid branch name.";
+      return t("issues:resources.invalid");
   }
 }

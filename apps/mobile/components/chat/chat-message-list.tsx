@@ -1,44 +1,11 @@
 /**
- * Chat message list — user / assistant bubbles, oldest at top, newest at
- * bottom. Initial render lands at the bottom; new arrivals auto-scroll
- * when the user is anchored near the bottom; reading history is never
- * yanked down.
+ * Chronological FlashList chat with initial bottom positioning and MVCP.
+ * Follow new messages only while the user is near the bottom; preserve reading
+ * position through asynchronous Markdown and image resizing.
  *
- * Behavioral parity (apps/mobile/CLAUDE.md):
- *   - Render ALL message roles. Unknown role values are downgraded to
- *     "assistant" by ChatMessageSchema's `.catch()`, so this list never
- *     needs to silently drop a row.
- *   - Render `failure_reason` messages with destructive styling — same
- *     boolean as web's destructive bubble + failureReasonLabel().
- *
- * v1 simplifications:
- *   - No "Replied in Ns" badge under assistant bubbles (elapsed_ms is
- *     parsed but not displayed). Easy v2 add — show below the bubble.
- *   - Attachments bound to a message but NOT referenced inline in `content`
- *     render as standalone cards below the bubble via `CommentAttachmentList`
- *     (same component the comment thread uses; mirrors web reusing
- *     `AttachmentList` in chat). Inline `![](url)` / `[name](url)` still flow
- *     through the markdown renderer and are de-duped out of the card list.
- *
- * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` (Copy / Select Text / Cancel). While the sheet is on
- * screen the targeted bubble's border highlights. The assistant branch
- * has no border baseline because its bubble has no shell — adding a 2px
- * baseline would shift layout per message. See `useChatMessageLongPress`
- * in `./message-long-press.tsx`.
- *
- * List engine: FlashList v2 (Shopify). FlatList was the original choice
- * (per the now-outdated "no FlashList" baseline in apps/mobile/CLAUDE.md
- * — written before FlashList v2 stabilised). FlatList's `scrollToEnd` is
- * janky on variable-height lists by RN's own docs admission, and our
- * markdown bubbles render in multiple async passes (Shiki highlight,
- * image natural-size, lightbox provider injection) — each pass used to
- * fire onContentSizeChange and trigger another forced scroll, causing
- * the "open chat → feels stuck" jank. FlashList v2 replaces the manual
- * scroll dance with `maintainVisibleContentPosition`
- * (default-on; locks visible item across content changes) +
- * `startRenderingFromBottom` (initial paint at bottom, no setTimeout
- * hacks). Cell recycling also keeps scroll-up smooth.
+ * Render all normalized message roles and failure styling. Attachments not used
+ * inline appear as standalone cards. Long-press actions highlight the target
+ * without adding a border that would shift the layout.
  */
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
@@ -58,7 +25,7 @@ import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
-import { failureReasonLabel } from "@/lib/failure-reason-label";
+import { failureReasonKey } from "@/lib/failure-reason-label";
 import { formatElapsedMs } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
 import { useChatSelectStore } from "@/data/chat-select-store";
@@ -75,6 +42,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   messages: ChatMessage[];
@@ -273,6 +241,7 @@ function MessageRow({
   quickActionsDisabled: boolean;
 }) {
   const isUser = message.role === "user";
+  const { t } = useT("chat");
   const isFailure = !!message.failure_reason;
   const isSelecting = useChatSelectStore(
     (s) => s.selectingId === message.id,
@@ -282,7 +251,7 @@ function MessageRow({
   if (isFailure) {
     return (
       <FailureBubble
-        reasonLabel={failureReasonLabel(message.failure_reason)}
+        reasonLabel={t(failureReasonKey(message.failure_reason))}
         rawError={message.content}
         elapsedMs={message.elapsed_ms ?? null}
         isSelecting={isSelecting}
@@ -386,6 +355,7 @@ function AssistantRow({
   // instead of an empty Markdown block; caption reads "Finished in" not
   // "Replied in".
   const isNoResponse = message.message_kind === "no_response";
+  const { t } = useT("chat");
   const body = (
     <View className="gap-1.5">
       {timeline.length > 0 ? (
@@ -393,7 +363,7 @@ function AssistantRow({
       ) : null}
       {isNoResponse ? (
         <Text className="text-sm italic text-muted-foreground">
-          The agent finished this turn without a text reply.
+          {t("no_response")}
         </Text>
       ) : (
         <Markdown
@@ -448,6 +418,7 @@ function QuickActions({
   onSelect: (action: ChatQuickAction) => void | Promise<unknown>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useT("chat");
   const blocked = disabled || submitting;
 
   const handleSelect = async (action: ChatQuickAction) => {
@@ -466,7 +437,7 @@ function QuickActions({
   return (
     <View
       className="flex-row flex-wrap gap-2 pt-0.5"
-      accessibilityLabel="Suggested follow-ups"
+      accessibilityLabel={t("a11y.suggested_followups")}
     >
       {actions.slice(0, 3).map((action, index) => (
         <Pressable
@@ -511,12 +482,13 @@ function ElapsedCaption({
   variant: "replied" | "failed" | "finished";
   elapsedMs: number;
 }) {
+  const { t } = useT("chat");
   const label =
     variant === "replied"
-      ? `Replied in ${formatElapsedMs(elapsedMs)}`
+      ? t("elapsed.replied", { time: formatElapsedMs(elapsedMs) })
       : variant === "finished"
-        ? `Finished in ${formatElapsedMs(elapsedMs)}`
-        : `Failed after ${formatElapsedMs(elapsedMs)}`;
+        ? t("elapsed.finished", { time: formatElapsedMs(elapsedMs) })
+        : t("elapsed.failed", { time: formatElapsedMs(elapsedMs) });
   return (
     <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
   );
@@ -536,6 +508,7 @@ function FailureBubble({
   longPress: ReturnType<typeof useChatMessageLongPress>;
 }) {
   const hasRawError = rawError.trim().length > 0;
+  const { t } = useT("chat");
 
   // B6: pass `selectable={isSelecting}` rather than hard-coding
   // `selectable` — otherwise UIKit's text-selection gesture pre-empts
@@ -561,7 +534,7 @@ function FailureBubble({
             <CollapsibleTrigger asChild>
               <View
                 accessibilityRole="button"
-                accessibilityLabel="Show error details"
+                accessibilityLabel={t("a11y.show_error_details")}
                 className="mt-1 flex-row items-center gap-1 active:opacity-70"
               >
                 <Ionicons
@@ -570,7 +543,7 @@ function FailureBubble({
                   color="#71717a"
                 />
                 <Text className="text-xs text-muted-foreground">
-                  Show details
+                  {t("details.show")}
                 </Text>
               </View>
             </CollapsibleTrigger>

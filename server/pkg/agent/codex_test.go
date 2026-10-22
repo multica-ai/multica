@@ -1033,6 +1033,40 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	}
 }
 
+func TestCodexResultUsageMapUsesSessionModelForDefaultAgent(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "default-model-thread"
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := fmt.Sprintf(
+		`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`+"\n",
+		startTime.Add(time.Second).UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	jsonRPCUsage := TokenUsage{
+		InputTokens:      321,
+		OutputTokens:     42,
+		CacheReadTokens:  1000,
+		CacheWriteTokens: 7,
+	}
+	got := codexResultUsageMap(startTime, taskHome, threadID, false, "", jsonRPCUsage)
+	want := map[string]TokenUsage{"gpt-5.6-sol": jsonRPCUsage}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("usage map = %#v, want session model with unchanged JSON-RPC usage %#v", got, want)
+	}
+}
+
 func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
@@ -2362,6 +2396,12 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 				if params["cwd"] != "/work" {
 					t.Errorf("cwd = %v, want /work", params["cwd"])
 				}
+				if params["excludeTurns"] != true {
+					t.Errorf("excludeTurns = %v, want true to avoid replaying unbounded history over stdout", params["excludeTurns"])
+				}
+				if _, ok := params["history"]; ok {
+					t.Error("resume must load persisted history, not override it")
+				}
 			},
 		},
 	})
@@ -3437,6 +3477,66 @@ func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
 	}
 }
+
+func TestCodexExecuteResumesWithoutHydratingLargeHistory(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Simulate an app-server whose persisted history exceeds the stdout line
+	// cap. excludeTurns makes the response small without starting a new thread.
+	fakePath := writeFakeCodexAppServer(t, `
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read line
+read line
+case "$line" in
+  *'"excludeTurns":true'*)
+    echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr_prior","turns":[]}}}'
+    ;;
+  *)
+    printf '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr_prior","turns":[{"text":"'
+`+fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+`
+    printf '"}]}}}\n'
+    exit 0
+    ;;
+esac
+read line
+printf '%s\n' "$line" > "$(dirname "$0")/turn-start.json"
+echo '{"jsonrpc":"2.0","id":3,"result":{}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_prior","turn":{"id":"turn-current"}}}'
+echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_prior","turnId":"turn-current","item":{"type":"agentMessage","id":"msg-current","text":"Continued"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_prior","turn":{"id":"turn-current","status":"completed"}}}'
+`)
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr_prior",
+		ResumeExpected:            true,
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "completed" || result.SessionID != "thr_prior" || result.ResumeRejected || result.Output != "Continued" {
+		t.Fatalf("expected successful continuation of the original thread, got %+v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "turn-start.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request struct {
+		Method string `json:"method"`
+		Params struct {
+			ThreadID string `json:"threadId"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Method != "turn/start" || request.Params.ThreadID != "thr_prior" {
+		t.Fatalf("expected turn/start on the original thread, got %s", data)
+	}
+}
+
 func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos
 	// globally, so running concurrently with other codex Execute tests

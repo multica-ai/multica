@@ -40,6 +40,7 @@ import { ProjectIcon } from "@/components/ui/project-icon";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";
 import { api } from "@/data/api";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 import {
   selectViewedIssueIds,
   useViewedIssuesStore,
@@ -55,9 +56,16 @@ const ISSUE_LIMIT = 20;
 const PROJECT_LIMIT = 10;
 const RECENT_LIMIT = 5;
 
-// =====================================================
+// `buildSearchRows` stays pure; it supplies stable section identities and the
+// localized render owns the label lookup.
+const SEARCH_HEADER_LABELS: Record<string, string> = {
+  "h-recent": "navigation:routes.recent",
+  "h-projects": "navigation:routes.projects",
+  "h-issues": "navigation:routes.issues",
+  "h-cancelled": "issues:status.cancelled",
+};
+
 // HighlightText — mobile port of web's HighlightText
-// =====================================================
 // Web uses an HTML <mark> which doesn't exist in RN, so we segment the
 // string ourselves and wrap matched parts in a styled <Text>. Same regex
 // escape + case-insensitive substring match as
@@ -115,9 +123,7 @@ function HighlightText({
   );
 }
 
-// =====================================================
 // Row item types — drives the single FlatList render
-// =====================================================
 // RowItem + buildSearchRows live in lib/search-rows.ts so the ordering rules
 // (including the cancelled partition) are testable without mounting the screen.
 
@@ -294,9 +300,7 @@ function RecentRow({ item, slug }: RecentRowProps) {
   );
 }
 
-// =====================================================
 // Screen
-// =====================================================
 
 interface SearchResultsState {
   issues: SearchIssueResult[];
@@ -308,6 +312,7 @@ const EMPTY_RESULTS: SearchResultsState = { issues: [], projects: [] };
 export default function SearchModal() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const slug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("issues");
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultsState>(EMPTY_RESULTS);
@@ -419,7 +424,7 @@ export default function SearchModal() {
         case "header":
           return (
             <Text className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground uppercase">
-              {item.title}
+              {t(SEARCH_HEADER_LABELS[item.key] ?? item.title)}
             </Text>
           );
         case "issue":
@@ -430,7 +435,7 @@ export default function SearchModal() {
           return <RecentRow item={item.issue} slug={slug} />;
       }
     },
-    [slug],
+    [slug, t],
   );
 
   return (
@@ -445,7 +450,7 @@ export default function SearchModal() {
           <TextInput
             value={query}
             onChangeText={handleChange}
-            placeholder="Search issues and projects"
+            placeholder={t("list.search_placeholder")}
             placeholderTextColor="#a1a1aa"
             autoFocus
             autoCorrect={false}

@@ -359,17 +359,19 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
   const qc = new QueryClient();
   qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(0, "Looking into it. ")]);
 
-  const view = render(
+  const content = (active: boolean) => (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
         <ChatMessageList
+          active={active}
           messages={[]}
           pendingTask={{ task_id: TASK_ID, status: "running" }}
           availability={undefined}
         />
       </QueryClientProvider>
-    </I18nProvider>,
+    </I18nProvider>
   );
+  const view = render(content(true));
 
   const el = view.container.querySelector<HTMLElement>("[data-tab-scroll-root]");
   if (!el) throw new Error("chat list did not render a scroll container");
@@ -377,6 +379,7 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
   return {
     qc,
     view,
+    setActive: (active: boolean) => view.rerender(content(active)),
     scroll: scroller(el, contentHeight),
     rowCount: () => view.container.querySelectorAll("[data-row-key]").length,
     followsAtBottom: () =>
@@ -395,6 +398,54 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
 }
 
 describe("ChatMessageList auto-scroll", () => {
+  it("stops following and reveal polling before a closing list unmounts", () => {
+    const { view, scroll, setActive, followsAtBottom } = renderStreamingChat();
+    const observedBefore = observedTargets().length;
+    const measure = vi.spyOn(scroll.el, "getBoundingClientRect");
+    const staleHeightCallback = reportContentHeightChanged;
+
+    setActive(false);
+
+    expect(view.container.contains(scroll.el)).toBe(true);
+    expect(followsAtBottom()).toBe("false");
+    expect(observedTargets()).toHaveLength(observedBefore - 1);
+    scroll.grow(120);
+    scroll.shrinkViewport(72);
+    scroll.browserScrollsListUp(100);
+    act(() => staleHeightCallback?.());
+    for (let frame = 0; frame < 20; frame++) act(() => renderFrame());
+
+    expect(scroll.pinCalls()).toHaveLength(0);
+    expect(measure).not.toHaveBeenCalled();
+  });
+
+  it("resumes following if a closing list is reopened before unmount", () => {
+    const { scroll, setActive, followsAtBottom } = renderStreamingChat();
+
+    setActive(false);
+    scroll.grow(120);
+    setActive(true);
+    scroll.grow(120);
+
+    expect(followsAtBottom()).toBe("auto");
+    expect(scroll.pinCalls()).toHaveLength(1);
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("preserves the reader's released follow across an interrupted close", () => {
+    const { scroll, setActive, followsAtBottom } = renderStreamingChat();
+
+    scroll.readerScrollsUp(240);
+    setActive(false);
+    scroll.grow(120);
+    setActive(true);
+    scroll.grow(120);
+
+    expect(followsAtBottom()).toBe("false");
+    expect(scroll.pinCalls()).toHaveLength(0);
+    expect(scroll.distanceFromBottom()).toBe(480);
+  });
+
   it("follows a streaming reply whose row count never changes", () => {
     const { scroll, streamChunk, rowCount } = renderStreamingChat();
 

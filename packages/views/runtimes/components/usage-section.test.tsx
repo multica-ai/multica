@@ -196,6 +196,51 @@ describe("UsageSection — Viewing timezone wiring", () => {
   });
 });
 
+describe("UsageSection — cache hit rate", () => {
+  beforeEach(() => {
+    usageOverride.rows = null;
+  });
+
+  it("includes cache writes in the denominator", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 72_000,
+        cache_write_tokens: 28_000,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByText(/72% hit/)).toBeInTheDocument();
+  });
+
+  it("shows an unavailable rate when no input-side tokens were reported", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_tokens: 0,
+        output_tokens: 1_000,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText(/0% hit/)).not.toBeInTheDocument();
+  });
+});
+
 describe("UsageSection — custom-pricing entry point", () => {
   // A model that no maintained row prices, so it lands in the unmapped
   // diagnostic. `collectUnmappedModels` keys it by provider, so the saved

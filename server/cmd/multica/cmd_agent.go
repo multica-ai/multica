@@ -219,6 +219,8 @@ func init() {
 
 	// agent tasks
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
+	agentTasksCmd.Flags().Int("limit", 200, "Maximum runs per page (1-200)")
+	agentTasksCmd.Flags().String("before", "", "Cursor from the previous page")
 
 	// agent avatar
 	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
@@ -509,9 +511,7 @@ func requireWorkspaceID(cmd *cobra.Command) (string, error) {
 	return id, nil
 }
 
-// ---------------------------------------------------------------------------
 // Agent commands
-// ---------------------------------------------------------------------------
 
 func runAgentList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -883,17 +883,31 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 	}
 
 	output, _ := cmd.Flags().GetString("output")
-	path := "/api/agents/" + args[0] + "/tasks"
-	if output == "json" {
-		path += "?include_usage=true"
+	params := url.Values{}
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 {
+		return fmt.Errorf("limit must be a positive integer")
 	}
+	params.Set("limit", fmt.Sprint(limit))
+	before, _ := cmd.Flags().GetString("before")
+	if before != "" {
+		params.Set("before", before)
+	}
+	if output == "json" {
+		params.Set("include_usage", "true")
+	}
+	path := "/api/agents/" + args[0] + "/tasks?" + params.Encode()
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var tasks []map[string]any
-	if err := client.GetJSON(ctx, path, &tasks); err != nil {
+	responseHeaders, err := client.GetJSONWithHeaders(ctx, path, &tasks)
+	if err != nil {
 		return fmt.Errorf("list agent runs: %w", err)
+	}
+	if cursor := responseHeaders.Get("X-Agent-Tasks-Next-Cursor"); cursor != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "More runs available; use --before %q to fetch the next page.\n", cursor)
 	}
 
 	if output == "json" {
@@ -994,9 +1008,7 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Agent skills subcommands
-// ---------------------------------------------------------------------------
 
 func runAgentSkillsList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -1124,9 +1136,7 @@ func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result j
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Agent env subcommands
-// ---------------------------------------------------------------------------
 
 // runAgentEnvGet fetches the plaintext custom_env for a single agent
 // via the audited `/env` endpoint. The CLI prints raw JSON in JSON
@@ -1201,9 +1211,7 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // parseCustomEnv parses the --custom-env flag value (a JSON object literal)
 // into a string map suitable for the request body. The clear-all signal is

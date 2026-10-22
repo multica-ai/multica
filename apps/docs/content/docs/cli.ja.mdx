@@ -229,9 +229,9 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"`；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
 | | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
-| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start` |
+| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start`、`--duplicate-of` |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
-| | `status <id> <status>` | ステータスを変更 | `--no-start` |
+| | `status <id> <status>` | ステータスを変更 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | カラム内で移動 | |
 | | `search <query>` | タスクを検索 | `--limit`、`--include-closed` |
 | | `children <id>` | サブタスクをステージごとに一覧 | |
@@ -250,7 +250,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | `list`: `--resource-type`（`issue` または `skill`）、`--full-id`；`create`: `--name`、`--color`、`--resource-type`（`issue` または `skill`）、`--description` |
-| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
+| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
 | | `tasks <id>` | エージェントの実行を表示 | |

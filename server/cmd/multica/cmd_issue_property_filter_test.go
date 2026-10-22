@@ -358,3 +358,47 @@ func TestRunIssueListFetchesCatalogOnce(t *testing.T) {
 		t.Fatalf("expected one /api/issues request, got %d", len(*queries))
 	}
 }
+
+func TestEncodeIssuePropertyListValues(t *testing.T) {
+	// Both write paths — `issue property set --value` and
+	// `issue create --property` — go through encodeIssuePropertyValue, so this
+	// covers the list-value forms for both commands.
+	multiText := propertyDTO{ID: "p-text", Name: "Aliases", Type: "multi_text"}
+	multiURL := propertyDTO{ID: "p-url", Name: "Related docs", Type: "multi_url"}
+	encode := func(property propertyDTO, raw string) ([]byte, error) {
+		return encodeIssuePropertyValue(t.Context(), nil, &memberDirectory{}, property, raw)
+	}
+
+	cases := []struct {
+		name     string
+		property propertyDTO
+		raw      string
+		want     string
+		wantErr  string
+	}{
+		{"comma form keeps simple entries", multiText, "alpha,beta", `["alpha","beta"]`, ""},
+		{"comma form skips empty tokens", multiText, "alpha, ,beta", `["alpha","beta"]`, ""},
+		{"JSON form preserves a comma in text", multiText, `["Smith, John","Doe, Jane"]`, `["Smith, John","Doe, Jane"]`, ""},
+		{"JSON form preserves a comma in a URL", multiURL, `["https://en.wikipedia.org/wiki/Washington,_D.C."]`, `["https://en.wikipedia.org/wiki/Washington,_D.C."]`, ""},
+		{"JSON form mixes both list types", multiURL, `["https://a.example/x?q=1,2","https://b.example"]`, `["https://a.example/x?q=1,2","https://b.example"]`, ""},
+		{"malformed JSON array is rejected", multiText, `["Smith, John", 7]`, "", "JSON array of strings"},
+		{"empty value is rejected", multiText, "", "", "at least one entry"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := encode(tc.property, tc.raw)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("encode(%q) error = %v, want containing %q", tc.raw, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("encode(%q): %v", tc.raw, err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("encode(%q) = %s, want %s", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

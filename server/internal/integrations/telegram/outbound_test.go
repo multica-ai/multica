@@ -38,6 +38,13 @@ type fakeTelegramOutboundQueries struct {
 	binding       db.ChannelChatSessionBinding
 	bindings      map[[16]byte]db.ChannelChatSessionBinding
 	installation  db.ChannelInstallation
+	// attachments is what the reply's assistant message has bound to it; the
+	// attachment hop reads it instead of the real attachment table.
+	attachments []db.Attachment
+}
+
+func (f *fakeTelegramOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	return f.attachments, nil
 }
 
 func (f *fakeTelegramOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {

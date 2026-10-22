@@ -3737,6 +3737,7 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("description-stdin", false, "")
 	cmd.Flags().String("description-file", "", "")
 	cmd.Flags().Bool("allow-external-file", false, "")
+	cmd.Flags().StringSlice("attachment", nil, "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("assignee", "", "")
@@ -3748,8 +3749,106 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Int("stage", 0, "")
 	cmd.Flags().Float64("position", 0, "")
 	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().String("duplicate-of", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestRunIssueUpdateAppendsLocalAttachmentToDescription(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const uploadedID = "33333333-3333-4333-8333-333333333333"
+	path := writeIssueCreateAttachment(t, "revised.png")
+	var calls []string
+	var body map[string]any
+	uploadIncludedIssueID := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/upload-file":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Errorf("parse upload: %v", err)
+			}
+			uploadIncludedIssueID = r.FormValue("issue_id") != ""
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": uploadedID, "filename": "revised.png", "content_type": "image/png",
+				"markdown_url": "https://api.example/api/attachments/" + uploadedID + "/download",
+			})
+		case "/api/issues/" + issueID:
+			if r.Method == http.MethodGet {
+				_ = json.NewEncoder(w).Encode(map[string]any{"description": "Existing body"})
+			} else {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode update: %v", err)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "title": "Updated"})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("attachment", path)
+	if err := runIssueUpdate(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if got := body["description"].(string); got != "Existing body\n\n![revised.png](https://api.example/api/attachments/"+uploadedID+"/download)" {
+		t.Fatalf("description = %q", got)
+	}
+	if ids, ok := body["attachment_ids"].([]any); !ok || !reflect.DeepEqual(ids, []any{uploadedID}) {
+		t.Fatalf("attachment_ids = %#v", body["attachment_ids"])
+	}
+	if uploadIncludedIssueID {
+		t.Fatal("upload included issue_id; update must bind the unbound upload in the PUT")
+	}
+	if want := []string{"GET /api/issues/" + issueID, "POST /api/upload-file", "PUT /api/issues/" + issueID}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestRunIssueUpdateAttachmentUsesProvidedDescriptionWithoutFetching(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const attachmentID = "22222222-2222-4222-8222-222222222222"
+	path := writeIssueCreateAttachment(t, "revised.png")
+	var calls []string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/upload-file":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": attachmentID, "filename": "revised.png", "content_type": "image/png",
+				"markdown_url": "https://api.example/api/attachments/" + attachmentID + "/download",
+			})
+		case "/api/issues/" + issueID:
+			if r.Method == http.MethodGet {
+				t.Error("description GET must be skipped when --description is provided")
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode update: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": issueID, "title": "Updated"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("attachment", path)
+	_ = cmd.Flags().Set("description", "Replacement body")
+	if err := runIssueUpdate(cmd, []string{issueID}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	if got := body["description"].(string); !strings.HasPrefix(got, "Replacement body\n\n") {
+		t.Fatalf("description = %q", got)
+	}
+	if want := []string{"POST /api/upload-file", "PUT /api/issues/" + issueID}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
 }
 
 func newIssueAssignTestCmd() *cobra.Command {
@@ -3765,6 +3864,7 @@ func newIssueAssignTestCmd() *cobra.Command {
 func newIssueStatusTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "status"}
 	cmd.Flags().Bool("no-start", false, "")
+	cmd.Flags().String("duplicate-of", "", "")
 	cmd.Flags().String("output", "table", "")
 	return cmd
 }
@@ -3894,6 +3994,137 @@ func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	}
 }
 
+// newDuplicateMarkTestServer serves MUL-1 (the original) and MUL-2 (the
+// duplicate) and records the body of the PUT to MUL-2. With recorded=false it
+// answers like a server older than the duplicate mark: no duplicate_of field.
+func newDuplicateMarkTestServer(t *testing.T, recorded bool, body *map[string]any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-2":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-2", "identifier": "MUL-2", "status": "todo"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-2":
+			if err := json.NewDecoder(r.Body).Decode(body); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			resp := map[string]any{"id": "issue-2", "identifier": "MUL-2", "status": "cancelled"}
+			if recorded {
+				resp["duplicate_of"] = map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo"}
+			}
+			json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	return srv
+}
+
+func TestRunIssueStatusDuplicateOfSendsMark(t *testing.T) {
+	var body map[string]any
+	newDuplicateMarkTestServer(t, true, &body)
+
+	cmd := newIssueStatusTestCmd()
+	_ = cmd.Flags().Set("duplicate-of", "MUL-1")
+	if err := runIssueStatus(cmd, []string{"MUL-2", "cancelled"}); err != nil {
+		t.Fatalf("runIssueStatus: %v", err)
+	}
+	want := map[string]any{"status": "cancelled", "duplicate_of_issue_id": "issue-1"}
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %#v, want %#v", body, want)
+	}
+}
+
+func TestRunIssueUpdateDuplicateOfSendsMark(t *testing.T) {
+	var body map[string]any
+	newDuplicateMarkTestServer(t, true, &body)
+
+	cmd := newIssueUpdateTestCmd()
+	_ = cmd.Flags().Set("duplicate-of", "MUL-1")
+	if err := runIssueUpdate(cmd, []string{"MUL-2"}); err != nil {
+		t.Fatalf("runIssueUpdate: %v", err)
+	}
+	// The server cancels the issue with the mark; no status is needed.
+	want := map[string]any{"duplicate_of_issue_id": "issue-1"}
+	if !reflect.DeepEqual(body, want) {
+		t.Fatalf("body = %#v, want %#v", body, want)
+	}
+}
+
+func TestRunIssueDuplicateOfFailsWhenServerDropsMark(t *testing.T) {
+	var body map[string]any
+	newDuplicateMarkTestServer(t, false, &body)
+
+	statusCmd := newIssueStatusTestCmd()
+	_ = statusCmd.Flags().Set("duplicate-of", "MUL-1")
+	err := runIssueStatus(statusCmd, []string{"MUL-2", "cancelled"})
+	if err == nil || !strings.Contains(err.Error(), "did not record the duplicate mark") {
+		t.Fatalf("runIssueStatus error = %v, want a missing-mark error", err)
+	}
+
+	updateCmd := newIssueUpdateTestCmd()
+	_ = updateCmd.Flags().Set("duplicate-of", "MUL-1")
+	err = runIssueUpdate(updateCmd, []string{"MUL-2"})
+	if err == nil || !strings.Contains(err.Error(), "did not record the duplicate mark") {
+		t.Fatalf("runIssueUpdate error = %v, want a missing-mark error", err)
+	}
+}
+
+func TestRunIssueDuplicateOfRejectsInvalidCombinationsBeforeRequest(t *testing.T) {
+	t.Chdir(t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	attachment := writeIssueCreateAttachment(t, "shot.png")
+
+	t.Run("status other than cancelled", func(t *testing.T) {
+		cmd := newIssueStatusTestCmd()
+		_ = cmd.Flags().Set("duplicate-of", "MUL-1")
+		err := runIssueStatus(cmd, []string{"MUL-2", "done"})
+		if err == nil || !strings.Contains(err.Error(), "must be cancelled") {
+			t.Fatalf("error = %v, want a must-be-cancelled error", err)
+		}
+	})
+	t.Run("empty reference", func(t *testing.T) {
+		cmd := newIssueStatusTestCmd()
+		_ = cmd.Flags().Set("duplicate-of", " ")
+		err := runIssueStatus(cmd, []string{"MUL-2", "cancelled"})
+		if err == nil || !strings.Contains(err.Error(), "requires the original issue") {
+			t.Fatalf("error = %v, want a missing-reference error", err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		flag  string
+		value string
+		want  string
+	}{
+		{"update status other than cancelled", "status", "todo", "must be cancelled"},
+		{"update description", "description", "new body", "cannot be combined"},
+		{"update attachment", "attachment", attachment, "cannot be combined"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newIssueUpdateTestCmd()
+			_ = cmd.Flags().Set("duplicate-of", "MUL-1")
+			_ = cmd.Flags().Set(tc.flag, tc.value)
+			err := runIssueUpdate(cmd, []string{"MUL-2"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunIssueAssignNoStartSendsSuppressRun(t *testing.T) {
 	const agentID = "5fb87ac7-23b5-4a7a-81fa-ed295a54545d"
 	var body map[string]any
@@ -3945,7 +4176,7 @@ func TestRunIssueAssignRejectsNoStartWithUnassign(t *testing.T) {
 func TestIssueReadCommandsUseInjectedTaskToken(t *testing.T) {
 	const fakeTaskToken = "mat_task_issue_sentinel"
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
@@ -4011,7 +4242,7 @@ func TestIssueReadCommandsUseInjectedTaskToken(t *testing.T) {
 
 func TestIssueReadCommandsFailClosedWithoutTaskToken(t *testing.T) {
 	ownerHome := t.TempDir()
-	t.Setenv("HOME", ownerHome)
+	redirectTestHome(t, ownerHome)
 	t.Setenv("MULTICA_AGENT_ID", "agent-test")
 	t.Setenv("MULTICA_TASK_ID", "task-test")
 	t.Setenv("MULTICA_TOKEN", "")

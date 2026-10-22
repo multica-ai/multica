@@ -36,6 +36,7 @@ import {
   issueColumnCategory,
 } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { useT } from "@/lib/i18n";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -85,6 +86,7 @@ export function MentionSuggestionBar({
   // Rows are icon-only, so colour is the only thing that can carry a custom
   // status's identity here. (MUL-6243)
   const catalog = useIssueStatuses();
+  const { t } = useT("issues");
 
   // Comment-mode data — disabled in chat mode to avoid wasted fetches.
   const { data: members = [] } = useQuery({
@@ -147,11 +149,11 @@ export function MentionSuggestionBar({
 
       const out: Row[] = [];
       if (matchedRecent.length > 0) {
-        out.push({ kind: "section", label: "Recent" });
+        out.push({ kind: "section", label: t("suggestions.recent") });
         for (const i of matchedRecent) out.push({ kind: "issue", issue: i });
       }
       if (matchedMine.length > 0) {
-        out.push({ kind: "section", label: "My issues" });
+        out.push({ kind: "section", label: t("suggestions.my_issues") });
         for (const i of matchedMine) out.push({ kind: "issue", issue: i });
       }
       if (out.length === 0) out.push({ kind: "empty" });
@@ -200,20 +202,20 @@ export function MentionSuggestionBar({
     const out: Row[] = [];
     if (showAll) out.push({ kind: "all" });
     if (matchedMembers.length > 0) {
-      out.push({ kind: "section", label: "Members" });
+      out.push({ kind: "section", label: t("picker.people") });
       for (const m of matchedMembers) out.push({ kind: "member", member: m });
     }
     if (matchedAgents.length > 0) {
-      out.push({ kind: "section", label: "Agents" });
+      out.push({ kind: "section", label: t("picker.agents") });
       for (const a of matchedAgents) out.push({ kind: "agent", agent: a });
     }
     if (matchedSquads.length > 0) {
-      out.push({ kind: "section", label: "Squads" });
+      out.push({ kind: "section", label: t("picker.squads") });
       for (const s of matchedSquads) out.push({ kind: "squad", squad: s });
     }
     if (out.length === 0) out.push({ kind: "empty" });
     return out;
-  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId]);
+  }, [isChat, query, recentIssues, myIssuesAll, members, agents, squads, userId, t]);
 
   if (!visible) return null;
 
@@ -280,9 +282,9 @@ export function MentionSuggestionBar({
                   <Text className="text-xs font-medium text-brand">@</Text>
                 </View>
                 <Text className="flex-1 text-sm text-foreground">
-                  Everyone
+                  {t("suggestions.everyone")}
                 </Text>
-                <Badge label="All" />
+                <Badge label={t("suggestions.all")} />
               </Pressable>
             );
           }
@@ -306,7 +308,7 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.member.name}
                 </Text>
-                <Badge label="Member" />
+                <Badge label={t("suggestions.member")} />
               </Pressable>
             );
           }
@@ -332,7 +334,9 @@ export function MentionSuggestionBar({
                   {item.agent.name}
                 </Text>
                 <Badge
-                  label={runtimeBound ? "Agent" : "Needs runtime"}
+                  label={runtimeBound
+                    ? t("picker.agent")
+                    : t("picker.needs_runtime")}
                   tone={runtimeBound ? "brand" : "outline"}
                 />
               </Pressable>
@@ -354,7 +358,7 @@ export function MentionSuggestionBar({
                 <Text className="flex-1 text-sm text-foreground">
                   {item.squad.name}
                 </Text>
-                <Badge label="Squad" tone="outline" />
+                <Badge label={t("picker.squad")} tone="outline" />
               </Pressable>
             );
           }

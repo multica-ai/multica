@@ -77,10 +77,6 @@ export function AccountTab() {
     value: draft,
     savedValue: savedDraft,
     onSave: saveProfile,
-    onSuccess: () =>
-      toast.success(t(($) => $.account.toast_profile_updated), {
-        id: "settings-auto-save",
-      }),
     onError: (error) =>
       toast.error(
         error instanceof Error
@@ -92,7 +88,7 @@ export function AccountTab() {
   });
 
   return (
-    <SettingsTab title={t(($) => $.page.tabs.profile)}>
+    <SettingsTab title={t(($) => $.page.tabs.profile)} scope="account">
       <SettingsSection
         title={t(($) => $.account.section_profile)}
         action={
@@ -106,6 +102,7 @@ export function AccountTab() {
       >
         <SettingsCard>
           <SettingsRow
+            anchor="avatar"
             label={t(($) => $.account.avatar_label)}
             description={t(($) => $.account.click_avatar_hint)}
             size="none"
@@ -120,9 +117,6 @@ export function AccountTab() {
                   try {
                     const updated = await api.updateMe({ avatar_url: url });
                     setUser(updated);
-                    toast.success(t(($) => $.account.toast_avatar_updated), {
-                      id: "settings-auto-save",
-                    });
                   } catch (error) {
                     toast.error(
                       error instanceof Error
@@ -136,6 +130,7 @@ export function AccountTab() {
           </SettingsRow>
 
           <SettingsRow
+            anchor="name"
             label={t(($) => $.account.name_label)}
             size="text"
           >
@@ -151,6 +146,7 @@ export function AccountTab() {
           </SettingsRow>
 
           <SettingsRow
+            anchor="about"
             label={t(($) => $.account.profile_description_label)}
             description={t(($) => $.account.profile_description_hint)}
             size="text"

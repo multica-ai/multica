@@ -36,6 +36,11 @@ export interface WorkspaceMcpServer {
   name: string;
   transport: string;
   enabled?: boolean;
+  /**
+   * Live agents the entry is assigned to. Only the workspace library listing
+   * carries it, and servers older than this field omit it.
+   */
+  agent_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -61,14 +66,6 @@ export interface User {
    * returns an object (defaults to `{}`), never null.
    */
   onboarding_questionnaire: Record<string, unknown>;
-  /**
-   * Legacy column from the removed starter-content dialog. The column is
-   * still written to (always 'imported' for new accounts after the
-   * mark-onboarded paths run) so older desktop builds — which still render
-   * the dialog on NULL — don't show it to anyone created on a newer server.
-   * Kept as `string | null` for forward compatibility.
-   */
-  starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
   /**

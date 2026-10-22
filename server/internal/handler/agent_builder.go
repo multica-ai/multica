@@ -104,6 +104,17 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Hold the runtime's access lock through creation so a concurrent privacy
+	// change cannot commit between authorization and the new binding.
+	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtime.ID)
+	if err != nil || runtime.WorkspaceID != workspaceUUID {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	if !h.authorizeBuilderRuntime(w, r, workspaceID, runtime, "start") {
+		return
+	}
+
 	builder, err := qtx.CreateAgentBuilder(r.Context(), db.CreateAgentBuilderParams{
 		WorkspaceID:  workspaceUUID,
 		Name:         fmt.Sprintf(".multica-agent-builder-%s", flowID),
@@ -358,19 +369,26 @@ func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
 		return db.AgentRuntime{}, false
 	}
-	member, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return db.AgentRuntime{}, false
-	}
-	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
-		return db.AgentRuntime{}, false
-	}
-	if runtime.Status != "online" {
-		writeError(w, http.StatusConflict, fmt.Sprintf("runtime must be online to %s an agent builder session", verb))
+	if !h.authorizeBuilderRuntime(w, r, workspaceID, runtime, verb) {
 		return db.AgentRuntime{}, false
 	}
 	return runtime, true
+}
+
+func (h *Handler) authorizeBuilderRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, runtime db.AgentRuntime, verb string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
+		return false
+	}
+	if runtime.Status != "online" {
+		writeError(w, http.StatusConflict, fmt.Sprintf("runtime must be online to %s an agent builder session", verb))
+		return false
+	}
+	return true
 }
 
 type SwitchAgentBuilderRuntimeRequest struct {
@@ -455,6 +473,25 @@ func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// Access changes take the runtime lock before locking dependent sessions.
+	// Follow that order and authorize the committed runtime under the lock.
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), workspaceUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		}
+		return
+	}
+	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtime.ID)
+	if err != nil || runtime.WorkspaceID != workspaceUUID {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	if !h.authorizeBuilderRuntime(w, r, workspaceID, runtime, "switch") {
+		return
+	}
 
 	if _, err := qtx.LockChatSessionForRuntimeBind(r.Context(), session.ID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

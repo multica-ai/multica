@@ -231,9 +231,11 @@ WHERE pull_request_id = $1;
 -- =====================
 
 -- name: LinkIssueToPullRequest :execrows
--- Automatic link from a PR title or branch. Returns 1 only when the link is
--- new, so the webhook evaluates auto-complete on the link event and not on
--- every redelivery. An existing link (automatic or manual) is left untouched.
+-- Automatic link from a PR title, branch, or closing keyword. Returns 1 only
+-- when the link is new, so the webhook evaluates the merge automation on the
+-- link event and not on every redelivery. An existing link (automatic or
+-- manual) is left untouched. close_intent is no longer read or written
+-- (MUL-7726).
 INSERT INTO issue_pull_request (
     issue_id, pull_request_id, linked_by_type, linked_by_id
 ) VALUES (

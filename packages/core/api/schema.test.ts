@@ -532,6 +532,60 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  // Local search index sync applies whatever these return to the local copy,
+  // so a malformed body rejects instead of degrading to an empty page.
+  describe("search index sync", () => {
+    it("sends the workspace slug and parses a snapshot page", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            issues: [],
+            comments: [{ id: "c1", issue_id: "i1", content: "hi", created_at: "2026-01-01T00:00:00.5Z" }],
+            projects: [],
+            next_after_number: 200,
+            done: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      const page = await client.getSearchIndexSnapshot({ workspaceSlug: "acme", afterNumber: 0, limit: 200 });
+
+      expect(page.comments).toHaveLength(1);
+      expect(page.done).toBe(false);
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(String(url)).toBe("https://api.example.test/api/search-index/snapshot?after_number=0&limit=200");
+      expect((init as RequestInit).headers).toMatchObject({ "X-Workspace-Slug": "acme" });
+    });
+
+    it("rejects malformed manifest, snapshot, and changes bodies", async () => {
+      const client = new ApiClient("https://api.example.test");
+
+      stubFetchJson({ cursor: "", issue_count: 0, comment_count: 0, project_count: 0, text_bytes: 0 });
+      await expect(client.getSearchIndexManifest({ workspaceSlug: "acme" })).rejects.toThrow(/Malformed response/);
+
+      stubFetchJson({ issues: "nope", comments: [], projects: [], next_after_number: 0, done: true });
+      await expect(client.getSearchIndexSnapshot({ workspaceSlug: "acme", afterNumber: 0 })).rejects.toThrow(
+        /Malformed response/,
+      );
+
+      stubFetchJson({ issues: [], comments: [], projects: [], cursor: "c2", has_more: false });
+      await expect(client.getSearchIndexChanges({ workspaceSlug: "acme", cursor: "c1" })).rejects.toThrow(
+        /Malformed response/,
+      );
+    });
+
+    it("surfaces an expired cursor as a 410 ApiError", async () => {
+      stubFetchJson({ error: "search index cursor expired; rebuild the local index" }, 410);
+      const client = new ApiClient("https://api.example.test");
+      const err = await client.getSearchIndexChanges({ workspaceSlug: "acme", cursor: "c1" }).catch((e) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(410);
+    });
+  });
+
   describe("listAutopilots", () => {
     const baseAutopilot = {
       id: "ap-1",

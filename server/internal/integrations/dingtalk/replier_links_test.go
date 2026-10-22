@@ -26,12 +26,13 @@ func TestIssueMarkdownIdentifierUsesWorkspaceAndStableID(t *testing.T) {
 		missingID             bool
 		want                  string
 	}{
-		{name: "identifier", base: "https://multica.example/", slug: "team-b", key: "ALHE-6", want: "[ALHE\\-6](https://multica.example/team-b/issues/" + id + ")"},
-		{name: "number uses UUID target", base: "https://multica.example", slug: "team-b", number: 6, want: "[\\#6](https://multica.example/team-b/issues/" + id + ")"},
-		{name: "UUID display fallback", base: "https://multica.example", slug: "team-b", want: "[11111111\\-2222\\-4333\\-8444\\-555555555555](https://multica.example/team-b/issues/" + id + ")"},
-		{name: "local app", base: "http://localhost:3000", slug: "team-b", key: "ALHE-6", want: "[ALHE\\-6](http://localhost:3000/team-b/issues/" + id + ")"},
-		{name: "base path", base: " https://multica.example/apps/multica/ ", slug: "team-b", key: "ALHE-6", want: "[ALHE\\-6](https://multica.example/apps/multica/team-b/issues/" + id + ")"},
-		{name: "parentheses in base path", base: "https://multica.example/apps/(dev)", slug: "team-b", key: "ALHE-6", want: "[ALHE\\-6](https://multica.example/apps/%28dev%29/team-b/issues/" + id + ")"},
+		{name: "identifier", base: "https://multica.example/", slug: "team-b", key: "ALHE-6", want: "[ALHE-6](https://multica.example/team-b/issues/" + id + ")"},
+		{name: "link label punctuation", base: "https://multica.example", slug: "team-b", key: "A[B]*_`\\-6", want: "[A\\[B\\]\\*\\_\\`\\\\-6](https://multica.example/team-b/issues/" + id + ")"},
+		{name: "number uses UUID target", base: "https://multica.example", slug: "team-b", number: 6, want: "[#6](https://multica.example/team-b/issues/" + id + ")"},
+		{name: "UUID display fallback", base: "https://multica.example", slug: "team-b", want: "[11111111-2222-4333-8444-555555555555](https://multica.example/team-b/issues/" + id + ")"},
+		{name: "local app", base: "http://localhost:3000", slug: "team-b", key: "ALHE-6", want: "[ALHE-6](http://localhost:3000/team-b/issues/" + id + ")"},
+		{name: "base path", base: " https://multica.example/apps/multica/ ", slug: "team-b", key: "ALHE-6", want: "[ALHE-6](https://multica.example/apps/multica/team-b/issues/" + id + ")"},
+		{name: "parentheses in base path", base: "https://multica.example/apps/(dev)", slug: "team-b", key: "ALHE-6", want: "[ALHE-6](https://multica.example/apps/%28dev%29/team-b/issues/" + id + ")"},
 		{name: "missing base", slug: "team-b", key: "ALHE-6", want: "ALHE-6"},
 		{name: "invalid base", base: "https://[", slug: "team-b", key: "ALHE-6", want: "ALHE-6"},
 		{name: "missing scheme", base: "multica.example", slug: "team-b", key: "ALHE-6", want: "ALHE-6"},

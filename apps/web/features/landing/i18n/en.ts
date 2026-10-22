@@ -22,7 +22,7 @@ export function createEnDict(
     headlineLine1: "Your next 10 hires",
     headlineLine2: "won\u2019t be human.",
     subheading:
-      "Multica is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
+      "Multica is a source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
     cta: "Start free trial",
     downloadDesktop: "Download Desktop",
     talkToSales: "Talk to sales",
@@ -104,7 +104,7 @@ export function createEnDict(
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 26 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 27 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -119,7 +119,7 @@ export function createEnDict(
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 26 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 27 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -139,7 +139,7 @@ export function createEnDict(
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 26 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 27 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -158,17 +158,18 @@ export function createEnDict(
   },
 
   openSource: {
-    label: "Open source",
-    headlineLine1: "Open source",
-    headlineLine2: "for all.",
+    label: "Source available",
+    headlineLine1: "Every line,",
+    headlineLine2: "on your terms.",
     description:
-      "Multica is fully open source. Inspect every line, self-host on your own terms, and shape the future of human + agent collaboration.",
+      "Multica\u2019s source code is public. Inspect every line, self-host it for free, and shape the future of human + agent collaboration. Offering Multica to others as a hosted service requires a commercial license.",
     cta: "Star on GitHub",
+    licensingCta: "How licensing works \u2192",
     highlights: [
       {
         title: "Self-host anywhere",
         description:
-          "Run Multica on your own infrastructure. Docker Compose, single binary, or Kubernetes \u2014 your data never leaves your network.",
+          "Run Multica on your own infrastructure. Docker Compose, single binary, or Kubernetes — your workspace data stays on servers you control.",
       },
       {
         title: "No vendor lock-in",
@@ -195,12 +196,17 @@ export function createEnDict(
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 26 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agent as a managed remote runtime for issue runs, using a QCA PAT and an existing QCA agent.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
         answer:
           "Both. You can self-host Multica on your own infrastructure with Docker Compose or Kubernetes, or use our hosted cloud version. Your data, your choice.",
+      },
+      {
+        question: "Can I use Multica commercially?",
+        answer:
+          "Yes. Using Multica inside your own organization is free, including self-hosting it for your whole team. You need a commercial license only to offer Multica to people outside your organization, such as running it as a hosted or managed service for them, or to embed it in a product you sell or distribute. The [licensing FAQ](/licensing) walks through common scenarios.",
       },
       {
         question:
@@ -216,19 +222,19 @@ export function createEnDict(
       {
         question: "Is my code safe? Where does agent execution happen?",
         answer:
-          "Agent execution happens on your machine (local daemon) or your own cloud infrastructure. Code never passes through Multica servers. The platform only coordinates task state and broadcasts events.",
+          "Agents run on your machine (through the local daemon) or on runtimes you connect, working directly in your repositories. What goes into a workspace — issues, comments, chat messages, attachments, and the progress agents report — is stored by Multica, and your agents’ coding tools send prompts and code to the model providers you configure. To keep workspace data on your own servers, self-host Multica. See the [privacy policy](/privacy) for details.",
       },
       {
         question: "How many agents can I run?",
         answer:
-          "As many as your hardware supports. Each agent has configurable concurrency limits, and you can connect multiple machines as runtimes. There are no artificial caps in the open source version.",
+          "As many as your hardware supports. Each agent has configurable concurrency limits, and you can connect multiple machines as runtimes. There are no artificial caps when you self-host.",
       },
     ],
   },
 
   footer: {
     tagline:
-      "Project management for human + agent teams. Open source, self-hostable, built for the future of work.",
+      "Project management for human + agent teams. Source-available, self-hostable, built for the future of work.",
     cta: "Get started",
     groups: {
       product: {
@@ -254,7 +260,8 @@ export function createEnDict(
         label: "Company",
         links: [
           { label: "About", href: "/about" },
-          { label: "Open Source", href: "#open-source" },
+          { label: "Licensing", href: "/licensing" },
+          { label: "Privacy", href: "/privacy" },
           { label: "Contact Sales", href: "/contact-sales" },
           { label: "GitHub", href: githubUrl },
         ],
@@ -281,9 +288,228 @@ export function createEnDict(
       "We think the same inflection is happening again. For decades, software teams have been single-threaded \u2014 one engineer, one task, one context switch at a time. AI agents change that equation. Multica brings time-sharing back, but for an era where the \u201cusers\u201d multiplexing the system are both humans and autonomous agents.",
       "In Multica, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code \u2014 just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.",
       "Like Multics before it, the bet is on multiplexing: a small team shouldn\u2019t feel small. With the right system, two engineers and a fleet of agents can move like twenty.",
-      "The platform is fully open source and self-hostable. Your data stays on your infrastructure. Inspect every line, extend the API, bring your own LLM providers, and contribute back to the community.",
+      "The source code is public and you can self-host Multica for free, keeping your workspace data on your own infrastructure. Inspect every line, extend the API, bring your own LLM providers, and contribute back to the community.",
     ],
     cta: "View on GitHub",
+    team: {
+      title: "Who\u2019s behind Multica",
+      paragraphs: [
+        "Multica is built by a small team that has been working together since 2021. Before Multica, we built devv.ai, an AI search engine for developers. In 2025 we turned to the problem we kept running into ourselves: how a small team actually gets work done alongside AI agents. That became Multica.",
+        "The source code is public and you can self-host it, so you can read every line before you build on Multica, and a self-hosted deployment runs entirely on your own infrastructure. How commercial use works is spelled out on our [licensing page](/licensing).",
+      ],
+      contacts: [
+        {
+          label: "Commercial licensing & sales",
+          linkLabel: "Contact Sales",
+          href: "/contact-sales",
+        },
+        {
+          label: "How licensing works",
+          linkLabel: "Licensing FAQ",
+          href: "/licensing",
+        },
+        { label: "Community & support", linkLabel: "Discord", href: discordUrl },
+        { label: "Source code & issues", linkLabel: "GitHub", href: githubUrl },
+      ],
+    },
+  },
+
+  licensing: {
+    title: "Licensing",
+    intro: [
+      "Multica is released under the [Multica License](https://github.com/multica-ai/multica/blob/main/LICENSE): the Apache License 2.0 with a few additional conditions. The source code is public, and using Multica inside your own organization is free, including self-hosting it for your whole team.",
+      "The main additional condition covers hosted use: offering Multica to people outside your organization requires a commercial license. This page shows where that line falls, using the questions we hear most often. It is a plain-language guide, not legal advice. If anything here differs from the LICENSE, the LICENSE controls.",
+    ],
+    rule: {
+      title: "The rule of thumb",
+      text: "Is anyone outside your organization driving the instance — creating issues, talking to agents, or triggering work? If so, through any interface (web, Slack, or API), that is a hosted service. If they only receive results your team produced with Multica, that is internal use.",
+    },
+    scenarios: {
+      title: "Common scenarios",
+      scenarioColumn: "Scenario",
+      licenseColumn: "Commercial license",
+      required: "Required",
+      notRequired: "Not required",
+      items: [
+        {
+          scenario: "Your organization uses Multica internally",
+          example: "Self-hosted, across any number of workspaces.",
+          required: false,
+        },
+        {
+          scenario:
+            "You deploy Multica for a client, who owns it and uses it internally",
+          example: "Implementation, training, consulting, or customization work.",
+          required: false,
+        },
+        {
+          scenario:
+            "Your team uses Multica to do work for clients, who only receive the deliverables",
+          example:
+            "An agency that runs its content production in Multica and ships the finished work.",
+          required: false,
+        },
+        {
+          scenario:
+            "Agents only push reports or notifications to a client\u2019s Slack channel",
+          example:
+            "The client reads them but never interacts with the instance.",
+          required: false,
+        },
+        {
+          scenario:
+            "You run and manage Multica instances for clients on your own infrastructure",
+          example: "A managed service, whether or not you charge for it.",
+          required: true,
+        },
+        {
+          scenario: "People outside your organization sign in to your instance",
+          example: "Clients, partners, or the public get their own accounts.",
+          required: true,
+        },
+        {
+          scenario:
+            "People outside your organization drive your instance through another entry point",
+          example:
+            "A public website backed by Multica, a Slack integration, or an API \u2014 even when it is free.",
+          required: true,
+        },
+        {
+          scenario: "You embed Multica in a product you sell or distribute",
+          example: "Multica ships as a component of another commercial offering.",
+          required: true,
+        },
+      ],
+    },
+    sections: [
+      {
+        heading: "Other conditions",
+        bullets: [
+          "Branding: keep the Multica logo, product name, and the copyright and attribution information shown in the Multica interface, unless we have given you a written branding waiver.",
+          "Attribution: if you build on Multica\u2019s backend, daemon, or CLI without the Multica interface, keep the copyright and NOTICE information, and state in your user-facing documentation that your product is built on Multica, with a link to the [GitHub repository](https://github.com/multica-ai/multica).",
+          "Forks: publishing the source code of a fork is not a hosted service and needs no commercial license. Anyone who operates a hosted service from that fork needs their own.",
+          "A commercial license and a branding waiver are separate grants. One does not include the other.",
+        ],
+      },
+      {
+        heading: "Getting a commercial license",
+        paragraphs: [
+          "Tell us about your use case through [Contact Sales](/contact-sales) and we\u2019ll get back to you within three business days. Not sure whether your setup needs a license? Ask us on [Discord](" + discordUrl + ") or through the same form.",
+        ],
+      },
+    ],
+  },
+
+  privacy: {
+    title: "Privacy Policy",
+    lastUpdated: "Last updated: September 24, 2026",
+    intro: [
+      "This Privacy Policy explains how Index Labs (Hong Kong) Limited (“Multica”, “we”, “us”) collects, uses, and shares personal information when you visit multica.ai, contact us, or use Multica Cloud, our hosted service, including the web, desktop, and mobile apps.",
+      "It does not cover Multica deployments you host yourself. The operator of a self-hosted deployment controls its data, and any AI providers, integrations, or analytics it uses depend on how they configure it. The only thing a self-hosted server sends us is a daily usage snapshot: a random ID for the deployment, so snapshots from the same server can be linked; the server version; approximate counts of workspaces, members, agents, and connected daemons; and the number of agent runs started, completed, failed, and cancelled that day. It contains no names, email addresses, or content. Setting DO_NOT_TRACK=1 turns off this snapshot.",
+    ],
+    sections: [
+      {
+        heading: "Information we collect",
+        bullets: [
+          "Account information: your name, email address, and profile picture. If you sign in with Google, we receive your name, email address, and profile picture from Google. You can also add profile details such as language, time zone, and a short bio, and answer onboarding questions such as your role, your use case, and how you heard about Multica.",
+          "Content you create: workspaces, issues, comments, chat messages, attachments, agent instructions, and anything else you or your agents put into Multica Cloud.",
+          "Contact Sales inquiries: your name, business email, company name and size, country or region, use case, goals, and communication preferences. To prevent abuse, we also record the IP address and browser user agent the form was sent from.",
+          "Billing information: subscription payments are handled by Stripe on pages hosted by Stripe. We never receive or store your full card details.",
+          "Usage and device information: app version, operating system, client type, and a randomly generated installation ID; the name of each machine you connect as a runtime (its hostname by default); and crash and error reports. Before a report is sent, we filter recognizable email addresses and credentials out of the error message, but reports can still contain other details about what went wrong.",
+          "Feedback: when you send feedback, we receive your message along with the page, app version, operating system, and any error details.",
+        ],
+      },
+      {
+        heading: "How we use information",
+        bullets: [
+          "To provide, operate, and secure Multica Cloud, including signing you in, syncing your workspaces, and delivering notifications and invitations.",
+          "To respond to Contact Sales inquiries and support requests.",
+          "To send service messages such as sign-in codes and workspace invitations. We only send product updates or marketing if you opted in, and you can unsubscribe at any time.",
+          "To understand how Multica is used, fix bugs, and improve the product.",
+          "To prevent abuse and meet our legal obligations.",
+        ],
+      },
+      {
+        heading: "Legal bases",
+        paragraphs: [
+          "Where the law requires a legal basis for processing, we rely on performing our contract with you, to provide Multica Cloud; our legitimate interests in securing, supporting, and improving Multica and responding to inquiries; your consent, for marketing messages; and compliance with our legal obligations.",
+        ],
+      },
+      {
+        heading: "AI features",
+        paragraphs: [
+          "Your coding agents run on your own machines or on runtimes you connect, using the coding tools and accounts you set up. An agent running on your machine does not mean the model runs there: those tools send prompts, code, files, and tool results to their model providers, under the terms of the tool and account you use. Multica coordinates their work.",
+          "Some Multica Cloud features, such as chat titles and suggested follow-ups, send your first chat message or a few recent messages to a third-party large language model provider we choose, to generate the result. Multica does not use your content to train AI models.",
+        ],
+      },
+      {
+        heading: "Cookies and analytics",
+        paragraphs: [
+          "We use cookies that are needed to keep you signed in, protect against cross-site request forgery, and give you access to files you uploaded. We also use a cookie that remembers which campaign or website referred you, for up to 30 days, and cookies that remember your language and the last workspace you opened.",
+          "We use PostHog to understand product usage and to collect crash reports. When you are signed in, PostHog receives your account name and email so we can match reports to your account. We do not use advertising cookies, and we do not sell your personal information.",
+        ],
+      },
+      {
+        heading: "Who we share information with",
+        paragraphs: [
+          "Information you put into a workspace is visible to its other members and admins, and to the agents and integrations they authorize, according to the workspace’s permissions. If your workspace belongs to an organization, that organization manages its content and may handle requests about it.",
+          "We also disclose information when the law requires it, and to a buyer or successor if Multica is involved in a merger, acquisition, or sale of assets.",
+          "Beyond that, we share personal information only with the service providers that help us run Multica and with integrations you choose to connect:",
+        ],
+        bullets: [
+          "Amazon Web Services: hosting, file storage, and content delivery",
+          "Vercel: hosting for the website and web app",
+          "Stripe: payments and billing",
+          "Resend: sign-in and invitation emails",
+          "PostHog: product analytics and crash reports",
+          "Google: sign-in, if you choose Sign in with Google",
+          "Large language model providers: the AI features described above",
+          "Integrations you connect, such as Slack, Lark, DingTalk, WeCom, Telegram, GitHub, GitLab, or apps connected through Composio: the data you choose to exchange with them, which is also subject to their own terms",
+        ],
+      },
+      {
+        heading: "Where information is stored",
+        paragraphs: [
+          "Multica Cloud is hosted on Amazon Web Services and Vercel. We and our service providers may process your information in the United States and other countries. Wherever it is processed, we protect it as described in this policy.",
+        ],
+      },
+      {
+        heading: "How long we keep information",
+        paragraphs: [
+          "We keep account information and workspace content for as long as your account or workspace exists. When a workspace owner deletes a workspace, its issues, comments, and other content are removed from Multica Cloud, though backups we keep for recovery may still contain copies for a period afterwards. To have files uploaded to a deleted workspace erased from our file storage, email [support@multica.ai](mailto:support@multica.ai). We keep billing records for as long as accounting and tax rules require, and product analytics, crash reports, Contact Sales inquiries, and feedback for as long as they are useful for supporting you and improving Multica. We delete inquiries and feedback on request.",
+        ],
+      },
+      {
+        heading: "Your choices and rights",
+        paragraphs: [
+          "Depending on where you live, you may have the right to access, correct, delete, or export your personal information; to object to or restrict certain processing; to withdraw consent you have given, such as for marketing messages; and to complain to your local data protection authority. You can update your profile in Multica at any time and delete a workspace you own from its settings. For anything else, including deleting your account, email [support@multica.ai](mailto:support@multica.ai). We will respond within 30 days.",
+        ],
+      },
+      {
+        heading: "Security",
+        paragraphs: [
+          "We protect your information with encryption in transit, access controls, and encrypted storage for integration credentials. No system is perfectly secure, so please contact us right away if you believe your account has been compromised.",
+        ],
+      },
+      {
+        heading: "Children",
+        paragraphs: [
+          "Multica is not directed to children under 16, and we do not knowingly collect their personal information.",
+        ],
+      },
+      {
+        heading: "Changes to this policy",
+        paragraphs: [
+          "We may update this policy from time to time. We will post the new version on this page and update the date at the top. If a change is significant, we will let you know before it takes effect.",
+        ],
+      },
+      {
+        heading: "Contact us",
+        paragraphs: [
+          "Multica is operated by Index Labs (Hong Kong) Limited, which is responsible for your personal information. For privacy questions or requests, email [support@multica.ai](mailto:support@multica.ai).",
+        ],
+      },
+    ],
   },
 
   changelog: {
@@ -296,6 +522,232 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.6.5",
+        date: "2026-10-21",
+        title: "Clearer statuses for Issues outside projects, private CA repo sync, lighter background tabs, and steadier runs",
+        changes: [],
+        features: [
+          "Issues outside a project list only the Default workflow's statuses by default; search still finds every status.",
+        ],
+        improvements: [
+          "Background browser tabs stop refreshing the unread count until you return; the desktop badge keeps updating when minimized.",
+        ],
+        fixes: [
+          "A new workflow step can get its handler and instruction right away, before you save.",
+          "The project sidebar shows the workflow name, with the handoff count on hover.",
+          "A private CA set on a self-hosted server is trusted when the daemon syncs repos, and failed syncs show the exact error.",
+          "Self-hosted Forgejo, Gitea, and GitLab PRs wake agents when checks finish or the PR merges.",
+          "A wakeup rule stops showing an old error once a later check goes through.",
+          "The desktop tab bar's right-click menu and buttons follow your language.",
+          "Copilot starts even with very long context.",
+          "OpenCode 2.x lets you pick a thinking level again.",
+          "Codex runs on the default model now show an estimated cost.",
+          "Scrolling to the bottom of an Issue no longer pushes the page up or leaves a blank gap.",
+        ],
+      },
+      {
+        version: "0.6.4",
+        date: "2026-10-20",
+        title: "Interactive Markdown tables, Muse Code, safer private runtimes, and steadier runs",
+        changes: [],
+        features: [
+          "Markdown tables let you resize columns, enlarge them, sort and filter, and copy.",
+          "Issue reference cards show more context, and Shift+click opens a side preview.",
+          "With Muse Code 1.4.10 or later installed and signed in, agents can run tasks on it and resume sessions.",
+          "On macOS and Linux, Cursor 2026.10.14 or later accepts new guidance mid-run, except in local folders.",
+          "Quick actions can post a preset comment without picking an agent or squad.",
+          "The Inbox can show only Issues that no agent is working on.",
+          "Rename an Issue straight from its actions menu in lists and boards.",
+        ],
+        improvements: [
+          "Enlarging an HTML preview keeps what you typed and clicked, and Issue description previews can be enlarged too.",
+          "The comment outline folds resolved threads by default; expand them any time.",
+          "Switching pages stays smoother while lots of updates come in.",
+          "More Gemini models and aliases show an estimated cost.",
+          "The docs add a guide to quick actions.",
+        ],
+        fixes: [
+          "Making a shared runtime private shows the impact first, then unbinds teammates' agents and cancels their runs.",
+          "Autopilots for those teammate agents are paused when a runtime becomes private, until you resume them.",
+          "Picking someone else's private runtime is flagged when you save the agent, not when it fails to run.",
+          "Replies to a comment delivered mid-run still go to the agent that received it.",
+          "A comment-triggered task you cancelled is no longer queued again on its own.",
+          "Replies to an assigned task stay in its thread, next to the execution log.",
+          "Claude runs that start slowly still accept guidance mid-run.",
+          "Codex user skills missing required details now load, and broken ones are skipped with a warning.",
+          "After a failed DeepSeek Harness setup, it shows as not installed and can be retried, keeping your files.",
+          "A closed floating chat stops working in the background, and keeps your draft and uploads.",
+          "The desktop app opens some older workspaces, and keeps their tabs.",
+          "Creating a local project on Linux opens the folder picker.",
+          "With the unread filter on, an opened notification no longer vanishes as it is marked read.",
+          "Comment links on desktop jump to the right comment.",
+          "The browser tab keeps showing the title of the workspace page you are on.",
+          "Archiving an agent with a long name keeps the name and confirm button inside the dialog.",
+          "Pictures quoted in WeCom reach the agent, matched with their text.",
+          "Files stop sending to WeCom once its connection is revoked.",
+          "WeCom notifications no longer risk being sent twice.",
+          "PR checks and check-based wakeups work even when the GitHub App lacks Contents access.",
+          "English docs pages no longer flicker on load.",
+          "Cancelled tasks no longer add an extra English sentence.",
+        ],
+      },
+      {
+        version: "0.6.3",
+        date: "2026-10-16",
+        title: "Per-run cost details, shorter onboarding, revoked access for former members, and steadier runs",
+        changes: [],
+        features: [
+          "The execution log shows a cost bar for each run, along with its tokens, time, and model.",
+          "Run details compare runs by cost, tokens, or agent time, with a cumulative view one click away.",
+          "Expand any run to see its token and cost breakdown.",
+        ],
+        improvements: [
+          "Skipping runtime setup during onboarding opens the install guide Issue right away.",
+        ],
+        fixes: [
+          "Members who leave or are removed from a workspace stop getting its notifications and live updates.",
+          "The agent builder fills in the configuration even when its draft comes back slightly malformed.",
+          "The agent builder's retry warning stays gone once you close it or edit the form yourself.",
+          "Tasks picked up but never delivered to your computer go back to the queue instead of getting stuck.",
+          "Resuming in a local folder no longer replays committed changes as drafts, and keeps your other drafts.",
+          "Cache cleanup no longer deletes tracked folders like .next, or Git checkouts inside them.",
+          "Claude Sonnet 5.5 and Haiku 5.5 runs now show an estimated cost.",
+          "Arabic, Hebrew, and other right-to-left text reads in the right order, even with English mixed in.",
+        ],
+      },
+      {
+        version: "0.6.2",
+        date: "2026-10-13",
+        title: "Text and link list properties, workspace switching in Cmd+K, one-click starters, and steadier runs",
+        changes: [],
+        features: [
+          "Custom properties can hold a list of text or links, and be filtered by exact value.",
+          "Press Cmd/Ctrl+K to switch to another workspace.",
+          "On desktop, switching workspace brings back the tab you last had open there.",
+          "Clicking a conversation starter in an empty chat sends it right away, and never overwrites a draft.",
+          "Turn on start-at-login for your local daemon from the command line; it stays off until you do.",
+        ],
+        improvements: [
+          "The Issues list loads its first page faster.",
+          "Desktop navigation and the tab bar now line up.",
+        ],
+        fixes: [
+          "Long Codex threads continue across local folders, and rate limits no longer stall a run.",
+          "The Codex CLI inside ChatGPT.app is detected.",
+          "Pi tasks get the MCP servers you configured.",
+          "Failed Pi and Kimi runs show as failed instead of finishing quietly.",
+          "Antigravity keeps its answer even when the connection drops right at the end.",
+          "A CodeBuddy startup error no longer stops runs already in progress.",
+          "Oh My Pi starts a fresh session when asked, instead of resuming the old one.",
+          "Tasks on Windows keep access to the system temp folder.",
+          "Tasks are no longer cut off as unresponsive after your computer wakes from sleep.",
+          "The local daemon recovers even when its health-check port is taken.",
+          "Hermes picks up its earlier session across local folders.",
+          "Busy Autopilot schedules no longer go silent, and runs keep their Autopilot attribution.",
+          "PR wakeups no longer miss a change, and explain problems they can recover from.",
+          "Lark clears its Typing reaction once the task ends.",
+          "WeCom Issue notifications come from the bot of the agent doing the work.",
+          "Issue prefixes that contain digits show up in search.",
+          "Editing a project at the same time as someone else no longer wipes their fields.",
+          "Follow-ups sent while a chat is still loading are no longer lost.",
+          "Plain attachment download links keep working, and text steps in run details are labeled correctly.",
+          "Server errors no longer expose internal error details.",
+        ],
+      },
+      {
+        version: "0.6.1",
+        date: "2026-10-01",
+        title: "Cumulative run cost curves, a faster Issues list, and steadier workspace switching",
+        changes: [],
+        features: [
+          "The run chart follows your pointer, and shows the quiet stretches between runs.",
+          "An Issue's sidebar shows the cumulative cost of its runs as a curve.",
+          "Mark a duplicate Issue from the command line and keep the link to the original.",
+        ],
+        improvements: [
+          "The Issues list stays steady as runs come and go, and the working-agents filter returns faster.",
+        ],
+        fixes: [
+          "Codex offers GPT-6.1 Sol, and cost for the GPT-6 models reads at current prices.",
+          "Hitting a provider's usage limit reads as a quota, not as a credential problem.",
+          "Closing the floating chat leaves your keyboard shortcuts working, and keeps your draft.",
+          "On Windows, a repository checks out even after your workspaces folder was moved.",
+          "Switching workspace from an open chat lands you there, with your session and project still selected.",
+        ],
+      },
+      {
+        version: "0.6.0",
+        date: "2026-09-28",
+        title: "Conditional wakeups, instant search, deliverable previews, and a new Settings page",
+        changes: [],
+        features: [
+          "An Issue can wake its agent when a status changes, a sub-issue finishes, or a pull request moves.",
+          "Give a wakeup an expiry, and see every check it made.",
+          "Issue and project search return results instantly on web and desktop.",
+          "Reply to a running agent and choose to add to this run, queue a new one, or restart it.",
+          "See a receipt telling you the running agent got your reply.",
+          "Find an Issue's deliverables in one sidebar, with versions and details.",
+          "Attachments sit in a grid, and HTML, Markdown, CSV, JSON, and YAML preview in place.",
+          "Mermaid diagrams show whole, zoom in close, and images copy in one click.",
+          "See a run's timeline on the Issue, along with failed and cancelled states.",
+          "Let an Issue move itself the way you choose once its pull requests are merged.",
+          "Preview an Issue beside the list without leaving it.",
+          "WeCom notices arrive in each person's own language.",
+          "Pick Claude Opus 5.5 and GPT-6 Sol/Luna from the model list.",
+          "See a repository's project description as you pick it.",
+        ],
+        improvements: [
+          "Settings are grouped into personal, workspace, and this device, and you can search them.",
+          "Agent task history pages through and adds up the time spent.",
+          "Back, forward, and the sidebar toggle sit together on the left in the desktop app.",
+          "See how many agents each MCP server is assigned to.",
+        ],
+        fixes: [
+          "Model settings you saved stay saved.",
+          "A Hermes task runs with the settings you picked.",
+          "MCP tool inputs stay fully visible.",
+          "An attachment you quote in Telegram reaches the agent with your message.",
+          "WeCom no longer answers the same message twice.",
+          "Tools with the same name across plugins no longer replace each other.",
+          "A link opened by Issue identifier expands the comment it points to.",
+          "Opening a project on mobile shows its Issues right away.",
+          "Select all, and every selected Issue is deleted.",
+          "Run status reads accurately.",
+          "A saved view keeps the name you typed.",
+          "The wakeup menu shows its options correctly.",
+          "A pull request row shows the whole diff, and spins while checks run.",
+        ],
+      },
+      {
+        version: "0.5.3",
+        date: "2026-09-24",
+        title: "Telegram media, Simplified Chinese on mobile, Issue and PR auto-complete, and truer usage figures",
+        changes: [],
+        features: [
+          "Send photos, videos, audio, and files to an agent on Telegram.",
+          "Attachments an agent produces come back to you in Telegram.",
+          "Pick Simplified Chinese, English, or your system language in the mobile app.",
+          "See an Issue's linked pull requests, and let it complete itself once they are all merged.",
+          "Watch an Antigravity agent's tool steps as they happen.",
+          "Add new instructions to a Grok Build task while it is still running.",
+          "Browse every attachment on an Issue full-window and page through them.",
+          "Read the whole documentation site in French.",
+          "Find licensing answers, the privacy policy, and the team behind Multica on the site.",
+          "Self-hosted admins can make automatic titles and quick actions respond faster.",
+        ],
+        improvements: [
+          "Comment actions are grouped by what you came to do, with Edit and Resolve first.",
+        ],
+        fixes: [
+          "Usage for a resumed Claude session counts this run only.",
+          "Cache hit rates on Issues and runtimes no longer read higher than they are.",
+          "Agent replies in a thread appear in the order they were sent.",
+          "A task on Windows starts even when a file is briefly in use.",
+          "An Issue link in DingTalk shows up without stray characters.",
+          "A self-hosted server explains an untrusted certificate, and can trust your own CA.",
+        ],
+      },
       {
         version: "0.5.2",
         date: "2026-09-23",
@@ -3728,17 +4180,17 @@ export function createEnDict(
     ],
     consent: {
       intro:
-        "Multica, Inc. respects your privacy. We’ll use your personal information only to manage your account and deliver the products or services you’ve requested. Occasionally, we’d love to share product updates, best practices, and insights that may be relevant to you. Please let us know below if you’d like to hear from us.",
+        "Multica respects your privacy. We’ll use your personal information only to manage your account and deliver the products or services you’ve requested. Occasionally, we’d love to share product updates, best practices, and insights that may be relevant to you. Please let us know below if you’d like to hear from us.",
       outreach:
-        "I’d like to receive one-to-one communication from Multica, Inc., including service updates, support inquiries, and business-related follow-ups.",
+        "I’d like to receive one-to-one communication from Multica, including service updates, support inquiries, and business-related follow-ups.",
       updates:
         "I’d like to receive product updates, insights, and event invitations from Multica.",
       unsubscribe:
         "You can unsubscribe from our communications at any time. For more details on how we handle your data and privacy rights, please review our",
       submitConsent:
-        "By clicking “Submit,” you consent to allow Multica, Inc. to store and process your information for the purpose of delivering the requested content.",
+        "By clicking “Submit,” you consent to allow Multica to store and process your information for the purpose of delivering the requested content.",
       privacyLinkLabel: "Privacy Policy.",
-      privacyLinkHref: "/about",
+      privacyLinkHref: "/privacy",
     },
     success: {
       title: "Thanks — we got it.",

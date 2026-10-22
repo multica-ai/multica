@@ -20,6 +20,7 @@ import {
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
+  cacheHitRatePercent,
   formatTokens,
   formatUsd,
   estimateCost,
@@ -75,11 +76,9 @@ function rangesForDim(dim: Exclude<WhenTab, "heatmap">) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Local segmented control. shadcn's Tabs is wired for full tab pages with
 // keyboard nav and ARIA semantics that a compact toolbar pill doesn't need.
 // Visual: light-grey track + white "raised" active pill.
-// ---------------------------------------------------------------------------
 
 function Segmented<T extends string | number>({
   value,
@@ -117,7 +116,6 @@ function Segmented<T extends string | number>({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Top-level orchestrator. Owns the time window, fetches a 180-day usage
 // cache once, slices it into "current" / "prior" windows for delta math,
 // and threads everything into the four visual blocks below.
@@ -126,7 +124,6 @@ function Segmented<T extends string | number>({
 // weeks (~6 months) so the long view actually looks long. The 7d/30d/90d
 // period selector slices client-side; the prior-window delta on the Cost
 // KPI also benefits from having extra history available.
-// ---------------------------------------------------------------------------
 
 export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { t, i18n } = useT("runtimes");
@@ -171,9 +168,11 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
 
   const tokensTotal =
     totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
-  const cacheableTokens = totals.input + totals.cacheRead;
-  const cacheHitRate =
-    cacheableTokens > 0 ? Math.round((totals.cacheRead / cacheableTokens) * 100) : 0;
+  const cacheHitRate = cacheHitRatePercent(
+    totals.input,
+    totals.cacheRead,
+    totals.cacheWrite,
+  );
 
   const costDelta = pctChange(totals.cost, prevTotals.cost);
   const locales = i18n.resolvedLanguage ?? i18n.language;
@@ -272,10 +271,12 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
           accent={totals.cacheSavings > 0 ? "success" : "default"}
           hint={
             <span>
-              {t(($) => $.usage.kpi_cache_hint, {
-                pct: cacheHitRate,
-                reads: formatTokens(totals.cacheRead),
-              })}
+              {cacheHitRate == null
+                ? "—"
+                : t(($) => $.usage.kpi_cache_hint, {
+                    pct: cacheHitRate,
+                    reads: formatTokens(totals.cacheRead),
+                  })}
             </span>
           }
         />
@@ -322,13 +323,11 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // WhenChart — answers "WHEN was this runtime spending money?".
 // Dimension (Daily / Weekly) is owned by the parent so the page-level
 // period selector can react to it. Heatmap is an independent view toggled
 // inside this card; it ignores both the dimension and the period selector,
 // always showing the long 26-week view.
-// ---------------------------------------------------------------------------
 
 type Dim = Exclude<WhenTab, "heatmap">;
 type DailyMetric = "cost" | "tokens";
@@ -498,14 +497,12 @@ function WeeklyTab({
   return <WeeklyCostChart data={costData} />;
 }
 
-// ---------------------------------------------------------------------------
 // EmptyChartState — drop-in replacement for "the chart would render empty".
 // Two cases worth distinguishing:
 //   1. No tokens at all → "no usage" (genuinely nothing happened).
 //   2. Tokens present but cost is $0 → almost always means the model name
 //      reported by the daemon isn't in our pricing table. List the offenders
 //      so a developer can update MODEL_PRICING in one go.
-// ---------------------------------------------------------------------------
 
 function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
@@ -546,7 +543,6 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // CustomPricingBar — the only entry point into the custom-pricing dialog,
 // rendered above the KPI grid. Two states:
 //
@@ -560,7 +556,6 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
 //      saved rates could no longer be corrected or removed from the UI.
 //
 // Hidden entirely when nothing is unmapped and nothing is overridden.
-// ---------------------------------------------------------------------------
 
 function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
@@ -617,10 +612,8 @@ function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Chart legend — one coloured dot + label per stack segment, rendered in
 // WhenChart's header so the chart body keeps its full vertical real estate.
-// ---------------------------------------------------------------------------
 
 function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean }) {
   const { t } = useT("runtimes");
@@ -650,9 +643,7 @@ function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean 
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cost-by block: two-tab attribution view (by agent / by model).
-// ---------------------------------------------------------------------------
 
 function CostByBlock({
   runtimeId,
@@ -799,11 +790,9 @@ function CostByList({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Folded row — single chevron-toggle link revealing the raw breakdown
 // table. The Activity heatmap used to live here too; it was promoted to a
 // WhenChart toggle, leaving only the breakdown table behind.
-// ---------------------------------------------------------------------------
 
 function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
@@ -876,9 +865,7 @@ function DailyBreakdownTable({ usage }: { usage: RuntimeUsage[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Loading + empty states
-// ---------------------------------------------------------------------------
 
 function UsageSkeleton() {
   return (
@@ -902,9 +889,7 @@ function UsageEmpty() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 interface UsageTotals {
   input: number;

@@ -185,7 +185,43 @@ type antigravityStreamEvent struct {
 	Result     *antigravityStreamResult     `json:"result"`
 }
 
+// antigravityNetworkIssueError is the provider sentence some agy releases
+// report when a trailing round trip fails. It carries no Go error text, so it
+// has to stay a literal match alongside the transport patterns below.
 const antigravityNetworkIssueError = "There was a network issue connecting to the server, please try again."
+
+// antigravityTransportErrorRe matches the causes Go's http client reports when
+// a round trip never produced a response: socket, DNS and TLS failures. These
+// are the strings that appear inside the `*url.Error` agy wraps as
+// `API error (attempt N): request failed: Post "...": <cause>`.
+//
+// Two things are deliberately excluded.
+//
+//   - agy's own `request failed:` prefix. It is tempting to match it directly
+//     since it marks an http.Client failure, but only one spelling has been
+//     observed in the field, and nothing rules out agy reusing the same prefix
+//     for an HTTP status error. Matching the cause keeps a provider rejection
+//     from being read as transport noise.
+//   - Provider-side rejections: quota, capacity, overload, policy and auth all
+//     arrive as an HTTP response, so they are decisions about the request
+//     rather than a failure to deliver it. Those must stay failures the user
+//     sees instead of being smoothed over by a complete-looking answer —
+//     reportTaskResult documents failing closed for exactly that reason.
+var antigravityTransportErrorRe = regexp.MustCompile(`(?i)(\bEOF\b|connection reset by peer|broken pipe|connection refused|connection timed out|i/o timeout|tls handshake timeout|tls: handshake failure|use of closed network connection|network is unreachable|no such host|server misbehaving|malformed HTTP response|http2: client connection lost|http2: server sent GOAWAY)`)
+
+// antigravityTrailingTransportError reports whether agy's provider error
+// describes a transport-level failure rather than a decision the provider made
+// about the request.
+func antigravityTrailingTransportError(providerError string) bool {
+	trimmed := strings.TrimSpace(providerError)
+	if trimmed == "" {
+		return false
+	}
+	if strings.EqualFold(trimmed, antigravityNetworkIssueError) {
+		return true
+	}
+	return antigravityTransportErrorRe.MatchString(trimmed)
+}
 
 func (u antigravityStreamUsage) hasTokens() bool {
 	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0
@@ -231,8 +267,15 @@ func antigravityResultStatus(status string) string {
 	}
 }
 
+// antigravityCompletedDespiteTrailingNetworkError reports whether a turn that
+// agy ended in an error actually delivered a finished answer first. All three
+// conditions are required: the trailing failure has to be transport-level (a
+// provider-side rejection is a real failure), agy has to have handed back a
+// non-empty canonical response, and the latest agent_response step has to have
+// reached DONE — an ACTIVE step means the answer was still being written when
+// the connection went away.
 func antigravityCompletedDespiteTrailingNetworkError(providerError, response string, agentResponseDone bool) bool {
-	return strings.EqualFold(strings.TrimSpace(providerError), antigravityNetworkIssueError) &&
+	return antigravityTrailingTransportError(providerError) &&
 		strings.TrimSpace(response) != "" &&
 		agentResponseDone
 }

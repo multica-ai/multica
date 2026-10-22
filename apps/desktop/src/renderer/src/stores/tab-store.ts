@@ -3,19 +3,11 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
-import { isReservedSlug } from "@multica/core/paths";
+import { workspaceSlugForPath } from "@multica/core/paths";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-//
-// MUL-4741 Phase 2: tabs are *sessions*, not routers. A TabSession is pure
-// serializable state — URL, identity, virtual history, and a memento of
-// restorable view state. The single app router is a projection of the active
-// session, driven exclusively by the tab Coordinator (src/platform/
-// tab-coordinator.ts) which subscribes to this store and reconciles the
-// router to `activeSession.url` with a navigation token. Nothing in this
-// file touches react-router.
+// Tab sessions hold serializable URLs, identity, virtual history, and view
+// mementos. The coordinator projects the active session onto the single router;
+// this store does not operate the router.
 
 /**
  * One captured scroll position.
@@ -293,9 +285,7 @@ interface TabStore {
   reset: () => void;
 }
 
-// ---------------------------------------------------------------------------
 // Session identity helpers
-// ---------------------------------------------------------------------------
 //
 // A tab's icon is NOT part of this model. It is derived from `tab.url` at
 // render time via `routeIconForPath` (@multica/views/layout), which shares the
@@ -303,18 +293,7 @@ interface TabStore {
 // surfaces cannot drift, and no stale icon can survive in persisted state.
 // Title is likewise not determined here; it comes from document.title.
 
-/** Extract the leading workspace slug from a path, or null if the path
- *  isn't workspace-scoped (global path, root, or empty). */
-function extractWorkspaceSlug(path: string): string | null {
-  const first = path.split("/").filter(Boolean)[0] ?? "";
-  if (!first) return null;
-  if (isReservedSlug(first)) return null;
-  return first;
-}
-
-// ---------------------------------------------------------------------------
 // URL helpers
-// ---------------------------------------------------------------------------
 
 /** Split a tab URL into pathname and the search+hash suffix. */
 export function splitTabUrl(url: string): { pathname: string; suffix: string } {
@@ -382,12 +361,12 @@ function inboxSelectionKeyForUrl(url: string): string | null {
  * Returns null for rejects (caller decides how to recover — usually by
  * dropping the tab or substituting a default).
  */
-export function sanitizeTabPath(path: string): string | null {
+export function sanitizeTabPath(path: string, savedGroupSlug?: string): string | null {
   const { pathname, suffix } = splitTabUrl(path);
   const segments = pathname.split("/").filter(Boolean);
   const firstSegment = segments[0] ?? "";
   if (!firstSegment) return null;
-  if (isReservedSlug(firstSegment)) {
+  if (!workspaceSlugForPath(path, savedGroupSlug)) {
     // Don't log for known transition paths — these are legitimate inputs
     // at the interception boundary (older persisted state or stale callers).
     const isTransition = path === "/workspaces/new" || path.startsWith("/invite/");
@@ -405,9 +384,7 @@ export function sanitizeTabPath(path: string): string | null {
   return path;
 }
 
-// ---------------------------------------------------------------------------
 // Session factory
-// ---------------------------------------------------------------------------
 
 function createId(): string {
   return createSafeId();
@@ -487,7 +464,7 @@ function withBrowsingVisit(
   options: BrowsingVisitOptions = {},
 ): WorkspaceTabGroup {
   const clean = sanitizeTabPath(url);
-  if (!clean || extractWorkspaceSlug(clean) !== slug) return group;
+  if (!clean || workspaceSlugForPath(clean) !== slug) return group;
   const historyKey = browsingHistoryKeyForUrl(clean);
   const replacedHistoryKey = options.replacedUrl
     ? browsingHistoryKeyForUrl(options.replacedUrl)
@@ -579,8 +556,8 @@ function normalizeBrowsingHistory(value: unknown, slug: string): string[] {
   const seenResources = new Set<string>();
   for (const candidate of value) {
     if (typeof candidate !== "string") continue;
-    const clean = sanitizeTabPath(candidate);
-    if (!clean || extractWorkspaceSlug(clean) !== slug) continue;
+    const clean = sanitizeTabPath(candidate, slug);
+    if (!clean || workspaceSlugForPath(clean, slug) !== slug) continue;
     const resourceKey = browsingHistoryKeyForUrl(clean);
     if (seenResources.has(resourceKey)) continue;
     seenResources.add(resourceKey);
@@ -618,9 +595,7 @@ function normalizeBrowsingHistoryTitles(
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Group helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Build a group with its MRU order reconciled against the new (tabs,
@@ -711,9 +686,7 @@ function buildCloseOtherTabsResult(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Store
-// ---------------------------------------------------------------------------
 
 export const useTabStore = create<TabStore>()(
   persist(
@@ -1003,7 +976,7 @@ export const useTabStore = create<TabStore>()(
         if (!clean) return;
         // A session never navigates out of its workspace — cross-workspace
         // pushes go through switchWorkspace at the adapter layer.
-        if (extractWorkspaceSlug(clean) !== activeWorkspaceSlug) return;
+        if (workspaceSlugForPath(clean) !== activeWorkspaceSlug) return;
 
         const current = group.tabs[index];
         if (current.url === clean) return;
@@ -1362,11 +1335,11 @@ export function mergePersistedTabs<T extends PersistedTabState>(
   for (const [slug, pGroup] of Object.entries(persisted.byWorkspace)) {
     const tabs: TabSession[] = [];
     for (const pTab of pGroup.tabs) {
-      const clean = sanitizeTabPath(pTab.url);
+      const clean = sanitizeTabPath(pTab.url, slug);
       // Persisted url may have come from a stale version or a
       // manual edit. Drop rather than rewrite so we never silently
       // put users on a url that doesn't match the group's slug.
-      if (!clean || extractWorkspaceSlug(clean) !== slug) {
+      if (!clean || workspaceSlugForPath(clean, slug) !== slug) {
         console.warn(
           `[tab-store] dropping persisted tab "${pTab.url}" from ` +
             `group "${slug}" — url/slug mismatch`,
@@ -1497,9 +1470,7 @@ function setHistoryIndex(
   });
 }
 
-// ---------------------------------------------------------------------------
 // Persisted shapes (for migration)
-// ---------------------------------------------------------------------------
 
 interface V1Tab {
   id: string;
@@ -1673,7 +1644,7 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
   const byWorkspace: Record<string, V2PersistedGroup> = {};
   const oldTabs = v1.tabs ?? [];
   for (const tab of oldTabs) {
-    const slug = extractWorkspaceSlug(tab.path);
+    const slug = workspaceSlugForPath(tab.path);
     if (!slug) continue; // drop root / global-path tabs
     if (!byWorkspace[slug]) byWorkspace[slug] = { tabs: [], activeTabId: "" };
     byWorkspace[slug].tabs.push({
@@ -1711,9 +1682,7 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
   return { activeWorkspaceSlug, byWorkspace };
 }
 
-// ---------------------------------------------------------------------------
 // Selectors (convenience hooks)
-// ---------------------------------------------------------------------------
 
 /**
  * Pure non-hook helper — useful from event handlers / effects that already
