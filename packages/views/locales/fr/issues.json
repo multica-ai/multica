@@ -372,6 +372,8 @@
     "no_value": "Aucune valeur",
     "ordered_by": "Tableau trié par {{field}}",
     "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne.",
+    "sub_issue_count_one": "{{count}} sous-tâche",
+    "sub_issue_count_other": "{{count}} sous-tâches",
     "filter_to_status": "Filtrer sur cet état",
     "outside_workflow": "Hors du workflow de ce tableau",
     "workflow_columns_note": "Les colonnes viennent du workflow du tableau ; hors projet, les vues utilisent Default."

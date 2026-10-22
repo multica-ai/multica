@@ -372,6 +372,8 @@
     "no_value": "No value",
     "ordered_by": "Board ordered by {{field}}",
     "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column.",
+    "sub_issue_count_one": "{{count}} sub-issue",
+    "sub_issue_count_other": "{{count}} sub-issues",
     "filter_to_status": "Filter to this status",
     "outside_workflow": "Not in this board’s workflow",
     "workflow_columns_note": "Columns come from the board’s workflow; views outside a project use Default."

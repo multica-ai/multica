@@ -368,6 +368,7 @@
     "no_value": "값 없음",
     "ordered_by": "{{field}} 기준으로 정렬된 보드",
     "manual_reorder_hint": "열 안의 순서를 바꾸려면 정렬을 '수동'으로 전환하세요.",
+    "sub_issue_count_other": "하위 태스크 {{count}}개",
     "filter_to_status": "이 상태로 필터",
     "outside_workflow": "이 보드의 워크플로에 없음",
     "workflow_columns_note": "보드의 열은 워크플로가 정합니다. 프로젝트 밖의 보기는 Default를 사용합니다."
