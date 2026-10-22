@@ -1,0 +1,78 @@
+---
+title: "Boîte de réception et abonnements"
+description: "Un seul endroit pour les assignations, mentions, commentaires et échecs d'agents qui demandent votre suivi."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+La boîte de réception rassemble l'activité de travail qui vous concerne. Ce n'est pas un journal d'activité complet — elle signale les changements qui demandent votre attention ; le contexte complet reste sur la tâche correspondante.
+
+## Ce qui arrive dans la boîte de réception
+
+Les notifications courantes incluent :
+
+- une tâche vous est assignée, ou vous est retirée ;
+- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, son statut, sa priorité ou ses dates changent ;
+- quelqu'un vous @mentionne dans la description ou un commentaire d'une tâche ;
+- une tâche ou un commentaire que vous avez créé reçoit une réaction ;
+- une exécution d'agent échoue sur une tâche à laquelle vous êtes abonné ;
+- la création d'une tâche via un agent aboutit ou échoue ;
+- une automatisation à laquelle vous êtes abonné crée une nouvelle tâche, ou est mise en pause après des échecs consécutifs.
+
+Vos propres actions ne vous notifient pas. Plusieurs notifications sur la même tâche sont fusionnées en une seule entrée ; ouvrez-la pour voir les changements récents de la tâche.
+
+## Sources d'abonnement automatique
+
+Ces participants sont automatiquement abonnés à une tâche :
+
+- le créateur de la tâche ;
+- un nouvel assigné ;
+- toute personne qui commente ;
+- toute personne nouvellement @mentionnée dans la description de la tâche ;
+- les abonnés préconfigurés dans une automatisation.
+
+Changer l'assigné ne supprime pas les abonnements existants. Abonnez-vous ou désabonnez-vous à tout moment depuis la page de la tâche ; après le désabonnement, les mises à jour ordinaires n'arrivent plus dans votre boîte de réception, mais les @mentions directes vous notifient toujours individuellement.
+
+<Callout type="info">
+Lorsque le statut d'une sous-tâche change, les abonnés de la tâche parente sont également notifiés. Les commentaires, la priorité et les changements de dates d'une sous-tâche ne remontent pas à la tâche parente.
+</Callout>
+
+## Les agents n'utilisent pas la boîte de réception
+
+La boîte de réception est réservée aux membres de l'espace de travail. Même lorsqu'un agent est l'assigné ou un abonné, il ne lit jamais les notifications de la boîte de réception.
+
+@mentionner un agent dans un commentaire, lui assigner une tâche ou déclencher une automatisation crée directement une exécution au lieu de laisser une notification à l'agent. `@all` ne notifie que les membres.
+
+## Traiter les notifications
+
+Sélectionner une notification la marque comme lue. Archivez-la quand vous avez terminé ; l'archivage ne modifie ni ne supprime la tâche correspondante. Dès qu'une tâche atteint un statut qui la rend à une personne — `in_review`, un statut personnalisé de la catégorie `started`, ou tout statut des catégories `done` ou `closed` — ses notifications d'échec d'exécution sont archivées automatiquement. `blocked` fait exception : il transmet la tâche, mais le travail reste bloqué, donc les échecs passés restent utiles à lire.
+
+Faites un clic droit sur une notification pour **Marquer comme lu** / **Marquer comme non lu** et **Archiver** (**Désarchiver** dans la vue Archivées). Marquer comme non lu est l'action « j'ai regardé, mais je n'en ai pas fini » : la notification redevient non lue et fait remonter le compteur de non-lus, et elle reste non lue même tant que vous la gardez ouverte — la rouvrir plus tard la marque comme lue, comme d'habitude. Les notifications archivées conservent leur état de lecture : en restaurer une la rétablit exactement comme vous l'aviez laissée.
+
+Depuis le menu de la boîte de réception, vous pouvez aussi :
+
+- tout marquer comme lu ;
+- tout archiver, ou archiver tout ce qui est lu ;
+- archiver les notifications des tâches en `done` ou `cancelled` ;
+- ouvrir Archivées et restaurer une notification.
+
+Ouvrez **Archivées** en bas de la boîte de réception pour parcourir les notifications plus anciennes. D'autres éléments se chargent au fil du défilement. Les filtres s'appliquent à l'ensemble des archives, y compris aux éléments pas encore chargés.
+
+## Régler les types de notification
+
+Ouvrez **Paramètres → Notifications** pour activer ou désactiver chaque groupe séparément :
+
+- Assignations ;
+- Changements de statut ;
+- Commentaires ;
+- Mentions ;
+- Priorité et date d'échéance ;
+- Activité des agents.
+
+Désactiver un groupe n'empêche pas l'enregistrement des changements sur la tâche — cela arrête seulement les notifications dans la boîte de réception. Quelques types, comme les réactions, les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces six groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
+
+## Étapes suivantes
+
+- [Commentaires](/comments) — réponses, mentions et fils de discussion.
+- [@mentionner des agents dans les commentaires](/mentioning-agents) — notifications des membres et exécutions d'agents.
+- [Automatisations](/autopilots) — configurer la création automatique de travail et les abonnés par défaut.

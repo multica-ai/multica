@@ -384,7 +384,7 @@ func TestCodebuddyHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage), make(map[string]struct{}))
 	output, tools := turn.text, turn.toolUses
 
 	if output != "codebuddy says hi" {
@@ -518,5 +518,410 @@ func TestCodebuddyHandleControlRequestApprovesInCodebuddyShape(t *testing.T) {
 	}
 	if updatedInput["command"] != "ls" {
 		t.Fatalf("expected the original tool input to be preserved, got %v", updatedInput["command"])
+	}
+}
+
+func TestBuildCodebuddyEnvDisablesBackgroundTasks(t *testing.T) {
+	t.Parallel()
+
+	env := buildCodebuddyEnv(map[string]string{"FOO": "bar"})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected %s=1 in child env, got %q (env=%v)", codebuddyDisableBackgroundTasksEnv, got, env)
+	}
+
+	// Exact-key override in caller env must still lose to the appended force.
+	env = buildCodebuddyEnv(map[string]string{codebuddyDisableBackgroundTasksEnv: "0"})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected forced %s=1 even when caller passes 0, got %q", codebuddyDisableBackgroundTasksEnv, got)
+	}
+
+	// Windows os/exec dedups case-insensitively and keeps the last entry. A
+	// lowercase custom_env key must not outvote the forced disable.
+	env = buildCodebuddyEnv(map[string]string{
+		strings.ToLower(codebuddyDisableBackgroundTasksEnv): "0",
+	})
+	if got := lastEnvValueFold(env, codebuddyDisableBackgroundTasksEnv); got != "1" {
+		t.Fatalf("expected forced %s=1 to win over lowercase override, got %q (env=%v)",
+			codebuddyDisableBackgroundTasksEnv, got, env)
+	}
+	lastExact := ""
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == codebuddyDisableBackgroundTasksEnv {
+			lastExact = value
+		}
+	}
+	if lastExact != "1" {
+		t.Fatalf("forced entry must be last exact key so os/exec Windows dedup keeps it, got last=%q env=%v", lastExact, env)
+	}
+}
+
+// lastEnvValueFold mirrors os/exec's Windows dedup: case-insensitive key match,
+// last occurrence wins.
+func lastEnvValueFold(env []string, key string) string {
+	got := ""
+	for _, entry := range env {
+		k, v, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(k, key) {
+			got = v
+		}
+	}
+	return got
+}
+
+func TestCodebuddySystemIsBackgroundTask(t *testing.T) {
+	t.Parallel()
+
+	for _, subtype := range []string{"task_started", "task_progress", "task_updated", "task_notification"} {
+		if !codebuddySystemIsBackgroundTask(subtype) {
+			t.Fatalf("expected %q to be a background-task system subtype", subtype)
+		}
+	}
+	for _, subtype := range []string{"init", "status", "", "session_started"} {
+		if codebuddySystemIsBackgroundTask(subtype) {
+			t.Fatalf("did not expect %q to be treated as background-task", subtype)
+		}
+	}
+}
+
+func TestCodebuddyExecuteResumeRejectedFromStderr(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"echo \"No conversation found with session ID: sess-dead\" >&2\n" +
+		"exit 1\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "sess-dead",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed, got %q (%q)", result.Status, result.Error)
+		}
+		if !result.ResumeRejected {
+			t.Fatalf("expected ResumeRejected when stderr reports missing session, got %+v", result)
+		}
+		if result.SessionID != "" {
+			t.Fatalf("expected empty SessionID after resume rejection, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestCodebuddyExecuteFailsOnBackgroundTaskStarted(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Replay the CodeBuddy 2.150.0 background-task shape from the headless
+	// docs: Bash tool_use → system/task_started → text tool_result → success
+	// result. Without a completion guard this used to report completed.
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-bg"}'` + "\n" +
+		`printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"sleep 60","run_in_background":true}}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"system","subtype":"task_started","task_id":"bash-1","tool_use_id":"toolu_01","description":"sleep 60","task_type":"Bash","session_id":"sess-bg"}'` + "\n" +
+		`printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"Started the build in the background."}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-bg","result":"Started the build in the background."}'` + "\n" +
+		"exit 0\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed when system/task_started appears, got %q (%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "background task") {
+			t.Fatalf("expected background-task error, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestCodebuddyExecuteFailsOnTopLevelError(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Issue #9200: with an inherited SERVER__PORT a second concurrent codebuddy
+	// run fails to listen, prints one top-level {"type":"error"} line and then
+	// stays alive without emitting anything else. The parser had no branch for
+	// that type, so the run sat at "waiting for agent response" until the idle
+	// watchdog stopped it. The fake replays exactly that shape: error line,
+	// then a process that stays alive and silent. Timeout is 0 (watchdog-only
+	// liveness, like the incident), so without the error branch this test only
+	// ends via the 5s result-wait deadline.
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"error","error":"listen EADDRINUSE: address already in use 127.0.0.1:42888"}'` + "\n" +
+		"sleep 60\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected failed on top-level error event, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "EADDRINUSE") {
+			t.Fatalf("expected the CLI error text in result.Error, got %q", result.Error)
+		}
+		if result.Output != "" {
+			t.Fatalf("failed run must return empty output, got %q", result.Output)
+		}
+	// 30s budget: in a fully parallel suite the teardown path (spawn → error
+	// line → cancel → process-group kill → finalize) has been observed to take
+	// up to ~13s on a loaded machine; on the unfixed baseline the run never
+	// ends, so any budget detects it.
+	case <-time.After(30 * time.Second):
+		t.Fatal("top-level error event did not fail the run; still waiting for the idle watchdog")
+	}
+}
+
+func TestCodebuddyExecuteErrorAfterResultDoesNotFlipOutcome(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// An error line trailing an already-seen terminal result must not flip a
+	// finished run to failed: the result event governs the outcome.
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-late","result":"done"}'` + "\n" +
+		`printf '%s\n' '{"type":"error","error":"late noise"}'` + "\n" +
+		"exit 0\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed when result precedes the error line, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "done" {
+			t.Fatalf("expected output to survive, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestCodebuddyExecuteContinuesAfterRuntimeError(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// CodeBuddy can report a recoverable control-message error after its run
+	// has started, then still produce a successful terminal result.
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-recovered"}'` + "\n" +
+		`printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Working"}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"error","error":"control response rejected"}'` + "\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-recovered","result":"done"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "prompt", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var sawErrorLog bool
+	for msg := range session.Messages {
+		if msg.Type == MessageLog && msg.Level == "error" && msg.Content == "control response rejected" {
+			sawErrorLog = true
+		}
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "done" {
+		t.Fatalf("recoverable error must not stop the run, got %+v", result)
+	}
+	if !sawErrorLog {
+		t.Fatal("expected recoverable error to appear in the message stream")
+	}
+}
+
+func TestCodebuddyExecuteReportsRuntimeErrorWithoutResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-no-result"}'` + "\n" +
+		`printf '%s\n' '{"type":"error","error":"control channel failed"}'` + "\n" +
+		"exit 0\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "prompt", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" || result.Output != "" || !strings.Contains(result.Error, "control channel failed") {
+		t.Fatalf("expected the CLI error when the stream ends without a result, got %+v", result)
+	}
+}
+
+func TestCodebuddyExecuteRuntimeErrorDoesNotOverrideCancellation(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-cancel"}'` + "\n" +
+		`printf '%s\n' '{"type":"error","error":"recoverable control error"}'` + "\n" +
+		"sleep 60\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "prompt", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var sawErrorLog bool
+	for msg := range session.Messages {
+		if msg.Type == MessageLog && msg.Content == "recoverable control error" {
+			sawErrorLog = true
+			cancel()
+		}
+	}
+	result := <-session.Result
+	if !sawErrorLog || result.Status != "aborted" {
+		t.Fatalf("user cancellation must outrank a prior recoverable error, log=%v result=%+v", sawErrorLog, result)
+	}
+}
+
+func TestBuildCodebuddyEnvForcesRandomInternalPortAndBashBackground(t *testing.T) {
+	t.Parallel()
+
+	// Issue #9200: a user-scope SERVER__PORT pins every codebuddy run's
+	// internal HTTP server to one port, so concurrent runs of the same agent
+	// collide with EADDRINUSE. Force port 0 (OS-assigned) the same way the
+	// background-task disable is forced.
+	env := buildCodebuddyEnv(map[string]string{"SERVER__PORT": "42888", "FOO": "bar"})
+	if got := lastEnvValueFold(env, "SERVER__PORT"); got != "0" {
+		t.Fatalf("expected forced SERVER__PORT=0 in child env, got %q (env=%v)", got, env)
+	}
+	if got := lastEnvValueFold(env, "CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED"); got != "1" {
+		t.Fatalf("expected CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED=1 in child env, got %q (env=%v)", got, env)
+	}
+
+	// The PowerShell tool moves timed-out commands to the background unless
+	// CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED is set; a caller-provided "0"
+	// must lose to the forced "1".
+	env = buildCodebuddyEnv(map[string]string{"CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED": "0"})
+	if got := lastEnvValueFold(env, "CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED"); got != "1" {
+		t.Fatalf("expected forced =1 even when caller passes 0, got %q", got)
+	}
+
+	// Forced entries must be the last exact-key occurrences so os/exec's
+	// Windows dedup (case-insensitive, last-wins) keeps them.
+	for _, key := range []string{"SERVER__PORT", "CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED"} {
+		lastExact := ""
+		for _, entry := range env {
+			k, v, ok := strings.Cut(entry, "=")
+			if ok && k == key {
+				lastExact = v
+			}
+		}
+		if (key == "SERVER__PORT" && lastExact != "0") || (key == "CODEBUDDY_BASH_AUTO_BACKGROUND_DISABLED" && lastExact != "1") {
+			t.Fatalf("forced %s entry must be last exact key for Windows dedup, got last=%q (env=%v)", key, lastExact, env)
+		}
 	}
 }

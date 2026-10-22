@@ -383,12 +383,12 @@ export function RuntimePicker({
                 {label}
               </span>
               {rt.runtime_mode === "cloud" && (
-                <span className="shrink-0 rounded bg-info/10 px-1 text-micro font-medium text-info">
+                <span className="shrink-0 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
                   {t(($) => $.create_dialog.runtime_cloud_badge)}
                 </span>
               )}
               {locked && (
-                <span className="shrink-0 inline-flex items-center gap-0.5 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
+                <span className="shrink-0 inline-flex items-center gap-0.5 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
                   <Lock className="h-2.5 w-2.5" />
                   {t(($) => $.create_dialog.runtime_private_badge)}
                 </span>
@@ -428,7 +428,7 @@ export function RuntimePicker({
                     {machine.title}
                   </span>
                   {machine.mode === "cloud" && (
-                    <span className="shrink-0 rounded bg-info/10 px-1 text-micro font-medium text-info">
+                    <span className="shrink-0 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
                       {t(($) => $.create_dialog.runtime_cloud_badge)}
                     </span>
                   )}
@@ -507,7 +507,7 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded px-2 py-0.5 text-caption font-medium transition-colors ${
+      className={`flex-1 rounded-xs px-2 py-0.5 text-caption font-medium transition-colors ${
         active
           ? "bg-background text-foreground shadow-sm"
           : "text-muted-foreground hover:text-foreground"

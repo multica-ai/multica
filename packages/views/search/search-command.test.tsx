@@ -1,10 +1,16 @@
 import { act, type ReactNode } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog([]),
+}));
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
 import { SearchCommand } from "./search-command";
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 import { useSearchStore } from "./search-store";
 import enCommon from "../locales/en/common.json";
 import enAuth from "../locales/en/auth.json";
@@ -77,6 +83,8 @@ const {
   mockMembers,
   mockAgents,
   mockSquads,
+  mockWorkspaces,
+  mockUnreadSummary,
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
@@ -120,6 +128,18 @@ const {
       name: string;
       avatar_url: string | null;
     }>,
+  },
+  mockWorkspaces: {
+    current: [] as Array<{
+      id: string;
+      name: string;
+      slug: string;
+      avatar_url: string | null;
+      created_at: string;
+    }>,
+  },
+  mockUnreadSummary: {
+    current: [] as Array<{ workspace_id: string; count: number }>,
   },
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
@@ -238,6 +258,12 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["workspaces", "ws-test", "members"] }),
   agentListOptions: () => ({ queryKey: ["workspaces", "ws-test", "agents"] }),
   squadListOptions: () => ({ queryKey: ["workspaces", "ws-test", "squads"] }),
+  workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
+}));
+
+vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/inbox/queries")>()),
+  inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -250,7 +276,7 @@ function resolveIssue(key: readonly unknown[]) {
   // issueDetailOptions key shape: ["issues", wsId, "detail", id]
   if (key[0] === "issues" && key[2] === "detail") {
     const id = key[3];
-    return mockAllIssues.current.find((i) => i.id === id);
+    return mockAllIssues.current.find((i) => i.id === id || i.identifier === id);
   }
   return undefined;
 }
@@ -258,6 +284,12 @@ function resolveIssue(key: readonly unknown[]) {
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     const key = opts.queryKey;
+    if (key[0] === "workspaces" && key[1] === "list") {
+      return { data: mockWorkspaces.current };
+    }
+    if (key[0] === "inbox" && key[1] === "unread-summary") {
+      return { data: mockUnreadSummary.current };
+    }
     if (key[0] === "workspaces" && key[2] === "members") {
       return { data: mockMembers.current };
     }
@@ -312,6 +344,8 @@ describe("SearchCommand", () => {
     mockAllIssues.current = [];
     mockAgents.current = [];
     mockSquads.current = [];
+    mockWorkspaces.current = [];
+    mockUnreadSummary.current = [];
     mockSetTheme.mockReset();
     mockTheme.current = "system";
     mockPathname.current = "/ws-test/issues";
@@ -558,6 +592,94 @@ describe("SearchCommand", () => {
     expect(useSearchStore.getState().open).toBe(false);
   });
 
+  describe("workspace switching", () => {
+    // Server order is created_at ascending, which is also the sidebar
+    // switcher's order. "Zeta Labs" is the oldest, so an alphabetical re-sort
+    // would put it last. The current workspace ("ws-test") has "workspace" in
+    // its name, so the bare keyword would match it if it weren't excluded.
+    beforeEach(() => {
+      mockWorkspaces.current = [
+        {
+          id: "ws-zeta",
+          name: "Zeta Labs",
+          slug: "zeta",
+          avatar_url: null,
+          created_at: "2025-01-01T00:00:00Z",
+        },
+        {
+          id: "ws-test",
+          name: "Test Workspace",
+          slug: "ws-test",
+          avatar_url: null,
+          created_at: "2025-06-01T00:00:00Z",
+        },
+        {
+          id: "ws-acme",
+          name: "Acme Corp",
+          slug: "acme-hq",
+          avatar_url: null,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ];
+      mockUnreadSummary.current = [
+        { workspace_id: "ws-acme", count: 2 },
+        { workspace_id: "ws-test", count: 5 },
+      ];
+    });
+
+    const workspaceRows = () =>
+      within(screen.getByRole("group", { name: "Workspaces" })).getAllByRole(
+        "option",
+      );
+
+    it("hides the Workspaces group on an empty query", () => {
+      renderSearch();
+
+      expect(screen.queryByText("Workspaces")).not.toBeInTheDocument();
+    });
+
+    it("matches a workspace by name and switches to it by slug on Enter", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      const input = screen.getByPlaceholderText("Type a command or search...");
+
+      await user.type(input, "me co");
+      await waitFor(() => {
+        expect(workspaceRows().map((row) => row.textContent)).toEqual([
+          expect.stringContaining("Acme Corp"),
+        ]);
+      });
+
+      await user.clear(input);
+      await user.type(input, "acme-hq");
+      await waitFor(() => expect(workspaceRows()).toHaveLength(1));
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(mockPush).toHaveBeenCalledWith("/acme-hq/issues");
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it('lists every other workspace for "workspace", oldest first, with unread dots', async () => {
+      const user = userEvent.setup();
+      renderSearch();
+
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "workspace",
+      );
+
+      await waitFor(() => {
+        expect(workspaceRows().map((row) => row.textContent)).toEqual([
+          expect.stringContaining("Zeta Labs"),
+          expect.stringContaining("Acme Corp"),
+        ]);
+      });
+      const [zeta, acme] = workspaceRows();
+      expect(within(zeta!).queryByTestId("workspace-unread-dot")).toBeNull();
+      expect(within(acme!).getByTestId("workspace-unread-dot")).toBeInTheDocument();
+    });
+  });
+
   it("renders recent issues from query cache joined with store visit records", () => {
     mockRecentItems.current = [
       { id: "issue-1", visitedAt: 1000 },
@@ -698,6 +820,31 @@ describe("SearchCommand", () => {
     expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
     expect(mockCommentExpandAll).not.toHaveBeenCalled();
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("folds comments under the issue UUID when the URL carries the identifier", async () => {
+    const user = userEvent.setup();
+    mockPathname.current = "/ws-test/issues/MUL-42";
+    mockAllIssues.current = [
+      { id: "issue-1", identifier: "MUL-42", title: "Demo", status: "todo" },
+    ];
+    mockTimeline.current = [
+      { type: "comment", id: "root-1", actor_type: "member", actor_id: "u1", created_at: "2026-01-01T01:00:00Z", parent_id: null },
+    ];
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "fold");
+
+    const foldItem = await screen.findByText(
+      (_, el) => el?.textContent === "Fold All Comments" && el?.tagName === "SPAN",
+    );
+    await user.click(foldItem);
+
+    await waitFor(() => {
+      expect(mockCommentCollapseAll).toHaveBeenCalledWith("issue-1", ["root-1"]);
+    });
+    expect(mockResolvedCollapseAll).toHaveBeenCalledWith("issue-1");
   });
 
   it("unfolds all comments and expands resolved threads", async () => {

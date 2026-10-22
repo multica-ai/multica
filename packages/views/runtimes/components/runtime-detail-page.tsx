@@ -28,6 +28,7 @@ import { RenameMachineDialog } from "./rename-machine-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
 import { MachineCliSection } from "./machine-cli-section";
+import { isQoderLocator, QoderDetailPage } from "./qoder-detail-page";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
 
@@ -177,6 +178,13 @@ export function RuntimeDetailPage({
     };
   }, [machine, isAdmin, currentUserId]);
 
+  if (
+    isQoderLocator(machineLocator, runtimes) ||
+    (machine?.runtimes.length &&
+      machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"))
+  ) {
+    return <QoderDetailPage />;
+  }
   if (isLoading) return <MachineDetailSkeleton />;
 
   if (!machine) {
@@ -239,7 +247,7 @@ export function RuntimeDetailPage({
                     {healthLabel(machine.health)}
                   </span>
                   {machine.isCurrent && (
-                    <span className="rounded bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
+                    <span className="rounded-xs bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
                       {t(($) => $.machine.this_machine)}
                     </span>
                   )}

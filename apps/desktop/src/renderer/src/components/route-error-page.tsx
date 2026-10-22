@@ -70,9 +70,7 @@ function DesktopNotFoundPage() {
       <div className="space-y-2">
         <h2 className="text-title font-semibold">This page doesn&apos;t exist</h2>
         <p className="max-w-lg text-body text-muted-foreground">
-          Nothing in Multica matches this address. If you got here from a link,
-          it probably points at a file on someone else&apos;s computer rather
-          than a page.
+          This address is unavailable. Check the link or go back.
         </p>
         <p className="max-w-lg truncate font-mono text-caption text-muted-foreground">
           {location.pathname}
@@ -129,8 +127,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
       <div className="space-y-2">
         <h2 className="text-title font-semibold">Something went wrong in this tab</h2>
         <p className="max-w-lg text-body text-muted-foreground">
-          A route-level renderer error was contained before it could take down the
-          desktop shell. Reload this tab, or send the report if it keeps happening.
+          This tab could not load. Reload it, or send a report if the problem continues.
         </p>
         <p className="max-w-lg truncate text-caption text-muted-foreground">{message}</p>
       </div>

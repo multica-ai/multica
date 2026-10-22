@@ -393,7 +393,7 @@ function SquadNameEditor({
         <button
           type="button"
           {...triggerProps}
-          className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded px-1 text-left text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
+          className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded-xs px-1 text-left text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
         >
           <span>{value}</span>
           <Pencil className="h-3.5 w-3.5 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
@@ -708,11 +708,9 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
   );
 }
 
-// ---------------------------------------------------------------------------
 // SquadDetailInspector — left 320px column, mirrors AgentDetailInspector.
 // Holds identity (avatar / name / description) + leader / member count /
 // timestamps. All inline-editable.
-// ---------------------------------------------------------------------------
 function SquadDetailInspector({
   squad,
   memberCount,
@@ -844,7 +842,7 @@ function SquadDescriptionEditor({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded px-1 text-left text-caption leading-relaxed transition-colors hover:bg-accent/50"
+        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded-xs px-1 text-left text-caption leading-relaxed transition-colors hover:bg-accent/50"
       >
         {value ? (
           <span className="text-muted-foreground">{value}</span>
@@ -931,11 +929,9 @@ function SquadDescriptionEditorBody({
   );
 }
 
-// ---------------------------------------------------------------------------
 // SquadOverviewPane — right column with two tabs (Members | Instructions).
 // Mirrors AgentOverviewPane: dirty-guard via AlertDialog when switching tabs
 // with unsaved Instructions.
-// ---------------------------------------------------------------------------
 type SquadDetailTab = "members" | "instructions";
 
 const squadDetailTabs: { id: SquadDetailTab; icon: typeof FileText }[] = [
@@ -1190,7 +1186,7 @@ function SquadMembersTab({
                     {t(($) => $.member_type[m.member_type])}
                   </span>
                   {isLeader(m) && (
-                    <span className="inline-flex items-center gap-0.5 text-caption bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
+                    <span className="inline-flex items-center gap-0.5 text-caption bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-xs">
                       <Crown className="size-3" />
                       {t(($) => $.members_tab.leader_chip)}
                     </span>

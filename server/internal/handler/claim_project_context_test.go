@@ -455,7 +455,7 @@ func TestBuildClaimedTaskResponse_SourceLoadFailure_PreservesTaskAndEmitsNoConte
 			}
 			req := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 
-			resp, _, _, _, failure := brokenHandler.buildClaimedTaskResponse(
+			resp, _, _, _, _, failure := brokenHandler.buildClaimedTaskResponse(
 				req, &task, runtime, runtimeID, testWorkspaceID)
 
 			if failure == nil {

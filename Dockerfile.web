@@ -8,6 +8,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
 COPY apps/web/package.json apps/web/
 # postinstall runs fumadocs-mdx which reads apps/web/source.config.ts
 COPY apps/web/source.config.ts apps/web/source.config.ts
+# Root pnpm patchedDependencies is read even without the mobile workspace.
+COPY apps/mobile/patches/ apps/mobile/patches/
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
 COPY packages/views/package.json packages/views/
@@ -53,6 +55,11 @@ RUN pnpm --filter @multica/web build
 FROM node:22-alpine AS runner
 
 WORKDIR /app
+
+# Alpine openssl security fixes (CVE-2026-63073, CVE-2026-75803).
+# Floor pins the fix so the build fails instead of silently shipping the CVEs.
+# Remove once node:22-alpine includes libssl3 >= 3.5.8-r0.
+RUN apk add --no-cache "libcrypto3>=3.5.8-r0" "libssl3>=3.5.8-r0"
 
 ENV NODE_ENV=production
 ENV REMOTE_API_URL=http://backend:8080

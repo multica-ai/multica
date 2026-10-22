@@ -44,6 +44,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { DeferredTooltip } from "./deferred-tooltip";
 
 interface PropertyIconOption {
   value: string;
@@ -155,20 +156,24 @@ export function PropertyIconPicker({
         {PROPERTY_ICON_OPTIONS.map((option) => {
           const selected = option.value === value;
           return (
-            <button
+            <DeferredTooltip
               key={option.value}
-              type="button"
-              aria-label={option.label}
-              aria-pressed={selected}
-              title={option.label}
-              className={cn(
-                "flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                selected && "bg-brand/10 text-brand ring-1 ring-inset ring-brand/25",
-              )}
-              onClick={() => onSelect(option.value)}
-            >
-              <option.Icon className="size-4" />
-            </button>
+              content={option.label}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={option.label}
+                  aria-pressed={selected}
+                  className={cn(
+                    "flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                    selected && "bg-brand/10 text-brand ring-1 ring-inset ring-brand/25",
+                  )}
+                  onClick={() => onSelect(option.value)}
+                >
+                  <option.Icon className="size-4" />
+                </button>
+              }
+            />
           );
         })}
       </div>

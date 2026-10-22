@@ -27,6 +27,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -64,6 +65,7 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
 import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
@@ -255,13 +257,14 @@ function SkippedRunsGroup({
   );
 }
 
-function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
+export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
   const { t, i18n } = useT("autopilots");
   const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
@@ -324,16 +327,33 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
   // trash icon visually floats above the URL action buttons because the
   // outer flex uses `items-start`.
   const deleteButton = canWrite ? (
-    <Button
+    <IconButton
       size="icon"
       variant="ghost"
       className="h-7 w-7 shrink-0"
       onClick={() => setConfirmOpen(true)}
-      title={t(($) => $.trigger_row.delete_dialog.confirm)}
+      label={t(($) => $.trigger_row.delete_dialog.confirm)}
     >
       <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-    </Button>
+    </IconButton>
   ) : null;
+
+  // Schedule rows only: cron and timezone are the fields this dialog edits, and
+  // the API rejects them on any other kind. It rides alongside Delete so the
+  // row that states a schedule is also the row that can change it — without it
+  // an autopilot with two schedules has no editable schedule at all (MUL-7478).
+  const editButton =
+    canWrite && trigger.kind === "schedule" ? (
+      <IconButton
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7 shrink-0"
+        onClick={() => setEditOpen(true)}
+        label={t(($) => $.trigger_row.edit_schedule)}
+      >
+        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+      </IconButton>
+    ) : null;
 
   return (
     <div className="flex items-start gap-3 rounded-md border px-3 py-2">
@@ -345,12 +365,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
             <span className="text-caption text-muted-foreground">({trigger.label})</span>
           )}
           {!trigger.enabled && (
-            <span className="text-caption bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-caption bg-muted px-1.5 py-0.5 rounded-xs">
               {t(($) => $.trigger_row.disabled_badge)}
             </span>
           )}
           {isApi && (
-            <span className="text-caption bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-caption bg-muted px-1.5 py-0.5 rounded-xs">
               {t(($) => $.trigger_row.deprecated_badge)}
             </span>
           )}
@@ -372,7 +392,11 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
             )}
           </div>
         )}
-        {trigger.next_run_at && (
+        {/* A disabled trigger keeps the next_run_at it had — the dispatcher
+            filters on `enabled` instead of clearing it — so the row would
+            otherwise carry the Disabled badge and a promise to run at 09:00
+            in the same breath. The badge is the true one. */}
+        {trigger.next_run_at && trigger.enabled && (
           <div className="text-caption text-muted-foreground">
             {t(($) => $.trigger_row.next_label, {
               date: formatInTimeZone(
@@ -390,16 +414,16 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
               actions={
                 <>
                   {canWrite && (
-                    <Button
+                    <IconButton
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7 shrink-0"
                       onClick={() => setRotateOpen(true)}
-                      title={t(($) => $.trigger_row.rotate_url)}
+                      label={t(($) => $.trigger_row.rotate_url)}
                       disabled={rotateToken.isPending}
                     >
                       <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
-                    </Button>
+                    </IconButton>
                   )}
                   {deleteButton}
                 </>
@@ -408,7 +432,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </div>
         )}
       </div>
-      {!showWebhookUrlRow && deleteButton}
+      {!showWebhookUrlRow && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {editButton}
+          {deleteButton}
+        </div>
+      )}
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -433,6 +462,12 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <EditScheduleTriggerDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        autopilotId={autopilotId}
+        trigger={trigger}
+      />
       <AlertDialog open={rotateOpen} onOpenChange={(v) => { if (!v && !rotateToken.isPending) setRotateOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

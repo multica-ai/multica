@@ -23,66 +23,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// ---------------------------------------------------------------------------
-// Avatar URLs (MUL-5393 / #6024)
-// ---------------------------------------------------------------------------
+// Persist raw storage URLs as durable avatar references. At read time, private
+// objects become stable /api/avatars/<sig>/<key> URLs that resolve through the
+// deployment's download policy. Never persist expiring signatures.
 //
-// `avatar_url` columns (user / agent / squad / workspace) store the raw
-// storage object URL the upload returned. On a deployment whose bucket is
-// public — S3/R2 behind a public CDN domain, or the LocalStorage backend
-// whose /uploads/* route is served publicly — that URL loads fine in an
-// <img> and nothing here changes it.
+// The endpoint uses its HMAC as the credential so native image loads work across
+// origins without an Authorization header. Only image keys belonging to standalone,
+// unbound uploads are publishable; issue, comment, chat, and task attachments are
+// excluded. Enforce this at write time and on every read so old rows are covered
+// and later attachment binding revokes access.
 //
-// On a PRIVATE bucket with no public CDN (S3 with Block Public Access, R2,
-// MinIO — the shape #6024 reports) that raw URL is a guaranteed 403 in the
-// browser: `ATTACHMENT_DOWNLOAD_MODE` only ever applied to the attachment
-// download endpoint, and avatars never went through it. Every avatar in the
-// deployment renders broken even though the upload itself succeeded.
-//
-// The fix resolves at READ time rather than at upload time:
-//
-//   - What is PERSISTED stays the durable object reference (the raw storage
-//     URL). Nothing with a TTL is ever written to the database — that is the
-//     MUL-3130 regression this deliberately avoids — and avatars already
-//     saved by an older build are fixed without a backfill.
-//   - What is SERVED is `/api/avatars/<sig>/<key>`, a stable URL this server
-//     resolves per request into a presigned redirect (or a proxied body)
-//     using the deployment's existing storage download policy.
-//
-// The endpoint is unauthenticated on purpose, and the signature is the
-// credential. An auth-gated URL cannot be a native <img src>: the auth cookie
-// is SameSite=Strict, so a Desktop/mobile webview (token auth, non-API
-// document origin) and any split-origin self-hosted web app would fail the
-// resource load. This is the same reasoning behind CloudFront signed URLs,
-// and it is strictly tighter than the LocalStorage backend's existing
-// posture, where /uploads/* serves objects by key with no auth at all.
-//
-// Three things bound what a signed avatar URL can reach:
-//
-//   - the HMAC covers the storage key, so a caller cannot mint one for a key
-//     the server never published as an avatar;
-//   - only image extensions resolve at all (see avatarContentType);
-//   - and the object must be AVATAR-CLASS — a standalone image upload that is
-//     not attached to an issue, comment, chat session, chat message, or task
-//     (see avatarKeyIsPublishable).
-//
-// That last rule is the authorization boundary, and it is enforced on BOTH
-// sides. Being able to name a storage object is not permission to publish it:
-// without the check, any caller who had seen a private image attachment's raw
-// URL could submit it as their own avatar and the unauthenticated endpoint
-// would then keep re-signing it forever — and a user avatar propagates to
-// every workspace that user belongs to. The write side rejects such a value up
-// front; the read side re-checks per request, which is what makes the
-// guarantee hold for rows written before this check existed and revokes the
-// URL if an object is ever bound to a comment or chat afterwards.
-//
-// Uploader identity is deliberately NOT part of the rule. Duplicating an agent
-// legitimately reuses the source agent's avatar object, which a different
-// admin may have uploaded. The remaining theoretical case — publishing someone
-// else's *unbound* image — requires knowing that object's URL, and unbound
-// rows appear in no listing endpoint (ListAttachments is by issue,
-// groupAttachments by comment, chat attachments by message), so the only party
-// who ever sees one is its own uploader.
+// Uploader identity is not required because agent copies reuse existing avatars.
+// Unbound uploads are not exposed through attachment listing endpoints.
 
 const avatarURLPathPrefix = "/api/avatars/"
 
@@ -375,9 +327,7 @@ func (h *Handler) absolutizeAvatarPath(relPath string) string {
 	return relPath
 }
 
-// ---------------------------------------------------------------------------
 // ServeAvatar — GET /api/avatars/{sig}/*
-// ---------------------------------------------------------------------------
 //
 // Unauthenticated by design (the signature is the credential) — see the file
 // header. Resolution reuses resolveAttachmentDownloadMode so an avatar and an

@@ -1,0 +1,112 @@
+---
+title: Skills
+description: Regroupez des instructions, des étapes et des supports de référence récurrents dans des skills que plusieurs agents peuvent réutiliser.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Un skill est un ensemble réutilisable de méthodes de travail au sein d'un espace de travail. Son fichier principal est `SKILL.md`, éventuellement accompagné de scripts, de modèles et de supports de référence.
+
+Ajoutez un skill à un [agent](/agents) : l'agent suit ses consignes lorsqu'il effectue un travail lié. Il n'est plus nécessaire de copier la même méthode dans les instructions de chaque agent, et les mises à jour se font à un seul endroit.
+
+## Skills et instructions de l'agent
+
+| | Instructions de l'agent | Skill |
+|---|---|---|
+| **Idéal pour** | Les responsabilités, limites et exigences de livraison durables de cet agent | Les étapes, supports et outils réutilisables pour un type de travail |
+| **Portée** | Appartiennent à un seul agent et sont fournies à chaque exécution | Peut être ajouté à plusieurs agents et activé ou désactivé individuellement |
+| **Exemple** | « Relire uniquement le code frontend, ne jamais le modifier directement » | Une checklist d'accessibilité et un modèle de rapport |
+
+## Créer ou importer un skill
+
+Sur la page **Skills** de l'espace de travail, choisissez « Nouveau skill ». Quatre options sont disponibles :
+
+| Option | Quand l'utiliser |
+|---|---|
+| **Créer manuellement** | Commencez à rédiger à partir d'un `SKILL.md` vierge. |
+| **Importer depuis cet appareil** | Choisissez un dossier contenant `SKILL.md`, ou une archive `.skill` / `.zip` présente sur cet ordinateur. |
+| **Importer depuis une URL** | Importez un skill publié depuis GitHub, ClawHub ou Skills.sh. |
+| **Copier depuis un runtime** | Analysez les skills d'un ordinateur connecté et copiez ceux que vous sélectionnez dans l'espace de travail. |
+
+La copie depuis un runtime prend un instantané des fichiers à ce moment-là. Les modifications ultérieures des fichiers locaux ne mettent pas automatiquement à jour la version de l'espace de travail ; réimportez le skill ou modifiez-le dans Multica.
+
+Le même format d'archive fonctionne depuis le CLI :
+
+```bash
+multica skill import --file ./review-helper.skill
+```
+
+Si un skill portant le même nom existe déjà dans l'espace de travail, l'import peut s'arrêter, écraser le contenu existant, enregistrer sous un nouveau nom ou ignorer le skill. L'écrasement par import est réservé au créateur du skill ; un `admin` de l'espace de travail qui peut modifier le skill dans l'application ne peut pas pour autant l'écraser par import. Pour récupérer une version plus récente d'un skill déjà présent dans l'espace de travail, utilisez plutôt [Mettre à jour un skill importé](#mettre-à-jour-un-skill-importé).
+
+## Mettre à jour un skill importé
+
+Un skill importé depuis GitHub, ClawHub ou Skills.sh conserve une référence à sa source. Pour récupérer la dernière version, utilisez **Mettre à jour** sur la page du skill (ou « Mettre à jour depuis la source » dans le menu de la ligne, dans la liste), ou le CLI :
+
+```bash
+multica skill refresh <skill-id>
+```
+
+Le skill est retéléchargé depuis sa source et remplacé sur place :
+
+- **Conservé** : l'identité du skill — rattachements aux agents, étiquettes, créateur et date de création. Les agents conservent le skill sans avoir à le rajouter.
+- **Remplacé** : le nom (si la source l'a renommé), la description, `SKILL.md` et tous les fichiers annexes. Les modifications locales du skill sont écrasées.
+
+Le créateur du skill ainsi que les `owner` et `admin` de l'espace de travail peuvent mettre à jour depuis la source. Les skills créés manuellement, importés depuis un fichier d'archive ou copiés depuis un runtime n'ont pas de source hébergée et ne peuvent pas être mis à jour de cette façon — réimportez-les.
+
+Pour mettre à jour plusieurs skills à la fois, sélectionnez-les dans la liste des skills et choisissez **Mettre à jour** dans la barre d'outils de sélection. Chaque skill sélectionné disposant d'une source hébergée est retéléchargé depuis celle-ci ; les autres sont ignorés.
+
+## Contenu d'un skill
+
+Chaque skill contient un fichier principal, `SKILL.md`. Précisez-y :
+
+- quand le skill s'applique ;
+- ce qu'il faut vérifier avant de commencer ;
+- les étapes à exécuter ;
+- la forme que doit prendre le résultat ;
+- quand s'arrêter pour consulter un membre.
+
+Vous pouvez aussi ajouter des fichiers annexes, par exemple :
+
+```text
+SKILL.md
+references/api-conventions.md
+templates/review-report.md
+scripts/check.sh
+```
+
+`SKILL.md` est un chemin réservé ; un fichier annexe ne peut pas porter ce nom. Les fichiers annexes sont transmis à l'agent avec le fichier principal.
+
+## Rattacher un skill à un agent
+
+Après sa création ou son import, un skill doit encore être ajouté à des agents précis. Choisissez les agents depuis la page du skill, ou gérez les rattachements depuis l'onglet **Skills** de l'agent.
+
+- Un agent peut utiliser plusieurs skills ;
+- un skill peut servir plusieurs agents ;
+- lorsqu'un skill n'est pas utile pour le moment, désactivez le rattachement au lieu de supprimer le skill ;
+- les modifications s'appliquent aux exécutions suivantes et ne changent pas les exécutions déjà en cours.
+
+Seuls les membres autorisés à modifier l'agent peuvent ajouter, retirer ou désactiver ses skills.
+
+## Skills de l'espace de travail et skills du dépôt
+
+Les skills de l'espace de travail sont stockés dans Multica — idéal pour les skills que l'équipe maintient ensemble et ajoute à différents agents.
+
+Certains outils de codage IA lisent aussi des skills au niveau du projet directement depuis le dépôt de code, comme `.claude/skills/` ou `.agents/skills/`. Ces fichiers restent gérés par le dépôt ; Multica ne les enregistre pas automatiquement comme skills de l'espace de travail. La prise en charge dépend de l'outil utilisé — voir [Comparatif des outils de codage IA](/providers).
+
+Les skills locaux au runtime déjà installés sur un ordinateur connecté (Claude Code et Codex) apparaissent dans l'onglet **Skills** de l'agent et peuvent être désactivés agent par agent. Cette désactivation requiert également le droit de modifier l'agent.
+
+## Droits de modification
+
+Tout membre de l'espace de travail peut créer ou importer un skill. Le créateur ainsi que les `owner` et `admin` de l'espace de travail peuvent le modifier ou le supprimer ; les autres membres peuvent le consulter et l'utiliser, mais pas écraser son contenu.
+
+La suppression est définitive et retire le skill de tous les agents en même temps.
+
+<Callout type="warning">
+Les skills importés depuis des sources externes peuvent contenir des scripts, des commandes ou des instructions dangereuses. Multica ne les vérifie pas, ne les signe pas et ne les isole pas dans un bac à sable à votre place. Le contenu importé est transmis tel quel aux agents : la source doit donc être digne de confiance.
+</Callout>
+
+## Étapes suivantes
+
+- [Squads](/squads) — laissez un chef choisir le bon membre pour le travail.
+- [Daemon et runtimes](/daemon-runtimes) — comment les skills atteignent l'environnement d'exécution réel.
+- [Comparatif des outils de codage IA](/providers) — comment les différents outils prennent en charge les skills.

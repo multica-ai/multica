@@ -119,6 +119,12 @@ const (
 	// self-describing); nothing routes on it.
 	EventIssueStatusChanged = "issue_status:changed"
 
+	// Project workflow events (MUL-7420). Same shape as the status catalog
+	// event: workflows are read as one list, so every write answers the same
+	// way — re-read it. A project switching workflows publishes
+	// project:updated instead.
+	EventIssueWorkflowChanged = "issue_workflow:changed"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"
@@ -143,12 +149,13 @@ const (
 	EventSquadDeleted = "squad:deleted"
 
 	// Daemon events
-	EventDaemonHeartbeat              = "daemon:heartbeat"
-	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
-	EventDaemonRegister               = "daemon:register"
-	EventDaemonTaskAvailable          = "daemon:task_available"
-	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
-	EventDaemonWorkspacesChanged      = "daemon:workspaces_changed"
+	EventDaemonHeartbeat               = "daemon:heartbeat"
+	EventDaemonHeartbeatAck            = "daemon:heartbeat_ack"
+	EventDaemonRegister                = "daemon:register"
+	EventDaemonTaskAvailable           = "daemon:task_available"
+	EventDaemonTaskSupplementAvailable = "daemon:task_supplement_available"
+	EventDaemonRuntimeProfilesChanged  = "daemon:runtime_profiles_changed"
+	EventDaemonWorkspacesChanged       = "daemon:workspaces_changed"
 	// EventDaemonPendingWork is a runtime-scoped hint that a heartbeat-carried
 	// request (model discovery, capability discovery, or local-skill import) is
 	// queued for that runtime. Without it the daemon only learns about the

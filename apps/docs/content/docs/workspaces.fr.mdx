@@ -1,0 +1,57 @@
+---
+title: Espaces de travail
+description: Un espace de travail est la frontière qui isole les équipes, le travail et la configuration des agents les uns des autres.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Un espace de travail est la frontière de plus haut niveau de Multica. Les membres, les tâches, les projets, les agents, les skills et l'historique des exécutions appartiennent tous à un seul espace de travail et sont entièrement isolés de tous les autres.
+
+## Contenu d'un espace de travail
+
+| Catégorie | Contenu |
+|---|---|
+| **Travail** | Tâches, projets, commentaires, pièces jointes, historique des exécutions |
+| **Équipe** | Membres, rôles, invitations |
+| **Agents** | Configuration des agents, skills, runtimes, automatisations |
+| **Paramètres partagés** | Contexte, étiquettes, propriétés personnalisées, intégrations |
+
+Le **Contexte** est fourni à chaque agent de l'espace de travail — c'est l'endroit où placer les informations générales sur l'équipe, les conventions produit et les exigences durables. Les exigences ponctuelles d'une exécution ont leur place dans la tâche correspondante.
+
+## Créer un espace de travail
+
+La création d'un espace de travail demande trois informations :
+
+- **Nom de l'espace de travail** : affiché aux membres ; modifiable par la suite.
+- **URL de l'espace de travail** : l'identifiant dans l'adresse — le `my-team` de `multica.ai/my-team`. Lettres minuscules, chiffres et tirets uniquement ; elle ne peut pas entrer en conflit avec un espace de travail existant ou une adresse réservée, et ne peut plus être modifiée après la création.
+- **Préfixe des tâches** : prérempli à partir de l'URL de l'espace de travail et modifiable avant la création — avec le préfixe `MUL`, les numéros de tâches apparaissent sous la forme `MUL-1`, `MUL-2`, et la numérotation progresse indépendamment dans l'espace de travail. Lettres majuscules et chiffres, jusqu'à 10 caractères ; il peut être modifié plus tard dans les paramètres.
+
+Le créateur devient automatiquement `owner`.
+
+## Modifier les paramètres
+
+`owner` et `admin` peuvent modifier le nom, le logo, la description, le contexte et le préfixe des tâches ; `member` peut seulement les consulter.
+
+![Paramètres de l'espace de travail : nom, contexte, identifiant d'URL, préfixe des tâches et zone de danger](/images/docs/workspace-settings.webp)
+
+<Callout type="warning">
+Après un changement de préfixe des tâches, chaque tâche passe immédiatement au nouveau numéro (`MUL-5` devient `NEW-5`), mais les anciens numéros figurant dans les PR, les noms de branches et l'historique des discussions ne sont pas mis à jour.
+</Callout>
+
+## Changer d'espace de travail et le quitter
+
+Un même compte peut rejoindre plusieurs espaces de travail. Changer d'espace de travail modifie seulement ce que vous consultez ; aucune donnée n'est déplacée.
+
+Après avoir quitté un espace de travail, il vous faut une nouvelle invitation pour y revenir. Quitter un espace de travail désactive aussi les runtimes dont vous êtes propriétaire, archive les agents qui y sont liés et annule leurs exécutions non terminées.
+
+Le dernier `owner` ne peut pas quitter l'espace de travail ; promouvez d'abord un autre membre au rôle `owner`.
+
+## Supprimer un espace de travail
+
+Seul un `owner` peut supprimer un espace de travail. La suppression retire définitivement tout son travail, ses membres, la configuration de ses agents et l'historique de ses exécutions, et elle est irréversible. Si vous vous absentez seulement pour un temps, quittez l'espace de travail au lieu de le supprimer.
+
+## Étapes suivantes
+
+- [Membres et rôles](/members-roles) — inviter des membres et gérer les rôles.
+- [Tâches](/issues) — l'unité de travail de base d'un espace de travail.
+- [Agents](/agents) — identité et configuration des agents.

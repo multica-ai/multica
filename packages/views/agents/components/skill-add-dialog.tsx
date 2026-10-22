@@ -14,7 +14,6 @@ import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -102,9 +101,6 @@ export function SkillAddDialog({
           <DialogTitle className="text-body">
             {t(($) => $.tab_body.skills.add_dialog_title)}
           </DialogTitle>
-          <DialogDescription className="text-caption">
-            {t(($) => $.tab_body.skills.add_dialog_description)}
-          </DialogDescription>
         </DialogHeader>
 
         <SkillPickerList

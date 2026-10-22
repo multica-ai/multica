@@ -331,6 +331,12 @@ WHERE id = sqlc.arg('id')
 -- makes the late pin safe: a NEWER task on this chat that already recorded a
 -- session owns the pointer, and a straggler must not drag the conversation
 -- backwards onto the turn the user interrupted.
+--
+-- The newer-task lookup depends on
+-- idx_agent_task_queue_chat_session (migration 472). Neither chat_pending_v3
+-- nor chat_terminal_resume can replace it: this guard spans both in-flight and
+-- terminal tasks and compares created_at; the broader index also serves the
+-- chat_session foreign-key delete lookup.
 UPDATE chat_session cs
 SET session_id = t.session_id,
     runtime_id = t.runtime_id,
@@ -515,6 +521,73 @@ SELECT EXISTS (
       AND role = 'user'
       AND channel_ingested
 ) AS channel_ingested;
+
+-- name: GetTaskChannelOrigin :one
+-- The whole origin question for one completed task in one round trip: is the
+-- task row still there, and did its input arrive over a channel?
+--
+-- This answers exactly what engine.TaskInputIsChannelIngested answers, in one
+-- read instead of two (GetAgentTask, then TaskHasChannelIngestedMessages). That
+-- function is the definition; this is a transcription of it, not an improvement
+-- on it. Both halves are load-bearing:
+--
+--   * A task with NO input batch owner is channel-ingested. Migration 158 left
+--     both legacy direct rows and channel tasks NULL here, so the owner cannot
+--     say which one a row was, and the adapters that read this deliver by
+--     default — the behaviour #5645 shipped. Keying the EXISTS on the task's
+--     own id instead (COALESCE(chat_input_task_id, id)) silently stops
+--     delivering the auto-retry of a legacy channel task: CreateRetryTask
+--     copies a NULL owner verbatim, on purpose (see agent.sql), and the clone
+--     owns no messages — so it reads as web UI while CopyChannelTaskDelivery
+--     has already given it the room's route.
+--   * Otherwise the verdict is the batch OWNER'S, not the task's. An auto-retry
+--     clone inherits its parent's chat_input_task_id while the user's message
+--     stays tagged with the parent, so reading the owner is what lets the clone
+--     reach the verdict its parent already has (MUL-4351).
+--
+-- NO ROW means the task is gone — cancelled and reaped while its ending was in
+-- flight. Callers receive pgx.ErrNoRows and must not fold that into "asked in
+-- the web UI": it is the absence of a verdict, not a negative one, and the two
+-- are recorded differently.
+--
+-- One round trip rather than two because this read is SYNCHRONOUS ON THE
+-- COMPLETION RESPONSE. It runs inside events.Bus.Publish
+-- (internal/events/bus.go:61-76), below TaskService.broadcastChatDone
+-- (internal/service/task.go:7330) and CompleteTaskWithTransition
+-- (internal/service/task.go:4518), which the daemon's POST /tasks/{id}/complete
+-- waits for before it answers (internal/handler/daemon.go:4269).
+--
+-- batch_owner_unknown IS THE SAME FACT, REPORTED SEPARATELY, and it exists for
+-- one reader: the log level on a turn that has no delivery row.
+--
+-- channel_ingested above says "deliver this", and for a NULL owner it says so
+-- without evidence — which is right, because delivering is the safe side and
+-- the auto-retry of a legacy channel turn depends on it. Warning is the other
+-- direction: a missing route is worth paging an operator about only when
+-- something actually established the turn was a channel's. A NULL owner
+-- establishes nothing, so a missing route on one of those is not evidence of a
+-- lost reply; migration 158 left legacy web rows and channel rows alike NULL
+-- here, and reading it as "channel" would put the loudest line this adapter has
+-- on a pre-158 web turn that auto-retried.
+--
+-- So one verdict, two readings: deliver on the open side, warn on the closed
+-- one. The query reports both and chooses neither.
+--
+-- Plan: agent_task_queue_pkey for the row, idx_chat_message_input_owner for the
+-- EXISTS. Neither side scans.
+SELECT (
+    task.chat_input_task_id IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM chat_message
+        WHERE task_id = task.chat_input_task_id
+          AND role = 'user'
+          AND channel_ingested
+    )
+)::boolean AS channel_ingested,
+    (task.chat_input_task_id IS NULL)::boolean AS batch_owner_unknown
+FROM agent_task_queue AS task
+WHERE task.id = $1;
 
 -- name: SetChatMessageChannelOutboundProvenanceByTask :execrows
 -- The assistant row is committed before EventChatDone is published. Attach the

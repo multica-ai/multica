@@ -51,8 +51,10 @@ import type {
   DingTalkInstallation,
 } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useT, useTimeAgo } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 const dingTalkChatManagePermission = "qyapi_chat_manage";
 
@@ -184,12 +186,12 @@ export function DingTalkConnectionLabel({
                   <TooltipContent
                     side="top"
                     align="start"
-                    className="max-w-80 items-start whitespace-normal border-0 bg-surface-raised px-3 py-2 text-popover-foreground shadow-[var(--menu-shadow)] ring-1 ring-surface-border"
+                    className="max-w-80 items-start whitespace-normal px-3 py-2"
                   >
                     <span className="leading-relaxed">
                       {permissionTooltipPrefix}{" "}
                       <code
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground ring-1 ring-border"
+                        className="rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground ring-1 ring-border"
                         translate="no"
                       >
                         {dingTalkChatManagePermission}
@@ -587,7 +589,7 @@ export function DingTalkTab() {
             <p className="text-body font-medium">{t(($) => $.dingtalk.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.dingtalk.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_DINGTALK_SECRET_KEY
               </code>{" "}
               {t(($) => $.dingtalk.not_enabled_description_suffix)}{" "}
@@ -601,13 +603,6 @@ export function DingTalkTab() {
             <h2 className="text-body font-semibold">
               {t(($) => $.dingtalk.connections_title)}
             </h2>
-            {!isLoading &&
-              displayedInstallations.length > 0 &&
-              groupDiscoverySupported && (
-              <p className="max-w-3xl text-caption leading-relaxed text-muted-foreground">
-                {t(($) => $.dingtalk.groups_overview_description)}
-              </p>
-            )}
           </div>
           {isLoading || (!canManage && agentsLoading) ? (
             <Card>
@@ -739,7 +734,7 @@ function InstallationRow({
             <h3 className="truncate text-title-sm font-medium text-pretty">
               {agentName}
               {!isActive && (
-                <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                   {t(($) => $.dingtalk.revoked_badge)}
                 </span>
               )}
@@ -805,14 +800,7 @@ function InstallationRow({
 // prefixes (English has none), matching the convention used elsewhere in the
 // app for doc links.
 function dingtalkDocsUrl(lang: string | undefined): string {
-  const prefix = lang?.startsWith("zh")
-    ? "/zh"
-    : lang?.startsWith("ja")
-      ? "/ja"
-      : lang?.startsWith("ko")
-        ? "/ko"
-        : "";
-  return `https://multica.ai/docs${prefix}/dingtalk-bot-integration`;
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/dingtalk-bot-integration`;
 }
 
 // DingTalkAgentBindButton is the per-agent CTA exposed from the agent detail
@@ -938,21 +926,24 @@ export function DingTalkAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="dingtalk-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.dingtalk.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="dingtalk-agent-connect"
       >
-        <DingTalkMark className="h-4 w-4" />
-        {t(($) => $.dingtalk.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="dingtalk-agent-connect"
+        >
+          <DingTalkMark className="h-4 w-4" />
+          {t(($) => $.dingtalk.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -1119,20 +1110,21 @@ function DingTalkAgentBotConnectedBadge({
           botIdentityIssue={botIdentityIssue}
           showBotIdentity={botName !== undefined || botIdentityIssue !== undefined}
         />
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.dingtalk.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.dingtalk.disconnect)}
-          data-testid="dingtalk-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" aria-hidden="true" />
-          {disconnecting
-            ? t(($) => $.dingtalk.disconnecting)
-            : t(($) => $.dingtalk.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.dingtalk.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.dingtalk.disconnect)}
+            data-testid="dingtalk-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" aria-hidden="true" />
+            {disconnecting
+              ? t(($) => $.dingtalk.disconnecting)
+              : t(($) => $.dingtalk.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       <AlertDialog

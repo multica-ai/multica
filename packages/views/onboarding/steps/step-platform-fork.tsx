@@ -6,7 +6,6 @@ import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -73,6 +72,7 @@ export function StepPlatformFork({
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [connecting, setConnecting] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [model, setModel] = useState("");
 
   const picker = useRuntimePicker(wsId, wsSlug);
@@ -98,6 +98,16 @@ export function StepPlatformFork({
       setDialog(null);
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (skipping) return;
+    setSkipping(true);
+    try {
+      await onNext(null);
+    } finally {
+      setSkipping(false);
     }
   };
 
@@ -141,8 +151,10 @@ export function StepPlatformFork({
         <Button
           variant="ghost"
           className="w-full"
-          onClick={() => onNext(null)}
+          disabled={skipping}
+          onClick={handleSkip}
         >
+          {skipping && <Loader2 className="h-4 w-4 animate-spin" />}
           {t(($) => $.step_runtime.skip)}
         </Button>
       </StepFooter>
@@ -171,9 +183,7 @@ export function StepPlatformFork({
   );
 }
 
-// ------------------------------------------------------------
 // Fork cards
-// ------------------------------------------------------------
 
 function ForkPrimary({ onClick }: { onClick: () => void }) {
   const { t } = useT("onboarding");
@@ -256,9 +266,7 @@ function ForkAlt({
   );
 }
 
-// ------------------------------------------------------------
 // CLI install dialog
-// ------------------------------------------------------------
 
 /**
  * Modal dialog for the CLI install path. Contains the real install
@@ -298,9 +306,6 @@ function CliInstallDialog({
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{t(($) => $.step_platform.cli_dialog_title)}</DialogTitle>
-          <DialogDescription>
-            {t(($) => $.step_platform.cli_dialog_description)}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-2">

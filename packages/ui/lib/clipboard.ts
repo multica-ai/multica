@@ -58,3 +58,69 @@ export async function copyText(text: string): Promise<boolean> {
     previouslyFocused?.focus();
   }
 }
+
+/**
+ * Copy the image at `url` to the clipboard as a PNG.
+ *
+ * Reads the bytes with `fetch`, so the URL has to be readable from script:
+ * same-origin, `blob:` / `data:`, or a CORS-enabled host (the desktop shell
+ * reads any origin). The async Clipboard API only takes `image/png` for
+ * images, so anything else — JPEG, WebP, GIF (first frame) — is re-encoded
+ * through a canvas first.
+ *
+ * @returns `true` on success, `false` on failure (unreadable URL, bytes that
+ * don't decode as an image, no async Clipboard API, permission denied).
+ */
+export async function copyImage(url: string): Promise<boolean> {
+  if (
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.write ||
+    typeof ClipboardItem === "undefined"
+  ) {
+    return false;
+  }
+  try {
+    // The item takes the pending PNG rather than the finished one so the
+    // write starts inside the click that asked for it; Safari rejects a
+    // clipboard write that happens after an await.
+    await navigator.clipboard.write([
+      new ClipboardItem({ "image/png": fetchAsPng(url) }),
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchAsPng(url: string): Promise<Blob> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
+  const blob = await res.blob();
+  if (blob.type === "image/png") return blob;
+
+  // Decoded through <img> rather than createImageBitmap so SVG works too, and
+  // so a storage host that serves `application/octet-stream` still sniffs as
+  // the image it is.
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    if (!context || canvas.width === 0 || canvas.height === 0) {
+      throw new Error("image has no drawable size");
+    }
+    context.drawImage(image, 0, 0);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (png) => (png ? resolve(png) : reject(new Error("PNG encode failed"))),
+        "image/png",
+      );
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

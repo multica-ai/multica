@@ -9,7 +9,8 @@
     "projects": "Projects",
     "issues": "Issues",
     "cancelled": "Cancelled",
-    "recent": "Recent"
+    "recent": "Recent",
+    "workspaces": "Workspaces"
   },
   "commands": {
     "current_theme_aria": "Current theme",

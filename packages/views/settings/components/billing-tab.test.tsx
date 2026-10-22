@@ -176,6 +176,20 @@ vi.mock("../../platform", () => ({ openExternal: mocks.openExternal }));
 
 import { BillingTab, formatStripeMinorAmount } from "./billing-tab";
 
+// The component formats dates in the viewer's own time zone, so a midnight-UTC
+// fixture reads as the previous calendar day anywhere behind UTC. Build the
+// expected text with the same formatter instead of hard-coding the calendar day.
+function formatExpectedDate(iso: string): string {
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(
+    new Date(iso),
+  );
+}
+
+const FEB_1_2030 = formatExpectedDate("2030-02-01T00:00:00Z");
+const FEB_15_2030 = formatExpectedDate("2030-02-15T00:00:00Z");
+const MAR_1_2030 = formatExpectedDate("2030-03-01T00:00:00Z");
+const APR_1_2030 = formatExpectedDate("2030-04-01T00:00:00Z");
+
 function setSeatCapacity({
   humanMembers = 4,
   purchased = 5,
@@ -604,6 +618,25 @@ describe("BillingTab", () => {
     expect(await screen.findByText(copy)).toBeInTheDocument();
   });
 
+  it("explains that a disabled billing capability requires an administrator", async () => {
+    const user = userEvent.setup();
+    mocks.checkout.mockRejectedValue(
+      new ApiError("request failed", 403, "Forbidden", {
+        code: "workspace_subscriptions_disabled",
+      }),
+    );
+    renderWithI18n(<BillingTab />);
+
+    await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
+    await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+
+    expect(
+      await screen.findByText(
+        "Workspace subscriptions are not enabled for this deployment. Contact your administrator.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("consumes cancel callback params once while preserving the active tab", () => {
     navigationState.search =
       "tab=billing&result=cancel&session_id=cs_test_1&source=email";
@@ -729,7 +762,8 @@ describe("BillingTab", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders authoritative subscription seat facts", () => {
+  it("renders authoritative subscription seat facts and opens their calculation help", async () => {
+    const user = userEvent.setup();
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
@@ -762,8 +796,20 @@ describe("BillingTab", () => {
     expect(screen.getByText("4 seats")).toBeInTheDocument();
     expect(screen.getByText("1 seat")).toBeInTheDocument();
     expect(screen.getByText("0 seats")).toBeInTheDocument();
-    expect(screen.getByText(/4 seats from Feb 1, 2030/)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`4 seats from ${FEB_1_2030}`)),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("4 members")).toHaveLength(1);
+    expect(screen.getByText("Available seats").closest("summary")).toBeNull();
+    const formula = "Purchased seats minus members and reserved invitations.";
+    expect(screen.queryByText(formula)).not.toBeInTheDocument();
+    const help = screen.getByRole("button", { name: "How available seats are calculated" });
+    help.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(formula)).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByText(formula)).not.toBeInTheDocument());
+    expect(help).toHaveFocus();
   });
 
   it("quotes and confirms an additive seat purchase", async () => {
@@ -1269,11 +1315,13 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(
-      screen.getByText(/Update your payment method by Feb 15, 2030/),
+      screen.getByText(
+        new RegExp(`Update your payment method by ${FEB_15_2030}`),
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("Cancellation is scheduled")).toBeInTheDocument();
     expect(
-      screen.getByText(/subscription is scheduled to cancel on Mar 1, 2030/),
+      screen.getByText(new RegExp(`subscription will cancel on ${MAR_1_2030}`)),
     ).toBeInTheDocument();
   });
 
@@ -1298,7 +1346,7 @@ describe("BillingTab", () => {
     expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Open the Billing Portal to update your payment method. The plan badge above shows the access currently available.",
+        "Update your payment method in billing management.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/keep Pro access/)).not.toBeInTheDocument();
@@ -1323,13 +1371,15 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(
-      screen.getByText(/subscription is scheduled to cancel on Apr 1, 2030/),
+      screen.getByText(new RegExp(`subscription will cancel on ${APR_1_2030}`)),
     ).toBeInTheDocument();
-    expect(screen.getByText(/4 seats from Apr 1, 2030/)).toBeInTheDocument();
-    expect(screen.getByText("Apr 1, 2030")).toBeInTheDocument();
-    expect(screen.queryByText("Mar 1, 2030")).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/subscription is scheduled to cancel on Mar 1, 2030/),
+      screen.getByText(new RegExp(`4 seats from ${APR_1_2030}`)),
+    ).toBeInTheDocument();
+    expect(screen.getByText(APR_1_2030)).toBeInTheDocument();
+    expect(screen.queryByText(MAR_1_2030)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(new RegExp(`subscription will cancel on ${MAR_1_2030}`)),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Pro remains available/)).not.toBeInTheDocument();
   });
@@ -1458,7 +1508,7 @@ describe("BillingTab", () => {
     expect(screen.getByText("Payment needs attention")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Open the Billing Portal to update your payment method. The plan badge above shows the access currently available.",
+        "Update your payment method in billing management.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/keep Pro access/)).not.toBeInTheDocument();

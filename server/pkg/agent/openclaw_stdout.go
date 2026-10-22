@@ -15,7 +15,8 @@ import (
 // mid-write if a future openclaw flushes a result and then appends more. 2s is
 // far longer than the gap inside one flush, and it costs nothing in the normal
 // case because a CLI that exits reaches EOF and never consults it.
-const openclawResultIdleGrace = 2 * time.Second
+// Package tests shorten it; production never reassigns it.
+var openclawResultIdleGrace = 2 * time.Second
 
 // openclawStdoutPoll is how often the reader re-evaluates its exit conditions.
 const openclawStdoutPoll = 100 * time.Millisecond

@@ -35,8 +35,10 @@ import { telegramInstallationsOptions, telegramKeys } from "@multica/core/telegr
 import { api } from "@multica/core/api";
 import type { TelegramInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // TelegramTab is the workspace settings panel for Telegram bot installations,
 // mirroring SlackTab: listing is member-visible; the disconnect action is
@@ -106,7 +108,7 @@ export function TelegramTab() {
             <p className="text-body font-medium">{t(($) => $.telegram.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.telegram.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_TELEGRAM_SECRET_KEY
               </code>{" "}
               {t(($) => $.telegram.not_enabled_description_suffix)}{" "}
@@ -209,7 +211,7 @@ function InstallationRow({
               </span>
             ) : null}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.telegram.revoked_badge)}
               </span>
             )}
@@ -234,14 +236,7 @@ function InstallationRow({
 // telegramDocsUrl points at the Telegram integration guide on the docs site,
 // localized like the Slack docs link.
 function telegramDocsUrl(lang: string | undefined): string {
-  const prefix = lang?.startsWith("zh")
-    ? "/zh"
-    : lang?.startsWith("ja")
-      ? "/ja"
-      : lang?.startsWith("ko")
-        ? "/ko"
-        : "";
-  return `https://multica.ai/docs${prefix}/telegram-bot-integration`;
+  return `https://multica.ai/docs${docsLocalePrefix(lang)}/telegram-bot-integration`;
 }
 
 // TelegramAgentBindButton is the per-agent CTA on the agent detail page.
@@ -340,21 +335,24 @@ export function TelegramAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="telegram-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.telegram.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="telegram-agent-connect"
       >
-        <TelegramMark className="h-3 w-3" />
-        {t(($) => $.telegram.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="telegram-agent-connect"
+        >
+          <TelegramMark className="h-3 w-3" />
+          {t(($) => $.telegram.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -497,32 +495,34 @@ function TelegramAgentBotConnectedBadge({
             {installation.bot_username ? ` · @${installation.bot_username}` : ""}
           </span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.telegram.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.telegram.disconnect)}
-          data-testid="telegram-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.telegram.disconnecting)
-            : t(($) => $.telegram.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.telegram.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.telegram.disconnect)}
+            data-testid="telegram-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.telegram.disconnecting)
+              : t(($) => $.telegram.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       {installation.bot_username && (
-        <button
-          type="button"
-          onClick={() => openExternal(`https://t.me/${installation.bot_username}`)}
-          className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-          title={t(($) => $.telegram.agent_bot_manage_tooltip)}
-        >
-          <ExternalLink className="h-3 w-3" />
-          {t(($) => $.telegram.agent_bot_manage_link)}
-        </button>
+        <TooltipHint label={t(($) => $.telegram.agent_bot_manage_tooltip)}>
+          <button
+            type="button"
+            onClick={() => openExternal(`https://t.me/${installation.bot_username}`)}
+            className="inline-flex items-center gap-1 text-caption text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.telegram.agent_bot_manage_link)}
+          </button>
+        </TooltipHint>
       )}
 
       <AlertDialog

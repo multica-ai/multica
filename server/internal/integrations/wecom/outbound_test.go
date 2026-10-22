@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -31,16 +32,38 @@ import (
 // (use pgx.ErrNoRows to exercise the "not a wecom session" / "no binding"
 // branches).
 type fakeOutboundQueries struct {
+	// userBinding* / user* answer the languageLookup half of the interface:
+	// which Multica user a channel userid belongs to, and what language that
+	// user reads. A fake with no profile set answers "nothing", which is the
+	// deployment default — the answer every test written before the copy pack
+	// expects.
+	userBindingID pgtype.UUID
+	userBindErr   error
+	// perUserBinding overrides userBindingID for one channel userid; an invalid
+	// UUID means that sender is not bound, which is pgx.ErrNoRows in production.
+	perUserBinding map[string]pgtype.UUID
+	userLanguage   string
+	userErr        error
 	sessionBinding db.ChannelChatSessionBinding
 	sessionErr     error
 	installation   db.ChannelInstallation
 	installErr     error
 	memberBinding  db.ChannelUserBinding
 	memberErr      error
-	workspace      db.Workspace
-	workspaceErr   error
-	attachments    []db.Attachment
-	attachmentsErr error
+	// agentMemberBinding / agentMemberErr answer the agent-pinned member
+	// lookup, the one that makes a notification follow the bot↔agent mapping in
+	// a multi-bot org. An unset binding with no error is pgx.ErrNoRows — the bot
+	// this member never bound — which is what every test written before that
+	// lookup expects when it does not mention one. agentBindingAsked records the
+	// agent each lookup was made for, so a test can ask whether the acting
+	// agent's bot was consulted at all.
+	agentMemberBinding db.ChannelUserBinding
+	agentMemberErr     error
+	agentBindingAsked  []pgtype.UUID
+	workspace          db.Workspace
+	workspaceErr       error
+	attachments        []db.Attachment
+	attachmentsErr     error
 	// lookupGate holds every attachment lookup open until it is closed, which
 	// is what a slow database looks like from in here. lookupsEntered counts
 	// the arrivals, so a test can ask how many deliveries got as far as the
@@ -54,6 +77,9 @@ type fakeOutboundQueries struct {
 	tasks    map[string]db.AgentTaskQueue
 	taskErr  error
 	taskGets int
+	// originGateReads counts GetTaskChannelOrigin calls. It is the gate's whole
+	// price: one keyed read per completion, where it used to be two.
+	originGateReads int
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -71,6 +97,29 @@ type fakeOutboundQueries struct {
 	channelIngested *bool
 	originErr       error
 	originAskedFor  []string
+	// perTaskIngested overrides channelIngested for one id. A rig needs it
+	// whenever two runs of DIFFERENT origin share a session — a question typed
+	// in the room and one typed in Multica against the same agent — which is
+	// the population every binding rule here is about.
+	perTaskIngested map[string]bool
+	// deliveryFiled says whether channel_task_delivery holds a row for the run,
+	// and sessionChannelType names the platform that row points at.
+	//
+	// These are SEPARATE from the channel_ingested stamp because production
+	// writes them in different places, and collapsing them is what hid a live
+	// bug: TaskService.enqueueChatTask takes requireDelivery, and only
+	// EnqueueChannelChatTask passes true (internal/service/task.go:1912).
+	// EnqueueChatTask passes false with the reason in its own doc — "no
+	// external delivery snapshot is created: first-party sends reply only to
+	// first-party clients" (:1882) — so a run typed in Multica has NO row even
+	// in a chat with a WeCom binding, while another platform's run has a row
+	// naming that platform.
+	//
+	// nil means filed, which is what every test written before this field
+	// expects and what a channel-owned run really is.
+	deliveryFiled      *bool
+	perTaskDelivery    map[string]bool
+	sessionChannelType string
 	// t is who an unset stamp is reported to. fileTask sets it, and a filed
 	// row is the only route to the origin gate, so it is always there by the
 	// time the gate reads.
@@ -83,13 +132,100 @@ type fakeOutboundQueries struct {
 func askedOverWecom() *bool  { asked := true; return &asked }
 func askedInTheWebUI() *bool { asked := false; return &asked }
 
-func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUID) (db.ChannelTaskDelivery, error) {
+// originFor answers "where was this question asked" for one task: the per-task
+// stamp if the rig set one, else the rig-wide one, else unknown.
+func (f *fakeOutboundQueries) originFor(id string) (asked bool, known bool) {
+	if v, ok := f.perTaskIngested[id]; ok {
+		return v, true
+	}
+	if f.channelIngested != nil {
+		return *f.channelIngested, true
+	}
+	return false, false
+}
+
+// filedFor answers whether channel_task_delivery holds a row for the run.
+func (f *fakeOutboundQueries) filedFor(id string) (filed bool, explicit bool) {
+	if v, ok := f.perTaskDelivery[id]; ok {
+		return v, true
+	}
+	if f.deliveryFiled != nil {
+		return *f.deliveryFiled, true
+	}
+	// Unset: derive it from the enqueue that writes both. requireDelivery is
+	// true exactly for EnqueueChannelChatTask, so a run the rig has called
+	// first-party has no row, and one it has called channel-ingested does. A
+	// rig that says neither keeps the row, which is what every test written
+	// before this field expects.
+	if asked, known := f.originFor(id); known {
+		return asked, false
+	}
+	return true, false
+}
+
+// notFiled and filed are the two answers to "was a delivery route frozen for
+// this run": filed for a channel-owned task, notFiled for one typed in Multica.
+func notFiled() *bool { v := false; return &v }
+
+// refuseImpossibleRouting ends the test when a rig asks for a state production
+// cannot produce: a run with a WeCom delivery row whose question was typed in
+// Multica. Both facts come from the same enqueue — requireDelivery is true
+// exactly for EnqueueChannelChatTask — so a rig asserting both is asserting
+// against a world that does not exist, and a gate tested in that world can
+// pass while being unreachable in this one. That is precisely what happened:
+// this double used to hand back a WeCom row for every id.
+func (f *fakeOutboundQueries) refuseImpossibleRouting(id string) {
+	asked, known := f.originFor(id)
+	if !known || asked {
+		return
+	}
+	if _, explicit := f.filedFor(id); !explicit {
+		return // derived, not asserted
+	}
+	if f.t == nil {
+		return
+	}
+	f.t.Helper()
+	f.t.Fatalf("rig says task %s was asked in the web UI AND has a WeCom delivery row; production "+
+		"writes the row only for EnqueueChannelChatTask (internal/service/task.go:1912), so use "+
+		"deliveryFiled: notFiled() for a first-party run", id)
+}
+
+// GetChannelTaskDelivery answers BY TASK ID, because production does.
+//
+// A DELIVERY ROW EXISTS EXACTLY WHEN THE QUESTION CAME IN OVER A CHANNEL.
+// EnqueueChatTask's own doc says a first-party run gets none ("no external
+// delivery snapshot is created"), SendDirectChatMessage inserts none, and
+// main's channel_new_e2e_test.go:353 says the direct task deliberately gets
+// none — so for a run typed in Multica this query returns pgx.ErrNoRows.
+//
+// This double used to ignore the id and hand back a WeCom row for every one,
+// which put a run in a state production cannot be in: asked in the web UI AND
+// delivered over WeCom at once. Every test of the origin gate ran against that
+// state, which is why ten of them passed over a gate that was unreachable for
+// the whole population it was written for.
+//
+// A rig that never says where its question came from keeps the row — that is
+// what every test written before the gate existed expects, and none of them
+// reaches the gate.
+func (f *fakeOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
 	if f.sessionErr != nil {
 		return db.ChannelTaskDelivery{}, f.sessionErr
 	}
+	id := util.UUIDToString(taskID)
+	if filed, _ := f.filedFor(id); !filed {
+		return db.ChannelTaskDelivery{}, pgx.ErrNoRows
+	}
+	channelType := f.sessionChannelType
+	if channelType == "" {
+		channelType = channelTypeWecom
+	}
+	if channelType == channelTypeWecom {
+		f.refuseImpossibleRouting(id)
+	}
 	return db.ChannelTaskDelivery{
 		BindingID: f.sessionBinding.ID, InstallationID: f.sessionBinding.InstallationID,
-		ChannelType: channelTypeWecom, ChannelChatID: f.sessionBinding.ChannelChatID,
+		ChannelType: channelType, ChannelChatID: f.sessionBinding.ChannelChatID,
 		ChatType:         f.sessionBinding.ChatType,
 		ChannelMessageID: f.sessionBinding.LastMessageID, ChannelThreadID: f.sessionBinding.LastThreadID,
 		RouteRevision: f.sessionBinding.RouteRevision, Config: f.sessionBinding.Config,
@@ -101,6 +237,21 @@ func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChan
 func (f *fakeOutboundQueries) FindChannelBindingForMember(context.Context, db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
 	return f.memberBinding, f.memberErr
 }
+
+// FindChannelBindingForMemberOnAgentInstallation answers only when the rig
+// filed a binding on the agent's own bot. Production's answer for a bot this
+// member never bound is pgx.ErrNoRows, and handing back a row for every agent
+// would let a test pass that never said which bots the member is on.
+func (f *fakeOutboundQueries) FindChannelBindingForMemberOnAgentInstallation(_ context.Context, arg db.FindChannelBindingForMemberOnAgentInstallationParams) (db.ChannelUserBinding, error) {
+	f.agentBindingAsked = append(f.agentBindingAsked, arg.AgentID)
+	if f.agentMemberErr != nil {
+		return db.ChannelUserBinding{}, f.agentMemberErr
+	}
+	if !f.agentMemberBinding.InstallationID.Valid {
+		return db.ChannelUserBinding{}, pgx.ErrNoRows
+	}
+	return f.agentMemberBinding, nil
+}
 func (f *fakeOutboundQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
 }
@@ -111,6 +262,31 @@ func (f *fakeOutboundQueries) ListAttachmentsByChatMessage(context.Context, db.L
 	}
 	return f.attachments, f.attachmentsErr
 }
+
+// GetChannelUserBindingByUserID answers by the channel userid it is given.
+// Production returns pgx.ErrNoRows for a sender nobody has bound, so a double
+// that hands back a binding for every id cannot express a room where one
+// speaker is bound and another is not — which is every real room.
+func (f *fakeOutboundQueries) GetChannelUserBindingByUserID(_ context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error) {
+	if f.userBindErr != nil {
+		return db.ChannelUserBinding{}, f.userBindErr
+	}
+	if id, ok := f.perUserBinding[arg.ChannelUserID]; ok {
+		if !id.Valid {
+			return db.ChannelUserBinding{}, pgx.ErrNoRows
+		}
+		return db.ChannelUserBinding{MulticaUserID: id}, nil
+	}
+	return db.ChannelUserBinding{MulticaUserID: f.userBindingID}, nil
+}
+
+func (f *fakeOutboundQueries) GetUser(_ context.Context, id pgtype.UUID) (db.User, error) {
+	if f.userErr != nil {
+		return db.User{}, f.userErr
+	}
+	return db.User{ID: id, Language: pgtype.Text{String: f.userLanguage, Valid: f.userLanguage != ""}}, nil
+}
+
 func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.taskGets++
 	if f.taskErr != nil {
@@ -122,16 +298,46 @@ func (f *fakeOutboundQueries) GetAgentTask(_ context.Context, id pgtype.UUID) (d
 	}
 	return task, nil
 }
+
+// GetTaskChannelOrigin is one read in production, so it is one method here —
+// but the ANSWER is composed from the same two facts the two-read path composes
+// it from, rather than being a second stamp this double could set
+// independently. A double that can disagree with
+// engine.TaskInputIsChannelIngested about the same row is a double that will.
+func (f *fakeOutboundQueries) GetTaskChannelOrigin(ctx context.Context, id pgtype.UUID) (db.GetTaskChannelOriginRow, error) {
+	f.originGateReads++
+	if f.taskErr != nil {
+		return db.GetTaskChannelOriginRow{}, f.taskErr
+	}
+	task, ok := f.tasks[util.UUIDToString(id)]
+	if !ok {
+		// The query selects from agent_task_queue, so a task nobody filed has
+		// no row here either — and ErrNoRows is the answer the caller tells
+		// apart from a negative verdict.
+		return db.GetTaskChannelOriginRow{}, pgx.ErrNoRows
+	}
+	if !task.ChatInputTaskID.Valid {
+		// A batch with no owner is channel-ingested: no stamp is read, so no
+		// rig is asked for one. fileNoOwnerTask is the only way to get here,
+		// and it says in its own comment that it opts that task out of
+		// failStampNotSet.
+		return db.GetTaskChannelOriginRow{ChannelIngested: true, BatchOwnerUnknown: true}, nil
+	}
+	ingested, err := f.TaskHasChannelIngestedMessages(ctx, task.ChatInputTaskID)
+	return db.GetTaskChannelOriginRow{ChannelIngested: ingested}, err
+}
+
 func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(_ context.Context, taskID pgtype.UUID) (bool, error) {
 	f.originAskedFor = append(f.originAskedFor, util.UUIDToString(taskID))
 	if f.originErr != nil {
 		return false, f.originErr
 	}
-	if f.channelIngested == nil {
+	asked, known := f.originFor(util.UUIDToString(taskID))
+	if !known {
 		f.failStampNotSet(util.UUIDToString(taskID))
 		return false, nil // unreachable: failStampNotSet ends the test
 	}
-	return *f.channelIngested, nil
+	return asked, nil
 }
 
 // failStampNotSet ends the test naming what the rig left out, instead of
@@ -177,6 +383,21 @@ func (f *fakeOutboundQueries) fileRetryClone(t testing.TB, id, owner string) {
 	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID, ChatInputTaskID: ownerID}
 }
 
+// fileNoOwnerTask files a row migration 158 left behind: chat_input_task_id
+// NULL, so the origin gate delivers it without evidence and the log level on a
+// missing route has to come from somewhere else. Such a task reads no
+// channel_ingested stamp, so this is the one way to file a task without
+// answering failStampNotSet for it.
+func (f *fakeOutboundQueries) fileNoOwnerTask(t testing.TB, id string) {
+	t.Helper()
+	f.t = t
+	taskID := mustParseTaskUUID(t, id)
+	if f.tasks == nil {
+		f.tasks = map[string]db.AgentTaskQueue{}
+	}
+	f.tasks[util.UUIDToString(taskID)] = db.AgentTaskQueue{ID: taskID}
+}
+
 func mustParseTaskUUID(t testing.TB, id string) pgtype.UUID {
 	t.Helper()
 	parsed, err := util.ParseUUID(id)
@@ -195,7 +416,7 @@ func newOutboundWithConn(t *testing.T, q outboundQueries) (*Outbound, pgtype.UUI
 	instID := mustTestUUID(t)
 	conn := &recordingConn{}
 	reg.set(instID, conn.autoAck(newWSSender(conn, nil)))
-	return NewOutbound(q, reg, slog.Default()), instID, conn
+	return NewOutbound(q, reg, nil, slog.Default()), instID, conn
 }
 
 func TestProcessEvent_DeliversChatReplyToBoundChat(t *testing.T) {
@@ -324,6 +545,382 @@ func TestTryDeliverInbox_NoBindingIsNoop(t *testing.T) {
 	}
 	if len(conn.frames) != 0 {
 		t.Errorf("no binding should push nothing, got %d frames", len(conn.frames))
+	}
+}
+
+// The multi-bot rule: a notification about one agent's work is
+// pushed through THAT agent's bot, not through whichever bot the recipient
+// happens to have bound most recently. The recipient-wide answer here names a
+// different bot on purpose — delivering through the other one is the whole
+// assertion.
+func TestTryDeliverInbox_FollowsTheActingAgentsBot(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		// What FindChannelBindingForMember answers: some other agent's bot.
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	// The member IS on the acting agent's bot, which is the socket this rig
+	// holds.
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_A_BOT", InstallationID: instID}
+	agentID := "55555555-5555-5555-5555-555555555555"
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", agentID),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the member is bound on the acting agent's bot")
+	}
+	body := conn.sendBody(t, 0)
+	if body["chatid"] != "T_AGENT_A_BOT" {
+		t.Errorf("inbox push chatid = %v, want the acting agent's bot", body["chatid"])
+	}
+	if len(q.agentBindingAsked) != 1 || util.UUIDToString(q.agentBindingAsked[0]) != agentID {
+		t.Errorf("agent-pinned lookup asked for %v, want exactly [%s]", q.agentBindingAsked, agentID)
+	}
+}
+
+// The fallback: the agent that acted has no bot this member linked, so the
+// notification still goes out through the bot the recipient-wide lookup names.
+// Without this, preferring the agent's bot would silently drop notifications
+// for every agent the recipient never bound.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotIsUnbound(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the recipient-wide binding should still deliver")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the recipient's own bot", body["chatid"])
+	}
+	if len(q.agentBindingAsked) != 1 {
+		t.Errorf("agent-pinned lookup asked %d times, want 1 before the fallback", len(q.agentBindingAsked))
+	}
+}
+
+// A notification a member authored names no agent, so there is nothing to
+// attribute: the recipient-wide answer stands and the agent-pinned lookup is
+// never issued (a member is not an agent id, and asking would be meaningless).
+func TestTryDeliverInbox_MemberAuthoredNotificationKeepsTheRecipientWideAnswer(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding: db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		workspace:     db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_BOT", InstallationID: instID}
+
+	item := agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555")
+	item["actor_type"] = util.TextToPtr(pgtype.Text{String: "member", Valid: true})
+	if !o.tryDeliverInbox(context.Background(), item,
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the member has a binding")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the recipient-wide answer", body["chatid"])
+	}
+	if len(q.agentBindingAsked) != 0 {
+		t.Errorf("agent-pinned lookup issued for a member-authored notification: %v", q.agentBindingAsked)
+	}
+}
+
+// A failed agent-pinned read must not silence a notification the fallback can
+// still deliver.
+func TestTryDeliverInbox_AgentBotLookupFailureFallsBack(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		memberBinding:  db.ChannelUserBinding{ChannelUserID: "T_USER_1"},
+		agentMemberErr: errors.New("connection reset"),
+		workspace:      db.Workspace{Slug: "acme"},
+	}
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.memberBinding.InstallationID = instID
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; a failed agent-bot read must fall back")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_USER_1" {
+		t.Errorf("inbox push chatid = %v, want the fallback bot", body["chatid"])
+	}
+}
+
+// The other half of the multi-bot rule. Preferring the acting agent's bot must
+// not make a notification LESS deliverable than the recipient-wide route was:
+// when agent A's bot has no live socket anywhere in the fleet, the push has to
+// fall back to the bot the recipient-wide lookup names — the same route that
+// carried this notification before the agent's bot was preferred.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotHasNoLiveSender(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111") // registered nowhere: no socket on any replica
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	reg := newSendersRegistry()
+	conn := &recordingConn{}
+	reg.set(fallbackInstID, conn.autoAck(newWSSender(conn, nil)))
+	o := NewOutbound(q, reg, nil, slog.Default())
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID}
+	q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; the recipient-wide binding still has a live socket")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_LATEST_BOT" {
+		t.Errorf("inbox push chatid = %v, want the recipient-wide bot", body["chatid"])
+	}
+}
+
+// A registered socket that refuses the write deadline is a second shape of the
+// same proof: SetWriteDeadline runs before WriteMessage, so nothing could have
+// reached the wire, and the recipient-wide bot is still owed the push.
+func TestTryDeliverInbox_FallsBackWhenTheActingAgentsBotWriteIsRefused(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111")
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	reg := newSendersRegistry()
+	// Agent A's socket is up, but it will not accept a frame.
+	refusing := &deadlineRefusingConn{recordingConn: &recordingConn{}}
+	reg.set(agentInstID, refusing.recordingConn.autoAck(newWSSender(refusing, nil)))
+	conn := &recordingConn{}
+	reg.set(fallbackInstID, conn.autoAck(newWSSender(conn, nil)))
+	o := NewOutbound(q, reg, nil, slog.Default())
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID}
+	q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+	if !o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Fatal("tryDeliverInbox returned false; a refused write is provably undelivered and must fall back")
+	}
+	if body := conn.sendBody(t, 0); body["chatid"] != "T_LATEST_BOT" {
+		t.Errorf("inbox push chatid = %v, want the recipient-wide bot", body["chatid"])
+	}
+}
+
+// The flip side of the fallback: a send whose fate is UNKNOWN — here, the
+// verdict never came back — may already be in the member's chat, so the
+// recipient-wide bot is deliberately NOT tried. Duplicating the card is worse
+// than a late one.
+func TestTryDeliverInbox_DoesNotFallBackOnAnUncertainSend(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111")
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	reg := newSendersRegistry()
+	agentConn := &recordingConn{swallowAckFromSend: 1}
+	agentSender := newWSSender(agentConn, nil)
+	agentSender.ackTimeout = 50 * time.Millisecond
+	reg.set(agentInstID, agentConn.autoAck(agentSender))
+	fallbackConn := &recordingConn{}
+	reg.set(fallbackInstID, fallbackConn.autoAck(newWSSender(fallbackConn, nil)))
+	o := NewOutbound(q, reg, nil, slog.Default())
+	q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID}
+	q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+	if o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", "55555555-5555-5555-5555-555555555555"),
+		"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+		t.Error("tryDeliverInbox returned true for a send whose verdict never came back")
+	}
+	if frames := fallbackConn.sendFrames(); len(frames) != 0 {
+		t.Errorf("the recipient-wide bot was tried after an uncertain send: %d frames", len(frames))
+	}
+}
+
+// TestTryDeliverInbox_TriStateRelayMapping pins what each relay verdict means
+// to the fallback decision. Only a verdict that PROVES the card did not reach
+// WeCom may be re-routed: relayNotWired (no relay attached) and relayNoHolder
+// (published, but no replica ever took the delivery claim). relayAccepted is a
+// delivery; relayUncertain may already be one, so it must stay put.
+func TestTryDeliverInbox_TriStateRelayMapping(t *testing.T) {
+	t.Parallel()
+	const agentID = "55555555-5555-5555-5555-555555555555"
+	for _, tc := range []struct {
+		name          string
+		state         relayPublish
+		wantDelivered bool
+		wantFallback  int
+	}{
+		{"accepted is a delivery", relayAccepted, true, 0},
+		{"uncertain is not re-routed", relayUncertain, false, 0},
+		{"no holder falls back", relayNoHolder, true, 1},
+		{"no relay falls back", relayNotWired, true, 1},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+			agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111") // no socket here
+			fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+			reg := newSendersRegistry()
+			conn := &recordingConn{}
+			reg.set(fallbackInstID, conn.autoAck(newWSSender(conn, nil)))
+			relay := &scriptedRelay{state: tc.state}
+			o := NewOutbound(q, reg, nil, slog.Default(), WithRelay(relay))
+			q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_A_BOT", InstallationID: agentInstID}
+			q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+			got := o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", agentID),
+				"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444")
+			if got != tc.wantDelivered {
+				t.Errorf("tryDeliverInbox = %v, want %v", got, tc.wantDelivered)
+			}
+			if n := len(conn.sendFrames()); n != tc.wantFallback {
+				t.Errorf("the recipient-wide bot was sent %d cards, want %d", n, tc.wantFallback)
+			}
+		})
+	}
+}
+
+// TestTryDeliverInbox_OnlyTheAttemptWithASecondRouteWaits pins the split the
+// latency tests are about: the relay is asked to WAIT for a verdict only on the
+// agent-attributed attempt, because only that one has the recipient-wide bot
+// behind it. A member-authored push has no fallback at all, and the fallback
+// attempt has nothing behind it, so neither may hold the request's goroutine.
+func TestTryDeliverInbox_OnlyTheAttemptWithASecondRouteWaits(t *testing.T) {
+	t.Parallel()
+	agentInstID := mustUUID("aaaaaaaa-1111-1111-1111-111111111111")
+	fallbackInstID := mustUUID("bbbbbbbb-2222-2222-2222-222222222222")
+	const agentID = "55555555-5555-5555-5555-555555555555"
+
+	// Agent-authored, neither bot reachable here: the agent attempt waits (and
+	// misses), then the fallback attempt runs -- and must not wait again.
+	t.Run("agent attributed", func(t *testing.T) {
+		t.Parallel()
+		q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+		relay := &scriptedRelay{state: relayNoHolder}
+		o := NewOutbound(q, newSendersRegistry(), nil, slog.Default(), WithRelay(relay))
+		q.agentMemberBinding = db.ChannelUserBinding{ChannelUserID: "T_AGENT_BOT", InstallationID: agentInstID}
+		q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+		if o.tryDeliverInbox(context.Background(), agentInboxItem("new_comment", agentID),
+			"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+			t.Error("tryDeliverInbox = true; neither bot is reachable and no verdict was a delivery")
+		}
+		if len(relay.awaited) != 2 || !relay.awaited[0] || relay.awaited[1] {
+			t.Errorf("awaited = %v, want the agent attempt to wait and the fallback attempt not to", relay.awaited)
+		}
+	})
+
+	// Member-authored: the recipient-wide binding is the only route, so the one
+	// attempt must not wait for a verdict nothing could act on.
+	t.Run("member authored", func(t *testing.T) {
+		t.Parallel()
+		q := &fakeOutboundQueries{workspace: db.Workspace{Slug: "acme"}}
+		relay := &scriptedRelay{state: relayNoHolder}
+		o := NewOutbound(q, newSendersRegistry(), nil, slog.Default(), WithRelay(relay))
+		q.memberBinding = db.ChannelUserBinding{ChannelUserID: "T_LATEST_BOT", InstallationID: fallbackInstID}
+
+		item := agentInboxItem("new_comment", agentID)
+		item["actor_type"] = util.TextToPtr(pgtype.Text{String: "member", Valid: true})
+		if o.tryDeliverInbox(context.Background(), item,
+			"33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444") {
+			t.Error("tryDeliverInbox = true; the only bot is unreachable")
+		}
+		if len(relay.awaited) != 1 || relay.awaited[0] {
+			t.Errorf("awaited = %v, want the single member-authored attempt not to wait", relay.awaited)
+		}
+	})
+}
+
+// scriptedRelay is the router seam with a canned verdict, so the tri-state
+// mapping in pushInbox can be pinned without a bus or a claim store.
+type scriptedRelay struct {
+	state relayPublish
+	// awaited records whether the attempt that produced the verdict asked the
+	// relay to WAIT for it. Only the agent-attributed attempt may, which is the
+	// distinction the latency tests are about.
+	awaited []bool
+	frames  []relayFrame
+}
+
+func (r *scriptedRelay) publish(f relayFrame, _ string) relayPublish {
+	r.frames = append(r.frames, f)
+	r.awaited = append(r.awaited, false)
+	return r.state
+}
+
+func (r *scriptedRelay) publishAwaitingHolder(_ context.Context, f relayFrame, _ string) relayPublish {
+	r.frames = append(r.frames, f)
+	r.awaited = append(r.awaited, true)
+	return r.state
+}
+
+// deadlineRefusingConn is a socket whose write deadline cannot be set, which is
+// the one write failure raised before WriteMessage is entered (ws_sender.go's
+// writeLocked). It is the "provably nothing left this process" case the
+// fallback is owed for.
+type deadlineRefusingConn struct {
+	*recordingConn
+}
+
+func (c *deadlineRefusingConn) SetWriteDeadline(time.Time) error {
+	return errors.New("write deadline refused")
+}
+
+// inboxActorAgent reads the payload the way both publishers spell it, and
+// answers "no agent" for everything else — an actor that is a member, a
+// missing field, a nil pointer, or an id that is not a UUID.
+func TestInboxActorAgent(t *testing.T) {
+	t.Parallel()
+	agentID := "55555555-5555-5555-5555-555555555555"
+	for _, tc := range []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{name: "pointer fields, as published", item: agentInboxItem("new_comment", agentID), want: agentID},
+		{name: "plain fields, as re-encoded", want: agentID, item: map[string]any{
+			"actor_type": "agent", "actor_id": agentID,
+		}},
+		{name: "member actor", want: "", item: map[string]any{
+			"actor_type": util.TextToPtr(pgtype.Text{String: "member", Valid: true}),
+			"actor_id":   util.UUIDToPtr(mustUUID(agentID)),
+		}},
+		{name: "no actor", want: "", item: map[string]any{"actor_type": (*string)(nil)}},
+		{name: "agent actor with no id", want: "", item: map[string]any{
+			"actor_type": util.TextToPtr(pgtype.Text{String: "agent", Valid: true}),
+		}},
+		{name: "agent actor with an unparsable id", want: "", item: map[string]any{
+			"actor_type": "agent", "actor_id": "not-a-uuid",
+		}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := inboxActorAgent(tc.item)
+			if tc.want == "" {
+				if ok {
+					t.Errorf("inboxActorAgent = %q, want no agent", util.UUIDToString(got))
+				}
+				return
+			}
+			if !ok || util.UUIDToString(got) != tc.want {
+				t.Errorf("inboxActorAgent = (%q, %v), want (%s, true)", util.UUIDToString(got), ok, tc.want)
+			}
+		})
+	}
+}
+
+// agentInboxItem is one issue-comment notification as the listeners publish
+// it: a member recipient, and the agent whose comment it is as the actor —
+// behind pointers, which is how inboxItemToResponse builds the map.
+func agentInboxItem(notifType, agentID string) map[string]any {
+	return map[string]any{
+		"recipient_type": "member",
+		"recipient_id":   "33333333-3333-3333-3333-333333333333",
+		"workspace_id":   "44444444-4444-4444-4444-444444444444",
+		"type":           notifType,
+		"title":          "An issue",
+		"actor_type":     util.TextToPtr(pgtype.Text{String: "agent", Valid: true}),
+		"actor_id":       util.UUIDToPtr(mustUUID(agentID)),
 	}
 }
 

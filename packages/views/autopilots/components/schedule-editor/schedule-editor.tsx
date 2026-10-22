@@ -66,7 +66,6 @@ export interface ScheduleEditorProps {
   onChange: (value: ScheduleConfig) => void;
   wsId: string;
   disabled?: boolean;
-  disabledReason?: string;
   /** Fires when the server accepts or rejects the current expression, so the
    *  owning dialog can keep its submit button in step with the inline error. */
   onValidityChange?: (valid: boolean) => void;
@@ -238,7 +237,6 @@ export function ScheduleEditor({
   onChange,
   wsId,
   disabled,
-  disabledReason,
   onValidityChange,
 }: ScheduleEditorProps) {
   const { t, i18n } = useT("autopilots");
@@ -862,9 +860,6 @@ export function ScheduleEditor({
         </div>
         )}
       </div>
-      {disabled === true && disabledReason !== undefined && (
-        <p className="mt-2 text-micro text-muted-foreground">{disabledReason}</p>
-      )}
     </div>
   );
 }

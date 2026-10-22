@@ -18,7 +18,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
         key: "rework",
         name: "Rework",
         description: "",
-        category: "todo",
+        category: "unstarted",
         color: "#22c55e",
         is_system: false,
         position: 0,

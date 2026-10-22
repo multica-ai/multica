@@ -77,15 +77,18 @@ describe("resolveEmergencyLocale", () => {
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
-  it("hydrates in the cookie locale when the browser and document use another language", async () => {
-    document.cookie = `${LOCALE_COOKIE}=zh-Hans;path=/`;
+  it.each([
+    { locale: "zh-Hans", lang: "zh-CN", title: "出现了问题", reload: "重新加载" },
+    { locale: "fr", lang: "fr-FR", title: "Une erreur s'est produite", reload: "Recharger" },
+  ])("hydrates in $locale from the cookie when the browser uses another language", async ({ locale, lang, title, reload }) => {
+    document.cookie = `${LOCALE_COOKIE}=${locale};path=/`;
     setBrowserLanguages(["ja-JP"]);
 
     const { onRecoverableError } = await hydrateGlobalError("ja-JP");
 
-    expect(document.documentElement.lang).toBe("zh-CN");
-    expect(document.body).toHaveTextContent("出现了问题");
-    expect(document.querySelector("button")).toHaveTextContent("重新加载");
+    expect(document.documentElement.lang).toBe(lang);
+    expect(document.body).toHaveTextContent(title);
+    expect(document.querySelector("button")).toHaveTextContent(reload);
     expect(document.body).not.toHaveTextContent("Something went wrong");
     expect(document.body).not.toHaveTextContent("問題が発生しました");
     expect(onRecoverableError).not.toHaveBeenCalled();

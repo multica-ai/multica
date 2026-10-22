@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/eventcontract"
 	"github.com/robfig/cron/v3"
 )
 
@@ -107,13 +108,13 @@ const (
 
 // Product events an `event`-triggered hook may subscribe to.
 const (
-	EventIssueCreated       = "issue.created"
-	EventIssueUpdated       = "issue.updated"
-	EventIssueStatusChanged = "issue.status_changed"
-	EventCommentCreated     = "comment.created"
-	EventTaskStarted        = "task.started"
-	EventTaskCompleted      = "task.completed"
-	EventTaskFailed         = "task.failed"
+	EventIssueCreated       = eventcontract.EventIssueCreated
+	EventIssueUpdated       = eventcontract.EventIssueUpdated
+	EventIssueStatusChanged = eventcontract.EventIssueStatusChanged
+	EventCommentCreated     = eventcontract.EventCommentCreated
+	EventTaskStarted        = eventcontract.EventTaskStarted
+	EventTaskCompleted      = eventcontract.EventTaskCompleted
+	EventTaskFailed         = eventcontract.EventTaskFailed
 )
 
 var fixedScopes = map[string]bool{

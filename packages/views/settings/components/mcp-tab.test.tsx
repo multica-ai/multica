@@ -30,11 +30,13 @@ const data = vi.hoisted(() => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
+  queryOptions: <T,>(options: T) => options,
   useQuery: () => ({ data: data.servers, isLoading: data.isLoading }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   workspaceMcpServersOptions: () => ({ queryKey: ["workspaces", "workspace-1", "mcp-servers"] }),
+  memberListOptions: () => ({ queryKey: ["workspaces", "workspace-1", "members"] }),
 }));
 
 vi.mock("@multica/core/workspace/mutations", () => ({
@@ -525,6 +527,20 @@ describe("McpTab", () => {
     expect(
       screen.getByText(/Only workspace owners and admins/),
     ).toBeInTheDocument();
+  });
+
+  it("says how many agents use each server, when the server reports it", () => {
+    data.servers = [
+      server({ id: "s1", name: "sentry", agent_count: 3 }),
+      server({ id: "s2", name: "figma", agent_count: 0 }),
+      server({ id: "s3", name: "legacy" }),
+    ];
+    render(<McpTab />, { wrapper: Wrapper });
+
+    expect(screen.getByText(/Used by 3 agents/)).toBeInTheDocument();
+    expect(screen.getByText(/Not assigned to any agent/)).toBeInTheDocument();
+    // An older server omits the count; say nothing rather than "0".
+    expect(screen.getAllByText(/Used by|Not assigned/)).toHaveLength(2);
   });
 
   it("renders an empty state when the library is empty", () => {

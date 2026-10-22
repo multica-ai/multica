@@ -97,7 +97,7 @@ type RegisterSlackBYORequest struct {
 // credentials — BYO is exactly the path for deployments without a hosted app.
 func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
 	if h.SlackInstall == nil {
-		writeError(w, http.StatusServiceUnavailable, "slack integration not enabled")
+		writeFeatureDisabled(w, "slack_not_configured", "slack integration not enabled")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -181,7 +181,7 @@ func (h *Handler) publishSlackInstallationCreated(row db.ChannelInstallation, ac
 // audit; a re-install (re-pasting the app's tokens) flips status back to 'active'.
 func (h *Handler) RevokeSlackInstallation(w http.ResponseWriter, r *http.Request) {
 	if h.SlackInstall == nil {
-		writeError(w, http.StatusServiceUnavailable, "slack integration not configured")
+		writeFeatureDisabled(w, "slack_not_configured", "slack integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -239,7 +239,7 @@ type RedeemSlackBindingTokenResponse struct {
 //   - 403 Forbidden: redeemer is not a workspace member
 func (h *Handler) RedeemSlackBindingToken(w http.ResponseWriter, r *http.Request) {
 	if h.SlackBindingTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "slack integration not configured")
+		writeFeatureDisabled(w, "slack_not_configured", "slack integration not configured")
 		return
 	}
 	userID, ok := requireUserID(w, r)

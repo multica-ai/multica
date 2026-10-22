@@ -112,9 +112,6 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                 <h3 className="text-body font-medium">
                   {t(($) => $.cloud_runtime.create_title)}
                 </h3>
-                <p className="mt-1 text-caption text-muted-foreground">
-                  {t(($) => $.cloud_runtime.create_hint)}
-                </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">

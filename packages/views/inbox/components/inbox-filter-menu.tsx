@@ -1,21 +1,25 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { BotOff, CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "lucide-react";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import {
   filterInboxItems,
   inboxActorKey,
   inboxActorKeyParts,
+  inboxFiltersForArchive,
   inboxFiltersForPrioritySupport,
   inboxFilterCount,
   type InboxPriorityFilterSupport,
   useInboxFilters,
   useInboxFilterStore,
 } from "@multica/core/inbox/filter-store";
+import { useQuery } from "@tanstack/react-query";
+import { archivedInboxFacetsOptions } from "@multica/core/inbox/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -65,19 +69,29 @@ function actorCounts(items: InboxItem[]): Map<string, number> {
   return counts;
 }
 
+const EMPTY_ISSUE_IDS: ReadonlySet<string> = new Set();
+
 /** Faceted filters for the deduplicated list currently on screen. */
 export function InboxFilterMenu({
   wsId,
   items,
   priorityFilterSupport,
+  activeIssueIds = EMPTY_ISSUE_IDS,
+  archived = false,
 }: {
   wsId: string;
   items: InboxItem[];
   priorityFilterSupport: InboxPriorityFilterSupport;
+  /** Issues an agent is running or queued on. */
+  activeIssueIds?: ReadonlySet<string>;
+  archived?: boolean;
 }) {
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
   const filters = useInboxFilters(wsId);
+  const [open, setOpen] = useState(false);
+  const facetsQuery = useQuery({ ...archivedInboxFacetsOptions(wsId, filters), enabled: archived && open });
+  const facets = archived ? facetsQuery.data : undefined;
   const toggleStatus = useInboxFilterStore((state) => state.toggleStatusFilter);
   const togglePriority = useInboxFilterStore(
     (state) => state.togglePriorityFilter,
@@ -86,6 +100,7 @@ export function InboxFilterMenu({
   const toggleUnreadOnly = useInboxFilterStore(
     (state) => state.toggleUnreadOnly,
   );
+  const toggleIdleOnly = useInboxFilterStore((state) => state.toggleIdleOnly);
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
   const clearPriorityFilters = useInboxFilterStore(
@@ -93,19 +108,21 @@ export function InboxFilterMenu({
   );
   const inboxStatusKeys = useMemo(
     () => [
-      ...new Set(
-        items.flatMap((item) =>
+      ...new Set([
+        ...filters.statuses,
+        ...Object.keys(facets?.statuses ?? {}),
+        ...items.flatMap((item) =>
           item.issue_status == null ? [] : [item.issue_status],
         ),
-      ),
+      ]),
     ],
-    [items],
+    [items, facets, filters.statuses],
   );
   const statusOptions = useStatusOptions(wsId, inboxStatusKeys);
-  const effectiveFilters = useMemo(
-    () => inboxFiltersForPrioritySupport(filters, priorityFilterSupport),
-    [filters, priorityFilterSupport],
-  );
+  const effectiveFilters = useMemo(() => {
+    const supported = inboxFiltersForPrioritySupport(filters, priorityFilterSupport);
+    return archived ? inboxFiltersForArchive(supported) : supported;
+  }, [filters, priorityFilterSupport, archived]);
   const activeCount = inboxFilterCount(effectiveFilters);
   const priorityFilteringSupported = priorityFilterSupport === "supported";
 
@@ -131,43 +148,55 @@ export function InboxFilterMenu({
   // ignoring its own, so each number says how many rows selecting that value
   // can actually reveal.
   const statusFacetItems = useMemo(
-    () => filterInboxItems(items, { ...effectiveFilters, statuses: [] }),
-    [items, effectiveFilters],
+    () => filterInboxItems(items, { ...effectiveFilters, statuses: [] }, { activeIssueIds }),
+    [items, effectiveFilters, activeIssueIds],
   );
   const priorityFacetItems = useMemo(
-    () => filterInboxItems(items, { ...effectiveFilters, priorities: [] }),
-    [items, effectiveFilters],
+    () => filterInboxItems(items, { ...effectiveFilters, priorities: [] }, { activeIssueIds }),
+    [items, effectiveFilters, activeIssueIds],
   );
   const actorFacetItems = useMemo(
-    () => filterInboxItems(items, { ...effectiveFilters, actors: [] }),
-    [items, effectiveFilters],
+    () => filterInboxItems(items, { ...effectiveFilters, actors: [] }, { activeIssueIds }),
+    [items, effectiveFilters, activeIssueIds],
   );
-  const unreadCount = useMemo(
+  const localUnreadCount = useMemo(
     () =>
-      filterInboxItems(items, { ...effectiveFilters, unreadOnly: false }).filter(
-        (item) => item.read !== true,
-      ).length,
-    [items, effectiveFilters],
+      filterInboxItems(
+        items,
+        { ...effectiveFilters, unreadOnly: false },
+        { activeIssueIds },
+      ).filter((item) => item.read !== true).length,
+    [items, effectiveFilters, activeIssueIds],
   );
-  const statuses = useMemo(
+  const idleCount = useMemo(
+    () =>
+      filterInboxItems(items, { ...effectiveFilters, idleOnly: true }, { activeIssueIds })
+        .length,
+    [items, effectiveFilters, activeIssueIds],
+  );
+  const localStatuses = useMemo(
     () => statusCounts(statusFacetItems),
     [statusFacetItems],
   );
-  const priorities = useMemo(
+  const localPriorities = useMemo(
     () => priorityCounts(priorityFacetItems),
     [priorityFacetItems],
   );
-  const actors = useMemo(
+  const localActors = useMemo(
     () => actorCounts(actorFacetItems),
     [actorFacetItems],
   );
+  const unreadCount = archived ? facets?.unreadCount ?? 0 : localUnreadCount;
+  const statuses = archived ? new Map(Object.entries(facets?.statuses ?? {})) : localStatuses;
+  const priorities = archived ? new Map(Object.entries(facets?.priorities ?? {})) : localPriorities;
+  const actors = archived ? new Map(Object.entries(facets?.actors ?? {})) : localActors;
   // The universe of actors comes from every row in the view rather than the
   // faceted subset: picking one actor must not remove the others from the menu
   // that offers them. Sorted by name so the list does not reshuffle as counts
   // change under other selections.
   const actorOptions = useMemo(() => {
-    const keys = new Set<string>();
-    for (const item of items) {
+    const keys = new Set<string>(archived ? [...Object.keys(facets?.actors ?? {}), ...filters.actors] : []);
+    for (const item of archived ? [] : items) {
       const key = inboxActorKey(item);
       if (key != null) keys.add(key);
     }
@@ -177,21 +206,21 @@ export function InboxFilterMenu({
         return { key, type, id, name: getActorName(type, id) };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, getActorName]);
+  }, [items, getActorName, archived, facets, filters.actors]);
   const triggerLabel =
     activeCount > 0
       ? t(($) => $.filters.active_count, { count: activeCount })
       : t(($) => $.filters.tooltip);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
-          <Button
+          <IconButton
             variant={activeCount > 0 ? "default" : "ghost"}
             size="icon-sm"
-            aria-label={triggerLabel}
-            title={triggerLabel}
+            label={triggerLabel}
+            tooltipSide="bottom"
             className={cn(
               "text-muted-foreground",
               activeCount > 0 &&
@@ -206,6 +235,11 @@ export function InboxFilterMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-auto min-w-44">
+        {archived && facetsQuery.isLoading && <p role="status" className="px-2 py-1 text-caption text-muted-foreground">{t(($) => $.list.loading_more)}</p>}
+        {archived && facetsQuery.isError && <div className="px-2 py-1">
+          <p role="alert" className="text-caption text-destructive">{t(($) => $.errors.filters_load_failed)}</p>
+          <Button variant="ghost" size="sm" onClick={() => { void facetsQuery.refetch(); }}>{t(($) => $.list.retry)}</Button>
+        </div>}
         <DropdownMenuCheckboxItem
           checked={effectiveFilters.unreadOnly}
           onCheckedChange={() => toggleUnreadOnly(wsId)}
@@ -218,6 +252,21 @@ export function InboxFilterMenu({
             </span>
           )}
         </DropdownMenuCheckboxItem>
+        {/* The archive is filtered server-side, which has no idle dimension. */}
+        {!archived && (
+          <DropdownMenuCheckboxItem
+            checked={effectiveFilters.idleOnly}
+            onCheckedChange={() => toggleIdleOnly(wsId)}
+          >
+            <BotOff className="size-3.5" />
+            <span className="flex-1">{t(($) => $.filters.no_agents_working)}</span>
+            {idleCount > 0 && (
+              <span className="text-caption text-muted-foreground">
+                {t(($) => $.filters.notification_count, { count: idleCount })}
+              </span>
+            )}
+          </DropdownMenuCheckboxItem>
+        )}
         <DropdownMenuSeparator />
 
         {actorOptions.length > 0 && (
@@ -287,6 +336,7 @@ export function InboxFilterMenu({
                     status={option.key}
                     category={option.category}
                     color={option.color}
+                    icon={option.icon}
                     className="size-3.5"
                   />
                   <span className="flex-1">{option.label}</span>

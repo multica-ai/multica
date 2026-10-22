@@ -61,6 +61,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionPageHeader,
@@ -244,9 +245,7 @@ export interface AgentsPageProps {
   hasLocalMachine?: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Page header
-// ---------------------------------------------------------------------------
 
 function PageHeaderBar({
   totalCount,
@@ -255,7 +254,7 @@ function PageHeaderBar({
   totalCount: number;
   onCreate: () => void;
 }) {
-  const { t } = useT("agents");
+  const { t, i18n } = useT("agents");
   return (
     <CollectionPageHeader
       icon={Bot}
@@ -263,7 +262,7 @@ function PageHeaderBar({
       count={totalCount}
       description={t(($) => $.page.tagline)}
       learnMore={{
-        href: "https://multica.ai/docs/agents",
+        href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/agents`,
         label: t(($) => $.page.learn_more),
       }}
       actions={
@@ -327,9 +326,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function CheckboxCell({
   checked,
@@ -399,7 +396,7 @@ function NameCell({ row }: { row: AgentListRow }) {
             </Tooltip>
           )}
           {isOwnedByMe && (
-            <span className="shrink-0 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-xs bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.row.you)}
             </span>
           )}
@@ -567,9 +564,7 @@ function LastActiveCell({ row }: { row: AgentListRow }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header row + skeleton
-// ---------------------------------------------------------------------------
 
 function AgentListHeader({
   sortField,
@@ -761,10 +756,8 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
 // Page
-// ---------------------------------------------------------------------------
 
 export function AgentsPage(_props: AgentsPageProps = {}) {
   const { t } = useT("agents");

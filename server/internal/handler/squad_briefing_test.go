@@ -362,6 +362,14 @@ func TestBuildSquadLeaderBriefing_MentionsRoundTrip(t *testing.T) {
 // returns the agent block of the response. Fails the test on non-200.
 func claimAndDecodeAgent(t *testing.T, runtimeID string) *TaskAgentData {
 	t.Helper()
+	// The shared TestMain runtime heartbeats only at suite start, and claims
+	// skip runtimes unseen for RuntimeClaimFreshnessSeconds (150s). This file
+	// runs late enough to cross that on a slow -race runner, so refresh first.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent_runtime SET status = 'online', last_seen_at = now() WHERE id = $1`, runtimeID,
+	); err != nil {
+		t.Fatalf("refresh runtime heartbeat: %v", err)
+	}
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-squad-briefing")
 	req = withURLParam(req, "runtimeId", runtimeID)
@@ -374,11 +382,12 @@ func claimAndDecodeAgent(t *testing.T, runtimeID string) *TaskAgentData {
 			Agent *TaskAgentData `json:"agent"`
 		} `json:"task"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+	body := w.Body.String()
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if resp.Task == nil || resp.Task.Agent == nil {
-		t.Fatalf("expected task.agent in response, got: %s", w.Body.String())
+		t.Fatalf("expected task.agent in response, got: %s", body)
 	}
 	return resp.Task.Agent
 }

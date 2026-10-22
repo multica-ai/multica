@@ -17,11 +17,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { isDesktopShell } from "../platform/local-directory";
 import { DISCORD_URL, DiscordIcon } from "./discord";
 import { useT } from "../i18n";
+import { docsLocalePrefix } from "../common/docs-locale";
 
 const DOCS_URL = "https://multica.ai/docs";
 const CHANGELOG_URL = "https://multica.ai/changelog";
@@ -32,7 +34,7 @@ const CHANGELOG_URL = "https://multica.ai/changelog";
 const DOWNLOAD_URL = "https://multica.ai/download";
 
 export function HelpLauncher() {
-  const { t } = useT("layout");
+  const { t, i18n } = useT("layout");
   const serverVersion = useConfigStore((state) => state.serverVersion);
   // Web-only: offering "download the desktop app" inside the desktop app is
   // nonsense, and this sidebar is shared — apps/desktop renders the same
@@ -46,13 +48,14 @@ export function HelpLauncher() {
   const desktop = isDesktopShell();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t(($) => $.help.trigger)}
-        title={t(($) => $.help.trigger)}
-        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
-      >
-        <CircleHelp className="size-4" />
-      </DropdownMenuTrigger>
+      <TooltipHint label={t(($) => $.help.trigger)}>
+        <DropdownMenuTrigger
+          aria-label={t(($) => $.help.trigger)}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
+        >
+          <CircleHelp className="size-4" />
+        </DropdownMenuTrigger>
+      </TooltipHint>
       <DropdownMenuContent
         align="end"
         side="top"
@@ -79,7 +82,11 @@ export function HelpLauncher() {
         )}
         <DropdownMenuItem
           render={
-            <a href={DOCS_URL} target="_blank" rel="noopener noreferrer" />
+            <a
+              href={`${DOCS_URL}${docsLocalePrefix(i18n.language)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            />
           }
         >
           <BookOpen className="h-3.5 w-3.5" />

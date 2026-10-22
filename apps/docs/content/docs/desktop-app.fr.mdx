@@ -1,0 +1,182 @@
+---
+title: Application de bureau
+description: Installez Multica Desktop, utilisez les onglets de Desktop et le daemon intégré, et connectez-vous à une instance auto-hébergée.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica Desktop est disponible pour macOS, Windows et Linux. Il utilise le même compte et les mêmes données d'espace de travail que l'application web, mais il gère automatiquement le daemon sur votre machine et conserve un ensemble d'onglets distinct pour chaque espace de travail.
+
+## Desktop et web
+
+| | Web | Desktop |
+| --- | --- | --- |
+| Comment l'ouvrir | Navigateur | Installer l'application de bureau |
+| Onglets par espace de travail | Utilise les onglets du navigateur | Chaque espace de travail conserve ses propres onglets |
+| Daemon | Installer et démarrer le CLI séparément | Démarré automatiquement par l'application après la connexion |
+| Mises à jour | Actualiser la page | Mises à jour via l'application de bureau |
+
+Le web est plus pratique pour un coup d'œil rapide ou sur un ordinateur partagé.
+
+Vous pouvez être connecté aux deux en même temps. Tant qu'ils se connectent au même service Multica, les données qu'ils affichent sont partagées.
+
+## Installation
+
+Choisissez le programme d'installation correspondant à votre système d'exploitation et à l'architecture de votre processeur sur la [page de téléchargement de Multica](https://multica.ai/download) :
+
+| Plateforme | Programme d'installation |
+| --- | --- |
+| macOS | `.dmg` |
+| Windows | `.exe` |
+| Linux | `.AppImage`, `.deb` ou `.rpm` |
+
+Après l'installation, connectez-vous avec la même adresse e-mail que sur le web. Une fois connecté, Desktop démarre son propre CLI Multica intégré et détecte les outils de codage IA déjà installés sur la machine.
+
+<Callout type="info">
+Le CLI intégré à Desktop sert uniquement au runtime géré par l'application. Si vous voulez aussi exécuter des commandes comme `multica issue` dans un terminal, installez le CLI séparément en suivant l'[étape 2 du démarrage rapide](/cloud-quickstart#2-connectez-un-ordinateur).
+</Callout>
+
+## Onglets de Desktop
+
+Desktop enregistre les onglets par espace de travail. Par exemple, si vous ouvrez trois tâches dans l'espace de travail A puis passez à l'espace de travail B, vous voyez les onglets propres à B ; revenez à A et les trois onglets précédents sont toujours là.
+
+Une même ressource ne s'ouvre qu'une seule fois dans l'espace de travail courant. Les onglets peuvent être réordonnés, épinglés et fermés, et chacun conserve son propre historique de navigation avant/arrière et sa position de défilement. Cliquer sur un lien de l'application pour ce déploiement, ou le coller, l'ouvre directement dans un onglet au lieu de basculer vers le navigateur.
+
+La déconnexion efface tous les onglets enregistrés sur la machine : la personne suivante qui se connecte ne voit jamais les pages laissées par le compte précédent.
+
+## Daemon intégré
+
+Après la connexion, Desktop crée un profil CLI dédié au service Multica courant et l'utilise pour démarrer le daemon. Le profil se trouve ici :
+
+```text
+~/.multica/profiles/desktop-<host>/
+```
+
+Il ne lit ni n'écrase jamais le profil par défaut que vous utilisez dans le terminal. Si vous démarrez aussi manuellement un autre daemon, Multica les affiche comme des runtimes distincts.
+
+Vous pouvez consulter l'état et les journaux du runtime dans les paramètres de Desktop. Si un outil n'est pas détecté, vérifiez d'abord qu'il fonctionne dans un terminal ordinaire et qu'il est connecté, puis redémarrez le daemon de Desktop.
+
+## Mettre à jour Desktop
+
+La mise à jour automatique est activée par défaut. L'application recherche et télécharge les nouvelles versions en arrière-plan ; une fois une version téléchargée, vous pouvez redémarrer pour l'installer immédiatement ou la laisser s'installer à la prochaine fermeture. Vous pouvez aussi désactiver les vérifications automatiques ou rechercher manuellement de nouvelles versions dans **Paramètres → Mises à jour**.
+
+Les mises à jour sont distribuées par système d'exploitation et par architecture de processeur :
+
+- Windows arm64 et macOS x64 (Intel) utilisent chacun leur propre flux de mise à jour ;
+- toutes les autres architectures utilisent le flux par défaut ;
+- l'application sélectionne automatiquement le bon flux de mise à jour — aucun choix manuel n'est nécessaire ;
+- sous Linux, la mise à jour automatique ne fonctionne qu'avec `.AppImage` ; mettez à jour `.deb` et `.rpm` en installant un nouveau paquet par-dessus l'ancien ;
+- si la mise à jour automatique échoue, réinstallez de la même façon par-dessus avec le programme d'installation correspondant, disponible sur la page de téléchargement.
+
+## Se connecter à une instance auto-hébergée
+
+Desktop se connecte par défaut à Multica Cloud. Pour vous connecter à une instance auto-hébergée, créez `desktop.json` dans le répertoire `.multica` de votre répertoire personnel :
+
+| Plateforme | Chemin |
+| --- | --- |
+| macOS | `/Users/<you>/.multica/desktop.json` |
+| Linux | `/home/<you>/.multica/desktop.json` |
+| Windows | `C:\Users\<you>\.multica\desktop.json` |
+
+Ce sont les emplacements par défaut — si votre répertoire personnel a été déplacé ou redirigé, utilisez son chemin réel.
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+```
+
+<Callout type="warning">
+Il ne s'agit **pas** du `~/.multica/config.json` du CLI, et les noms de clés diffèrent : le CLI utilise `server_url`, Desktop utilise `apiUrl`. Desktop ne lit jamais la configuration du CLI — il gère un profil de daemon distinct dans `~/.multica/profiles/desktop-<host>/`. Modifier `config.json` ne change pas le serveur auquel Desktop se connecte.
+</Callout>
+
+`apiUrl` est l'adresse publique du backend ; elle est obligatoire et doit utiliser `http` ou `https`. Les deux autres URL peuvent être omises — Desktop les déduit automatiquement :
+
+- `wsUrl` : remplace le schéma de `apiUrl` par `ws` ou `wss` et ajoute `/ws` au chemin ;
+- `appUrl` : retire le préfixe `api.` lorsque l'hôte commence par `api.` et comporte au moins trois niveaux (`api.example.com` → `example.com`) ; sinon, elle reste identique à `apiUrl`.
+
+En général, `apiUrl` seul suffit. Ne les définissez explicitement que si la déduction ne correspond pas à votre déploiement ; les trois cas courants :
+
+- l'application web et l'API sont sur des domaines différents ;
+- le WebSocket est déployé séparément ;
+- l'hôte ne suit pas la convention de retrait du préfixe (les hôtes à deux niveaux comme `api.local` conservent leur préfixe).
+
+```json
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com",
+  "appUrl": "https://app.example.com",
+  "wsUrl": "wss://ws.example.com/socket"
+}
+```
+
+Redémarrez Desktop après l'enregistrement — le fichier n'est lu qu'une fois, au démarrage. Les deux modes d'échec se manifestent différemment, ce qui est le moyen le plus rapide de les distinguer :
+
+- **Fichier introuvable** (mauvais répertoire, ou nom de fichier qui n'est pas exactement `desktop.json`) — Desktop utilise la configuration Cloud par défaut et n'affiche aucune erreur. Donc, si Desktop indique toujours une adresse Cloud sans aucune erreur de configuration, le fichier ne se trouve pas là où Desktop le cherche.
+- **Fichier trouvé mais invalide** (JSON, version ou URL) — Desktop affiche une erreur de configuration et ne se rabat pas sur Cloud.
+
+Supprimez le fichier et redémarrez pour revenir à la configuration Cloud par défaut.
+
+<Callout type="warning">
+Desktop ne peut se connecter qu'à des adresses joignables à la fois depuis le navigateur et depuis la machine d'exécution. Si une instance auto-hébergée distante n'utilise pas HTTPS ou ne fait pas passer le WebSocket par son proxy, Desktop ne peut pas établir de connexion ; consultez le [démarrage rapide en auto-hébergement](/self-host-quickstart#3-choisir-le-mode-daccès) pour la configuration complète.
+</Callout>
+
+### Windows : vérifier le nom et l'encodage du fichier
+
+Deux comportements par défaut des éditeurs Windows produisent silencieusement un fichier que Desktop ne peut pas utiliser :
+
+- **Le Bloc-notes ajoute `.txt`.** Enregistrer sous `desktop.json` peut produire `desktop.json.txt`, que Desktop considère comme introuvable. Activez l'affichage des extensions de noms de fichiers dans l'Explorateur de fichiers, ou choisissez *Tous les fichiers* dans la boîte de dialogue d'enregistrement. Pour voir le vrai nom du fichier, exécutez `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"` dans PowerShell — la colonne `Name` doit indiquer exactement `desktop.json`.
+- **La redirection PowerShell écrit en UTF-16 ou avec un BOM.** `> desktop.json` et `Out-File` peuvent produire un encodage impossible à analyser, qui se traduit par une erreur de configuration.
+
+Pour éviter ces deux problèmes, créez le fichier depuis PowerShell en une seule étape :
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
+
+## Windows Defender signale Multica comme un virus
+
+**Symptôme** : Sécurité Windows signale une menace telle que `Trojan:Script/Wacatac.B!ml` et met en quarantaine un fichier de l'installation de Desktop. L'élément concerné est normalement le CLI intégré, et non l'exécutable de l'application :
+
+```text
+C:\Users\<you>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
+```
+
+**Il s'agit d'un faux positif.** Le suffixe `!ml` signifie que le verdict provient des heuristiques d'apprentissage automatique de Defender, et non d'une signature de logiciel malveillant. Les builds Windows de Multica ne sont pas encore signées avec Authenticode, et un binaire non signé tout juste publié, qui lance des processus en arrière-plan et ouvre des connexions réseau, correspond exactement au profil que ces heuristiques jugent suspect. Chaque artefact Windows est construit par GitHub Actions à partir du code source public de ce dépôt.
+
+**Vérifiez par vous-même** — chaque release GitHub publie un fichier `checksums.txt` couvrant toutes les archives du CLI :
+
+```powershell
+Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
+```
+
+Comparez l'empreinte obtenue avec la ligne correspondante de `checksums.txt` dans la [dernière release](https://github.com/multica-ai/multica/releases/latest).
+
+**Comment corriger** :
+
+1. **Restaurez le fichier mis en quarantaine** — Sécurité Windows → *Protection contre les virus et menaces* → *Historique de protection* → sélectionnez l'élément Multica → *Actions* → *Restaurer*.
+2. **Ajoutez une exclusion** pour qu'il ne soit plus mis en quarantaine — *Protection contre les virus et menaces* → *Gérer les paramètres* → *Exclusions* → *Ajouter une exclusion* → *Dossier*, et ajoutez les deux dossiers suivants :
+   - `%LOCALAPPDATA%\Programs\@multicadesktop`
+   - `%APPDATA%\Multica`
+
+   Les deux chemins sont nécessaires : lorsque le CLI intégré disparaît, Desktop télécharge un remplaçant dans `%APPDATA%\Multica\bin` ; exclure uniquement le dossier d'installation vous enferme donc dans une boucle où le remplaçant est lui aussi mis en quarantaine.
+3. **Signalez le faux positif à Microsoft** sur [Microsoft Security Intelligence — soumettre un fichier](https://www.microsoft.com/en-us/wdsi/filesubmission), en choisissant *Software developer* et *Incorrectly detected as malware*. C'est ce qui permet de retirer la détection pour tous les utilisateurs, généralement en quelques jours.
+
+<Callout type="warning">
+N'ajoutez ces exclusions que si vous avez installé Multica depuis la [page de téléchargement](https://multica.ai/download) ou les [releases GitHub](https://github.com/multica-ai/multica/releases) et que la somme de contrôle correspond. Une exclusion désactive la protection en temps réel pour tout le contenu de ce dossier.
+</Callout>
+
+## Étapes suivantes
+
+- [Démarrage rapide](/cloud-quickstart) — le parcours de première connexion.
+- [Daemon et runtimes](/daemon-runtimes) — le fonctionnement du daemon intégré.
+- [Dépannage](/troubleshooting) — diagnostiquer les problèmes de connexion.

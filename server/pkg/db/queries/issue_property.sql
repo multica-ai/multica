@@ -48,8 +48,9 @@ WHERE id = $1 AND workspace_id = $2
 RETURNING *;
 
 -- name: SetIssuePropertyValue :one
--- Single-key atomic write (mirror of SetIssueMetadataKey): concurrent writers
--- on different property keys never clobber each other.
+-- Single-key atomic write: concurrent writers on different property keys
+-- never clobber each other. Unlike SetIssueMetadataKey, a no-op still updates
+-- and returns the issue row.
 UPDATE issue
 SET properties = jsonb_set(properties, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb, true),
     revision = revision + CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,

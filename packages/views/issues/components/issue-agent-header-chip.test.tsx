@@ -189,6 +189,18 @@ beforeEach(() => {
 });
 
 describe("IssueAgentHeaderChip", () => {
+  it("lists pending threads oldest first after the running task, even after coalescing", () => {
+    // ListTasksByIssue returns newest first, as in DEV-24.
+    mockState.tasks = [
+      makeTask({ id: "dlc", status: "queued", created_at: "2026-09-08T11:44:52+08:00" }),
+      makeTask({ id: "beginner", status: "queued", created_at: "2026-09-08T11:44:34+08:00", trigger_comment_id: "new-supplement", coalesced_comment_ids: ["original"] }),
+      makeTask({ id: "running", created_at: "2026-09-08T11:44:26+08:00" }),
+    ];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+    expect(screen.getAllByTestId("active-task-row").map((row) => row.querySelector("span")?.textContent))
+      .toEqual(["running", "beginner", "dlc"]);
+  });
+
   it("shows the active agent name without event count or elapsed time", () => {
     mockState.tasks = [makeTask({})];
 
@@ -201,6 +213,24 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.queryByText(/events?/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/\d+[smh]/i)).not.toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("wears the decorative border beam only while an agent is running", () => {
+    mockState.tasks = [makeTask({})];
+    const { unmount } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const running = screen.getByRole("button", { name: "Walt is working" });
+    const ring = running.querySelector(".border-beam-ring");
+    expect(running).toHaveClass("relative");
+    expect(ring).toHaveAttribute("aria-hidden", "true");
+    expect(ring?.querySelector(".border-beam-light")).not.toBeNull();
+    unmount();
+
+    mockState.tasks = [makeTask({ status: "queued" })];
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const queued = screen.getByRole("button", { name: "Walt is queued" });
+    expect(queued.querySelector(".border-beam-ring")).toBeNull();
   });
 
   it("keeps the header popover card with active task rows", () => {

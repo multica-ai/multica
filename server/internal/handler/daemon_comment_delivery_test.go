@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -111,62 +111,36 @@ type failNthBegin struct {
 	calls    int
 }
 
-type failDeleteCommentDB struct {
-	delegate db.DBTX
+// lockCommentForDeleteTxStarter begins real transactions whose
+// LockCommentForDelete statement answers with lockErr instead: an error
+// simulates a storage failure, pgx.ErrNoRows a concurrent delete that won.
+type lockCommentForDeleteTxStarter struct {
+	delegate *pgxpool.Pool
+	lockErr  error
 }
 
-type zeroDeleteCommentDB struct {
-	delegate db.DBTX
+type lockCommentForDeleteTx struct {
+	pgx.Tx
+	lockErr error
 }
 
-type deleteCommentResultRow struct {
-	changed bool
-	err     error
-}
+type errorRow struct{ err error }
 
-func (r deleteCommentResultRow) Scan(dest ...interface{}) error {
-	if r.err != nil {
-		return r.err
+func (r errorRow) Scan(...interface{}) error { return r.err }
+
+func (s *lockCommentForDeleteTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.delegate.Begin(ctx)
+	if err != nil {
+		return nil, err
 	}
-	*(dest[0].(*bool)) = r.changed
-	*(dest[1].(*int64)) = 0
-	return nil
+	return lockCommentForDeleteTx{Tx: tx, lockErr: s.lockErr}, nil
 }
 
-func (f *failDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
-	if strings.Contains(query, "-- name: DeleteComment") {
-		return pgconn.CommandTag{}, errors.New("injected comment deletion failure")
+func (t lockCommentForDeleteTx) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
+	if strings.Contains(query, "-- name: LockCommentForDelete") {
+		return errorRow{err: t.lockErr}
 	}
-	return f.delegate.Exec(ctx, query, args...)
-}
-
-func (f *failDeleteCommentDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
-	return f.delegate.Query(ctx, query, args...)
-}
-
-func (f *failDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
-	if strings.Contains(query, "-- name: DeleteComment") {
-		return deleteCommentResultRow{err: errors.New("injected comment deletion failure")}
-	}
-	return f.delegate.QueryRow(ctx, query, args...)
-}
-
-func (z *zeroDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
-	if strings.Contains(query, "-- name: DeleteComment") {
-		return pgconn.NewCommandTag("DELETE 0"), nil
-	}
-	return z.delegate.Exec(ctx, query, args...)
-}
-
-func (z *zeroDeleteCommentDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
-	return z.delegate.Query(ctx, query, args...)
-}
-
-func (z *zeroDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
-	if strings.Contains(query, "-- name: DeleteComment") {
-		return deleteCommentResultRow{changed: false}
-	}
-	return z.delegate.QueryRow(ctx, query, args...)
+	return t.Tx.QueryRow(ctx, query, args...)
 }
 
 func (f *failNthBegin) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -231,6 +205,16 @@ func createCommentDeliveryFixture(t *testing.T, label string) commentDeliveryFix
 		threadID:  []string{ids[0], ids[1], ids[1]},
 		content:   contents,
 	}
+}
+
+func makeCommentDeliverySingleThread(t *testing.T, fixture commentDeliveryFixture) {
+	t.Helper()
+	root := dbfx.Comment(t, fixture.issueID, "thread root", testutil.Cols{"author_type": "agent", "author_id": fixture.agentID})
+	dbfx.Exec(t, `UPDATE comment SET created_at=now()-interval '10 minutes' WHERE id=$1`, root)
+	for _, id := range fixture.commentID {
+		dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, id, root)
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET trigger_comment_id=trigger_comment_id WHERE id=$1`, fixture.taskID)
 }
 
 func claimCommentDeliveryFixture(t *testing.T, fixture commentDeliveryFixture, capabilities string) AgentTaskResponse {
@@ -348,15 +332,35 @@ func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 	})
 }
 
+// deletedTriggerStates are the two shapes a deleted trigger leaves behind: a
+// removed row (trigger_comment_id cleared by ON DELETE SET NULL), or a
+// tombstone for a trigger that still had replies (#8296), which keeps the id.
+var deletedTriggerStates = []struct {
+	name string
+	sql  string
+}{
+	{name: "removed", sql: `DELETE FROM comment WHERE id = $1`},
+	{name: "tombstoned", sql: `UPDATE comment SET content = '', deleted_at = now() WHERE id = $1`},
+}
+
 func TestClaimTaskByRuntime_CoalescedOnlyStaleTaskDoesNotReuseDeletedTriggerCapabilities(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
+	for _, state := range deletedTriggerStates {
+		t.Run(state.name, func(t *testing.T) {
+			testClaimRepairsDeletedTrigger(t, state.sql)
+		})
+	}
+}
+
+func testClaimRepairsDeletedTrigger(t *testing.T, deleteTriggerSQL string) {
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger stale claim")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign stale-claim issue: %v", err)
 	}
-	if _, err := testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, fixture.commentID[2]); err != nil {
+	if _, err := testPool.Exec(context.Background(), deleteTriggerSQL, fixture.commentID[2]); err != nil {
 		t.Fatalf("delete trigger directly: %v", err)
 	}
 
@@ -386,6 +390,7 @@ func TestUpdateComment_RequeuesSurvivingCoalescedBatch(t *testing.T) {
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Edited trigger batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign edited-trigger issue: %v", err)
 	}
@@ -408,6 +413,7 @@ func TestDeleteComment_RequeuesSurvivingCoalescedBatch(t *testing.T) {
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign deleted-trigger issue: %v", err)
 	}
@@ -435,6 +441,7 @@ func TestUpdateComment_CancelsAndRequeuesWhenEditedInputIsCoalesced(t *testing.T
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Edited coalesced input repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign edited-coalesced issue: %v", err)
 	}
@@ -450,6 +457,13 @@ func TestUpdateComment_CancelsAndRequeuesWhenEditedInputIsCoalesced(t *testing.T
 	}
 
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[0], fixture.commentID[1:])
+	original, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(fixture.taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !taskToResponse(original, testWorkspaceID).CancelledByCommentChange {
+		t.Fatal("edited input must identify the cancelled run as invalidated by a comment change")
+	}
 }
 
 func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.T) {
@@ -457,6 +471,7 @@ func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Deleted coalesced input repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign deleted-coalesced issue: %v", err)
 	}
@@ -477,12 +492,13 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Failed deletion batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign failed-delete issue: %v", err)
 	}
 
 	failingHandler := *testHandler
-	failingHandler.Queries = db.New(&failDeleteCommentDB{delegate: testPool})
+	failingHandler.TxStarter = &lockCommentForDeleteTxStarter{delegate: testPool, lockErr: errors.New("injected comment deletion failure")}
 	w := httptest.NewRecorder()
 	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
 	req = withURLParam(req, "commentId", fixture.commentID[2])
@@ -506,12 +522,13 @@ func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *test
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Concurrent deletion batch repair")
+	makeCommentDeliverySingleThread(t, fixture)
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
 		t.Fatalf("assign concurrent-delete issue: %v", err)
 	}
 
 	zeroHandler := *testHandler
-	zeroHandler.Queries = db.New(&zeroDeleteCommentDB{delegate: testPool})
+	zeroHandler.TxStarter = &lockCommentForDeleteTxStarter{delegate: testPool, lockErr: pgx.ErrNoRows}
 	w := httptest.NewRecorder()
 	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
 	req = withURLParam(req, "commentId", fixture.commentID[2])
@@ -587,6 +604,7 @@ func TestClaimTaskByRuntime_PayloadOverflowReceiptsOnlyEmbeddedPrefix(t *testing
 		t.Skip("database not available")
 	}
 	fixture := createCommentDeliveryFixture(t, "Comment payload overflow")
+	makeCommentDeliverySingleThread(t, fixture)
 	oversized := strings.Repeat("x", maxClaimCommentPayloadBytes+1024)
 	if _, err := testPool.Exec(context.Background(), `UPDATE comment SET content = $2 WHERE id = $1`, fixture.commentID[0], oversized); err != nil {
 		t.Fatalf("make first coalesced comment oversized: %v", err)
@@ -778,6 +796,14 @@ func TestRerunIssue_PromotesNewestSurvivorAfterSourceTriggerDeleted(t *testing.T
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
+	for _, state := range deletedTriggerStates {
+		t.Run(state.name, func(t *testing.T) {
+			testRerunPromotesSurvivorAfterTriggerDeleted(t, state.sql)
+		})
+	}
+}
+
+func testRerunPromotesSurvivorAfterTriggerDeleted(t *testing.T, deleteTriggerSQL string) {
 	ctx := context.Background()
 	fixture := createCommentDeliveryFixture(t, "Deleted trigger manual rerun")
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
@@ -790,7 +816,7 @@ func TestRerunIssue_PromotesNewestSurvivorAfterSourceTriggerDeleted(t *testing.T
 	`, fixture.taskID); err != nil {
 		t.Fatalf("complete deleted-trigger rerun source: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, fixture.commentID[2]); err != nil {
+	if _, err := testPool.Exec(ctx, deleteTriggerSQL, fixture.commentID[2]); err != nil {
 		t.Fatalf("delete rerun source trigger: %v", err)
 	}
 
@@ -977,7 +1003,7 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 		WorkspaceID: parseUUID(testWorkspaceID),
 		UserID:      parseUUID(testUserID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true, db.CreateDaemonTokenParams{
+	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true, nil, nil, db.CreateDaemonTokenParams{
 		TokenHash:   daemonTokenHash,
 		WorkspaceID: parseUUID(testWorkspaceID),
 		DaemonID:    "daemon-claim-rollback",
@@ -1030,7 +1056,7 @@ func TestFinalizeTaskClaim_TriggerDeletedAfterClaimRejectsStaleProvenance(t *tes
 		WorkspaceID: parseUUID(testWorkspaceID),
 		UserID:      parseUUID(testUserID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}, []pgtype.UUID{parseUUID(fixture.commentID[0]), parseUUID(fixture.commentID[1])}, true)
+	}, []pgtype.UUID{parseUUID(fixture.commentID[0]), parseUUID(fixture.commentID[1])}, true, nil, nil)
 	if err == nil {
 		t.Fatalf("FinalizeTaskClaim accepted a receipt after persisted trigger changed")
 	}

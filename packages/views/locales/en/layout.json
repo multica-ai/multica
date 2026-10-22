@@ -40,6 +40,13 @@
     "loading_workspace": "Loading workspace…",
     "loading_named_prefix": "Loading"
   },
+  "window": {
+    "go_back": "Go back",
+    "go_forward": "Go forward",
+    "hold_for_history": "Hold for history",
+    "back_history": "Back history",
+    "forward_history": "Forward history"
+  },
   "sidebar": {
     "unpin_tooltip": "Unpin",
     "workspaces_label": "Workspaces",
@@ -52,8 +59,10 @@
     "new_issue": "New Issue",
     "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
-    "workspace_group": "Workspace",
-    "configure_group": "Configure",
+    "work_group": "Work",
+    "ai_team_group": "AI Team",
+    "show_more_pins": "Show {{count}} more…",
+    "show_fewer_pins": "Show fewer",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Join our Discord",

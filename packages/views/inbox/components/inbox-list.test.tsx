@@ -14,7 +14,11 @@ vi.mock("react-virtuoso", () => ({
     {
       data,
       itemContent,
+      components,
+      endReached,
     }: {
+      components: { Footer: React.ComponentType };
+      endReached: () => void;
       data: InboxItem[];
       itemContent: (index: number, item: InboxItem) => React.ReactNode;
     },
@@ -23,9 +27,11 @@ vi.mock("react-virtuoso", () => ({
     useImperativeHandle(ref, () => ({ scrollIntoView }));
     return (
       <div>
+        <button onClick={endReached}>Reach list end</button>
         {data.map((item, index) => (
           <div key={item.id}>{itemContent(index, item)}</div>
         ))}
+        <components.Footer />
       </div>
     );
   }),
@@ -49,7 +55,10 @@ vi.mock("./inbox-list-item", () => ({
   ),
 }));
 
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
+vi.mock("../../i18n", async () => {
+  const strings = (await import("../../locales/en/inbox.json")).default;
+  return { useT: () => ({ t: (select: (value: typeof strings) => string) => select(strings) }) };
+});
 
 function item(id: string, overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -81,7 +90,6 @@ function renderList(selectedKey: string, onSelect = vi.fn()) {
       items={items}
       view="inbox"
       selectedKey={selectedKey}
-      archivedCount={0}
       onSelect={onSelect}
       onAction={vi.fn()}
       onOpenArchived={vi.fn()}
@@ -190,5 +198,37 @@ describe("InboxList keyboard navigation", () => {
 
     expect(onSelect).toHaveBeenCalledWith(items[1]);
     expect(document.activeElement).toBe(scroller);
+  });
+});
+
+
+describe("InboxList archive pagination", () => {
+  it("keeps a count-free archive entry available with an empty inbox", () => {
+    const onOpenArchived = vi.fn();
+    render(<InboxList items={[]} view="inbox" selectedKey="" onSelect={vi.fn()} onAction={vi.fn()} onOpenArchived={onOpenArchived} />);
+    fireEvent.click(screen.getByRole("button", { name: "Archived" }));
+    expect(onOpenArchived).toHaveBeenCalledOnce();
+  });
+
+  it("loads at the end, suppresses automatic retries, and provides a retry button", () => {
+    const onLoadMore = vi.fn();
+    const props = { items, view: "archived" as const, selectedKey: "", onSelect: vi.fn(), onAction: vi.fn(), onOpenArchived: vi.fn(), onLoadMore };
+    const { rerender } = render(<InboxList {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reach list end" }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
+    onLoadMore.mockClear();
+    rerender(<InboxList {...props} loadMoreError />);
+    fireEvent.click(screen.getByRole("button", { name: "Reach list end" }));
+    expect(onLoadMore).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onLoadMore).toHaveBeenCalledOnce();
+    expect(screen.getByText("a")).toBeTruthy();
+  });
+
+  it("loads the next page when restored rows drain the loaded window", () => {
+    const onLoadMore = vi.fn();
+    render(<InboxList items={[]} view="archived" selectedKey="" onSelect={vi.fn()} onAction={vi.fn()} onOpenArchived={vi.fn()} onLoadMore={onLoadMore} />);
+    expect(onLoadMore).toHaveBeenCalledOnce();
+    expect(screen.queryByText("No archived notifications")).toBeNull();
   });
 });

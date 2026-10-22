@@ -50,12 +50,19 @@ var repoRemoveCmd = &cobra.Command{
 var repoCheckoutCmd = &cobra.Command{
 	Use:   "checkout <url>",
 	Short: "Check out a repository into the working directory",
-	Long:  "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.",
-	Args:  exactArgs(1),
-	RunE:  runRepoCheckout,
+	Long: "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.\n\n" +
+		"Running it again where the repository is already checked out never silently discards work: a checkout " +
+		"that has uncommitted changes, untracked files, or unpushed commits, or is already on this task's branch, " +
+		"is kept as it is and only its remote refs are fetched. Pass --fresh to discard its uncommitted changes and " +
+		"untracked files and start over on a new branch; commits stay on the old branch, but push any you still need first.",
+	Args: exactArgs(1),
+	RunE: runRepoCheckout,
 }
 
-var repoCheckoutRef string
+var (
+	repoCheckoutRef   string
+	repoCheckoutFresh bool
+)
 
 func init() {
 	repoListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -68,6 +75,7 @@ func init() {
 	repoRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
+	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFresh, "fresh", false, "discard an existing checkout's uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref); commits stay on the old branch")
 
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoAddCmd)
@@ -363,6 +371,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		"task_id":       taskID,
 		"checkout_mode": strings.TrimSpace(os.Getenv("MULTICA_REPO_CHECKOUT_MODE")),
 		"retry_busy":    true,
+		"fresh":         repoCheckoutFresh,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -415,18 +424,48 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		break
 	}
 
-	var result struct {
-		Path       string `json:"path"`
-		BranchName string `json:"branch_name"`
-	}
+	var result repoCheckoutResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("parse response: %w", err)
 	}
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
-	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
+	fmt.Fprintln(os.Stderr, repoCheckoutSummary(repoURL, result))
 
 	return nil
+}
+
+// repoCheckoutResult is the daemon's /repo/checkout response. Daemons older
+// than MUL-7284 never keep an existing checkout and omit Kept and the counts.
+type repoCheckoutResult struct {
+	Path             string `json:"path"`
+	BranchName       string `json:"branch_name"`
+	Kept             string `json:"kept"`
+	UncommittedFiles int    `json:"uncommitted_files"`
+	UnpushedCommits  int    `json:"unpushed_commits"`
+}
+
+// repoCheckoutSummary says what the checkout did. A kept checkout has to read
+// differently from a new branch off the default branch, or the agent works on
+// as if the checkout were fresh and loses track of what it holds.
+func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
+	if result.Kept == "" {
+		return fmt.Sprintf("Checked out %s → %s (branch: %s)", repoURL, result.Path, result.BranchName)
+	}
+	branch := result.BranchName
+	if branch == "" {
+		branch = "detached HEAD"
+	}
+	if result.Kept == "task_branch" {
+		branch += ", this task's branch"
+	}
+	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
+		"nothing was reset, cleaned, or switched; only remote refs were fetched.\n"+
+		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
+		"re-run with --fresh; commits stay on the old branch, but push any you still need first.",
+		repoURL, result.Path, branch,
+		result.UncommittedFiles, pluralS(result.UncommittedFiles),
+		result.UnpushedCommits, pluralS(result.UnpushedCommits))
 }
 
 func repoCheckoutRetryDelay(value string, now time.Time) time.Duration {

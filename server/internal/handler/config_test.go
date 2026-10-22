@@ -53,8 +53,13 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 
 func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.cfg.PublicURL = "https://api.example.com"
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+	}()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
@@ -79,6 +84,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com, got %q", cfg.CdnDomain)
+	}
+	if cfg.AttachmentPublicURL != "https://api.example.com" {
+		t.Fatalf("attachment_public_url = %q, want API public URL", cfg.AttachmentPublicURL)
 	}
 	if cfg.AllowSignup {
 		t.Fatalf("allow_signup: want false, got true")
@@ -555,5 +563,47 @@ func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
 	}
 	if _, ok := raw["agent_conversation_starters_supported"]; !ok {
 		t.Fatal("agent_conversation_starters_supported missing from the JSON body")
+	}
+}
+
+func TestGetConfigDeclaresIssueCreatePropertiesSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.IssueCreatePropertiesSupported {
+		t.Fatal("this build atomically persists issue create properties but does not advertise the contract")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["issue_create_properties_supported"]; !ok {
+		t.Fatal("issue_create_properties_supported missing from the JSON body")
+	}
+}
+
+// Web/Desktop, mobile and the CLI promise that a delete keeps the replies only
+// when the server declares it (#8296). Older servers omit the field and delete
+// the replies too, so this build must advertise the contract explicitly.
+func TestGetConfigDeclaresCommentDeleteKeepsReplies(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if raw["comment_delete_keep_replies_supported"] != true {
+		t.Fatalf("comment_delete_keep_replies_supported = %v, want true", raw["comment_delete_keep_replies_supported"])
 	}
 }

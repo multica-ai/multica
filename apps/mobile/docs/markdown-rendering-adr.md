@@ -255,4 +255,4 @@ React-tree renderer:
 - `apps/mobile/lib/markdown/markdown-style.ts` — `useMarkdownStyle()` theme bridge
 - `apps/mobile/lib/markdown/code-block.tsx` — Shiki-powered code segment
 - `apps/mobile/lib/markdown/markdown-image.tsx` — lightbox-aware image segment
-- `apps/mobile/CLAUDE.md` — mobile-wide rules including theme/CSS-variable system
+- `apps/mobile/AGENTS.md` — mobile-wide rules including theme/CSS-variable system

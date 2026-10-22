@@ -161,9 +161,6 @@ export function ActorIssuesPanel({
             <p className="text-body">
               {t(($) => $.actor_issues.empty[scope].title)}
             </p>
-            <p className="text-caption">
-              {t(($) => $.actor_issues.empty[scope].description)}
-            </p>
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">

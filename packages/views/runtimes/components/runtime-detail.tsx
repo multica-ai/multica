@@ -45,6 +45,11 @@ import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import {
+  RevokeRuntimeAccessDialog,
+  parseRuntimeAccessRevocationPlan,
+  type RuntimeAccessRevocationPlan,
+} from "./revoke-runtime-access-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
@@ -394,7 +399,7 @@ function Fact({
   );
 }
 
-function ServingAgentsCard({
+export function ServingAgentsCard({
   agents,
   presenceMap,
   agentHref,
@@ -572,6 +577,8 @@ function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
   const wsId = useWorkspaceId();
   const updateRuntime = useUpdateRuntime(wsId);
   const current = runtime.visibility === "public" ? "public" : "private";
+  const [revokePlan, setRevokePlan] = useState<RuntimeAccessRevocationPlan | null>(null);
+  const [revokeOpen, setRevokeOpen] = useState(false);
 
   const flip = (next: "private" | "public") => {
     if (next === current) return;
@@ -584,35 +591,51 @@ function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
               visibility: t(($) => $.detail.visibility_label[next]),
             }),
           ),
-        onError: (err) =>
+        onError: (err) => {
+          const plan = parseRuntimeAccessRevocationPlan(err);
+          if (plan) {
+            setRevokePlan(plan);
+            setRevokeOpen(true);
+            return;
+          }
           toast.error(
             err instanceof Error && err.message
               ? err.message
               : t(($) => $.detail.visibility_toast_failed),
-          ),
+          );
+        },
       },
     );
   };
 
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-      <VisibilityChoice
-        active={current === "private"}
-        icon={<Lock className="h-3 w-3" />}
-        label={t(($) => $.detail.visibility_label.private)}
-        tooltip={t(($) => $.detail.visibility_hint.private)}
-        disabled={updateRuntime.isPending}
-        onClick={() => flip("private")}
+    <>
+      <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+        <VisibilityChoice
+          active={current === "private"}
+          icon={<Lock className="h-3 w-3" />}
+          label={t(($) => $.detail.visibility_label.private)}
+          tooltip={t(($) => $.detail.visibility_hint.private)}
+          disabled={updateRuntime.isPending}
+          onClick={() => flip("private")}
+        />
+        <VisibilityChoice
+          active={current === "public"}
+          icon={<Globe className="h-3 w-3" />}
+          label={t(($) => $.detail.visibility_label.public)}
+          tooltip={t(($) => $.detail.visibility_hint.public)}
+          disabled={updateRuntime.isPending}
+          onClick={() => flip("public")}
+        />
+      </div>
+      <RevokeRuntimeAccessDialog
+        open={revokeOpen}
+        onOpenChange={setRevokeOpen}
+        runtime={runtime}
+        wsId={wsId}
+        initialPlan={revokePlan}
       />
-      <VisibilityChoice
-        active={current === "public"}
-        icon={<Globe className="h-3 w-3" />}
-        label={t(($) => $.detail.visibility_label.public)}
-        tooltip={t(($) => $.detail.visibility_hint.public)}
-        disabled={updateRuntime.isPending}
-        onClick={() => flip("public")}
-      />
-    </div>
+    </>
   );
 }
 
@@ -639,7 +662,7 @@ function VisibilityChoice({
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-caption font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-xs px-2 py-1 text-caption font-medium transition-colors ${
               active
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"

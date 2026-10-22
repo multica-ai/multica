@@ -110,7 +110,7 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		if err != nil {
 			return empty, err
 		}
-		if err = service.SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, result.CancelledTasks...); err != nil {
+		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
 			return empty, err
 		}
 

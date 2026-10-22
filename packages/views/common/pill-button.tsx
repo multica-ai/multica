@@ -1,6 +1,7 @@
 "use client";
 
 import { X as XIcon } from "lucide-react";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 
 // Shared pill chrome. `PillButton` puts it on the button itself; the clearable
@@ -102,18 +103,19 @@ export function ClearablePillButton({
         {children}
       </button>
       {clearable && (
-        <button
-          type="button"
-          aria-label={clearLabel}
-          title={clearLabel}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClear?.();
-          }}
-          className="flex shrink-0 items-center py-1 pl-0.5 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
-        >
-          <XIcon className="size-3" />
-        </button>
+        <TooltipHint label={clearLabel}>
+          <button
+            type="button"
+            aria-label={clearLabel}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear?.();
+            }}
+            className="flex shrink-0 items-center py-1 pl-0.5 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <XIcon className="size-3" />
+          </button>
+        </TooltipHint>
       )}
     </span>
   );

@@ -314,7 +314,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 실제로 어떤 버전이 뜰지는 `docker compose pull`이 결정합니다. 이 명령이 GHCR에 해당 태그가 지금 어떤 이미지를 가리키는지 물어보기 때문입니다. 그래서 몇 달 묵은 checkout에서도 오늘자 `latest` 이미지를 받을 수 있고, 반대로 `git pull`만 해서는 이미지를 받아 컨테이너를 다시 만들기 전까지 아무것도 바뀌지 않습니다.
 
 <Callout type="warning">
-**`MULTICA_IMAGE_TAG`를 고정해 뒀다면 두 방법 모두 업그레이드되지 않습니다.** 두 이미지 모두 `${MULTICA_IMAGE_TAG:-latest}`로 해석되며(`docker-compose.selfhost.yml:42`, `:125`), `.env.example`에는 `MULTICA_IMAGE_TAG=latest`가 들어 있습니다. `.env`에서 특정 릴리스로 고정해 뒀다면 `pull`은 같은 태그를 다시 받아올 뿐이라 예전 버전에 그대로 머무릅니다 — 오류도, 경고도 없습니다. 업그레이드 전에 확인하세요.
+**`MULTICA_IMAGE_TAG`를 고정해 뒀다면 두 방법 모두 업그레이드되지 않습니다.** 두 이미지 모두 `${MULTICA_IMAGE_TAG:-latest}`로 해석되며(`docker-compose.selfhost.yml`, `services.backend.image` / `services.frontend.image`), `.env.example`에는 `MULTICA_IMAGE_TAG=latest`가 들어 있습니다. `.env`에서 특정 릴리스로 고정해 뒀다면 `pull`은 같은 태그를 다시 받아올 뿐이라 예전 버전에 그대로 머무릅니다 — 오류도, 경고도 없습니다. 업그레이드 전에 확인하세요.
 
 ```bash
 grep MULTICA_IMAGE_TAG .env
@@ -353,7 +353,7 @@ Migration은 backend 시작 시 자동으로 실행됩니다. migration 103처�
 
 ### `/health` 말고 `/readyz`로 검증하세요
 
-`/health`는 **liveness** 프로브라서 프로세스가 살아 있기만 하면 `{"status":"ok"}`를 반환합니다 — migration이 실패했더라도 마찬가지입니다. `/readyz`(`server/cmd/server/router.go:680`, `/healthz`는 별칭)는 데이터베이스와 적용된 migration 집합을 확인하므로, 잘못된 업그레이드를 잡아내는 것은 이쪽입니다.
+`/health`는 **liveness** 프로브라서 프로세스가 살아 있기만 하면 `{"status":"ok"}`를 반환합니다 — migration이 실패했더라도 마찬가지입니다. `/readyz`(`server/cmd/server/router.go`에 등록된 `readyHandler`, `/healthz`는 별칭)는 데이터베이스와 적용된 migration 집합을 확인하므로, 잘못된 업그레이드를 잡아내는 것은 이쪽입니다.
 
 ```bash
 curl -s localhost:8080/readyz

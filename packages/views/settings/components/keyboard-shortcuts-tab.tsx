@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Keyboard, RotateCcw, Search, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   AlertDialog,
@@ -115,6 +116,7 @@ export function KeyboardShortcutsTab() {
     <SettingsTab
       title={t(($) => $.shortcuts.title)}
       description={t(($) => $.shortcuts.description)}
+      scope="device"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
@@ -263,7 +265,10 @@ function ShortcutRow({
 }) {
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
-  const description = t(($) => $.shortcuts.actions[action.id].description);
+  // Keep descriptions in the search index, but only show non-obvious behavior.
+  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "send"].includes(action.id)
+    ? t(($) => $.shortcuts.actions[action.id].description)
+    : undefined;
   const errorText = error?.kind === "reserved"
     ? t(($) => $.shortcuts.reserved_error)
     : error?.kind === "send"
@@ -320,28 +325,26 @@ function ShortcutRow({
               </span>
             )}
           </button>
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onReset}
             disabled={!customized}
-            aria-label={t(($) => $.shortcuts.reset_action, { action: label })}
-            title={t(($) => $.shortcuts.reset)}
+            label={t(($) => $.shortcuts.reset_action, { action: label })}
           >
             <RotateCcw className="size-3.5" />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onDisable}
             disabled={shortcut === null}
-            aria-label={t(($) => $.shortcuts.disable_action, { action: label })}
-            title={t(($) => $.shortcuts.disable)}
+            label={t(($) => $.shortcuts.disable_action, { action: label })}
           >
             <X className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
         {errorText ? (
           <span role="alert" className="max-w-72 text-right text-caption text-destructive">

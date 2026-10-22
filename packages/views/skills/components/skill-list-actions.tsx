@@ -49,12 +49,14 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
 import { isRefreshableOrigin, readOrigin } from "../lib/origin";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
-import type { SkillRow } from "./skills-page";
+import type { SkillRow } from "./skill-list-filter";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
 // once at the page level.
@@ -66,9 +68,7 @@ export interface SkillActionsContext {
   isAdmin: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Add-to-agent dialog (multi-select; shared by row kebab and batch toolbar)
-// ---------------------------------------------------------------------------
 
 // Attaching is permission-gated by the TARGET agent (its owner, or a
 // workspace owner/admin — server/internal/handler/agent.go canManageAgent).
@@ -155,7 +155,7 @@ function SkillChips({ skills }: { skills: SkillSummary[] }) {
   const visible = skills.slice(0, MAX_SKILL_CHIPS);
   const overflow = skills.slice(MAX_SKILL_CHIPS);
   const chipClass =
-    "max-w-[10rem] truncate rounded bg-muted px-1.5 py-0.5 text-caption text-muted-foreground";
+    "max-w-[10rem] truncate rounded-xs bg-muted px-1.5 py-0.5 text-caption text-muted-foreground";
   return (
     <div className="flex flex-wrap items-center gap-1">
       {visible.map((s) => (
@@ -321,9 +321,6 @@ export function AddToAgentDialog({
           <DialogTitle className="text-body">
             {t(($) => $.actions.add_to_agent)}
           </DialogTitle>
-          <DialogDescription className="text-caption">
-            {t(($) => $.actions.add_dialog_description)}
-          </DialogDescription>
         </DialogHeader>
 
         <SkillChips skills={skills} />
@@ -402,9 +399,7 @@ export function AddToAgentDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Delete confirmation (single row and batch share one dialog)
-// ---------------------------------------------------------------------------
 
 export function DeleteSkillsDialog({
   rows,
@@ -510,9 +505,7 @@ export function DeleteSkillsDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Bulk update-from-source (batch toolbar)
-// ---------------------------------------------------------------------------
 
 /**
  * Confirm-and-run dialog for updating several imported skills from their
@@ -645,9 +638,7 @@ export function UpdateSkillsDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Row kebab
-// ---------------------------------------------------------------------------
 
 // The row is a plain `<div>` whose whole-row navigation is a mouse `onClick`
 // (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops click
@@ -677,15 +668,20 @@ export function SkillRowActions({
       className="flex items-center"
     >
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.actions.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.actions.row_menu)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.actions.row_menu)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-52">
@@ -751,9 +747,7 @@ export function SkillRowActions({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar (floating bottom bar, same shape as the issues batch bar)
-// ---------------------------------------------------------------------------
 
 export function SkillBatchToolbar({
   rows,
@@ -816,14 +810,16 @@ export function SkillBatchToolbar({
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
+          <TooltipHint label={t(($) => $.actions.clear_selection)}>
+            <button
+              type="button"
+              aria-label={t(($) => $.actions.clear_selection)}
+              onClick={onClear}
+              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
+            >
+              <X className="size-3.5 text-muted-foreground" />
+            </button>
+          </TooltipHint>
         </div>
 
         <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)}>

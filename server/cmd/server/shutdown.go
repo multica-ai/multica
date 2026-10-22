@@ -23,6 +23,9 @@ type shutdownSequence struct {
 	// StopAutopilot first: it schedules work the rest of the system performs.
 	StopAutopilot func()
 
+	// Drain the internal maintenance listener while the primary pool is alive.
+	DrainMaintenance func()
+
 	// DrainHTTP before anything that serves it. In-flight handlers finish
 	// calling Schedule() before the scheduler stops, and no new task
 	// completion can arrive after this — which is what makes the relay stop
@@ -61,6 +64,7 @@ type shutdownSequence struct {
 func (s shutdownSequence) run() {
 	for _, step := range []func(){
 		s.StopAutopilot,
+		s.DrainMaintenance,
 		s.DrainHTTP,
 		s.StopOutboundRelay,
 		s.CancelWorkers,

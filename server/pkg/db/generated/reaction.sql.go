@@ -77,6 +77,22 @@ func (q *Queries) AddReaction(ctx context.Context, arg AddReactionParams) (AddRe
 	return i, err
 }
 
+const deleteCommentReactions = `-- name: DeleteCommentReactions :exec
+DELETE FROM comment_reaction
+WHERE comment_id = $1 AND workspace_id = $2
+`
+
+type DeleteCommentReactionsParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Part of the comment delete transaction: reactions go with the comment.
+func (q *Queries) DeleteCommentReactions(ctx context.Context, arg DeleteCommentReactionsParams) error {
+	_, err := q.db.Exec(ctx, deleteCommentReactions, arg.CommentID, arg.WorkspaceID)
+	return err
+}
+
 const listReactionsByCommentIDs = `-- name: ListReactionsByCommentIDs :many
 SELECT id, comment_id, workspace_id, actor_type, actor_id, emoji, created_at FROM comment_reaction
 WHERE comment_id = ANY($1::uuid[])

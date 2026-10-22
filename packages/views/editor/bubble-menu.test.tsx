@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const formatState = vi.hoisted(() => ({ codeBlock: false }));
 
 vi.mock("@floating-ui/dom", () => ({
   autoUpdate: vi.fn(() => vi.fn()),
@@ -23,6 +25,7 @@ vi.mock("@tiptap/react", () => ({
     italic: false,
     strike: false,
     code: false,
+    codeBlock: formatState.codeBlock,
     highlight: false,
     link: false,
     blockquote: false,
@@ -50,7 +53,7 @@ vi.mock("../i18n", async () => {
 
 import { EditorBubbleMenu } from "./bubble-menu";
 
-function createEditor(): Editor {
+function createEditor(codeBlock = false): Editor {
   const chain = {
     focus: vi.fn(),
     toggleBold: vi.fn(),
@@ -84,7 +87,7 @@ function createEditor(): Editor {
       selection: { empty: false, from: 1, to: 2 },
       doc: {
         textBetween: () => "selected text",
-        resolve: () => ({ parent: { type: { name: "paragraph" } } }),
+        resolve: () => ({ parent: { type: { name: codeBlock ? "codeBlock" : "paragraph" } } }),
       },
     },
     view: {
@@ -93,6 +96,7 @@ function createEditor(): Editor {
     },
     commands: {
       focus: vi.fn(),
+      setTextSelection: vi.fn(),
     },
     chain: () => chain,
     getAttributes: () => ({ href: "https://example.com" }),
@@ -102,7 +106,40 @@ function createEditor(): Editor {
 }
 
 describe("EditorBubbleMenu accessibility", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); formatState.codeBlock = false; });
+
+  it("keeps the selection and toolbar on failed capture without resubscribing for new action objects", () => {
+    const editor = createEditor();
+    Object.defineProperty(editor, "isInitialized", { value: true });
+    const { rerender } = render(<EditorBubbleMenu editor={editor} selectionAction={{ label: "Add to comment", onSelect: () => false }} />);
+    const transaction = vi.mocked(editor.on).mock.calls.find(([event]) => event === "transaction")?.[1] as (() => void);
+    act(() => transaction());
+    const registrations = vi.mocked(editor.on).mock.calls.filter(([event]) => event === "transaction").length;
+    rerender(<EditorBubbleMenu editor={editor} selectionAction={{ label: "Add to comment", onSelect: () => false }} />);
+    expect(vi.mocked(editor.on).mock.calls.filter(([event]) => event === "transaction")).toHaveLength(registrations);
+    fireEvent.click(screen.getByRole("button", { name: "Add to comment" }));
+    expect(editor.commands.setTextSelection).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Add to comment" })).toBeVisible();
+  });
+
+  it.each([false, true])("exposes a non-editing selection action, including code (code: %s)", (codeBlock) => {
+    formatState.codeBlock = codeBlock;
+    const editor = createEditor(codeBlock);
+    Object.defineProperty(editor, "isInitialized", { value: true });
+    const onSelect = vi.fn();
+    render(<EditorBubbleMenu editor={editor} selectionAction={{ label: "Add to comment", onSelect }} />);
+    const transaction = vi.mocked(editor.on).mock.calls.find(([event]) => event === "transaction")?.[1] as (() => void);
+    act(() => transaction());
+    const action = screen.getByRole("button", { name: "Add to comment" });
+    expect(action).toBeVisible();
+    fireEvent.mouseDown(action);
+    fireEvent.click(action);
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(editor.commands.setTextSelection).toHaveBeenCalledWith(2);
+    expect(editor.chain().insertContentAt).not.toHaveBeenCalled();
+    expect(editor.chain().toggleBlockquote).not.toHaveBeenCalled();
+    if (codeBlock) expect(screen.queryByLabelText("Bold")).not.toBeInTheDocument();
+  });
 
   it("gives every icon-only formatting control an accessible name", () => {
     render(

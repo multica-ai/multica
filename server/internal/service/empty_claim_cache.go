@@ -17,15 +17,15 @@ import (
 // which closes the race where a slow claim writes an empty verdict
 // AFTER an enqueue has already invalidated it:
 //
-//   T1 claim:   v0 := GET version
-//               SELECT ... -> empty
-//               (slow, e.g. GC pause)
-//   T2 enqueue: INSERT row
-//               INCR version  (-> v1)
-//               wakeup
-//   T1 claim:   SET empty = v0
-//   T3 claim:   v1' := GET version (== v1)
-//               GET empty (== v0) -> v0 != v1, treat as miss -> SELECT
+//	T1 claim:   v0 := GET version
+//	            SELECT ... -> empty
+//	            (slow, e.g. GC pause)
+//	T2 enqueue: INSERT row
+//	            INCR version  (-> v1)
+//	            wakeup
+//	T1 claim:   SET empty = v0
+//	T3 claim:   v1' := GET version (== v1)
+//	            GET empty (== v0) -> v0 != v1, treat as miss -> SELECT
 //
 // Without the version tag T3 would have hit the stale empty key and
 // the just-queued task would sit idle until the empty key's TTL
@@ -69,20 +69,20 @@ const emptyClaimRedisTimeout = 250 * time.Millisecond
 // single-node dev / tests with no REDIS_URL degrade cleanly to direct
 // DB lookups.
 type EmptyClaimCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewEmptyClaimCache returns a cache backed by rdb. Pass nil to
 // disable caching; the returned *EmptyClaimCache is safe to call but
 // never hits Redis.
-func NewEmptyClaimCache(rdb *redis.Client) *EmptyClaimCache {
+func NewEmptyClaimCache(rdb redis.UniversalClient) *EmptyClaimCache {
 	if rdb == nil {
 		return nil
 	}
 	return &EmptyClaimCache{rdb: rdb}
 }
 
-func emptyClaimKey(runtimeID string) string   { return emptyClaimCachePrefix + runtimeID }
+func emptyClaimKey(runtimeID string) string     { return emptyClaimCachePrefix + runtimeID }
 func emptyClaimVersion(runtimeID string) string { return emptyClaimVersionPrefix + runtimeID }
 
 func (c *EmptyClaimCache) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -127,17 +127,24 @@ func (c *EmptyClaimCache) IsEmpty(ctx context.Context, runtimeID string) bool {
 	}
 	bctx, cancel := c.bounded(ctx)
 	defer cancel()
-	// MGET returns []interface{} of either the value (string) or nil.
-	vals, err := c.rdb.MGet(bctx, emptyClaimKey(runtimeID), emptyClaimVersion(runtimeID)).Result()
+	// Keep the established key names so old and new replicas exchange the same
+	// invalidation signal during rolling deploys. They land in different Redis
+	// Cluster slots, so issue two GETs in one pipeline instead of using MGET.
+	// An atomic snapshot is unnecessary: versions only increase, and enqueue
+	// completes Bump before waking the daemon. A claim triggered by that wakeup
+	// therefore observes the new version regardless of GET execution order.
+	pipe := c.rdb.Pipeline()
+	emptyCmd := pipe.Get(bctx, emptyClaimKey(runtimeID))
+	versionCmd := pipe.Get(bctx, emptyClaimVersion(runtimeID))
+	if _, err := pipe.Exec(bctx); err != nil && !errors.Is(err, redis.Nil) {
+		slog.Warn("empty_claim_cache: pipelined get failed; falling back to DB", "error", err)
+		return false
+	}
+	emptyVer, err := emptyCmd.Result()
 	if err != nil {
-		slog.Warn("empty_claim_cache: mget failed; falling back to DB", "error", err)
-		return false
-	}
-	if len(vals) != 2 || vals[0] == nil {
-		return false
-	}
-	emptyVer, ok := vals[0].(string)
-	if !ok {
+		if !errors.Is(err, redis.Nil) {
+			slog.Warn("empty_claim_cache: empty verdict get failed; falling back to DB", "error", err)
+		}
 		return false
 	}
 	// A missing version key means "no enqueue has ever bumped this
@@ -146,10 +153,11 @@ func (c *EmptyClaimCache) IsEmpty(ctx context.Context, runtimeID string) bool {
 	// must match here, otherwise the fast path would never trigger
 	// for fresh runtimes.
 	curVer := "0"
-	if vals[1] != nil {
-		if s, ok := vals[1].(string); ok {
-			curVer = s
-		}
+	if version, err := versionCmd.Result(); err == nil {
+		curVer = version
+	} else if !errors.Is(err, redis.Nil) {
+		slog.Warn("empty_claim_cache: version get failed; falling back to DB", "error", err)
+		return false
 	}
 	return emptyVer == curVer
 }

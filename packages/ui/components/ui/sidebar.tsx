@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 
 import { useIsCompact } from "@multica/ui/hooks/use-mobile"
 import { cn } from "@multica/ui/lib/utils"
-import { Button } from "@multica/ui/components/ui/button"
+import { IconButton } from "@multica/ui/components/common/icon-button"
 import { Input } from "@multica/ui/components/ui/input"
 import { Separator } from "@multica/ui/components/ui/separator"
 import {
@@ -89,8 +89,9 @@ type SidebarResizeContextProps = {
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
-// Width previews are written directly to the two layout shells during drag.
-// This context only exposes the one committed state transition on pointer-up.
+// Width previews are written directly to the layout shells and opt-in chrome
+// consumers during drag. This context only exposes the one committed state
+// transition on pointer-up.
 const SidebarResizeContext = React.createContext<SidebarResizeContextProps | null>(null)
 
 function useSidebar() {
@@ -394,17 +395,19 @@ function Sidebar({
 function SidebarTrigger({
   className,
   onClick,
+  shortcut,
   ...props
-}: React.ComponentProps<typeof Button>) {
+}: Omit<React.ComponentProps<typeof IconButton>, "label">) {
   const { toggleSidebar } = useSidebar()
   const { t } = useTranslation("ui")
 
   return (
-    <Button
+    <IconButton
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
-      variant="ghost"
-      size="icon-sm"
+      label={t(($) => $.toggle_sidebar)}
+      shortcut={shortcut}
+      tooltipSide="bottom"
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
@@ -413,8 +416,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">{t(($) => $.toggle_sidebar)}</span>
-    </Button>
+    </IconButton>
   )
 }
 
@@ -433,6 +435,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     wrapperEl: HTMLElement
     gapEl: HTMLElement
     containerEl: HTMLElement
+    liveWidthConsumers: HTMLElement[]
   } | null>(null)
   const cancelActiveDragRef = React.useRef<(() => void) | null>(null)
 
@@ -450,6 +453,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       const gapEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-gap']")
       const containerEl = sidebarEl?.querySelector<HTMLElement>("[data-slot='sidebar-container']")
       if (!sidebarEl || !wrapperEl || !gapEl || !containerEl) return
+      const liveWidthConsumers = Array.from(
+        wrapperEl.querySelectorAll<HTMLElement>("[data-sidebar-resize-consumer]")
+      )
 
       const startWidth = clampSidebarWidth(containerEl.getBoundingClientRect().width)
       dragRef.current = {
@@ -461,6 +467,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         wrapperEl,
         gapEl,
         containerEl,
+        liveWidthConsumers,
       }
 
       wrapperEl.setAttribute("data-sidebar-resizing", "true")
@@ -488,6 +495,9 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
           }
           drag.gapEl.style.removeProperty("width")
           drag.containerEl.style.removeProperty("width")
+          for (const consumer of drag.liveWidthConsumers) {
+            consumer.style.removeProperty("--sidebar-live-width")
+          }
           drag.wrapperEl.removeAttribute("data-sidebar-resizing")
         }
 
@@ -514,11 +524,15 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         if (nextWidth === drag.latestWidth) return
 
         drag.latestWidth = nextWidth
-        // Only the two layout shells depend on the live width. Direct writes
-        // let the browser coalesce layout at paint time without a React commit
-        // or an inherited custom-property invalidation on the whole app tree.
+        // Direct writes let the browser coalesce layout at paint time without
+        // a React commit or an inherited custom-property invalidation on the
+        // whole app tree. Optional chrome consumers receive the same preview
+        // through a local custom property.
         drag.gapEl.style.width = `${nextWidth}px`
         drag.containerEl.style.width = `${nextWidth}px`
+        for (const consumer of drag.liveWidthConsumers) {
+          consumer.style.setProperty("--sidebar-live-width", `${nextWidth}px`)
+        }
       }
       const onPointerUp = (event: PointerEvent) => {
         if (event.pointerId === e.pointerId) finishDrag("commit")

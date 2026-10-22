@@ -59,3 +59,29 @@ describe("baselineFromQuery property filters", () => {
     expect(baseline.property.size).toBe(0);
   });
 });
+
+// Saved views predate the project-status dimension, so every read path has to
+// treat a missing key as "no filter" rather than as a value.
+describe("baselineFromQuery project status filters", () => {
+  it("keeps known project statuses", () => {
+    const baseline = baselineFromQuery({
+      projectStatusFilters: ["in_progress", "completed"],
+    });
+    expect(baseline.raw.projectStatusFilters).toEqual(["in_progress", "completed"]);
+    expect(baseline.projectStatus.has("in_progress")).toBe(true);
+  });
+
+  it("treats a view saved before the dimension existed as no filter", () => {
+    const baseline = baselineFromQuery({ projectFilters: ["p-1"] });
+    expect(baseline.raw.projectStatusFilters).toEqual([]);
+    expect(baseline.projectStatus.size).toBe(0);
+  });
+
+  it("drops values the store cannot represent", () => {
+    const baseline = baselineFromQuery({
+      // "backlog" is an issue status; the project lifecycle has no such value.
+      projectStatusFilters: ["in_progress", "backlog", 7, null],
+    });
+    expect(baseline.raw.projectStatusFilters).toEqual(["in_progress"]);
+  });
+});

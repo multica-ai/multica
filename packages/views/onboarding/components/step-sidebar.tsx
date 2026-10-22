@@ -7,12 +7,11 @@ import {
   type OnboardingStep,
 } from "@multica/core/onboarding";
 import { cn } from "@multica/ui/lib/utils";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { DotSphere } from "@multica/ui/components/ui/dot-sphere";
 import {
   Stepper,
-  StepperDescription,
   StepperIndicator,
   StepperItem,
   StepperNav,
@@ -83,18 +82,19 @@ export function StepProgressBar({
   return (
     <div className="mb-6 flex items-center gap-3 md:hidden">
       {onBack ? (
-        <Button
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-sm"
           onClick={onBack}
           disabled={backDisabled}
-          aria-label={t(($) => $.common.back)}
+          label={t(($) => $.common.back)}
+          tooltipSide="bottom"
           className="-ml-2 shrink-0"
           style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
         >
           <ArrowLeft />
-        </Button>
+        </IconButton>
       ) : null}
       <span
         aria-hidden
@@ -171,17 +171,18 @@ export function StepSidebar({
               </span>
             </span>
             {onBack ? (
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 onClick={onBack}
                 disabled={backDisabled}
-                aria-label={t(($) => $.common.back)}
+                label={t(($) => $.common.back)}
+                tooltipSide="bottom"
                 style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
               >
                 <ArrowLeft />
-              </Button>
+              </IconButton>
             ) : null}
           </header>
 
@@ -235,9 +236,6 @@ export function StepSidebar({
                         >
                           {t(($) => $.step_nav[key].label)}
                         </StepperTitle>
-                        <StepperDescription className="mt-0.5 max-w-none text-muted-foreground">
-                          {t(($) => $.step_nav[key].description)}
-                        </StepperDescription>
                       </div>
                     </>
                   );

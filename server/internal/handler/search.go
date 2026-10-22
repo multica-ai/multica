@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // searchStatementTimeout bounds every /search request at the Postgres level.
@@ -25,16 +27,16 @@ import (
 // therefore still make either path slow enough that the frontend appears to
 // hang ("搜索卡死没有任何反应", MUL-4059).
 //
-// The 5 s cap leaves headroom above the production-observed candidate-first
-// maximum (1.79 s in the MUL-7055 matrix) while keeping a bounded database
-// safety fuse. Interactive web callers cancel superseded searches, and the
-// mobile API client has a 30 s request timeout, so this remains within the
-// first-party clients' request budgets. On timeout the caller sees a 503 with
-// a descriptive error rather than a stalled connection — SearchIssues /
-// SearchProjects map SQLSTATE 57014 to http.StatusServiceUnavailable so the
-// frontend can distinguish this from a generic 500.
+// The 8 s cap adds three seconds of headroom above the MUL-7146 requests that
+// reached the previous 5 s database fuse, while remaining bounded well below
+// the mobile API client's 30 s request timeout. Interactive web callers cancel
+// superseded searches, limiting how long abandoned work can occupy a pooled
+// connection. On timeout the caller sees a 503 with a descriptive error rather
+// than a stalled connection — SearchIssues / SearchProjects map SQLSTATE 57014
+// to http.StatusServiceUnavailable so the frontend can distinguish this from a
+// generic 500.
 const (
-	searchStatementTimeout = 5 * time.Second
+	searchStatementTimeout = 8 * time.Second
 
 	searchWorkMemEnv       = "DATABASE_SEARCH_WORK_MEM_MB"
 	defaultSearchWorkMemMB = 64
@@ -182,4 +184,23 @@ func isSearchStatementTimeout(err error) bool {
 		return pgErr.Code == "57014"
 	}
 	return false
+}
+
+// writeSearchCancellation classifies an abandoned search without counting it as
+// a server failure or a successful request. PostgreSQL may surface disconnect
+// cancellation as SQLSTATE 57014, so the request context distinguishes it from
+// the database's statement timeout. Unrelated database errors remain failures.
+// Successful paths pass the context error to catch cancellation after commit
+// or during supplementary reads before writing a response.
+func writeSearchCancellation(w http.ResponseWriter, r *http.Request, err error) bool {
+	if !errors.Is(r.Context().Err(), context.Canceled) {
+		return false
+	}
+	if !errors.Is(err, context.Canceled) && !isSearchStatementTimeout(err) {
+		return false
+	}
+	// The client has disconnected; retain the status for logs and metrics but
+	// avoid encoding a response body for a request that no longer needs it.
+	w.WriteHeader(middleware.StatusClientClosedRequest)
+	return true
 }

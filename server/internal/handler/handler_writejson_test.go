@@ -2,11 +2,31 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 )
+
+func TestWriteFeatureDisabledIsNonRetryable(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeFeatureDisabled(rec, "feature_disabled", "feature is disabled")
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if retryAfter := rec.Header().Get("Retry-After"); retryAfter != "" {
+		t.Fatalf("Retry-After = %q, want empty", retryAfter)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["code"] != "feature_disabled" {
+		t.Fatalf("code = %q, want feature_disabled", body["code"])
+	}
+}
 
 // TestWriteMeasuredJSONByteIdenticalToWriteJSON locks the load-bearing assumption
 // behind the F2 claim-observability patch: swapping writeJSON for writeMeasuredJSON

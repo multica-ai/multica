@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"time"
@@ -64,10 +65,10 @@ return #members
 // Redis errors always mean "check PostgreSQL now", so the cache can only reduce
 // load; it is never authoritative for task recovery.
 type ReclaimCheckCache struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewReclaimCheckCache(rdb *redis.Client) *ReclaimCheckCache {
+func NewReclaimCheckCache(rdb redis.UniversalClient) *ReclaimCheckCache {
 	if rdb == nil {
 		return nil
 	}
@@ -118,14 +119,29 @@ func (c *ReclaimCheckCache) DueRuntimeIDs(ctx context.Context, runtimeIDs []stri
 	for _, runtimeID := range validRuntimeIDs {
 		backstopKeys = append(backstopKeys, reclaimCheckBackstopKey(runtimeID))
 	}
-	backstops, err := c.rdb.MGet(bctx, backstopKeys...).Result()
-	if err != nil {
+	backstopPipe := c.rdb.Pipeline()
+	backstopCommands := make([]*redis.StringCmd, len(backstopKeys))
+	for i, key := range backstopKeys {
+		backstopCommands[i] = backstopPipe.Get(bctx, key)
+	}
+	_, err := backstopPipe.Exec(bctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
 		slog.Warn("reclaim_check_cache: backstop read failed; falling back to DB", "error", err)
 		return validRuntimeIDs
 	}
-	if len(backstops) != len(validRuntimeIDs) {
-		slog.Warn("reclaim_check_cache: incomplete backstop read; falling back to DB")
-		return validRuntimeIDs
+	backstops := make([]string, len(backstopCommands))
+	backstopExists := make([]bool, len(backstopCommands))
+	for i, command := range backstopCommands {
+		value, err := command.Result()
+		if errors.Is(err, redis.Nil) {
+			continue
+		}
+		if err != nil {
+			slog.Warn("reclaim_check_cache: backstop result failed; falling back to DB", "error", err)
+			return validRuntimeIDs
+		}
+		backstops[i] = value
+		backstopExists[i] = true
 	}
 
 	nowMillis := now.UnixMilli()
@@ -137,14 +153,13 @@ func (c *ReclaimCheckCache) DueRuntimeIDs(ctx context.Context, runtimeIDs []stri
 	pipe := c.rdb.Pipeline()
 	scheduleCommands := make([]scheduleCommand, 0, len(validRuntimeIDs))
 	for i, runtimeID := range validRuntimeIDs {
-		backstop, ok := backstops[i].(string)
-		if !ok {
+		if !backstopExists[i] {
 			// A missing or non-string value means this runtime has no trustworthy
 			// successful-check marker.
 			due[i] = true
 			continue
 		}
-		checkedMillis, err := strconv.ParseInt(backstop, 10, 64)
+		checkedMillis, err := strconv.ParseInt(backstops[i], 10, 64)
 		if err != nil {
 			due[i] = true
 			continue

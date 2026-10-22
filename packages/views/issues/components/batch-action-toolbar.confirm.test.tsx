@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 
@@ -18,11 +18,21 @@ vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),
 }));
 
-const batchUpdate = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const batchUpdate = vi.hoisted(() => vi.fn().mockResolvedValue({ updated: 1 }));
 const batchDelete = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@multica/core/issues/mutations", () => ({
   useBatchUpdateIssues: () => ({ mutateAsync: batchUpdate, isPending: false }),
   useBatchDeleteIssues: () => ({ mutateAsync: batchDelete, isPending: false }),
+}));
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/issue-workflows", () => ({
+  useIssueWorkflows: () => ({ workflows: [] }),
+  sharedWorkflowStatusKeys: () => null,
+}));
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: [] }),
 }));
 
 const openModal = vi.hoisted(() => vi.fn());
@@ -31,7 +41,8 @@ vi.mock("@multica/core/modals", () => ({
 }));
 
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
+vi.mock("sonner", () => ({ toast }));
 
 // Interactive picker stubs: each renders buttons that fire the real onUpdate the
 // toolbar passes in, so we exercise handleBatchStatus / handleBatchAssignee.
@@ -97,6 +108,8 @@ beforeEach(() => {
   batchUpdate.mockClear();
   batchDelete.mockClear();
   openModal.mockClear();
+  toast.success.mockClear();
+  toast.warning.mockClear();
 });
 
 describe("BatchActionToolbar status routing (MUL-4155)", () => {
@@ -112,6 +125,15 @@ describe("BatchActionToolbar status routing (MUL-4155)", () => {
       expect(batchUpdate).toHaveBeenCalledWith({ ids: ["a"], updates: { status } });
       unmount();
     }
+  });
+
+  it("warns instead of reporting success when the server skips some issues", async () => {
+    selection.selectedIds = new Set(["a", "b"]);
+    batchUpdate.mockResolvedValueOnce({ updated: 1 });
+    render(<BatchActionToolbar issues={[makeIssue({ id: "a" }), makeIssue({ id: "b" })]} />);
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it("still routes agent assignment through the run-confirm modal", () => {

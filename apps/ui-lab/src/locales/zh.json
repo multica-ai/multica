@@ -1,0 +1,553 @@
+{
+  "lab": {
+    "preview": {
+      "source": "当前代码",
+      "preview": "预览",
+      "originalFrame": "原版界面",
+      "editedFrame": "调整后的界面",
+      "unchanged": "与当前代码一致",
+      "back": "返回修改版",
+      "original": "查看原版",
+      "compare": "并排对比",
+      "unavailable": "当前预览提供任务列表和详情，其他页面尚未配置样例数据。",
+      "changeCount_other": "{{count}} 项修改",
+      "changeCount_one": "{{count}} 项修改"
+    },
+    "theme": {
+      "light": "浅色",
+      "dark": "深色",
+      "label": "预览主题",
+      "lightLabel": "浅色主题",
+      "darkLabel": "深色主题"
+    },
+    "notice": {
+      "saved": "方案已保存到此浏览器",
+      "copied": "CSS 已复制",
+      "copyFailed": "无法访问剪贴板，请选择代码手动复制，或下载 CSS",
+      "exported": "CSS 已导出",
+      "storageFailed": "浏览器无法保存草稿，请导出 CSS 以保留修改。",
+      "dismiss": "关闭提示",
+      "loaded": "已载入：{{name}}"
+    },
+    "nav": {
+      "toggle": "切换场景导航",
+      "internal": "内部工作台",
+      "scenes": "组件与场景",
+      "previewScenes": "预览场景",
+      "saved": "已存方案",
+      "empty": "暂无方案",
+      "workbench": "工作台"
+    },
+    "actions": {
+      "undo": "撤销",
+      "redo": "重做",
+      "save": "保存方案",
+      "export": "导出修改",
+      "deleteDesign": "删除方案 {{name}}"
+    },
+    "save": {
+      "title": "保存设计方案",
+      "description": "保存在当前浏览器，最多 20 份。",
+      "name": "方案名称",
+      "placeholder": "例如：更紧凑的任务视图"
+    },
+    "export": {
+      "title": "导出设计修改",
+      "description": "合并到 packages/ui/styles/tokens.css 的对应代码块。导出不会写回源码。",
+      "copy": "复制 CSS",
+      "download": "下载 CSS"
+    },
+    "scenes": {
+      "components": "组件总览",
+      "button": "Button 按钮",
+      "list": "任务列表",
+      "detail": "任务详情",
+      "dialog": "弹窗",
+      "motion": "动效",
+      "colors": "颜色"
+    },
+    "language": {
+      "label": "语言"
+    },
+    "panels": {
+      "expandLeft": "展开左侧栏",
+      "collapseLeft": "折叠左侧栏",
+      "expandRight": "展开右侧栏",
+      "collapseRight": "折叠右侧栏"
+    }
+  },
+  "button": {
+    "variants": {
+      "primary": "主要操作",
+      "secondary": "次要操作",
+      "soft": "柔和填充",
+      "ghost": "轻量操作",
+      "brand": "品牌强调",
+      "brandSoft": "品牌浅色",
+      "destructive": "危险操作",
+      "link": "链接样式"
+    },
+    "actions": {
+      "create": "创建任务",
+      "continue": "继续",
+      "submit": "提交任务",
+      "more": "更多操作",
+      "dialog": "打开对话框",
+      "save": "保存修改",
+      "saveExample": "保存示例",
+      "saveNext": "保存并继续创建下一项任务",
+      "compactAdd": "紧凑添加",
+      "quick": "快捷操作",
+      "addSize": "添加任务 {{size}}"
+    },
+    "page": {
+      "title": "按钮",
+      "variantCount": "8 种外观",
+      "sizeCount": "8 种尺寸",
+      "contents": "按钮页面目录",
+      "playground": "试用",
+      "variants": "外观与状态",
+      "context": "使用场景",
+      "try": "试用按钮",
+      "sizes": "尺寸与图标"
+    },
+    "controls": {
+      "label": "按钮文字",
+      "content": "内容",
+      "leading": "前置图标",
+      "trailing": "后置图标",
+      "textOnly": "仅文字",
+      "iconOnly": "仅图标",
+      "state": "状态",
+      "icon": "图标",
+      "text": "文字"
+    },
+    "states": {
+      "default": "默认",
+      "disabled": "禁用",
+      "loading": "加载中",
+      "invalid": "无效输入",
+      "interactive": "默认 / 可交互",
+      "processing": "处理中",
+      "submitting": "提交中...",
+      "submitted": "已提交",
+      "complete": "示例提交完成",
+      "clicked_other": "已触发 {{count}} 次示例操作",
+      "clicked_one": "已触发 {{count}} 次示例操作"
+    },
+    "geometry": {
+      "height": "高度",
+      "padding": "内边距"
+    },
+    "context": {
+      "submit": "提交与反馈",
+      "triggers": "弹层触发器",
+      "popover": "弹层内容",
+      "saveDescription": "保存当前修改。",
+      "length": "文字长度",
+      "compact": "紧凑空间"
+    }
+  },
+  "inspector": {
+    "sections": {
+      "size": "尺寸",
+      "appearance": "外观",
+      "type": "文字",
+      "adjustSize": "调整尺寸",
+      "colors": "颜色",
+      "moreColors": "更多颜色",
+      "density": "列表密度"
+    },
+    "changes": {
+      "modified": "已修改",
+      "reset": "重置全部修改",
+      "resetTitle": "重置全部修改（可撤销）",
+      "resetButton": "重置按钮参数",
+      "resetButtonTitle": "重置全部按钮尺寸",
+      "unchanged": "与原版一致",
+      "empty": "所有参数均使用当前代码的值",
+      "export": "导出 CSS",
+      "restore": "恢复原版值"
+    },
+    "panel": {
+      "label": "设计参数",
+      "tabs": "属性面板",
+      "design": "设计",
+      "changes": "修改",
+      "system": "设计系统"
+    },
+    "scope": {
+      "component": "组件",
+      "global": "全局",
+      "shared": "共享",
+      "theme": "全局 · {{theme}}"
+    },
+    "actions": {
+      "edit": "编辑{{label}}",
+      "size": "尺寸 {{size}}",
+      "restore": "恢复 {{key}} {{scope}}",
+      "scrub": "拖动调整{{label}}",
+      "scrubHint": "{{token}}\n左右拖动调整，Shift 加速；点击输入数值。",
+      "reset": "重置{{label}}",
+      "invalid": "请输入 {{min}}–{{max}} 之间的数值。"
+    }
+  },
+  "tokens": {
+    "labels": {
+      "gap": "图文间距",
+      "brand": "品牌色",
+      "primary": "主要操作背景",
+      "primaryText": "主要操作文字",
+      "secondary": "次要操作背景",
+      "secondaryText": "次要操作文字",
+      "destructive": "危险操作颜色",
+      "ring": "聚焦轮廓",
+      "shell": "外层框架",
+      "page": "页面背景",
+      "surface": "内容表面",
+      "raised": "浮层背景",
+      "hover": "悬停背景",
+      "selected": "选中背景",
+      "foreground": "正文颜色",
+      "muted": "次要文字",
+      "height": "按钮高度",
+      "padding": "水平内边距",
+      "rowHeight": "任务行高",
+      "radius": "基础圆角",
+      "caption": "辅助文字",
+      "label": "信息标签",
+      "body": "正文",
+      "lineHeight": "正文行高",
+      "title": "标题",
+      "enterDuration": "进入时长",
+      "exitDuration": "退出时长",
+      "enterEasing": "进入曲线",
+      "exitEasing": "退出曲线",
+      "faint": "弱化图标",
+      "surfaceText": "容器文字",
+      "selectedText": "选中文字",
+      "cardText": "卡片文字",
+      "popoverText": "浮层文字",
+      "brandText": "品牌色上的文字",
+      "accent": "强调背景",
+      "accentText": "强调文字",
+      "mutedFill": "弱化背景",
+      "success": "成功",
+      "warning": "警告",
+      "info": "信息",
+      "border": "边框",
+      "surfaceBorder": "容器边框",
+      "inputBorder": "输入框边框",
+      "sidebar": "侧栏背景",
+      "sidebarText": "侧栏文字",
+      "sidebarPrimary": "侧栏主要操作",
+      "sidebarPrimaryText": "侧栏主要操作文字",
+      "sidebarAccent": "侧栏悬停",
+      "sidebarAccentText": "侧栏悬停文字",
+      "sidebarBorder": "侧栏边框",
+      "sidebarRing": "侧栏焦点环",
+      "chart1": "图表 1",
+      "chart2": "图表 2",
+      "chart3": "图表 3",
+      "chart4": "图表 4",
+      "chart5": "图表 5"
+    }
+  },
+  "color": {
+    "feedback": {
+      "invalid": "请输入 3 位或 6 位 HEX 色值。",
+      "copied": "已复制色值",
+      "copyFailed": "无法复制，请选择色值后手动复制。",
+      "gamut": "超出 sRGB，HEX 为近似值。"
+    },
+    "roles": {
+      "searchLabel": "搜索颜色角色",
+      "searchPlaceholder": "搜索颜色或变量...",
+      "title": "颜色角色",
+      "empty": "没有找到匹配的颜色。",
+      "current": "颜色角色：{{label}}"
+    },
+    "controls": {
+      "picker": "颜色色板",
+      "hex": "HEX 色值",
+      "copy": "复制 HEX 色值",
+      "restoreTitle": "恢复此颜色的原版值",
+      "restore": "恢复原版颜色",
+      "original": "原版",
+      "current": "当前",
+      "reset": "重置此颜色",
+      "presets": "快捷色",
+      "advanced": "精确调整",
+      "close": "关闭颜色编辑器",
+      "use": "使用颜色 {{color}}",
+      "editor": "{{label}}颜色编辑器",
+      "opacity": "不透明度"
+    },
+    "channels": {
+      "lightness": "明度",
+      "chroma": "色度",
+      "hue": "色相"
+    }
+  },
+  "gallery": {
+    "surfaces": {
+      "shell": "框架",
+      "page": "页面",
+      "surface": "表面",
+      "raised": "浮层",
+      "hover": "悬停",
+      "selected": "选中"
+    },
+    "dialog": {
+      "open": "打开弹窗",
+      "title": "新建任务",
+      "description": "填写任务标题。",
+      "label": "弹窗任务标题",
+      "placeholder": "输入任务标题..."
+    },
+    "sections": {
+      "title": "基础组件",
+      "surfaces": "表面与层次",
+      "forms": "输入与选择",
+      "status": "状态与标签",
+      "typography": "文字层级",
+      "elevation": "浮层与圆角",
+      "feedback": "加载与空状态"
+    },
+    "actions": {
+      "new": "新建",
+      "outline": "边框按钮",
+      "delete": "删除",
+      "disabled": "不可用"
+    },
+    "form": {
+      "title": "组件任务标题",
+      "placeholder": "为任务起一个名字...",
+      "notify": "通知负责人",
+      "autopilot": "自动化",
+      "disabled": "禁用输入框",
+      "readonly": "只读状态",
+      "attention": "需关注"
+    },
+    "type": {
+      "heading": "小细节，构成好体验",
+      "body": "Build with intention. 让智能体和团队一起工作。",
+      "label": "任务属性 · 负责人 · 项目",
+      "caption": "次要信息也应该清楚可读 · 2 分钟前",
+      "cardTitle": "产品体验优化",
+      "cardDescription": "内外层圆角的关系",
+      "empty": "所有通知都已处理"
+    }
+  },
+  "fixtures": {
+    "issues": {
+      "titles": [
+        "统一任务列表与详情页的视觉层次",
+        "优化命令菜单的键盘导航",
+        "优化智能体运行中的反馈与状态展示",
+        "检查中英文混排，以及很长的任务标题在窄窗口中的截断表现",
+        "为菜单和弹窗建立一致的圆角规则",
+        "完善深色模式下的选中与悬停状态",
+        "让空状态保持清晰、轻量"
+      ],
+      "description": "## 目标\n\n让团队更容易找到当前最重要的信息。标题清晰、正文舒适，次要信息保持安静。\n\n## 验收标准\n\n- [x] 共享同一套语义颜色与圆角\n- [ ] 中英文混排与长标题表现自然\n- [ ] 选中状态在悬停时依然清晰\n\nBuild with intention. 让智能体和团队一起工作。"
+    },
+    "comments": {
+      "first": "先检查列表的密度，再比较详情页中的文字层级。"
+    }
+  },
+  "system": {
+    "modules": {
+      "foundations": "设计基础",
+      "components": "基础组件",
+      "patterns": "组合模式",
+      "product": "业务组件",
+      "layouts": "页面布局",
+      "changes": "修改管理"
+    },
+    "descriptions": {
+      "foundations": "颜色、字体、间距与视觉规则。",
+      "components": "基础控件、变体与交互状态。",
+      "patterns": "由组件组成的常用操作流程。",
+      "product": "任务、团队与智能体界面。",
+      "layouts": "页面结构与响应式布局。",
+      "changes": "查看、保存与导出设计修改。"
+    },
+    "pages": {
+      "colors": "颜色",
+      "typography": "字体",
+      "spacing": "间距",
+      "radius": "圆角",
+      "shadows": "阴影",
+      "motion": "动效",
+      "icons": "图标",
+      "gallery": "组件总览",
+      "button": "按钮",
+      "input": "输入框",
+      "select": "选择器",
+      "checkbox": "复选框",
+      "switch": "开关",
+      "badge": "标签",
+      "tabs": "选项卡",
+      "tooltip": "提示框",
+      "dialog": "对话框",
+      "popover": "弹出层",
+      "forms": "表单",
+      "filters": "搜索与筛选",
+      "properties": "属性编辑",
+      "confirmation": "操作确认",
+      "feedback": "加载、空状态与错误",
+      "issueRow": "任务行",
+      "statusPicker": "状态选择器",
+      "assigneePicker": "负责人选择器",
+      "comments": "评论",
+      "agentRun": "智能体运行",
+      "sidebar": "侧边栏",
+      "list": "任务列表",
+      "detail": "任务详情",
+      "settings": "设置页",
+      "split": "分栏布局",
+      "review": "修改记录",
+      "saved": "保存方案",
+      "export": "CSS 导出",
+      "impact": "影响范围",
+      "source": "应用到源码"
+    },
+    "navigation": {
+      "overview": "总览",
+      "title": "设计系统",
+      "expand": "展开或收起{{module}}"
+    },
+    "status": {
+      "available": "已接入",
+      "planned": "待补充",
+      "progress": "{{ready}} / {{total}} 已接入"
+    },
+    "empty": {
+      "message": "后续在这里补充示例与规范。",
+      "back": "返回{{module}}",
+      "notFound": "页面不存在"
+    },
+    "changes": {
+      "reset": "重置全部",
+      "return": "打开按钮工作台"
+    }
+  },
+  "motion": {
+    "actions": {
+      "open": "打开",
+      "close": "关闭",
+      "replay": "重播"
+    },
+    "controls": {
+      "title": "动效",
+      "speed": "预览速度",
+      "reduced": "系统已启用减少动态效果，动画已关闭。"
+    },
+    "easing": {
+      "standard": "标准",
+      "linear": "线性",
+      "easeOut": "缓出",
+      "easeIn": "缓入"
+    }
+  },
+  "rules": {
+    "content": {
+      "title": "使用规则与代码",
+      "download": "下载 Markdown"
+    }
+  },
+  "dialog": {
+    "controls": {
+      "example": "示例",
+      "form": "表单",
+      "long": "长内容"
+    },
+    "actions": {
+      "open": "打开弹窗",
+      "cancel": "取消",
+      "save": "保存"
+    },
+    "content": {
+      "title": "编辑任务",
+      "description": "更新任务标题。",
+      "label": "标题",
+      "defaultTitle": "检查界面",
+      "item": "检查项 {{number}}：确认布局、内容和操作在窄屏下仍可访问。"
+    },
+    "states": {
+      "open": "已打开",
+      "closed": "已关闭",
+      "saved": "已保存示例"
+    }
+  },
+  "palette": {
+    "page": {
+      "title": "颜色",
+      "search": "搜索颜色",
+      "placeholder": "搜索名称或 token...",
+      "empty": "没有匹配的颜色",
+      "count": "{{count}} 个 token",
+      "edit": "编辑{{label}}",
+      "aliases": "别名",
+      "selected": "当前颜色",
+      "sample": "实际效果"
+    },
+    "groups": {
+      "surfaces": "背景与容器",
+      "content": "文字与图标",
+      "actions": "操作",
+      "feedback": "反馈",
+      "borders": "边框与焦点",
+      "charts": "图表",
+      "sidebar": "侧栏"
+    },
+    "sample": {
+      "title": "检查界面",
+      "description": "分配前更新任务内容。",
+      "create": "新建任务",
+      "cancel": "取消"
+    }
+  },
+  "colorUsage": {
+    "sections": "颜色分区",
+    "palette": "色板",
+    "title": "用途与对比度",
+    "mapping": "用途映射",
+    "preview": "交互状态",
+    "hint": "悬停、按住鼠标或用 Tab 聚焦。点击上方 token 可编辑。",
+    "roles": {
+      "action": "主要操作",
+      "brand": "激活的筛选 / 开关",
+      "tabs": "标签页 · 文字 / 指示线",
+      "input": "输入框 · 文字 / 边框",
+      "focus": "键盘焦点",
+      "error": "输入错误"
+    },
+    "states": {
+      "default": "默认",
+      "hover": "悬停",
+      "pressed": "按下",
+      "focus": "聚焦",
+      "selected": "选中",
+      "invalid": "错误",
+      "disabled": "禁用"
+    },
+    "unmeasured": "未测量",
+    "pass": "通过",
+    "fail": "未通过",
+    "exempt": "豁免 · 已禁用",
+    "text": "文字",
+    "focusBorder": "焦点边框",
+    "mainAction": "主要操作",
+    "activeFilter": "分配给我",
+    "overview": "概览",
+    "activity": "动态",
+    "overviewContent": "任务详情",
+    "activityContent": "最近更新",
+    "taskName": "任务名称",
+    "rules": "规则与测量说明",
+    "scope": "文字目标为 4.5:1；焦点边框与内外相邻背景的目标均为 3:1。基于过渡结束后的实际 sRGB 颜色计算，并合成透明度。禁用控件豁免，背景图片和整体透明度不测量。占位文字、标签页指示线和焦点环几何形态需单独检查；此处不代表完整的无障碍审查。",
+    "policy": "主要操作保持中性色，品牌色标识激活的控件。标签页使用正文色和次要文字色；输入错误使用 destructive，焦点使用 ring。导出前检查明暗主题。修改 token 会影响所有使用它的组件。"
+  }
+}

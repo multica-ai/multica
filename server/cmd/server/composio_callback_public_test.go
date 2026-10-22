@@ -15,7 +15,7 @@ import (
 // settings redirect — the exact symptom Yushen hit.
 //
 // With no COMPOSIO_API_KEY configured in the test env, h.Composio == nil, so a
-// cookie-less hit on the callback now reaches the handler and returns 503
+// cookie-less hit on the callback now reaches the handler and returns 403
 // ("not configured") rather than being short-circuited to 401 by the Auth
 // middleware. The precise non-401 code is incidental; what this test pins is
 // that the request is NOT rejected by auth.

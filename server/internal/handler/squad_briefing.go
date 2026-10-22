@@ -105,8 +105,8 @@ Your responsibilities, in order:
 // job is the owning/guest permission boundary, drawn at the Agent Identity
 // layer (Instruction Precedence puts it above the workflow). The owning
 // leader needs the standing wrap-up instruction below — the @mention-dispatch
-// shape (no child issues, so no child-done system comment) never produces a
-// comment that asks for in_review, so without it the parent would sit in
+// shape (no child issues, so no sub-issue wakeup) never produces a
+// trigger that asks for in_review, so without it the parent would sit in
 // in_progress forever; the guest leader gets the prohibition instead
 // (squadParentStatusNotOwned). Both compositions are pinned by
 // handler/squad_parent_status_contract_test.go.

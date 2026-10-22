@@ -109,7 +109,7 @@ describe("StepPlatformFork", () => {
       screen.queryByRole("button", { name: /^continue$/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/pick a way to connect — or skip and connect a computer later/i),
+      screen.getByText("You can connect later."),
     ).toBeInTheDocument();
   });
 

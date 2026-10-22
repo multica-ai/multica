@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -625,12 +626,29 @@ func newDownloadRouter() http.Handler {
 	return r
 }
 
+var (
+	sharedTestRSAKeyOnce sync.Once
+	sharedTestRSAKeyVal  *rsa.PrivateKey
+	sharedTestRSAKeyErr  error
+)
+
+// sharedTestRSAKey returns one RSA-2048 key for the whole test binary. Minting
+// a key costs tens to hundreds of milliseconds under -race, and no test needs
+// a unique one: each signs and verifies with the key it was handed.
+func sharedTestRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	sharedTestRSAKeyOnce.Do(func() {
+		sharedTestRSAKeyVal, sharedTestRSAKeyErr = rsa.GenerateKey(rand.Reader, 2048)
+	})
+	if sharedTestRSAKeyErr != nil {
+		t.Fatalf("generate RSA test key: %v", sharedTestRSAKeyErr)
+	}
+	return sharedTestRSAKeyVal
+}
+
 func testCloudFrontSigner(t *testing.T) *auth.CloudFrontSigner {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("generate CloudFront test key: %v", err)
-	}
+	key := sharedTestRSAKey(t)
 	pemBytes := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
@@ -738,6 +756,52 @@ func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *test
 	}
 	if got := dl.Query().Get("response-content-disposition"); !strings.HasPrefix(got, "attachment") {
 		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+}
+
+func TestGetAttachmentForDownload_UsesAttachmentWorkspaceMembership(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	store := &mockStorageNoCdn{}
+	origStorage, origCfg, origSigner := testHandler.Storage, testHandler.cfg, testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage, testHandler.cfg, testHandler.CFSigner = origStorage, origCfg, origSigner
+	})
+
+	slug := fmt.Sprintf("download-metadata-%d", time.Now().UnixNano())
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name": "Download metadata workspace", "slug": slug,
+		"description": "", "issue_prefix": "DMW",
+	})
+	id := dbfx.Insert(t, "attachment", testutil.Cols{
+		"workspace_id":  otherWorkspaceID,
+		"uploader_type": "member", "uploader_id": testUserID,
+		"filename": "report.pdf", "url": "https://s3.example.com/test-bucket/report.pdf",
+		"content_type": "application/pdf", "size_bytes": 12,
+	})
+
+	request := func() *http.Request {
+		req := httptest.NewRequest("GET", "/api/attachments/"+id+"/download-metadata", nil)
+		req.Header.Set("X-User-ID", testUserID)
+		req.Header.Set("X-Workspace-ID", testWorkspaceID) // viewing workspace A
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", id)
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	testutil.Call(t, testHandler.GetAttachmentForDownload, request()).Want(http.StatusNotFound)
+	dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": otherWorkspaceID, "user_id": testUserID, "role": "member",
+	})
+
+	var resp AttachmentResponse
+	testutil.Call(t, testHandler.GetAttachmentForDownload, request()).Want(http.StatusOK).JSON(&resp)
+	if resp.ID != id || !strings.Contains(resp.AttachmentDownloadURL, "/signed-download?") {
+		t.Fatalf("response missing attachment-specific signed URL: %+v", resp)
 	}
 }
 
@@ -1620,7 +1684,8 @@ func TestGetAttachmentContent_NotFound(t *testing.T) {
 
 // isTextPreviewable is the whitelist linkpin between the proxy and the
 // client-side dispatcher. Regress against the most common content types so
-// drifting one of the lists alone fails loud.
+// drifting one of the lists alone fails loud. The same table runs against the
+// client in packages/views/editor/utils/preview.test.ts — change both.
 func TestIsTextPreviewable(t *testing.T) {
 	t.Helper()
 	cases := []struct {
@@ -1634,6 +1699,12 @@ func TestIsTextPreviewable(t *testing.T) {
 		{"plain text", "text/plain", "log.txt", true},
 		{"json by mime", "application/json", "data.json", true},
 		{"yaml by ext", "application/octet-stream", "config.yml", true},
+		{"csv by ext", "application/octet-stream", "report.csv", true},
+		{"tsv by ext", "application/octet-stream", "export.tsv", true},
+		{"json lines by ext", "application/octet-stream", "events.jsonl", true},
+		{"ndjson by ext", "application/octet-stream", "events.ndjson", true},
+		{"ndjson by mime", "application/x-ndjson", "events", true},
+		{"log by ext", "application/octet-stream", "server.log", true},
 		{"go source", "text/plain", "main.go", true},
 		{"typescript", "application/octet-stream", "index.ts", true},
 		{"html", "text/html", "page.html", true},

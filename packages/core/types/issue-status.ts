@@ -3,21 +3,20 @@ import type { IssueStatusCategory } from "./issue";
 /**
  * A workspace's issue status catalog (MUL-6243).
  *
- * The 7 categories map one-to-one onto the 7 built-in statuses: a category's
- * value IS its canonical status key. A custom status names a category and
- * inherits that canonical status's platform behavior in full — a custom status
- * in the `todo` category starts an agent exactly like Todo does, one in the
- * `in_review` category finalizes an autopilot run exactly like In Review does.
- *
- * That is why there is no separate "behavior" field here: the category is the
- * behavior.
+ * Seven concrete built-in statuses are grouped into four lifecycle categories.
+ * Category is presentation and workflow phase; the server keeps the legacy
+ * status behavior projection separate so collapsing `in_review` and `blocked`
+ * into `started` does not change existing automation behavior.
  */
 
 // IssueStatusCategory is defined in ./issue, next to IssueStatus, because the
-// two only make sense read together: a category is one of the 7 built-in keys,
-// and a status key is a category or a workspace's custom key. Re-exported here
-// so catalog consumers can import both from one place. (MUL-6243)
+// two only make sense read together. Re-exported here so catalog consumers can
+// import both from one place. (MUL-6243, MUL-7240)
 export type { IssueStatusCategory } from "./issue";
+
+/** Visual geometry only; never use these values to infer workflow behavior. */
+export const ISSUE_STATUS_ICONS = ["dotted", "circle", "half", "three_quarters", "check", "slash", "cross"] as const;
+export type IssueStatusIcon = (typeof ISSUE_STATUS_ICONS)[number];
 
 export interface IssueStatusEntry {
   id: string;
@@ -34,11 +33,11 @@ export interface IssueStatusEntry {
   category: IssueStatusCategory;
   /** "#rrggbb". */
   color: string;
+  /** Empty/absent means category default. Unknown future values render a fallback. */
+  icon?: string | null;
   /**
    * True for the 7 built-ins. They cannot be renamed, recolored, archived, or
-   * have their category changed: each one is its category's canonical
-   * definition, and the default workspace must look identical for every user
-   * who never opens the status settings.
+   * have their category changed.
    */
   is_system: boolean;
   /** Ordering within the category. */
@@ -50,7 +49,7 @@ export interface IssueStatusEntry {
 
 export interface ListIssueStatusesResponse {
   statuses: IssueStatusEntry[];
-  /** The 7 categories, in display order. */
+  /** The four lifecycle categories, in display order. */
   categories: IssueStatusCategory[];
   total: number;
 }
@@ -62,16 +61,19 @@ export interface CreateIssueStatusRequest {
   description?: string;
   category: IssueStatusCategory;
   color: string;
+  icon?: IssueStatusIcon | "";
 }
 
 /**
  * `key` and `category` are absent by design — both are immutable. Changing a
- * category would silently rewrite the machine semantics of every issue already
- * on that status; changing a key would strand them.
+ * category would regroup every issue already on that status; changing a key
+ * would strand them.
  */
 export interface UpdateIssueStatusRequest {
   name?: string;
   description?: string;
   color?: string;
+  /** Omit to preserve; empty string resets to the default. */
+  icon?: IssueStatusIcon | "";
   position?: number;
 }

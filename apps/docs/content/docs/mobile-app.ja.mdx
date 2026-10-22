@@ -5,7 +5,7 @@ description: ソースコードから Multica を iPhone にインストール�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica の iOS クライアントはまだ App Store にありません。Mac でオープンソースリポジトリから Release 版をビルドし、自分の iPhone にインストールできます。Android クライアントはまだ提供されていません。
+Multica の iOS クライアントはまだ App Store にありません。Mac で公開されているソースリポジトリから Release 版をビルドし、自分の iPhone にインストールできます。Android クライアントはまだ提供されていません。
 
 インストールしたアプリはデフォルトで Multica Cloud に接続し、既存のアカウントでそのままサインインできます。ワークスペース、タスク、コメント、実行履歴はすべてサーバー側に保存されるため、Web や Desktop から手動で同期する必要はありません。
 
@@ -70,19 +70,21 @@ pnpm ios:mobile:device:prod:release
 
 ## セルフホストインスタンスへの接続
 
-Release ビルドは API アドレスをアプリに埋め込みます。セルフホストインスタンスに接続するには、先に `apps/mobile/.env.production` を編集します:
+Release ビルドは API アドレスをアプリに埋め込みます。`apps/mobile/.env.production` は公開されている multica.ai のデフォルト値とともにコミットされているため、新しくクローンした状態でも本番ビルドができます。
+
+セルフホストインスタンスに接続するには、`apps/mobile/.env.production.example` を `apps/mobile/.env.production.local` としてコピーし、コピーを編集します:
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`EXPO_PUBLIC_API_URL` は必須です。`EXPO_PUBLIC_WEB_URL` は任意で、"Copy link" や "Open on web" などの入口に使われます。未設定の場合、これらのメニュー項目は表示されません。
+`.local` ファイルはコミット済みのデフォルトをキーごとに上書きし、gitignore されるため、個人の API アドレスがリポジトリに入ることはありません。`EXPO_PUBLIC_API_URL` は必須です。`EXPO_PUBLIC_WEB_URL` は "Copy link" や "Open on web" などの入口に使われます。コピーには両方を設定してください。書かなかったキーには multica.ai のデフォルト値が使われるため、これらの入口がセルフホストインスタンスではなく multica.ai を開きます。
 
 編集後にビルドコマンドを再実行します。iPhone がこの API アドレスに到達できる必要があります。LAN のアドレスを使う場合、`localhost` と書かないでください — iPhone 上では iPhone 自身を指します。
 
 <Callout type="warning">
-`.env.production` を変更すると、現在のチェックアウトの本番設定が変わります。その変更をコミットすると、個人の API アドレスがリポジトリの本番設定に書き込まれます。
+`.env.production` を直接編集すると、現在のチェックアウトの本番設定が変わります。個人の値は gitignore された `.env.production.local` に書いてください。
 </Callout>
 
 モバイルの開発、Simulator の使用、staging への接続については、リポジトリの [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) を参照してください。

@@ -167,9 +167,7 @@ export function StepAboutYou({
     onSkip();
   };
 
-  const footerHint = canContinue
-    ? t(($) => $.step_question.hint_continue)
-    : t(($) => $.step_question.hint_pick);
+  const footerHint = canContinue ? undefined : t(($) => $.step_question.hint_pick);
 
   return (
     <>

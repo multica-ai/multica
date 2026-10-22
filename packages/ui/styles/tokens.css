@@ -34,6 +34,7 @@
     --color-success: var(--success);
     --color-warning: var(--warning);
     --color-info: var(--info);
+    --color-priority-high: var(--priority-high);
     --color-brand: var(--brand);
     --color-brand-foreground: var(--brand-foreground);
     --color-accent-foreground: var(--accent-foreground);
@@ -51,13 +52,17 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
+    /* Compact product radius ladder. Keep the roles stable even when the base
+       value changes: xs=micro controls, sm=nested surfaces, md=rows/menus,
+       lg=controls/compact surfaces, xl=cards/dialogs. */
+    --radius-xs: calc(var(--radius) * 0.375);
+    --radius-sm: calc(var(--radius) * 0.5);
+    --radius-md: calc(var(--radius) * 0.75);
     --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    --radius-xl: calc(var(--radius) * 1.5);
+    --radius-2xl: calc(var(--radius) * 2);
+    --radius-3xl: calc(var(--radius) * 2.5);
+    --radius-4xl: calc(var(--radius) * 3);
 }
 
 /* Type scale — the only font sizes product UI may use.
@@ -118,7 +123,27 @@
 }
 
 :root {
+    /* Dialog motion, shared by popup and backdrop. */
+    --dialog-enter-duration: 100ms;
+    --dialog-exit-duration: 100ms;
+    --dialog-enter-easing: ease;
+    --dialog-exit-easing: ease;
+
     color-scheme: light;
+    /* Button geometry. Text and icon-only buttons share the height ladder.
+       Keep the defaults aligned with the existing compact product controls. */
+    --button-height-xs: 1.5rem;
+    --button-height-sm: 1.75rem;
+    --button-height-default: 2rem;
+    --button-height-lg: 2.25rem;
+    --button-padding-xs: 0.5rem;
+    --button-padding-sm: 0.625rem;
+    --button-padding-default: 0.625rem;
+    --button-padding-lg: 0.625rem;
+    --button-gap-xs: 0.25rem;
+    --button-gap-sm: 0.25rem;
+    --button-gap-default: 0.375rem;
+    --button-gap-lg: 0.375rem;
     /* Surface system: the app shell is the quiet outer frame; the page canvas
        is where lists, boards, and conversations live; surfaces are reserved
        for bounded content groups; raised surfaces are ephemeral overlays. */
@@ -149,6 +174,12 @@
        so they carry a lighter shadow than window-level overlays (dialogs,
        sheets), which keep --floating-shadow. */
     --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
+    /* Tooltips are a dark surface in both themes, so a passive label never
+       reads as one of the interactive panels above. Near-black here; in dark
+       mode it sits one step above every surface and carries a ring instead of
+       a drop shadow. */
+    --tooltip: oklch(0.21 0.006 285.885);
+    --tooltip-shadow: 0 4px 12px rgb(15 23 42 / 0.16), 0 1px 3px rgb(15 23 42 / 0.12);
     --background: var(--page-canvas);
     --foreground: oklch(0.141 0.005 285.823);
     --card: var(--surface);
@@ -196,7 +227,8 @@
     --chart-3: oklch(0.76 0.10 255);
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
-    --radius: 0.625rem;
+    --radius: 0.5rem;
+    --issue-row-height: 36px;
     --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);
@@ -205,11 +237,13 @@
     --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.705 0.015 286.067);
-    --brand: oklch(0.55 0.16 255);
+    --brand: oklch(0.56079497 0.19449888 256.41258418);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
     --info: oklch(0.55 0.18 250);
+    /* High priority sits between --destructive (urgent) and --warning (medium). */
+    --priority-high: oklch(0.68 0.18 50);
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
@@ -235,6 +269,8 @@
     --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16);
     --floating-shadow: 0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28);
     --menu-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
+    --tooltip: oklch(0.3 0.006 286.033);
+    --tooltip-shadow: 0 0 0 1px oklch(1 0 0 / 10%), 0 8px 24px rgb(0 0 0 / 0.4);
     --background: var(--page-canvas);
     --foreground: oklch(0.985 0 0);
     --card: var(--surface);
@@ -275,11 +311,13 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.552 0.016 285.938);
+    /* Brand also paints body-text links; keep it readable on dark surfaces. */
     --brand: oklch(0.65 0.16 255);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.65 0.15 145);
     --warning: oklch(0.70 0.16 85);
     --info: oklch(0.65 0.18 250);
+    --priority-high: oklch(0.72 0.17 50);
     --scrollbar-thumb: oklch(1 0 0 / 8%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
     --scrollbar-track: transparent;

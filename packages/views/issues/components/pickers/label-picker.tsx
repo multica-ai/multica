@@ -47,6 +47,8 @@ interface LabelPickerProps {
    *  × affordance — a remove <button> can't nest inside a trigger <button>,
    *  so removal happens by toggling the label off in the open picker. */
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
 }
 
 /**
@@ -96,6 +98,7 @@ export function LabelPicker({
   align = "start",
   defaultOpen = false,
   triggerRender,
+  tooltip,
 }: LabelPickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
@@ -209,7 +212,7 @@ export function LabelPicker({
   const resolvedTriggerRender =
     triggerRender ??
     (hasLabels ? (
-      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
+      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 hover:bg-accent/30 transition-colors" />
     ) : undefined);
 
   return (
@@ -226,6 +229,7 @@ export function LabelPicker({
         searchPlaceholder={t(($) => $.pickers.label.search_placeholder)}
         onSearchChange={setFilter}
         triggerRender={resolvedTriggerRender}
+        tooltip={tooltip}
         trigger={
           hasLabels ? (
             <>

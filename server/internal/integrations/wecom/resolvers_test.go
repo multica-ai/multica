@@ -280,7 +280,7 @@ func TestOutbound_RegisterAndHandleEventNoopOnNonWecom(t *testing.T) {
 	// that isn't a wecom binding must be a silent no-op (handleEvent swallows
 	// the processEvent result). Uses pgx.ErrNoRows via the fake.
 	q := &fakeOutboundQueries{sessionErr: pgx.ErrNoRows}
-	o := NewOutbound(q, newSendersRegistry(), slog.Default())
+	o := NewOutbound(q, newSendersRegistry(), nil, slog.Default())
 	bus := events.New()
 	o.Register(bus)
 	// Publishing must not panic; the handler runs synchronously on the bus.

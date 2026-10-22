@@ -5,6 +5,14 @@ import (
 	"sync"
 )
 
+// ChannelReactionTarget retains the non-secret cleanup anchor when a transaction
+// deletes the delivery row. It is internal bus metadata, never a client payload.
+type ChannelReactionTarget struct {
+	ChannelType    string
+	InstallationID string
+	MessageID      string
+}
+
 // Event represents a domain event published by handlers or services.
 type Event struct {
 	Type        string // e.g. "issue:created", "inbox:new"
@@ -17,8 +25,9 @@ type Event struct {
 	// event to a more specific scope than `workspace:{WorkspaceID}`. When set
 	// these tell the listener which Redis stream / Hub room to publish on
 	// without re-deserializing Payload. See MUL-1138 phase 1.
-	TaskID        string
-	ChatSessionID string
+	TaskID                string
+	ChatSessionID         string
+	ChannelReactionTarget *ChannelReactionTarget `json:"-"`
 }
 
 // Handler is a function that processes an event.
@@ -44,6 +53,18 @@ func (b *Bus) Subscribe(eventType string, h Handler) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.listeners[eventType] = append(b.listeners[eventType], h)
+}
+
+// SubscriberCount reports how many type-specific handlers are registered for
+// an event type. It exists for wiring guards: a subscriber that is never
+// registered fails silently — the events keep flowing and nobody reads them —
+// so "is anything listening" has to be assertable from outside the bus.
+// Global (SubscribeAll) handlers are not counted; they answer a different
+// question.
+func (b *Bus) SubscriberCount(eventType string) int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.listeners[eventType])
 }
 
 // SubscribeAll registers a handler that receives ALL events regardless of type.

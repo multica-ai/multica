@@ -5,7 +5,7 @@ description: 从源码把 Multica 安装到 iPhone，并连接 Cloud 或自托�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica iOS 客户端目前还没有上架 App Store。你可以在 Mac 上从开源仓库构建 Release 版本，再安装到自己的 iPhone。Android 客户端暂未提供。
+Multica iOS 客户端目前还没有上架 App Store。你可以在 Mac 上从公开的源码仓库构建 Release 版本，再安装到自己的 iPhone。Android 客户端暂未提供。
 
 安装后的 App 默认连接 Multica Cloud，使用已有账号即可登录。工作区、任务、评论和执行记录都保存在服务端，不需要从 Web 或 Desktop 手动同步。
 
@@ -70,19 +70,21 @@ pnpm ios:mobile:device:prod:release
 
 ## 连接自托管实例
 
-Release 构建会把 API 地址写入 App。要连接自托管实例，先修改 `apps/mobile/.env.production`：
+Release 构建会把 API 地址写入 App。`apps/mobile/.env.production` 已随仓库提交，默认指向 multica.ai 的公开后端，干净克隆即可构建生产版本。
+
+要连接自托管实例，把 `apps/mobile/.env.production.example` 复制为 `apps/mobile/.env.production.local` 并修改副本：
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`EXPO_PUBLIC_API_URL` 必填；`EXPO_PUBLIC_WEB_URL` 可选，用于 "Copy link"、"Open on web" 等入口，不设置时这些菜单项不会显示。
+`.local` 文件会按 key 覆盖提交的默认值，且已被 gitignore，个人 API 地址不会进入仓库。`EXPO_PUBLIC_API_URL` 必填；`EXPO_PUBLIC_WEB_URL` 用于 "Copy link"、"Open on web" 等入口。两个都要在副本里设置：没写的 key 会沿用 multica.ai 的默认值，这些入口就会打开 multica.ai，而不是你的实例。
 
 修改后重新运行构建命令。iPhone 必须能访问这个 API 地址；使用局域网地址时，不要写 `localhost`，因为它在 iPhone 上指向手机本身。
 
 <Callout type="warning">
-修改 `.env.production` 会改变当前 checkout 的生产配置。提交该修改会把个人 API 地址写进仓库的生产配置。
+直接修改 `.env.production` 会改变当前 checkout 的生产配置。个人配置请放在 gitignore 的 `.env.production.local` 中。
 </Callout>
 
 开发移动端、使用 Simulator 或连接 staging 的说明见仓库中的 [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md)。

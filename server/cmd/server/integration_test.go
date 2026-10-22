@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 var (
@@ -71,6 +72,8 @@ func TestMain(m *testing.M) {
 
 	bus := events.New()
 	registerListeners(bus, hub)
+	// Same wiring as main.go: HTTP writes through the test server log activity.
+	registerActivityListeners(bus, db.New(pool))
 	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
 	testServer = httptest.NewServer(router)
 
@@ -884,8 +887,8 @@ UPDATE agent SET owner_id = $2 WHERE id = $1
 		t.Fatalf("member DingTalk install request failed: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 503", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 403", resp.StatusCode)
 	}
 	if _, err := testPool.Exec(context.Background(), `
 UPDATE agent SET owner_id = $2 WHERE id = $1
@@ -1518,21 +1521,8 @@ func TestWebSocketIntegration(t *testing.T) {
 	readJSON(t, resp, &issue)
 	issueID := issue["id"].(string)
 
-	// Read the WebSocket message
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error: %v", err)
-	}
-
-	// Verify the message contains the issue event
-	var wsMsg map[string]any
-	if err := json.Unmarshal(msg, &wsMsg); err != nil {
-		t.Fatalf("failed to parse WebSocket message: %v", err)
-	}
-	if wsMsg["type"] != "issue:created" {
-		t.Fatalf("expected type 'issue:created', got '%s'", wsMsg["type"])
-	}
+	// Verify the broadcast carries the issue event
+	readWSMessageOfType(t, conn, "issue:created")
 
 	// Update the issue — should trigger another broadcast
 	resp = authRequest(t, "PUT", "/api/issues/"+issueID, map[string]any{
@@ -1540,29 +1530,36 @@ func TestWebSocketIntegration(t *testing.T) {
 	})
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on update: %v", err)
-	}
-	var updateMsg map[string]any
-	json.Unmarshal(msg, &updateMsg)
-	if updateMsg["type"] != "issue:updated" {
-		t.Fatalf("expected type 'issue:updated', got '%s'", updateMsg["type"])
-	}
+	readWSMessageOfType(t, conn, "issue:updated")
 
 	// Delete the issue — should trigger another broadcast
 	resp = authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
 	resp.Body.Close()
 
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("WebSocket read error on delete: %v", err)
-	}
-	var deleteMsg map[string]any
-	json.Unmarshal(msg, &deleteMsg)
-	if deleteMsg["type"] != "issue:deleted" {
-		t.Fatalf("expected type 'issue:deleted', got '%s'", deleteMsg["type"])
+	readWSMessageOfType(t, conn, "issue:deleted")
+}
+
+// readWSMessageOfType reads frames until one of the wanted type arrives. The
+// activity listeners are wired like production, so an activity:created frame
+// for the same write can land before or after the issue event itself.
+func readWSMessageOfType(t *testing.T, conn *websocket.Conn, wantType string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		conn.SetReadDeadline(deadline)
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("WebSocket read error waiting for %s: %v", wantType, err)
+		}
+		var wsMsg map[string]any
+		if err := json.Unmarshal(msg, &wsMsg); err != nil {
+			t.Fatalf("failed to parse WebSocket message: %v", err)
+		}
+		if wsMsg["type"] == wantType {
+			return wsMsg
+		}
+		if wsMsg["type"] != "activity:created" {
+			t.Fatalf("expected type '%s', got '%s'", wantType, wsMsg["type"])
+		}
 	}
 }

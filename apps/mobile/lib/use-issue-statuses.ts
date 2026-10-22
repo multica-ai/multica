@@ -13,9 +13,9 @@
  * 2. **No `isPending` / `isError` / `retry`.** Web needs those because its
  *    board routes a status FILTER to server-side column branches and must hold
  *    its loading state rather than guess. Mobile filters client-side over an
- *    already-fetched list and groups on the server-sent `status_category`, so
+ *    already-fetched list and groups on the concrete status key, so
  *    nothing here blocks on the catalog — a catalog that never arrives degrades
- *    to exactly the pre-catalog rendering (built-in labels, category glyphs).
+ *    to built-in labels or the raw custom key, without dropping any rows.
  */
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -23,11 +23,25 @@ import { issueStatusListOptions } from "@/data/queries/issue-statuses";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import {
   buildIssueStatusCatalog,
+  isBuiltInIssueStatus,
   type IssueStatusCatalog,
 } from "@/lib/issue-status";
+import { useT } from "@/lib/i18n";
 
 export function useIssueStatuses(): IssueStatusCatalog {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { t } = useT();
   const { data } = useQuery(issueStatusListOptions(wsId));
-  return useMemo(() => buildIssueStatusCatalog(data), [data]);
+  return useMemo(() => {
+    const catalog = buildIssueStatusCatalog(data);
+    return {
+      ...catalog,
+      labelOf: (key: string) => {
+        const label = catalog.labelOf(key);
+        // Only i18next keys are translatable. A custom status name may itself
+        // contain a colon, so its catalog name must pass through unchanged.
+        return isBuiltInIssueStatus(key) ? t(label) : label;
+      },
+    };
+  }, [data, t]);
 }

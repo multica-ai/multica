@@ -59,6 +59,7 @@ export function AuthInitializer({
     const request = getApi()
       .getConfig()
       .then((cfg) => {
+        configStore.getState().setAttachmentPublicUrl(cfg.attachment_public_url);
         if (cfg.cdn_domain) {
           configStore.getState().setCdnConfig({
             cdnDomain: cfg.cdn_domain,
@@ -93,6 +94,18 @@ export function AuthInitializer({
           .getState()
           .setAgentConversationStartersSupported(
             cfg.agent_conversation_starters_supported === true,
+          );
+        configStore
+          .getState()
+          .setIssueCreatePropertiesSupported(
+            cfg.issue_create_properties_supported === true,
+          );
+        // Older servers delete a comment's replies with it; promise nothing
+        // about replies unless the server declares otherwise.
+        configStore
+          .getState()
+          .setCommentDeleteKeepRepliesSupported(
+            cfg.comment_delete_keep_replies_supported === true,
           );
         if (cfg.posthog_key) {
           initAnalytics({

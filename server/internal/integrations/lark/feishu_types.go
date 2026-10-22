@@ -59,6 +59,10 @@ type InboundMessage struct {
 	// enricher prepends quoted/forwarded context). `/issue` is parsed from
 	// THIS, not the enriched Body.
 	CommandBody string
+
+	// HasSelectedContext is set when enrichment renders an explicitly selected
+	// quote or forward; automatic recent context does not set it.
+	HasSelectedContext bool
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier
@@ -98,6 +102,8 @@ type DispatchResult struct {
 	// IssueIdentifier is the workspace-qualified key ("MUL-42") for the
 	// created issue, used verbatim in the confirmation message.
 	IssueIdentifier string
+	// IssueWorkspaceSlug is the workspace route segment used in deep links.
+	IssueWorkspaceSlug string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
 	// IssueDuplicate distinguishes an active-issue conflict from a successful

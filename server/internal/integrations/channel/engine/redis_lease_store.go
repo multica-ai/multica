@@ -45,11 +45,11 @@ var redisReleaseLease = redis.NewScript(redisReleaseLeaseSource)
 // client/pool. Every mutation is a single Lua operation, so compare + expiry
 // update/delete cannot be interleaved by another replica.
 type RedisLeaseStore struct {
-	client    *redis.Client
+	client    redis.UniversalClient
 	namespace string
 }
 
-func NewRedisLeaseStore(client *redis.Client, namespace string) (*RedisLeaseStore, error) {
+func NewRedisLeaseStore(client redis.UniversalClient, namespace string) (*RedisLeaseStore, error) {
 	if client == nil {
 		return nil, errors.New("channel lease redis client is nil")
 	}
@@ -108,15 +108,20 @@ func (s *RedisLeaseStore) ListHeldWSLeases(ctx context.Context, ids []pgtype.UUI
 	for i, id := range ids {
 		keys[i] = s.key(id)
 	}
-	// RedisLeaseStore intentionally takes *redis.Client (standalone/sentinel),
-	// not ClusterClient. A future cluster-mode implementation must group keys by
-	// hash slot or pipeline individual GETs; cross-slot MGET is not valid.
-	values, err := s.client.MGet(ctx, keys...).Result()
-	if err != nil {
+	pipe := s.client.Pipeline()
+	commands := make([]*redis.StringCmd, len(keys))
+	for i, key := range keys {
+		commands[i] = pipe.Get(ctx, key)
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}
-	for i, value := range values {
-		if value != nil {
+	for i, command := range commands {
+		if err := command.Err(); err != nil && !errors.Is(err, redis.Nil) {
+			return nil, err
+		}
+		if command.Err() == nil {
 			held[uuidString(ids[i])] = struct{}{}
 		}
 	}

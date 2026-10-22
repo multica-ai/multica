@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -108,10 +109,36 @@ func (d *fakeWSDialer) DialContext(ctx context.Context, urlStr string, h http.He
 	return d.conn, nil, nil
 }
 
+// syncBuffer is a mutex-guarded io.Writer, so a slog handler written
+// from the connector goroutine can be read from the test goroutine.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // quietConnector wires a connector with a deterministic decoder + the
 // fakeWSConn. Caller controls the decoder so each test can assert
 // per-payload behaviour.
 func quietConnector(t *testing.T, conn *fakeWSConn, decoder FrameDecoder, pingInterval time.Duration) *WSLongConnConnector {
+	t.Helper()
+	return connectorWithLogger(t, conn, decoder, pingInterval, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+// connectorWithLogger is quietConnector with the logger left to the
+// caller, for the tests that assert on what the connector logs.
+func connectorWithLogger(t *testing.T, conn *fakeWSConn, decoder FrameDecoder, pingInterval time.Duration, logger *slog.Logger) *WSLongConnConnector {
 	t.Helper()
 	c, err := NewWSLongConnConnector(WSConnectorConfig{
 		Dialer: &fakeWSDialer{conn: conn},
@@ -125,7 +152,7 @@ func quietConnector(t *testing.T, conn *fakeWSConn, decoder FrameDecoder, pingIn
 		PingInterval: pingInterval,
 		ReadDeadline: time.Second,
 		WriteTimeout: time.Second,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:       logger,
 	})
 	if err != nil {
 		t.Fatalf("NewWSLongConnConnector: %v", err)
@@ -457,6 +484,71 @@ func TestWSConnectorDecoderErrorAcksAndContinues(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// TestWSConnectorLogsDroppedEventTypeOncePerType covers #8496: an app can
+// subscribe to event types we do not handle, and that path writes neither a
+// log line nor a DB row, so the socket leaves no trace of what it receives.
+// The type is named once per connection — a busy chat delivers reactions and
+// membership churn continuously, and one line per frame would be unbounded.
+// Heartbeats carry no event type and stay silent.
+func TestWSConnectorLogsDroppedEventTypeOncePerType(t *testing.T) {
+	t.Parallel()
+	conn := newFakeWSConn()
+	logs := &syncBuffer{}
+	decoder := FrameDecoderFunc(func([]byte, Installation) (InboundMessage, bool, error) {
+		return InboundMessage{}, false, nil
+	})
+	c := connectorWithLogger(t, conn, decoder, time.Hour, slog.New(slog.NewTextHandler(logs, nil)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(ctx, Installation{AppID: "test_app"}, func(context.Context, InboundMessage) (DispatchResult, error) {
+			return DispatchResult{}, nil
+		})
+	}()
+
+	reaction := `{"schema":"2.0","header":{"event_type":"im.message.reaction.created_v1","event_id":"e%d"}}`
+	pushDataFrame(conn, []byte(fmt.Sprintf(reaction, 1)), "m1")
+	waitForWrites(t, conn, 1)
+	if got := logs.String(); !strings.Contains(got, "im.message.reaction.created_v1") {
+		t.Fatalf("dropped event type not logged; log was:\n%s", got)
+	}
+
+	// Same type again, plus a heartbeat: both ACKed, neither logged.
+	pushDataFrame(conn, []byte(fmt.Sprintf(reaction, 2)), "m2")
+	pushDataFrame(conn, []byte(`{}`), "m3")
+	waitForWrites(t, conn, 3)
+	if got := strings.Count(logs.String(), "dropping unhandled event type"); got != 1 {
+		t.Errorf("log lines after a repeat + a heartbeat = %d, want 1; log was:\n%s", got, logs.String())
+	}
+
+	// A type we have not reported yet is worth one line of its own.
+	pushDataFrame(conn, []byte(`{"schema":"2.0","header":{"event_type":"im.chat.access_event_v1","event_id":"e4"}}`), "m4")
+	waitForWrites(t, conn, 4)
+	if got := strings.Count(logs.String(), "dropping unhandled event type"); got != 2 {
+		t.Errorf("log lines after a second event type = %d, want 2; log was:\n%s", got, logs.String())
+	}
+
+	cancel()
+	<-done
+}
+
+// waitForWrites blocks until the connector has written n frames (each
+// processed frame is ACKed), so a test can assert on what handling that
+// frame did without racing the connector goroutine.
+func waitForWrites(t *testing.T, conn *fakeWSConn, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(conn.snapshot()) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("connector wrote %d frames, want %d", len(conn.snapshot()), n)
 }
 
 func TestWSConnectorReadErrorReturnsToHub(t *testing.T) {

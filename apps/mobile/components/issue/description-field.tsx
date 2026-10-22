@@ -1,7 +1,7 @@
 /**
  * Description input block shared by `new-issue.tsx` and `issue/[id]/edit.tsx`.
  *
- * Focus-tinted `rounded-2xl` container wrapping the `AutosizeTextArea` —
+ * Focus-tinted `rounded-xl` container wrapping the `AutosizeTextArea` —
  * matches the "write markdown body" treatment used by the comment composer
  * so all three surfaces feel like the same control.
  *
@@ -15,26 +15,31 @@ import { View } from "react-native";
 import { AutosizeTextArea } from "@/components/ui/autosize-textarea";
 import { MIN_BODY_INPUT_HEIGHT_PX } from "@/components/ui/input-tokens";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import type { UseMentionInputReturn } from "@/lib/use-mention-input";
+import { continuousCorners } from "@/lib/radius";
 
 export function DescriptionField({
   description,
   disabled,
-  placeholder = "Description… (type @ to mention)",
+  placeholder,
 }: {
   description: UseMentionInputReturn;
   disabled: boolean;
   placeholder?: string;
 }) {
+  const { t } = useT("issues");
   const [focused, setFocused] = useState(false);
+  const resolvedPlaceholder = placeholder ?? t("new.description_placeholder");
   return (
     <View
       className={cn(
-        "rounded-2xl border px-3",
+        "rounded-xl border px-3",
         focused
           ? "border-primary/30 bg-secondary"
           : "border-transparent bg-secondary/40",
       )}
+      style={continuousCorners}
     >
       <AutosizeTextArea
         value={description.text}
@@ -43,7 +48,7 @@ export function DescriptionField({
         onSelectionChange={description.handlers.onSelectionChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         className="py-2"
         minHeight={MIN_BODY_INPUT_HEIGHT_PX}
         editable={!disabled}

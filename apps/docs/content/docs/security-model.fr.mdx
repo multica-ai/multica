@@ -1,0 +1,59 @@
+---
+title: Modèle de sécurité
+description: Ce à quoi une exécution Multica peut accéder sur la machine où elle tourne, et où se situe la véritable frontière d'isolation.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Lorsqu'un agent prend en charge une exécution, le daemon lance un outil de codage IA (Codex, Claude Code, etc.) en tant que processus enfant. Comprendre ce que ce processus peut toucher, c'est comprendre tout le modèle de sécurité.
+
+## La frontière, c'est l'utilisateur du daemon
+
+Par défaut, une exécution dispose de **toutes les permissions de l'utilisateur du système d'exploitation qui fait tourner le daemon**. Elle peut lire et écrire tous les fichiers accessibles à cet utilisateur, utiliser ses identifiants et accéder au réseau sans restriction.
+
+Multica ne garantit aucun bac à sable (sandbox) pour le système de fichiers. Une exception limitée existe aujourd'hui — Windows, lorsque vous avez explicitement activé le sandbox natif de Codex — mais savoir quelles combinaisons de plateforme et de configuration isolent quoi que ce soit relève d'un détail de compatibilité qui évolue avec les versions des outils. Considérez chaque exécution comme non isolée et placez la frontière à l'extérieur du daemon.
+
+<Callout type="warning">
+Multica n'isole pas le système de fichiers à votre place. Si le daemon tourne sous votre compte utilisateur personnel, une exécution peut lire vos clés SSH, modifier votre profil de shell et supprimer vos documents. L'isolation doit venir de la frontière dans laquelle vous placez le daemon.
+</Callout>
+
+C'est un choix délibéré. Les agents doivent installer des dépendances, lancer des builds, utiliser vos CLI cloud et piloter des outils qui s'attendent à un répertoire personnel normal. Un sandbox partiel du système de fichiers casse ce travail d'une manière difficile à diagnostiquer — l'outil signale « not logged in » ou utilise silencieusement le mauvais compte — sans pour autant protéger ce qui compte le plus, puisqu'il ne peut pas empêcher une exécution de lire des identifiants et de les envoyer sur le réseau.
+
+Multica ne prétend donc pas être la frontière. Placez-en une autour de lui.
+
+## Configurations recommandées
+
+Choisissez celle qui correspond à votre infrastructure — elles sont classées de la plus légère à la plus robuste :
+
+1. **Utilisateur Unix dédié.** Créez un utilisateur `multica`, donnez-lui uniquement les dépôts et les identifiants dont les agents ont besoin, et faites tourner le daemon sous cet utilisateur. Votre propre compte reste intact.
+2. **Conteneur.** Faites tourner le daemon dans un conteneur avec uniquement les montages et les secrets dont les agents ont besoin.
+3. **Machine virtuelle.** Isolation complète, au prix du provisionnement d'une machine.
+
+Quel que soit votre choix, considérez les identifiants accessibles depuis cet environnement comme des identifiants que l'agent peut utiliser : limitez au strict nécessaire la portée des jetons, préférez des clés de déploiement dédiées à un usage précis plutôt que votre clé SSH personnelle, et évitez de laisser des identifiants de production sans rapport dans le répertoire personnel de cet utilisateur.
+
+## Ce que Multica isole réellement
+
+Ces mécanismes sont réels, mais ils relèvent du confort et de la limitation des dégâts — ils ne constituent pas une frontière de sécurité face à une exécution qui tente activement de s'échapper :
+
+- **Répertoire de travail par exécution.** Chaque exécution obtient son propre répertoire de travail sous `~/multica_workspaces/`, de sorte que des exécutions simultanées n'entrent pas en collision sur la même copie locale.
+- **État d'agent par exécution.** Les exécutions Codex reçoivent un `CODEX_HOME` propre à l'exécution, contenant la configuration, les sessions et les skills, afin que les paramètres propres à une exécution ne polluent pas votre `~/.codex/`.
+- **Jetons d'API limités à l'exécution.** Le `MULTICA_TOKEN` transmis à une exécution est lié par le serveur à cet agent et à cette exécution : une exécution ne peut donc pas agir en votre nom ni au nom d'un autre agent via l'API Multica.
+
+## Ce qui n'est pas une frontière
+
+- **Le sandbox et les paramètres d'approbation propres à l'outil de codage.** Multica fait tourner les agents sans supervision : les demandes d'approbation reçoivent donc une réponse automatique. Par défaut, le sandbox du système de fichiers est lui aussi désactivé : Codex tourne avec `sandbox_mode = "danger-full-access"` et Claude Code avec `--permission-mode bypassPermissions`. L'exception est Windows — si vous configurez explicitement le sandbox natif de Codex (`windows.sandbox = "unelevated"` ou `"elevated"`), Multica respecte ce choix et conserve `workspace-write` pour ces exécutions. Cela vaut la peine là où c'est adapté, mais il s'agit d'un seul outil sur une seule plateforme, et cela ne change rien à la manière dont vous devez restreindre l'utilisateur du daemon.
+- **L'organisation de votre répertoire `HOME`.** Les exécutions héritent du véritable `HOME` et des variables `XDG_*` de l'utilisateur du daemon, ce qui permet aux CLI de l'hôte (`gh`, `aws`, `kubectl`, `gcloud`, `glab`) de fonctionner dans une exécution exactement comme dans votre shell. Cela signifie aussi que tout ce qui se trouve dans ce répertoire personnel est accessible.
+
+<Callout>
+Sous Linux, les exécutions Codex tournaient auparavant dans le sandbox `workspace-write`, avec un `HOME` redirigé par exécution. Ce mécanisme a été retiré : il laissait les CLI de l'hôte non configurés dans les exécutions et, comme il ne restreignait que les écritures, il n'a jamais empêché une exécution de lire et d'exfiltrer des identifiants. Linux s'aligne désormais sur le comportement par défaut de macOS et de Windows.
+</Callout>
+
+## Vérifier la configuration effective d'une exécution
+
+Le daemon journalise le mode de sandbox effectif au niveau warn lorsqu'une exécution démarre sans sandbox :
+
+```bash
+multica daemon logs --lines 200 | grep "codex sandbox"
+```
+
+Pour confirmer la configuration Codex effective, lisez le bloc géré dans le `config.toml` situé sous le `CODEX_HOME` de l'exécution — la section comprise entre les marqueurs `# BEGIN multica-managed` et `# END multica-managed` est écrite par le daemon à chaque exécution.

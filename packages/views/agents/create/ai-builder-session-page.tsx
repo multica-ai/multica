@@ -44,7 +44,7 @@ export function AiBuilderSessionPage({ sessionId }: { sessionId: string }) {
   // link that outlived it. Replace rather than push: the address no longer
   // resolves, so it must not stay on the stack for a back to land on.
   const leave = useCallback(
-    () => navigation.replace(withSquadParam(paths.newAgentAi(), squadId)),
+    () => navigation.replace(withSquadParam(paths.newAgent(), squadId)),
     [navigation, paths, squadId],
   );
 

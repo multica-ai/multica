@@ -29,7 +29,7 @@ DingTalk, WeCom, and Telegram are [community-maintained](/community-maintained):
 
 WeCom handles text messages today. Voice, image, and file messages get a short reply explaining that, and are not passed to the agent.
 
-Telegram handles text messages today. Unsupported media gets a short reply explaining that, and is not passed to the agent.
+Telegram passes photos, files, video, and audio to the agent as attachments, and sends files the agent produces back into the chat, when the server has object storage configured; without it, media gets the same short unsupported reply as before. Stickers and other non-file messages get that reply and are not passed to the agent.
 
 Step-by-step guides:
 

@@ -3,7 +3,7 @@
 import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
@@ -83,7 +83,13 @@ vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsCompact: () => layout.width < 1024,
 }));
 vi.mock("@multica/core/paths", () => ({
+  useRequiredWorkspaceSlug: () => "acme",
   useWorkspacePaths: () => ({ chat: () => "/acme/chat" }),
+}));
+const platformWorkspace = vi.hoisted(() => ({ slug: "acme" }));
+vi.mock("@multica/core/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/platform")>()),
+  getCurrentSlug: () => platformWorkspace.slug,
 }));
 
 // The store mock is REACTIVE like real Zustand: setActiveSession replaces the
@@ -202,7 +208,7 @@ const NO_ACCESS_MSG = "You don't have access to chat with this agent.";
 
 function renderPage(search: string, { strict = false } = {}) {
   const replace = vi.fn();
-  const navigation: NavigationAdapter = {
+  let navigation: NavigationAdapter = {
     push: vi.fn(),
     replace,
     back: vi.fn(),
@@ -229,7 +235,20 @@ function renderPage(search: string, { strict = false } = {}) {
     return strict ? <StrictMode>{page}</StrictMode> : page;
   };
   const view = render(makeUi());
-  return { replace, rerender: () => view.rerender(makeUi()) };
+  return {
+    replace,
+    rerender: (
+      { pathname, search }: { pathname?: string; search?: string } = {},
+    ) => {
+      navigation = {
+        ...navigation,
+        pathname: pathname ?? navigation.pathname,
+        searchParams:
+          search === undefined ? navigation.searchParams : new URLSearchParams(search),
+      };
+      view.rerender(makeUi());
+    },
+  };
 }
 
 beforeEach(() => {
@@ -238,7 +257,113 @@ beforeEach(() => {
   storeListeners.clear();
   availableAgentsRef.current = [agent];
   agentsSettledRef.current = true;
+  platformWorkspace.slug = "acme";
   layout.width = DESKTOP;
+});
+
+describe("ChatPage URL synchronization", () => {
+  it.each(["/globex/issues", "/acme/issues"])(
+    "does not redirect back to chat when the retained page observes %s",
+    (pathname) => {
+      const { replace, rerender } = renderPage("session=session-1");
+      expect(storeRef.current.activeSessionId).toBe("session-1");
+      mockSetActiveSession.mockClear();
+
+      // App Router can retain the outgoing page after the shared navigation
+      // adapter has already published the destination URL.
+      rerender({ pathname, search: "" });
+
+      expect(replace).not.toHaveBeenCalled();
+      expect(mockSetActiveSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, "session-3"])(
+    "does not write the rehydrated session %s into the outgoing workspace's URL",
+    (sessionId) => {
+      const { replace, rerender } = renderPage("session=session-1");
+      rerender({ pathname: "/globex/issues" });
+      mockSetActiveSession.mockClear();
+      replace.mockClear();
+
+      act(() => {
+        mockSetActiveSession(sessionId);
+      });
+
+      expect(storeRef.current.activeSessionId).toBe(sessionId);
+      expect(mockSetActiveSession).toHaveBeenCalledTimes(1);
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, "session-3"])(
+    "ignores rehydration to %s before the destination pathname commits",
+    (sessionId) => {
+      const { replace } = renderPage("session=session-1");
+      mockSetActiveSession.mockClear();
+
+      // The incoming layout can rehydrate the shared store while the
+      // outgoing page's navigation adapter still reports /acme/chat.
+      platformWorkspace.slug = "globex";
+      act(() => {
+        mockSetActiveSession(sessionId);
+      });
+
+      expect(storeRef.current.activeSessionId).toBe(sessionId);
+      expect(mockSetActiveSession).toHaveBeenCalledTimes(1);
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("resumes synchronization when returning to the same chat URL", () => {
+    const { replace, rerender } = renderPage("session=session-1");
+    rerender({ pathname: "/globex/issues", search: "session=session-1" });
+    act(() => {
+      mockSetActiveSession("session-2");
+    });
+    replace.mockClear();
+    mockSetActiveSession.mockClear();
+
+    rerender({ pathname: "/acme/chat" });
+
+    expect(mockSetActiveSession).toHaveBeenCalledWith("session-1");
+    expect(storeRef.current.activeSessionId).toBe("session-1");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("mirrors thread selection and clearing while the chat route is current", () => {
+    const { replace } = renderPage("session=session-1");
+
+    act(() => {
+      mockSetActiveSession("session-2");
+    });
+    expect(replace).toHaveBeenLastCalledWith("/acme/chat?session=session-2");
+
+    act(() => {
+      mockSetActiveSession(null);
+    });
+    expect(replace).toHaveBeenLastCalledWith("/acme/chat");
+  });
+
+  it.each(["pathname", "rehydration"])(
+    "does not consume a pending agent link after workspace switching starts via %s",
+    (transition) => {
+      availableAgentsRef.current = [];
+      agentsSettledRef.current = false;
+      const { replace, rerender } = renderPage("agent=agent-1");
+
+      availableAgentsRef.current = [agent];
+      agentsSettledRef.current = true;
+      if (transition === "rehydration") platformWorkspace.slug = "globex";
+      rerender({
+        pathname: transition === "pathname" ? "/globex/chat" : "/acme/chat",
+      });
+
+      expect(mockStartNewChat).not.toHaveBeenCalled();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(replace).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("ChatPage ?agent= deep link", () => {

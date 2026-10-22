@@ -2,6 +2,7 @@
 
 import type { Label } from "@multica/core/types";
 import { X } from "lucide-react";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useT } from "../i18n";
 
 /**
@@ -69,20 +70,22 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
     >
       <span className={nameClass}>{label.name}</span>
       {onRemove && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          // bg-current/20 uses the computed text color so the hover state is
-          // visible on both light and dark chip backgrounds. hover:bg-black/10
-          // was invisible on darker chips (anything requiring light text).
-          className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full hover:bg-current/20 focus:outline-none focus:ring-1 focus:ring-current"
-          aria-label={t(($) => $.remove_label, { name: label.name })}
-        >
-          <X className="h-2.5 w-2.5" strokeWidth={2.5} />
-        </button>
+        <TooltipHint label={t(($) => $.remove_label, { name: label.name })}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            // bg-current/20 uses the computed text color so the hover state is
+            // visible on both light and dark chip backgrounds. hover:bg-black/10
+            // was invisible on darker chips (anything requiring light text).
+            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full hover:bg-current/20 focus:outline-none focus:ring-1 focus:ring-current"
+            aria-label={t(($) => $.remove_label, { name: label.name })}
+          >
+            <X className="h-2.5 w-2.5" strokeWidth={2.5} />
+          </button>
+        </TooltipHint>
       )}
     </span>
   );

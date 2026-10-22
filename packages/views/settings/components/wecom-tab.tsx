@@ -37,6 +37,7 @@ import { api } from "@multica/core/api";
 import type { WecomInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // WecomTab is the workspace settings panel for WeCom smart-bot
 // installations. Listing is member-visible; the disconnect action is
@@ -94,7 +95,7 @@ export function WecomTab() {
             <p className="text-body font-medium">{t(($) => $.wecom.not_enabled_title)}</p>
             <p className="text-caption text-muted-foreground">
               {t(($) => $.wecom.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-micro">
+              <code className="rounded-xs bg-muted px-1 py-0.5 text-micro">
                 MULTICA_WECOM_SECRET_KEY
               </code>{" "}
               {t(($) => $.wecom.not_enabled_description_suffix)}{" "}
@@ -206,7 +207,7 @@ function InstallationRow({
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.wecom.revoked_badge)}
               </span>
             )}
@@ -363,21 +364,24 @@ export function WecomAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="wecom-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.wecom.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="wecom-agent-connect"
       >
-        <WecomMark className="h-3 w-3" />
-        {t(($) => $.wecom.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="wecom-agent-connect"
+        >
+          <WecomMark className="h-3 w-3" />
+          {t(($) => $.wecom.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -538,20 +542,21 @@ function WecomAgentBotConnectedBadge({
             })}
           </span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.wecom.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.wecom.disconnect)}
-          data-testid="wecom-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.wecom.disconnecting)
-            : t(($) => $.wecom.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.wecom.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.wecom.disconnect)}
+            data-testid="wecom-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.wecom.disconnecting)
+              : t(($) => $.wecom.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       <AlertDialog

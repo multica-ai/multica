@@ -1,0 +1,114 @@
+---
+title: Intégrations de messagerie
+description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCom ou Telegram et utilisez-les depuis les outils de messagerie que votre équipe utilise déjà.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
+
+Feishu/Lark, Slack, DingTalk, WeCom et Telegram sont pris en charge aujourd'hui. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
+
+## Choisir une plateforme
+
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
+|---|---|---|---|---|---|
+| Installation | Générez un QR code dans Multica et autorisez-le en le scannant avec Feishu | Créez une application dans Slack, puis collez deux jetons dans Multica | Créez une application interne et un robot en mode Stream, puis collez son AppKey et son AppSecret dans Multica | Créez un bot intelligent avec la connexion longue activée dans la console d'administration WeCom, puis collez son ID de bot et son secret dans Multica | Créez un bot avec @BotFather, puis collez son jeton dans Multica |
+| Messages directs à l'agent | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Pris en charge |
+| Groupes ou canaux | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot ou en lui répondant |
+| Créer des tâches | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande slash `/issue` ; l'agent rédige la description avant de créer la tâche | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle |
+| Démarrer une nouvelle discussion | `/new [message]` | Message direct : `/new [message]` ; canal/fil : `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
+| Effacer le contexte de la discussion en cours | `/clear [message]` | Message direct : `/clear [message]` ; canal/fil : `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
+| Connexion | Connexion longue de la plateforme | Socket Mode | Mode Stream | Connexion longue de la plateforme | Long polling `getUpdates` |
+
+Les nouvelles connexions ne sont actuellement ouvertes qu'à Feishu en Chine continentale ; les connexions Lark internationales existantes continuent de fonctionner et peuvent toujours être gérées.
+
+Chaque bot est associé à un seul agent Multica. Pour utiliser plusieurs agents sur la même plateforme de messagerie, connectez un bot distinct pour chacun.
+
+DingTalk, WeCom et Telegram sont [maintenus par la communauté](/community-maintained) : ils sont inclus dans chaque version, mais sans SLA de support officiel. Signalez les problèmes dans les [issues GitHub](https://github.com/multica-ai/multica/issues).
+
+WeCom traite aujourd'hui les messages texte. Les messages vocaux, les images et les fichiers reçoivent une courte réponse qui l'explique et ne sont pas transmis à l'agent.
+
+Telegram transmet à l'agent les photos, fichiers, vidéos et contenus audio sous forme de pièces jointes, et renvoie dans la conversation les fichiers produits par l'agent, lorsque le stockage des pièces jointes est configuré sur le serveur ; sans cela, les médias reçoivent, comme auparavant, une courte réponse indiquant qu'ils ne sont pas pris en charge. Les stickers et autres messages qui ne sont pas des fichiers reçoivent cette même réponse et ne sont pas transmis à l'agent.
+
+Guides pas à pas :
+
+- [Intégration du bot Feishu / Lark](/lark-bot-integration)
+- [Intégration du bot Slack](/slack-bot-integration)
+- [Intégration du bot DingTalk](/dingtalk-bot-integration)
+- [Intégration du bot Telegram](/telegram-bot-integration)
+
+## Traitement d'un message
+
+1. Multica identifie l'espace de travail et l'agent auxquels le bot est rattaché.
+2. Dans un groupe ou un canal, seuls les messages qui @mentionnent explicitement le bot sont traités ; les messages directs ne nécessitent aucune mention.
+3. Multica vérifie l'association du compte de l'expéditeur et son appartenance à l'espace de travail.
+4. Le message rejoint une session de [discussion avec l'agent](/chat), et une exécution est créée.
+5. La réponse de l'agent est renvoyée dans le message direct ou le fil d'origine.
+
+Les messages de canal qui ne @mentionnent pas le bot ne déclenchent jamais l'agent et ne sont pas ajoutés au contexte de sa conversation.
+
+Les messages ordinaires suivent ce flux. `/issue` est une commande, pas un tour de discussion : Multica publie le résultat sur la plateforme d'origine, mais n'ajoute pas la commande aux discussions Multica. La commande slash native de Slack passe toujours par son propre flux asynchrone de création de tâche.
+
+## Contrôle des conversations
+
+`/new` crée une nouvelle discussion Multica et y achemine les messages suivants de cette conversation externe. `/new <message>` crée la discussion et utilise le message comme premier tour. La discussion précédente reste enregistrée et utilisable dans Multica.
+
+`/clear` reste dans la discussion Multica en cours, mais démarre un nouveau contexte visible par l'agent. L'historique complet de la discussion reste disponible dans Multica, tandis que l'agent ne peut plus récupérer les messages antérieurs à cette limite. `/clear <message>` utilise le message comme premier tour du nouveau contexte ; un `/clear` seul s'applique au prochain vrai message.
+
+Sur Slack, `/new` et `/clear` sont des commandes slash natives dans un message direct. La charge utile d'une commande slash native n'identifie pas le fil d'un canal : utilisez donc `@Multica /new [message]` ou `@Multica /clear [message]` dans le fil cible.
+
+## Isolation des sessions
+
+- Feishu/Lark sépare les sessions par conversation ; les messages suivants d'une même conversation poursuivent la même session.
+- Slack sépare les messages directs par canal ; dans un canal, chaque fil a sa propre session.
+- DingTalk sépare les sessions par conversation ; chaque message direct ou groupe poursuit sa propre session.
+- WeCom sépare les sessions par conversation ; chaque message direct ou conversation de groupe poursuit sa propre session.
+- Telegram sépare les sessions par conversation ; les sujets de forum sont isolés par sujet.
+
+Dans un canal, chaque relance nécessite toujours une nouvelle @mention. L'agent ne reçoit que les messages qui lui sont adressés : il ne lit jamais automatiquement tout l'historique du canal.
+
+## Association de compte
+
+La première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte. Une fois qu'il s'est connecté à Multica, son compte sur la plateforme est associé à son appartenance à l'espace de travail actuel.
+
+Multica n'exécute l'agent qu'une fois l'association terminée. Chaque message revérifie l'association du compte et l'appartenance à l'espace de travail ; après avoir quitté un espace de travail, on ne peut plus l'atteindre via le bot.
+
+<Callout type="info">
+L'association de compte confirme uniquement l'identité de l'expéditeur. Les autres membres de la plateforme de messagerie ne sont pas ajoutés automatiquement à l'espace de travail Multica.
+</Callout>
+
+## Gérer les connexions
+
+Les propriétaires et administrateurs de l'espace de travail peuvent connecter ou déconnecter des bots ; pour les bots Feishu/Lark, la connexion et la déconnexion sont aussi ouvertes au propriétaire de l'agent. Les membres ordinaires peuvent consulter les intégrations connectées et utiliser les agents auxquels ils ont accès.
+
+Après la déconnexion, le bot ne reçoit plus de nouveaux messages. Les conversations Multica et les historiques d'exécution existants sont conservés.
+
+## Auto-hébergement
+
+Un déploiement auto-hébergé doit configurer une clé de chiffrement de 32 octets pour chaque plateforme avant que Multica n'ouvre le point d'entrée de connexion correspondant :
+
+```dotenv
+MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Ces clés chiffrent les identifiants de bot stockés. Consultez [Variables d'environnement](/environment-variables) pour savoir comment les générer, les stocker et les renouveler. Multica Cloud est déjà configuré.
+
+Le seul chemin sortant de WeCom est le WebSocket détenu par un processus ; ce qu'il advient d'une réponse produite sur une *autre* réplique dépend donc du relais temps réel :
+
+- **Mode de relais sharded ou dual** (`REDIS_URL` défini — le mode par défaut avec Redis) : la réponse est transmise à la réplique qui détient la connexion, puis livrée. WeCom sur plusieurs répliques est pris en charge.
+- **Mode de relais legacy, ou sans Redis** : la réponse est abandonnée. Dans cette configuration, exécutez le backend avec WeCom activé sur une seule réplique.
+
+Quel que soit le mode, une réponse produite alors qu'*aucune* réplique ne détient de connexion active (toutes en cours de reconnexion) n'est pas livrée. Elle est comptabilisée dans `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` par la réplique qui l'a routée, ce qui permet de mesurer l'ampleur de cette fenêtre ; si cette perte est inacceptable, une réplique unique reste le déploiement le plus prudent.
+
+## Étapes suivantes
+
+- [Intégration du bot Feishu / Lark](/lark-bot-integration) — connecter un agent en scannant un QR code.
+- [Intégration du bot Slack](/slack-bot-integration) — créer une application Slack et coller ses jetons dans Multica.
+- [Intégration du bot DingTalk](/dingtalk-bot-integration) — créer un robot en mode Stream et coller ses identifiants dans Multica.
+- [Intégration du bot Telegram](/telegram-bot-integration) — créer un bot avec @BotFather et coller son jeton dans Multica.
+- [Discussion](/chat) — le modèle de conversation et d'exécution derrière chaque bot.

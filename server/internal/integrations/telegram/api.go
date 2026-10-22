@@ -7,7 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -117,6 +121,11 @@ func (a *botAPI) call(ctx context.Context, method string, params any, out any) e
 	if params != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return a.do(req, method, out)
+}
+
+// do performs one prepared Bot API request and decodes the envelope.
+func (a *botAPI) do(req *http.Request, method string, out any) error {
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return &requestError{method: method, cause: err}
@@ -169,13 +178,132 @@ type Message struct {
 	ReplyToMessage  *Message        `json:"reply_to_message,omitempty"`
 	MessageThreadID int64           `json:"message_thread_id,omitempty"`
 	IsTopicMessage  bool            `json:"is_topic_message,omitempty"`
-	Photo           []any           `json:"photo,omitempty"`
-	Document        *struct {
-		FileName string `json:"file_name"`
-	} `json:"document,omitempty"`
-	Voice   *struct{} `json:"voice,omitempty"`
-	Video   *struct{} `json:"video,omitempty"`
-	Sticker *struct{} `json:"sticker,omitempty"`
+	// A message carries at most one of the media below (an album arrives as
+	// one message per item). Photo lists the available sizes, smallest first.
+	Photo     []PhotoSize `json:"photo,omitempty"`
+	Document  *FileRef    `json:"document,omitempty"`
+	Video     *FileRef    `json:"video,omitempty"`
+	VideoNote *FileRef    `json:"video_note,omitempty"`
+	Animation *FileRef    `json:"animation,omitempty"`
+	Audio     *FileRef    `json:"audio,omitempty"`
+	Voice     *FileRef    `json:"voice,omitempty"`
+	Sticker   *struct{}   `json:"sticker,omitempty"`
+}
+
+// PhotoSize is one rendition of a photo message.
+type PhotoSize struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+	FileSize     int64  `json:"file_size,omitempty"`
+}
+
+// FileRef is the common shape of Document / Video / Animation / Audio / Voice:
+// the fields getFile needs plus the display metadata the attachment row keeps.
+// Kinds without a file_name simply leave it empty.
+type FileRef struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id"`
+	FileName     string `json:"file_name,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+}
+
+// File is the getFile result. FilePath is relative to the file download host.
+type File struct {
+	FileID   string `json:"file_id"`
+	FileSize int64  `json:"file_size,omitempty"`
+	FilePath string `json:"file_path,omitempty"`
+}
+
+// maxBotDownloadBytes is Telegram's cap on what a bot may download via getFile
+// (20 MB). Larger media is refused by Telegram itself, so the resolver refuses
+// it up front without spending an intent row on it.
+const maxBotDownloadBytes = 20 << 20
+
+// GetFile resolves a file_id to a download path.
+func (a *botAPI) GetFile(ctx context.Context, fileID string) (File, error) {
+	var f File
+	err := a.call(ctx, "getFile", struct {
+		FileID string `json:"file_id"`
+	}{FileID: fileID}, &f)
+	return f, err
+}
+
+// DownloadFile fetches a file the getFile call located. The download host
+// puts the bot token in the URL, so failures are reported without it.
+func (a *botAPI) DownloadFile(ctx context.Context, filePath string, maxBytes int64) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.base+"/file/bot"+a.token+"/"+strings.TrimPrefix(filePath, "/"), nil)
+	if err != nil {
+		return nil, "", errors.New("telegram: build file download request failed")
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, "", &requestError{method: "downloadFile", cause: err}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("telegram: file download: http %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("telegram: read file download: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, "", fmt.Errorf("telegram: file exceeds the %d byte download limit", maxBytes)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if semi := strings.IndexByte(contentType, ';'); semi >= 0 {
+		contentType = strings.TrimSpace(contentType[:semi])
+	}
+	return data, contentType, nil
+}
+
+// sendMediaParams addresses one outbound file. Field is the multipart part the
+// Bot API method expects ("photo" for sendPhoto, "document" for sendDocument,
+// …); the method name is derived from it.
+type sendMediaParams struct {
+	ChatID          int64
+	MessageThreadID int64
+	Field           string
+	Filename        string
+	ContentType     string
+	Data            []byte
+}
+
+// SendMedia uploads one file as its own message via sendPhoto / sendDocument /
+// sendVideo / sendAudio — the multipart counterpart of SendMessage.
+func (a *botAPI) SendMedia(ctx context.Context, p sendMediaParams) (Message, error) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("chat_id", strconv.FormatInt(p.ChatID, 10))
+	if p.MessageThreadID != 0 {
+		_ = mw.WriteField("message_thread_id", strconv.FormatInt(p.MessageThreadID, 10))
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, p.Field, p.Filename))
+	if p.ContentType != "" {
+		header.Set("Content-Type", p.ContentType)
+	}
+	part, err := mw.CreatePart(header)
+	if err != nil {
+		return Message{}, fmt.Errorf("telegram: encode media upload: %w", err)
+	}
+	if _, err := part.Write(p.Data); err != nil {
+		return Message{}, fmt.Errorf("telegram: encode media upload: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return Message{}, fmt.Errorf("telegram: encode media upload: %w", err)
+	}
+	method := "send" + strings.ToUpper(p.Field[:1]) + p.Field[1:]
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+"/bot"+a.token+"/"+method, &body)
+	if err != nil {
+		return Message{}, fmt.Errorf("telegram: build %s request: %w", method, err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	var m Message
+	return m, a.do(req, method, &m)
 }
 
 // MessageEntity is the Bot API's structured annotation for mentions,

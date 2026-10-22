@@ -29,6 +29,7 @@ import type {
 } from "@multica/core/types";
 import { ISSUE_PROPERTY_TYPES } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -77,7 +78,7 @@ import {
   PropertyIconPicker,
 } from "../../common/property-icon";
 import { useLocale, useT } from "../../i18n";
-import { SettingsTab } from "./settings-layout";
+import { SettingsReadOnlyNotice, SettingsTab } from "./settings-layout";
 
 const MAX_ACTIVE_PROPERTIES = 20;
 
@@ -141,7 +142,9 @@ export function PropertiesTab() {
     <SettingsTab
       title={t(($) => $.properties.title)}
       description={t(($) => $.properties.description)}
+      scope="workspace"
     >
+      {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-sm">
@@ -262,13 +265,13 @@ export function PropertiesTab() {
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
-                          <Button
+                          <IconButton
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={t(($) => $.properties.actions.open, { name: property.name })}
+                            label={t(($) => $.properties.actions.open, { name: property.name })}
                           >
                             <MoreHorizontal className="size-4" />
-                          </Button>
+                          </IconButton>
                         }
                       />
                       <DropdownMenuContent align="end">
@@ -351,6 +354,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.actor)}</>;
     case "multi_actor":
       return <>{t(($) => $.properties.types.multi_actor)}</>;
+    case "multi_text":
+      return <>{t(($) => $.properties.types.multi_text)}</>;
+    case "multi_url":
+      return <>{t(($) => $.properties.types.multi_url)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;
@@ -452,7 +459,10 @@ function PropertyEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      {/* Options are unbounded, so the form is the part that has to give:
+          header and footer stay put and the fields scroll, keeping "Save
+          property" clickable no matter how many options are on the draft. */}
+      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {property
@@ -463,7 +473,9 @@ function PropertyEditorDialog({
             {t(($) => $.properties.editor.admin_hint)}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-5 py-2">
+        {/* -mx-1/px-1 keeps the 3px focus ring of an edge-to-edge input from
+            being clipped by the scroll container. */}
+        <div className="-mx-1 min-h-0 flex-1 space-y-5 overflow-y-auto px-1 py-2">
           <div className="grid grid-cols-[4.25rem_minmax(0,1fr)_10rem] gap-3">
             <div className="space-y-2">
               <FieldLabel>{t(($) => $.properties.editor.icon)}</FieldLabel>
@@ -595,10 +607,10 @@ function PropertyEditorDialog({
                       placeholder={t(($) => $.properties.editor.option_name_placeholder)}
                       className="h-8"
                     />
-                    <Button
+                    <IconButton
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={t(($) => $.properties.editor.remove_option)}
+                      label={t(($) => $.properties.editor.remove_option)}
                       disabled={draft.options.length <= 1}
                       onClick={() =>
                         setDraft((current) => ({
@@ -608,7 +620,7 @@ function PropertyEditorDialog({
                       }
                     >
                       <X className="size-4" />
-                    </Button>
+                    </IconButton>
                   </div>
                 ))}
               </div>

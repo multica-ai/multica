@@ -12,6 +12,7 @@ import {
 } from "@multica/core/autopilots/mutations";
 import type { AutopilotCollaborator } from "@multica/core/types";
 import { toast } from "sonner";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -140,15 +141,17 @@ export function AutopilotAccessManager({
                   {getActorName("member", c.user_id)}
                 </span>
               </span>
-              <button
-                type="button"
-                onClick={() => void handleRevoke(c.user_id)}
-                disabled={revoke.isPending}
-                className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-                aria-label={t(($) => $.access.remove_tooltip)}
-              >
-                <X className="size-3.5" />
-              </button>
+              <TooltipHint label={t(($) => $.access.remove_tooltip)}>
+                <button
+                  type="button"
+                  onClick={() => void handleRevoke(c.user_id)}
+                  disabled={revoke.isPending}
+                  className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                  aria-label={t(($) => $.access.remove_tooltip)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </TooltipHint>
             </li>
           ))}
         </ul>
