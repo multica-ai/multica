@@ -15,13 +15,8 @@ import {
   focusRing,
 } from "./primitives";
 import { CUSTOMER_LOGOS } from "./customer-logos";
-import {
-  AutopilotsVisual,
-  ChatVisual,
-  RuntimesVisual,
-  SkillsVisual,
-  WorkflowVisual,
-} from "./demo/feature-visuals";
+import { RuntimesVisual, WorkflowVisual } from "./demo/feature-visuals";
+import { AutopilotsFigure, ChatFigure, SkillsFigure } from "./demo/figure-visuals";
 import { HeroBoard } from "./demo/hero-board";
 import { AgentVisual, ConnectVisual, ReviewVisual } from "./demo/how-it-works-visuals";
 import { CtaBand, SitePage } from "./site-page";
@@ -130,67 +125,57 @@ function LogoWall() {
   );
 }
 
-export type FeatureId = "runtimes" | "workflows" | "chat" | "autopilots" | "skills";
-
-const FEATURES: { id: FeatureId; title: string; body: string; alt: string }[] = [
+const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType }[] = [
   {
     id: "runtimes",
     title: "Runs on your machines, or in our cloud",
     body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
-    alt: "A workspace connected to a MacBook, a Linux server, and Multica Cloud, sending each one work while a fourth machine connects",
+    alt: "The Runtimes page listing a MacBook, a Linux server, and Multica Cloud with their coding agents and workloads, as a teammate's Mac mini connects and picks up work",
+    visual: RuntimesVisual,
   },
   {
     id: "workflows",
     title: "Workflows hand off every step",
     body: "Lay out the steps a project’s issues follow and who owns each one. Moving an issue to the next step hands it to that step’s person or agent.",
-    alt: "A four-step workflow drawn as connected nodes, with an issue moving from owner to owner and being sent back once from review",
+    alt: "The workflow editor for a Delivery workflow: Todo, In Progress handed to Backend Agent, In Review handed to QA Agent, and Done handed to Mia Chen, with each step's handoff shown in turn",
+    visual: WorkflowVisual,
   },
   {
     id: "chat",
     title: "Mention an agent in chat",
     body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
-    alt: "A chat thread where a teammate mentions Backend Agent, which files an issue that lands on the In Progress column",
+    alt: "A message panel beside a board: messages land one by one, the agent's reply becomes a card that hops onto the board, and that column's lamp comes on",
+    visual: ChatFigure,
   },
   {
     id: "autopilots",
     title: "Autopilots run on a schedule",
     body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
-    alt: "A timeline of today with four scheduled triggers; as the playhead passes each one, an issue is filed for its agent",
+    alt: "A 24-hour dial with a peg at each scheduled hour; as it turns, each peg trips a lever and the dispenser beside it pushes out a ticket",
+    visual: AutopilotsFigure,
   },
   {
     id: "skills",
     title: "Skills the whole team shares",
     body: "Write down how your team does a thing once, and every agent follows it.",
-    alt: "A release-checklist skill connected to four agents; a new line is added and every agent picks up the change",
+    alt: "A stack of sheets wired to four agent pucks; a line is added to the top sheet, a token runs to each puck, and every puck's lamp comes on",
+    visual: SkillsFigure,
   },
 ];
 
-const FEATURE_VISUALS: Record<FeatureId, ComponentType> = {
-  runtimes: RuntimesVisual,
-  workflows: WorkflowVisual,
-  chat: ChatVisual,
-  autopilots: AutopilotsVisual,
-  skills: SkillsVisual,
-};
-
 function Features() {
-  return <FeatureSection visuals={FEATURE_VISUALS} />;
-}
-
-/** The features band; `visuals` picks the mockup drawn for each feature. */
-export function FeatureSection({ visuals }: { visuals: Record<FeatureId, ComponentType> }) {
   return (
     <Section>
       <Container>
         <SectionHeader title="Built for teams of people and agents" />
         <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
-            <FeatureCard key={feature.id} {...feature} visual={visuals[feature.id]} aspect="aspect-[4/3]" />
+            <FeatureCard key={feature.id} {...feature} aspect="aspect-[4/3]" />
           ))}
         </div>
         <div className="mt-site-grid-row grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-3">
           {FEATURES.slice(2).map((feature) => (
-            <FeatureCard key={feature.id} {...feature} visual={visuals[feature.id]} aspect="aspect-[3/2]" />
+            <FeatureCard key={feature.id} {...feature} aspect="aspect-[3/2]" />
           ))}
         </div>
       </Container>
@@ -204,7 +189,7 @@ function FeatureCard({
   visual: Visual,
   alt,
   aspect,
-}: (typeof FEATURES)[number] & { visual: ComponentType; aspect: string }) {
+}: (typeof FEATURES)[number] & { aspect: string }) {
   return (
     <div>
       <div role="img" aria-label={alt} className={cn("relative overflow-hidden rounded-site-panel bg-site-sunken", aspect)}>

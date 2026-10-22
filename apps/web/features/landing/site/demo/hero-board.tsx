@@ -52,7 +52,7 @@ import { Avatar, BACKEND, FRONTEND, LEO, MIA, QA, SAM, usePrefersReducedMotion, 
  * which works it, opens a PR, gets it approved, and lands it in Done.
  */
 
-const WIDE_WIDTH = 1200;
+const WIDE_WIDTH = 1360;
 const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
 const COLUMN_STRIDE = 232 + 12;

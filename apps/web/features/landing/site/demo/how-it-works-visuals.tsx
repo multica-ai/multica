@@ -19,9 +19,10 @@ import {
 } from "./mock-kit";
 
 /*
- * Mockups for the home page "how it works" steps, on the same 520 × 390
- * canvas as the large feature cards. Each loops its step while on screen and
- * holds the finished frame under reduced motion. Data is fictional.
+ * Mockups for the home page "how it works" steps, on the same canvas as the
+ * large feature cards: 520 × 390, growing on wide cards (see ZoomCanvas).
+ * Each loops its step while on screen and holds the finished frame under
+ * reduced motion. Data is fictional.
  */
 
 const CANVAS = { width: 520, height: 390 } as const;
@@ -68,7 +69,7 @@ export function ConnectVisual() {
   return (
     <ZoomCanvas {...CANVAS}>
       <div ref={ref} className={cn("absolute inset-0 transition-opacity duration-300", reset && "opacity-0")}>
-        <Window className="inset-x-7 top-7 h-[420px]">
+        <Window className="inset-x-7 top-7 -bottom-8">
           <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3">
             {[0, 1, 2].map((dot) => (
               <span key={dot} className="size-2.5 rounded-full bg-muted-foreground/25" />
@@ -137,7 +138,7 @@ export function AgentVisual() {
   return (
     <ZoomCanvas {...CANVAS}>
       <div ref={ref} className={cn("absolute inset-0 transition-opacity duration-300", step === 6 && "opacity-0")}>
-        <Window className="top-7 left-7 h-[420px] w-[340px]">
+        <Window className="top-7 left-7 -bottom-8 w-[340px]">
           <div className="flex h-11 shrink-0 items-center border-b border-border px-4 text-label font-medium">
             Create agent
           </div>
@@ -231,7 +232,7 @@ export function ReviewVisual() {
   return (
     <ZoomCanvas {...CANVAS}>
       <div ref={ref} className={cn("absolute inset-0 transition-opacity duration-300", step === 5 && "opacity-0")}>
-        <Window className="inset-x-7 top-7 h-[420px]">
+        <Window className="inset-x-7 top-7 -bottom-8">
           <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-4 text-caption text-muted-foreground">
             Acme Labs <ChevronRight className="size-3" /> <span className="text-foreground">ACM-158</span>
           </div>

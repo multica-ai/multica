@@ -4,7 +4,7 @@ import { type CSSProperties, type ReactNode, type Ref, useEffect, useRef, useSta
 
 import { cn } from "@multica/ui/lib/utils";
 
-import { AUTOPILOTS_FIGURE, RUNTIMES_FIGURE, WORKFLOWS_FIGURE } from "./figure-art";
+import { AUTOPILOTS_FIGURE, CHAT_FIGURE, SKILLS_FIGURE } from "./figure-art";
 import { usePrefersReducedMotion, useStoryLoop } from "./mock-kit";
 
 type Vec = readonly [number, number];
@@ -38,105 +38,98 @@ function Figure({
   );
 }
 
-// --- Workflows: the issue rides a conveyor through each step's station ----
+/** Starts the part at `from`, passes `via`, and settles where it was built. */
+function hop(from: Vec, via: Vec, delay: number): CSSProperties {
+  return {
+    "--site-from": shift(from),
+    "--site-via": shift(via),
+    animationDelay: `${delay}ms`,
+  } as CSSProperties;
+}
 
-// Stations: Todo (a person scopes it), In Progress and In Review (agents),
-// Done (a person merges). Review sends it back once before it goes through.
-const STATION_OWNERS = ["ink", "agent", "agent", "ink"] as const;
-const WORKFLOW_STOPS = [0, 1, 2, 1, 2, 3, 3];
-const WORKFLOW_HOLDS = [1300, 1500, 1500, 1500, 1500, 2200, 500];
-const SLIDE_MS = 700;
+// --- Chat: a reply becomes a card on the board ----------------------------
 
-export function WorkflowFigure() {
-  const { ref, step } = useStoryLoop(WORKFLOW_HOLDS, 5);
-  const figure = WORKFLOWS_FIGURE;
-  const resetting = step === WORKFLOW_HOLDS.length - 1;
-  const stop = resetting ? 0 : (WORKFLOW_STOPS[step] ?? 0);
+// Two messages land, the agent replies, its card hops onto the board, and
+// the column's lamp shows the agent at work.
+const CHAT_HOLDS = [900, 900, 1100, 1000, 2400, 500];
+const CHAT_HOP_MS = 800;
+
+export function ChatFigure() {
+  const { ref, step } = useStoryLoop(CHAT_HOLDS, 4);
+  const figure = CHAT_FIGURE;
+  const resetting = step === CHAT_HOLDS.length - 1;
   return (
     <Figure figure={figure} sceneRef={ref} resetting={resetting}>
       <Art svg={figure.back} />
-      <Art
-        svg={figure.sled}
-        className="transition-[translate] ease-in-out motion-reduce:transition-none"
-        style={{ translate: shift(figure.stations[stop]!), transitionDuration: `${SLIDE_MS}ms` }}
-      />
-      {figure.stamps.map((svg, index) => (
+      {figure.bubbles.map((svg, index) => {
+        const shown = step >= index || resetting;
+        return (
+          <Art
+            key={index}
+            svg={svg}
+            className="transition-[translate,opacity] duration-500 ease-out motion-reduce:transition-none"
+            style={{ translate: shown ? "0 0" : shift(figure.drop), opacity: shown ? 1 : 0 }}
+          />
+        );
+      })}
+      <Art svg={figure.board} />
+      <g data-on={step >= 4 && !resetting ? "agent" : undefined}>
+        <Art svg={figure.lamp} />
+      </g>
+      {step >= 3 && (
         <Art
-          key={index === stop && !resetting ? `press-${step}` : index}
-          svg={svg}
-          className={cn(index === stop && !resetting && "animate-site-stamp motion-reduce:animate-none")}
-          style={
-            {
-              "--site-press": shift(figure.press),
-              animationDelay: `${step === 0 ? 300 : SLIDE_MS}ms`,
-            } as CSSProperties
-          }
+          svg={figure.card}
+          className="animate-site-hop motion-reduce:animate-none"
+          style={{ ...hop(figure.from, figure.via, 0), animationDuration: `${CHAT_HOP_MS}ms` }}
         />
-      ))}
-      {figure.beams.map((svg, index) => (
-        <g key={index}>
-          <Art svg={svg} />
-          <g data-on={index === stop && !resetting ? STATION_OWNERS[index] : undefined}>
-            <Art svg={figure.lamps[index]!} />
-          </g>
-        </g>
-      ))}
-      <Art svg={figure.front} />
+      )}
     </Figure>
   );
 }
 
-// --- Runtimes: a rack whose controller dispatches work to each machine ----
+// --- Skills: one edit reaches every agent ---------------------------------
 
-// Bay 1 is already busy. The controller sends work to bays 0 and 2, then a
-// fourth machine lowers into the empty bay and gets work too.
-const RUNTIME_SENDS = [null, 0, 2, null, 3, null, null];
-const RUNTIME_ON: number[][] = [[1], [1], [0, 1], [0, 1, 2], [0, 1, 2], [0, 1, 2, 3], []];
-const RUNTIME_HOLDS = [900, 1100, 1300, 1400, 1100, 2400, 500];
-const TOKEN_MS = 700;
+// A line is added to the skill, a token runs to each agent, and each agent's
+// lamp comes on as its token arrives.
+const SKILL_HOLDS = [900, 1100, 1300, 2400, 500];
+const TOKEN_MS = 900;
+const TOKEN_STAGGER_MS = 120;
 
-export function RuntimesFigure() {
-  const { ref, step } = useStoryLoop(RUNTIME_HOLDS, 5);
-  const figure = RUNTIMES_FIGURE;
-  const resetting = step === RUNTIME_HOLDS.length - 1;
-  const send = RUNTIME_SENDS[step];
-  const on = RUNTIME_ON[step] ?? [];
-  const seated = step >= 3 && !resetting;
-  const [ox, oy] = figure.origin;
-  const from = figure.bus.from;
+export function SkillsFigure() {
+  const { ref, step } = useStoryLoop(SKILL_HOLDS, 3);
+  const figure = SKILLS_FIGURE;
+  const resetting = step === SKILL_HOLDS.length - 1;
   return (
     <Figure figure={figure} sceneRef={ref} resetting={resetting}>
       <Art svg={figure.back} />
-      {send != null && (
-        <circle
-          key={step}
-          cx={ox + from[0]}
-          cy={oy + from[1]}
-          r={3.2}
-          className="animate-site-token fill-site-agent stroke-site-surface motion-reduce:hidden"
-          style={
-            {
-              strokeWidth: 1.5,
-              "--site-to": `${figure.bus.bays[send]![0] - from[0]}px ${figure.bus.bays[send]![1] - from[1]}px`,
-            } as CSSProperties
-          }
-        />
-      )}
-      {figure.modules.map((svg, index) => {
-        const arriving = index === 3;
-        return (
-          <g
-            key={index}
-            className={cn(arriving && "transition-[translate,opacity] duration-700 ease-out motion-reduce:transition-none")}
-            style={arriving ? { translate: seated ? "0 0" : shift(figure.drop, 0.45), opacity: seated ? 1 : 0 } : undefined}
-          >
-            <Art svg={svg} />
-            <g data-on={on.includes(index) ? "agent" : undefined}>
-              <Art svg={figure.lamps[index]!} />
-            </g>
+      <Art
+        svg={figure.added}
+        className="transition-opacity duration-500 motion-reduce:transition-none"
+        style={{ opacity: step >= 1 || resetting ? 1 : 0 }}
+      />
+      {figure.pucks.map((svg, index) => (
+        <g key={index}>
+          <Art svg={svg} />
+          <g data-on={step >= 3 && !resetting ? "agent" : undefined}>
+            <Art svg={figure.lamps[index]!} />
           </g>
-        );
-      })}
+        </g>
+      ))}
+      {step === 2 &&
+        figure.tokens.map((token, index) => (
+          <circle
+            key={index}
+            cx={token.at[0]}
+            cy={token.at[1]}
+            r={2.6}
+            className="animate-site-hop fill-site-agent stroke-site-surface motion-reduce:hidden"
+            style={{
+              ...hop(token.from, token.via, index * TOKEN_STAGGER_MS),
+              animationDuration: `${TOKEN_MS}ms`,
+              strokeWidth: 1.2,
+            }}
+          />
+        ))}
     </Figure>
   );
 }

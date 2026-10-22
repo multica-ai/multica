@@ -47,29 +47,37 @@ export function Avatar({ actor, size }: { actor: Actor; size: 16 | 20 | 24 }) {
   );
 }
 
+/** Largest zoom a mockup is shown at, so its UI never reads bigger than the product's. */
+const MAX_ZOOM = 0.88;
+
 /**
- * Fills its positioned parent and renders `children` on a `width` × `height`
- * design canvas scaled to the parent's width. The parent sets the aspect
- * ratio; keep it equal to the canvas's so nothing is cropped unintentionally.
+ * Fills its positioned parent and renders `children` on a design canvas
+ * zoomed to the parent's width. Below `width` the canvas stays `width` ×
+ * `height` and shrinks to fit; past `MAX_ZOOM` it grows to fill the frame
+ * instead, so lay content out against the canvas edges, not at fixed spots.
+ * The parent sets the aspect ratio; keep it equal to the canvas's.
  */
 export function ZoomCanvas({ width, height, children }: { width: number; height: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState<number | null>(null);
+  const [fit, setFit] = useState<{ zoom: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const resize = new ResizeObserver(() => setZoom(el.clientWidth / width));
+    const resize = new ResizeObserver(() => {
+      const zoom = Math.min(el.clientWidth / width, MAX_ZOOM);
+      setFit({ zoom, width: Math.max(width, el.clientWidth / zoom), height: Math.max(height, el.clientHeight / zoom) });
+    });
     resize.observe(el);
     return () => resize.disconnect();
-  }, [width]);
+  }, [width, height]);
 
   return (
     <div ref={ref} className="absolute inset-0 overflow-hidden">
       <div
         aria-hidden
-        className={cn("relative text-foreground", zoom === null && "opacity-0")}
-        style={{ width, height, zoom: zoom ?? undefined }}
+        className={cn("relative text-foreground", fit === null && "opacity-0")}
+        style={{ width: fit?.width ?? width, height: fit?.height ?? height, zoom: fit?.zoom }}
       >
         {children}
       </div>
@@ -150,18 +158,5 @@ export function Working({ label = "Working" }: { label?: string }) {
       <span className="size-1.5 shrink-0 rounded-full bg-site-agent" />
       <ShimmerText className="text-micro text-muted-foreground">{label}</ShimmerText>
     </span>
-  );
-}
-
-/**
- * A dot that rides `path` (canvas coordinates) once when it mounts; key it to
- * replay. Hidden under reduced motion, where nothing travels.
- */
-export function Pulse({ path, delay = 0 }: { path: string; delay?: number }) {
-  return (
-    <span
-      className="absolute top-0 left-0 size-2 animate-site-travel rounded-full bg-site-agent ring-2 ring-background motion-reduce:hidden"
-      style={{ offsetPath: `path("${path}")`, offsetRotate: "0deg", animationDelay: `${delay}ms` }}
-    />
   );
 }
