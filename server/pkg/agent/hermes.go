@@ -796,6 +796,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// the MUL-5029 mis-routing hazard it exists to prevent stayed live for
 		// exactly the agents that hit it. See acpModelIDsEquivalent for the
 		// evidence and for what the redundant call actually costs.
+		effortStateIsCurrent := true
 		if opts.Model != "" && acpModelIDsEquivalent(effectiveModel, sessionCurrentModel) {
 			b.cfg.Logger.Info("hermes session already on requested model; skipping redundant set_model",
 				"model", opts.Model,
@@ -803,10 +804,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				"session_id", sessionID,
 			)
 		} else if opts.Model != "" {
-			if _, err := c.request(runCtx, "session/set_model", map[string]any{
+			modelResult, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
-			}); err != nil {
+			})
+			if err != nil {
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
@@ -833,6 +835,18 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				return
 			}
+			if opts.ThinkingLevel != "" {
+				refreshed, err := refreshACPModelOptions(runCtx, c.request, sessionID, opts.Model, sessionResult, modelResult)
+				if err != nil {
+					b.cfg.Logger.Warn("hermes could not refresh model options", "error", err, "requested_model", opts.Model)
+				} else {
+					modelResult = refreshed
+				}
+			}
+			effortStateIsCurrent = hasACPConfigOptions(modelResult)
+			if effortStateIsCurrent {
+				sessionResult = modelResult
+			}
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
 
@@ -844,10 +858,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// above this must NOT fail the task — an effort we could not apply
 		// still runs the prompt at the runtime's own default.
 		//
-		// sessionResult stops describing the live session once set_model runs,
-		// because an ACP effort option may depend on the current model.
+		// Prefer the refreshed options after a switch. Older runtimes return
+		// no state; in that case the helper lets the runtime validate the level.
 		applyACPEffortOption(runCtx, c.request, "hermes", b.cfg.Logger,
-			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
+			sessionID, sessionResult, opts.ThinkingLevel, effortStateIsCurrent)
 
 		// 4. Send the prompt and wait for PromptResponse.
 		//

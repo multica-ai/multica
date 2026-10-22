@@ -1520,18 +1520,14 @@ func parseOmpEfforts(raw json.RawMessage) []string {
 // stand-in catalog is better than nothing there. Here there is no stand-in.
 func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
 	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
-		defaultBin:   "hermes",
-		clientName:   "multica-model-discovery",
-		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
-		tmpdirPrefix: "multica-hermes-discovery-",
-		strictErrors: true,
-		timeout:      hermesDiscoveryTimeout,
-		// The same handshake carries an effort selector on jcode and carries
-		// none on Hermes Agent, so annotate is what tells the two apart —
-		// Hermes Agent models come back with a nil Thinking and show no
-		// picker. Only the session's current model is annotated; see
-		// annotateACPThinkingForSessionModel.
-		annotate: annotateACPThinkingForSessionModel,
+		defaultBin:       "hermes",
+		clientName:       "multica-model-discovery",
+		extraEnv:         []string{"HERMES_YOLO_MODE=1"},
+		tmpdirPrefix:     "multica-hermes-discovery-",
+		strictErrors:     true,
+		timeout:          hermesDiscoveryTimeout,
+		annotate:         annotateACPThinkingForSessionModel,
+		probeModelEffort: true,
 	})
 	if err != nil {
 		return nil, annotateHermesDiscoveryUnconfigured(err)
@@ -1970,6 +1966,9 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// probeModelEffort switches non-current models on the throwaway session
+	// to read their own catalogs, never copying the default model's options.
+	probeModelEffort bool
 	// timeout bounds the whole handshake — spawn, initialize, session/new.
 	// Zero means acpDiscoveryDefaultTimeout.
 	//
@@ -2064,7 +2063,7 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
 	nextID := 1
-	requestACP := func(method string, params map[string]any) (json.RawMessage, error) {
+	requestACP := func(method string, params any) (json.RawMessage, error) {
 		id := nextID
 		nextID++
 		msg := map[string]any{
@@ -2188,6 +2187,30 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	}
 	if p.annotate != nil {
 		p.annotate(models, sessionResult)
+	}
+	if p.probeModelEffort && hasACPConfigOptions(sessionResult) {
+		sessionID := extractACPSessionID(sessionResult)
+		if sessionID != "" {
+			for i := range models {
+				if models[i].Default || runCtx.Err() != nil {
+					continue
+				}
+				result, err := requestACP("session/set_model", map[string]any{
+					"sessionId": sessionID, "modelId": models[i].ID,
+				})
+				if err == nil {
+					result, err = refreshACPModelOptions(runCtx, func(_ context.Context, method string, params any) (json.RawMessage, error) {
+						return requestACP(method, params)
+					}, sessionID, models[i].ID, sessionResult, result)
+				}
+				if err == nil {
+					models[i].Thinking = acpModelThinking(result)
+				}
+			}
+		}
+	}
+	if err := runCtx.Err(); err != nil {
+		return fail("per-model effort discovery", err)
 	}
 	return models, nil
 }

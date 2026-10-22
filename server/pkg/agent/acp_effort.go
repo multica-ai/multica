@@ -166,19 +166,9 @@ func parseACPEffortOption(raw json.RawMessage) (acpEffortOption, bool) {
 // would wave it through, and the task would silently run at the default — the
 // exact fake switch this whole path exists to prevent.
 //
-// Models other than the current one keep a nil Thinking, which hides the picker
-// for them. Reading a real per-model catalog means driving the session's own
-// `model` config option once per model and consuming each refreshed response;
-// that is a follow-up, not something to fake here.
+// Other models stay nil unless discovery explicitly probes them after switching.
 func annotateACPThinkingForSessionModel(models []Model, sessionResult json.RawMessage) {
-	option, ok := parseACPEffortOption(sessionResult)
-	if !ok || len(option.Choices) == 0 {
-		return
-	}
-	thinking := &ModelThinking{
-		SupportedLevels: option.Choices,
-		DefaultLevel:    option.CurrentValue,
-	}
+	thinking := acpModelThinking(sessionResult)
 	for i := range models {
 		// Default is set from the session's advertised currentModelId, so it
 		// marks the one model this catalog actually describes. If nothing is
@@ -187,6 +177,39 @@ func annotateACPThinkingForSessionModel(models []Model, sessionResult json.RawMe
 			models[i].Thinking = thinking
 		}
 	}
+}
+
+func hasACPConfigOptions(raw json.RawMessage) bool {
+	var result map[string]json.RawMessage
+	if json.Unmarshal(raw, &result) != nil {
+		return false
+	}
+	_, camel := result["configOptions"]
+	_, snake := result["config_options"]
+	return camel || snake
+}
+
+// refreshACPModelOptions gets a correlated response when set_model returns no
+// options. The advertised model selector returns the full configuration under
+// ACP, unlike uncorrelated session updates that may arrive after the response.
+func refreshACPModelOptions(ctx context.Context, request acpRequestFn, sessionID, modelID string, previous, switched json.RawMessage) (json.RawMessage, error) {
+	if hasACPConfigOptions(switched) {
+		return switched, nil
+	}
+	if _, ok := findACPConfigOption(previous, "model"); !ok {
+		return switched, nil
+	}
+	return request(ctx, "session/set_config_option", map[string]any{
+		"sessionId": sessionID, "configId": "model", "value": modelID,
+	})
+}
+
+func acpModelThinking(raw json.RawMessage) *ModelThinking {
+	option, ok := parseACPEffortOption(raw)
+	if !ok || len(option.Choices) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: option.Choices, DefaultLevel: option.CurrentValue}
 }
 
 // acpRequestFn is the ACP JSON-RPC call each backend's client already exposes.

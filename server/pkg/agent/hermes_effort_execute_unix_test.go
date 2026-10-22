@@ -22,6 +22,10 @@ import (
 // to $HERMES_RPC_LOG. sessionResult is returned from BOTH session/new and
 // session/resume so one stub covers either entry path.
 func hermesEffortExecStub(sessionResult string) string {
+	modelResult := `{"configOptions":[{"id":"thought_level","currentValue":"low","options":[{"value":"low"},{"value":"high"}]}]}`
+	if strings.Contains(sessionResult, `"id":"model"`) {
+		modelResult = `{}`
+	}
 	return `#!/bin/sh
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$HERMES_RPC_LOG"
@@ -35,7 +39,15 @@ while IFS= read -r line; do
       ;;
     *'"method":"session/set_config_option"'*)
       requested=$(printf '%s' "$line" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"reasoning_effort","currentValue":"%s","options":[{"value":"low"},{"value":"medium"},{"value":"high"}]}]}}\n' "$id" "$requested"
+      config=$(printf '%s' "$line" | sed -n 's/.*"configId":"\([^"]*\)".*/\1/p')
+      if [ "$config" = model ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thought_level","currentValue":"low","options":[{"value":"low"},{"value":"high"}]}]}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"%s","currentValue":"%s","options":[{"value":"low"},{"value":"medium"},{"value":"high"}]}]}}\n' "$id" "$config" "$requested"
+      fi
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":` + modelResult + `}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
@@ -127,5 +139,24 @@ func TestHermesExecuteSendsNothingForHermesAgent(t *testing.T) {
 	}
 	if !strings.Contains(rpcLog, `"method":"session/prompt"`) {
 		t.Errorf("the turn should still have prompted; log:\n%s", rpcLog)
+	}
+}
+
+func TestHermesExecuteUsesSwitchedModelEffort(t *testing.T) {
+	for name, initial := range map[string]string{
+		"set-model-response":   hermesAgentSessionResult,
+		"model-config-refresh": `{"sessionId":"ses-hermes","configOptions":[{"id":"model","currentValue":"initial","options":[{"value":"initial"},{"value":"other-model"}]}]}`,
+	} {
+		for _, resume := range []string{"", "ses-hermes"} {
+			t.Run(name+"/resume="+resume, func(t *testing.T) {
+				rpcLog := runHermesEffortTurn(t, initial, "high", ExecOptions{Model: "other-model", ResumeSessionID: resume})
+				if !strings.Contains(rpcLog, `"configId":"thought_level"`) || !strings.Contains(rpcLog, `"value":"high"`) {
+					t.Fatalf("switched model effort was not applied: %s", rpcLog)
+				}
+				if strings.Index(rpcLog, "set_config_option") > strings.Index(rpcLog, "session/prompt") {
+					t.Fatalf("effort was applied after prompt: %s", rpcLog)
+				}
+			})
+		}
 	}
 }
