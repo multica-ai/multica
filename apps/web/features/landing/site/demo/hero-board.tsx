@@ -240,7 +240,7 @@ export function HeroBoard() {
       ref={windowRef}
       role="img"
       aria-label="A Multica issue board: an issue is assigned to a coding agent, which works on it, opens a pull request, and moves it to done after review"
-      className="absolute inset-x-[4%] top-[6%] bottom-0 overflow-hidden rounded-t-[12px] border border-b-0 border-site-line-strong bg-app-shell shadow-site-float"
+      className="absolute inset-0 overflow-hidden rounded-[12px] border border-site-line-strong bg-app-shell shadow-site-float"
     >
       <div
         aria-hidden
