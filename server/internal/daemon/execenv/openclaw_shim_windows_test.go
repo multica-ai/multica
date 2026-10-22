@@ -94,9 +94,10 @@ func systemPath(t *testing.T) string {
 // TestWindowsOpenclawShimMissingNodeSurfacesCmdStderr records what actually
 // happens on Windows when a real npm shim cannot find its interpreter.
 //
-// The first CI run of this job showed cmd.exe's "'node' is not recognized"
-// reaching Go's stderr pipe, which refutes #6061's premise and means this case
-// takes execOpenclawCLI's stderr branch — the shim diagnostic is NOT involved.
+// CI showed cmd.exe's missing-command diagnostic reaching Go's stderr pipe,
+// which refutes #6061's premise and means this case takes execOpenclawCLI's
+// stderr branch — the shim diagnostic is NOT involved. The diagnostic is
+// localized, so assert its command identity and capture, not English wording.
 // Asserting that directly (rather than "either branch is fine") is deliberate:
 // the earlier disjunction let the diagnostic go completely unexercised on
 // Windows while still reporting a pass. If this ever flips, this test fails
@@ -111,12 +112,23 @@ func TestWindowsOpenclawShimMissingNodeSurfacesCmdStderr(t *testing.T) {
 	if err == nil {
 		t.Fatalf("shim must fail without node on PATH, got output %q", out)
 	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() == 0 {
+		t.Fatalf("expected a non-zero shim exit, got %v", err)
+	}
 	msg := err.Error()
 	t.Logf("observed error: %s", msg)
 
-	if !strings.Contains(strings.ToLower(msg), "not recognized") {
-		t.Errorf("expected cmd.exe's own stderr to reach Go's pipe; if this now fails, "+
-			"the platform behaviour changed and the shim diagnostic is carrying this case instead\ngot: %s", msg)
+	_, stderr, hasStderr := strings.Cut(msg, "(stderr: ")
+	stderr = strings.TrimSpace(strings.TrimSuffix(stderr, ")"))
+	if !hasStderr || stderr == "" {
+		t.Errorf("expected cmd.exe's localized stderr to reach Go's pipe\ngot: %s", msg)
+	}
+	if !strings.Contains(strings.ToLower(stderr), "node") {
+		t.Errorf("stderr should identify the missing node command\ngot: %s", msg)
+	}
+	if strings.Contains(msg, "no stderr output;") {
+		t.Errorf("non-empty cmd.exe stderr must not use the silent-shim diagnostic\ngot: %s", msg)
 	}
 	if !strings.Contains(msg, "openclaw config file") {
 		t.Errorf("error should name the failing subcommand\ngot: %s", msg)
