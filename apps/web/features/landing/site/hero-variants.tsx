@@ -1,6 +1,6 @@
 "use client";
 
-// Temporary: hero layout options for review, switched with `?hero=a|b|c|d`.
+// Temporary: hero layout options for review, switched with `?hero=a|b|c|d|e|f`.
 // Remove once a layout is chosen.
 
 import { useEffect, useState } from "react";
@@ -10,13 +10,15 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActionLink, Container, ProductFrame, focusRing } from "./primitives";
 import { PLACEHOLDER_PAGES } from "./sitemap";
 
-type HeroVariant = "a" | "b" | "c" | "d";
+type HeroVariant = "a" | "b" | "c" | "d" | "e" | "f";
+const VARIANTS: HeroVariant[] = ["a", "b", "c", "d", "e", "f"];
 
 export function useHeroVariant(): HeroVariant | null {
   const [variant, setVariant] = useState<HeroVariant | null>(null);
   useEffect(() => {
     const value = new URLSearchParams(window.location.search).get("hero");
-    if (value === "a" || value === "b" || value === "c" || value === "d") setVariant(value);
+    const match = VARIANTS.find((v) => v === value);
+    if (match) setVariant(match);
   }, []);
   return variant;
 }
@@ -89,6 +91,36 @@ export function HeroVariants({ variant, ctaHref, ctaLabel }: { variant: HeroVari
               </p>
               <Ctas href={ctaHref} label={ctaLabel} className="mt-5" />
             </div>
+          </div>
+        </Container>
+        <Container className="mt-10 lg:mt-12">
+          <ProductFrame label="Hero product visual" aspectRatio="16 / 9" />
+        </Container>
+      </section>
+    );
+  }
+
+  if (variant === "e" || variant === "f") {
+    // Headline and actions left, description right: its last line level with
+    // the headline's last line (e) or with the bottom of the actions (f).
+    return (
+      <section className="pt-12 pb-site-section lg:pt-16">
+        <Container>
+          <Announcement />
+          <div className="mt-5 grid gap-x-16 gap-y-6 lg:grid-cols-[1.25fr_1fr]">
+            <h1 className="font-site-display text-site-display text-site-ink text-balance lg:col-start-1 lg:row-start-1">
+              Your next ten hires won’t be human
+            </h1>
+            <p
+              className={cn(
+                "max-w-[30rem] text-site-body text-site-muted text-pretty lg:col-start-2 lg:row-start-1 lg:self-end lg:justify-self-end",
+                variant === "f" && "lg:row-span-2",
+              )}
+            >
+              Placeholder tagline. Assign issues to coding agents, review their work, and scale the team — on
+              your machines or in the cloud.
+            </p>
+            <Ctas href={ctaHref} label={ctaLabel} className="lg:col-start-1 lg:row-start-2" />
           </div>
         </Container>
         <Container className="mt-10 lg:mt-12">
