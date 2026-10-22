@@ -5,7 +5,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import {
@@ -43,7 +42,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
-import { Avatar, BACKEND, FRONTEND, LEO, MIA, QA, SAM, type Actor } from "./mock-kit";
+import { Avatar, BACKEND, FRONTEND, LEO, MIA, QA, SAM, usePrefersReducedMotion, type Actor } from "./mock-kit";
 
 /*
  * Hero product mockup: the issue board, built from the product's own tokens
@@ -271,18 +270,6 @@ export function HeroBoard() {
         </main>
       </div>
     </div>
-  );
-}
-
-function usePrefersReducedMotion() {
-  return useSyncExternalStore(
-    (onChange) => {
-      const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    () => true,
   );
 }
 

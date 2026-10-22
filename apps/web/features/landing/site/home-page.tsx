@@ -21,7 +21,7 @@ import {
   ChatVisual,
   RuntimesVisual,
   SkillsVisual,
-  SquadVisual,
+  WorkflowVisual,
 } from "./demo/feature-visuals";
 import { HeroBoard } from "./demo/hero-board";
 import { CtaBand, SitePage } from "./site-page";
@@ -137,11 +137,11 @@ const FEATURES: { title: string; body: string; href: string; visual: ComponentTy
     alt: "The Runtimes page listing a MacBook, a Linux server, Multica Cloud, and a Windows laptop, each with its coding agents",
   },
   {
-    title: "A squad splits big work",
-    body: "Hand a goal to a squad. Its lead agent breaks it into sub-issues, gives each to the right agent, and starts the next stage when one lands.",
-    href: productHref("squads"),
-    visual: SquadVisual,
-    alt: "An issue owned by a squad, with four sub-issues in three stages assigned to different agents",
+    title: "Workflows hand off every step",
+    body: "Lay out the steps a project’s issues follow and who owns each one. Moving an issue to the next step hands it to that step’s person or agent.",
+    href: productHref("workflows"),
+    visual: WorkflowVisual,
+    alt: "A Feature delivery workflow with four steps, each with an owner, and an issue being handed from one step to the next",
   },
   {
     title: "Mention an agent in chat",

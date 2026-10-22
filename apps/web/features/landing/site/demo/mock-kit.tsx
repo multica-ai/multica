@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import { Bot } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -73,4 +73,44 @@ export function ZoomCanvas({ width, height, children }: { width: number; height:
       </div>
     </div>
   );
+}
+
+export function usePrefersReducedMotion() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    () => true,
+  );
+}
+
+/**
+ * Steps through a looping story, holding step `i` for `holds[i]` ms. The loop
+ * runs only while the element behind `ref` is on screen; under reduced motion
+ * it rests on `still`, the one frame that tells the story on its own.
+ */
+export function useStoryLoop(holds: readonly number[], still: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [step, setStep] = useState(0);
+  const reducedMotion = usePrefersReducedMotion();
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const intersection = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting ?? false));
+    intersection.observe(el);
+    return () => intersection.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible || reducedMotion) return;
+    const timer = setTimeout(() => setStep((current) => (current + 1) % holds.length), holds[step]);
+    return () => clearTimeout(timer);
+  }, [holds, step, visible, reducedMotion]);
+
+  return { ref, step: reducedMotion ? still : step };
 }
