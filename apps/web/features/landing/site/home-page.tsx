@@ -75,7 +75,7 @@ function Hero() {
         </div>
       </Container>
       <Container className="mt-10 lg:mt-12">
-        <ProductFrame label="Hero product visual" aspectRatio="16 / 9">
+        <ProductFrame label="Hero product visual" className="aspect-[4/3] sm:aspect-video">
           <HeroBoard />
         </ProductFrame>
       </Container>
