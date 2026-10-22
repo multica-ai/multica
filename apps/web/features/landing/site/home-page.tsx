@@ -45,27 +45,27 @@ function Hero() {
   const ctaHref = useDashboardCtaHref();
 
   return (
-    <section className="pt-16 sm:pt-24">
+    <section className="pt-site-hero pb-site-section">
       <Container>
         <Link
           href={`/${PLACEHOLDER_PAGES.blog.slug}`}
           className={cn(
-            "inline-flex items-center gap-2 rounded-full border border-site-line bg-site-surface py-1 pr-3 pl-1 text-site-eyebrow text-site-ink-secondary transition-colors hover:border-site-line-strong",
+            "inline-flex items-center gap-2 rounded-site-control border border-site-line bg-site-surface py-1 pr-3 pl-1 text-site-small text-site-ink-secondary transition-colors hover:border-site-line-strong",
             focusRing,
           )}
         >
-          <span className="rounded-full bg-site-sunken px-2 py-0.5 font-medium text-site-ink">New</span>
+          <span className="rounded-site-control bg-site-sunken px-2 py-0.5 text-site-ink">New</span>
           Announcement placeholder
           <ArrowRight className="size-3.5 text-site-muted" aria-hidden />
         </Link>
-        <h1 className="mt-6 max-w-[15ch] font-site-display text-site-hero text-site-ink text-balance">
+        <h1 className="mt-6 max-w-[20ch] font-site-display text-site-heading text-site-ink text-balance">
           Your next ten hires won’t be human
         </h1>
-        <p className="mt-6 max-w-[36rem] text-site-lead text-site-muted text-pretty">
+        <p className="mt-4 max-w-[30rem] text-site-body text-site-muted text-pretty">
           Placeholder tagline. Multica turns coding agents into teammates you can assign, review,
           and scale — on your machines or in the cloud.
         </p>
-        <div className="mt-9 flex flex-wrap gap-2.5">
+        <div className="mt-7 flex flex-wrap gap-2.5">
           <ActionLink href={ctaHref} size="lg">
             {user ? "Open dashboard" : "Get started"}
           </ActionLink>
@@ -74,7 +74,7 @@ function Hero() {
           </ActionLink>
         </div>
       </Container>
-      <Container className="mt-14 sm:mt-20">
+      <Container className="mt-12 lg:mt-24">
         <ProductFrame label="Hero product visual" aspectRatio="16 / 9" />
       </Container>
     </section>
@@ -86,13 +86,13 @@ function WorksWith() {
   const providers = HERO_PROVIDERS.filter((p) => STRIP_PROVIDERS.includes(p.name));
 
   return (
-    <Section className="pb-0 sm:pb-0">
+    <Section>
       <Container>
         <div className="flex items-baseline justify-between gap-4">
           <Eyebrow>Works with the agents you already use</Eyebrow>
           <Link
             href={`${docsHrefForLocale(locale)}/providers`}
-            className={cn("text-site-eyebrow text-site-muted hover:text-site-ink", focusRing)}
+            className={cn("shrink-0 whitespace-nowrap text-site-small text-site-muted hover:text-site-ink", focusRing)}
           >
             All 27 agents
           </Link>
@@ -104,7 +104,7 @@ function WorksWith() {
               className="flex h-24 items-center justify-center gap-2.5 border-site-line text-site-muted not-first:border-l"
             >
               <Mark className="size-5" />
-              <span className="text-site-body font-medium">{name}</span>
+              <span className="text-site-small">{name}</span>
             </li>
           ))}
         </ul>
@@ -126,12 +126,12 @@ function Features() {
     <Section>
       <Container>
         <SectionHeader title="Section headline placeholder" lead="Placeholder: one line framing the product pillars." />
-        <div className="mt-12 grid gap-x-4 gap-y-12 md:grid-cols-2">
+        <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
             <FeatureCard key={feature.title} {...feature} aspectRatio="4 / 3" />
           ))}
         </div>
-        <div className="mt-12 grid gap-x-4 gap-y-12 md:grid-cols-3">
+        <div className="mt-site-grid-row grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-3">
           {FEATURES.slice(2).map((feature) => (
             <FeatureCard key={feature.title} {...feature} aspectRatio="5 / 4" />
           ))}
@@ -151,8 +151,8 @@ function FeatureCard({
   return (
     <Link href={href} className={cn("group block rounded-site-panel", focusRing)}>
       <ProductFrame tone={tone} label={`${title} visual`} aspectRatio={aspectRatio} />
-      <h3 className="mt-5 text-site-card text-site-ink">{title}</h3>
-      <p className="mt-1.5 max-w-[32rem] text-site-body text-site-muted">{body}</p>
+      <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
+      <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
     </Link>
   );
 }
@@ -165,18 +165,18 @@ const STEPS: { title: string; body: string; tone: VisualTone }[] = [
 
 function HowItWorks() {
   return (
-    <Section className="border-t border-site-line">
+    <Section>
       <Container>
         <SectionHeader title="From issue to merged PR" lead="Placeholder: the core loop in three steps." />
-        <ol className="mt-14 flex flex-col gap-20">
+        <ol className="mt-site-step flex flex-col gap-site-step">
           {STEPS.map((step, index) => (
             <li key={step.title} className="grid items-center gap-8 md:grid-cols-2 md:gap-16">
               <div className={cn(index % 2 === 1 && "md:order-2")}>
-                <p className="font-site-display text-site-section text-site-muted tabular-nums">
+                <p className="font-site-display text-site-title text-site-muted tabular-nums">
                   {String(index + 1).padStart(2, "0")}
                 </p>
-                <h3 className="mt-3 font-site-display text-site-section text-site-ink">{step.title}</h3>
-                <p className="mt-3 max-w-[28rem] text-site-lead text-site-muted">{step.body}</p>
+                <h3 className="mt-3 font-site-display text-site-title text-site-ink">{step.title}</h3>
+                <p className="mt-1 max-w-[28rem] text-site-body text-site-muted">{step.body}</p>
               </div>
               <ProductFrame tone={step.tone} label={`Step ${index + 1} visual`} aspectRatio="4 / 3" />
             </li>
@@ -204,14 +204,14 @@ const DEPLOY_OPTIONS = [
 
 function Deploy() {
   return (
-    <Section className="border-t border-site-line">
+    <Section>
       <Container>
         <SectionHeader title="Run it where your code lives" lead="Placeholder: cloud or self-hosted, same product." />
-        <div className="mt-12 grid gap-4 md:grid-cols-2">
+        <div className="mt-site-block grid gap-site-grid-col md:grid-cols-2">
           {DEPLOY_OPTIONS.map((option) => (
-            <div key={option.title} className="flex flex-col rounded-site-panel border border-site-line bg-site-surface p-8">
+            <div key={option.title} className="flex flex-col rounded-site-card border border-site-line bg-site-surface p-6 lg:p-8">
               <h3 className="text-site-card text-site-ink">{option.title}</h3>
-              <p className="mt-2 text-site-body text-site-muted">{option.body}</p>
+              <p className="mt-site-stack text-site-body text-site-muted">{option.body}</p>
               <ul className="mt-6 flex flex-col gap-2.5">
                 {option.points.map((point, index) => (
                   <li key={index} className="flex items-center gap-2.5 text-site-body text-site-ink-secondary">
@@ -233,15 +233,15 @@ function Deploy() {
 
 function Customers() {
   return (
-    <Section className="border-t border-site-line">
+    <Section>
       <Container>
         <SectionHeader title="Teams shipping with Multica" lead="Placeholder: customer proof once logos and quotes are approved." />
-        <div className="mt-12 grid gap-4 md:grid-cols-3">
+        <div className="mt-site-block grid gap-site-grid-col md:grid-cols-3">
           {[0, 1, 2].map((index) => (
-            <figure key={index} className="flex flex-col justify-between gap-10 rounded-site-panel border border-site-line bg-site-surface p-8">
+            <figure key={index} className="flex flex-col justify-between gap-10 rounded-site-card border border-site-line bg-site-surface p-6">
               <blockquote className="text-site-card text-site-ink">“Customer quote placeholder.”</blockquote>
               <figcaption className="flex items-center gap-3">
-                <span aria-hidden className="size-9 rounded-full bg-site-sunken" />
+                <span aria-hidden className="size-9 rounded-site-control bg-site-sunken" />
                 <span className="text-site-body">
                   <span className="block text-site-ink">Name placeholder</span>
                   <span className="block text-site-muted">Title, Company</span>

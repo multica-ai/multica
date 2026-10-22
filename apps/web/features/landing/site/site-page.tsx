@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ActionLink,
@@ -37,13 +36,13 @@ export function PageHero({
   actions?: ReactNode;
 }) {
   return (
-    <Container className="pt-16 pb-12 sm:pt-24 sm:pb-16">
+    <Container className="pt-site-hero pb-site-section">
       {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-      <h1 className="mt-3 max-w-[20ch] font-site-display text-site-title text-site-ink text-balance">{title}</h1>
+      <h1 className="mt-3 max-w-[20ch] font-site-display text-site-heading text-site-ink text-balance">{title}</h1>
       {lead ? (
-        <p className="mt-5 max-w-[38rem] text-site-lead text-site-muted text-pretty">{lead}</p>
+        <p className="mt-4 max-w-[30rem] text-site-body text-site-muted text-pretty">{lead}</p>
       ) : null}
-      {actions ? <div className="mt-8 flex flex-wrap gap-2.5">{actions}</div> : null}
+      {actions ? <div className="mt-7 flex flex-wrap gap-2.5">{actions}</div> : null}
     </Container>
   );
 }
@@ -56,31 +55,17 @@ export function CtaBand({
   lead?: string;
 }) {
   return (
-    <Section>
-      <Container>
-        <div className="flex flex-col gap-8 rounded-site-panel bg-site-inverse px-8 py-12 sm:px-12 sm:py-16 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-[36rem]">
-            <h2 className="font-site-display text-site-section text-site-inverse-ink text-balance">{title}</h2>
-            <p className="mt-4 text-site-lead text-site-inverse-muted">{lead}</p>
-          </div>
-          <div className="flex flex-wrap gap-2.5">
-            <ActionLink
-              href="/login"
-              size="lg"
-              className="bg-site-inverse-ink text-site-ink hover:bg-site-hover"
-            >
-              Get started
-            </ActionLink>
-            <ActionLink
-              href="/contact-sales"
-              size="lg"
-              tone="ghost"
-              className="text-site-inverse-ink hover:bg-site-ink-secondary"
-            >
-              Book a demo
-              <ArrowRight className="size-4" aria-hidden />
-            </ActionLink>
-          </div>
+    <Section className="py-0">
+      <Container className="flex flex-col items-center pt-24 pb-16 text-center lg:pt-30 lg:pb-20">
+        <h2 className="max-w-[16ch] font-site-display text-site-display text-site-ink text-balance">{title}</h2>
+        <p className="mt-4 max-w-[30rem] text-site-body text-site-muted text-pretty">{lead}</p>
+        <div className="mt-8 flex flex-wrap justify-center gap-2.5">
+          <ActionLink href="/login" size="lg">
+            Get started
+          </ActionLink>
+          <ActionLink href="/contact-sales" size="lg" tone="secondary">
+            Book a demo
+          </ActionLink>
         </div>
       </Container>
     </Section>
@@ -102,13 +87,13 @@ export function DirectoryPage({
   return (
     <SitePage>
       <PageHero title={title} lead={lead} />
-      <Container className="flex flex-col gap-14 pb-8">
+      <Container className="flex flex-col gap-site-block pb-site-section">
         {groups.map((group) => (
           <section key={group.title} aria-labelledby={`group-${group.title}`}>
-            <h2 id={`group-${group.title}`} className="text-site-eyebrow text-site-muted">
+            <h2 id={`group-${group.title}`} className="text-site-small text-site-muted">
               {group.title}
             </h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-4 grid gap-site-grid-col sm:grid-cols-2 lg:grid-cols-3">
               {group.pages.map((page) => (
                 <Link
                   key={page.slug}
@@ -119,7 +104,7 @@ export function DirectoryPage({
                   )}
                 >
                   <h3 className="text-site-card text-site-ink">{page.title}</h3>
-                  <p className="mt-2 text-site-body text-site-muted">{page.summary}</p>
+                  <p className="mt-site-stack text-site-body text-site-muted">{page.summary}</p>
                 </Link>
               ))}
             </div>
@@ -156,20 +141,20 @@ export function PlaceholderPage({ eyebrow, page }: { eyebrow: string; page: Site
           </>
         }
       />
-      <Container>
+      <Container className="pb-site-section">
         <ProductFrame label={`${page.title} visual`} aspectRatio="16 / 8" />
       </Container>
       <Section>
         <Container>
           <SectionHeader title="Sections to come" lead="This page is a placeholder in the new site structure." />
-          <div className="mt-10 grid gap-4 md:grid-cols-3">
+          <div className="mt-site-block grid gap-site-grid-col md:grid-cols-3">
             {OUTLINE.map((item, index) => (
               <div key={item.title} className="rounded-site-card border border-site-line bg-site-surface p-6">
-                <p className="text-site-eyebrow text-site-muted tabular-nums">
+                <p className="text-site-small text-site-muted tabular-nums">
                   {String(index + 1).padStart(2, "0")}
                 </p>
                 <h3 className="mt-6 text-site-card text-site-ink">{item.title}</h3>
-                <p className="mt-2 text-site-body text-site-muted">{item.body}</p>
+                <p className="mt-site-stack text-site-body text-site-muted">{item.body}</p>
               </div>
             ))}
           </div>

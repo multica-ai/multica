@@ -9,14 +9,20 @@ export const focusRing =
 export function Container({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("mx-auto w-full max-w-[1240px] px-5 sm:px-8", className)}
+      className={cn("mx-auto w-full max-w-site px-site-gutter", className)}
       {...props}
     />
   );
 }
 
+/** Page band: full-bleed hairline on top, shared vertical rhythm inside. */
 export function Section({ className, ...props }: ComponentProps<"section">) {
-  return <section className={cn("py-20 sm:py-28", className)} {...props} />;
+  return (
+    <section
+      className={cn("border-t border-site-line py-site-section", className)}
+      {...props}
+    />
+  );
 }
 
 export function SectionHeader({
@@ -33,11 +39,11 @@ export function SectionHeader({
   return (
     <div className={cn("max-w-[44rem]", className)}>
       {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-      <h2 className={cn("font-site-display text-site-section text-site-ink text-balance", eyebrow && "mt-3")}>
+      <h2 className={cn("font-site-display text-site-heading text-site-ink text-balance", eyebrow && "mt-3")}>
         {title}
       </h2>
       {lead ? (
-        <p className="mt-4 text-site-lead text-site-muted text-pretty">{lead}</p>
+        <p className="mt-4 max-w-[36rem] text-site-body text-site-muted text-pretty">{lead}</p>
       ) : null}
     </div>
   );
@@ -46,7 +52,7 @@ export function SectionHeader({
 export function Eyebrow({ className, ...props }: ComponentProps<"p">) {
   return (
     <p
-      className={cn("text-site-eyebrow font-medium text-site-muted", className)}
+      className={cn("text-site-small text-site-muted", className)}
       {...props}
     />
   );
@@ -54,14 +60,13 @@ export function Eyebrow({ className, ...props }: ComponentProps<"p">) {
 
 const actionTone = {
   primary: "bg-site-inverse text-site-inverse-ink hover:bg-site-ink-secondary",
-  secondary:
-    "border border-site-line-strong bg-site-surface text-site-ink hover:bg-site-hover",
+  secondary: "border border-site-line-strong text-site-ink hover:bg-site-hover",
   ghost: "text-site-ink hover:bg-site-hover",
 } as const;
 
 const actionSize = {
-  md: "h-9 px-3.5 text-site-nav",
-  lg: "h-12 px-5 text-site-body",
+  md: "h-site-control-sm px-3 text-site-small",
+  lg: "h-site-control px-5 text-site-body",
 } as const;
 
 export function actionClassName(
@@ -69,7 +74,7 @@ export function actionClassName(
   size: keyof typeof actionSize = "md",
 ) {
   return cn(
-    "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-site-control font-medium whitespace-nowrap transition-colors",
+    "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-site-control whitespace-nowrap transition-colors",
     focusRing,
     actionTone[tone],
     actionSize[size],
@@ -157,7 +162,7 @@ export function ProductFrame({
     >
       {children ?? (
         <div className="absolute inset-[7%] flex items-end rounded-site-card border border-dashed border-site-line-strong bg-site-surface/60 p-4">
-          <span className="rounded-md bg-site-surface px-2 py-1 text-site-eyebrow text-site-muted">
+          <span className="rounded-site-inner bg-site-surface px-2 py-1 text-site-small text-site-muted">
             {label}
           </span>
         </div>

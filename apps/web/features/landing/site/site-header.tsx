@@ -88,7 +88,7 @@ export function SiteHeader() {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
         }}
       >
-        <div className="mx-auto flex h-16 w-full max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8">
+        <div className="mx-auto flex h-site-header w-full max-w-site items-center justify-between gap-6 px-site-gutter">
           <div className="flex min-w-0 items-center gap-8">
             <Link
               href="/"
@@ -190,7 +190,7 @@ export function SiteHeader() {
         <div
           aria-hidden
           onClick={() => close()}
-          className="fixed inset-x-0 top-16 bottom-0 z-30 hidden bg-site-canvas/70 backdrop-blur-md lg:block"
+          className="fixed inset-x-0 top-site-header bottom-0 z-30 hidden bg-site-canvas/70 backdrop-blur-md lg:block"
         />
       ) : null}
 
@@ -207,7 +207,7 @@ export function SiteHeader() {
 }
 
 const navItemClassName = cn(
-  "inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-site-nav text-site-ink transition-colors hover:bg-site-hover",
+  "inline-flex h-site-control-sm items-center gap-1 rounded-site-control px-3 text-site-small text-site-ink transition-colors hover:bg-site-hover",
   focusRing,
 );
 
@@ -217,10 +217,10 @@ function MegaPanel({ menu, onNavigate }: { menu: SiteMenu; onNavigate: () => voi
       id={`site-menu-${menu.id}`}
       className="absolute inset-x-0 top-full hidden border-b border-site-line bg-site-canvas lg:block"
     >
-      <div className="mx-auto grid w-full max-w-[1240px] grid-cols-5 gap-8 px-5 pt-6 pb-9 sm:px-8">
+      <div className="mx-auto grid w-full max-w-site grid-cols-5 gap-8 px-site-gutter pt-6 pb-10">
         {menu.groups.map((group) => (
           <div key={group.title}>
-            <p className="text-site-eyebrow text-site-muted">{group.title}</p>
+            <p className="text-site-small text-site-muted">{group.title}</p>
             <ul className="mt-3 flex flex-col">
               {group.links.map((link) => (
                 <li key={`${group.title}-${link.label}`}>
@@ -267,7 +267,7 @@ function MobileMenu({
         className="landing-light inset-0 gap-0 border-0 bg-site-canvas text-site-ink shadow-none data-[side=top]:h-dvh lg:hidden"
       >
         <SheetTitle className="sr-only">Menu</SheetTitle>
-        <div className="flex h-16 shrink-0 items-center justify-between px-5">
+        <div className="flex h-site-header shrink-0 items-center justify-between px-site-gutter">
           <Link href="/" onClick={close} className={cn("flex items-center gap-2.5 rounded-sm", focusRing)}>
             <MulticaIcon className="size-[18px]" noSpin />
             <span className="text-site-logo font-medium lowercase">
@@ -279,12 +279,12 @@ function MobileMenu({
           </button>
         </div>
 
-        <nav aria-label="Primary" className="min-h-0 flex-1 overflow-y-auto px-5">
+        <nav aria-label="Primary" className="min-h-0 flex-1 overflow-y-auto px-site-gutter">
           {menus.map((menu) => (
             <details key={menu.id} className="group border-b border-site-line">
               <summary
                 className={cn(
-                  "flex h-14 cursor-pointer list-none items-center justify-between text-site-menu [&::-webkit-details-marker]:hidden",
+                  "flex h-14 cursor-pointer list-none items-center justify-between text-site-card [&::-webkit-details-marker]:hidden",
                   focusRing,
                 )}
               >
@@ -294,7 +294,7 @@ function MobileMenu({
               <div className="flex flex-col gap-4 pb-5">
                 {menu.groups.map((group) => (
                   <div key={group.title}>
-                    <p className="text-site-eyebrow text-site-muted">{group.title}</p>
+                    <p className="text-site-small text-site-muted">{group.title}</p>
                     <ul className="mt-1 grid grid-cols-2 gap-x-4">
                       {group.links.map((link) => (
                         <li key={`${group.title}-${link.label}`}>
@@ -319,14 +319,14 @@ function MobileMenu({
               key={link.href}
               href={link.href}
               onClick={close}
-              className={cn("flex h-14 items-center border-b border-site-line text-site-menu", focusRing)}
+              className={cn("flex h-14 items-center border-b border-site-line text-site-card", focusRing)}
             >
               {link.label}
             </Link>
           ))}
         </nav>
 
-        <div className="grid shrink-0 grid-cols-2 gap-2.5 px-5 pt-4 pb-8">
+        <div className="grid shrink-0 grid-cols-2 gap-2.5 px-site-gutter pt-4 pb-8">
           {showLogin ? (
             <ActionLink href="/login" tone="secondary" size="lg" onClick={close}>
               Log in

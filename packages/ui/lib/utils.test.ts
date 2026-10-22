@@ -4,7 +4,7 @@ import { cn } from "./utils";
 describe("cn", () => {
   it.each([
     ["text-muted-foreground text-body", "text-muted-foreground text-body"],
-    ["text-site-inverse-ink text-site-nav", "text-site-inverse-ink text-site-nav"],
+    ["text-site-inverse-ink text-site-small", "text-site-inverse-ink text-site-small"],
   ])("keeps a colour and a role-named size together: %s", (input, expected) => {
     expect(cn(input)).toBe(expected);
   });
@@ -15,6 +15,6 @@ describe("cn", () => {
   });
 
   it("lets a later size replace an earlier one", () => {
-    expect(cn("text-site-nav", "text-site-body")).toBe("text-site-body");
+    expect(cn("text-site-small", "text-site-body")).toBe("text-site-body");
   });
 });

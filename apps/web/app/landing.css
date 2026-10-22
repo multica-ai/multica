@@ -2,9 +2,14 @@
  * Marketing site design language
  *
  * Every landing surface draws from this file: colour roles, typefaces, the
- * display type ramp, radii, and the placeholder visual. Components reference the roles
- * (`bg-site-canvas`, `text-site-muted`, `text-site-section`), never raw values,
- * so the whole site can be re-tuned here without touching markup.
+ * type ramp, radii, layout spacing, and the placeholder visual. Components
+ * reference the roles (`bg-site-canvas`, `text-site-heading`, `py-site-section`),
+ * never raw values, so the whole site can be re-tuned here without touching
+ * markup.
+ *
+ * Small gaps inside a component use the stock 4px spacing scale; the
+ * `site-*` spacing roles cover the structural rhythm that must match across
+ * pages (gutters, section padding, header height, heading-to-content gaps).
  *
  * Text hierarchy is expressed by the four solid ink roles. Do not dim text with
  * opacity — `site-muted` is the floor for readable copy on `site-canvas` and
@@ -29,8 +34,22 @@
     --color-site-inverse-muted: var(--site-inverse-muted);
 
     --radius-site-control: var(--site-radius-control);
+    --radius-site-inner: var(--site-radius-inner);
     --radius-site-card: var(--site-radius-card);
     --radius-site-panel: var(--site-radius-panel);
+
+    --container-site: var(--site-container);
+    --spacing-site-gutter: var(--site-gutter);
+    --spacing-site-header: var(--site-header);
+    --spacing-site-hero: var(--site-hero);
+    --spacing-site-section: var(--site-section);
+    --spacing-site-block: var(--site-block);
+    --spacing-site-stack: var(--site-stack);
+    --spacing-site-grid-row: var(--site-grid-row);
+    --spacing-site-grid-col: var(--site-grid-col);
+    --spacing-site-step: var(--site-step);
+    --spacing-site-control-sm: var(--site-control-sm);
+    --spacing-site-control: var(--site-control);
 
     --shadow-site-float: var(--site-shadow-float);
 
@@ -39,49 +58,35 @@
     --font-site-mono: var(--site-font-mono);
 }
 
-/* Display ramp. Fluid between a 375px phone and a 1440px desktop; each step
-   carries its own leading, tracking, and weight so headings cannot drift. */
+/* Type ramp. One regular weight carries every step; hierarchy comes from size,
+   leading, and tracking alone. Fluid steps run from a 375px phone to the
+   desktop width. */
 @theme {
-    --text-site-hero: clamp(2.75rem, 1.86rem + 3.8vw, 4.5rem);
-    --text-site-hero--line-height: 1.03;
-    --text-site-hero--letter-spacing: -0.03em;
-    --text-site-hero--font-weight: 450;
+    --text-site-display: clamp(2.5rem, 1.9rem + 2.6vw, 4rem);
+    --text-site-display--line-height: 1;
+    --text-site-display--letter-spacing: -0.03em;
 
-    --text-site-title: clamp(2.25rem, 1.7rem + 2.3vw, 3.5rem);
-    --text-site-title--line-height: 1.06;
-    --text-site-title--letter-spacing: -0.026em;
-    --text-site-title--font-weight: 450;
+    --text-site-heading: clamp(2rem, 1.8rem + 0.9vw, 2.5rem);
+    --text-site-heading--line-height: 1.05;
+    --text-site-heading--letter-spacing: -0.03em;
 
-    --text-site-section: clamp(1.875rem, 1.5rem + 1.6vw, 2.75rem);
-    --text-site-section--line-height: 1.1;
-    --text-site-section--letter-spacing: -0.022em;
-    --text-site-section--font-weight: 450;
+    --text-site-title: clamp(1.5rem, 1.3rem + 0.9vw, 2rem);
+    --text-site-title--line-height: 1.2;
+    --text-site-title--letter-spacing: -0.02em;
 
-    --text-site-card: 1.1875rem;
-    --text-site-card--line-height: 1.4;
-    --text-site-card--letter-spacing: -0.015em;
-    --text-site-card--font-weight: 500;
+    --text-site-card: 1.25rem;
+    --text-site-card--line-height: 1.2;
+    --text-site-card--letter-spacing: -0.01em;
 
-    --text-site-lead: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
-    --text-site-lead--line-height: 1.55;
-    --text-site-lead--letter-spacing: -0.006em;
+    --text-site-body: 1rem;
+    --text-site-body--line-height: 1.4;
 
-    --text-site-body: 0.9375rem;
-    --text-site-body--line-height: 1.55;
+    --text-site-small: 0.875rem;
+    --text-site-small--line-height: 1.4;
 
     --text-site-logo: 1.3125rem;
     --text-site-logo--line-height: 1;
     --text-site-logo--letter-spacing: -0.02em;
-
-    --text-site-menu: 1.125rem;
-    --text-site-menu--line-height: 1.5rem;
-    --text-site-menu--letter-spacing: -0.01em;
-
-    --text-site-nav: 0.875rem;
-    --text-site-nav--line-height: 1.25rem;
-
-    --text-site-eyebrow: 0.8125rem;
-    --text-site-eyebrow--line-height: 1.25rem;
 }
 
 /* Typefaces. One sans family carries the whole site: Inter's optical-size axis
@@ -115,11 +120,36 @@
     --site-inverse-ink: oklch(0.985 0.002 250);
     --site-inverse-muted: oklch(0.74 0.01 262);
 
-    --site-radius-control: 10px;
-    --site-radius-card: 14px;
-    --site-radius-panel: 20px;
+    /* Controls are pills; containers step 6 → 12 → 16 with size. */
+    --site-radius-control: 9999px;
+    --site-radius-inner: 6px;
+    --site-radius-card: 12px;
+    --site-radius-panel: 16px;
+
+    --site-container: 87.5rem;
+    --site-gutter: 1.25rem;
+    --site-header: 3.25rem;
+    --site-hero: 6.25rem;
+    --site-section: 3rem;
+    --site-block: 2.5rem;
+    --site-stack: 0.5rem;
+    --site-grid-row: 3rem;
+    --site-grid-col: 0.5rem;
+    --site-step: 4rem;
+    --site-control-sm: 1.75rem;
+    --site-control: 2.625rem;
 
     --site-shadow-float: 0 1px 2px rgb(15 23 42 / 0.05), 0 20px 48px rgb(15 23 42 / 0.1);
+}
+
+@media (min-width: 64rem) {
+    .landing-light {
+        --site-gutter: 3.75rem;
+        --site-hero: 8.75rem;
+        --site-section: 3.75rem;
+        --site-grid-row: 3.75rem;
+        --site-step: 7.5rem;
+    }
 }
 
 /* Placeholder visual: a soft tinted field with film grain. Stands in for
