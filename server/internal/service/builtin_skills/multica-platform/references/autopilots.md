@@ -20,8 +20,15 @@ Execution modes:
 - `run_only` creates an agent task directly. No issue is created; any durable
   report location has to come from other task context or instructions.
 
-`issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`,
-`{{branch}}`, or other variables.
+`issue-title-template` supports these variables in `create_issue` mode:
+
+- `{{date}}` renders `YYYY-MM-DD` in the trigger timezone.
+- `{{datetime}}` renders an RFC3339 timestamp in the trigger timezone.
+- `{{time}}` renders `HH:MM:SS` in the trigger timezone.
+- `{{event}}` renders the normalized webhook event name.
+- `{{payload.<field>}}` reads a scalar from the normalized webhook `eventPayload`; nested object paths such as `{{payload.repository.full_name}}` are supported.
+
+`event` and `payload` variables render empty for non-webhook runs. Missing fields and object, array, or null values also render empty. If those substitutions would leave the entire issue title blank, the autopilot title is used instead. Dynamic values are control-character-safe, whitespace-normalized to one line, and limited to 200 characters; truncated values carry a stable hash suffix so distinct deliveries do not collapse onto the same deduplication key. Unknown variables are rejected when the autopilot is created or updated; do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
 ## CLI
 
