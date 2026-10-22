@@ -206,6 +206,8 @@
     "grouping_section": "Regroupement",
     "ordering_section": "Tri",
     "card_properties_section": "Propriétés des cartes",
+    "columns_section": "Colonnes",
+    "columns_locked_by_filter": "Retirez le filtre d’état pour afficher ou masquer des colonnes.",
     "ascending_title": "Croissant",
     "descending_title": "Décroissant",
     "newest_first": "Plus récents d'abord",
@@ -363,18 +365,13 @@
     "toggle_collapse": "Replier ou déplier le couloir"
   },
   "board": {
-    "hidden_columns_label": "Colonnes masquées",
     "hide_column": "Masquer la colonne",
-    "show_column": "Afficher la colonne",
     "add_issue_tooltip": "Ajouter une tâche",
     "empty_column": "Aucune tâche",
     "empty_grouping": "Aucune tâche correspondante",
     "no_value": "Aucune valeur",
     "ordered_by": "Tableau trié par {{field}}",
-    "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne.",
-    "filter_to_status": "Filtrer sur cet état",
-    "outside_workflow": "Hors du workflow de ce tableau",
-    "workflow_columns_note": "Les colonnes viennent du workflow du tableau ; hors projet, les vues utilisent Default."
+    "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne."
   },
   "peek": {
     "panel_label": "Aperçu de la tâche",
@@ -1549,7 +1546,7 @@
       "instructions": "Instructions de passage",
       "instructions_placeholder": "Que doit-il se passer à cette étape ?",
       "next": "Une fois terminé, passer à",
-      "back": "Si des changements sont nécessaires, revenir à",
+      "back": "En cas de rejet, renvoyer à",
       "none_option": "Non défini",
       "save": "Enregistrer",
       "create": "Créer",
@@ -1578,7 +1575,7 @@
       "target_squad": "Squad · le leader répartit",
       "target_member": "Membre",
       "instructions_hint": "Envoyées au responsable avec cette exécution, avec la description et les commentaires de la tâche.",
-      "next_hint": "Inscrit dans les consignes du responsable pour qu’il sache quel état vient ensuite. Le système n’avance jamais l’état à la fin d’une exécution.",
+      "next_hint": "C’est le responsable qui déplace le ticket, et il ne le renvoie que pour une reprise, pas pour un blocage. La fin d’une exécution ne change jamais l’état.",
       "preview_brief": "Aperçu des consignes de l’agent",
       "preview_title": "Consignes de l’étape « {{status}} »",
       "preview_description": "Ce que reçoit l’exécution du responsable quand une tâche entre dans cette étape. Pas besoin d’enregistrer pour prévisualiser.",
@@ -1678,8 +1675,7 @@
     },
     "detail": {
       "follows_project": "(selon le projet)",
-      "card_title": "{{workflow}} · selon {{project}}",
-      "card_hint": "Le workflow du projet décide de ces colonnes et transferts."
+      "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",
     "handoff": {

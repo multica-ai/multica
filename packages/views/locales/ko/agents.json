@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "에이전트",
-    "tagline": "태스크를 맡고, 댓글을 남기고, 상태를 업데이트하는 AI 팀원입니다.",
     "learn_more": "자세히 보기 →",
     "new_agent": "새 에이전트",
     "search_placeholder": "에이전트 검색...",
@@ -342,7 +341,7 @@
   },
   "conversation_starters": {
     "label": "대화 시작 예시",
-    "hint": "최대 3개입니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
+    "hint": "이 에이전트와 새 채팅을 시작하면 표시됩니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
     "add": "추천 추가",
     "item_label": "추천 {{number}} 라벨",
     "prompt_label": "추천 {{number}} 프롬프트",
@@ -351,13 +350,21 @@
     "incomplete": "각 제안을 완성하거나 삭제한 후 저장하세요.",
     "remove": "추천 {{number}} 삭제",
     "preview_label": "새 채팅 미리보기",
-    "preview_defaults": "지금은 기본 예시입니다. 위에서 하나를 추가하면 세 개 모두 교체됩니다."
+    "preview_defaults": "지금은 기본 추천입니다. 직접 추가하면 세 개 모두 교체됩니다.",
+    "create_hint": "선택 사항입니다. 이 에이전트와의 새 채팅에 표시됩니다.",
+    "edit": "추천 {{number}} 편집",
+    "remove_short": "삭제",
+    "done": "완료",
+    "untitled": "제목 없는 추천",
+    "customize": "사용자 지정",
+    "defaults_summary_other": "기본 추천 {{count}}개 사용 중"
   },
   "tab_body": {
     "common": {
       "save": "저장",
       "add": "추가",
-      "unsaved_changes": "저장하지 않은 변경사항"
+      "unsaved_changes": "저장하지 않은 변경사항",
+      "discard": "변경 취소"
     },
     "instructions": {
       "intro": "모든 실행에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
@@ -369,7 +376,12 @@
       "system_layer_hide": "접기",
       "workspace_notes_label": "워크스페이스 메모",
       "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
-      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
+      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다.",
+      "mode_aria": "편집 모드",
+      "mode_write": "작성",
+      "mode_preview": "미리보기",
+      "preview_empty": "아직 미리 볼 내용이 없습니다.",
+      "char_count_other": "{{count}}자"
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",
@@ -959,7 +971,6 @@
       "aria": "에이전트 생성 단계"
     },
     "configure_title": "에이전트 구성",
-    "configure_description": "이름과 지침을 입력하세요. 나중에 언제든지 바꿀 수 있습니다.",
     "ask_ai": "AI에게 작성 맡기기",
     "change_runtime": "변경",
     "runtime_label": "런타임",
@@ -973,13 +984,9 @@
       "joined_squad": "스쿼드 {{squad}}에 추가됨",
       "next": "다음 단계",
       "assign_title": "첫 작업 할당하기",
-      "assign_description": "이 에이전트를 담당자로 하는 이슈를 만듭니다.",
       "mention_title": "이슈에서 멘션하기",
-      "mention_description": "이슈 댓글에서 @{{name}}을(를) 멘션하면 작업을 맡습니다.",
       "squad_title": "스쿼드에 추가",
-      "squad_description": "스쿼드 리더의 배분에 따라 다른 에이전트와 함께 일합니다.",
       "open_squad_title": "{{squad}} 열기",
-      "open_squad_description": "이 에이전트가 방금 합류한 스쿼드를 봅니다.",
       "open_agent": "에이전트 열기",
       "back_to_list": "에이전트 목록으로"
     },
@@ -1018,7 +1025,6 @@
       "member_connect": "관리자에게 연결을 요청하세요",
       "member_fix": "관리자에게 해결을 요청하세요",
       "footer_selected": "선택됨:",
-      "footer_hint": "계속하려면 런타임을 선택하세요",
       "cancel": "취소",
       "next": "다음"
     }

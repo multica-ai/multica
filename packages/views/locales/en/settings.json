@@ -682,8 +682,7 @@
     },
     "system": {
       "title": "System Notifications",
-      "description": "Show system notifications when Multica is in the background.",
-      "label": "Show system notifications"
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",

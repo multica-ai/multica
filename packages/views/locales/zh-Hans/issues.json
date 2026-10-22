@@ -202,6 +202,8 @@
     "grouping_section": "分组",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",
+    "columns_section": "列",
+    "columns_locked_by_filter": "清除状态筛选后才能显示或隐藏列。",
     "ascending_title": "升序",
     "descending_title": "降序",
     "newest_first": "最新优先",
@@ -359,18 +361,13 @@
     "toggle_collapse": "切换泳道"
   },
   "board": {
-    "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
-    "show_column": "显示列",
     "add_issue_tooltip": "新建任务",
     "empty_column": "无任务",
     "empty_grouping": "没有匹配的任务",
     "no_value": "未设置",
     "ordered_by": "按{{field}}排序",
-    "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。",
-    "filter_to_status": "按此状态筛选",
-    "outside_workflow": "不在当前看板的工作流里",
-    "workflow_columns_note": "看板的列由工作流决定，项目外的视图使用 Default 工作流。"
+    "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。"
   },
   "peek": {
     "panel_label": "任务预览",
@@ -1494,7 +1491,7 @@
       "instructions": "交接说明",
       "instructions_placeholder": "这一步要做什么？",
       "next": "完成后进入",
-      "back": "需要修改时退回",
+      "back": "打回时退回到",
       "none_option": "不指定",
       "save": "保存",
       "create": "创建",
@@ -1522,7 +1519,7 @@
       "target_squad": "小队 · 由 leader 分派",
       "target_member": "成员",
       "instructions_hint": "作为这次运行的说明发给处理人，和任务描述、评论一起作为上下文。",
-      "next_hint": "写进处理人收到的说明里，告诉它下一步该把状态改成什么。系统不会在运行结束后自动推进状态。",
+      "next_hint": "由处理人自己改状态，只有需要返工时才退回，受阻不用退回。运行结束不会自动改状态。",
       "preview_brief": "预览智能体收到的说明",
       "preview_title": "「{{status}}」这一步的说明",
       "preview_description": "任务进入这一步时，处理人的运行会收到这段说明。预览不需要先保存。",
@@ -1613,8 +1610,7 @@
     },
     "detail": {
       "follows_project": "（跟随项目）",
-      "card_title": "「{{workflow}}」· 跟随项目「{{project}}」",
-      "card_hint": "这些列和交接由项目的工作流决定。"
+      "card_title": "「{{workflow}}」· 跟随项目「{{project}}」"
     },
     "list_separator": "、",
     "handoff": {

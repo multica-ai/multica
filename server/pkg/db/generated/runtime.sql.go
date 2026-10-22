@@ -603,7 +603,7 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 }
 
 const getAgentRuntimeHeartbeatLeases = `-- name: GetAgentRuntimeHeartbeatLeases :many
-SELECT id, workspace_id, daemon_id, status, last_seen_at
+SELECT id, workspace_id, daemon_id, owner_id, status, last_seen_at
 FROM agent_runtime
 WHERE id = ANY($1::uuid[])
 `
@@ -612,6 +612,7 @@ type GetAgentRuntimeHeartbeatLeasesRow struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	DaemonID    pgtype.Text        `json:"daemon_id"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
 	Status      string             `json:"status"`
 	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
 }
@@ -620,6 +621,9 @@ type GetAgentRuntimeHeartbeatLeasesRow struct {
 // WebSocket authenticates its whole runtime set in one round trip and then
 // keeps these immutable ownership fields plus liveness state in its connection
 // lease, avoiding a GetAgentRuntime call on every heartbeat.
+//
+// owner_id is carried so the WS handshake can enforce runtime ownership for
+// user-credential connections (MUL-8154) with the same single round trip.
 func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgtype.UUID) ([]GetAgentRuntimeHeartbeatLeasesRow, error) {
 	rows, err := q.db.Query(ctx, getAgentRuntimeHeartbeatLeases, ids)
 	if err != nil {
@@ -633,6 +637,7 @@ func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgty
 			&i.ID,
 			&i.WorkspaceID,
 			&i.DaemonID,
+			&i.OwnerID,
 			&i.Status,
 			&i.LastSeenAt,
 		); err != nil {
@@ -1084,6 +1089,44 @@ func (q *Queries) ListNonOwnerActiveTasksByRuntimeForUpdate(ctx context.Context,
 	return items, nil
 }
 
+const listRuntimeOwnersByDaemon = `-- name: ListRuntimeOwnersByDaemon :many
+SELECT id, owner_id FROM agent_runtime
+WHERE workspace_id = $1 AND daemon_id = $2
+`
+
+type ListRuntimeOwnersByDaemonParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+}
+
+type ListRuntimeOwnersByDaemonRow struct {
+	ID      pgtype.UUID `json:"id"`
+	OwnerID pgtype.UUID `json:"owner_id"`
+}
+
+// Registration pre-check (MUL-8154): every runtime row a daemon_id already
+// holds in a workspace, with its owner. A user-credential registration is
+// refused before any write when any of them belongs to someone else.
+func (q *Queries) ListRuntimeOwnersByDaemon(ctx context.Context, arg ListRuntimeOwnersByDaemonParams) ([]ListRuntimeOwnersByDaemonRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimeOwnersByDaemon, arg.WorkspaceID, arg.DaemonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimeOwnersByDaemonRow{}
+	for rows.Next() {
+		var i ListRuntimeOwnersByDaemonRow
+		if err := rows.Scan(&i.ID, &i.OwnerID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStaleOfflineRuntimeGCCandidates = `-- name: ListStaleOfflineRuntimeGCCandidates :many
 SELECT id FROM agent_runtime
 WHERE status = 'offline'
@@ -1306,11 +1349,17 @@ func (q *Queries) LockRuntimeRevocationChatSessions(ctx context.Context, arg Loc
 }
 
 const lockRuntimesForMerge = `-- name: LockRuntimesForMerge :many
-SELECT id FROM agent_runtime
+SELECT id, workspace_id, owner_id FROM agent_runtime
 WHERE id = ANY($1::uuid[])
 ORDER BY id
 FOR UPDATE
 `
+
+type LockRuntimesForMergeRow struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
 
 // Step 2: the runtime rows themselves, FOR UPDATE, in id order.
 //
@@ -1328,19 +1377,21 @@ FOR UPDATE
 //
 // Returns the ids it actually locked: a caller that asked for two and got fewer
 // knows a runtime disappeared before it got there and must abandon the merge.
-func (q *Queries) LockRuntimesForMerge(ctx context.Context, runtimeIds []pgtype.UUID) ([]pgtype.UUID, error) {
+// workspace_id and owner_id come back with the lock so the merge can verify,
+// against the locked rows, that the caller owns both sides (MUL-8154).
+func (q *Queries) LockRuntimesForMerge(ctx context.Context, runtimeIds []pgtype.UUID) ([]LockRuntimesForMergeRow, error) {
 	rows, err := q.db.Query(ctx, lockRuntimesForMerge, runtimeIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []LockRuntimesForMergeRow{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i LockRuntimesForMergeRow
+		if err := rows.Scan(&i.ID, &i.WorkspaceID, &i.OwnerID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2028,7 +2079,10 @@ INSERT INTO agent_runtime (
     metadata,
     owner_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, now()
+)
 ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -2039,19 +2093,22 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE $10::uuid IS NULL
+   OR agent_runtime.owner_id = $10::uuid
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	RequiredOwnerID pgtype.UUID `json:"required_owner_id"`
 }
 
 type UpsertAgentRuntimeRow struct {
@@ -2078,6 +2135,14 @@ type UpsertAgentRuntimeRow struct {
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 // that updated an existing row (false). Analytics reads this to fire
 // runtime_registered/runtime_ready only on first-time registration.
+//
+// Ownership fence (MUL-8154): when required_owner_id is set (user-credential
+// registration), the conflict branch only updates a row already owned by that
+// user. A row owned by someone else - or by nobody - is left untouched and the
+// statement returns no row, so a workspace member cannot take over another
+// member's runtime by re-registering its (daemon_id, provider). Daemon-token
+// registration passes NULL here and NULL owner_id, which keeps the existing
+// owner via the COALESCE below.
 // Built-in runtimes carry no profile_id. The arbiter is the partial unique
 // index from migration 121 (WHERE profile_id IS NULL); the predicate must be
 // spelled out so Postgres selects that partial index, not the custom-runtime
@@ -2093,6 +2158,7 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		arg.DeviceInfo,
 		arg.Metadata,
 		arg.OwnerID,
+		arg.RequiredOwnerID,
 	)
 	var i UpsertAgentRuntimeRow
 	err := row.Scan(
@@ -2131,7 +2197,10 @@ INSERT INTO agent_runtime (
     owner_id,
     profile_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, now()
+)
 ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -2143,20 +2212,23 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
+WHERE $11::uuid IS NULL
+   OR agent_runtime.owner_id = $11::uuid
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeWithProfileParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	DaemonID    pgtype.Text `json:"daemon_id"`
-	Name        string      `json:"name"`
-	RuntimeMode string      `json:"runtime_mode"`
-	Provider    string      `json:"provider"`
-	Status      string      `json:"status"`
-	DeviceInfo  string      `json:"device_info"`
-	Metadata    []byte      `json:"metadata"`
-	OwnerID     pgtype.UUID `json:"owner_id"`
-	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DaemonID        pgtype.Text `json:"daemon_id"`
+	Name            string      `json:"name"`
+	RuntimeMode     string      `json:"runtime_mode"`
+	Provider        string      `json:"provider"`
+	Status          string      `json:"status"`
+	DeviceInfo      string      `json:"device_info"`
+	Metadata        []byte      `json:"metadata"`
+	OwnerID         pgtype.UUID `json:"owner_id"`
+	ProfileID       pgtype.UUID `json:"profile_id"`
+	RequiredOwnerID pgtype.UUID `json:"required_owner_id"`
 }
 
 type UpsertAgentRuntimeWithProfileRow struct {
@@ -2186,7 +2258,8 @@ type UpsertAgentRuntimeWithProfileRow struct {
 // single daemon can host the built-in provider AND any number of custom
 // profiles of the same protocol family. provider carries the base runtime
 // identity so ResolveBackend applies its descriptor; profile_id preserves
-// custom-profile provenance. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
+// custom-profile provenance. (xmax = 0) AS inserted mirrors UpsertAgentRuntime,
+// and the required_owner_id fence matches it too.
 func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertAgentRuntimeWithProfileParams) (UpsertAgentRuntimeWithProfileRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntimeWithProfile,
 		arg.WorkspaceID,
@@ -2199,6 +2272,7 @@ func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertA
 		arg.Metadata,
 		arg.OwnerID,
 		arg.ProfileID,
+		arg.RequiredOwnerID,
 	)
 	var i UpsertAgentRuntimeWithProfileRow
 	err := row.Scan(

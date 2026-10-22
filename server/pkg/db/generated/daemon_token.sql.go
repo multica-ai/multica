@@ -12,9 +12,9 @@ import (
 )
 
 const createDaemonToken = `-- name: CreateDaemonToken :one
-INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at)
-VALUES ($1, $2, $3, $4)
-RETURNING id, token_hash, workspace_id, daemon_id, expires_at, created_at
+INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at, owner_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, token_hash, workspace_id, daemon_id, expires_at, created_at, owner_id
 `
 
 type CreateDaemonTokenParams struct {
@@ -22,14 +22,18 @@ type CreateDaemonTokenParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	DaemonID    string             `json:"daemon_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
 }
 
+// owner_id binds the token to the runtime owner it was issued for (MUL-8154);
+// NULL only for Qoder-managed tokens.
 func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenParams) (DaemonToken, error) {
 	row := q.db.QueryRow(ctx, createDaemonToken,
 		arg.TokenHash,
 		arg.WorkspaceID,
 		arg.DaemonID,
 		arg.ExpiresAt,
+		arg.OwnerID,
 	)
 	var i DaemonToken
 	err := row.Scan(
@@ -39,6 +43,7 @@ func (q *Queries) CreateDaemonToken(ctx context.Context, arg CreateDaemonTokenPa
 		&i.DaemonID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.OwnerID,
 	)
 	return i, err
 }
@@ -93,7 +98,7 @@ func (q *Queries) DeleteExpiredDaemonTokens(ctx context.Context) error {
 }
 
 const getDaemonTokenByHash = `-- name: GetDaemonTokenByHash :one
-SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at FROM daemon_token
+SELECT id, token_hash, workspace_id, daemon_id, expires_at, created_at, owner_id FROM daemon_token
 WHERE token_hash = $1 AND expires_at > now()
 `
 
@@ -107,6 +112,7 @@ func (q *Queries) GetDaemonTokenByHash(ctx context.Context, tokenHash string) (D
 		&i.DaemonID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.OwnerID,
 	)
 	return i, err
 }

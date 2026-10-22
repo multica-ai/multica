@@ -202,6 +202,8 @@
     "grouping_section": "グループ化",
     "ordering_section": "並び替え",
     "card_properties_section": "カードのプロパティ",
+    "columns_section": "列",
+    "columns_locked_by_filter": "列を表示・非表示にするには、ステータスの絞り込みを解除してください。",
     "ascending_title": "昇順",
     "descending_title": "降順",
     "newest_first": "新しい順",
@@ -359,18 +361,13 @@
     "toggle_collapse": "レーンの開閉"
   },
   "board": {
-    "hidden_columns_label": "非表示の列",
     "hide_column": "列を非表示",
-    "show_column": "列を表示",
     "add_issue_tooltip": "タスクを追加",
     "empty_column": "タスクなし",
     "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード",
-    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。",
-    "filter_to_status": "このステータスで絞り込む",
-    "outside_workflow": "このボードのワークフローにはありません",
-    "workflow_columns_note": "ボードの列はワークフローで決まります。プロジェクト外のビューは Default を使います。"
+    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
   },
   "peek": {
     "panel_label": "タスクのプレビュー",
@@ -1494,7 +1491,7 @@
       "instructions": "引き継ぎの指示",
       "instructions_placeholder": "このステップで何をしますか？",
       "next": "完了したら移動",
-      "back": "修正が必要なら戻す先",
+      "back": "差し戻す先",
       "none_option": "指定しない",
       "save": "保存",
       "create": "作成",
@@ -1522,7 +1519,7 @@
       "target_squad": "スクワッド · リーダーが割り振り",
       "target_member": "メンバー",
       "instructions_hint": "今回の実行の指示として処理者に送られ、タスクの説明やコメントと一緒にコンテキストになります。",
-      "next_hint": "処理者が受け取る説明に書き込まれ、次にどのステータスへ変えるかを伝えます。実行が終わってもシステムはステータスを自動で進めません。",
+      "next_hint": "ステータスを変えるのは処理者です。差し戻しはやり直しが必要なときだけで、ブロッカーには使いません。実行が終わってもステータスは自動で変わりません。",
       "preview_brief": "エージェントが受け取る説明をプレビュー",
       "preview_title": "「{{status}}」ステップの説明",
       "preview_description": "タスクがこのステップに入ったとき、処理者の実行が受け取る内容です。プレビューに保存は不要です。",
@@ -1613,8 +1610,7 @@
     },
     "detail": {
       "follows_project": "（プロジェクトに従う）",
-      "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う",
-      "card_hint": "これらの列と引き継ぎはプロジェクトのワークフローで決まります。"
+      "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う"
     },
     "list_separator": "、",
     "handoff": {

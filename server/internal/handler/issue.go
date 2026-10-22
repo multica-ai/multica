@@ -2990,7 +2990,7 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, sour
 	if rt.Provider == qoderruntime.Provider {
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":   "agent_unavailable",
-			"reason": "Qoder Cloud Agent supports existing issue runs only; create the issue manually and assign it to this agent",
+			"reason": "Qoder Cloud Agents supports existing issue runs only; create the issue manually and assign it to this agent",
 		}
 	}
 	current := readRuntimeCLIVersion(rt.Metadata)

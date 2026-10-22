@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Agents",
-    "tagline": "Des coéquipiers IA qui prennent des tâches, commentent et mettent à jour les statuts.",
     "learn_more": "En savoir plus →",
     "new_agent": "Nouvel agent",
     "search_placeholder": "Rechercher des agents…",
@@ -377,7 +376,6 @@
       "aria": "Étapes de création de l'agent"
     },
     "configure_title": "Configurer l'agent",
-    "configure_description": "Donnez-lui un nom et des instructions. Tout reste modifiable ensuite.",
     "ask_ai": "Laisser l'IA rédiger",
     "change_runtime": "Changer",
     "runtime_label": "Runtime",
@@ -391,13 +389,9 @@
       "joined_squad": "Ajouté à l'escouade {{squad}}",
       "next": "Et ensuite",
       "assign_title": "Lui confier une première tâche",
-      "assign_description": "Créez un ticket assigné à cet agent.",
       "mention_title": "Le mentionner dans un ticket",
-      "mention_description": "Mentionnez @{{name}} dans un commentaire de ticket et il prend le travail en charge.",
       "squad_title": "L'ajouter à une escouade",
-      "squad_description": "Travailler avec d'autres agents, sous la répartition du chef d'escouade.",
       "open_squad_title": "Ouvrir {{squad}}",
-      "open_squad_description": "Voir l'escouade que cet agent vient de rejoindre.",
       "open_agent": "Ouvrir l'agent",
       "back_to_list": "Retour aux agents"
     },
@@ -439,7 +433,6 @@
       "member_connect": "Demandez à un admin de le connecter",
       "member_fix": "Demandez à un admin de corriger",
       "footer_selected": "Sélection :",
-      "footer_hint": "Choisissez un runtime pour continuer",
       "cancel": "Annuler",
       "next": "Suivant"
     }
@@ -511,7 +504,7 @@
   },
   "conversation_starters": {
     "label": "Amorces de conversation",
-    "hint": "Trois au maximum. En choisir une remplit le champ de saisie sans envoyer le message.",
+    "hint": "Proposées dans une nouvelle discussion avec cet agent. En choisir une remplit le champ de saisie sans envoyer le message.",
     "add": "Ajouter une suggestion",
     "item_label": "Libellé de la suggestion {{number}}",
     "prompt_label": "Prompt de la suggestion {{number}}",
@@ -520,13 +513,22 @@
     "incomplete": "Complétez ou supprimez chaque suggestion avant d'enregistrer.",
     "remove": "Supprimer la suggestion {{number}}",
     "preview_label": "Aperçu d'une nouvelle discussion",
-    "preview_defaults": "Voici les suggestions par défaut. Ajoutez une suggestion ci-dessus pour remplacer les trois."
+    "preview_defaults": "Voici les suggestions intégrées. Ajoutez les vôtres pour remplacer les trois.",
+    "create_hint": "Facultatif. Affichées dans une nouvelle discussion avec cet agent.",
+    "edit": "Modifier la suggestion {{number}}",
+    "remove_short": "Supprimer",
+    "done": "Terminé",
+    "untitled": "Suggestion sans titre",
+    "customize": "Personnaliser",
+    "defaults_summary_one": "{{count}} suggestion intégrée utilisée",
+    "defaults_summary_other": "{{count}} suggestions intégrées utilisées"
   },
   "tab_body": {
     "common": {
       "save": "Enregistrer",
       "add": "Ajouter",
-      "unsaved_changes": "Modifications non enregistrées"
+      "unsaved_changes": "Modifications non enregistrées",
+      "discard": "Annuler les modifications"
     },
     "instructions": {
       "intro": "Définissez le prompt système utilisé à chaque exécution. Markdown est pris en charge.",
@@ -538,7 +540,13 @@
       "system_layer_hide": "Masquer",
       "workspace_notes_label": "Notes de l'espace de travail",
       "workspace_notes_intro": "Ajoutez ci-dessous le contexte et les préférences de votre équipe. Ils s'appliquent par-dessus les instructions que Multica maintient pour cet agent. Le Markdown est pris en charge.",
-      "workspace_notes_placeholder": "Ajoutez le contexte que cet agent doit toujours avoir.\n\n# Exemple\nNotre dépôt principal est github.com/acme/platform.\nRédige les tâches en anglais même quand nous discutons en français.\nNous ne déployons pas le vendredi."
+      "workspace_notes_placeholder": "Ajoutez le contexte que cet agent doit toujours avoir.\n\n# Exemple\nNotre dépôt principal est github.com/acme/platform.\nRédige les tâches en anglais même quand nous discutons en français.\nNous ne déployons pas le vendredi.",
+      "mode_aria": "Mode de l'éditeur",
+      "mode_write": "Écrire",
+      "mode_preview": "Aperçu",
+      "preview_empty": "Rien à prévisualiser pour l'instant.",
+      "char_count_one": "{{count}} caractère",
+      "char_count_other": "{{count}} caractères"
     },
     "env": {
       "intro_readonly": "Injectées dans le processus de l'agent au lancement. Seuls les propriétaires et administrateurs de l'espace de travail peuvent lire ou modifier les valeurs ; chaque affichage et chaque modification sont consignés dans le journal d'audit de l'espace de travail.",

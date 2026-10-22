@@ -16,7 +16,7 @@ const ctx = vi.hoisted(() => ({
   capturedItems: [] as CapturedMenuItem[][],
   browserWindowFromWebContents: vi.fn(),
   popupSpy: vi.fn(),
-  clipboardWriteText: vi.fn(),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   openExternalSpy: vi.fn().mockResolvedValue(undefined),
   preferredLanguagesRef: { current: ["en-US"] as string[] },
 }));

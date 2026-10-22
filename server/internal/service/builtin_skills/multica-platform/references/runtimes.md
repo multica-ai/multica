@@ -175,7 +175,7 @@ Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
 checkout.
 
-## Qoder Cloud Agent bridge (PoC)
+## Qoder Cloud Agents bridge (PoC)
 
 A server-hosted `qoder-runtime` service can register the `qoder_cloud` provider.
 Bind a Multica agent to the runtime and set its `runtime_config.qoder_agent_id` to the selected QCA Agent ID. The Web/Desktop agent creation form and runtime configuration tab provide a name-based QCA Agent picker.
@@ -191,7 +191,7 @@ integration links the pull request. The service needs persistent state for
 restart recovery. Cancel from Multica to stop remote
 work; stopping the bridge process alone leaves remote execution running. Do not
 use `runtime update` to upgrade the bridge: deploy its binary through its service
-manager. For setup and recovery, consult the Qoder Cloud Agent section of the
+manager. For setup and recovery, consult the Qoder Cloud Agents section of the
 Multica runtime documentation or ask the deployment administrator.
 
 The bridge registers `runtime_mode=cloud`. Other daemons may omit
@@ -207,7 +207,7 @@ append-only behavior. The Qoder bridge uses its remote event IDs as these keys.
 Qoder Cloud bridge repository runs require `github_token_files` in its private JSON configuration, mapping each GitHub repository URL to a 0600 token file. Credentials are injected only into session creation requests, never into prompts or recovery state. Managed connections also support repository credential configuration in the runtime dialog.
 
 Workspace admins may also configure one managed QCA connection in **Runtimes →
-Add → Cloud services → Qoder Cloud Agent** (web and desktop). The server prerequisite is
+Add → Cloud services → Qoder Cloud Agents** (web and desktop). The server prerequisite is
 `MULTICA_VCS_SECRET_KEY`. The server
 supervises the bridge, encrypts credentials in the database, and supports idle
 stop/restart. Active tasks must finish or be cancelled before configuration

@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "エージェント",
-    "tagline": "タスクを引き受け、コメントし、ステータスを更新する AI チームメイトです。",
     "learn_more": "詳細はこちら →",
     "new_agent": "新規エージェント",
     "search_placeholder": "エージェントを検索...",
@@ -334,7 +333,7 @@
   },
   "conversation_starters": {
     "label": "会話の開始例",
-    "hint": "最大3件。選択すると入力欄に入り、送信はされません。",
+    "hint": "このエージェントとの新しいチャットに表示されます。選択すると入力欄に入り、送信はされません。",
     "add": "候補を追加",
     "item_label": "候補 {{number}} のラベル",
     "prompt_label": "候補 {{number}} のプロンプト",
@@ -343,13 +342,21 @@
     "incomplete": "各候補を完成させるか削除してから保存してください。",
     "remove": "候補 {{number}} を削除",
     "preview_label": "新しいチャットのプレビュー",
-    "preview_defaults": "これは組み込みの初期値です。上で候補を1件追加すると3件すべて置き換わります。"
+    "preview_defaults": "これは組み込みの候補です。独自の候補を追加すると3件すべて置き換わります。",
+    "create_hint": "任意。このエージェントとの新しいチャットに表示されます。",
+    "edit": "候補 {{number}} を編集",
+    "remove_short": "削除",
+    "done": "完了",
+    "untitled": "無題の候補",
+    "customize": "カスタマイズ",
+    "defaults_summary_other": "組み込みの候補 {{count}} 件を使用中"
   },
   "tab_body": {
     "common": {
       "save": "保存",
       "add": "追加",
-      "unsaved_changes": "保存していない変更"
+      "unsaved_changes": "保存していない変更",
+      "discard": "破棄"
     },
     "instructions": {
       "intro": "すべての実行で使用する System Prompt を設定します。Markdown に対応しています。",
@@ -361,7 +368,12 @@
       "system_layer_hide": "隠す",
       "workspace_notes_label": "ワークスペースの補足",
       "workspace_notes_intro": "チームのコンテキストや好みを下に追加してください。Multica がこのエージェント向けに管理している指示の上に適用されます。Markdown が使えます。",
-      "workspace_notes_placeholder": "このエージェントが常に知っておくべきことを書きます。\n\n# 例\nメインリポジトリは github.com/acme/platform です。\nチャットが日本語でも、タスクは英語で書いてください。\n金曜日はデプロイしません。"
+      "workspace_notes_placeholder": "このエージェントが常に知っておくべきことを書きます。\n\n# 例\nメインリポジトリは github.com/acme/platform です。\nチャットが日本語でも、タスクは英語で書いてください。\n金曜日はデプロイしません。",
+      "mode_aria": "エディターモード",
+      "mode_write": "編集",
+      "mode_preview": "プレビュー",
+      "preview_empty": "プレビューする内容がまだありません。",
+      "char_count_other": "{{count}} 文字"
     },
     "env": {
       "intro_readonly": "エージェントプロセスの起動時に注入されます。値の読み取りや編集ができるのはワークスペースのオーナーと admin のみで、すべての表示と編集はワークスペースの監査ログに記録されます。",
@@ -959,7 +971,6 @@
       "aria": "エージェント作成の手順"
     },
     "configure_title": "エージェントを設定",
-    "configure_description": "名前と指示を入力します。あとからいつでも変更できます。",
     "ask_ai": "AI に書いてもらう",
     "change_runtime": "変更",
     "runtime_label": "ランタイム",
@@ -973,13 +984,9 @@
       "joined_squad": "スクワッド {{squad}} に追加しました",
       "next": "次にすること",
       "assign_title": "最初のタスクを割り当てる",
-      "assign_description": "このエージェントを担当者にしてイシューを作成します。",
       "mention_title": "イシューでメンションする",
-      "mention_description": "イシューのコメントで @{{name}} とメンションすると、作業を引き受けます。",
       "squad_title": "スクワッドに追加",
-      "squad_description": "スクワッドリーダーの割り振りで、他のエージェントと一緒に働きます。",
       "open_squad_title": "{{squad}} を開く",
-      "open_squad_description": "このエージェントが加わったスクワッドを表示します。",
       "open_agent": "エージェントを開く",
       "back_to_list": "エージェント一覧に戻る"
     },
@@ -1018,7 +1025,6 @@
       "member_connect": "管理者に接続を依頼してください",
       "member_fix": "管理者に対応を依頼してください",
       "footer_selected": "選択中：",
-      "footer_hint": "続行するにはランタイムを選択してください",
       "cancel": "キャンセル",
       "next": "次へ"
     }

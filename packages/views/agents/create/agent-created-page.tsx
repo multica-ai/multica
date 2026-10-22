@@ -91,7 +91,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
             <DoneAction
               icon={ListPlus}
               title={t(($) => $.creation_studio.done.assign_title)}
-              description={t(($) => $.creation_studio.done.assign_description)}
               primary
               disabled={!agent}
               onClick={() =>
@@ -104,7 +103,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
             <DoneAction
               icon={AtSign}
               title={t(($) => $.creation_studio.done.mention_title)}
-              description={t(($) => $.creation_studio.done.mention_description, { name })}
               href={paths.issues()}
             />
             <DoneAction
@@ -113,11 +111,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
                 squad
                   ? t(($) => $.creation_studio.done.open_squad_title, { squad: squad.name })
                   : t(($) => $.creation_studio.done.squad_title)
-              }
-              description={
-                squad
-                  ? t(($) => $.creation_studio.done.open_squad_description)
-                  : t(($) => $.creation_studio.done.squad_description)
               }
               href={squad ? paths.squadDetail(squad.id) : paths.squads()}
             />
@@ -147,7 +140,6 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
 function DoneAction({
   icon: Icon,
   title,
-  description,
   primary = false,
   disabled = false,
   href,
@@ -155,7 +147,6 @@ function DoneAction({
 }: {
   icon: typeof ListPlus;
   title: string;
-  description: string;
   primary?: boolean;
   disabled?: boolean;
   href?: string;
@@ -177,10 +168,7 @@ function DoneAction({
       >
         <Icon aria-hidden="true" className="size-4" />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-body font-medium">{title}</span>
-        <span className="block text-caption text-muted-foreground">{description}</span>
-      </span>
+      <span className="min-w-0 flex-1 text-body font-medium">{title}</span>
       <ArrowRight
         aria-hidden="true"
         className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"

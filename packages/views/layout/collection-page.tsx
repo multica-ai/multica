@@ -53,12 +53,12 @@ export function CollectionPageHeader({
             {count}
           </span>
         ) : null}
-        {description ? (
+        {description || learnMore ? (
           <p className="ml-2 hidden min-w-0 truncate text-caption text-muted-foreground md:block">
             {description}
             {learnMore ? (
               <>
-                {" "}
+                {description ? " " : null}
                 <a
                   href={learnMore.href}
                   target="_blank"

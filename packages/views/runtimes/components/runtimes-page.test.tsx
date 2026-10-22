@@ -162,7 +162,7 @@ describe("RuntimesPage", () => {
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("Connected · Jiayuan's MacBook")).toBeInTheDocument();
     expect(within(menu).getByText("Other machine or server")).toBeInTheDocument();
-    expect(within(menu).getByText("Qoder Cloud Agent")).toBeInTheDocument();
+    expect(within(menu).getByText("Qoder Cloud Agents")).toBeInTheDocument();
     expect(within(menu).getByText("By Qoder")).toBeInTheDocument();
   });
 
@@ -187,7 +187,7 @@ describe("RuntimesPage", () => {
     await user.click(screen.getByRole("button", { name: /^Offline/ }));
     expect(screen.getByText("build-server")).toBeInTheDocument();
     expect(screen.queryByText("dev-machine.local")).not.toBeInTheDocument();
-    expect(screen.queryByText("Qoder Cloud Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Qoder Cloud Agents")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^All/ }));
     await user.type(screen.getByRole("textbox"), "zzz");
@@ -200,7 +200,7 @@ describe("RuntimesPage", () => {
     const qoderRuntime = makeRuntime({
       id: "rt-qoder",
       daemon_id: "qoder-managed-ws-test",
-      name: "Qoder Cloud Agent",
+      name: "Qoder Cloud Agents",
       provider: "qoder_cloud",
       runtime_mode: "cloud",
       device_info: "",
@@ -214,7 +214,7 @@ describe("RuntimesPage", () => {
         connection,
       });
       expect(screen.getByText("dev-machine.local")).toBeInTheDocument();
-      expect(screen.queryAllByText("Qoder Cloud Agent")).toHaveLength(
+      expect(screen.queryAllByText("Qoder Cloud Agents")).toHaveLength(
         connection.available ? 1 : 0,
       );
       expect(screen.getByRole("button", { name: /^All/ })).toHaveTextContent(

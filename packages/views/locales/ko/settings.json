@@ -677,8 +677,7 @@
     },
     "system": {
       "title": "시스템 알림",
-      "description": "Multica가 백그라운드에 있을 때 시스템 알림을 표시합니다.",
-      "label": "시스템 알림 표시"
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",

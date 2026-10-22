@@ -273,7 +273,6 @@ describe("Issues cold-load render loop (MUL-4985)", () => {
       <BoardView
         issues={issues}
         visibleStatuses={["todo", "in_progress", "done"]}
-        hiddenStatuses={[]}
         onMoveIssue={vi.fn()}
       />,
     );

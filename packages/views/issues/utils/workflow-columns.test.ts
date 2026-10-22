@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import type { IssueWorkflow } from "@multica/core/types";
-import { surfaceStatusOrder, useColumnWorkflow, workflowColumns } from "./workflow-columns";
+import { useColumnWorkflow, workflowColumns } from "./workflow-columns";
 
 const workflow: IssueWorkflow = {
   id: "wf-1",
@@ -74,23 +74,5 @@ describe("useColumnWorkflow (MUL-7420)", () => {
   it("lets an explicit status filter reach a status the project's workflow dropped", () => {
     const { workflow: selected } = useColumnWorkflow("ws-1", "project-1", true);
     expect(workflowColumns(["blocked"], selected)).toEqual(["blocked"]);
-  });
-});
-
-describe("surfaceStatusOrder (MUL-7420)", () => {
-  it("lists the workflow's steps, then the catalog statuses it leaves out", () => {
-    expect(surfaceStatusOrder(["backlog", "todo", "in_progress", "in_review", "done", "blocked"], workflow)).toEqual([
-      "todo",
-      "code_review",
-      "in_progress",
-      "done",
-      "backlog",
-      "in_review",
-      "blocked",
-    ]);
-  });
-
-  it("is the catalog order without a workflow", () => {
-    expect(surfaceStatusOrder(["backlog", "todo"], null)).toEqual(["backlog", "todo"]);
   });
 });

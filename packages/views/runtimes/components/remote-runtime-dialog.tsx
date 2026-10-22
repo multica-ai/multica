@@ -11,7 +11,7 @@ import { useT } from "../../i18n";
 import { QoderConfiguration } from "./qoder-configuration";
 
 /**
- * Connects the workspace's Qoder Cloud Agent. An existing connection is
+ * Connects the workspace's Qoder Cloud Agents. An existing connection is
  * managed on its runtime page instead.
  */
 export function RemoteRuntimeDialog({

@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "智能体",
-    "tagline": "能领取任务、留下评论、推进状态的 AI 队友。",
     "learn_more": "了解更多 →",
     "new_agent": "新建智能体",
     "search_placeholder": "搜索智能体...",
@@ -367,7 +366,6 @@
       "aria": "创建智能体步骤"
     },
     "configure_title": "配置智能体",
-    "configure_description": "给它起个名字，写下指令。之后都可以再改。",
     "ask_ai": "让 AI 帮我写",
     "change_runtime": "更换",
     "runtime_label": "运行时",
@@ -381,13 +379,9 @@
       "joined_squad": "已加入小队：{{squad}}",
       "next": "接下来",
       "assign_title": "指派第一个任务",
-      "assign_description": "新建一个任务，负责人设为这个智能体。",
       "mention_title": "在任务里 @ 它",
-      "mention_description": "在任何任务的评论里 @{{name}}，它会接手处理。",
       "squad_title": "加入小队",
-      "squad_description": "和其他智能体一起，由小队负责人分派。",
       "open_squad_title": "打开 {{squad}}",
-      "open_squad_description": "查看它刚加入的小队。",
       "open_agent": "打开智能体",
       "back_to_list": "返回智能体列表"
     },
@@ -426,7 +420,6 @@
       "member_connect": "需要管理员连接",
       "member_fix": "需要管理员处理",
       "footer_selected": "已选：",
-      "footer_hint": "选择一个运行时以继续",
       "cancel": "取消",
       "next": "下一步"
     }
@@ -497,7 +490,7 @@
   },
   "conversation_starters": {
     "label": "对话开场建议",
-    "hint": "最多三条。点击后填入输入框，不会发送。",
+    "hint": "新建对话时显示。点击后填入输入框，不会发送。",
     "add": "添加建议",
     "item_label": "建议 {{number}} 的标题",
     "prompt_label": "建议 {{number}} 的提示词",
@@ -506,13 +499,21 @@
     "incomplete": "请填写完整或移除每条建议后再保存。",
     "remove": "移除建议 {{number}}",
     "preview_label": "新对话预览",
-    "preview_defaults": "以上是内置的默认值。在上方添加一条建议即可整组替换。"
+    "preview_defaults": "以上是内置建议。添加你自己的建议即可整组替换。",
+    "create_hint": "可选。新建与这个智能体的对话时显示。",
+    "edit": "编辑建议 {{number}}",
+    "remove_short": "移除",
+    "done": "完成",
+    "untitled": "未命名建议",
+    "customize": "自定义",
+    "defaults_summary_other": "正在使用 {{count}} 条内置建议"
   },
   "tab_body": {
     "common": {
       "save": "保存",
       "add": "添加",
-      "unsaved_changes": "未保存的修改"
+      "unsaved_changes": "未保存的修改",
+      "discard": "放弃修改"
     },
     "instructions": {
       "intro": "设置每次运行都会使用的 System Prompt，支持 Markdown。",
@@ -524,7 +525,12 @@
       "system_layer_hide": "收起",
       "workspace_notes_label": "工作区补充",
       "workspace_notes_intro": "在下面补充你们团队的上下文和偏好，它们会叠加在 Multica 为这个智能体维护的指令之上。支持 Markdown。",
-      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
+      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。",
+      "mode_aria": "编辑模式",
+      "mode_write": "编辑",
+      "mode_preview": "预览",
+      "preview_empty": "还没有可预览的内容。",
+      "char_count_other": "{{count}} 个字符"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",

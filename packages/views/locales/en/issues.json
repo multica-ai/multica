@@ -206,6 +206,8 @@
     "grouping_section": "Grouping",
     "ordering_section": "Ordering",
     "card_properties_section": "Card properties",
+    "columns_section": "Columns",
+    "columns_locked_by_filter": "Clear the status filter to show or hide columns.",
     "ascending_title": "Ascending",
     "descending_title": "Descending",
     "newest_first": "Newest first",
@@ -363,18 +365,13 @@
     "toggle_collapse": "Toggle lane"
   },
   "board": {
-    "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
-    "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
     "empty_grouping": "No matching issues",
     "no_value": "No value",
     "ordered_by": "Board ordered by {{field}}",
-    "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column.",
-    "filter_to_status": "Filter to this status",
-    "outside_workflow": "Not in this board’s workflow",
-    "workflow_columns_note": "Columns come from the board’s workflow; views outside a project use Default."
+    "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column."
   },
   "peek": {
     "panel_label": "Issue preview",
@@ -1549,7 +1546,7 @@
       "instructions": "Handoff instructions",
       "instructions_placeholder": "What should happen in this step?",
       "next": "When done, move to",
-      "back": "When changes are needed, move back to",
+      "back": "If rejected, send back to",
       "none_option": "Not set",
       "save": "Save",
       "create": "Create",
@@ -1578,7 +1575,7 @@
       "target_squad": "Squad · leader dispatches",
       "target_member": "Member",
       "instructions_hint": "Sent to the handler with this run, alongside the issue description and comments.",
-      "next_hint": "Written into the handler’s brief so it knows which status comes next. The system never advances the status when a run ends.",
+      "next_hint": "The handler moves the issue itself and sends it back only for rework, not blockers. A run ending never changes the status.",
       "preview_brief": "Preview the agent’s brief",
       "preview_title": "Brief for the “{{status}}” step",
       "preview_description": "What the handler’s run receives when an issue enters this step. Saved changes are not required to preview.",
@@ -1678,8 +1675,7 @@
     },
     "detail": {
       "follows_project": "(from project)",
-      "card_title": "{{workflow}} · from {{project}}",
-      "card_hint": "The project’s workflow decides these columns and handoffs."
+      "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
     "handoff": {

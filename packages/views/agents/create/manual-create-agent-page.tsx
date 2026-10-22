@@ -212,14 +212,9 @@ export function ManualCreateAgentPage() {
           )}
           {!duplicateId ? (
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="text-title font-semibold tracking-tight">
-                  {t(($) => $.creation_studio.configure_title)}
-                </h2>
-                <p className="mt-1 text-body text-muted-foreground">
-                  {t(($) => $.creation_studio.configure_description)}
-                </p>
-              </div>
+              <h2 className="min-w-0 text-title font-semibold tracking-tight">
+                {t(($) => $.creation_studio.configure_title)}
+              </h2>
               {canAskAi ? (
                 <div className="flex flex-col items-end gap-1">
                   <Button

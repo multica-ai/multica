@@ -42,6 +42,7 @@ import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssuePeekHost } from "../components/issue-peek";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
+import { ColumnStatusesProvider } from "./column-statuses-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
@@ -261,6 +262,7 @@ function IssueSurfaceContent({
           actions. */}
       <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
+      <ColumnStatusesProvider statuses={controller.columnStatuses}>
         {renderHeader ? (
           renderHeader(renderContext)
         ) : (
@@ -334,7 +336,6 @@ function IssueSurfaceContent({
               <BoardView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -348,7 +349,6 @@ function IssueSurfaceContent({
               <ListView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
@@ -378,7 +378,6 @@ function IssueSurfaceContent({
                 unfilteredIssues={swimlaneIssues}
                 activeFilters={controller.activeFilters}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -397,6 +396,7 @@ function IssueSurfaceContent({
             }
           />
         )}
+      </ColumnStatusesProvider>
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>

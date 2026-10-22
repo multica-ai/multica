@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "运行时",
-    "tagline": "智能体在这些机器和云服务上执行任务。",
     "learn_more": "了解更多 →",
     "connect_remote": "添加机器",
     "search_placeholder": "搜索...",
@@ -510,7 +509,7 @@
   },
   "qoder": {
     "title": "QCA 运行时",
-    "description": "连接 Qoder Cloud Agent，由 Multica 管理执行并加密保存凭证。工作区管理员可修改配置。",
+    "description": "连接 Qoder Cloud Agents，由 Multica 管理执行并加密保存凭证。工作区管理员可修改配置。",
     "loading": "加载中...",
     "unavailable": "请先在服务端配置 MULTICA_VCS_SECRET_KEY。",
     "online": "在线",
@@ -524,7 +523,7 @@
     "region_hint": "选择创建 PAT 的站点，PAT 只能在对应区域使用。",
     "keep_secret": "留空保留已保存的凭证",
     "repositories": "GitHub 仓库授权",
-    "repositories_hint": "为每个仓库绑定凭证，在项目中选择仓库和起始分支。服务端不会返回凭证明文。",
+    "repositories_hint": "为每个仓库绑定凭证，在项目中选择仓库和起始分支。",
     "remove": "移除",
     "add_repository": "添加仓库",
     "saved": "已保存，服务端将自动启动运行时。",
@@ -548,7 +547,7 @@
     "save_agent": "保存关联",
     "agent_saved": "已保存 QCA 智能体关联",
     "agent_save_failed": "无法保存 QCA 智能体关联",
-    "cloud_title": "Qoder Cloud Agent",
+    "cloud_title": "Qoder Cloud Agents",
     "managed": "托管服务",
     "cloud_description": "使用共享连接在 Qoder 云端运行智能体，无需维护本地主机。",
     "configure_credentials": "配置凭证",
@@ -589,27 +588,26 @@
       "execution_summary": "最多同时 {{concurrency}} 个 · 单次超时 {{timeout}} 分钟"
     },
     "stop_confirm": {
-      "title": "暂停 Qoder Cloud Agent？",
+      "title": "暂停 Qoder Cloud Agents？",
       "description": "恢复之前，新任务不会再发给 Qoder。",
       "cancel": "取消",
       "description_agents_other": "下面 {{count}} 个智能体会保留指令和历史，但在恢复 Qoder 或更换运行时之前无法接新任务。"
     },
-    "connect_title": "连接 Qoder Cloud Agent",
-    "connect_description": "用 Qoder PAT 连接一次。Multica 会在 Qoder 的沙箱里执行任务，凭证加密保存。",
+    "connect_title": "连接 Qoder Cloud Agents",
+    "connect_description": "Multica 会在 Qoder 的沙箱里执行任务。",
     "page": {
       "configuration": "配置",
       "agents_title": "智能体",
       "pause_title": "暂停 Qoder",
       "pause_hint": "不再向 Qoder 派发新任务。凭证和智能体都会保留，可以随时恢复。",
       "resume_title": "恢复 Qoder",
-      "resume_hint": "使用已保存的配置重新开始接任务。",
       "resume": "恢复",
       "resumed": "Qoder 正在启动。",
       "disconnect_title": "断开 Qoder",
       "disconnect_hint": "删除已保存的 PAT 和仓库令牌，并移除这个运行时。使用它的智能体会被解绑，历史保留。",
       "disconnect": "断开连接",
       "not_connected_title": "Qoder 尚未连接",
-      "not_connected_hint": "请工作区管理员连接 Qoder Cloud Agent。",
+      "not_connected_hint": "请工作区管理员连接 Qoder Cloud Agents。",
       "workload_idle": "空闲",
       "connection_title": "连接",
       "edit": "编辑",
@@ -632,7 +630,7 @@
       "minutes_other": "{{count}} 分钟"
     },
     "disconnect_confirm": {
-      "title": "断开 Qoder Cloud Agent？",
+      "title": "断开 Qoder Cloud Agents？",
       "description": "已保存的 PAT 和仓库令牌会被删除，Qoder 运行时会被移除。之后要再用 Qoder，需要重新连接。",
       "description_agents_other": "下面 {{count}} 个智能体会被解绑，保留指令和历史，之后可以换到其他运行时。",
       "plan_changed": "Qoder 上的智能体有变化，请确认最新列表后再操作。",

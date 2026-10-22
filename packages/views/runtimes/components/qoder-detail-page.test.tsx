@@ -153,7 +153,7 @@ describe("isQoderLocator", () => {
 it("shows the connection with its agents and no machine-level controls", async () => {
   const client = mount();
   expect(
-    await screen.findByRole("heading", { name: "Qoder Cloud Agent" }),
+    await screen.findByRole("heading", { name: "Qoder Cloud Agents" }),
   ).toBeInTheDocument();
   expect(await screen.findByText("Web environment")).toBeInTheDocument();
   expect(screen.getByText("acme/web")).toBeInTheDocument();
@@ -178,7 +178,7 @@ it("asks before pausing and names the agents it strands", async () => {
   const client = mount();
   fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
   const dialog = await screen.findByRole("alertdialog");
-  expect(within(dialog).getByText("Pause Qoder Cloud Agent?")).toBeInTheDocument();
+  expect(within(dialog).getByText("Pause Qoder Cloud Agents?")).toBeInTheDocument();
   expect(within(dialog).getByText("Reviewer")).toBeInTheDocument();
   expect(mocks.stopQoderConnection).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Pause" }));

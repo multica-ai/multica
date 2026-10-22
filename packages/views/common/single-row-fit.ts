@@ -14,11 +14,11 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
  * never depends on what is currently mounted for real — no feedback
  * loop between measurement and rendering.
  *
- * Rule: the longest prefix that fits alongside `reserve` px of trailing
- * chrome wins. `reserve` must cover everything that is ALWAYS rendered
- * after the items (triggers, menus) — it is subtracted even when every
- * item fits, otherwise a row that exactly fits its items clips the
- * chrome off the end.
+ * Rule: the longest prefix that fits alongside its trailing chrome wins.
+ * `reserve` returns the chrome width for a candidate fit count, including
+ * permanent menus even when every item fits. Resolve both from the same
+ * measurement before updating state, so overflow controls cannot feed a
+ * stale fit back into a later render.
  *
  * Remeasures on container resize (ResizeObserver) and after every
  * commit (labels/items change the mirror); state only updates when the
@@ -33,8 +33,8 @@ export function useSingleRowFit({
   count: number;
   /** Horizontal gap between items in px (the container's `gap`). */
   gap: number;
-  /** Width in px to hold back for the overflow trigger. */
-  reserve: number;
+  /** Trailing chrome width in px for a candidate number of fitting items. */
+  reserve: (fitCount: number) => number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const measureRef = useRef<HTMLDivElement | null>(null);
@@ -49,19 +49,17 @@ export function useSingleRowFit({
       (child) => (child as HTMLElement).offsetWidth,
     );
 
-    let used = 0;
-    let next = 0;
-    for (let i = 0; i < widths.length; i++) {
-      const withItem = used + (i > 0 ? gap : 0) + widths[i]!;
-      if (withItem + gap + reserve > available) break;
-      used = withItem;
-      next = i + 1;
+    let next = widths.length;
+    let used =
+      widths.reduce((sum, width) => sum + width, 0) + Math.max(0, next - 1) * gap;
+    while (next > 0 && used + gap + reserve(next) > available) {
+      next--;
+      used -= widths[next]! + (next > 0 ? gap : 0);
     }
     setFitCount((current) => (current === next ? current : next));
   }, [gap, reserve]);
 
   // After every commit: the mirror just re-rendered with current labels.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberate every-commit measure; the setState inside is change-guarded
   useLayoutEffect(() => {
     recompute();
   });

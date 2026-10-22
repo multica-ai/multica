@@ -1,4 +1,4 @@
-# Qoder Cloud Agent runtime bridge (PoC)
+# Qoder Cloud Agents runtime bridge (PoC)
 
 This standalone service registers a `qoder_cloud` runtime in one Multica
 workspace. Bind a Multica agent to that runtime and assign it an issue. The
@@ -42,7 +42,7 @@ store. Do not commit tokens to source control.
 | `QODER_CLOUD_TOKEN` | Qoder PAT with access to the configured agent/environment |
 | `QODER_CLOUD_ENVIRONMENT_ID` | Existing managed Qoder Environment ID |
 | `QODER_BRIDGE_STATE_DIR` | Dedicated persistent directory, writable by the service user |
-| `QODER_BRIDGE_NAME` | Optional display name; defaults to `Qoder Cloud Agent` |
+| `QODER_BRIDGE_NAME` | Optional display name; defaults to `Qoder Cloud Agents` |
 
 Alternatively, copy `config.example.json` to a private location, set its fields,
 and restrict it with `chmod 600`. File fields override the environment; missing
@@ -186,9 +186,9 @@ the administrator chooses **Update credentials**. The quick-add dialog creates a
 Multica agent linked to an existing QCA Agent and uses the configured environment.
 
 
-Workspace administrators can open **Runtimes → Add → Cloud services → Qoder Cloud Agent** to configure one
+Workspace administrators can open **Runtimes → Add → Cloud services → Qoder Cloud Agents** to configure one
 managed QCA connection per workspace, load environments from the PAT and check environment access, bind GitHub
-repository tokens, and **Connect**. The Qoder Cloud Agent page can later **Pause** an idle runtime, resume it, or
+repository tokens, and **Connect**. The Qoder Cloud Agents page can later **Pause** an idle runtime, resume it, or
 **Disconnect** it. The menu entry only appears when the server has `MULTICA_VCS_SECRET_KEY` set. The existing project
 resource picker selects the repository and starting branch. The managed form
 offers Qoder's official regions, `https://api.qoder.com/api/v1/cloud` (Global) and

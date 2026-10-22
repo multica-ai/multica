@@ -130,14 +130,14 @@ func TestUpdateAgentRuntime_CustomNameMachineFanout(t *testing.T) {
 func registerRuntimeOnDaemon(t *testing.T, daemonID, provider string) map[string]any {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    daemonID,
 		"device_name":  "host",
 		"runtimes": []map[string]any{
 			{"name": provider + " (host)", "type": provider, "version": "1.0.0", "status": "online"},
 		},
-	}, testWorkspaceID, daemonID)
+	})
 	testHandler.DaemonRegister(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("register %s: expected 200, got %d: %s", provider, w.Code, w.Body.String())

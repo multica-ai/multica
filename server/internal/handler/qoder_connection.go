@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -590,8 +591,19 @@ func (h *Handler) qoderReady(ctx context.Context, ws string, revision int64, run
 }
 
 func (h *Handler) qoderCredentialAllowed(r *http.Request, ws, daemonID string) (bool, error) {
+	// Prefer the hash DaemonAuth recorded for the authenticating token: a WS
+	// RPC replays the request in-process without an Authorization header
+	// (MUL-8154). Fall back to the header for callers outside DaemonAuth.
+	tokenHash := middleware.DaemonTokenHashFromContext(r.Context())
+	if tokenHash == "" {
+		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if raw == "" {
+			return false, nil
+		}
+		tokenHash = auth.HashToken(raw)
+	}
 	var allowed bool
-	err := h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection c JOIN daemon_token d ON d.id=c.token_id JOIN member m ON m.workspace_id=c.workspace_id AND m.user_id=c.owner_id WHERE c.provider='qoder_cloud' AND c.workspace_id=$1 AND c.enabled AND d.daemon_id=$2 AND d.token_hash=$3 AND d.expires_at>now() AND m.role IN ('owner','admin'))`, ws, daemonID, auth.HashToken(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))).Scan(&allowed)
+	err := h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection c JOIN daemon_token d ON d.id=c.token_id JOIN member m ON m.workspace_id=c.workspace_id AND m.user_id=c.owner_id WHERE c.provider='qoder_cloud' AND c.workspace_id=$1 AND c.enabled AND d.daemon_id=$2 AND d.token_hash=$3 AND d.expires_at>now() AND m.role IN ('owner','admin'))`, ws, daemonID, tokenHash).Scan(&allowed)
 	return allowed, err
 }
 

@@ -668,6 +668,7 @@ type DaemonToken struct {
 	DaemonID    string             `json:"daemon_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
 }
 
 type DingtalkBotIdentity struct {
