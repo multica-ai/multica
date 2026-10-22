@@ -1,8 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { LandingHeader } from "./landing-header";
-import { LandingFooter } from "./landing-footer";
+import { SiteHeader } from "../site/site-header";
+import { SiteFooter } from "../site/site-footer";
 import { InlineLinks } from "./inline-links";
 import type { DocumentSection } from "../i18n";
 
@@ -21,7 +21,7 @@ export function DocumentPage({
 }) {
   return (
     <>
-      <LandingHeader variant="light" />
+      <SiteHeader />
       <main className="bg-white text-[#0a0d12]">
         <article className="mx-auto max-w-[720px] px-4 py-16 sm:px-6 sm:py-20 lg:py-24">
           <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
@@ -40,7 +40,7 @@ export function DocumentPage({
           {children}
         </article>
       </main>
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }

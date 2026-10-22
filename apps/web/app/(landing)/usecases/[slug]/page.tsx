@@ -3,8 +3,8 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cn } from "@multica/ui/lib/utils";
-import { LandingHeader } from "@/features/landing/components/landing-header";
-import { LandingFooter } from "@/features/landing/components/landing-footer";
+import { SiteHeader } from "@/features/landing/site/site-header";
+import { SiteFooter } from "@/features/landing/site/site-footer";
 import { Screenshot } from "@/features/landing/components/mdx/screenshot";
 import { getUseCasePageForLocale } from "@/lib/use-cases-source";
 import {
@@ -219,9 +219,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
 
   return (
     <>
-      <div className="sticky top-0 z-40 bg-white">
-        <LandingHeader variant="light" />
-      </div>
+      <SiteHeader />
       <main className="bg-white text-[#0a0d12]">
         <div
           className={cn(
@@ -268,7 +266,7 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
           ) : null}
         </div>
       </main>
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }

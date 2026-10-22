@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { LandingHeader } from "@/features/landing/components/landing-header";
-import { LandingFooter } from "@/features/landing/components/landing-footer";
+import { SiteHeader } from "@/features/landing/site/site-header";
+import { SiteFooter } from "@/features/landing/site/site-footer";
 import { DownloadHero } from "@/features/landing/components/download/hero";
 import { AllPlatforms } from "@/features/landing/components/download/all-platforms";
 import { CliSection } from "@/features/landing/components/download/cli-section";
@@ -37,20 +37,12 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
 
   return (
     <>
-      {/* Positioning context for the dark-variant LandingHeader —
-          mirrors multica-landing.tsx. The header is `absolute top-0
-          inset-x-0`, so it anchors to this `relative` wrapper and
-          scrolls off together with the dark hero below. Without the
-          wrapper, `absolute` would escape to the initial containing
-          block and read as fixed. */}
-      <div className="relative">
-        <LandingHeader variant="dark" />
-        <DownloadHero
-          detected={detected}
-          assets={release.assets}
-          versionUnavailable={versionUnavailable}
-        />
-      </div>
+      <SiteHeader />
+      <DownloadHero
+        detected={detected}
+        assets={release.assets}
+        versionUnavailable={versionUnavailable}
+      />
 
       <AllPlatforms
         assets={release.assets}
@@ -62,7 +54,7 @@ export function DownloadClient({ release }: { release: LatestRelease }) {
         version={release.version}
         releaseHtmlUrl={releaseHtmlUrl}
       />
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }

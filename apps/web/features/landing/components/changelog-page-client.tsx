@@ -7,8 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { LandingHeader } from "./landing-header";
-import { LandingFooter } from "./landing-footer";
+import { SiteHeader } from "../site/site-header";
+import { SiteFooter } from "../site/site-footer";
 import { useLocale } from "../i18n";
 import type { Locale } from "../i18n/types";
 
@@ -181,7 +181,7 @@ export function ChangelogPageClient() {
 
   return (
     <>
-      <LandingHeader variant="light" />
+      <SiteHeader />
       <main className="bg-white text-[#0a0d12]">
         <div className="mx-auto max-w-[1080px] px-4 py-16 sm:px-6 sm:py-20 lg:py-24">
           <div className="lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-16">
@@ -329,7 +329,7 @@ export function ChangelogPageClient() {
           </div>
         </div>
       </main>
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }

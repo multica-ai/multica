@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { LandingHeader } from "./landing-header";
-import { LandingFooter } from "./landing-footer";
+import { SiteHeader } from "../site/site-header";
+import { SiteFooter } from "../site/site-footer";
 import { useLocale } from "../i18n";
 
 type SubmitState =
@@ -153,7 +153,7 @@ export function ContactSalesPageClient() {
 
   return (
     <>
-      <LandingHeader variant="light" />
+      <SiteHeader />
       <main className="bg-[#f7f8fa] text-[#0a0d12]">
         <div
           ref={successAnchorRef}
@@ -187,7 +187,7 @@ export function ContactSalesPageClient() {
           )}
         </div>
       </main>
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }
