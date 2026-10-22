@@ -27,6 +27,8 @@ const (
 	testFutureDefID    = "afafafaf-1111-4111-8111-111111111111"
 	testScoreGtDefID   = "bcbcbcbc-1111-4111-8111-111111111111"
 	testRiskDefID      = "bdbdbdbd-1111-4111-8111-111111111111"
+	testTagsDefID      = "bebebebe-1111-4111-8111-111111111111"
+	testLinksDefID     = "bfbfbfbf-1111-4111-8111-111111111111"
 )
 
 func propertyFilterTestCatalog() []propertyDTO {
@@ -52,7 +54,10 @@ func propertyFilterTestCatalog() []propertyDTO {
 	// reachable by UUID, an interior > still works under =.
 	scoreGt := propertyDTO{ID: testScoreGtDefID, Name: "Score>", Type: "number"}
 	risk := propertyDTO{ID: testRiskDefID, Name: "Risk>Reward", Type: "text"}
-	return []propertyDTO{impact, blocked, notes, archived, platforms, reviewer, score, shipDate, spec, future, scoreGt, risk}
+	// Free-form list types are equality-only, like PROPERTY_FILTER_OPS_BY_TYPE.
+	tags := propertyDTO{ID: testTagsDefID, Name: "Tags", Type: "multi_text"}
+	links := propertyDTO{ID: testLinksDefID, Name: "Links", Type: "multi_url"}
+	return []propertyDTO{impact, blocked, notes, archived, platforms, reviewer, score, shipDate, spec, future, scoreGt, risk, tags, links}
 }
 
 // newPropertyFilterTestServer serves the fixed property catalog and captures
@@ -146,6 +151,14 @@ func TestRunIssueListSendsPropertyFilter(t *testing.T) {
 			name:  "repeated property flags OR into one definition",
 			flags: []string{"Impact=High", "impact=Medium"},
 			want:  map[string][]any{testImpactDefID: {testImpactHighID, testImpactMediumID}},
+		},
+		{
+			name:  "free-form list types keep equality",
+			flags: []string{"Tags=alpha", "Links=https://a.example"},
+			want: map[string][]any{
+				testTagsDefID:  {"alpha"},
+				testLinksDefID: {"https://a.example"},
+			},
 		},
 		{
 			name:  "duplicate resolved values collapse",
@@ -424,6 +437,10 @@ func TestRunIssueListPropertyFilterErrors(t *testing.T) {
 		{"comparison on a select names the type", []string{"Impact>=Medium"}, "select properties only support ="},
 		{"comparison on a checkbox", []string{"Blocked>true"}, "checkbox properties only support ="},
 		{"comparison on an actor", []string{"Reviewer>x"}, "actor properties only support ="},
+		{"contains on a multi_text is equality-only", []string{"Tags~=alpha"}, "multi_text properties only support ="},
+		{"comparison on a multi_text", []string{"Tags>1"}, "multi_text properties only support ="},
+		{"contains on a multi_url is equality-only", []string{"Links~=example"}, "multi_url properties only support ="},
+		{"comparison on a multi_url", []string{"Links<x"}, "multi_url properties only support ="},
 		{"comparison on text lists contains", []string{"Notes>3"}, "text properties support ~="},
 		{"contains on a number lists the comparisons", []string{"Score~=3"}, "number properties support >, >=, <, <="},
 		{"contains on a date lists the comparisons", []string{"Ship Date~=2026"}, "date properties support >, <"},

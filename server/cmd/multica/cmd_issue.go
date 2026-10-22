@@ -229,8 +229,9 @@ var issueListCmd = &cobra.Command{
 	Long: "List issues in the workspace.\n\n" +
 		"--property filters by a custom property, one member per flag. \"Name=Value\" is\n" +
 		"equality; the value is an option name or id (select, multi_select), true or\n" +
-		"false (checkbox), a member name, email or id (actor types), or the stored value\n" +
-		"itself (text, url, number, date as YYYY-MM-DD). Comparisons use the same flag:\n" +
+		"false (checkbox), a member name, email or id (actor types), one list entry\n" +
+		"(multi_text, multi_url), or the stored value itself (text, url, number, date as\n" +
+		"YYYY-MM-DD). Comparisons use the same flag:\n" +
 		"  number    \"Score>3\"  \"Score>=3\"  \"Score<3\"  \"Score<=3\"\n" +
 		"  date      \"Ship Date>2026-01-01\" (after)  \"Ship Date<2026-01-01\" (before)\n" +
 		"  text/url  \"Notes~=review\" (contains, case-insensitive; the needle is sent as typed)\n" +

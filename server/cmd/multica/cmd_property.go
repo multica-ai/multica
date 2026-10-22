@@ -1084,6 +1084,8 @@ var propertyFilterOperators = map[string]map[string]string{
 	"checkbox":     {},
 	"actor":        {},
 	"multi_actor":  {},
+	"multi_text":   {},
+	"multi_url":    {},
 }
 
 // propertyFilterSpellings orders the comparison forms for error messages.
