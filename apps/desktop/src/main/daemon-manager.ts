@@ -52,6 +52,7 @@ import {
   isAuthStatusError,
   type AuthProbeResult,
 } from "./daemon-auth-probe";
+import { applyPathToEnv, readEnvPath } from "./env-path";
 
 const POLL_INTERVAL_MS = 5_000;
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
@@ -428,7 +429,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
 
 function findCliOnPath(): string | null {
   const candidates = process.platform === "win32" ? ["multica.exe"] : ["multica"];
-  const paths = (process.env["PATH"] ?? "").split(
+  const paths = readEnvPath(process.env).split(
     process.platform === "win32" ? ";" : ":",
   );
   if (process.platform === "darwin") {
@@ -940,8 +941,16 @@ async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
 // hide CLI self-update UI. Computed lazily so it picks up the PATH fix
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
+//
+// On Windows, collapse Path/PATH into one key before spawn. Writing uppercase
+// `PATH` on top of a spread `process.env` (which often carries `Path`) creates
+// duplicate case variants; the child may then only see a truncated PATH and
+// fail with "no agent CLI found" (#9250).
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  return applyPathToEnv(
+    { ...process.env, MULTICA_LAUNCHED_BY: "desktop" },
+    { platform: process.platform },
+  );
 }
 
 function scheduleStatusRefresh(): void {
