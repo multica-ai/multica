@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -3985,8 +3986,13 @@ func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testin
 				arguments, _ := msg.Input["arguments"].(map[string]any)
 				gotToolUse = msg.Input["server"] == "plugin-exa-search" && arguments["query"] == "latest Multica news"
 			}
-			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "web_search_exa" && msg.Output == "completed\nduration: 1627 ms" {
-				gotToolResult = true
+			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "web_search_exa" {
+				const prefix = "completed\nduration: 1627 ms\nresult_content_blocks: 1\ncaller_duration_ms: "
+				if suffix, ok := strings.CutPrefix(msg.Output, prefix); ok {
+					if durationMS, err := strconv.ParseInt(suffix, 10, 64); err == nil && durationMS >= 0 {
+						gotToolResult = true
+					}
+				}
 			}
 		}
 		mu.Unlock()

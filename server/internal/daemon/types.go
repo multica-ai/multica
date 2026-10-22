@@ -5,6 +5,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
+	"github.com/multica-ai/multica/server/pkg/taskpolicy"
 )
 
 // AgentEntry describes a single available agent CLI.
@@ -76,16 +77,17 @@ type ProjectWorkflowData struct {
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
 	// StartClaimSupported gates retries when talking to older servers.
-	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
-	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	StartClaimSupported  bool                        `json:"start_claim_supported,omitempty"`
+	DispatchedAt         string                      `json:"dispatched_at,omitempty"`
+	ID                   string                      `json:"id"`
+	AgentID              string                      `json:"agent_id"`
+	RuntimeID            string                      `json:"runtime_id"`
+	IssueID              string                      `json:"issue_id"`
+	WorkspaceID          string                      `json:"workspace_id"`
+	WorkspaceSlug        string                      `json:"workspace_slug,omitempty"`
+	IssueIdentifier      string                      `json:"issue_identifier,omitempty"`
+	RemoteMCPConnections []remotemcp.Connection      `json:"remote_mcp_connections,omitempty"`
+	ExecutionPolicy      *taskpolicy.ExecutionPolicy `json:"execution_policy,omitempty"`
 	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
 	// broker's credential-resolution calls. It must never enter agent env/config.
 	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`

@@ -1,0 +1,80 @@
+---
+title: Task-scoped Brain MCP acceptance
+description: How the opt-in Brain MCP acceptance policy scopes one task and what its receipts prove.
+---
+
+The `brain_mcp_acceptance_v1` execution policy is a versioned, opt-in mode for one issue rerun. It is not a general Brain reader and does not change shared agent, provider, MCP, or daemon defaults. An ordinary rerun remains unchanged.
+
+## Opting in
+
+Send the policy on `POST /api/issues/{id}/rerun`:
+
+```json
+{
+  "execution_policy": {
+    "mode": "brain_mcp_acceptance_v1",
+    "mcp_server": "brain",
+    "project_ids": ["brain", "multica"]
+  }
+}
+```
+
+The mode and provider are fixed. `mcp_server` must name an already configured managed MCP server, and `project_ids` must exactly equal the frozen `brain` and `multica` scope, in that order. The daemon accepts the task only when it supports execution policies. Policy-bearing reruns and retries start without a prior provider session; they must not be retried without the policy as an equivalent fallback.
+
+## Fixed acceptance scope
+
+The policy permits only Claude and the named MCP server. Its tool input gate is fixed to the versioned acceptance checks: read `brain` context for the exact A33 and A36 questions, read `multica` context for the exact A28 question, resolve only the fixed unknown identity, read an immutable cited document revision, list the caller's company projects and projects, and fetch the one frozen `company_events` range. Other tool names, projects, questions, selectors, and inputs are denied before MCP dispatch. A cited document ID and revision must come from the verified context for that same project, and the immutable read response must match the requested document ID and revision.
+
+Claude must support the fail-closed task-local hook configuration (minimum CLI version `2.1.295`). The hook is configured to deny out-of-scope tool names and inputs before dispatch and correlate completed calls for receipt verification. A failed or unavailable hook, incompatible CLI, unmanaged server configuration, unsupported daemon, or missing verification evidence fails the restricted task; it does not silently downgrade to unrestricted execution.
+
+Default protocol tests use synthetic events and a fake CLI. A separate opt-in installed-CLI fixture exercises the same invocation and HTTP hook configuration using a scripted, loopback-only Anthropic API and synthetic MCP server. This fixture proves dispatch behavior, not model quality, account readiness, live Brain acceptance, or runtime activation.
+
+## Receipt limits and evidence boundaries
+
+Receipts are bounded by task-level call, count, and byte limits. Full HTTP hook envelopes use the same 32 MiB ceiling as agent stream events, rather than a short-excerpt budget; larger bodies fail closed. Durable task history records only minimal operational metadata: server, tool, call ID, status, measured PreToolUse-to-PostToolUse hook interval, result byte count, and the evaluator's pass/fail aggregate. This hook interval is not a measurement from inside the MCP connector. Sanitized source identifiers, hashes, and revisions are transient verification evidence and are not persisted in task output.
+
+A successful receipt proves that the configured tool returned data matching the checked selector and response shape, and that the local hook observed the correlated call. It does not prove the underlying Brain record is true, complete, fresh beyond its reported metadata, or authoritative. The expected fixed HTTP 404 refusal is accepted only for its exact correlated request and response; it cannot distinguish a nonexistent resource from one hidden by access controls. Historical document reads are verified against the requested immutable revision and body hash, not against the current revision pointer.
+
+The acceptance fixtures and selectors are versioned test contracts. They are not live Brain receipts, and accepting them does not authorize production execution or runtime activation.
+
+## Transient answer evaluation
+
+The daemon's ordinary execution boundary always registers the task-owned `agent.EvaluateBrainAcceptance` consumer for a policy-bearing task, including retries. It cannot substitute a permissive callback. The synchronous `ExecOptions.EvaluateBrainAcceptance` callback is separate from `Session.Messages` and `Session.Result` and is not serialized in execution options. It receives four bounded, structured answers and the correlated sanitized receipts only after successful retrieval and hook verification. Callback rejection fails the task with a fixed error; callback error text is withheld. Standalone protocol tests may supply their own consumer, but operational receipt verification without this evaluator is not acceptance.
+
+Answers use a finite set of conclusion and uncertainty labels, plus project/document/revision citations correlated to both the exact scoped context question and a verified full immutable read. Unknown fields, arbitrary prose, reasoning, source bodies, uncited documents, wrong projects, and oversized answers are rejected before delivery. The task-owned consumer requires A33's full immutable retrieval conclusion, A36's rejection of self-asserted authority, A28's distinction between worker completion and owner acceptance, and A49's unknown/no-current-claim refusal. A49 must have unknown evidence state and no citations. Superseded source metadata requires a stale or unknown caveat, including when another read of the same immutable citation reports unverified freshness. Unsupported claims of conflict are not inferred from reference metadata. The exact refusal and bounded event check must both be present; one verified receipt cannot complete acceptance. The callback consumes its argument in memory and never logs, serializes, or persists it. No retention permission is implied.
+
+Transient read metadata is limited to the source-defined tier (`truth`, `working`, `history`), reference status (`reference_only`, `superseded_reference`, `superseded_revision`), freshness (`unverified`, `superseded`), `assured: false`, and an optional validated `recordedAt` timestamp. Missing or unsupported required metadata fails evaluation rather than granting assurance. A historical revision does not automatically change freshness, and a `truth` tier does not make a claim authoritative.
+
+Every observed MCP call must have a positive monotonic hook interval no greater than three seconds, compared at full duration precision. PreToolUse returns before dispatch and PostToolUse follows completion, so this interval conservatively encloses connector execution plus CLI/hook overhead. It is an upper-bound gate, not connector-only telemetry. No live timing result is implied by the gate's implementation.
+
+The synthetic, no-account ordinary-evaluator and daemon-wiring invocation is:
+
+```bash
+cd server
+go test ./pkg/agent ./internal/daemon \
+  -run 'TestClaudeRestrictedTransientEvaluation|TestEvaluateBrainAcceptance|TestExecuteAndDrainRequiresTaskOwnedBrainAcceptance' \
+  -count=1
+```
+
+These tests exercise task-owned evaluator wiring, answer/citation delivery, incomplete/wrong-answer rejection, freshness consistency, and the timing boundary while checking that neither answers nor source identifiers/bodies escape into durable messages, results, or logs. They are not a live semantic score. The event receipt currently validates only row identity and bounds, not canonical page/payload hashes.
+
+## Installed-CLI synthetic dispatch fixture
+
+`TestClaudeRestrictedInstalledSyntheticDispatch` is behind `agentintegration`, `MULTICA_RUN_REAL_AGENT_SMOKE=1`, and `MULTICA_CLAUDE_SYNTHETIC_FIXTURE=1`. Supply an explicit task-local CLI path with `MULTICA_CLAUDE_FIXTURE_EXECUTABLE`. The fixture never discovers an installed agent or loads account credentials. It creates fresh HOME/config/work directories, uses a synthetic token and loopback API/MCP/hooks, and has no upstream forwarding.
+
+**Fence the entire test process first.** `ANTHROPIC_BASE_URL` is routing, not network isolation. On Linux, run the compiled test binary inside a disposable container with `--network none` and read-only mounts of only the test binary and the task-local official CLI. On macOS, use a separately qualified process-local network sandbox inherited by the test and all children; do not change a shared firewall. The fixture additionally requires immediate denial of IPv4/IPv6 documentation-range sockets before starting the CLI. It is not itself a sandbox.
+
+```bash
+cd server
+go test -c -tags=agentintegration -o /tmp/multica-claude-synthetic.test ./pkg/agent
+# Inside the qualified network fence, with the explicit fixture path:
+MULTICA_RUN_REAL_AGENT_SMOKE=1 \
+MULTICA_CLAUDE_SYNTHETIC_FIXTURE=1 \
+MULTICA_CLAUDE_FIXTURE_EXECUTABLE=/fixture/claude \
+/fixture/test -test.run '^TestClaudeRestrictedInstalledSyntheticDispatch$' \
+  -test.v -test.timeout=4m
+```
+
+The nine-case matrix requires the allowed case to dispatch exactly once with correlated pre/post hooks. Denied arguments, refused hook connection, timeout, and malformed hook JSON must dispatch zero times. Native tools must not appear in API tool definitions. Four deliberately adversarial scripted calls inject the real native names `Bash`, `Read`, `Write`, and `Edit` despite their absence from definitions. Each runs once without the adapter's secondary gate to test the CLI registry, then replays through the actual backend with fresh HOME/config to require a failed task at the tool/correlation gate (not merely a missing final answer). Both must dispatch no MCP, leave the scratch sentinel unchanged, disclose no read canary, and create no execution/write marker. These injected calls test dispatch rejection, not model behavior.
+
+Scratch inspection rejects persisted conversation JSONL and prompt/source/final-answer canaries; operational MCP JSONL may still be created by Claude, so `--no-session-persistence` must not be described as disabling all CLI logs. Scratch directories and listeners are cleaned up. None of this authorizes production calls, provider spend, a shared CLI upgrade, or daemon activation.

@@ -2279,12 +2279,10 @@ SELECT
     COALESCE($9::boolean, FALSE),
     $10,
     $11,
-    CASE
-        WHEN COALESCE($12::text, '') <> ''
-        THEN jsonb_build_object('head_sha', $12::text)
-        ELSE NULL
-    END,
-    $13,
+    NULLIF(jsonb_strip_nulls(jsonb_build_object(
+        'head_sha', NULLIF(COALESCE($12::text, ''), ''),
+        'execution_policy', $13::jsonb
+    )), '{}'::jsonb),
     $14,
     $15,
     $16,
@@ -2294,9 +2292,10 @@ SELECT
     $20,
     $21,
     $22,
+    $23,
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
     (SELECT i.status FROM issue i WHERE i.id = $3),
-    COALESCE($23::uuid, gen_random_uuid())
+    COALESCE($24::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
@@ -2314,6 +2313,7 @@ type CreateAgentTaskParams struct {
 	HandoffNote          pgtype.Text   `json:"handoff_note"`
 	SquadID              pgtype.UUID   `json:"squad_id"`
 	HeadSha              pgtype.Text   `json:"head_sha"`
+	ExecutionPolicy      []byte        `json:"execution_policy"`
 	OriginatorUserID     pgtype.UUID   `json:"originator_user_id"`
 	AccountableUserID    pgtype.UUID   `json:"accountable_user_id"`
 	RuntimeMcpOverlay    []byte        `json:"runtime_mcp_overlay"`
@@ -2334,10 +2334,9 @@ type CreateAgentTaskParams struct {
 // head_sha stamps the commit under review into the task's context JSONB so the
 // reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 // against an OLD head apart from a fresh request against a NEW head (TEN-356).
-// Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
-// issues with no linked PR. Issue-linked tasks never hit quick-create context
-// parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
-// key rides harmlessly alongside.
+// execution_policy carries an explicit one-task provider/tool restriction for
+// manual reruns. Both are omitted when unset, preserving NULL context for
+// ordinary issue tasks.
 // id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
 // enqueues cluster in a narrow contiguous primary-key range instead of
 // scattering across the B-tree. On a table with existing v4 ids, that range
@@ -2359,6 +2358,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.HandoffNote,
 		arg.SquadID,
 		arg.HeadSha,
+		arg.ExecutionPolicy,
 		arg.OriginatorUserID,
 		arg.AccountableUserID,
 		arg.RuntimeMcpOverlay,
@@ -2862,10 +2862,16 @@ SELECT
     CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    p.work_dir,
+	CASE
+		WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+		  OR (p.context->'execution_policy' IS NOT NULL AND p.context->'execution_policy' <> 'null'::jsonb)
+        THEN NULL
+		ELSE p.session_id
+	END,
+	p.work_dir,
     p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+        OR (p.context->'execution_policy' IS NOT NULL AND p.context->'execution_policy' <> 'null'::jsonb),
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
@@ -2913,6 +2919,8 @@ type CreateRetryTaskParams struct {
 // Owner-row locks fence workspace teardown. Slot conflicts yield no row instead
 // of aborting the caller's failure transaction; pgx.ErrNoRows means commit the
 // parent transition without a retry. Pending human reruns retain their slot.
+// Restricted-policy tasks also start a fresh provider session while preserving
+// their policy context and checkout workdir.
 //
 // Chat retry priority keeps older input ahead of newer turns. A non-NULL fire_at
 // defers dispatch until promotion. max_attempts optionally persists the effective

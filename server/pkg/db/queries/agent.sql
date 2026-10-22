@@ -323,10 +323,9 @@ LIMIT @page_limit;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
--- issues with no linked PR. Issue-linked tasks never hit quick-create context
--- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
--- key rides harmlessly alongside.
+-- execution_policy carries an explicit one-task provider/tool restriction for
+-- manual reruns. Both are omitted when unset, preserving NULL context for
+-- ordinary issue tasks.
 -- id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
 -- enqueues cluster in a narrow contiguous primary-key range instead of
 -- scattering across the B-tree. On a table with existing v4 ids, that range
@@ -349,11 +348,10 @@ SELECT
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
     sqlc.narg(squad_id),
-    CASE
-        WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
-        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
-        ELSE NULL
-    END,
+    NULLIF(jsonb_strip_nulls(jsonb_build_object(
+        'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
+        'execution_policy', sqlc.narg('execution_policy')::jsonb
+    )), '{}'::jsonb),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -494,6 +492,8 @@ WHERE id = $1 AND issue_id IS NULL
 -- Owner-row locks fence workspace teardown. Slot conflicts yield no row instead
 -- of aborting the caller's failure transaction; pgx.ErrNoRows means commit the
 -- parent transition without a retry. Pending human reruns retain their slot.
+-- Restricted-policy tasks also start a fresh provider session while preserving
+-- their policy context and checkout workdir.
 --
 -- Chat retry priority keeps older input ahead of newer turns. A non-NULL fire_at
 -- defers dispatch until promotion. max_attempts optionally persists the effective
@@ -514,10 +514,16 @@ SELECT
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    p.work_dir,
+	CASE
+		WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+		  OR (p.context->'execution_policy' IS NOT NULL AND p.context->'execution_policy' <> 'null'::jsonb)
+        THEN NULL
+		ELSE p.session_id
+	END,
+	p.work_dir,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+        OR (p.context->'execution_policy' IS NOT NULL AND p.context->'execution_policy' <> 'null'::jsonb),
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,

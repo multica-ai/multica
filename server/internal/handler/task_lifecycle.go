@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/taskpolicy"
 )
 
 // RecoverOrphanedTasks is called by the daemon at startup for each runtime
@@ -150,6 +151,9 @@ type RerunIssueRequest struct {
 	// assignee — so clicking retry on row that belonged to a now-displaced
 	// agent re-fires that same agent, not the new assignee.
 	TaskID string `json:"task_id,omitempty"`
+	// ExecutionPolicy opts only this rerun into the versioned Brain acceptance
+	// policy. The request selects one exact project; the server owns its tools.
+	ExecutionPolicy *taskpolicy.Request `json:"execution_policy,omitempty"`
 }
 
 // RerunIssue manually re-enqueues an agent run for the issue. By default it
@@ -177,6 +181,16 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+	}
+
+	var executionPolicy *taskpolicy.ExecutionPolicy
+	if req.ExecutionPolicy != nil {
+		policy, policyErr := taskpolicy.NewBrainMCPAcceptance(*req.ExecutionPolicy)
+		if policyErr != nil {
+			writeError(w, http.StatusBadRequest, policyErr.Error())
+			return
+		}
+		executionPolicy = policy
 	}
 
 	var sourceTaskID pgtype.UUID
@@ -208,7 +222,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)
+	task, err := h.TaskService.RerunIssueWithExecutionPolicy(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke, executionPolicy)
 	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return

@@ -31,6 +31,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
+	"github.com/multica-ai/multica/server/pkg/taskpolicy"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -372,14 +373,15 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	ID                   string                      `json:"id"`
+	AgentID              string                      `json:"agent_id"`
+	RuntimeID            string                      `json:"runtime_id"`
+	IssueID              string                      `json:"issue_id"`
+	WorkspaceID          string                      `json:"workspace_id"`
+	WorkspaceSlug        string                      `json:"workspace_slug,omitempty"`
+	IssueIdentifier      string                      `json:"issue_identifier,omitempty"`
+	RemoteMCPConnections []remotemcp.Connection      `json:"remote_mcp_connections,omitempty"`
+	ExecutionPolicy      *taskpolicy.ExecutionPolicy `json:"execution_policy,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
 	// disabling or uninstalling a plugin takes effect on the next task rather
@@ -842,6 +844,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
 	}
+	executionPolicy, _ := taskpolicy.FromTaskContext(t.Context)
 	return AgentTaskResponse{
 		// Task-scoped provenance must not transfer through copied retry context.
 		CancelledByCommentChange: t.Status == "cancelled" && cancellation.TaskID != "" && cancellation.TaskID == uuidToString(t.ID),
@@ -852,6 +855,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		RuntimeID:              uuidToString(t.RuntimeID),
 		IssueID:                uuidToString(t.IssueID),
 		WorkspaceID:            workspaceID,
+		ExecutionPolicy:        executionPolicy,
 		Status:                 t.Status,
 		Priority:               t.Priority,
 		DispatchedAt:           timestampToPtr(t.DispatchedAt),

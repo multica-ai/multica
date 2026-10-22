@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/taskpolicy"
 )
 
 // TestCreateRetryTaskFireAtControlsDeferral locks in the SQL half of the
@@ -85,6 +87,68 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 				t.Errorf("channel_context_revision = %+v, want 7", child.ChannelContextRevision)
 			}
 		})
+	}
+}
+
+func TestCreateRetryTaskPreservesPolicyAndDropsProviderSession(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+	policy, err := taskpolicy.NewBrainMCPAcceptance(taskpolicy.Request{
+		Mode:       taskpolicy.BrainMCPAcceptanceMode,
+		MCPServer:  "brain",
+		ProjectIDs: []string{taskpolicy.BrainProjectID, taskpolicy.MulticaProjectID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextJSON, err := json.Marshal(map[string]any{"execution_policy": policy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts,
+			failure_reason, context, session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'failed', 0, 1, 2, 'agent_error.provider_network', $4::jsonb,
+			'old-provider-session', '/tmp/restricted-retry-workdir')
+		RETURNING id
+	`, agentID, runtimeID, issueID, contextJSON).Scan(&parentID); err != nil {
+		t.Fatalf("insert restricted parent task: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+	})
+
+	child, err := q.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parentID})
+	if err != nil {
+		t.Fatalf("CreateRetryTask: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, child.ID) })
+	if child.SessionID.Valid {
+		t.Fatalf("restricted retry inherited provider session %q", child.SessionID.String)
+	}
+	if !child.ForceFreshSession {
+		t.Fatal("restricted retry did not force a fresh provider session")
+	}
+	if !child.WorkDir.Valid || child.WorkDir.String != "/tmp/restricted-retry-workdir" {
+		t.Fatalf("restricted retry workdir = %+v, want source workdir", child.WorkDir)
+	}
+	retryPolicy, err := taskpolicy.FromTaskContext(child.Context)
+	if err != nil {
+		t.Fatalf("parse retry policy: %v", err)
+	}
+	if retryPolicy == nil || len(retryPolicy.ProjectIDs) != 2 ||
+		retryPolicy.ProjectIDs[0] != taskpolicy.BrainProjectID ||
+		retryPolicy.ProjectIDs[1] != taskpolicy.MulticaProjectID {
+		t.Fatalf("retry policy = %+v, want preserved frozen project policy", retryPolicy)
 	}
 }
 

@@ -48,6 +48,9 @@ const (
 	// ships a redirect stub under the old name; when it is present it ships
 	// nothing extra, so the stub retires itself as daemons update.
 	DaemonCapabilityPlatformSkillV1 = "platform-skill-v1"
+	// DaemonCapabilityTaskExecutionPolicyV1 advertises that the daemon enforces
+	// the per-task provider/tool policy in a claim before launching a runtime.
+	DaemonCapabilityTaskExecutionPolicyV1 = "task-execution-policy-v1"
 
 	// DaemonCapabilityCheckoutKeepsWorkV1 advertises that the daemon's
 	// `multica repo checkout` keeps an existing checkout that holds work

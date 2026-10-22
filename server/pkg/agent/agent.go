@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskpolicy"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -141,6 +143,13 @@ type ExecOptions struct {
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
+	// ExecutionPolicy opts one task into a provider-enforced restricted mode.
+	// Only backends that explicitly implement the policy may accept it.
+	ExecutionPolicy *taskpolicy.ExecutionPolicy
+	// EvaluateBrainAcceptance is a synchronous, in-memory consumer for the
+	// restricted acceptance harness. It never uses Messages, Result, or task
+	// history. The consumer must not persist its argument.
+	EvaluateBrainAcceptance func(BrainAcceptanceEvaluation) error `json:"-"`
 }
 
 // runContext derives the execution context for an agent subprocess from the
@@ -221,15 +230,17 @@ const (
 
 // Message is a unified event emitted by an agent during execution.
 type Message struct {
-	Type      MessageType
-	Content   string         // text content (Text, Error, Log)
-	Tool      string         // tool name (ToolUse, ToolResult)
-	CallID    string         // tool call ID (ToolUse, ToolResult)
-	Input     map[string]any // tool input (ToolUse)
-	Output    string         // tool output (ToolResult)
-	Status    string         // agent status string (Status)
-	Level     string         // log level (Log)
-	SessionID string         // backend session id (Status), for early resume-pointer pinning
+	Type             MessageType
+	Content          string         // text content (Text, Error, Log)
+	Tool             string         // tool name (ToolUse, ToolResult)
+	CallID           string         // tool call ID (ToolUse, ToolResult)
+	Input            map[string]any // tool input (ToolUse)
+	Output           string         // tool output (ToolResult)
+	Status           string         // agent status string (Status)
+	DurationMS       int64          // caller-measured tool duration when available
+	DurationMeasured bool           // whether DurationMS was measured locally
+	Level            string         // log level (Log)
+	SessionID        string         // backend session id (Status), for early resume-pointer pinning
 }
 
 // TokenUsage tracks token consumption for a single model.

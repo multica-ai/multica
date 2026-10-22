@@ -58,6 +58,7 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			// Without it the server never hands this daemon the wakeups that
 			// waited for its run; they start runs of their own instead.
 			protocol.DaemonCapabilityJoinedWakeupsV1,
+			protocol.DaemonCapabilityTaskExecutionPolicyV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
