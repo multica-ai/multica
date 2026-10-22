@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -275,6 +276,126 @@ func TestMergeRuntimeAndAgentMcpConfigNullKeepsNativeInheritance(t *testing.T) {
 			t.Fatalf("merged %q = %q", string(raw), string(merged))
 		}
 	}
+}
+
+func TestLoadMulticaCortexMcpServerConfigNormalizesAndKeepsSecretsOutOfInventory(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_CORTEX_MCP_URL", "https://cortex.example.test")
+	t.Setenv("MULTICA_CORTEX_MCP_API_KEY", "Bearer sk_ctx_secret")
+
+	config, configured, err := loadMulticaCortexMcpServerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured {
+		t.Fatal("expected the Cortex environment integration to be configured")
+	}
+	entry := config["cortex-hub"].(map[string]any)
+	if got := entry["url"]; got != "https://cortex.example.test/mcp" {
+		t.Fatalf("Cortex URL = %#v", got)
+	}
+	if got := entry["type"]; got != "http" {
+		t.Fatalf("Cortex transport type = %#v", got)
+	}
+	if got := entry["headers"].(map[string]any)["Authorization"]; got != "Bearer sk_ctx_secret" {
+		t.Fatalf("Cortex Authorization = %#v", got)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(servers) != 1 {
+		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+	if servers[0].Name != "cortex-hub" || servers[0].Source != "Multica environment" {
+		t.Fatalf("Cortex inventory = %#v", servers[0])
+	}
+	if got := fmt.Sprintf("%#v", servers); got == "" || containsAny(got, "sk_ctx_secret", "Authorization", "cortex.example.test/mcp") {
+		t.Fatalf("secret-bearing Cortex details leaked into inventory: %s", got)
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigInjectsCortexWithoutAgentConfig(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_CORTEX_MCP_URL", "https://cortex.example.test/mcp")
+	t.Setenv("MULTICA_CORTEX_MCP_API_KEY", "sk_ctx_secret")
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("claude", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		McpServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(merged, &document); err != nil {
+		t.Fatal(err)
+	}
+	entry := document.McpServers["cortex-hub"]
+	if entry == nil {
+		t.Fatalf("Cortex server missing from merged config: %#v", document.McpServers)
+	}
+	if got := entry["url"]; got != "https://cortex.example.test/mcp" {
+		t.Fatalf("Cortex URL = %#v", got)
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigCortexEnvironmentWinsSameName(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_CORTEX_MCP_URL", "https://cortex.example.test/mcp")
+	t.Setenv("MULTICA_CORTEX_MCP_API_KEY", "sk_ctx_restricted")
+	agentConfig := json.RawMessage(`{"mcpServers":{"cortex-hub":{"type":"http","url":"https://untrusted.example/mcp","headers":{"Authorization":"Bearer wrong"}}}}`)
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("claude", agentConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		McpServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(merged, &document); err != nil {
+		t.Fatal(err)
+	}
+	entry := document.McpServers["cortex-hub"]
+	if got := entry["url"]; got != "https://cortex.example.test/mcp" {
+		t.Fatalf("Cortex URL was overridden by agent config: %#v", got)
+	}
+	if got := entry["headers"].(map[string]any)["Authorization"]; got != "Bearer sk_ctx_restricted" {
+		t.Fatalf("Cortex key was overridden by agent config: %#v", got)
+	}
+}
+
+func TestLoadMulticaCortexMcpServerConfigRejectsPartialOrUnsafeConfig(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		key  string
+	}{
+		{name: "partial", url: "https://cortex.example.test/mcp"},
+		{name: "query", url: "https://cortex.example.test/mcp?token=bad", key: "secret"},
+		{name: "non-http", url: "file:///tmp/mcp", key: "secret"},
+		{name: "space-in-key", url: "https://cortex.example.test/mcp", key: "secret key"},
+		{name: "tab-in-key", url: "https://cortex.example.test/mcp", key: "secret\tkey"},
+		{name: "newline", url: "https://cortex.example.test/mcp", key: "secret\nleak"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_CORTEX_MCP_URL", tc.url)
+			t.Setenv("MULTICA_CORTEX_MCP_API_KEY", tc.key)
+			if _, _, err := loadMulticaCortexMcpServerConfig(); err == nil {
+				t.Fatal("expected unsafe or incomplete Cortex config to fail")
+			}
+		})
+	}
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCodeArtsMcpConfigLoadsJSONCAndAgentWins(t *testing.T) {

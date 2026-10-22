@@ -25,6 +25,8 @@ func TestMain(m *testing.M) {
 		"MULTICA_WORKSPACE_ID",
 		"MULTICA_SERVER_URL",
 		"MULTICA_TASK_CONFIG_ROOT",
+		"MULTICA_CORTEX_MCP_URL",
+		"MULTICA_CORTEX_MCP_API_KEY",
 	} {
 		os.Unsetenv(key)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,22 +24,71 @@ type runtimeLocalMcpServerSummary struct {
 	Enabled   bool   `json:"enabled"`
 }
 
+const (
+	multicaCortexMcpServerName = "cortex-hub"
+	multicaCortexMcpURL        = "MULTICA_CORTEX_MCP_URL"
+	multicaCortexMcpAPIKey     = "MULTICA_CORTEX_MCP_API_KEY"
+)
+
+// loadMulticaCortexMcpServerConfig reads the opt-in Cortex Hub connection
+// from the local daemon environment. The bearer token is deliberately never
+// persisted in Multica or returned by the capabilities inventory.
+func loadMulticaCortexMcpServerConfig() (map[string]any, bool, error) {
+	endpoint := strings.TrimSpace(os.Getenv(multicaCortexMcpURL))
+	apiKey := strings.TrimSpace(os.Getenv(multicaCortexMcpAPIKey))
+	if endpoint == "" && apiKey == "" {
+		return map[string]any{}, false, nil
+	}
+	if endpoint == "" || apiKey == "" {
+		return nil, false, fmt.Errorf("%s and %s must be set together", multicaCortexMcpURL, multicaCortexMcpAPIKey)
+	}
+	if strings.HasPrefix(strings.ToLower(apiKey), "bearer ") {
+		apiKey = strings.TrimSpace(apiKey[len("Bearer "):])
+	}
+	if apiKey == "" || strings.ContainsAny(apiKey, " \t\r\n\v\f") {
+		return nil, false, fmt.Errorf("%s must contain a bearer token without whitespace or line breaks", multicaCortexMcpAPIKey)
+	}
+
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, false, fmt.Errorf("%s must be an absolute http(s) URL", multicaCortexMcpURL)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, false, fmt.Errorf("%s must use http or https", multicaCortexMcpURL)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, false, fmt.Errorf("%s must not contain credentials, query parameters, or fragments", multicaCortexMcpURL)
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if path == "" {
+		path = "/mcp"
+	}
+	parsed.Path = path
+	parsed.RawPath = ""
+
+	return map[string]any{
+		multicaCortexMcpServerName: map[string]any{
+			"type": "http",
+			"url":  parsed.String(),
+			"headers": map[string]any{
+				"Authorization": "Bearer " + apiKey,
+			},
+		},
+	}, true, nil
+}
+
 // mergeRuntimeAndAgentMcpConfig builds the task-local MCP configuration used
 // when an agent has MCP servers managed by Multica. Runtime servers are the
 // base layer and the agent's entries win on a same-name collision. The merge
 // happens inside the local daemon so runtime URLs, headers, commands, and env
 // values never need to leave the machine.
 //
-// A nil/null agent config keeps the provider's native inheritance path intact.
-// A present config (including an empty mcpServers map) opts into the merged,
-// task-local config so adding one managed server no longer disables unrelated
-// runtime servers.
+// Without the Cortex environment integration, a nil/null agent config keeps
+// the provider's native inheritance path intact. When Cortex is configured,
+// nil/null is synthesized into the merged task-local config so the managed
+// server is injected while unrelated runtime servers remain available. A
+// present config (including an empty mcpServers map) is merged in the same way.
 func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage) (json.RawMessage, error) {
-	trimmed := bytes.TrimSpace(agentConfig)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return agentConfig, nil
-	}
-
 	runtimeServers, supported, err := loadRuntimeMcpServerConfigs(provider)
 	if err != nil {
 		return nil, err
@@ -47,9 +97,26 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 		return agentConfig, nil
 	}
 
-	var agentDocument map[string]any
-	if err := json.Unmarshal(trimmed, &agentDocument); err != nil {
-		return nil, fmt.Errorf("parse agent MCP config: %w", err)
+	cortexServers, cortexConfigured, err := loadMulticaCortexMcpServerConfig()
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(agentConfig)
+	if (len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))) && !cortexConfigured {
+		return agentConfig, nil
+	}
+	for name, entry := range cortexServers {
+		// The daemon environment is the explicit deployment-level integration;
+		// it wins over a same-name user config so a stale per-agent entry cannot
+		// redirect the agent or replace the restricted deployment key.
+		runtimeServers[name] = entry
+	}
+
+	agentDocument := map[string]any{}
+	if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null")) {
+		if err := json.Unmarshal(trimmed, &agentDocument); err != nil {
+			return nil, fmt.Errorf("parse agent MCP config: %w", err)
+		}
 	}
 	agentServers := map[string]any{}
 	if servers, ok := nestedRuntimeMcpMap(agentDocument, "mcpServers"); ok {
@@ -68,6 +135,9 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 		merged[name] = entry
 	}
 	for name, entry := range agentServers {
+		merged[name] = entry
+	}
+	for name, entry := range cortexServers {
 		merged[name] = entry
 	}
 
@@ -458,6 +528,20 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	}
 
 	out := make([]runtimeLocalMcpServerSummary, 0)
+	if _, supported, err := loadRuntimeMcpServerConfigs(provider); err != nil {
+		return nil, false, err
+	} else if supported {
+		if _, configured, err := loadMulticaCortexMcpServerConfig(); err != nil {
+			return nil, true, err
+		} else if configured {
+			out = append(out, runtimeLocalMcpServerSummary{
+				Name:      multicaCortexMcpServerName,
+				Transport: "http",
+				Source:    "Multica environment",
+				Enabled:   true,
+			})
+		}
+	}
 	raw, err := os.ReadFile(path)
 	if err == nil {
 		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
