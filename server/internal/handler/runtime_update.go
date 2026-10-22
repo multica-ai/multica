@@ -14,9 +14,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 )
 
-// ---------------------------------------------------------------------------
 // CLI update request store
-// ---------------------------------------------------------------------------
 
 type UpdateStatus string
 
@@ -206,9 +204,7 @@ func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) 
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 // InitiateUpdate creates a new CLI update request (protected route, called by frontend).
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {

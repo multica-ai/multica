@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
@@ -104,9 +105,7 @@ function StickyHeaderShell({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface CommentCardProps {
   issueId: string;
@@ -160,9 +159,7 @@ interface CommentCardProps {
   highlightedCommentId?: string | null;
 }
 
-// ---------------------------------------------------------------------------
 // Shared delete confirmation dialog
-// ---------------------------------------------------------------------------
 
 function DeleteCommentDialog({
   open,
@@ -203,9 +200,7 @@ function DeleteCommentDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Standalone attachment list — renders attachments not already in the markdown
-// ---------------------------------------------------------------------------
 
 export function AttachmentList({
   attachments,
@@ -356,9 +351,7 @@ function TaskCommentRetryButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Shared edit-attachment state hook
-// ---------------------------------------------------------------------------
 
 const NEVER_STEER = () => false;
 
@@ -625,9 +618,7 @@ function CommentRevisionConflict({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
-// ---------------------------------------------------------------------------
 
 function CommentRow({
   runHeader,
@@ -749,16 +740,21 @@ function CommentRow({
             className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
           />}
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className={commentActionClassName}
-                  aria-label={t(($) => $.comment.more_actions)}
-                >
-                  <MoreHorizontal className="h-4 w-4" aria-hidden />
-                </Button>
+            <DeferredTooltip
+              content={t(($) => $.comment.more_actions)}
+              trigger={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className={commentActionClassName}
+                      aria-label={t(($) => $.comment.more_actions)}
+                    >
+                      <MoreHorizontal className="h-4 w-4" aria-hidden />
+                    </Button>
+                  }
+                />
               }
             />
             <DropdownMenuContent align="end">
@@ -999,9 +995,7 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   );
 }
 
-// ---------------------------------------------------------------------------
 // CommentCard — One Card per thread (parent + all replies flat inside)
-// ---------------------------------------------------------------------------
 
 // A quick action posts an ordinary comment and is rendered as one (MUL-5465).
 // It briefly had a collapsed one-line header that expanded to reveal the
@@ -1137,6 +1131,7 @@ function CommentCardImpl({
   const reactions = entry.reactions ?? [];
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const toggleLabel = open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread);
 
   // Reply-resolution display. When a REPLY is the thread's resolution, the other
   // replies fold behind a bar and the resolution stays visible (root-resolution
@@ -1257,19 +1252,23 @@ function CommentCardImpl({
               )}
 
               <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread)}
-                  title={open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread)}
-                  aria-expanded={open}
-                  aria-controls={open ? `comment-body-${entry.id}` : undefined}
-                  onClick={handleToggle}
-                  className={commentActionClassName}
-                >
-                  <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
-                </Button>
+                <DeferredTooltip
+                  content={toggleLabel}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={toggleLabel}
+                      aria-expanded={open}
+                      aria-controls={open ? `comment-body-${entry.id}` : undefined}
+                      onClick={handleToggle}
+                      className={commentActionClassName}
+                    >
+                      <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+                    </Button>
+                  }
+                />
                 {open && !deleted && <>
                   {!edit.editing && <QuickEmojiPicker
                     onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
@@ -1278,16 +1277,21 @@ function CommentCardImpl({
                     className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
                   />}
                   <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className={commentActionClassName}
-                          aria-label={t(($) => $.comment.more_actions)}
-                        >
-                          <MoreHorizontal className="h-4 w-4" aria-hidden />
-                        </Button>
+                    <DeferredTooltip
+                      content={t(($) => $.comment.more_actions)}
+                      trigger={
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className={commentActionClassName}
+                              aria-label={t(($) => $.comment.more_actions)}
+                            >
+                              <MoreHorizontal className="h-4 w-4" aria-hidden />
+                            </Button>
+                          }
+                        />
                       }
                     />
                     <DropdownMenuContent align="end">

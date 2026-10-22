@@ -1,0 +1,51 @@
+---
+title: Quick Actions
+description: Save a frequent request and use it from an issue without writing it again.
+---
+
+Quick Actions turn requests you use often into buttons on an issue. Save who to ask and what to say once, then use the same request on other issues.
+
+For example, create **Code Review** for your review agent with this prompt:
+
+> Review the changes linked to this issue. Check for mistakes and missing tests, and post your findings here.
+
+The agent already has the issue's context, so you do not need to copy its description into the request.
+
+## Use a quick action
+
+In the web or desktop app, there are two ways to use an action:
+
+| Where | What happens |
+|---|---|
+| **Quick Actions** in the issue sidebar | Click an action to post its saved request immediately. If it has an agent or squad, it asks them to work on this issue. |
+| Type `/` in the comment box | Choose an action to insert its request as a draft. Edit it for this issue, then send when ready. Nothing is posted just by choosing it. |
+
+Using a quick action does not change the issue's assignee or status. Follow the reply in the issue's discussion and check the [execution log](/tasks) for the agent's progress.
+
+An action with **No target** posts the saved message without @mentioning anyone. Use it for a checklist or a response you often write.
+
+## Create a quick action
+
+1. Open **Settings → Quick Actions** and choose **New quick action**.
+2. Give it a short name that describes the request, such as **Code Review** or **Summarize progress**.
+3. Choose **Just me** for your own use, or **Team** to share it with the workspace. Creating and managing Team actions requires `owner` or `admin` permissions; members should choose **Just me**.
+4. Choose an agent or squad under **Runs as**, or choose **No target** to save a message without a mention.
+5. Write the **Prompt** as you want it sent, then save. It is sent as written; variables are not supported.
+
+Team actions that call an agent must use one everyone in the workspace can run. For a squad, this applies to its leader. Personal actions can use agents you have permission to run.
+
+“Just me” controls who can see and use the saved action. Once you use it on an issue, its posted comment is visible to people who can see that issue.
+
+## Manage saved actions
+
+Return to **Settings → Quick Actions** to edit an action, archive it, or restore an archived one. Archive an action to remove it from everyday use while keeping it for later. Deleting it removes the saved action; past comments and run records stay.
+
+If no actions have been created for you or your team, the issue sidebar does not show a Quick Actions section.
+
+If an action cannot call its agent, ask an admin to check the selected agent and who can run it. An agent that is waiting for its computer to come online has not started yet; see [Troubleshooting](/troubleshooting).
+
+## Related guides
+
+- [Comments](/comments) — discuss work and follow replies on an issue.
+- [@-mention agents](/mentioning-agents) — write a one-off request yourself.
+- [Workflows](/workflows) — arrange who takes over at each step of a project.

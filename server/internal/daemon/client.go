@@ -271,7 +271,7 @@ func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, ta
 // starvation; a claim that commits server-side after the client gives up is
 // recovered by ReclaimStaleDispatchedTasksForRuntimes on the next poll. Kept
 // comfortably above p99 claim latency so recovery stays the exception.
-const batchClaimRequestTimeout = 5 * time.Second
+const batchClaimRequestTimeout = protocol.DaemonBatchClaimRequestTimeout
 
 // claimTasksResult carries optional scheduling metadata understood only by
 // daemons advertising claim-poll-hints-v1. A zero-value result is deliberately
@@ -1078,6 +1078,7 @@ type RegisterResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
+	CACerts      string          `json:"ca_certs,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {
@@ -1093,6 +1094,9 @@ type WorkspaceReposResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
+	// CACerts is the server's extra CA certificates (PEM) for git; see
+	// applyGitCACerts.
+	CACerts string `json:"ca_certs,omitempty"`
 }
 
 func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {

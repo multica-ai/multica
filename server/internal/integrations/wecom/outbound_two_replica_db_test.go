@@ -293,6 +293,11 @@ type fanoutRelay struct {
 	deliverers []*RelayOutbound
 	log        []queued
 	published  int
+	// failAfterFanout makes PublishWithID do its whole fan-out and THEN report
+	// an error: the frame was accepted and delivered, and only the publisher's
+	// view of the call is lost. It is the shape the inbox push must treat as
+	// uncertain rather than as a miss.
+	failAfterFanout bool
 }
 
 func (f *fanoutRelay) register(r *RelayOutbound) {
@@ -314,7 +319,25 @@ func (f *fanoutRelay) PublishWithID(_, scopeID, _ string, frame []byte, id strin
 	for _, d := range targets {
 		d.DeliverWecomOutbound(scopeID, frame, id)
 	}
+	if f.failAfterFanout {
+		return errors.New("relay: publish response lost")
+	}
 	return nil
+}
+
+// publishedTo counts the frames published for one installation, which is how a
+// test tells "the fallback was never offered" from "it was offered and
+// dropped".
+func (f *fanoutRelay) publishedTo(installationID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, q := range f.log {
+		if q.frame.InstallationID == installationID {
+			n++
+		}
+	}
+	return n
 }
 
 // replayTo re-delivers everything published so far to one node, which is what
@@ -337,6 +360,9 @@ type sharedDedupe struct {
 	values map[string]string
 	fail   bool
 	calls  int
+	// stateReads counts the non-fencing reads the acceptance poll makes, which
+	// is how a test can see how many windows were paid for.
+	stateReads int
 
 	// releaseFails makes Release report failure and keep the key: a DEL that
 	// never reached the server.
@@ -398,6 +424,15 @@ func (d *sharedDedupe) claimCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls
+}
+
+// claimStateCount is how many acceptance polls this store answered. One window
+// of a W-wide wait is roughly W/(W/8)+1 of them; two windows are roughly twice
+// that, which is the arithmetic a fallback that waits again would show.
+func (d *sharedDedupe) claimStateCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stateReads
 }
 
 func (d *sharedDedupe) Release(_ context.Context, key, token string) (bool, error) {
@@ -466,6 +501,29 @@ func (d *sharedDedupe) Resolve(_ context.Context, key string) (claimState, error
 		return claimLost, nil
 	}
 	d.values[key] = claimLostValue
+	return claimHeld, nil
+}
+
+// ClaimState is the read the inbox publisher polls to see whether a replica
+// took the delivery. Same answers as Resolve, except a held claim is reported
+// held rather than fenced: the publisher is not resolving an outcome here, it
+// is watching a delivery it must not disturb.
+func (d *sharedDedupe) ClaimState(_ context.Context, key string) (claimState, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stateReads++
+	if d.fail {
+		return claimAbsent, errors.New("dedupe unavailable")
+	}
+	v, ok := d.values[key]
+	switch {
+	case !ok:
+		return claimAbsent, nil
+	case v == claimSettledValue:
+		return claimSettled, nil
+	case v == claimLostValue:
+		return claimLost, nil
+	}
 	return claimHeld, nil
 }
 

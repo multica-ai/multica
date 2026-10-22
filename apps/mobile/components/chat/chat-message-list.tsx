@@ -1,44 +1,11 @@
 /**
- * Chat message list — user / assistant bubbles, oldest at top, newest at
- * bottom. Initial render lands at the bottom; new arrivals auto-scroll
- * when the user is anchored near the bottom; reading history is never
- * yanked down.
+ * Chronological FlashList chat with initial bottom positioning and MVCP.
+ * Follow new messages only while the user is near the bottom; preserve reading
+ * position through asynchronous Markdown and image resizing.
  *
- * Behavioral parity (apps/mobile/CLAUDE.md):
- *   - Render ALL message roles. Unknown role values are downgraded to
- *     "assistant" by ChatMessageSchema's `.catch()`, so this list never
- *     needs to silently drop a row.
- *   - Render `failure_reason` messages with destructive styling — same
- *     boolean as web's destructive bubble + failureReasonLabel().
- *
- * v1 simplifications:
- *   - No "Replied in Ns" badge under assistant bubbles (elapsed_ms is
- *     parsed but not displayed). Easy v2 add — show below the bubble.
- *   - Attachments bound to a message but NOT referenced inline in `content`
- *     render as standalone cards below the bubble via `CommentAttachmentList`
- *     (same component the comment thread uses; mirrors web reusing
- *     `AttachmentList` in chat). Inline `![](url)` / `[name](url)` still flow
- *     through the markdown renderer and are de-duped out of the card list.
- *
- * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` (Copy / Select Text / Cancel). While the sheet is on
- * screen the targeted bubble's border highlights. The assistant branch
- * has no border baseline because its bubble has no shell — adding a 2px
- * baseline would shift layout per message. See `useChatMessageLongPress`
- * in `./message-long-press.tsx`.
- *
- * List engine: FlashList v2 (Shopify). FlatList was the original choice
- * (per the now-outdated "no FlashList" baseline in apps/mobile/CLAUDE.md
- * — written before FlashList v2 stabilised). FlatList's `scrollToEnd` is
- * janky on variable-height lists by RN's own docs admission, and our
- * markdown bubbles render in multiple async passes (Shiki highlight,
- * image natural-size, lightbox provider injection) — each pass used to
- * fire onContentSizeChange and trigger another forced scroll, causing
- * the "open chat → feels stuck" jank. FlashList v2 replaces the manual
- * scroll dance with `maintainVisibleContentPosition`
- * (default-on; locks visible item across content changes) +
- * `startRenderingFromBottom` (initial paint at bottom, no setTimeout
- * hacks). Cell recycling also keeps scroll-up smooth.
+ * Render all normalized message roles and failure styling. Attachments not used
+ * inline appear as standalone cards. Long-press actions highlight the target
+ * without adding a border that would shift the layout.
  */
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";

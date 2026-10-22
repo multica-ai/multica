@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useChatSessionRealtime } from "./use-chat-session-realtime";
 import { chatKeys } from "@/data/queries/chat";
 import { useChatSessionsRealtime } from "./use-chat-sessions-realtime";
 
@@ -27,10 +28,37 @@ vi.mock("@/lib/use-ws-subscriptions", () => ({
 
 vi.mock("@/data/api", () => ({ api: {} }));
 
+
 describe("useChatSessionsRealtime", () => {
   beforeEach(() => {
     invalidateQueries.mockReset();
     subscriptionSetups.length = 0;
+  });
+
+  it("refreshes a late cancellation outcome without requiring a reconnect", () => {
+    useChatSessionsRealtime();
+    useChatSessionRealtime("session-1");
+    const handlers = new Map<string, EventHandler[]>();
+    const ws: MockWS = {
+      on: vi.fn((event: string, handler: EventHandler) => {
+        handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+        return () => {};
+      }),
+      onReconnect: vi.fn(() => () => {}),
+    };
+    for (const setup of subscriptionSetups) setup(ws, "workspace-1");
+    for (const handle of handlers.get("chat:cancel_finalized") ?? []) {
+      handle({ chat_session_id: "session-1", outcome: "stopped" });
+    }
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: chatKeys.sessions("workspace-1") });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: chatKeys.messages("session-1") });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: chatKeys.pendingTask("session-1") });
+    invalidateQueries.mockClear();
+    for (const handle of handlers.get("chat:cancel_finalized") ?? []) {
+      handle({ chat_session_id: "another-session", outcome: "stopped" });
+    }
+    expect(invalidateQueries).toHaveBeenCalledTimes(1);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: chatKeys.sessions("workspace-1") });
   });
 
   it("invalidates the workspace session list for channel-created chats", () => {

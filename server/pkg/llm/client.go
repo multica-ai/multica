@@ -97,7 +97,7 @@ import (
 // FallbackModel is the last-resort model used when neither the request nor the
 // configured default supplies one. It is deliberately a small, inexpensive
 // model since this layer backs lightweight utility calls.
-const FallbackModel = "gpt-5.6-luna"
+const FallbackModel = "gpt-6-luna"
 
 // defaultTimeout bounds the full request lifecycle (including SDK retries) when
 // the caller's context has no deadline of its own. Streaming requests are not
@@ -160,8 +160,8 @@ type Config struct {
 	// would otherwise dominate the latency budget of the assist calls above.
 	// Standard OpenAI endpoints reject unknown body fields, so this is opt-in
 	// per deployment rather than automatic. It never touches reasoning_effort:
-	// GPT-5.6-family models already get ReasoningEffortNone from GenerateJSON,
-	// and this knob targets the gateways where that field is ignored instead.
+	// GPT-5.6-family models and GPT-6 Luna already get ReasoningEffortNone from
+	// GenerateJSON; this knob targets gateways that ignore that field instead.
 	DisableThinking bool
 	// HTTPClient, when set, replaces the SDK's default transport. Primarily a
 	// test seam.
@@ -401,8 +401,8 @@ func (c *Client) GenerateText(ctx context.Context, model, systemPrompt, userProm
 // word "JSON" has to appear somewhere in the prompt, or OpenAI-compatible
 // endpoints reject the request outright.
 //
-// This helper is for small, latency-sensitive utility work. For the GPT-5.6
-// family it explicitly disables reasoning and leaves sampling controls at the
+// This helper is for small, latency-sensitive utility work. For GPT-6 Luna and
+// the GPT-5.6 family it disables reasoning and leaves sampling controls at the
 // model default. That keeps maxCompletionTokens available to the visible JSON
 // instead of spending it on reasoning, and avoids sampling parameters that
 // those models may reject. Other models keep the caller's temperature so a
@@ -431,8 +431,8 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 	if effectiveModel == "" {
 		effectiveModel = c.defaultModel
 	}
-	if isGPT56Family(effectiveModel) {
-		// GPT-5.6 defaults to medium reasoning. This path generates a tiny JSON
+	if strings.EqualFold(effectiveModel, "gpt-6-luna") || isGPT56Family(effectiveModel) {
+		// These models default to medium reasoning. This path generates a tiny JSON
 		// object under a strict wall-clock budget, so reasoning would add latency
 		// and consume the completion-token limit without improving the contract.
 		params.ReasoningEffort = shared.ReasoningEffortNone
@@ -441,7 +441,7 @@ func (c *Client) GenerateJSON(ctx context.Context, model, systemPrompt, userProm
 	}
 	if maxCompletionTokens > 0 {
 		// max_tokens is deprecated and rejected by current reasoning models,
-		// including the GPT-5.6 family. Prefer the replacement field for every
+		// including GPT-6 Luna. Prefer the replacement field for every
 		// upstream; a narrow compatibility retry below covers older gateways
 		// that have not implemented it yet.
 		params.MaxCompletionTokens = openai.Int(maxCompletionTokens)

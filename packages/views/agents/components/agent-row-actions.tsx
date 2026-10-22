@@ -37,6 +37,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
 import { AppLink, useIntentNavigate } from "../../navigation";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 interface AgentRowActionsProps {
   agent: Agent;
@@ -137,15 +138,20 @@ export function AgentRowActions({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.row.actions_aria)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-100 @2xl:opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.row.actions_aria)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.row.actions_aria)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-100 @2xl:opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-auto">
@@ -248,8 +254,8 @@ export function AgentRowActions({
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
                   <AlertCircle className="h-5 w-5 text-destructive" />
                 </div>
-                <div className="flex-1">
-                  <AlertDialogTitle>
+                <div className="min-w-0 flex-1">
+                  <AlertDialogTitle className="break-all">
                     {t(($) => $.row_actions.archive_dialog_title, { name: agent.name })}
                   </AlertDialogTitle>
                   <AlertDialogDescription>

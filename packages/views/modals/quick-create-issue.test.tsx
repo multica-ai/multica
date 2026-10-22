@@ -133,7 +133,7 @@ const mockSquadsData = vi.hoisted(
 // version" (#7633). Tests flip this to drop the row and prove the panel no
 // longer blocks on it.
 const mockRuntimesData = vi.hoisted(
-  () => ({ list: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as Array<{ id: string; metadata: Record<string, unknown> }> }),
+  () => ({ list: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as Array<{ id: string; provider?: string; metadata: Record<string, unknown> }> }),
 );
 
 // The real handle mints an id when it inserts the placeholder and hands it to
@@ -455,14 +455,6 @@ vi.mock("../issues/components/pickers/property-picker", () => ({
   PickerEmpty: () => <div data-testid="picker-empty" />,
 }));
 
-vi.mock("@multica/ui/components/ui/button", () => ({
-  Button: ({ children, disabled, onClick }: { children: ReactNode; disabled?: boolean; onClick?: () => void }) => (
-    <button type="button" disabled={disabled} onClick={onClick}>
-      {children}
-    </button>
-  ),
-}));
-
 vi.mock("@multica/ui/components/ui/switch", () => ({
   Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) => (
     <input
@@ -508,6 +500,18 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 }
 
 describe("AgentCreatePanel", () => {
+  it("does not select Qoder agents or their squads for issue creation", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    mockSquadsData.list = [{ id: "squad-1", name: "Cloud Squad", leader_id: "agent-1", archived_at: null }];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+    expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Bohan")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cloud Squad")).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.lastActorType = null;
@@ -1208,7 +1212,11 @@ describe("AgentCreatePanel", () => {
         ),
         "Ship it",
       );
-      expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+      // Blocked but still hoverable so its tooltip can explain why.
+      const create = screen.getByRole("button", { name: /^Create$/i });
+      expect(create).toHaveAttribute("aria-disabled", "true");
+      await user.click(create);
+      expect(mockQuickCreateIssue).not.toHaveBeenCalled();
     });
   });
 

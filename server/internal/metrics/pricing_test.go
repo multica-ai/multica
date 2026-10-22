@@ -517,6 +517,85 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 	}
 }
 
+func TestPriceForModelAliasAnthropicSonnetAndHaiku55(t *testing.T) {
+	cases := []struct {
+		aliases []string
+		want    ModelPrice
+	}{
+		{
+			aliases: []string{
+				"claude-sonnet-5",
+				"claude-5-sonnet",
+				"anthropic/claude-sonnet-5",
+				"claude-sonnet-5[1m]",
+				"claude-sonnet-5-20261001",
+				"claude-sonnet-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			aliases: []string{
+				"claude-sonnet-5-5",
+				"claude-sonnet-5.5",
+				"anthropic/claude-sonnet-5-5",
+				"anthropic:claude-sonnet-5.5",
+				"claude-sonnet-5-5[1m]",
+				"claude-sonnet-5-5-20261001",
+				"claude-sonnet-5-5-2026-10-01[1m]",
+				"claude-sonnet-5-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5-5", InputPerM: 2, CacheReadPerM: 0.1, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			aliases: []string{
+				"claude-haiku-5-5",
+				"claude-haiku-5.5",
+				"anthropic/claude-haiku-5-5",
+				"anthropic:claude-haiku-5.5",
+				"claude-haiku-5-5[1m]",
+				"claude-haiku-5-5-20261001",
+				"claude-haiku-5-5-2026-10-01[1m]",
+				"claude-haiku-5-5-latest",
+			},
+			want: ModelPrice{Provider: "anthropic", Model: "claude-haiku-5-5", InputPerM: 0.1, CacheReadPerM: 0.01, CacheWritePerM: 0.125, OutputPerM: 0.5},
+		},
+	}
+	for _, tc := range cases {
+		for _, model := range tc.aliases {
+			t.Run(model, func(t *testing.T) {
+				got, ok := PriceForModelAlias(model)
+				if !ok || got != tc.want {
+					t.Fatalf("PriceForModelAlias(%q) = %+v, %v; want %+v, true", model, got, ok, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestPriceForModelAliasAnthropicSonnetAndHaikuUnknownVariants(t *testing.T) {
+	for _, model := range []string{
+		"claude-sonnet-5-6",
+		"claude-sonnet-5.6",
+		"claude-sonnet-5-55",
+		"claude-haiku-5-6",
+		"claude-haiku-5.6",
+		"claude-haiku-5-55",
+		"claude-5-sonnet-preview",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
+	for _, base := range []string{"claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+		for _, suffix := range []string{"x", "-preview", "-latest-preview", "-20261001x", "[1m]junk", "[1m][2m]", "[]"} {
+			model := base + suffix
+			if got, ok := PriceForModelAlias(model); ok {
+				t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+			}
+		}
+	}
+}
+
 func TestPriceForModelAliasAnthropicOpus55(t *testing.T) {
 	// Opus 5.5 is its own SKU at $4 / $20 with cache reads at 0.05x input
 	// ($0.20). An Opus 5 alias that did not stop at the version would swallow

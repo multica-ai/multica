@@ -97,6 +97,7 @@ export function QuickAgentBar({
           onSelect={(agent) => pin.mutate(agent.id)}
           side="bottom"
           align="start"
+          tooltip={t(($) => $.list.add_agent)}
           triggerRender={
             <button
               type="button"

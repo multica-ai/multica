@@ -16,6 +16,15 @@ WHERE id = $1;
 SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2;
 
+-- name: GetRealtimeMemberships :many
+SELECT m.user_id, m.workspace_id
+FROM member m
+JOIN (
+    SELECT unnest(sqlc.arg(user_ids)::uuid[]) AS user_id,
+           unnest(sqlc.arg(workspace_ids)::uuid[]) AS workspace_id
+) AS requested
+    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id;
+
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)

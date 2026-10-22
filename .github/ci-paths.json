@@ -87,6 +87,7 @@
     "scripts/install.sh",
     "scripts/install.ps1",
     "scripts/check.sh",
+    "scripts/check.test.sh",
     "scripts/dev.sh",
     "scripts/local-env.sh",
     "scripts/init-worktree-env.sh",

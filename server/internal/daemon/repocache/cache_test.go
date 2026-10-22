@@ -34,6 +34,19 @@ func TestGitEnv(t *testing.T) {
 		t.Error("gitEnv() must include GIT_TERMINAL_PROMPT=0")
 	}
 
+	// Must contain GCM_INTERACTIVE=never so the Windows Git Credential
+	// Manager cannot spray login dialogs from background sync.
+	found = false
+	for _, entry := range env {
+		if entry == "GCM_INTERACTIVE=never" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("gitEnv() must include GCM_INTERACTIVE=never")
+	}
+
 	// Must contain HOME from the current environment.
 	home := os.Getenv("HOME")
 	if home == "" {

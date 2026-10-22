@@ -1,30 +1,12 @@
 import type { MetadataRoute } from "next";
 
 /**
- * Web app manifest — what makes the mobile web app installable and lets it run
- * in its own window instead of a browser tab.
+ * Installable web manifest. Start at /inbox so session-aware proxy routing
+ * opens the workspace or login; the marketing host's root would open the landing
+ * page even for a signed-in user.
  *
- * `start_url` is deliberately NOT "/". The official marketing hosts keep the
- * root path on the public site even for a signed-in session (see
- * `isOfficialMarketingHost` in proxy.ts), so an installed app pointed at "/"
- * would open the landing page. "/inbox" is one of `LEGACY_ROUTE_SEGMENTS`,
- * which proxy.ts resolves per session: signed in with a known workspace it
- * lands on that workspace's inbox, signed in without one it lands on /login
- * (which resolves against the workspace list), and signed out it lands on
- * /login too. All three are pinned in manifest.test.ts, because a launcher
- * icon has no URL bar to recover from a wrong destination.
- *
- * The icons under /icons are generated, not hand-drawn. To regenerate after a
- * brand change, edit public/icons/icon.svg and run from public/icons:
- *
- *   sips -s format png --resampleHeightWidth 512 512 icon.svg --out icon-maskable-512.png
- *   sips -s format png --resampleHeightWidth 180 180 icon.svg --out apple-touch-icon.png
- *   sips -s format png --resampleHeightWidth 512 512 ../../../desktop/build/icon.png --out icon-512.png
- *   sips -s format png --resampleHeightWidth 192 192 ../../../desktop/build/icon.png --out icon-192.png
- *
- * The two `any` icons come from the desktop app icon so an installed web app
- * and an installed desktop app show the same artwork; the maskable one is
- * full-bleed because Android crops it to the launcher's shape.
+ * Standard icons share desktop artwork. The maskable SVG supplies full-bleed
+ * artwork for launcher cropping; regenerate raster sizes from those source assets.
  */
 
 /** Launch path. Exported so manifest.test.ts can run it through the proxy. */

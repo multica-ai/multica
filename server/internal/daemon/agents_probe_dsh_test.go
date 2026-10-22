@@ -32,7 +32,7 @@ func dshProbeFixture(t *testing.T, body string, manifest bool) string {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(installedDshProfileManifest()), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,6 +143,67 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 			}
 		})
 	}
+
+	// A manifest that does not name the runtime is missing. Probing it is what
+	// hangs, so the classification must not start dsh at all.
+	t.Run("unreferenced manifest is missing without probing", func(t *testing.T) {
+		manifests := []string{"{}\n", "{\"dependencies\":{}}\n", dshSkeletonProfileManifest()}
+		for _, manifest := range manifests {
+			home := t.TempDir()
+			t.Setenv("DSH_HOME", home)
+			dir := filepath.Join(home, "profiles", dshMulticaProfileName)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(t.TempDir(), "ran")
+			t.Setenv("DSH_PROBE_MARKER", marker)
+			path := filepath.Join(t.TempDir(), "dsh")
+			script := "#!/bin/sh\ncase \"$*\" in\n  *--probe*) touch \"$DSH_PROBE_MARKER\"; exec sleep 30 ;;\n  *) printf '%s\\n' '0.1.2-rc.1' ;;\nesac\n"
+			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			start := time.Now()
+			if got := probeDshMulticaProfile(context.Background(), path); got != dshProbeMissingProfile {
+				t.Fatalf("probeDshMulticaProfile() = %v, want missing", got)
+			}
+			if time.Since(start) > time.Second {
+				t.Fatal("an unreferenced manifest still ran the probe")
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("dsh --probe ran for a manifest that does not name the runtime")
+			}
+		}
+	})
+
+	// A file that cannot be parsed is not evidence the runtime is absent, so a
+	// failed probe over it stays transient and the probe does run.
+	t.Run("unparseable manifest still probes", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("DSH_HOME", home)
+		dir := filepath.Join(home, "profiles", dshMulticaProfileName)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		marker := filepath.Join(t.TempDir(), "ran")
+		t.Setenv("DSH_PROBE_MARKER", marker)
+		path := filepath.Join(t.TempDir(), "dsh")
+		script := "#!/bin/sh\ncase \"$*\" in\n  *--probe*) touch \"$DSH_PROBE_MARKER\"; exit 0 ;;\n  *) printf '%s\\n' '0.1.2-rc.1' ;;\nesac\n"
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got := probeDshMulticaProfile(context.Background(), path); got != dshProbeUnavailable {
+			t.Fatalf("probeDshMulticaProfile() = %v, want unavailable", got)
+		}
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatal("dsh --probe did not run for an unparseable manifest")
+		}
+	})
 }
 
 // The four ways a probe can fail while the profile IS installed must not

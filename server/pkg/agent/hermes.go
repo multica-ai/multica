@@ -534,7 +534,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr)
+	// Surface a launch-time dependency reinstall (otherwise only visible at
+	// Debug through the forwarder above); see hermes_depsync.go / GH #9390.
+	depSync := newHermesDepSyncWatcher(b.cfg.Logger, b.cfg.Env["HERMES_HOME"])
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr, depSync)
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
@@ -687,6 +690,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			},
 			"clientCapabilities": map[string]any{},
 		})
+		depSync.Finish(err == nil)
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("hermes initialize failed: %v", err)

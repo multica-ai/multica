@@ -133,8 +133,14 @@ export function AnimatedRightSidebar({
   return (
     <motion.div
       animate={{ opacity: open ? 1 : 0, x: open ? 0 : 12 }}
+      // `relative` makes this scroller the containing block of absolutely
+      // positioned descendants (`sr-only` labels in the execution log, etc.).
+      // Without it they resolve against an ancestor outside the scroller:
+      // they escape its clip and stretch the enclosing panel's scroll height,
+      // so wheeling past the end of the comments scrolled the whole issue
+      // detail up and left a blank band at the bottom (MUL-8100).
       className={cn(
-        "h-full overflow-x-hidden overflow-y-auto border-l",
+        "relative h-full overflow-x-hidden overflow-y-auto border-l",
         !open && "pointer-events-none",
         className,
       )}

@@ -26,6 +26,7 @@ import type {
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Select,
@@ -507,15 +508,15 @@ function PublishedPackage({
           <div className="text-body font-medium">{pluginPackage.name}</div>
           <p className="text-caption text-muted-foreground">{pluginPackage.plugin_key}</p>
         </div>
-        <Button
+        <IconButton
           size="icon"
           variant="ghost"
-          aria-label={t(($) => $.plugins.publish.delete)}
+          label={t(($) => $.plugins.publish.delete)}
           disabled={!canManage || busy}
           onClick={() => onDelete(pluginPackage.id)}
         >
           <Trash2 />
-        </Button>
+        </IconButton>
       </div>
 
       <ul className="space-y-1.5">
@@ -610,17 +611,17 @@ function InstalledPlugin({
                   : t(($) => $.plugins.disabled)))
                 .catch(reportError)}
             />
-            <Button
+            <IconButton
               size="icon"
               variant="ghost"
-              aria-label={t(($) => $.plugins.uninstall)}
+              label={t(($) => $.plugins.uninstall)}
               disabled={!canManage || isMutating}
               onClick={() => uninstallMutation.mutateAsync(installation.id)
                 .then(() => toast.success(t(($) => $.plugins.uninstalled)))
                 .catch(reportError)}
             >
               {uninstallMutation.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            </Button>
+            </IconButton>
           </div>
         </div>
 

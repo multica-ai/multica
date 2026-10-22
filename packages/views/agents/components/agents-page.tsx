@@ -245,9 +245,7 @@ export interface AgentsPageProps {
   hasLocalMachine?: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Page header
-// ---------------------------------------------------------------------------
 
 function PageHeaderBar({
   totalCount,
@@ -262,7 +260,6 @@ function PageHeaderBar({
       icon={Bot}
       title={t(($) => $.page.title)}
       count={totalCount}
-      description={t(($) => $.page.tagline)}
       learnMore={{
         href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/agents`,
         label: t(($) => $.page.learn_more),
@@ -328,9 +325,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cells
-// ---------------------------------------------------------------------------
 
 function CheckboxCell({
   checked,
@@ -568,9 +563,7 @@ function LastActiveCell({ row }: { row: AgentListRow }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Header row + skeleton
-// ---------------------------------------------------------------------------
 
 function AgentListHeader({
   sortField,
@@ -762,10 +755,8 @@ function LoadingSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
 // Page
-// ---------------------------------------------------------------------------
 
 export function AgentsPage(_props: AgentsPageProps = {}) {
   const { t } = useT("agents");

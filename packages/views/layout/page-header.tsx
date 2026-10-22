@@ -2,6 +2,7 @@
 
 import { cn } from "@multica/ui/lib/utils";
 import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sidebar";
+import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 
 /**
  * The left edge every page shares: the header, the toolbar under it, and any
@@ -65,7 +66,12 @@ export const PAGE_TOOLBAR = cn(
 export function CollapsedNavTrigger() {
   const sidebar = useSidebarSafe();
   if (!sidebar || sidebar.hasExternalTrigger) return null;
-  return <SidebarTrigger className="xl:hidden" />;
+  return (
+    <SidebarTrigger
+      className="xl:hidden"
+      shortcut={<ActionShortcutKeycaps action="toggleSidebar" />}
+    />
+  );
 }
 
 interface PageHeaderProps {

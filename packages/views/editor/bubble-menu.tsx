@@ -51,7 +51,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Bold,
   Italic,
@@ -76,9 +76,7 @@ import {
   MessageSquarePlus,
 } from "lucide-react";
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boolean {
   if (!editor.isEditable) return false;
@@ -92,9 +90,7 @@ function shouldShowBubbleMenu(editor: Editor, hasSelectionAction = false): boole
   return true;
 }
 
-// ---------------------------------------------------------------------------
 // Mark Toggle Button
-// ---------------------------------------------------------------------------
 
 type InlineMark = "bold" | "italic" | "strike" | "code" | "highlight";
 
@@ -144,9 +140,7 @@ function MarkButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // URL normalisation
-// ---------------------------------------------------------------------------
 
 /** Protocols that can execute code in the browser — the only ones we block. */
 const DANGEROUS_PROTOCOL_RE = /^(javascript|data|vbscript):/i;
@@ -174,9 +168,7 @@ function normalizeUrl(input: string): string {
   return `https://${trimmed}`;
 }
 
-// ---------------------------------------------------------------------------
 // Link Edit Bar
-// ---------------------------------------------------------------------------
 
 function LinkEditBar({
   editor,
@@ -224,42 +216,40 @@ function LinkEditBar({
           if (e.key === "Escape") { e.preventDefault(); onClose(); editor.commands.focus(); }
         }}
       />
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
-        aria-label={t(($) => $.bubble_menu.link_edit.apply)}
+        label={t(($) => $.bubble_menu.link_edit.apply)}
         onClick={apply}
         onMouseDown={(e) => e.preventDefault()}
       >
         <Check className="size-3.5" />
-      </Button>
+      </IconButton>
       {existingHref && (
-        <Button
+        <IconButton
           size="icon-xs"
           variant="ghost"
-          aria-label={t(($) => $.bubble_menu.link_edit.remove)}
+          label={t(($) => $.bubble_menu.link_edit.remove)}
           onClick={remove}
           onMouseDown={(e) => e.preventDefault()}
         >
           <Unlink className="size-3.5" />
-        </Button>
+        </IconButton>
       )}
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
-        aria-label={t(($) => $.bubble_menu.link_edit.close)}
+        label={t(($) => $.bubble_menu.link_edit.close)}
         onClick={() => { onClose(); editor.commands.focus(); }}
         onMouseDown={(e) => e.preventDefault()}
       >
         <X className="size-3.5" />
-      </Button>
+      </IconButton>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Heading Dropdown
-// ---------------------------------------------------------------------------
 
 function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor; onOpenChange: (open: boolean) => void; activeLevel: number | undefined }) {
   const { t } = useT("editor");
@@ -315,9 +305,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
   );
 }
 
-// ---------------------------------------------------------------------------
 // List Dropdown
-// ---------------------------------------------------------------------------
 
 function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean; isTask: boolean }) {
   const { t } = useT("editor");
@@ -393,9 +381,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
   );
 }
 
-// ---------------------------------------------------------------------------
 // Create Sub-Issue Button
-// ---------------------------------------------------------------------------
 
 /**
  * Turns the current selection into a sub-issue of `parentIssueId` and replaces
@@ -488,9 +474,7 @@ function CreateSubIssueButton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Main Bubble Menu — @floating-ui/dom + portal to body
-// ---------------------------------------------------------------------------
 
 function EditorBubbleMenu({
   editor,

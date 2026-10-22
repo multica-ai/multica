@@ -11,6 +11,7 @@ display metadata; it is context later injected into task briefs and
 - [When to add a resource](#when-to-add-a-resource)
 - [Debugging wrong context](#debugging-wrong-context)
 - [Side effects](#side-effects)
+- [Project workflows](#project-workflows)
 
 ## Core model
 
@@ -153,3 +154,38 @@ is task-local checkout state.
 Project create/update/delete/status and project resource add/update/remove
 mutate durable workspace state and affect future tasks. Ask before changing
 `local_directory` unless the user explicitly requested that exact local path.
+
+## Project workflows
+
+A project can use a workflow: its ordered status columns, where a column may
+hand the issue off to a handler — a fixed agent, squad or member, the project
+lead, or the issue's creator. When the issue's project uses one, the per-turn
+prompt carries a `[Project workflow]` block, and that block replaces the
+status rules of your runtime brief for this issue.
+
+- **Only the workflow's keys.** A named workflow accepts only its own
+  statuses; any other status write fails with `status_not_in_workflow`, and
+  the error lists the allowed keys. The workspace Default workflow accepts
+  every status, so issues on statuses it no longer lists keep working.
+- **Changing the status is the handoff.** Entering a column that hands off
+  reassigns the issue to that column's handler and starts their run; a member
+  handler is assigned and runs nothing. Nothing advances the status when a run
+  ends: finishing a step means moving the issue to the next status yourself,
+  with the command the block names. A column can also name a "needs changes"
+  status that sends the issue back.
+- **Entering a step you handle starts your run.** Even when your own run makes
+  the move, a run for the new step queues behind the current one, and the
+  write skips your own event wakeups so one change starts one run. Do not add
+  a wakeup to catch it.
+- **A run works one step.** A run is bound to the status the issue was at when
+  it was queued, and moves along with your own status changes. If someone else
+  moves the issue while you work, your status changes are refused with
+  `workflow_step_moved`, naming who moved it. Do not retry; comment if
+  something still needs attention.
+- **The assignee owns the step.** Only the issue's assignee gets the step's
+  instructions and commands. Any other agent on the issue — mentioned in a
+  comment, say — sees the statuses and leaves them to the assignee unless
+  explicitly asked to change them.
+- **No `blocked` column.** When the workflow has none, comment why you cannot
+  proceed, then use the "needs changes" status if the step has one, or leave
+  the status as it is.

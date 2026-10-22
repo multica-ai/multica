@@ -20,6 +20,8 @@ const (
 	ctxKeyDaemonWorkspaceID daemonContextKey = iota
 	ctxKeyDaemonID
 	ctxKeyDaemonAuthPath
+	ctxKeyDaemonTokenHash
+	ctxKeyDaemonTokenOwnerID
 )
 
 // Daemon auth path labels exposed via context for slow-log attribution.
@@ -52,6 +54,43 @@ func DaemonAuthPathFromContext(ctx context.Context) string {
 
 // WithDaemonContext returns a new context with the daemon workspace ID and daemon ID set.
 // This is used by tests to simulate daemon token authentication.
+// DaemonTokenHashFromContext returns the hash of the mdt_ token that
+// authenticated the request, or "" for any other auth path. Checks that must
+// re-validate the exact credential (e.g. Qoder revocation) read it from here
+// rather than the Authorization header, so they also work for requests that
+// are replayed in-process from a WebSocket connection (MUL-8154).
+func DaemonTokenHashFromContext(ctx context.Context) string {
+	h, _ := ctx.Value(ctxKeyDaemonTokenHash).(string)
+	return h
+}
+
+// DaemonTokenOwnerIDFromContext returns the runtime owner the authenticating
+// mdt_ token is bound to, or "" when it is unbound (Qoder-managed) or the
+// request did not use a daemon token (MUL-8154).
+func DaemonTokenOwnerIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(ctxKeyDaemonTokenOwnerID).(string)
+	return id
+}
+
+// WithDaemonTokenOwnerID attaches the token's owner binding; the WS RPC
+// bridge uses it to replay a connection's credential in-process.
+func WithDaemonTokenOwnerID(ctx context.Context, ownerID string) context.Context {
+	if ownerID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyDaemonTokenOwnerID, ownerID)
+}
+
+// WithDaemonTokenHash attaches the authenticating mdt_ token hash. The WS
+// RPC bridge uses it to carry the connection's credential into the
+// synthetic request it hands to the HTTP handler.
+func WithDaemonTokenHash(ctx context.Context, tokenHash string) context.Context {
+	if tokenHash == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyDaemonTokenHash, tokenHash)
+}
+
 func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) context.Context {
 	ctx = context.WithValue(ctx, ctxKeyDaemonWorkspaceID, workspaceID)
 	ctx = context.WithValue(ctx, ctxKeyDaemonID, daemonID)
@@ -119,6 +158,8 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, id.WorkspaceID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonID, id.DaemonID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
+					ctx = context.WithValue(ctx, ctxKeyDaemonTokenHash, hash)
+					ctx = WithDaemonTokenOwnerID(ctx, id.OwnerID)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -138,6 +179,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					WorkspaceID: uuidToString(dt.WorkspaceID),
 					DaemonID:    dt.DaemonID,
 				}
+				if dt.OwnerID.Valid {
+					identity.OwnerID = uuidToString(dt.OwnerID)
+				}
 				// daemon_token.expires_at is NOT NULL; pgtype Valid is true
 				// in normal operation, but defend against zero just in case.
 				var expiresAt time.Time
@@ -149,6 +193,8 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, identity.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
+				ctx = context.WithValue(ctx, ctxKeyDaemonTokenHash, hash)
+				ctx = WithDaemonTokenOwnerID(ctx, identity.OwnerID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}

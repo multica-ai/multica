@@ -73,6 +73,12 @@ describe("cancellationActorLabel", () => {
 // it must hold: a SERVER-cancelled row (persisted reason) reads like a failed
 // row. Actor provenance is handled independently by cancellationActorLabel.
 describe("cancelReasonLabel", () => {
+  it("localizes access revocation without calling the cancelled run a failure", () => {
+    for (const locale of Object.keys(AGENT_RESOURCES) as SupportedLocale[]) {
+      expect(cancelReasonLabel({ status: "cancelled", failure_reason: "runtime_access_revoked" }, fixedT(locale)))
+        .toBe(AGENT_RESOURCES[locale].task_failure.reasons.runtime_access_revoked);
+    }
+  });
   it("returns null for a user-initiated cancel", () => {
     expect(
       cancelReasonLabel(

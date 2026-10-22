@@ -230,9 +230,11 @@ function QuickActionRow({
         <div className="space-y-0.5">
           <div className="font-medium">{action.name}</div>
           {action.description ? <div>{action.description}</div> : null}
-          <div className="text-muted-foreground">
-            {t(($) => $.detail.quick_action_runs_as, { name: targetName })}
-          </div>
+          {action.assignee_type !== "" ? (
+            <div className="text-muted-foreground">
+              {t(($) => $.detail.quick_action_runs_as, { name: targetName })}
+            </div>
+          ) : null}
         </div>
       </TooltipContent>
     </Tooltip>

@@ -79,7 +79,11 @@
       "cancelled": "Abandonné."
     },
     "pr_auto_complete_badge": "Définie à la fusion des PR",
-    "built_in_locked": "Les états intégrés pilotent le comportement du système : ils ne peuvent être ni modifiés ni archivés, mais vous pouvez les réordonner."
+    "built_in_locked": "Les états intégrés pilotent le comportement du système : ils ne peuvent être ni modifiés ni archivés, mais vous pouvez les réordonner.",
+    "builtin_badge": "Intégré",
+    "workflow_usage_one": "{{count}} workflow l’utilise",
+    "workflow_usage_other": "{{count}} workflows l’utilisent",
+    "workflow_usage_none": "Dans aucun workflow"
   },
   "wakeups": {
     "description": "Règles de la plateforme appliquées à chaque tâche. Chaque tâche peut les modifier dans sa section Réveils.",
@@ -139,6 +143,8 @@
     "field_name": "Nom",
     "field_name_placeholder": "Relecture de code",
     "field_target": "S'exécute en tant que",
+    "no_target": "Aucune cible",
+    "no_target_hint": "Publie un message sans mentionner personne.",
     "field_prompt": "Invite",
     "field_prompt_placeholder": "Relire le code lié à cette tâche. Se concentrer sur la justesse et les cas limites.",
     "prompt_hint": "Envoyée telle quelle. L'agent voit déjà la tâche.",
@@ -405,7 +411,8 @@
       "billing": "Facturation",
       "code": "Code",
       "channels": "Messagerie",
-      "apps": "Applications connectées"
+      "apps": "Applications connectées",
+      "workflows": "Workflows"
     },
     "groups": {
       "personal": "Personnel",
@@ -675,8 +682,7 @@
     },
     "system": {
       "title": "Notifications système",
-      "description": "Afficher les notifications système lorsque Multica est en arrière-plan.",
-      "label": "Afficher les notifications système"
+      "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
     },
     "browser": {
       "label": "Notifications du navigateur",
@@ -1218,6 +1224,15 @@
   "desktop": {
     "tabs": {
       "updates": "Mises à jour"
+    },
+    "tab_bar": {
+      "pin": "Épingler l'onglet",
+      "unpin": "Désépingler l'onglet",
+      "close": "Fermer l'onglet",
+      "close_others": "Fermer les autres onglets",
+      "open_window": "Ouvrir dans une nouvelle fenêtre",
+      "new": "Nouvel onglet",
+      "pinned_name": "{{title}} (épinglé)"
     },
     "updates": {
       "title": "Mises à jour",

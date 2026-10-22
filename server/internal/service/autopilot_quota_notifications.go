@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -158,7 +159,7 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 
 	items := make([]db.InboxItem, 0, len(recipients))
 	for _, recipient := range recipients {
-		item, err := q.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		item, inserted, err := inbox.CreateIfEligible(ctx, q, db.CreateInboxItemParams{
 			ID: dbid.NewV7(), WorkspaceID: facts.WorkspaceID,
 			RecipientType: recipient.Type, RecipientID: recipient.ID,
 			Type: "autopilot_quota_exceeded", Severity: "attention", IssueID: pgtype.UUID{},
@@ -168,6 +169,9 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create autopilot quota inbox item: %w", err)
+		}
+		if !inserted {
+			continue
 		}
 		items = append(items, item)
 	}

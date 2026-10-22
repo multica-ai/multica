@@ -1,0 +1,51 @@
+---
+title: Actions rapides
+description: Enregistrez une demande fréquente pour l’utiliser dans une tâche sans la réécrire.
+---
+
+Les actions rapides transforment vos demandes fréquentes en boutons sur une tâche. Enregistrez une fois qui appeler et quoi lui demander, puis réutilisez cette demande sur d’autres tâches.
+
+Par exemple, créez **Revue de code** pour votre agent de revue avec cette consigne :
+
+> Examine les modifications liées à cette tâche. Recherche les erreurs et les tests manquants, puis publie tes conclusions ici.
+
+L’agent connaît déjà le contexte de la tâche. Il n’est donc pas nécessaire de recopier sa description dans la demande.
+
+## Utiliser une action rapide
+
+Dans l’application web ou de bureau, vous avez deux possibilités :
+
+| Où | Ce qui se passe |
+|---|---|
+| **Actions rapides** dans la barre latérale de la tâche | Un clic publie immédiatement la demande enregistrée. Si un agent ou un squad est choisi, vous lui demandez de travailler sur cette tâche. |
+| Saisir `/` dans le champ de commentaire | Choisissez une action pour insérer sa demande dans un brouillon. Adaptez-la à cette tâche, puis envoyez-la. La sélection seule ne publie rien. |
+
+Utiliser une action rapide ne change ni le responsable ni le statut de la tâche. Suivez les réponses dans la discussion et la progression de l’agent dans le [journal d’exécution](/tasks).
+
+Une action avec **Aucune cible** publie le message enregistré sans @mentionner qui que ce soit. Elle convient aux listes de vérification et aux réponses fréquentes.
+
+## Créer une action rapide
+
+1. Ouvrez **Paramètres → Actions rapides**, puis **Nouvelle action rapide**.
+2. Donnez-lui un nom court qui décrit la demande, comme **Revue de code** ou **Résumer l’avancement**.
+3. Choisissez **Moi uniquement** pour un usage personnel ou **Équipe** pour la partager dans l’espace de travail. Créer et gérer les actions d’équipe demande le rôle `owner` ou `admin` ; les membres choisissent **Moi uniquement**.
+4. Dans **S’exécute en tant que**, choisissez un agent ou un squad, ou **Aucune cible** pour enregistrer un message sans mention.
+5. Rédigez la demande dans **Invite**, telle qu’elle doit être envoyée, puis enregistrez. Elle est envoyée telle quelle ; les variables ne sont pas prises en charge.
+
+Une action d’équipe doit utiliser un agent que tous les membres peuvent appeler. Pour un squad, cette condition concerne son leader. Une action personnelle peut utiliser les agents que vous avez le droit d’appeler.
+
+« Moi uniquement » détermine qui peut voir et utiliser l’action enregistrée. Le commentaire publié dans une tâche reste visible par les personnes ayant accès à cette tâche.
+
+## Gérer les actions enregistrées
+
+Revenez dans **Paramètres → Actions rapides** pour modifier, archiver ou restaurer une action. Archivez-la si vous pensez la réutiliser plus tard. La suppression retire l’action enregistrée ; les commentaires et les exécutions précédentes restent.
+
+Si aucune action personnelle ou d’équipe n’est disponible pour vous, la barre latérale de la tâche n’affiche pas la section Actions rapides.
+
+Si une action ne peut pas appeler son agent, demandez à un administrateur de vérifier l’agent choisi et ses droits d’appel. Si l’ordinateur de l’agent est hors ligne, le travail n’a pas encore commencé ; consultez le [dépannage](/troubleshooting).
+
+## Guides associés
+
+- [Commentaires](/comments) — discuter d’une tâche et suivre les réponses.
+- [@mentionner des agents](/mentioning-agents) — écrire vous-même une demande ponctuelle.
+- [Workflows](/workflows) — organiser qui prend le relais à chaque étape d’un projet.

@@ -79,7 +79,11 @@
       "cancelled": "Decided not to do."
     },
     "pr_auto_complete_badge": "Set when PRs merge",
-    "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them."
+    "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them.",
+    "builtin_badge": "Built-in",
+    "workflow_usage_one": "{{count}} workflow uses it",
+    "workflow_usage_other": "{{count}} workflows use it",
+    "workflow_usage_none": "In no workflow"
   },
   "wakeups": {
     "description": "Platform rules that apply to every issue. Each issue can change them in its Wakeups section.",
@@ -139,6 +143,8 @@
     "field_name": "Name",
     "field_name_placeholder": "Code Review",
     "field_target": "Runs as",
+    "no_target": "No target",
+    "no_target_hint": "Posts a message without mentioning anyone.",
     "field_prompt": "Prompt",
     "field_prompt_placeholder": "Review the code linked to this issue. Focus on correctness and edge cases.",
     "prompt_hint": "Sent as written. The agent already sees the issue.",
@@ -405,7 +411,8 @@
       "billing": "Billing",
       "code": "Code",
       "channels": "Messaging",
-      "apps": "Connected apps"
+      "apps": "Connected apps",
+      "workflows": "Workflows"
     },
     "groups": {
       "personal": "Personal",
@@ -675,8 +682,7 @@
     },
     "system": {
       "title": "System Notifications",
-      "description": "Show system notifications when Multica is in the background.",
-      "label": "Show system notifications"
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",
@@ -1218,6 +1224,15 @@
   "desktop": {
     "tabs": {
       "updates": "Updates"
+    },
+    "tab_bar": {
+      "pin": "Pin tab",
+      "unpin": "Unpin tab",
+      "close": "Close tab",
+      "close_others": "Close other tabs",
+      "open_window": "Open as new window",
+      "new": "New tab",
+      "pinned_name": "{{title}} (pinned)"
     },
     "updates": {
       "title": "Updates",

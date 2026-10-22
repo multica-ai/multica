@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -146,16 +147,15 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
                   <div className="flex items-center justify-between gap-2">
                     <code className="truncate font-mono text-caption">{key}</code>
                     {hasOverride && (
-                      <Button
+                      <IconButton
                         type="button"
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => removeCustomPricing(key)}
-                        aria-label={t(($) => $.usage.custom_pricing.remove_aria)}
-                        title={t(($) => $.usage.custom_pricing.remove_aria)}
+                        label={t(($) => $.usage.custom_pricing.remove_aria)}
                       >
                         <Trash2 />
-                      </Button>
+                      </IconButton>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

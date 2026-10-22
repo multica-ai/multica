@@ -1,79 +1,12 @@
 /**
- * The scrolling timeline. ASC chronological — oldest at top, newest near the
- * bottom (above the composer). Pull-to-refresh refetches issue + timeline.
+ * Chronological issue timeline backed by FlashList.
+ * Normal opens show the header; deep links start at the bottom and highlight a
+ * target when its row is rendered. MVCP keeps the viewport stable as asynchronous
+ * Markdown, images, and WebSocket patches change row heights.
  *
- * Backend returns the full timeline in one shot (server-side pagination
- * was dropped in #2322 — p99 ~30 entries per issue, cursor walking only
- * created bugs at reply-thread boundaries). The previous "Pull to load
- * older" UX and top-edge `fetchOlder` trigger are gone.
- *
- * Inbox deep-link — FlashList v2 `startRenderingFromBottom` (mirrors
- * chat-message-list.tsx):
- *   When `highlightCommentId` is set, we pass
- *   `maintainVisibleContentPosition.startRenderingFromBottom: true` to
- *   FlashList and remount the list via `key={`hl-${highlightNonce}`}` once
- *   timeline data has arrived. FlashList's `getInitialScrollIndex()` then
- *   lands on the last data item; after the initial paint MVCP keeps the
- *   visible content stable across async resizes (Shiki highlight, image
- *   natural-size, WS `comment:updated`). No JS-side scroll dance.
- *
- *   The previous implementation hand-rolled a `landed` state gate that
- *   re-fired `scrollToEnd` on every `onContentSizeChange`. That deadlocked
- *   the user at the bottom: `onScrollBeginDrag` queued `setLanded(true)`
- *   but a concurrent `onContentSizeChange` (from MVCP's own ScrollAnchor
- *   reposition, or from a markdown pass finishing) read the stale React
- *   closure, saw `landed === false`, and slammed the user back to bottom
- *   before the commit landed. State-vs-event races don't survive iOS
- *   markdown rendering hogging the JS thread.
- *
- *   The matching <CommentCard>'s `RootHighlightOverlay` fires when the
- *   target row enters the render window — so for a deep-link pointing
- *   at an old comment, the user scrolls up and the flash plays as the
- *   row mounts. `HIGHLIGHT_HOLD_MS` (5s) is the window for that.
- *
- *   Why not `scrollToIndex`: it requires accurate height estimates that
- *   variable-height markdown bubbles can't provide, even with
- *   `onScrollToIndexFailed` retry. Same lesson web learned (see
- *   `packages/views/issues/components/issue-detail.tsx:1822-1850` — they
- *   split the path into virtualized-for-browse / flat-for-deep-link
- *   precisely because "virtualization and 'land precisely on a target'
- *   have fundamentally opposed contracts"). Mobile sidesteps the split
- *   by not pretending to land precisely.
- *
- * `maintainVisibleContentPosition` is enabled by default on FlashList v2
- * and is implemented inside the C++ shadow tree — it compensates the
- * scroll offset both when a row is INSERTED above the viewport AND when
- * an upper row RESIZES (a WS `comment:updated` / `reaction:added` /
- * `resolved` event on an older comment used to push the user's read
- * position down by the delta). On FlatList the same prop was iOS-only
- * + JS-side; the FlashList path is steadier and animates the offset
- * compensation rather than snapping it.
- *
- * List engine: FlashList v2 (Shopify). Migrated from FlatList because:
- *   1. Cell recycling — markdown bubbles (Shiki highlight, image natural-
- *      size, lightbox provider injection) are expensive to mount; FlashList
- *      keeps them in recycled cells when scrolling through history rather
- *      than re-running the multi-pass render each time a row re-enters the
- *      window.
- *   2. Native MVCP — see paragraph above. Smoother behavior than FlatList's
- *      JS-side implementation when WS events resize an upper row.
- *   3. Async-render stability — async markdown size changes inside the
- *      viewport no longer cause the visual "twitch" we saw with FlatList,
- *      because FlashList re-layouts inside the shadow tree without
- *      surfacing a JS-side onContentSizeChange storm.
- *
- * What FlashList v2 does NOT change about this file:
- *   - The deep-link "land at bottom + flash on row mount" pattern (Linear
- *     iOS). FlashList's `scrollToIndex` is still estimate-based, so we
- *     intentionally don't try to land precisely on a specific comment —
- *     we land at the bottom and let `RootHighlightOverlay` claim the
- *     target when the user scrolls past it. `startRenderingFromBottom`
- *     is NOT enabled: a normal issue-open should show the header (title,
- *     description, status) first, not jump straight to the latest reply.
- *   - Spacing between rows. FlashList ignores `gap-*` on
- *     `contentContainer` the same way it does in chat-message-list.tsx —
- *     we use `ItemSeparatorComponent` for the 12 px breathing room and
- *     `ListHeaderComponentStyle` to add the same gap below the header.
+ * Avoid repeated scrollToEnd calls during content resizing: they can override
+ * user scrolling. New replies use the explicit jump-to-new chip instead of
+ * automatically following appends. Item separators provide spacing between rows.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {

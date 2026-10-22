@@ -28,6 +28,7 @@ import type {
 } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   Dialog,
@@ -225,14 +226,14 @@ function MemberRow({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-sm"
                 disabled={busy}
-                aria-label={t(($) => $.members.member_actions, { name: member.name })}
+                label={t(($) => $.members.member_actions, { name: member.name })}
               >
                 <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-              </Button>
+              </IconButton>
             }
           />
           <DropdownMenuContent align="end" className="w-auto">
@@ -329,17 +330,17 @@ function InvitationRow({
       <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <span className="flex size-7 shrink-0 items-center justify-center">
         {canManage && (
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-sm"
             disabled={busy}
             onClick={onRevoke}
-            aria-label={t(($) => $.members.revoke_invitation_aria, {
+            label={t(($) => $.members.revoke_invitation_aria, {
               email: invitation.invitee_email,
             })}
           >
             <X className="size-4 text-muted-foreground" />
-          </Button>
+          </IconButton>
         )}
       </span>
     </div>
@@ -382,23 +383,23 @@ function ShareLinkRow({
         </div>
       </div>
       <span className="w-24 shrink-0 text-body">{rc.label}</span>
-      <Button
+      <IconButton
         variant="ghost"
         size="icon-sm"
         onClick={onCopy}
-        aria-label={t(($) => $.members.share_link_copy_tooltip)}
+        label={t(($) => $.members.share_link_copy_tooltip)}
       >
         <Copy className="size-4 text-muted-foreground" />
-      </Button>
-      <Button
+      </IconButton>
+      <IconButton
         variant="ghost"
         size="icon-sm"
         disabled={busy}
         onClick={onRevoke}
-        aria-label={t(($) => $.members.share_link_revoke_tooltip)}
+        label={t(($) => $.members.share_link_revoke_tooltip)}
       >
         <Trash2 className="size-4 text-muted-foreground" />
-      </Button>
+      </IconButton>
     </div>
   );
 }

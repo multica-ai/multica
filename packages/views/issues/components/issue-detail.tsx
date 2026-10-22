@@ -5,6 +5,7 @@ import {
   issueBehavesAsAny,
   issueStatusCategory,
 } from "@multica/core/issues";
+import { IssueFlowCard } from "../../workflows/issue-flow-card";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -36,6 +37,8 @@ import {
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -66,7 +69,9 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PropRow } from "../../common/prop-row";
+import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
@@ -91,7 +96,7 @@ import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueCo
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
-import { ProjectPicker } from "../../projects/components/project-picker";
+import { IssueProjectPicker } from "../../projects/components/issue-project-picker";
 import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { useNewRunIds } from "./use-run-comment-motion";
@@ -128,6 +133,9 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  useProjectWorkflow,
+} from "@multica/core/issue-workflows";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
@@ -475,17 +483,13 @@ function ActivityText({ entry, text }: { entry: TimelineEntry; text: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
 
-// ---------------------------------------------------------------------------
 // Sidebar progressive disclosure
-// ---------------------------------------------------------------------------
 //
 // Properties shown in the sidebar split into two groups:
 //   - core: always rendered (status / assignee / project)
@@ -767,53 +771,47 @@ function ActivityBlock({
           );
         }
 
+        const handoff = isStatusChange && !!details.handoff_to_id;
         return (
-          <div key={entry.id} className="flex items-center text-caption text-muted-foreground">
-            <div className="mr-2 flex w-4 shrink-0 justify-center">
-              {leadIcon}
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              {/* The platform's own entries read as a sentence without an actor. */}
-              {!(isWakeup && entry.actor_type === "system") && (
-                <span className="shrink-0 font-medium">
-                  {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-                </span>
-              )}
-              <span className="truncate">
-                <ActivityText
-                  entry={entry}
-                  text={
-                    isWakeup
+          <div key={entry.id} className="text-caption text-muted-foreground">
+            <div className="flex items-center">
+              <div className="mr-2 flex w-4 shrink-0 justify-center">{leadIcon}</div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                {/* The platform's own entries read as a sentence without an actor. */}
+                {!(isWakeup && entry.actor_type === "system") && (
+                  <span className="shrink-0 font-medium">
+                    {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                  </span>
+                )}
+                <span className="truncate">
+                  <ActivityText
+                    entry={entry}
+                    text={isWakeup
                       ? formatWakeupActivity(entry, t, wakeupText, getActorName)
-                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel)
-                  }
-                />
-              </span>
-              {chip && (
-                <span className="ml-auto inline-flex max-w-48 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
-                  {chip}
+                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+                  />
                 </span>
-              )}
-              {(entry.coalesced_count ?? 1) > 1 &&
-                entry.action !== "task_completed" &&
-                entry.action !== "task_failed" && (
+                {chip && (
+                  <span className="ml-auto inline-flex max-w-48 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                    {chip}
+                  </span>
+                )}
+                {(entry.coalesced_count ?? 1) > 1 && entry.action !== "task_completed" && entry.action !== "task_failed" && (
                   <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption font-medium tabular-nums text-muted-foreground">
                     {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
                   </span>
                 )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
+                <Tooltip>
+                  <TooltipTrigger render={
                     <span className={cn("shrink-0 cursor-default", !chip && "ml-auto")}>
                       {timeAgo(entry.created_at)}
                     </span>
-                  }
-                />
-                <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString(locale)}
-                </TooltipContent>
-              </Tooltip>
+                  } />
+                  <TooltipContent side="top">{new Date(entry.created_at).toLocaleString(locale)}</TooltipContent>
+                </Tooltip>
+              </div>
             </div>
+            {handoff && <div className="ml-6"><TimelineHandoff details={details} /></div>}
           </div>
         );
       })}
@@ -821,9 +819,7 @@ function ActivityBlock({
   );
 }
 
-// ---------------------------------------------------------------------------
 // SubIssueRow — sub-issue list item with inline status & assignee editing
-// ---------------------------------------------------------------------------
 
 function SubIssueRow({
   child,
@@ -920,6 +916,8 @@ function SubIssueRow({
         <StatusPicker
           status={child.status}
           onUpdate={handleUpdate}
+          projectId={child.project_id}
+          issue={child}
           align="start"
           trigger={
             <StatusIcon
@@ -1040,9 +1038,7 @@ function SubIssueRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // SubIssueDisplayPopover — per-user "which properties do rows show" control
-// ---------------------------------------------------------------------------
 
 // Reuses the main Display panel's `card_*` labels — the property names are
 // identical, so the sub-issues control needs no locale keys of its own.
@@ -1129,9 +1125,7 @@ function SubIssueDisplayPopover({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Props
-// ---------------------------------------------------------------------------
 
 interface IssueDetailProps {
   issueId: string;
@@ -1169,9 +1163,7 @@ interface IssueDetailProps {
   trailingActions?: ReactNode;
 }
 
-// ---------------------------------------------------------------------------
 // Not found
-// ---------------------------------------------------------------------------
 
 /**
  * Exported so `IssueDetailRoute` can render it for an identifier that names no
@@ -1220,9 +1212,7 @@ export function IssueNotFound({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Loading skeleton
-// ---------------------------------------------------------------------------
 
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
@@ -1297,13 +1287,12 @@ export function IssueDetailSkeleton({
   );
 }
 
-// ---------------------------------------------------------------------------
 // IssueDetail
-// ---------------------------------------------------------------------------
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
+  const { t: tCommon } = useT("common");
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const id = issueId;
@@ -2680,6 +2669,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               status={issue.status}
               onUpdate={handleUpdateField}
               align="start"
+              projectId={issue.project_id}
+              issue={issue}
               onMarkDuplicate={actions.openMarkDuplicate}
               isDuplicate={isDuplicateIssue(issue)}
             />
@@ -2688,11 +2679,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker
+            <IssueProjectPicker
               projectId={issue.project_id}
               onUpdate={handleUpdateField}
+              issue={issue}
             />
           </PropRow>
+          <IssueWorkflowPropRow projectId={issue.project_id} status={issue.status} label={t(($) => $.workflows.project.label)} />
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
@@ -2904,15 +2897,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
                 <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
               </AppLink>
-              <button
-                type="button"
-                title={t(($) => $.actions.remove_parent_issue)}
-                aria-label={t(($) => $.actions.remove_parent_issue)}
-                onClick={() => actions.removeParent()}
-                className="shrink-0 rounded-xs p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                <Unlink className="h-3.5 w-3.5" />
-              </button>
+              <TooltipHint label={t(($) => $.actions.remove_parent_issue)}>
+                <button
+                  type="button"
+                  aria-label={t(($) => $.actions.remove_parent_issue)}
+                  onClick={() => actions.removeParent()}
+                  className="shrink-0 rounded-xs p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Unlink className="h-3.5 w-3.5" />
+                </button>
+              </TooltipHint>
             </div>
           </div>}
         </div>
@@ -3221,29 +3215,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // to the list we came from, falling back to all issues.
               onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
               trigger={
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                <IconButton
+                  label={tCommon(($) => $.more_actions)}
+                  tooltipSide="bottom"
+                  className="text-muted-foreground"
+                >
                   <MoreHorizontal />
-                </Button>
+                </IconButton>
               }
             />
             {isPeek ? (
               trailingActions
             ) : (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant={sidebarOpen ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      className={sidebarOpen ? "" : "text-muted-foreground"}
-                      onClick={handleToggleSidebar}
-                    >
-                      <PanelRight />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-              </Tooltip>
+              <IconButton
+                label={t(($) => $.detail.sidebar_tooltip)}
+                shortcut={<ActionShortcutKeycaps action="toggleRightSidebar" />}
+                tooltipSide="bottom"
+                variant={sidebarOpen ? "secondary" : "ghost"}
+                className={sidebarOpen ? "" : "text-muted-foreground"}
+                onClick={handleToggleSidebar}
+              >
+                <PanelRight />
+              </IconButton>
             )}
             </>
           }
@@ -3968,5 +3961,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </AnimatedRightSidebar>
       </ResizablePanel>
     </ResizablePanelGroup>,
+  );
+}
+
+/** The workflow the issue follows through its project (MUL-7420). */
+function IssueWorkflowPropRow({
+  projectId,
+  status,
+  label,
+}: {
+  projectId: string | null;
+  status: string;
+  label: string;
+}) {
+  const wsId = useWorkspaceId();
+  const workflow = useProjectWorkflow(wsId, projectId);
+  if (!workflow) return null;
+  return (
+    <PropRow label={label}>
+      <IssueFlowCard projectId={projectId} currentStatus={status} />
+    </PropRow>
   );
 }

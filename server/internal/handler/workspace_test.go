@@ -113,6 +113,71 @@ func TestCreateWorkspace_DisabledByConfig(t *testing.T) {
 	}
 }
 
+// TestCreateWorkspace_AllowedEmails guards the self-host allowlist added by
+// #9400: when WorkspaceCreationAllowedEmails is set, only matching accounts
+// (case-insensitive) may create workspaces; everyone else gets 403 and no row
+// is written. DisableWorkspaceCreation still wins over the allowlist.
+func TestCreateWorkspace_AllowedEmails(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	cases := []struct {
+		name     string
+		cfg      Config
+		wantCode int
+	}{
+		{
+			name:     "caller not in allowlist",
+			cfg:      Config{WorkspaceCreationAllowedEmails: []string{"someone-else@example.com"}},
+			wantCode: http.StatusForbidden,
+		},
+		{
+			name:     "caller in allowlist (case-insensitive)",
+			cfg:      Config{WorkspaceCreationAllowedEmails: []string{"other@example.com", strings.ToUpper(handlerTestEmail)}},
+			wantCode: http.StatusCreated,
+		},
+		{
+			name: "global disable overrides allowlist",
+			cfg: Config{
+				DisableWorkspaceCreation:       true,
+				WorkspaceCreationAllowedEmails: []string{handlerTestEmail},
+			},
+			wantCode: http.StatusForbidden,
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			slug := fmt.Sprintf("handler-tests-create-allowlist-%d", i)
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+			dbfx.Cleanup(t, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+			prev := testHandler.cfg
+			cfg := tc.cfg
+			cfg.AllowSignup = prev.AllowSignup
+			testHandler.cfg = cfg
+			t.Cleanup(func() { testHandler.cfg = prev })
+
+			req := newRequest("POST", "/api/workspaces", map[string]any{
+				"name": "Allowlist Create",
+				"slug": slug,
+			})
+			testutil.Call(t, testHandler.CreateWorkspace, req).Want(tc.wantCode)
+
+			var count int
+			dbfx.QueryRow(t, `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count)
+			wantCount := 0
+			if tc.wantCode == http.StatusCreated {
+				wantCount = 1
+			}
+			if count != wantCount {
+				t.Fatalf("expected %d workspace rows, found %d", wantCount, count)
+			}
+		})
+	}
+}
+
 // TestDeleteWorkspace_RequiresOwner exercises the in-handler authorization
 // added to DeleteWorkspace by calling the handler directly (bypassing the
 // router-level RequireWorkspaceRoleFromURL middleware). Without the handler

@@ -1,5 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act, render } from "@testing-library/react";
+import {
+  bindWorkspaceSlugLookup,
+  createQueryClient,
+} from "@multica/core/query-client";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useEffect } from "react";
 
 // MUL-4741: the adapter mutates tab sessions in the REAL store (no router,
@@ -30,6 +35,18 @@ vi.mock("@multica/core/auth", () => ({
 import { DesktopNavigationProvider, routeContentLinkPath } from "./navigation";
 import { currentPath, useNavigation } from "@multica/views/navigation";
 import { useTabStore, getActiveTab } from "@/stores/tab-store";
+
+let unbindWorkspaces: () => void = () => {};
+
+/** Give the current account membership of `slugs`, as the mounted provider would. */
+function withWorkspaces(slugs: string[]) {
+  const client = createQueryClient();
+  unbindWorkspaces = bindWorkspaceSlugLookup(client);
+  client.setQueryData(workspaceKeys.list(), slugs.map((slug) => ({ slug })));
+  return client;
+}
+
+afterEach(() => unbindWorkspaces());
 
 beforeEach(() => {
   overlay.open.mockReset();
@@ -140,6 +157,50 @@ describe("push", () => {
     const s = useTabStore.getState();
     expect(s.activeWorkspaceSlug).toBe("butter");
     expect(getActiveTab(s)?.url).toBe("/butter/inbox");
+  });
+
+  // The workspace switchers (sidebar dropdown, Mod+K palette) push the
+  // target's Issues root, which is where web lands. On desktop that resumes
+  // the workspace where the user left it instead. NoAccessPage recovers with
+  // replace() to the same kind of path, so both methods are covered.
+  it.each(["push", "replace"] as const)(
+    "%s to another workspace's Issues root restores its last active tab",
+    (method) => {
+      const store = useTabStore.getState();
+      store.switchWorkspace("butter", "/butter/projects");
+      store.switchWorkspace("acme");
+      const getAdapter = renderProvider();
+
+      getAdapter()[method]("/butter/issues");
+
+      const s = useTabStore.getState();
+      expect(s.activeWorkspaceSlug).toBe("butter");
+      expect(getActiveTab(s)?.url).toBe("/butter/projects");
+      expect(s.byWorkspace.butter.tabs.map((t) => t.url)).toEqual([
+        "/butter/projects",
+      ]);
+    },
+  );
+
+  it("lands on Issues when switching to a workspace with no tabs yet", () => {
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/butter/issues");
+
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/butter/issues");
+  });
+
+  it("still opens a deeper cross-workspace path under Issues", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("butter", "/butter/projects");
+    store.switchWorkspace("acme");
+    const getAdapter = renderProvider();
+
+    getAdapter().push("/butter/issues/BUT-1");
+
+    expect(getActiveTab(useTabStore.getState())?.url).toBe(
+      "/butter/issues/BUT-1",
+    );
   });
 
   it("logs out instead of navigating for /login", () => {
@@ -309,5 +370,33 @@ describe("routeContentLinkPath (links inside content — MUL-5208)", () => {
     expect(
       state.byWorkspace.acme.tabs.some((t) => t.url === "/butter/issues/BUT-1"),
     ).toBe(false);
+  });
+});
+
+describe("existing reserved workspace navigation", () => {
+  it.each(["push", "replace", "openInNewTab", "content"])(
+    "routes %s through the workspace switch flow",
+    (action) => {
+      withWorkspaces(["dingtalk"]);
+      const adapter = renderProvider();
+      act(() => {
+        if (action === "content") routeContentLinkPath("/dingtalk/issues/ISS-1", "background-tab");
+        else if (action === "openInNewTab") adapter().openInNewTab!("/dingtalk/issues/ISS-1");
+        else if (action === "replace") adapter().replace("/dingtalk/issues/ISS-1");
+        else adapter().push("/dingtalk/issues");
+      });
+      expect(useTabStore.getState().activeWorkspaceSlug).toBe("dingtalk");
+      expect(getActiveTab(useTabStore.getState())?.url).toBe(
+        action === "push" ? "/dingtalk/issues" : "/dingtalk/issues/ISS-1",
+      );
+    },
+  );
+
+  it("does not send a known invite workspace entity route to the invite overlay", () => {
+    withWorkspaces(["invite"]);
+    const adapter = renderProvider();
+    act(() => adapter().push("/invite/issues/MUL-123"));
+    expect(overlay.open).not.toHaveBeenCalled();
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/invite/issues/MUL-123");
   });
 });

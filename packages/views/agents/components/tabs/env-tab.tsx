@@ -16,6 +16,8 @@ import {
 import { api } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
@@ -454,32 +456,40 @@ export function EnvTab({
                   placeholder={t(($) => $.tab_body.env.value_placeholder)}
                   className="pr-8 font-mono text-caption"
                 />
-                <button
-                  type="button"
-                  onClick={() => toggleEnvVisibility(index)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={
+                <TooltipHint
+                  label={
                     entry.visible
                       ? t(($) => $.tab_body.env.hide_value_aria)
                       : t(($) => $.tab_body.env.show_value_aria)
                   }
                 >
-                  {entry.visible ? (
-                    <EyeOff className="h-3.5 w-3.5" />
-                  ) : (
-                    <Eye className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleEnvVisibility(index)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label={
+                      entry.visible
+                        ? t(($) => $.tab_body.env.hide_value_aria)
+                        : t(($) => $.tab_body.env.show_value_aria)
+                    }
+                  >
+                    {entry.visible ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </TooltipHint>
               </div>
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => removeEnvEntry(index)}
                 className="text-muted-foreground hover:text-destructive"
-                aria-label={t(($) => $.tab_body.env.remove_aria)}
+                label={t(($) => $.tab_body.env.remove_aria)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              </IconButton>
             </div>
           ))}
         </div>

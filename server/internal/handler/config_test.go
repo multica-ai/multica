@@ -53,8 +53,13 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 
 func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.cfg.PublicURL = "https://api.example.com"
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+	}()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
@@ -79,6 +84,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com, got %q", cfg.CdnDomain)
+	}
+	if cfg.AttachmentPublicURL != "https://api.example.com" {
+		t.Fatalf("attachment_public_url = %q, want API public URL", cfg.AttachmentPublicURL)
 	}
 	if cfg.AllowSignup {
 		t.Fatalf("allow_signup: want false, got true")

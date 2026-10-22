@@ -152,6 +152,30 @@ describe("ThinkingPropRow", () => {
     cleanup();
   });
 
+  it("offers discovered OpenCode variants and emits the native token for saving", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([{
+      id: "opencode-go/deepseek-v4.1-flash",
+      label: "opencode-go/deepseek-v4.1-flash",
+      provider: "opencode-go",
+      thinking: {
+        supported_levels: [
+          { value: "low", label: "Low" },
+          { value: "high", label: "High" },
+          { value: "fast-mode", label: "Fast Mode" },
+        ],
+      },
+    }]));
+    const { onChange } = renderRow({
+      provider: "opencode",
+      model: "opencode-go/deepseek-v4.1-flash",
+    });
+
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByText("Fast Mode"));
+    expect(onChange).toHaveBeenCalledWith("fast-mode");
+  });
+
   it("hides the row when the active model has no thinking levels and nothing is persisted", async () => {
     mockInitiateListModels.mockResolvedValue(listResult([NO_THINKING_MODEL]));
     renderRow({ model: "gemini-2.5-pro", value: "" });
@@ -206,7 +230,7 @@ describe("ThinkingPropRow", () => {
     // matching the i18n `thinking_clear_title` copy.
     await screen.findByText("xhigh");
     fireEvent.click(screen.getByRole("button"));
-    const clearButton = await screen.findByTitle(/Clear the override/i);
+    const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
 
     expect(onChange).toHaveBeenCalledWith("");
@@ -278,7 +302,7 @@ describe("ThinkingPropRow", () => {
     await screen.findByText("Thinking");
     expect(await screen.findByText("ultra")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
-    const clearButton = await screen.findByTitle(/Clear the override/i);
+    const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
   });
@@ -337,7 +361,7 @@ describe("ThinkingPropRow", () => {
     await screen.findByText("Thinking");
     expect(await screen.findByText("max")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
-    const clearButton = await screen.findByTitle(/Clear the override/i);
+    const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
   });

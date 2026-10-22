@@ -11,49 +11,15 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// Background
+// Persist Hermes ACP session databases by agent, profile, and conversation under
+// hermes-sessions. Tasks for one conversation are serialized; separate conversations
+// get separate SQLite databases. This keeps resumable transcripts across task homes
+// without sharing a live database among an agent's concurrent issues.
 //
-// Hermes persists every ACP session — the actual conversation transcript — in
-// the SQLite database at `<HERMES_HOME>/state.db` (acp_adapter/session.py).
-// Because Multica has to take over HERMES_HOME to inject bound skills, that
-// database landed inside the per-task overlay, which made a Hermes agent's
-// conversation last exactly one task.
-//
-// The failure was silent, which is what made it expensive. `session/resume`
-// against a database that does not hold the session does not fail: Hermes
-// creates a fresh session and answers with an ordinary success frame
-// (acp_adapter/server.py resume_session), so the daemon believed it had
-// resumed, re-sent the same dead id on every later turn, and the user saw a
-// conversation that restarted from zero with nothing in the logs (GH #6806).
-// The backend now detects that rebind (resolveHermesResumedSessionID), and
-// this file removes the cause.
-//
-// The store is keyed by (agent, hermes profile, conversation):
-//
-//	<multica profile dir>/hermes-sessions/<agent>/<hermes profile>/<conversation>/state.db
-//
-// Keying to the conversation — the issue, or `chat_<id>` for a chat session —
-// is what makes this safe to share where #6693 could not. Its stated reason
-// for leaving state.db task-local was concurrency: one agent's parallel tasks
-// would write one live SQLite database, which needs lock and consistency work
-// (plus Windows byte-range locks on `-shm`) that plain memory files do not.
-// Tasks of the SAME conversation are serial by construction — a follow-up is
-// dispatched after its predecessor reports — so the shard has one writer at a
-// time, while two different issues get two different databases and never meet.
-//
-// The (agent, profile) prefix matches the memory store's scoping exactly, so
-// pointing an agent at another Hermes profile gives it a fresh conversation
-// line just as it gives it a fresh memory line. It is a sibling root rather
-// than a subdirectory of `hermes-state/<agent>/<profile>` because that
-// directory IS the agent's memories dir (the overlay links `memories/`
-// straight at it), so nesting sessions inside it would surface them to Hermes
-// as a memory entry.
-//
-// The overlay mounts the shard by symlinking `<overlay>/state.db` at
-// `<store>/state.db`. SQLite resolves the link when it derives the `-wal` and
-// `-shm` paths, so the journal sidecars are created in the store next to the
-// database rather than in the task directory, and a task teardown can never
-// take the write-ahead log with it.
+// Keep session storage outside the memories root. Link overlay/state.db to the
+// store so SQLite places WAL and SHM sidecars beside the persistent database and
+// task teardown cannot remove them. Detect provider session-ID rebinding when a
+// requested session is absent.
 
 // hermesSessionStoreRoot is the directory under the daemon's Multica profile
 // dir that holds every agent's persistent Hermes conversation shards.

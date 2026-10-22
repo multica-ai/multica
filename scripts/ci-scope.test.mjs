@@ -32,6 +32,7 @@ for (const [name, files, selected] of [
   ["shell installer", ["scripts/install.sh"], ["scripts", "installer"]],
   ["PowerShell installer", ["scripts/install.ps1.test.ps1"], ["installer"]],
   ["cleanup script", ["scripts/drop-database.sh"], ["scripts"]],
+  ["check script regression tests", ["scripts/check.test.sh"], ["scripts"]],
   ["performance harness", ["scripts/perf-compare.test.sh"], ["scripts"]],
   ["reserved slug source", ["server/internal/handler/reserved_slugs.json"], ["backend", "runtime", "scripts"]],
   ["reserved slug output", ["packages/core/paths/reserved-slugs.ts"], ["frontend", "quality", "scripts"]],

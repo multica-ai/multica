@@ -54,7 +54,7 @@ const SCROLLBAR_SLACK = 16;
 // Rendered width of `value` at `fontPx`, in em-fractions per character class
 // of a proportional UI face: figures and capitals run wide (and figures are
 // tabular), lowercase and punctuation narrower, CJK glyphs a full em.
-function textWidth(value: string, fontPx: number): number {
+export function textWidth(value: string, fontPx: number): number {
   let ems = 0;
   for (const char of value) {
     if ((char.codePointAt(0) ?? 0) > 0x2e80) ems += 1;
@@ -230,7 +230,7 @@ export function TablePreview({ text, delimiter }: TablePreviewProps) {
   );
 }
 
-function SortHeader({
+export function SortHeader({
   title,
   numeric,
   sorted,

@@ -29,6 +29,7 @@ import type {
 } from "@multica/core/types";
 import { ISSUE_PROPERTY_TYPES } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -140,7 +141,6 @@ export function PropertiesTab() {
   return (
     <SettingsTab
       title={t(($) => $.properties.title)}
-      description={t(($) => $.properties.description)}
       scope="workspace"
     >
       {currentMember && !canManage ? <SettingsReadOnlyNotice wsId={wsId} /> : null}
@@ -264,13 +264,13 @@ export function PropertiesTab() {
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
-                          <Button
+                          <IconButton
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={t(($) => $.properties.actions.open, { name: property.name })}
+                            label={t(($) => $.properties.actions.open, { name: property.name })}
                           >
                             <MoreHorizontal className="size-4" />
-                          </Button>
+                          </IconButton>
                         }
                       />
                       <DropdownMenuContent align="end">
@@ -606,10 +606,10 @@ function PropertyEditorDialog({
                       placeholder={t(($) => $.properties.editor.option_name_placeholder)}
                       className="h-8"
                     />
-                    <Button
+                    <IconButton
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={t(($) => $.properties.editor.remove_option)}
+                      label={t(($) => $.properties.editor.remove_option)}
                       disabled={draft.options.length <= 1}
                       onClick={() =>
                         setDraft((current) => ({
@@ -619,7 +619,7 @@ function PropertyEditorDialog({
                       }
                     >
                       <X className="size-4" />
-                    </Button>
+                    </IconButton>
                   </div>
                 ))}
               </div>

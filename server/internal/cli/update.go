@@ -321,22 +321,14 @@ func MatchKnownBrewPrefix(path string) string {
 }
 
 // IsBrewInstall checks whether the running multica binary was installed via Homebrew.
+// The check itself lives in brewInstallForPath (stable_exe.go) so it stays
+// one implementation with the stable-path resolver that depends on it.
 func IsBrewInstall() bool {
 	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return false
 	}
-	resolved, err := filepath.EvalSymlinks(exePath)
-	if err != nil {
-		resolved = exePath
-	}
-
-	brewPrefix := GetBrewPrefix()
-	if brewPrefix != "" && strings.HasPrefix(resolved, brewPrefix) {
-		return true
-	}
-
-	return MatchKnownBrewPrefix(resolved) != ""
+	return brewInstallForPath(exePath)
 }
 
 // GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.

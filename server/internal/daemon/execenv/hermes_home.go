@@ -14,55 +14,20 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// Hermes discovers skills from exactly two places (verified against the bundled
-// Hermes agent source, agent/skill_utils.py get_all_skills_dirs): its home
-// skills dir `<HERMES_HOME>/skills/` first, then the directories listed under
-// `skills.external_dirs` in `<HERMES_HOME>/config.yaml`, in config order. It has
-// NO workspace-relative discovery, so the generic `.agent_context/skills/`
-// fallback the daemon used before was never scanned and workspace-assigned
-// skills silently never took effect (issue #5242).
+// Hermes discovers skills in HERMES_HOME/skills before skills.external_dirs;
+// it does not scan the task workspace. Bound skills therefore use a task-local
+// home overlay, while skill-less tasks keep the original home.
 //
-// Rather than replace HERMES_HOME with a home rebuilt from a fixed allowlist —
-// which would silently change behavior for tasks that don't even use skills and
-// would drop any home state not on the list (plugins, OAuth state, hooks, SOUL,
-// scripts, and whatever Hermes adds next) — this builds a minimal compatibility
-// overlay, and only when the agent actually has skills bound (gated at the call
-// site in Prepare/Reuse; a skill-less Hermes task keeps HERMES_HOME untouched).
+// Mirror host-home entries except task-owned overrides. The local skills directory
+// contains bound skills; external_dirs preserves shared skills and configured
+// directories normalized against the original home and effective environment.
 //
-// The overlay:
-//   - mirrors every top-level entry of the shared ~/.hermes/ into the per-task
-//     home via symlink, EXCEPT the entries it overrides — so the denylist stays
-//     tiny and future home state is inherited automatically instead of being
-//     missed by an allowlist;
-//   - derives a task-local config.yaml whose `skills.external_dirs` points at
-//     the shared skills dir plus the user's existing external_dirs, expanded
-//     against the agent's effective env and normalized to absolute paths (Hermes
-//     resolves relative external_dirs against HERMES_HOME, so leaving them
-//     relative after the redirect would silently repoint them) — this exposes
-//     the user's global/builtin skills read-only without copying them;
-//   - populates the task-local `skills/` dir with ONLY the Multica-bound skills,
-//     which take precedence because Hermes lists the home skills dir first;
-//   - keeps `memories/` overlay-owned, NOT symlinked to the shared home: Hermes
-//     loads and writes back MEMORY.md/USER.md there, and per-agent memory is a
-//     Multica product concern — the host's local Hermes memory must not bleed
-//     into a task, nor task memory back out to the host. The overlay links it to
-//     the agent's persistent store so it survives across tasks and issues
-//     (hermes_memory.go); it is a fresh per-task dir only when no store applies;
-//   - keeps the state.db SQLite session store and its journal sidecars
-//     overlay-owned: the host's conversation history is never linked or copied.
-//     state.db is then linked to the conversation's own persistent store
-//     (hermes_sessions.go) so a multi-turn conversation survives the task; it
-//     stays a task-local file only when there is no store to key on, or on a
-//     host that cannot create the link;
-//   - disables the external `memory.provider` in the derived config so a
-//     host-configured Supermemory/Hindsight/etc. backend isn't shared across
-//     tasks. This is the on-disk + external-backend memory isolation; a managed,
-//     agent-scoped memory backend is a separate future product decision.
+// Keep memories, state.db and its journals overlay-owned, using agent-scoped
+// memory and conversation-scoped session stores when available. Disable external
+// memory providers to prevent cross-task sharing.
 //
-// The shared ~/.hermes/ is never modified by this setup. Note however that
-// mirrored entries are writable symlinks, so if Hermes writes through one at
-// runtime (e.g. refreshing token state under a mirrored auth/OAuth path) that
-// write does reach the shared home — that propagation is intentional.
+// Setup does not modify the shared home. Mirrored auth and other entries remain
+// writable symlinks, so runtime updates through them intentionally reach the host.
 
 // hermesOverriddenEntries are the fixed top-level entries of the shared
 // ~/.hermes/ that the overlay supplies its own task-local version of, so they
