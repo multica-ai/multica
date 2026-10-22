@@ -28,13 +28,6 @@ export function isZhLocale(locale: Locale): boolean {
   return locale === "zh-Hans";
 }
 
-type FeatureSection = {
-  label: string;
-  title: string;
-  description: string;
-  cards: { title: string; description: string }[];
-};
-
 // Long-form page copy. Paragraphs and bullets may embed `[label](href)`
 // links, rendered by InlineLinks.
 export type DocumentSection = {
@@ -43,73 +36,13 @@ export type DocumentSection = {
   bullets?: string[];
 };
 
-type FooterGroup = {
-  label: string;
-  links: { label: string; href: string }[];
-};
-
 export type ContactSalesOption = { value: string; label: string };
 
 export type LandingDict = {
-  header: {
-    github: string;
-    cta: string;
-    dashboard: string;
-    docs: string;
-    changelog: string;
-    useCases: string;
-    navigation: string;
-    openMenu: string;
-    closeMenu: string;
-  };
-  hero: {
-    headlineLine1: string;
-    headlineLine2: string;
-    subheading: string;
-    cta: string;
-    downloadDesktop: string;
-    talkToSales: string;
-    worksWith: string;
-    imageAlt: string;
-  };
-  features: {
-    teammates: FeatureSection;
-    autonomous: FeatureSection;
-    skills: FeatureSection;
-    runtimes: FeatureSection;
-  };
-  howItWorks: {
-    label: string;
-    headlineMain: string;
-    headlineFaded: string;
-    steps: { title: string; description: string }[];
-    cta: string;
-    ctaGithub: string;
-    ctaDocs: string;
-  };
-  openSource: {
-    label: string;
-    headlineLine1: string;
-    headlineLine2: string;
-    description: string;
-    cta: string;
-    licensingCta: string;
-    highlights: { title: string; description: string }[];
-  };
   faq: {
     label: string;
     headline: string;
     items: { question: string; answer: string }[];
-  };
-  footer: {
-    tagline: string;
-    cta: string;
-    groups: {
-      product: FooterGroup;
-      resources: FooterGroup;
-      company: FooterGroup;
-    };
-    copyright: string;
   };
   about: {
     title: string;

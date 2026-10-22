@@ -3,15 +3,14 @@ import { describe, expect, it } from "vitest";
 import { createLandingDict } from "./dictionary";
 
 describe("createLandingDict", () => {
-  it.each([
-    ["en", "/docs"],
-    ["zh-Hans", "/docs/zh"],
-    ["ko", "/docs/ko"],
-    ["ja", "/docs/ja"],
-    // French has no landing copy and reuses English, but its docs exist.
-    ["fr", "/docs/fr"],
-  ] as const)("links the %s footer to %s", (locale, docsHref) => {
-    const links = createLandingDict(locale, true).footer.groups.resources.links;
-    expect(links[0]?.href).toBe(docsHref);
+  it("reuses the English copy for locales without their own dictionary", () => {
+    expect(createLandingDict("fr")).toEqual(createLandingDict("en"));
+  });
+
+  it("serves translated copy for locales with a dictionary", () => {
+    const en = createLandingDict("en");
+    for (const locale of ["zh-Hans", "ja", "ko"] as const) {
+      expect(createLandingDict(locale).faq.headline).not.toBe(en.faq.headline);
+    }
   });
 });

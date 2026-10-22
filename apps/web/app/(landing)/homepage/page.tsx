@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { MulticaLanding } from "@/features/landing/components/multica-landing";
+import { HomePage } from "@/features/landing/site/home-page";
 
 export const metadata: Metadata = {
   title: "Homepage",
@@ -17,5 +17,5 @@ export const metadata: Metadata = {
 };
 
 export default function HomepagePage() {
-  return <MulticaLanding />;
+  return <HomePage />;
 }
