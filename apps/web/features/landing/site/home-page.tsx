@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { ComponentType, CSSProperties } from "react";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -16,6 +16,13 @@ import {
   focusRing,
 } from "./primitives";
 import { CUSTOMER_LOGOS } from "./customer-logos";
+import {
+  AutopilotsVisual,
+  ChatVisual,
+  RuntimesVisual,
+  SkillsVisual,
+  SquadVisual,
+} from "./demo/feature-visuals";
 import { HeroBoard } from "./demo/hero-board";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
@@ -121,27 +128,57 @@ function LogoWall() {
   );
 }
 
-const FEATURES: { title: string; body: string; href: string }[] = [
-  { title: "Assign work to agents like teammates", body: "Placeholder: agents sit in the same assignee picker as your people.", href: productHref("agents") },
-  { title: "Bring any coding agent", body: "Placeholder: 27 coding tools register as runtimes on your machines.", href: productHref("runtimes") },
-  { title: "Squads split big work", body: "Placeholder: a leader agent routes each piece to the right teammate.", href: productHref("squads") },
-  { title: "Agents join the thread", body: "Placeholder: mention an agent in Slack or Lark and it gets to work.", href: productHref("chat") },
-  { title: "Autopilots run on a schedule", body: "Placeholder: recurring reports, upgrades, and triage.", href: productHref("autopilots") },
+const FEATURES: { title: string; body: string; href: string; visual: ComponentType; alt: string }[] = [
+  {
+    title: "Runs on your machines, or in our cloud",
+    body: "Connect a laptop or a server with one command and Multica finds the coding agents installed on it. Or run them in managed cloud sandboxes.",
+    href: productHref("runtimes"),
+    visual: RuntimesVisual,
+    alt: "The Runtimes page listing a MacBook, a Linux server, Multica Cloud, and a Windows laptop, each with its coding agents",
+  },
+  {
+    title: "A squad splits big work",
+    body: "Hand a goal to a squad. Its lead agent breaks it into sub-issues, gives each to the right agent, and starts the next stage when one lands.",
+    href: productHref("squads"),
+    visual: SquadVisual,
+    alt: "An issue owned by a squad, with four sub-issues in three stages assigned to different agents",
+  },
+  {
+    title: "Mention an agent in chat",
+    body: "From Slack, Lark, DingTalk, WeCom, or Telegram. The agent reads the thread, files the issue, and gets to work.",
+    href: productHref("chat"),
+    visual: ChatVisual,
+    alt: "A chat thread where a teammate mentions Backend Agent, which replies with the issue it filed",
+  },
+  {
+    title: "Autopilots run on a schedule",
+    body: "Upgrades, triage, and reports file themselves and land with an agent, every hour or every Monday.",
+    href: productHref("autopilots"),
+    visual: AutopilotsVisual,
+    alt: "A list of autopilots with their schedules and the agent that runs each one",
+  },
+  {
+    title: "Skills the whole team shares",
+    body: "Write down how your team does a thing once, and every agent follows it.",
+    href: productHref("skills"),
+    visual: SkillsVisual,
+    alt: "A list of team skills and the agents that use each one",
+  },
 ];
 
 function Features() {
   return (
     <Section className="border-t-0">
       <Container>
-        <SectionHeader title="Section headline placeholder" lead="Placeholder: one line framing the product pillars." />
+        <SectionHeader title="Built for teams of people and agents" />
         <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
           {FEATURES.slice(0, 2).map((feature) => (
-            <FeatureCard key={feature.title} {...feature} aspectRatio="4 / 3" />
+            <FeatureCard key={feature.title} {...feature} aspect="aspect-[4/3]" />
           ))}
         </div>
         <div className="mt-site-grid-row grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-3">
           {FEATURES.slice(2).map((feature) => (
-            <FeatureCard key={feature.title} {...feature} aspectRatio="5 / 4" />
+            <FeatureCard key={feature.title} {...feature} aspect="aspect-[3/2]" />
           ))}
         </div>
       </Container>
@@ -153,11 +190,15 @@ function FeatureCard({
   title,
   body,
   href,
-  aspectRatio,
-}: (typeof FEATURES)[number] & { aspectRatio: string }) {
+  visual: Visual,
+  alt,
+  aspect,
+}: (typeof FEATURES)[number] & { aspect: string }) {
   return (
     <Link href={href} className={cn("group block rounded-site-panel", focusRing)}>
-      <ProductFrame label={`${title} visual`} aspectRatio={aspectRatio} />
+      <div role="img" aria-label={alt} className={cn("relative overflow-hidden rounded-site-panel bg-site-sunken", aspect)}>
+        <Visual />
+      </div>
       <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
       <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
     </Link>

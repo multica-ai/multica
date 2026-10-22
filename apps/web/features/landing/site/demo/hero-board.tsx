@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type ComponentType,
   type ReactNode,
 } from "react";
 import {
@@ -41,11 +40,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
 import { PriorityIcon } from "@multica/views/issues/components/priority-icon";
-import { HERO_PROVIDERS } from "../../components/provider-marks";
+import { Avatar, BACKEND, FRONTEND, LEO, MIA, QA, SAM, type Actor } from "./mock-kit";
 
 /*
  * Hero product mockup: the issue board, built from the product's own tokens
@@ -59,17 +57,6 @@ const WIDE_WIDTH = 1200;
 const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
 const COLUMN_STRIDE = 232 + 12;
-
-type Actor =
-  | { kind: "member"; name: string; initials: string }
-  | { kind: "agent"; name: string; provider: string };
-
-const MIA: Actor = { kind: "member", name: "Mia Chen", initials: "MC" };
-const LEO: Actor = { kind: "member", name: "Leo Park", initials: "LP" };
-const SAM: Actor = { kind: "member", name: "Sam Rivera", initials: "SR" };
-const BACKEND: Actor = { kind: "agent", name: "Backend Agent", provider: "Claude Code" };
-const QA: Actor = { kind: "agent", name: "QA Agent", provider: "Codex" };
-const FRONTEND: Actor = { kind: "agent", name: "Frontend Agent", provider: "Cursor" };
 
 type Priority = "urgent" | "high" | "medium" | "low";
 type ColumnId = "todo" | "in_progress" | "in_review" | "done";
@@ -651,24 +638,5 @@ function Comment({ actor, children }: { actor: Actor; children: ReactNode }) {
       </div>
       {children}
     </div>
-  );
-}
-
-const PROVIDER_MARKS = new Map<string, ComponentType<{ className?: string }>>(
-  HERO_PROVIDERS.map((provider) => [provider.name, provider.Mark]),
-);
-
-function Avatar({ actor, size }: { actor: Actor; size: 16 | 20 }) {
-  if (actor.kind === "member") {
-    return <ActorAvatar name={actor.name} initials={actor.initials} size={size === 16 ? "xs" : "sm"} />;
-  }
-  const Mark = PROVIDER_MARKS.get(actor.provider);
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground"
-      style={{ width: size, height: size }}
-    >
-      {Mark ? <Mark className={size === 16 ? "size-2.5" : "size-3"} /> : <Bot className="size-3" />}
-    </span>
   );
 }
