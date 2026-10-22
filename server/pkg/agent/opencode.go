@@ -467,6 +467,20 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	stepProducedOutput := false // current step emitted text, a tool call, or reported usage
 	lastStepVoid := false       // the most recently closed step produced nothing at all
 
+	// stepProducedText tracks whether the CURRENT step emitted a COMPLETED
+	// final answer. It is separate from stepProducedOutput because the two
+	// answer different questions: a tool call means work was started, while
+	// completed text means the model finished its answer.
+	//
+	// OpenCode 2.1.x closes a final text-only step by ending the stream
+	// instead of emitting step_finish (observed: step_start -> text, then
+	// EOF). That stream shape is byte-identical to the one where the
+	// provider died right after a mid-step message, so "the step emitted
+	// text" cannot separate them. The part's completion window can: a
+	// finished part carries start AND end, a part the stream died inside
+	// carries a start and no end.
+	stepProducedText := false
+
 	scanner := newAgentStreamScanner(r)
 
 	for scanner.Scan() {
@@ -492,6 +506,9 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			b.handleTextEvent(event, ch, &output)
 			if event.Part.Text != "" {
 				stepProducedOutput = true
+				if event.Part.partCompleted() {
+					stepProducedText = true
+				}
 			}
 		case "tool_use":
 			b.handleToolUseEvent(event, ch)
@@ -506,6 +523,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			stepHasContinuationTool = false
 			awaitingContinuation = false
 			stepProducedOutput = false
+			stepProducedText = false
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			openStep = false
@@ -553,6 +571,26 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	noTerminalSignal := false
 	if finalStatus == "completed" {
 		switch {
+		case openStep && stepProducedText && !stepHasContinuationTool:
+			// OpenCode 2.1.x ends a final text-only step by closing the
+			// stream: step_start -> text, then EOF, with no step_finish for
+			// that step. Reproduced against opencode v2.1.2 (the 2.0.x
+			// contract this parser was written against always closed the
+			// last step with step_finish, reason "stop").
+			//
+			// The stream shape alone cannot tell this apart from the
+			// provider dying right after a mid-step message — the two are
+			// byte-identical. The part's completion window does: a finished
+			// final answer carries start AND end, so the provider round-trip
+			// completed and the run really did finish. Accept the clean EOF
+			// as the terminal signal in that case; every other shape keeps
+			// failing closed below.
+			//
+			// The guard keeps the fail-closed behaviour for every other
+			// shape: a step whose text never completed (the provider died
+			// before answering) and a step whose tool result was never fed
+			// back (stepHasContinuationTool) both still fail below.
+			sawStepFinish = true
 		case openStep:
 			finalStatus = "failed"
 			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
@@ -784,6 +822,28 @@ type opencodeEventPart struct {
 	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
 	// older opencode versions whose step-finish parts predate the field.
 	Reason string `json:"reason,omitempty"`
+
+	// Time is the part's completion window. OpenCode stamps it on a part
+	// once the part is finished: a completed part carries both start and
+	// end, a part the provider died in the middle of carries a start and
+	// no end. The 2.1.x vocabulary closes a final text-only step by ending
+	// the stream instead of emitting step_finish, so this window is what
+	// separates a finished final answer from a stream that died right
+	// after the text — the two are otherwise byte-identical.
+	Time *opencodePartTime `json:"time,omitempty"`
+}
+
+// opencodePartTime is the completion window of an event part.
+type opencodePartTime struct {
+	Start int64 `json:"start,omitempty"`
+	End   int64 `json:"end,omitempty"`
+}
+
+// partCompleted reports whether the part carries a finished time window.
+// A part with no window at all, or one that never got its end, was still
+// in flight when the stream stopped.
+func (p opencodeEventPart) partCompleted() bool {
+	return p.Time != nil && p.Time.End > 0
 }
 
 type opencodePartMetadata struct {
