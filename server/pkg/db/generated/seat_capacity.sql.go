@@ -156,6 +156,37 @@ func (q *Queries) DeferClaimedSeatCapacityIntent(ctx context.Context, arg DeferC
 	return result.RowsAffected(), nil
 }
 
+const deferSeatCapacityIntentForAction = `-- name: DeferSeatCapacityIntentForAction :execrows
+UPDATE seat_capacity_outbox
+SET last_error = left($1, 1000),
+    next_attempt_at = $2,
+    lease_token = NULL,
+    updated_at = now()
+WHERE operation_token = $3
+  AND action = $4
+  AND dead_lettered_at IS NULL
+`
+
+type DeferSeatCapacityIntentForActionParams struct {
+	LastError      string             `json:"last_error"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	OperationToken pgtype.UUID        `json:"operation_token"`
+	Action         string             `json:"action"`
+}
+
+func (q *Queries) DeferSeatCapacityIntentForAction(ctx context.Context, arg DeferSeatCapacityIntentForActionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deferSeatCapacityIntentForAction,
+		arg.LastError,
+		arg.NextAttemptAt,
+		arg.OperationToken,
+		arg.Action,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteClaimedSeatCapacityIntent = `-- name: DeleteClaimedSeatCapacityIntent :execrows
 DELETE FROM seat_capacity_outbox
 WHERE operation_token = $1
@@ -269,6 +300,29 @@ func (q *Queries) EnqueueSeatCapacityRelease(ctx context.Context, arg EnqueueSea
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const existsPendingSeatCapacityConfirmForMember = `-- name: ExistsPendingSeatCapacityConfirmForMember :one
+SELECT EXISTS (
+    SELECT 1
+    FROM seat_capacity_outbox
+    WHERE workspace_id = $1
+      AND member_id = $2
+      AND action = 'confirm'
+      AND dead_lettered_at IS NULL
+)
+`
+
+type ExistsPendingSeatCapacityConfirmForMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	MemberID    pgtype.UUID `json:"member_id"`
+}
+
+func (q *Queries) ExistsPendingSeatCapacityConfirmForMember(ctx context.Context, arg ExistsPendingSeatCapacityConfirmForMemberParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsPendingSeatCapacityConfirmForMember, arg.WorkspaceID, arg.MemberID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const expireInvitationForCapacityRecovery = `-- name: ExpireInvitationForCapacityRecovery :exec
