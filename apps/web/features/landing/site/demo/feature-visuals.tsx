@@ -27,6 +27,11 @@ import {
   PROVIDER_MARKS,
   QA,
   SAM,
+  ENTER,
+  OutlineButton,
+  Window,
+  WindowHeader,
+  Working,
   ZoomCanvas,
   useStoryLoop,
   type Actor,
@@ -45,51 +50,8 @@ import {
 const LARGE = { width: 520, height: 390 } as const;
 const SMALL = { width: 360, height: 240 } as const;
 
-const ENTER = "animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none";
-
-function Window({ className, children }: { className: string; children: ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "absolute flex flex-col overflow-hidden rounded-xl border border-site-line-strong bg-background shadow-site-float",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-function WindowHeader({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
-  return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-      <Icon className="size-4 text-muted-foreground" />
-      <span className="flex-1 text-label font-medium">{title}</span>
-      {children}
-    </div>
-  );
-}
-
-function Working({ label = "Working" }: { label?: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="size-1.5 shrink-0 rounded-full bg-site-agent" />
-      <ShimmerText className="text-micro text-muted-foreground">{label}</ShimmerText>
-    </span>
-  );
-}
-
-function OutlineButton({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
-  return (
-    <span className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-caption">
-      {Icon ? <Icon className="size-3.5 text-muted-foreground" /> : null}
-      {children}
-    </span>
-  );
-}
-
 // --- Runtimes ---------------------------------------------------------------
-// `multica setup` runs line by line, then the new machine joins the list.
+// A newly connected machine joins the list with its coding agents.
 
 type Runtime = {
   name: string;
@@ -131,22 +93,7 @@ const NEW_RUNTIME: Runtime = {
   note: <span className="text-micro text-success">Connected</span>,
 };
 
-const SETUP_LINES: ReactNode[] = [
-  <span key="command">
-    <span className="text-muted-foreground">$</span> multica setup
-  </span>,
-  <span key="found" className="text-muted-foreground">
-    Found 3 coding agents on this machine
-  </span>,
-  <span key="agents">
-    <span className="text-success">✓</span> Claude Code · Codex · Cursor
-  </span>,
-  <span key="connected">
-    <span className="text-success">✓</span> Connected to Acme Labs
-  </span>,
-];
-
-const RUNTIME_HOLDS = [700, 700, 700, 1000, 2600, 600] as const;
+const RUNTIME_HOLDS = [2200, 2800, 500] as const;
 
 function RuntimeRow({ runtime, className }: { runtime: Runtime; className?: string }) {
   return (
@@ -177,8 +124,7 @@ function RuntimeRow({ runtime, className }: { runtime: Runtime; className?: stri
 }
 
 export function RuntimesVisual() {
-  const { ref, step } = useStoryLoop(RUNTIME_HOLDS, 3);
-  const connected = step >= 4;
+  const { ref, step } = useStoryLoop(RUNTIME_HOLDS, 1);
   return (
     <ZoomCanvas {...LARGE}>
       <div ref={ref} className="absolute inset-0">
@@ -190,33 +136,14 @@ export function RuntimesVisual() {
             {RUNTIMES.map((runtime) => (
               <RuntimeRow key={runtime.name} runtime={runtime} />
             ))}
-            {connected ? (
+            {step >= 1 ? (
               <RuntimeRow
                 runtime={NEW_RUNTIME}
-                className={cn(ENTER, "transition-opacity duration-300", step === 5 && "opacity-0")}
+                className={cn(ENTER, "transition-opacity duration-300", step === 2 && "opacity-0")}
               />
             ) : null}
           </ul>
         </Window>
-        <div
-          className={cn(
-            "absolute bottom-6 left-16 w-[280px] rounded-xl border border-site-line-strong bg-background p-4 font-mono text-micro shadow-site-float",
-            "transition-[opacity,translate] duration-300 motion-reduce:transition-none",
-            connected && "translate-y-2 opacity-0",
-          )}
-        >
-          {SETUP_LINES.map((line, index) => (
-            <p
-              key={index}
-              className={cn(
-                "flex items-center gap-2 transition-opacity duration-200 not-first:mt-1.5",
-                index > Math.min(step, 3) && !connected && "opacity-0",
-              )}
-            >
-              {line}
-            </p>
-          ))}
-        </div>
       </div>
     </ZoomCanvas>
   );

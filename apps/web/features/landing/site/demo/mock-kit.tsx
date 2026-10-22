@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
-import { Bot } from "lucide-react";
+import { Bot, type LucideIcon } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { HERO_PROVIDERS } from "../../components/provider-marks";
 
 /*
  * Shared pieces for the landing's product mockups: the fictional Acme Labs
- * team and its avatars, and a canvas that lays a mockup out at a fixed design
- * size and zooms it to whatever frame it sits in.
+ * team and its avatars, window chrome, a canvas that lays a mockup out at a
+ * fixed design size and zooms it to whatever frame it sits in, and the loop
+ * that steps a mockup's story while it is on screen.
  */
 
 export type Actor =
@@ -113,4 +115,49 @@ export function useStoryLoop(holds: readonly number[], still: number) {
   }, [holds, step, visible, reducedMotion]);
 
   return { ref, step: reducedMotion ? still : step };
+}
+
+// Window chrome and small product atoms shared by the mockups.
+
+export const ENTER = "animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none";
+
+export function Window({ className, children }: { className: string; children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "absolute flex flex-col overflow-hidden rounded-xl border border-site-line-strong bg-background shadow-site-float",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function WindowHeader({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+      <Icon className="size-4 text-muted-foreground" />
+      <span className="flex-1 text-label font-medium">{title}</span>
+      {children}
+    </div>
+  );
+}
+
+export function Working({ label = "Working" }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="size-1.5 shrink-0 rounded-full bg-site-agent" />
+      <ShimmerText className="text-micro text-muted-foreground">{label}</ShimmerText>
+    </span>
+  );
+}
+
+export function OutlineButton({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
+  return (
+    <span className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-caption">
+      {Icon ? <Icon className="size-3.5 text-muted-foreground" /> : null}
+      {children}
+    </span>
+  );
 }

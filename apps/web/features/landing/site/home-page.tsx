@@ -2,7 +2,7 @@
 
 import type { ComponentType, CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
@@ -10,7 +10,6 @@ import { FAQSection } from "../components/faq-section";
 import {
   ActionLink,
   Container,
-  ProductFrame,
   Section,
   SectionHeader,
   focusRing,
@@ -24,6 +23,7 @@ import {
   WorkflowVisual,
 } from "./demo/feature-visuals";
 import { HeroBoard } from "./demo/hero-board";
+import { AgentVisual, ConnectVisual, ReviewVisual } from "./demo/how-it-works-visuals";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
 
@@ -205,28 +205,66 @@ function FeatureCard({
   );
 }
 
-const STEPS: { title: string; body: string }[] = [
-  { title: "Plan the work", body: "Placeholder: write issues, or let an agent break a spec into them." },
-  { title: "Assign it to an agent", body: "Placeholder: the agent claims the task, works in your repo, and reports progress." },
-  { title: "Review and ship", body: "Placeholder: review the PR, leave feedback, and merge." },
+const STEPS: { title: string; body: string; link: { label: string; href: string }; visual: ComponentType; alt: string }[] = [
+  {
+    title: "Connect your machines",
+    body: "Run multica setup on a laptop or a server and it finds the coding agents already installed there. No machine to spare? Run them in Multica Cloud.",
+    link: { label: "Explore Runtimes", href: productHref("runtimes") },
+    visual: ConnectVisual,
+    alt: "A terminal running multica setup, which signs in, finds Claude Code, Codex, and Cursor, and brings the laptop online",
+  },
+  {
+    title: "Add agents to your team",
+    body: "Give an agent a name, a runtime, instructions, and skills. It shows up in the assignee picker right next to your teammates.",
+    link: { label: "Explore Agents", href: productHref("agents") },
+    visual: AgentVisual,
+    alt: "The Create agent form filled in for Backend Agent, which then appears in the assignee picker beside team members",
+  },
+  {
+    title: "Assign work and review",
+    body: "Assign an issue and the agent takes it from there: it reports progress, opens a pull request, and waits for your review before anything merges.",
+    link: { label: "Explore Issues", href: productHref("issues") },
+    visual: ReviewVisual,
+    alt: "An issue where Backend Agent runs, opens a pull request with passing checks, and a teammate approves and merges it",
+  },
 ];
 
 function HowItWorks() {
   return (
     <Section>
       <Container>
-        <SectionHeader title="From issue to merged PR" lead="Placeholder: the core loop in three steps." />
+        <SectionHeader
+          title={
+            <>
+              <span className="text-site-muted">From setup to merged PR,</span>
+              <br />
+              your agents work like teammates.
+            </>
+          }
+        />
         <ol className="mt-site-step flex flex-col gap-site-step">
           {STEPS.map((step, index) => (
-            <li key={step.title} className="grid items-center gap-8 md:grid-cols-2 md:gap-16">
+            <li key={step.title} className="grid items-end gap-8 md:grid-cols-2 md:gap-16">
               <div className={cn(index % 2 === 1 && "md:order-2")}>
                 <p className="font-site-mono text-site-label text-site-muted tabular-nums">
                   {String(index + 1).padStart(2, "0")}
                 </p>
                 <h3 className="mt-4 font-site-display text-site-title text-site-ink">{step.title}</h3>
                 <p className="mt-1 max-w-[28rem] text-site-body text-site-muted">{step.body}</p>
+                <Link
+                  href={step.link.href}
+                  className={cn(
+                    "mt-4 inline-flex items-center gap-1 rounded-site-control text-site-body text-site-ink transition-colors hover:text-site-ink-secondary",
+                    focusRing,
+                  )}
+                >
+                  {step.link.label}
+                  <ChevronRight className="size-4" aria-hidden />
+                </Link>
               </div>
-              <ProductFrame label={`Step ${index + 1} visual`} aspectRatio="4 / 3" />
+              <div role="img" aria-label={step.alt} className="relative aspect-[4/3] overflow-hidden rounded-site-panel bg-site-sunken">
+                <step.visual />
+              </div>
             </li>
           ))}
         </ol>
