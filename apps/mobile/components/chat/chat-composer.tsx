@@ -57,6 +57,8 @@ interface Props {
   disabled?: boolean;
   /** When `disabled`, replaces the pill label with the reason. */
   disabledReason?: string;
+  /** Expand and focus the input when a conversation starter is selected. */
+  expandTrigger?: string | null;
 }
 
 const IS_IOS = process.env.EXPO_OS === "ios";
@@ -70,6 +72,7 @@ export function ChatComposer({
   allowStop = true,
   disabled = false,
   disabledReason,
+  expandTrigger,
 }: Props) {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { t } = useT("chat");
@@ -119,6 +122,7 @@ export function ChatComposer({
       isSending={sending}
       renderStop={allowStop ? () => <StopButton onPress={handleStop} /> : undefined}
       manageKeyboard={false}
+      expandTrigger={expandTrigger}
     />
   );
 }

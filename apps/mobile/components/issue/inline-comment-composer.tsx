@@ -18,6 +18,7 @@ import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { MessageComposer } from "@/components/composer/message-composer";
 import { useT } from "@/lib/i18n";
+import { getReplyTargetComposerProps } from "@/lib/reply-target-composer";
 
 export function InlineCommentComposer({ issueId }: { issueId: string }) {
   const createComment = useCreateComment(issueId);
@@ -25,6 +26,7 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const replyTarget = useReplyTargetStore((s) => s.target);
   const clearReplyTarget = useReplyTargetStore((s) => s.clear);
+  const composerReplyProps = getReplyTargetComposerProps(replyTarget);
 
   const onSubmit = useCallback(
     async ({
@@ -61,16 +63,9 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
       placeholder={t("comments.composer_placeholder")}
       pillLabel={t("comments.composer_pill")}
       pillIcon="chatbubble-ellipses-outline"
-      replyTarget={
-        replyTarget
-          ? {
-              actorName: replyTarget.actorName,
-              preview: replyTarget.preview,
-            }
-          : null
-      }
+      replyTarget={composerReplyProps.replyTarget}
       onClearReplyTarget={clearReplyTarget}
-      expandTrigger={replyTarget?.commentId ?? null}
+      expandTrigger={composerReplyProps.expandTrigger}
     />
   );
 }
