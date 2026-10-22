@@ -1,35 +1,30 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
-import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { FAQSection } from "../components/faq-section";
-import { HERO_PROVIDERS } from "../components/provider-marks";
 import {
   ActionLink,
   Container,
-  Eyebrow,
   ProductFrame,
   Section,
   SectionHeader,
   focusRing,
 } from "./primitives";
+import { CUSTOMER_LOGOS } from "./customer-logos";
 import { HeroBoard } from "./demo/hero-board";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
-
-// Vector marks only: the raster marks in HERO_PROVIDERS are drawn white for a
-// dark backdrop and disappear on the light canvas.
-const STRIP_PROVIDERS = ["Claude Code", "Codex", "Cursor", "GitHub Copilot", "Qwen Code", "Kimi CLI"];
 
 export function HomePage() {
   return (
     <SitePage>
       <Hero />
-      <WorksWith />
+      <LogoWall />
       <Features />
       <HowItWorks />
       <Deploy />
@@ -83,35 +78,46 @@ function Hero() {
   );
 }
 
-function WorksWith() {
-  const { locale } = useLocale();
-  const providers = HERO_PROVIDERS.filter((p) => STRIP_PROVIDERS.includes(p.name));
-
+function LogoWall() {
   return (
-    <Section>
+    <section aria-labelledby="logo-wall-title" className="pb-site-section">
       <Container>
-        <div className="flex items-baseline justify-between gap-4">
-          <Eyebrow>Works with the agents you already use</Eyebrow>
-          <Link
-            href={`${docsHrefForLocale(locale)}/providers`}
-            className={cn("shrink-0 whitespace-nowrap text-site-small text-site-muted hover:text-site-ink", focusRing)}
-          >
-            All 27 agents
-          </Link>
+        <h2 id="logo-wall-title" className="text-center text-site-small text-site-muted">
+          Used by engineers at
+        </h2>
+        <div className="group/wall mt-6 overflow-hidden mask-x-from-85% mask-x-to-100% motion-reduce:mask-none">
+          <div className="flex w-max animate-site-marquee group-hover/wall:[animation-play-state:paused] motion-reduce:w-auto motion-reduce:animate-none">
+            {[0, 1].map((copy) => (
+              <ul
+                key={copy}
+                aria-hidden={copy === 1 || undefined}
+                className={cn(
+                  "flex shrink-0 items-center gap-x-8 pr-8 sm:gap-x-12 sm:pr-12 motion-reduce:w-full motion-reduce:flex-wrap motion-reduce:justify-center motion-reduce:gap-y-4 motion-reduce:pr-0 sm:motion-reduce:gap-y-6",
+                  copy === 1 && "motion-reduce:hidden",
+                )}
+              >
+                {CUSTOMER_LOGOS.map((logo) => (
+                  <li
+                    key={logo.name}
+                    style={{ "--logo-color": logo.color } as CSSProperties}
+                    className="group/logo flex h-10 items-center gap-2 text-site-muted transition-colors duration-200 hover:text-site-ink"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                      className="size-5 fill-current sm:size-6 transition-colors duration-200 group-hover/logo:fill-(--logo-color)"
+                    >
+                      <path d={logo.path} />
+                    </svg>
+                    <span className="text-[0.9375rem] font-semibold sm:text-[1.0625rem] tracking-tight whitespace-nowrap">{logo.name}</span>
+                  </li>
+                ))}
+              </ul>
+            ))}
+          </div>
         </div>
-        <ul className="mt-6 grid grid-cols-2 border-y border-site-line sm:grid-cols-3 lg:grid-cols-6">
-          {providers.map(({ name, Mark }) => (
-            <li
-              key={name}
-              className="flex h-24 items-center justify-center gap-2.5 border-site-line text-site-muted not-first:border-l"
-            >
-              <Mark className="size-5" />
-              <span className="text-site-small">{name}</span>
-            </li>
-          ))}
-        </ul>
       </Container>
-    </Section>
+    </section>
   );
 }
 
@@ -125,7 +131,7 @@ const FEATURES: { title: string; body: string; href: string }[] = [
 
 function Features() {
   return (
-    <Section>
+    <Section className="border-t-0">
       <Container>
         <SectionHeader title="Section headline placeholder" lead="Placeholder: one line framing the product pillars." />
         <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">

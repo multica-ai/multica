@@ -173,3 +173,15 @@
     background-size: 16px 16px;
     background-position: 8px 8px;
 }
+
+/* Logo wall: the track holds the list twice, so sliding it by half loops
+   seamlessly. */
+@theme {
+    --animate-site-marquee: site-marquee 50s linear infinite;
+
+    @keyframes site-marquee {
+        to {
+            transform: translateX(-50%);
+        }
+    }
+}
