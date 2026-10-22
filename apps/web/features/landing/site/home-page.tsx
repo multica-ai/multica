@@ -17,6 +17,7 @@ import {
   SectionHeader,
   focusRing,
 } from "./primitives";
+import { HeroBoard } from "./demo/hero-board";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
 
@@ -74,7 +75,9 @@ function Hero() {
         </div>
       </Container>
       <Container className="mt-10 lg:mt-12">
-        <ProductFrame label="Hero product visual" aspectRatio="16 / 9" />
+        <ProductFrame label="Hero product visual" aspectRatio="16 / 9">
+          <HeroBoard />
+        </ProductFrame>
       </Container>
     </section>
   );
