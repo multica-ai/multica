@@ -49,7 +49,8 @@ import { HERO_PROVIDERS } from "../../components/provider-marks";
 
 /*
  * Hero product mockup: the issue board, built from the product's own tokens
- * and glyphs at a fixed design size, then zoomed to fit its frame. Data is
+ * and glyphs at a fixed design width, then zoomed to fit its frame; the
+ * height follows the frame so the app's inset panel always closes. Data is
  * fictional. It loops one story: an unassigned issue is handed to an agent,
  * which works it, opens a PR, gets it approved, and lands it in Done.
  */
@@ -57,7 +58,6 @@ import { HERO_PROVIDERS } from "../../components/provider-marks";
 const WIDE_WIDTH = 1200;
 const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
-const DESIGN_HEIGHT = 720;
 const COLUMN_STRIDE = 232 + 12;
 
 type Actor =
@@ -164,7 +164,7 @@ export function HeroBoard() {
   const windowRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const positions = useRef<{ zoom: number; at: Map<string, { x: number; y: number }> } | null>(null);
-  const [fit, setFit] = useState<{ zoom: number; narrow: boolean } | null>(null);
+  const [fit, setFit] = useState<{ zoom: number; narrow: boolean; height: number } | null>(null);
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
   const reducedMotion = usePrefersReducedMotion();
@@ -175,7 +175,8 @@ export function HeroBoard() {
     if (!el) return;
     const resize = new ResizeObserver(() => {
       const narrow = el.clientWidth < NARROW_BELOW;
-      setFit({ zoom: el.clientWidth / (narrow ? NARROW_WIDTH : WIDE_WIDTH), narrow });
+      const zoom = el.clientWidth / (narrow ? NARROW_WIDTH : WIDE_WIDTH);
+      setFit({ zoom, narrow, height: el.clientHeight / zoom });
     });
     const intersection = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting ?? false));
     resize.observe(el);
@@ -245,12 +246,12 @@ export function HeroBoard() {
       <div
         aria-hidden
         className={cn("flex text-foreground", !fit && "opacity-0")}
-        style={{ width: narrow ? NARROW_WIDTH : WIDE_WIDTH, height: DESIGN_HEIGHT, zoom: fit?.zoom }}
+        style={{ width: narrow ? NARROW_WIDTH : WIDE_WIDTH, height: fit?.height, zoom: fit?.zoom }}
       >
         {narrow ? null : <Sidebar />}
         <main
           className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-surface-border bg-background shadow-[var(--surface-shadow)]",
+            "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-surface-border bg-background",
             narrow ? "m-1.5" : "my-1.5 mr-1.5",
           )}
         >

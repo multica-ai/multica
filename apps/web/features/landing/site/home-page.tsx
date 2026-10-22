@@ -75,7 +75,7 @@ function Hero() {
         </div>
       </Container>
       <Container className="mt-10 lg:mt-12">
-        <div className="relative aspect-[4/3] sm:aspect-video">
+        <div className="relative aspect-square sm:aspect-[16/10]">
           <HeroBoard />
         </div>
       </Container>
