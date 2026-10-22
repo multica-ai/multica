@@ -33,7 +33,7 @@ export function SectionHeader({
   return (
     <div className={cn("max-w-[44rem]", className)}>
       {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-      <h2 className={cn("text-site-section text-site-ink text-balance", eyebrow && "mt-3")}>
+      <h2 className={cn("font-site-display text-site-section text-site-ink text-balance", eyebrow && "mt-3")}>
         {title}
       </h2>
       {lead ? (

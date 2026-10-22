@@ -31,9 +31,14 @@ import "./globals.css";
 // "Managed by runtime", dashboard/squad placeholders) plus every markdown <em> and
 // blockquote rendered as browser-synthesized oblique. Keep in sync with desktop's
 // `@fontsource-variable/inter/wght-italic.css` import.
+//
+// The optical-size axis serves the marketing display ramp (Inter's Display cut
+// above 32px). The product UI stays on the text cut: globals.css pins
+// `font-optical-sizing: none` at the root and only `.landing-light` re-enables it.
 const inter = Inter({
   subsets: ["latin"],
   style: ["normal", "italic"],
+  axes: ["opsz"],
   variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently

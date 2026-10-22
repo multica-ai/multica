@@ -39,7 +39,7 @@ export function PageHero({
   return (
     <Container className="pt-16 pb-12 sm:pt-24 sm:pb-16">
       {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-      <h1 className="mt-3 max-w-[20ch] text-site-title text-site-ink text-balance">{title}</h1>
+      <h1 className="mt-3 max-w-[20ch] font-site-display text-site-title text-site-ink text-balance">{title}</h1>
       {lead ? (
         <p className="mt-5 max-w-[38rem] text-site-lead text-site-muted text-pretty">{lead}</p>
       ) : null}
@@ -60,7 +60,7 @@ export function CtaBand({
       <Container>
         <div className="flex flex-col gap-8 rounded-site-panel bg-site-inverse px-8 py-12 sm:px-12 sm:py-16 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-[36rem]">
-            <h2 className="text-site-section text-site-inverse-ink text-balance">{title}</h2>
+            <h2 className="font-site-display text-site-section text-site-inverse-ink text-balance">{title}</h2>
             <p className="mt-4 text-site-lead text-site-inverse-muted">{lead}</p>
           </div>
           <div className="flex flex-wrap gap-2.5">

@@ -58,7 +58,7 @@ function Hero() {
           Announcement placeholder
           <ArrowRight className="size-3.5 text-site-muted" aria-hidden />
         </Link>
-        <h1 className="mt-6 max-w-[15ch] text-site-hero text-site-ink text-balance">
+        <h1 className="mt-6 max-w-[15ch] font-site-display text-site-hero text-site-ink text-balance">
           Your next ten hires won’t be human
         </h1>
         <p className="mt-6 max-w-[36rem] text-site-lead text-site-muted text-pretty">
@@ -172,10 +172,10 @@ function HowItWorks() {
           {STEPS.map((step, index) => (
             <li key={step.title} className="grid items-center gap-8 md:grid-cols-2 md:gap-16">
               <div className={cn(index % 2 === 1 && "md:order-2")}>
-                <p className="text-site-section text-site-muted tabular-nums">
+                <p className="font-site-display text-site-section text-site-muted tabular-nums">
                   {String(index + 1).padStart(2, "0")}
                 </p>
-                <h3 className="mt-3 text-site-section text-site-ink">{step.title}</h3>
+                <h3 className="mt-3 font-site-display text-site-section text-site-ink">{step.title}</h3>
                 <p className="mt-3 max-w-[28rem] text-site-lead text-site-muted">{step.body}</p>
               </div>
               <ProductFrame tone={step.tone} label={`Step ${index + 1} visual`} aspectRatio="4 / 3" />

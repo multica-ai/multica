@@ -9,6 +9,11 @@ describe("cn", () => {
     expect(cn(input)).toBe(expected);
   });
 
+  it("keeps a role-named font family next to a weight", () => {
+    expect(cn("font-medium font-site-display")).toBe("font-medium font-site-display");
+    expect(cn("font-site-sans", "font-site-display")).toBe("font-site-display");
+  });
+
   it("lets a later size replace an earlier one", () => {
     expect(cn("text-site-nav", "text-site-body")).toBe("text-site-body");
   });

@@ -28,7 +28,7 @@ export function PricingPage() {
               )}
             >
               <h2 className="text-site-card text-site-ink">{plan.name}</h2>
-              <p className="mt-6 text-site-section text-site-ink tabular-nums">{plan.price}</p>
+              <p className="mt-6 font-site-display text-site-section text-site-ink tabular-nums">{plan.price}</p>
               <p className="mt-1 text-site-body text-site-muted">{plan.cadence}</p>
               <ActionLink
                 href={plan.cta.href}

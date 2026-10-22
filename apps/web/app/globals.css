@@ -28,6 +28,9 @@
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
     "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
     "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  /* Inter ships an optical-size axis for the marketing pages; the product UI
+     keeps the default text cut, matching the desktop app's wght-only Inter. */
+  font-optical-sizing: none;
 }
 
 /* Japanese: Kanji are Han ideographs sharing the same Unicode block as Chinese,

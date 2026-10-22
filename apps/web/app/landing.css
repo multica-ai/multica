@@ -1,8 +1,8 @@
 /* =============================================================================
  * Marketing site design language
  *
- * Every landing surface draws from this file: colour roles, the display type
- * ramp, radii, and the placeholder visual. Components reference the roles
+ * Every landing surface draws from this file: colour roles, typefaces, the
+ * display type ramp, radii, and the placeholder visual. Components reference the roles
  * (`bg-site-canvas`, `text-site-muted`, `text-site-section`), never raw values,
  * so the whole site can be re-tuned here without touching markup.
  *
@@ -33,6 +33,10 @@
     --radius-site-panel: var(--site-radius-panel);
 
     --shadow-site-float: var(--site-shadow-float);
+
+    --font-site-sans: var(--site-font-sans);
+    --font-site-display: var(--site-font-display);
+    --font-site-mono: var(--site-font-mono);
 }
 
 /* Display ramp. Fluid between a 375px phone and a 1440px desktop; each step
@@ -40,17 +44,17 @@
 @theme {
     --text-site-hero: clamp(2.75rem, 1.86rem + 3.8vw, 4.5rem);
     --text-site-hero--line-height: 1.03;
-    --text-site-hero--letter-spacing: -0.038em;
+    --text-site-hero--letter-spacing: -0.03em;
     --text-site-hero--font-weight: 450;
 
     --text-site-title: clamp(2.25rem, 1.7rem + 2.3vw, 3.5rem);
     --text-site-title--line-height: 1.06;
-    --text-site-title--letter-spacing: -0.034em;
+    --text-site-title--letter-spacing: -0.026em;
     --text-site-title--font-weight: 450;
 
     --text-site-section: clamp(1.875rem, 1.5rem + 1.6vw, 2.75rem);
     --text-site-section--line-height: 1.1;
-    --text-site-section--letter-spacing: -0.03em;
+    --text-site-section--letter-spacing: -0.022em;
     --text-site-section--font-weight: 450;
 
     --text-site-card: 1.1875rem;
@@ -78,6 +82,21 @@
 
     --text-site-eyebrow: 0.8125rem;
     --text-site-eyebrow--line-height: 1.25rem;
+}
+
+/* Typefaces. One sans family carries the whole site: Inter's optical-size axis
+   switches headings to its Display cut (tighter spacing, finer joins) and keeps
+   copy on the text cut, and it is the face the product itself renders in, so
+   screenshots and page copy match. `site-display` is the single switch if the
+   headings ever get their own face. The CJK fallback chain comes with
+   `--font-sans`, per <html lang>. */
+.landing-light {
+    --site-font-sans: var(--font-sans);
+    --site-font-display: var(--font-sans);
+    --site-font-mono: var(--font-mono);
+
+    font-family: var(--site-font-sans);
+    font-optical-sizing: auto;
 }
 
 .landing-light {
