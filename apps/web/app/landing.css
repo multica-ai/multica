@@ -1,0 +1,155 @@
+/* =============================================================================
+ * Marketing site design language
+ *
+ * Every landing surface draws from this file: colour roles, the display type
+ * ramp, radii, and the placeholder visual. Components reference the roles
+ * (`bg-site-canvas`, `text-site-muted`, `text-site-section`), never raw values,
+ * so the whole site can be re-tuned here without touching markup.
+ *
+ * Text hierarchy is expressed by the four solid ink roles. Do not dim text with
+ * opacity — `site-muted` is the floor for readable copy on `site-canvas` and
+ * `site-surface`; `site-faint` is for decoration (dividers in text, disabled
+ * glyphs) only.
+ * ============================================================================= */
+
+@theme inline {
+    --color-site-canvas: var(--site-canvas);
+    --color-site-surface: var(--site-surface);
+    --color-site-sunken: var(--site-sunken);
+    --color-site-hover: var(--site-hover);
+    --color-site-ink: var(--site-ink);
+    --color-site-ink-secondary: var(--site-ink-secondary);
+    --color-site-muted: var(--site-muted);
+    --color-site-faint: var(--site-faint);
+    --color-site-line: var(--site-line);
+    --color-site-line-strong: var(--site-line-strong);
+    --color-site-accent: var(--site-accent);
+    --color-site-inverse: var(--site-inverse);
+    --color-site-inverse-ink: var(--site-inverse-ink);
+    --color-site-inverse-muted: var(--site-inverse-muted);
+
+    --radius-site-control: var(--site-radius-control);
+    --radius-site-card: var(--site-radius-card);
+    --radius-site-panel: var(--site-radius-panel);
+
+    --shadow-site-float: var(--site-shadow-float);
+}
+
+/* Display ramp. Fluid between a 375px phone and a 1440px desktop; each step
+   carries its own leading, tracking, and weight so headings cannot drift. */
+@theme {
+    --text-site-hero: clamp(2.75rem, 1.86rem + 3.8vw, 4.5rem);
+    --text-site-hero--line-height: 1.03;
+    --text-site-hero--letter-spacing: -0.038em;
+    --text-site-hero--font-weight: 450;
+
+    --text-site-title: clamp(2.25rem, 1.7rem + 2.3vw, 3.5rem);
+    --text-site-title--line-height: 1.06;
+    --text-site-title--letter-spacing: -0.034em;
+    --text-site-title--font-weight: 450;
+
+    --text-site-section: clamp(1.875rem, 1.5rem + 1.6vw, 2.75rem);
+    --text-site-section--line-height: 1.1;
+    --text-site-section--letter-spacing: -0.03em;
+    --text-site-section--font-weight: 450;
+
+    --text-site-card: 1.1875rem;
+    --text-site-card--line-height: 1.4;
+    --text-site-card--letter-spacing: -0.015em;
+    --text-site-card--font-weight: 500;
+
+    --text-site-lead: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
+    --text-site-lead--line-height: 1.55;
+    --text-site-lead--letter-spacing: -0.006em;
+
+    --text-site-body: 0.9375rem;
+    --text-site-body--line-height: 1.55;
+
+    --text-site-logo: 1.3125rem;
+    --text-site-logo--line-height: 1;
+    --text-site-logo--letter-spacing: -0.02em;
+
+    --text-site-menu: 1.125rem;
+    --text-site-menu--line-height: 1.5rem;
+    --text-site-menu--letter-spacing: -0.01em;
+
+    --text-site-nav: 0.875rem;
+    --text-site-nav--line-height: 1.25rem;
+
+    --text-site-eyebrow: 0.8125rem;
+    --text-site-eyebrow--line-height: 1.25rem;
+}
+
+.landing-light {
+    --site-canvas: oklch(0.985 0.002 250);
+    --site-surface: oklch(1 0 0);
+    --site-sunken: oklch(0.965 0.004 250);
+    --site-hover: oklch(0.945 0.005 250);
+    --site-ink: oklch(0.19 0.012 262);
+    --site-ink-secondary: oklch(0.36 0.012 262);
+    --site-muted: oklch(0.5 0.012 262);
+    --site-faint: oklch(0.7 0.008 262);
+    --site-line: oklch(0.915 0.005 250);
+    --site-line-strong: oklch(0.86 0.006 250);
+    --site-accent: oklch(0.55 0.16 255);
+    --site-inverse: oklch(0.19 0.012 262);
+    --site-inverse-ink: oklch(0.985 0.002 250);
+    --site-inverse-muted: oklch(0.74 0.01 262);
+
+    --site-radius-control: 10px;
+    --site-radius-card: 14px;
+    --site-radius-panel: 20px;
+
+    --site-shadow-float: 0 1px 2px rgb(15 23 42 / 0.05), 0 20px 48px rgb(15 23 42 / 0.1);
+}
+
+/* Placeholder visual: a soft tinted field with film grain. Stands in for
+   product shots and illustration until real art direction lands. */
+.site-visual {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background-color: oklch(0.9 0.02 250);
+}
+.site-visual::before {
+    content: "";
+    position: absolute;
+    inset: -15%;
+    z-index: -1;
+    filter: blur(24px);
+    background:
+        radial-gradient(38% 32% at 22% 28%, oklch(0.99 0.005 250) 0%, transparent 70%),
+        radial-gradient(44% 40% at 78% 70%, var(--site-visual-deep) 0%, transparent 70%),
+        radial-gradient(32% 30% at 64% 22%, var(--site-visual-mid) 0%, transparent 70%),
+        radial-gradient(30% 32% at 14% 82%, var(--site-visual-mid) 0%, transparent 70%),
+        linear-gradient(160deg, var(--site-visual-light) 0%, var(--site-visual-mid) 55%, var(--site-visual-light) 100%);
+}
+.site-visual::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    opacity: 0.3;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.site-visual[data-tone="sky"] {
+    --site-visual-light: oklch(0.93 0.025 245);
+    --site-visual-mid: oklch(0.84 0.05 250);
+    --site-visual-deep: oklch(0.7 0.08 258);
+}
+.site-visual[data-tone="dusk"] {
+    --site-visual-light: oklch(0.94 0.02 300);
+    --site-visual-mid: oklch(0.85 0.045 290);
+    --site-visual-deep: oklch(0.72 0.07 275);
+}
+.site-visual[data-tone="sage"] {
+    --site-visual-light: oklch(0.94 0.015 180);
+    --site-visual-mid: oklch(0.86 0.03 200);
+    --site-visual-deep: oklch(0.72 0.05 220);
+}
+.site-visual[data-tone="stone"] {
+    --site-visual-light: oklch(0.94 0.006 250);
+    --site-visual-mid: oklch(0.86 0.01 250);
+    --site-visual-deep: oklch(0.7 0.016 255);
+}

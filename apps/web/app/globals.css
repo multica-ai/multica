@@ -4,6 +4,7 @@
 @import "../../../packages/ui/styles/tokens.css";
 @import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
+@import "./landing.css";
 
 @custom-variant dark (&:is(.dark *));
 
