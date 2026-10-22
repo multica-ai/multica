@@ -94,6 +94,24 @@ func actionVerb(notifType string) string {
 		return "Agent blocked"
 	case "agent_completed":
 		return "Agent completed"
+	case "issue_subscribed":
+		return "Subscribed"
+	case "review_requested":
+		return "Review requested"
+	case "reaction_added":
+		return "Reacted"
+	case "quick_create_done":
+		return "Created with agent"
+	case "quick_create_failed":
+		return "Create with agent failed"
+	case "quick_create_unconfirmed":
+		return "Create with agent unconfirmed"
+	case "autopilot_paused":
+		return "Autopilot paused"
+	case "autopilot_quota_exceeded":
+		return "Autopilot run limit reached"
+	case "children_done":
+		return "Sub-issues finished"
 	default:
 		return "Update"
 	}

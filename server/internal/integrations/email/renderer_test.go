@@ -1,6 +1,9 @@
 package email
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -66,5 +69,30 @@ func TestRender_EmptyBaseURLDoesNotCrash(t *testing.T) {
 	// No complete URL is required, but at least it must not panic and Subject/Text/HTML must be non-empty
 	if out.Subject == "" || out.Text == "" || out.HTML == "" {
 		t.Error("empty base URL should still produce a sendable email")
+	}
+}
+
+// The web inbox labels every notification type it knows; an email for one of
+// them must not fall back to the generic "Update" subject. Reading the label
+// file makes an upstream sync that adds an inbox type fail here instead of
+// silently degrading the email.
+func TestActionVerb_CoversEveryInboxType(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "views", "locales", "en", "inbox.json"))
+	if err != nil {
+		t.Skipf("inbox labels not available: %v", err)
+	}
+	var labels struct {
+		Types map[string]string `json:"types"`
+	}
+	if err := json.Unmarshal(raw, &labels); err != nil {
+		t.Fatalf("parse inbox.json: %v", err)
+	}
+	if len(labels.Types) == 0 {
+		t.Fatal("inbox.json has no types section")
+	}
+	for notifType := range labels.Types {
+		if actionVerb(notifType) == actionVerb("") {
+			t.Errorf("actionVerb(%q) falls back to the generic subject; add a case for it", notifType)
+		}
 	}
 }
