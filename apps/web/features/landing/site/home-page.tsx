@@ -17,7 +17,6 @@ import {
   SectionHeader,
   focusRing,
 } from "./primitives";
-import { HeroVariants, useHeroVariant } from "./hero-variants";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
 
@@ -43,10 +42,6 @@ export function HomePage() {
 function Hero() {
   const user = useAuthStore((s) => s.user);
   const ctaHref = useDashboardCtaHref();
-  const variant = useHeroVariant();
-  if (variant) {
-    return <HeroVariants variant={variant} ctaHref={ctaHref} ctaLabel={user ? "Open dashboard" : "Get started"} />;
-  }
 
   return (
     <section className="pt-site-hero pb-site-section">
@@ -62,14 +57,14 @@ function Hero() {
           Announcement placeholder
           <ArrowRight className="size-3.5 text-site-muted" aria-hidden />
         </Link>
-        <h1 className="mt-6 max-w-[20ch] font-site-display text-site-heading text-site-ink text-balance">
+        <h1 className="mt-5 font-site-display text-site-heading text-site-ink text-balance">
           Your next ten hires won’t be human
         </h1>
-        <p className="mt-4 max-w-[30rem] text-site-body text-site-muted text-pretty">
-          Placeholder tagline. Multica turns coding agents into teammates you can assign, review,
-          and scale — on your machines or in the cloud.
+        <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">
+          Placeholder tagline. Assign issues to coding agents, review their work, and scale the team — on
+          your machines or in the cloud.
         </p>
-        <div className="mt-7 flex flex-wrap gap-2.5">
+        <div className="mt-6 flex flex-wrap gap-2.5">
           <ActionLink href={ctaHref} size="lg">
             {user ? "Open dashboard" : "Get started"}
           </ActionLink>
@@ -78,7 +73,7 @@ function Hero() {
           </ActionLink>
         </div>
       </Container>
-      <Container className="mt-12 lg:mt-24">
+      <Container className="mt-10 lg:mt-12">
         <ProductFrame label="Hero product visual" aspectRatio="16 / 9" />
       </Container>
     </section>

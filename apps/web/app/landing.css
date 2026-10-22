@@ -135,7 +135,7 @@
     --site-container: 87.5rem;
     --site-gutter: 1.25rem;
     --site-header: 3.25rem;
-    --site-hero: 6.25rem;
+    --site-hero: 3rem;
     --site-section: 3rem;
     --site-block: 2.5rem;
     --site-stack: 0.5rem;
@@ -151,7 +151,7 @@
 @media (min-width: 64rem) {
     .landing-light {
         --site-gutter: 3.75rem;
-        --site-hero: 8.75rem;
+        --site-hero: 4rem;
         --site-section: 3.75rem;
         --site-grid-row: 3.75rem;
         --site-step: 7.5rem;
