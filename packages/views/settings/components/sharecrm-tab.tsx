@@ -37,6 +37,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // formatInstalledAt renders the install timestamp defensively: the schema
 // defaults installed_at to "" and the backend can emit a zero-value timestamp
@@ -347,21 +348,24 @@ export function ShareCRMAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="sharecrm-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.sharecrm.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="sharecrm-agent-connect"
       >
-        <ShareCRMMark className="h-3 w-3" />
-        {t(($) => $.sharecrm.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="sharecrm-agent-connect"
+        >
+          <ShareCRMMark className="h-3 w-3" />
+          {t(($) => $.sharecrm.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -542,20 +546,21 @@ function ShareCRMAgentBotConnectedBadge({
           <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
           <span className="truncate">{t(($) => $.sharecrm.agent_bot_connected_label)}</span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.sharecrm.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.sharecrm.disconnect)}
-          data-testid="sharecrm-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.sharecrm.disconnecting)
-            : t(($) => $.sharecrm.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.sharecrm.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.sharecrm.disconnect)}
+            data-testid="sharecrm-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.sharecrm.disconnecting)
+              : t(($) => $.sharecrm.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       <AlertDialog
