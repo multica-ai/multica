@@ -32,12 +32,14 @@ export function HomePage() {
     <SitePage>
       <Hero />
       <LogoWall />
-      <Features />
-      <HowItWorks />
-      <Deploy />
-      <Customers />
-      <FAQSection />
-      <CtaBand />
+      <div className="site-rails">
+        <Features />
+        <HowItWorks />
+        <Deploy />
+        <Customers />
+        <FAQSection />
+        <CtaBand />
+      </div>
     </SitePage>
   );
 }
@@ -168,7 +170,7 @@ const FEATURES: { title: string; body: string; href: string; visual: ComponentTy
 
 function Features() {
   return (
-    <Section className="border-t-0">
+    <Section>
       <Container>
         <SectionHeader title="Built for teams of people and agents" />
         <div className="mt-site-block grid gap-x-site-grid-col gap-y-site-grid-row md:grid-cols-2">
