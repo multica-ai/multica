@@ -26,6 +26,52 @@ paths:
                 $ref: "#/components/schemas/Context"
         default:
           $ref: "#/components/responses/Problem"
+  /issues:
+    get:
+      operationId: listIssues
+      summary: List scheduler-safe workspace issues
+      x-multica-contract: shared_resource
+      x-multica-scope: issues:read
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status_category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [unstarted, started, done, closed]
+        - name: project_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: assignee_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: has_active_tasks
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, format: int32, default: 50, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Issues
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueListResponse"
+        default:
+          $ref: "#/components/responses/Problem"
   /issues/{issue_ref}:
     parameters:
       - $ref: "#/components/parameters/IssueRef"
@@ -106,6 +152,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Comment"
+        default:
+          $ref: "#/components/responses/Problem"
+  /issues/{issue_ref}/tasks:
+    parameters:
+      - $ref: "#/components/parameters/IssueRef"
+    post:
+      operationId: createIssueTask
+      summary: Queue an explicit agent task for an issue
+      x-multica-contract: shared_resource
+      x-multica-scope: tasks:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIssueTaskRequest"
+      responses:
+        "201":
+          description: Queued task metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueTask"
+        "409":
+          description: A pending task already exists for this issue and agent
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         default:
           $ref: "#/components/responses/Problem"
   /storage/{scope}:
@@ -343,6 +418,20 @@ components:
         last_activity_at: { type: [string, "null"], format: date-time }
         metadata: { type: object, additionalProperties: true }
         properties: { type: object, additionalProperties: true }
+        active_task_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Populated by collection queries; not currently part of the single-resource response.
+    IssueListResponse:
+      type: object
+      required: [issues]
+      properties:
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/Issue"
+        next_cursor: { type: string }
     PatchIssueRequest:
       type: object
       properties:
@@ -381,6 +470,26 @@ components:
       properties:
         content: { type: string, maxLength: 65536 }
         parent_id: { type: string }
+    CreateIssueTaskRequest:
+      type: object
+      required: [agent_id]
+      properties:
+        agent_id: { type: string, format: uuid }
+        handoff_note: { type: string, maxLength: 40000 }
+        priority:
+          type: [string, "null"]
+          enum: [urgent, high, medium, low, none, null]
+    IssueTask:
+      type: object
+      required: [id, issue_id, agent_id, runtime_id, status, priority, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        issue_id: { type: string, format: uuid }
+        agent_id: { type: string, format: uuid }
+        runtime_id: { type: string, format: uuid }
+        status: { type: string }
+        priority: { type: string, enum: [urgent, high, medium, low, none] }
+        created_at: { type: string, format: date-time }
     StorageKey:
       type: object
       required: [key, size_bytes, updated_at]
