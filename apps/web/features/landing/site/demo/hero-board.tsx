@@ -496,8 +496,8 @@ function IssuePanel({ stage }: { stage: Stage }) {
       data-open={stage.panel}
       className={cn(
         "absolute inset-y-0 right-0 z-10 flex w-[380px] flex-col border-l border-border bg-background shadow-[var(--floating-shadow)]",
-        "transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
-        "data-[open=false]:translate-x-full data-[open=false]:duration-300 data-[open=false]:ease-in",
+        "transition-[translate,box-shadow] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+        "data-[open=false]:translate-x-full data-[open=false]:shadow-none data-[open=false]:duration-300 data-[open=false]:ease-in",
       )}
     >
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
