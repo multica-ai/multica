@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/google/uuid"
 
@@ -264,6 +265,7 @@ type terminalTaskReport struct {
 	workDir        string
 	durableWorkDir string
 	failureReason  string
+	quotaResetAt   *time.Time
 	// sessionRolloutMissing is true when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). The server
 	// clears the resume pointer and flags the continuity gap for the next claim.
@@ -5884,6 +5886,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
+	result.QuotaResetZone = quotaResetZoneForAgent(task.Agent)
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
@@ -6232,6 +6235,27 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	return release, false
 }
 
+// quotaResetZoneForAgent requires both an opt-in and an explicit IANA timezone.
+// GLM's localized reset message has no UTC offset; guessing from the daemon's
+// host timezone could resume hours early or late on a remote machine.
+func quotaResetZoneForAgent(agent *AgentData) *time.Location {
+	if agent == nil {
+		return nil
+	}
+	var config struct {
+		QuotaAutoResume    bool   `json:"quota_auto_resume"`
+		QuotaResetTimezone string `json:"quota_reset_timezone"`
+	}
+	if json.Unmarshal(agent.RuntimeConfig, &config) != nil || !config.QuotaAutoResume || config.QuotaResetTimezone == "" {
+		return nil
+	}
+	zone, err := time.LoadLocation(config.QuotaResetTimezone)
+	if err != nil {
+		return nil
+	}
+	return zone
+}
+
 // reportTaskResult writes the final task disposition back to the server.
 //
 // Fail closed: only an explicit "completed" status is reported as success.
@@ -6267,6 +6291,11 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		taskLog.Error("complete task callback not acknowledged; durable report remains queued", "error", err)
 	default:
 		failureReason := result.FailureReason
+		var quotaResetAt *time.Time
+		if reset, ok := taskfailure.QuotaResetAt(result.Comment, time.Now(), result.QuotaResetZone); ok && result.Status != "cancelled" {
+			failureReason = taskfailure.ReasonAgentProviderQuotaLimit.String()
+			quotaResetAt = &reset
+		}
 		if failureReason == "" {
 			if result.Status == "cancelled" {
 				// "cancelled" is a deliberate non-failure terminal
@@ -6298,6 +6327,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			// they want to see how far it got.
 			branchName:            result.BranchName,
 			failureReason:         failureReason,
+			quotaResetAt:          quotaResetAt,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
 		}); err != nil {
@@ -6401,7 +6431,7 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	case terminalTaskReportComplete:
 		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
 	case terminalTaskReportFail:
-		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.quotaResetAt, schedule)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
