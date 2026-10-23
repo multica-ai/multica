@@ -162,17 +162,15 @@ function ReplyInput({
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
-    containerRef: composerRef,
     normalize: (raw) => {
       const current = draftKey ? useCommentDraftStore.getState().getAnnotations(draftKey) : EMPTY_REPLY_ANNOTATIONS;
       return !targetMissing && hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
-    // A thread reply is rarely the last thing the user has to say, so the caret
-    // stays in the box for the next one. Unlike a top-level comment, the posted
-    // reply lands directly above the box that is still focused — nothing needs
-    // to pull the eye elsewhere. `containerRef` keeps this from stealing focus
-    // if the user moved to another composer while the reply was in flight.
-    afterAccepted: () => (editorScrubbedRef.current ? "refocus" : "none"),
+    // Drop the caret once the reply is posted, same as a top-level comment: a
+    // focused editor swallows the page's keyboard shortcuts, so keeping it here
+    // would trap the user until they click away. Bound to `editorScrubbedRef`
+    // so a draft the stale-submit guard kept stays focused.
+    afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
     onSubmit: async (content) => {
       editorScrubbedRef.current = false;
       const { suppressAgentIds, steerTaskIds } = routing;
