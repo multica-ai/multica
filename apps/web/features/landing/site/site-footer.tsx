@@ -13,6 +13,7 @@ import {
   twitterUrl,
 } from "../components/shared";
 import { BrandLogo } from "./brand-logo";
+import { FooterWordmark } from "./footer-wordmark";
 import { Container, SiteTextLink, focusRing } from "./primitives";
 import { buildFooterGroups } from "./sitemap";
 
@@ -103,6 +104,7 @@ export function SiteFooter() {
             ))}
           </div>
         </div>
+        <FooterWordmark className="pt-site-block pb-10" />
       </Container>
     </footer>
   );
