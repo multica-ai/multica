@@ -18,6 +18,8 @@ import {
   TaskMessageListSchema,
   AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
+  ListAutopilotRunsResponseSchema,
+  EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
@@ -1609,6 +1611,53 @@ describe("AutopilotRunSchema", () => {
     const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
     expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
     expect(parsed.status).toBe("failed");
+  });
+});
+
+describe("ListAutopilotRunsResponseSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/autopilots/:id/runs" };
+  const run = {
+    id: "run-1",
+    autopilot_id: "ap-1",
+    source: "schedule",
+    status: "running",
+    task_id: "task-1",
+    created_at: "2026-09-30T00:00:00Z",
+  };
+
+  it("keeps task_status and work_issue_id", () => {
+    const parsed = parseWithFallback(
+      { runs: [{ ...run, task_status: "queued", work_issue_id: "issue-9" }], total: 1 },
+      ListAutopilotRunsResponseSchema,
+      EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.runs[0]?.task_status).toBe("queued");
+    expect(parsed.runs[0]?.work_issue_id).toBe("issue-9");
+  });
+
+  it("defaults the new fields to null for an older server", () => {
+    const parsed = parseWithFallback({ runs: [run], total: 1 }, ListAutopilotRunsResponseSchema, EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE, ENDPOINT);
+    expect(parsed.runs[0]?.status).toBe("running");
+    expect(parsed.runs[0]?.task_status).toBeNull();
+    expect(parsed.runs[0]?.work_issue_id).toBeNull();
+  });
+
+  it("nulls a malformed task_status instead of dropping the run", () => {
+    const parsed = parseWithFallback(
+      { runs: [{ ...run, task_status: 42, work_issue_id: { bad: true } }], total: 1 },
+      ListAutopilotRunsResponseSchema,
+      EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.runs).toHaveLength(1);
+    expect(parsed.runs[0]?.task_status).toBeNull();
+    expect(parsed.runs[0]?.work_issue_id).toBeNull();
+  });
+
+  it("degrades a malformed response to an empty list", () => {
+    const parsed = parseWithFallback({ runs: "nope" }, ListAutopilotRunsResponseSchema, EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE, ENDPOINT);
+    expect(parsed).toBe(EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE);
   });
 });
 

@@ -133,6 +133,13 @@ export interface AutopilotRun {
   trigger_payload: unknown;
   result: unknown;
   created_at: string;
+  // Status of the run's task (run_only runs). The server marks a run
+  // "running" as soon as its task is enqueued, so "queued" here means the run
+  // is still waiting for a free agent slot. Null when unknown or older server.
+  task_status: string | null;
+  // Issue the run's agent declared it is working on. Display-only; issue_id
+  // stays the lifecycle link for create_issue runs. Null on older servers.
+  work_issue_id: string | null;
 }
 
 export interface AutopilotQuotaUsage {
