@@ -1,0 +1,37 @@
+{
+  "back": "Kembali",
+  "tabs": {
+    "inbox": "Kotak Masuk",
+    "my_issues": "Tugas Saya",
+    "chat": "Obrolan",
+    "more": "Lainnya"
+  },
+  "more_menu": {
+    "pinned": "Disematkan",
+    "issues": "Tugas",
+    "projects": "Proyek",
+    "account_settings": "Pengaturan akun"
+  },
+  "routes": {
+    "issues": "Tugas",
+    "projects": "Proyek",
+    "settings": "Pengaturan",
+    "profile": "Profil",
+    "notifications": "Notifikasi",
+    "search": "Cari",
+    "issue": "Tugas",
+    "project": "Proyek",
+    "assignee": "Penerima Tugas",
+    "mention": "Sebutan",
+    "agents": "Agent",
+    "pinned": "Disematkan",
+    "switch_workspace": "Ganti ruang kerja",
+    "new_issue": "Tugas baru",
+    "new_project": "Proyek baru",
+    "edit_issue": "Edit tugas",
+    "edit_project": "Edit proyek",
+    "runs": "Eksekusi",
+    "add_resource": "Tambah resource",
+    "recent": "Terbaru"
+  }
+}

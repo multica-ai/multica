@@ -1,0 +1,88 @@
+---
+title: Tugaskan tugas ke agent
+description: Jadikan agent pemilik sebuah tugas dan tentukan apakah pekerjaan langsung dimulai.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Ketika sebuah pekerjaan perlu dimiliki oleh agent dalam jangka waktu tertentu, tugaskan tugas itu kepadanya. Agent membaca deskripsi dan diskusi tugas, mengerjakannya dengan konfigurasi dan skill miliknya sendiri, lalu menulis progres dan hasil kembali ke tugas yang sama.
+
+Jika Anda hanya perlu agent menangani satu permintaan spesifik tanpa mengubah kepemilikan, gunakan [@-mention di komentar](/mentioning-agents) sebagai gantinya.
+
+## Tugaskan dan mulai eksekusi
+
+1. Buka sebuah tugas dan klik **Penerima Tugas**.
+2. Pilih agent atau Squad.
+3. Tinjau agent yang akan mulai di dialog konfirmasi, lalu pilih **Mulai**.
+
+![Dialog konfirmasi penugasan: konfirmasi penugasan, atau pilih untuk belum memulai](/images/docs/assign-confirm-dialog.webp)
+
+Segala hal yang perlu diketahui agent tentang pekerjaan ini sebaiknya ada di dalam tugas itu sendiri — deskripsinya, diskusinya, atau deskripsi proyek dan instruksi agent.
+
+Saat Anda menugaskan ke Squad, Squad tersebut menjadi assignee tugas dan leader Squad yang mulai lebih dulu. Leader memutuskan apakah akan menyerahkan pekerjaan ke anggota lain, sesuai cara Squad itu beroperasi.
+
+## Eksekusi setelah penugasan
+
+Multica membuat [eksekusi](/tasks) untuk agent tersebut. Setelah sebuah runtime yang online mengklaim eksekusi itu, runtime menjalankan alat pengkodean AI di komputer tersebut; progres, komentar, dan hasilnya kemudian muncul di tugas.
+
+Jika runtime sedang offline sementara, eksekusi menunggu di antrean; sebuah eksekusi terikat pada runtime-nya dan tidak pernah berpindah ke komputer lain.
+
+Selama berjalan, agent dapat:
+
+- membaca deskripsi, field, dan komentar tugas;
+- menggunakan skill, server MCP, dan konteks proyek yang terikat padanya;
+- membaca file, menjalankan perintah, dan membuat perubahan di direktori kerja lokalnya;
+- memposting komentar dan memperbarui status tugas.
+
+Apa yang sebenarnya dapat dilakukan agent masih dibatasi oleh konfigurasi agent, lingkungan runtime, dan izin Anda untuk menjalankannya.
+
+Selama eksekusi berjalan, agent mengelola status tugas berdasarkan penilaiannya terhadap perubahan yang dibuat oleh pekerjaannya: memulai permintaan tugas itu sendiri langsung memindahkannya ke `in_progress`, penyerahan hasil memindahkannya ke `in_review`, pekerjaan yang masih berlanjut melewati giliran ini membuatnya tetap `in_progress`, dan konsultasi atau diskusi membiarkan status tidak berubah — tindakan-tindakan ini muncul di linimasa dengan identitas agent. Siklus hidup eksekusi dan status tugas adalah dua hal yang terpisah: selesainya sebuah eksekusi tidak secara otomatis mengubah status tugas.
+
+Saat penerima tugas adalah [Squad](/squads), aturan yang sama berlaku: Multica mengantrekan leader, dan mendelegasikan ke anggota bukanlah penyerahan hasil — giliran delegasi membuat tugas induk tetap `in_progress`, dan leader baru memindahkannya ke `in_review` setelah tujuan keseluruhan tercapai.
+
+## Tugaskan tanpa memulai
+
+**Jangan mulai dulu** di dialog konfirmasi menyimpan penerima tugas tanpa membuat eksekusi untuk saat ini. Gunakan ini untuk menetapkan kepemilikan dahulu dan memulai setelah latar belakang atau dependensi sudah siap.
+
+`backlog` juga tidak memulai eksekusi saat penugasan. Eksekusi baru berjalan setelah Anda memindahkan tugas keluar dari `backlog`, atau meminta sesuatu kepada penerima tugas lewat komentar susulan.
+
+Saat tugas sudah memiliki pemilik agent atau Squad, memindahkannya keluar dari `backlog` membuka dialog yang sama: perubahan status itulah yang memulai eksekusi, sehingga dialog itu juga menawarkan **Jangan mulai dulu** yang sama, yang memindahkan tugas tanpa membangkitkan agent. Dialog ini muncul untuk setiap status tujuan selain `backlog` itu sendiri dan status apa pun dalam kategori `done` atau `closed`.
+
+Hanya status baku `backlog` yang bekerja seperti ini. [Status kustom](/issues#status-khusus) dalam kategori `unstarted` **tidak** menahan pekerjaan — menugaskan agent ke tugas pada status tersebut langsung memulai eksekusi. Tugas yang sudah berada di `done` atau `cancelled` tetap langsung memulai eksekusi saat ditugaskan atau ditugaskan ulang ke agent.
+
+## Izin penugasan
+
+Apakah Anda dapat menugaskan sebuah agent ditentukan oleh Access-nya:
+
+- **Hanya saya**: hanya pemilik agent yang dapat menjalankannya;
+- **Orang tertentu**: pemilik dan anggota yang terdaftar dapat menjalankannya;
+- **Seluruh ruang kerja**: setiap anggota ruang kerja dapat menjalankannya.
+
+Pemilik dan admin ruang kerja dapat mengelola agent, tetapi bisa melihat sebuah agent tidak berarti bisa menjalankannya. Pemilih penerima tugas menonaktifkan agent yang tidak dapat Anda jalankan. Lihat [Agents](/agents#izin-dan-akses) untuk aturan lengkapnya.
+
+## Mengubah atau menghapus penerima tugas
+
+Mengganti penerima tugas ke agent lain memulai eksekusi baru untuk penerima tugas baru tersebut; memilih anggota hanya mengubah penerima tugas dan tidak memanggil alat pengkodean AI apa pun. Menghapus penerima tugas juga tidak membuat eksekusi.
+
+<Callout type="warning">
+Mengubah penerima tugas, menghapus penugasan, atau mengubah status tugas tidak menghentikan eksekusi yang sudah berjalan. Untuk menghentikannya, hentikan eksekusi yang bersangkutan di log eksekusi.
+</Callout>
+
+## Menggunakan CLI
+
+```bash
+multica issue assign MUL-42 --to "Agent name"
+multica issue assign MUL-42 --to-id <agent-uuid> --no-start
+multica issue status MUL-42 in_progress --no-start
+multica issue assign MUL-42 --unassign
+```
+
+Dalam skrip, gunakan `--to-id <uuid>` untuk menghindari kecocokan dengan objek lain yang bernama sama. Cari UUID dengan `multica agent list --output json` atau `multica workspace member list --output json`.
+
+Gunakan `--no-start` saat penugasan hanya perlu mencatat kepemilikan tanpa membuat eksekusi baru — misalnya, saat agent yang sama sudah menangani tugas ini dari eksekusi lain. Flag yang sama tersedia di `issue update` dan `issue status`. Jika sebuah alur kepemilikan-saja mengubah penugasan dan status sekaligus, terapkan flag ini ke kedua perintah; menekan penugasan tidak menekan eksekusi yang dipicu oleh perubahan status setelahnya.
+
+## Langkah selanjutnya
+
+- [@-mention agent di komentar](/mentioning-agents) — menangani pertanyaan baru tanpa mengubah penerima tugas.
+- [Eksekusi](/tasks) — aturan antrean, coba ulang, dan penghentian.
+- [Squads](/squads) — biarkan leader mengoordinasikan beberapa agent.

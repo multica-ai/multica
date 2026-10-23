@@ -1,0 +1,38 @@
+{
+  "title": "Pilih ruang kerja",
+  "members": "Anggota",
+  "agents": "Agent",
+  "select": "Pilih ruang kerja",
+  "switch": {
+    "title": "Ganti ruang kerja",
+    "message": "Ganti ke {{name}}?",
+    "confirm": "Ganti",
+    "current_a11y": "{{name}} adalah ruang kerja saat ini",
+    "switch_a11y": "Ganti ke {{name}}"
+  },
+  "empty": "Anda belum menjadi anggota ruang kerja apa pun. Hubungi admin ruang kerja Anda untuk diundang.",
+  "agent": {
+    "coming_soon": "Agent segera hadir.",
+    "title": "Agent",
+    "empty": "Belum ada agent",
+    "search_placeholder": "Cari agent..."
+  },
+  "actions": {
+    "retry": "Coba lagi",
+    "sign_out": "Keluar"
+  },
+  "auth": {
+    "signed_in_as": "Masuk sebagai"
+  },
+  "errors": {
+    "load_failed": "Gagal memuat ruang kerja: {{message}}"
+  },
+  "pins": {
+    "errors": {
+      "load_failed": "Gagal memuat item yang disematkan: {{message}}"
+    },
+    "empty": "Belum ada item yang disematkan.",
+    "unavailable_issue": "Tugas yang disematkan ini tidak tersedia.",
+    "unavailable_project": "Proyek yang disematkan ini tidak tersedia."
+  }
+}

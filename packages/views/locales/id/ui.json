@@ -1,0 +1,11 @@
+{
+  "attach_file": "Lampirkan file",
+  "toggle_sidebar": "Alihkan sidebar kiri",
+  "copy_code": "Salin kode",
+  "plain_text": "teks biasa",
+  "error_boundary": {
+    "title": "Terjadi kesalahan saat menampilkan bagian ini.",
+    "description": "Terjadi kesalahan yang tidak terduga.",
+    "try_again": "Coba lagi"
+  }
+}

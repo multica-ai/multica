@@ -52,6 +52,18 @@ export const uiTranslations: Partial<Record<Lang, Partial<Translations>>> = {
     chooseTheme: "Changer de thème",
     editOnGithub: "Modifier sur GitHub",
   },
+  id: {
+    search: "Cari",
+    searchNoResult: "Tidak ada hasil",
+    toc: "Di halaman ini",
+    tocNoHeadings: "Tidak ada judul",
+    lastUpdate: "Terakhir diperbarui",
+    chooseLanguage: "Pilih bahasa",
+    nextPage: "Halaman berikutnya",
+    previousPage: "Halaman sebelumnya",
+    chooseTheme: "Ganti tema",
+    editOnGithub: "Edit di GitHub",
+  },
 };
 
 // Display name shown in the LanguageToggle dropdown.
@@ -61,6 +73,7 @@ export const localeLabels: Record<Lang, string> = {
   ko: "한국어",
   ja: "日本語",
   fr: "Français",
+  id: "Bahasa Indonesia",
 };
 
 // Copy for the welcome page (Hero + Byline). Pages are translated as MDX;
@@ -95,5 +108,11 @@ export const homeCopy = {
     titleLead: "Humains et agents,",
     titleAccent: "au même endroit.",
     byline: ["Premiers pas", "Mis à jour en juillet 2026", "2 min de lecture"],
+  },
+  id: {
+    eyebrow: "Dokumentasi Multica",
+    titleLead: "Manusia dan agent,",
+    titleAccent: "dalam satu tempat.",
+    byline: ["Memulai", "Diperbarui Juli 2026", "2 menit membaca"],
   },
 } as const satisfies Record<Lang, unknown>;

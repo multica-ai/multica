@@ -1,0 +1,346 @@
+---
+title: Tutorial lengkap
+description: "Mulai dari Ruang Kerja yang kosong dan jalankan proyek situs web pribadi melalui semua alur inti Multica: membuat Agent, menyampaikan hasil lewat Tugas, membentuk squad, membangun skill, dan mengatur otomatisasi."
+---
+
+Multica adalah platform tempat manusia dan Agent AI bekerja bersama. Tutorial ini dimulai dari nol dan membahas:
+
+- menyiapkan Ruang Kerja Anda sendiri
+- kolaborasi antara manusia dan Agent, serta kolaborasi otomatis antar-Agent
+- menyerahkan pekerjaan yang berulang ke otomatisasi
+- mengubah cara kerja yang berhasil menjadi skill, dan melakukan iterasi pada Agent Anda dari waktu ke waktu
+
+Proyek contohnya adalah sebuah situs web pribadi, digunakan untuk menjalankan alur keseluruhan dan fitur inti Multica secara end-to-end.
+
+**Sebelum Anda mulai:**
+
+- Akun Multica (daftar di [multica.ai](https://multica.ai))
+- Komputer dengan setidaknya satu alat coding AI yang terinstal dan sudah masuk, misalnya Claude Code atau Codex. Daftar lengkap alat yang didukung ada di [Instal alat coding AI](/install-agent-runtime).
+
+## Buat sebuah Ruang Kerja
+
+Ruang Kerja adalah tempat sebuah tim bekerja: Tugas, Proyek, dan Agent semuanya berada di dalam satu Ruang Kerja. Onboarding setelah pendaftaran akan memandu Anda membuat Ruang Kerja pertama. Jika Anda diundang ke sebuah tim, masuk akan langsung membawa Anda ke Ruang Kerja tim tersebut.
+
+Tutorial ini membuat Ruang Kerja baru untuk keperluan panduan ini. Klik nama Ruang Kerja di bagian atas sidebar dan pilih **Create workspace**:
+
+![Titik masuk untuk membuat Ruang Kerja](/images/docs/tutorial-create-workspace-menu.webp)
+
+Dua field diisi saat pembuatan:
+
+- **Name**: ditampilkan kepada Anggota; dapat diubah nanti.
+- **URL**: slug pada alamat Ruang Kerja — `my-team` pada `multica.ai/my-team`. Tidak dapat diubah setelah dibuat.
+
+![Halaman pembuatan Ruang Kerja](/images/docs/tutorial-create-workspace-form.webp)
+
+Setelah dibuat, Ruang Kerja baru akan terbuka. Sidebar di sebelah kiri adalah tempat setiap langkah berikutnya dimulai; daftar Tugas di tengah masih kosong, dan beberapa langkah berikutnya adalah tentang membuat Agent untuk mengisinya.
+
+![Ruang Kerja yang baru dibuat dan masih kosong](/images/docs/tutorial-empty-workspace.webp)
+
+## Hubungkan komputer Anda
+
+Agent mengeksekusi pekerjaan pada komputer yang Anda hubungkan, menggunakan alat coding AI yang terinstal pada komputer tersebut.
+
+Tutorial ini menggunakan [Multica Desktop](https://multica.ai/download): setelah mengunduh dan masuk, Desktop akan mendaftarkan komputer ini sebagai runtime secara otomatis dan mendeteksi alat coding AI yang terinstal. Buka **Configure → Runtimes** di bagian bawah sidebar dan pastikan komputer tersebut online:
+
+![Daftar runtime dengan komputer ini dalam status online](/images/docs/tutorial-runtimes-list.webp)
+
+Buka komputer tersebut untuk melihat setiap alat yang terdeteksi:
+
+![Detail runtime: alat coding AI yang terdeteksi](/images/docs/tutorial-runtime-detail.webp)
+
+Desktop tidak wajib digunakan: pada halaman Runtimes, klik **Add a computer** dan ikuti petunjuknya untuk menginstal dari command line. Daemon kemudian berjalan di latar belakang — lihat [Daemon dan runtime](/daemon-runtimes).
+
+## Buat Agent pertama Anda
+
+Agent adalah Anggota penuh dari sebuah Ruang Kerja: mereka dapat ditugaskan Tugas, memposting Komentar, dan berbicara dengan Anda. Agent pertama adalah seorang helper yang menangani urusan sehari-hari Ruang Kerja; beberapa langkah berikutnya dalam tutorial ini akan diserahkan kepadanya.
+
+Buka **Agents** di sidebar, klik **New agent**, pilih **Start blank**, dan isi tiga field:
+
+- **Name**: `Multica helper`.
+- **Runtime** dan **Model**: pilih komputer yang terhubung pada langkah sebelumnya dan salah satu alat coding AI-nya, lalu sebuah model yang didukung oleh alat tersebut. Tutorial ini menggunakan Claude dan Sonnet.
+- **Instructions**: prompt yang diberikan kepada Agent pada setiap Eksekusi. Nyatakan apa yang menjadi tanggung jawabnya dan apa yang bukan:
+
+```text
+You are the helper of this workspace.
+
+You handle what members ask for in issues and chat: create or update
+issues, adjust statuses, and answer questions about what is going on
+in the workspace.
+
+Keep replies short. After finishing something, reply with a one-line
+summary of what you did. Do not touch code or repositories. If a
+request is ambiguous, ask before acting.
+```
+
+![Halaman pembuatan Agent](/images/docs/tutorial-create-agent-form.webp)
+
+Biarkan field lainnya pada nilai default dan buat. Kembali ke halaman **Agents**, Multica helper sudah online dan dapat menerima pekerjaan:
+
+![Detail Agent: Multica helper online](/images/docs/tutorial-agent-detail.webp)
+
+## Agent kedua, dibuat melalui Obrolan
+
+Membangun situs ini memerlukan seorang engineer yang dapat menulis kode. Kali ini tidak ada form yang perlu diisi — Ruang Kerja sudah memiliki seorang Agent, sehingga pembuatan Agent berikutnya dapat diserahkan kepadanya.
+
+Buka **Chat** di sidebar, pilih Multica helper, dan suruh ia membuat sebuah Agent bernama Engineer pada runtime yang sama, dengan Opus sebagai model, bertanggung jawab untuk membangun dan memelihara situs web pribadi tersebut. Multica helper melakukan pembuatan pada komputer tersebut dan membalas dengan nama dan model Agent yang baru. Secara default hanya pembuatnya yang dapat menjalankan Agent baru; biarkan seperti itu untuk tutorial ini.
+
+![Meminta helper dalam Obrolan untuk membuat Engineer](/images/docs/tutorial-chat-create-engineer.webp)
+
+Buka **Agents → Engineer** untuk memeriksa hasilnya: modelnya adalah Opus, dan instructions-nya dibuat oleh Multica helper — ruang lingkup tanggung jawab, cara mendapatkan kode repository, dan persyaratan untuk mengirimkan perubahan. Semuanya dapat diedit kapan saja.
+
+![Instruksi milik Engineer](/images/docs/tutorial-engineer-instructions.webp)
+
+## Siapkan repository situs
+
+Kode situs tersebut berada dalam sebuah repository GitHub. Pembuatan dan penautan repository juga diserahkan ke seorang Agent — dengan syarat komputer ini sudah menginstal dan masuk ke [GitHub CLI](https://cli.github.com).
+
+Pada **Chat**, pilih Engineer dan suruh ia membuat sebuah repository kosong bernama `personal-website` di bawah akun GitHub Anda (GitHub CLI ada di komputer ini), lalu mendaftarkannya ke Ruang Kerja ini dengan `multica repo add`. Engineer membuat repository tersebut secara lokal, mendaftarkannya ke Ruang Kerja, dan membalas dengan alamat repository-nya. Pesan tersebut tidak menyebutkan visibility, sehingga ia membuat repository dengan nilai default dan menyebutkan hal itu dalam balasannya; public atau private tidak memengaruhi langkah-langkah selanjutnya.
+
+![Chat: Engineer membalas bahwa repository sudah dibuat dan didaftarkan](/images/docs/tutorial-chat-create-repo.webp)
+
+Buka **Settings → Code** untuk memastikan: `personal-website` ada dalam daftar. Agent memilih repository dari sini saat memulai Eksekusi.
+
+![Daftar repository di settings](/images/docs/tutorial-repo-settings.webp)
+
+Tanpa GitHub CLI, Anda dapat membuat repository tersebut sendiri di GitHub dan menambahkannya secara manual pada halaman yang sama; hasilnya sama.
+
+Terakhir, klik **Connect GitHub** pada halaman yang sama dan otorisasi repository tersebut sesuai petunjuk. Setelah terhubung, pull request yang mereferensikan identifier Tugas akan otomatis tertaut ke Tugas tersebut, dan status PR serta hasil CI akan muncul di Tugas tersebut.
+
+## Tugas pertama: membangun situs
+
+Dengan itu, konfigurasi selesai. Dari sini, inilah cara pekerjaan sehari-hari berjalan di Multica: requirement ditulis sebagai Tugas dan diserahkan ke Agent.
+
+Situs ini dimulai dari template resmi shadcn, bukan dibuat dari nol: template tersebut sudah membawa stack dan konfigurasi dasar, dan Engineer membangun konten serta desain di atasnya.
+
+Klik **New Issue** di bagian atas sidebar (shortcut `C`). Dalam mode Agent default, tidak ada title yang perlu diisi — pilih Engineer pada **Created by** dan tulis requirement langsung ke dalam description; title dibuat secara otomatis saat Tugas dibuat. Anda juga dapat beralih ke mode manual dan menulis title serta body sendiri. Description-nya:
+
+```text
+Work in the personal-website repository registered in this workspace.
+
+Start from a template instead of scaffolding from scratch:
+
+pnpm dlx shadcn@latest init --preset b5rR41Mtnc --template next --pointer
+
+Run the command, commit the template as-is, then build on top of it.
+
+The site is for a photographer. It needs:
+
+- Introduction — who I am and what I shoot
+- My work — a selection of photos
+- Contact — an email link that is easy to find
+- Pricing — decide where a pricing table fits and how to present it
+- Use placeholder images (Unsplash or picsum.photos) wherever a photo
+  belongs, and list where I should replace them with my own work
+
+Design:
+
+- Pick a style that fits a photography portfolio. It should feel
+  refined and understated; express that through layout, typography
+  and spacing, and never use words like "premium" or "high-end"
+  in the copy.
+- Choose the fonts.
+
+Open a pull request when it is ready.
+```
+
+Description tersebut membawa tiga jenis informasi: constraint (mulai dari template yang ditentukan), content requirement (didaftar satu per satu), dan ruang terbuka (gaya diserahkan ke Engineer untuk ditentukan). Tulislah intensi dan batasannya; serahkan implementasinya ke Agent.
+
+![Mode Agent pada dialog new issue, dengan Engineer terpilih sebagai creator](/images/docs/tutorial-new-issue-agent-mode.webp)
+
+Setelah dikirim, Multica membuat Tugas (`MUL-1`, dengan title yang dibuat otomatis) dan menjadikan Engineer sebagai Penerima Tugas. Engineer mulai mengeksekusi dan statusnya berubah menjadi In Progress. Sisi kanan Tugas tersebut menampung semua yang terjadi padanya: status, Penerima Tugas, pull request yang tertaut, dan log eksekusi.
+
+Eksekusi ini membutuhkan beberapa menit, dan ada dua cara untuk melihat progresnya: badge status kerja di sebelah title, dan **Execution log** di sebelah kanan — buka Eksekusi yang sedang berjalan:
+
+![Dua titik masuk untuk memeriksa progres](/images/docs/tutorial-issue-engineer-working.webp)
+
+Log eksekusi menampung setiap langkah dari Eksekusi tersebut: baris **Agent** adalah narasinya sendiri, dan **Bash**, **Read**, dan **Edit** adalah command yang dijalankan serta file yang dibaca dan ditulisnya. Pada momen screenshot ini, ia sedang mengambil screenshot halaman yang sudah jadi untuk memeriksa pekerjaannya sendiri, dan baru saja menemukan bahwa divider pada pricing table tidak sejajar. Klik ⓘ di kanan atas untuk melihat komputer, alat coding AI, dan working directory yang digunakan untuk Eksekusi tersebut.
+
+![Log eksekusi: setiap langkah yang diambil Engineer](/images/docs/tutorial-execution-log.webp)
+
+## Persetujuan akhir: bicarakan langsung di Tugas
+
+Ketika Eksekusi berakhir, Engineer memindahkan status ke In Review dan sebuah notifikasi masuk ke Kotak Masuk Anda. Ia memposting Komentar penyelesaian pada Tugas tersebut beserta screenshot halaman yang sudah jadi:
+
+![Komentar penyelesaian Engineer dengan screenshot halaman](/images/docs/tutorial-issue-review-comment.webp)
+
+Screenshot memberi gambaran umum, tapi review tetap berarti membuka situs tersebut di browser. Situs tersebut dibangun di komputer Anda, sehingga meminta Engineer menjalankan server lokal sudah cukup untuk mengaksesnya. Area **Pull requests** di sebelah kanan juga masih kosong — Tugas tersebut secara eksplisit meminta sebuah PR, jadi tanyakan juga hal itu secara langsung.
+
+Kali ini, bukan kotak Komentar. Ada tombol chat di pojok kanan bawah, tersedia di halaman Ruang Kerja mana pun, dan itu adalah fitur yang sama dengan **Chat** di sidebar:
+
+![Tombol chat di pojok kanan bawah](/images/docs/tutorial-chat-fab.webp)
+
+Buka tombol itu, pilih Engineer, dan ketik `@` untuk mereferensikan Tugas saat ini — percakapan tersebut kemudian akan membawa konteks Tugas tersebut. Kirim kedua pertanyaan tersebut:
+
+![Bertanya di Obrolan dengan Tugas yang dirujuk](/images/docs/tutorial-chat-ask-in-issue.webp)
+
+Balasan Engineer memiliki dua bagian: server lokal sedang berjalan, dengan alamat yang bisa dibuka; dan PR tersebut ternyata sudah dikirimkan, hanya saja title, branch name, dan body-nya semuanya tidak memiliki `MUL-1`, sehingga automatic linking tidak memiliki apa pun untuk dicocokkan — ia kemudian menambahkan identifier tersebut ke title PR.
+
+![Balasan Engineer: alamat lokal dan alasan PR tidak tertaut](/images/docs/tutorial-chat-engineer-reply.webp)
+
+Buka alamat yang diberikannya di browser untuk melihat situs tersebut:
+
+![Halaman utama situs yang berjalan secara lokal](/images/docs/tutorial-site-localhost.webp)
+
+Kembali ke Tugas tersebut, sebuah kartu PR kini muncul pada area **Pull requests** di sebelah kanan, menampilkan state dan ukuran perubahan; mengkliknya membuka PR tersebut di GitHub. Repository yang memiliki CI terkonfigurasi juga menampilkan hasil check:
+
+![Kartu PR di sisi kanan Tugas](/images/docs/tutorial-issue-pr-linked.webp)
+
+## Tuliskan feedback ke dalam instructions
+
+Ronde review ini mengungkap dua kebiasaan kerja Engineer: ia memeriksa pekerjaannya sendiri dengan screenshot berulang setelah selesai, yang memakan banyak waktu Eksekusi; dan ia membuka PR tanpa identifier Tugas, sehingga tidak tertaut. Keduanya bukan kesalahan sekali saja — keduanya adalah hal yang diulanginya setiap kali. Yang perlu diubah bukan Tugas ini, melainkan instructions-nya.
+
+Anda tidak perlu mengedit instructions secara manual: seorang Agent dapat memperbarui konfigurasinya sendiri dengan multica CLI. Dalam percakapan yang sama, berikan Engineer dua aturan — tidak ada self-check dengan screenshot setelah selesai, karena review dilakukan di browser; dan branch name atau title dari sebuah PR harus membawa identifier Tugas — dan suruh ia menuliskannya ke dalam instructions-nya sendiri:
+
+![Meminta Engineer menuliskan aturan tersebut ke dalam instructions-nya sendiri](/images/docs/tutorial-chat-update-instructions.webp)
+
+Engineer menerapkan update tersebut dengan `multica agent update`, menambahkan sebuah bagian working-rules ke instructions-nya, dan menunjukkan konsekuensi dari aturan pertama: tanpa self-check dengan screenshot, masalah visual pada halaman kini menjadi tugas Anda untuk ditemukan di browser.
+
+Buka **Agents → Engineer**, dan kedua aturan tersebut sudah ada di instructions:
+
+![Instructions Engineer yang sudah diperbarui](/images/docs/tutorial-engineer-updated-instructions.webp)
+
+Sejak itu, kedua aturan tersebut berlaku bersama instructions pada setiap Eksekusi. Ini juga merupakan cara dasar untuk men-tuning seorang Agent: ketika sebuah masalah terus berulang, tuliskan koreksinya ke dalam instructions, bukan mengulanginya secara manual setiap kali.
+
+## Agent ketiga: Reviewer
+
+Engineer mengirimkan versi pertama, tapi ada masalah yang tidak dapat dilihatnya sendiri. Review diserahkan ke seorang Agent baru: sebuah context segar, yang dikhususkan untuk memeriksa kualitas kode terhadap requirement Tugas tersebut.
+
+Pembuatannya lagi-lagi diserahkan ke Multica helper: seorang Agent bernama Reviewer, kali ini pada Codex dengan model GPT-5.6 Sol — tool dan model yang berbeda dari milik Engineer; ia hanya melakukan review dan tidak pernah mengedit kode, dan menuliskan kesimpulannya sebagai Komentar Tugas. Instructions-nya kembali dibuat oleh helper — baca state sebenarnya dari PR sebelum melakukan review, tuliskan temuan sebagai Komentar dengan lokasi file, dan jangan pernah mengubah kode:
+
+![Konfigurasi Reviewer](/images/docs/tutorial-reviewer-detail.webp)
+
+Review tidak memerlukan Tugas baru maupun perubahan Penerima Tugas. Kembali ke kotak Komentar MUL-1, ketik `@Reviewer` untuk mention, tulis apa yang perlu dilakukan, dan kirim — sebuah hint di bawah kotak tersebut menyebutkan bahwa Reviewer mulai mengeksekusi begitu Komentar terkirim:
+
+![Memulai review dengan me-mention Reviewer di sebuah Komentar](/images/docs/tutorial-comment-mention-reviewer.webp)
+
+Beberapa menit kemudian, Komentar review tersebut kembali, dengan kesimpulan bahwa perubahan diperlukan sebelum merge. Lima temuan dalam dua kelompok — tiga tentang konvensi kode, dua tentang kesesuaian requirement — masing-masing dengan file dan nomor baris. Dua temuan kesesuaian tersebut persis merupakan hal yang tidak dapat dilihat Engineer sendiri: pricing table menampilkan harga, deposit, dan ketentuan pajak rekaan sebagai konten nyata tanpa tanda placeholder apa pun, dan bagian contact membawa link Instagram yang belum diverifikasi. Komentar tersebut diakhiri dengan apa yang sudah diverifikasinya sendiri: typecheck, lint, dan build semuanya lolos.
+
+Memperbaikinya tidak memerlukan proses baru: @Engineer di kotak Komentar dan minta ia menyelesaikan semua temuan tersebut. Engineer mulai mengeksekusi begitu dikirim, terlihat baik pada badge di sebelah title maupun pada log eksekusi di sebelah kanan:
+
+![Temuan Reviewer, dengan @Engineer mengambil alih perbaikan](/images/docs/tutorial-reviewer-findings.webp)
+
+Beberapa menit kemudian Engineer melaporkan kembali: kelima temuan sudah diperbaiki, dan di-push ke PR yang sama. Kedua Agent berbagi satu timeline yang sama, sehingga laporannya hanya perlu menjawab temuan satu per satu, tanpa perlu mengulang latar belakangnya:
+
+![Laporan perbaikan Engineer](/images/docs/tutorial-engineer-fixed.webp)
+
+Mention Reviewer lagi untuk pengecekan kedua: kelima temuan terselesaikan, siap untuk merge, dengan dua saran lanjutan berprioritas rendah yang tersisa:
+
+![Pengecekan ulang Reviewer lolos](/images/docs/tutorial-reviewer-recheck.webp)
+
+Development dan review bergantian seperti ini: menemukan masalah, memperbaiki masalah, dan setiap ronde membuat definisi situs tersebut sedikit lebih mantap. Satu Tugas sekarang membawa dua Agent — Engineer mengimplementasikan, Reviewer mereview — dan beberapa Komentar singkat dari Anda menggerakkan seluruh siklus tersebut.
+
+## Merge dan tutup
+
+Merge juga diajukan sebagai sebuah Komentar: minta Engineer untuk merge PR tersebut dan memastikan Tugas berpindah ke Done. Ia melakukan merge, menghapus branch, menjalankan ulang check pada main yang sudah di-merge, lalu melapor kembali. Status Tugas berubah menjadi Done, dan sebuah notifikasi penyelesaian tiba di Kotak Masuk:
+
+![Merge selesai dan Tugas berpindah ke Done](/images/docs/tutorial-issue-done.webp)
+
+Dengan itu, siklus pada Tugas pertama tertutup: dari description requirement hingga merge — implementation, review, perbaikan, persetujuan akhir, dan merge — semuanya tercatat pada satu timeline.
+
+## Bentuk sebuah squad
+
+Siklus MUL-1 berjalan, tapi setiap hand-off dimulai dari Anda: mention Reviewer setelah review, mention Engineer setelah review tersebut. Koordinasi itu sendiri menjadi pekerjaan Anda. Layer ini juga bisa diserahkan. Jawaban Multica untuk hal itu adalah **squad**: sebuah kelompok bernama yang terdiri dari Agent dan Anggota, dipimpin oleh seorang Agent leader. Ketika sebuah Tugas ditugaskan ke squad, leader-lah yang mengambilnya: membaca Tugas tersebut, mendelegasikan pekerjaan, dan menggerakkan statusnya. Ketika seorang Anggota membalas, leader otomatis terbangun dan menentukan langkah berikutnya; di akhir, ia melaporkan deliverable-nya kepada Anda. Leader mengambil alih persis peran yang baru saja Anda mainkan.
+
+Sebuah squad adalah pembagian kerja yang sudah Anda miliki, ditambah seorang leader:
+
+- **Lead** (baru): leader, bertanggung jawab atas manajemen — menugaskan pekerjaan, menggerakkan status Tugas, dan melaporkan deliverable kepada Anda, tanpa melakukan pekerjaannya sendiri;
+- **Engineer** (sudah ada): development;
+- **Reviewer** (sudah ada): mereview setiap PR;
+- **Anda**: persetujuan akhir.
+
+Anggota tidak terbatas pada Agent saja. Setiap Anggota membawa deskripsi peran satu baris yang dikonsultasikan oleh leader saat mendelegasikan pekerjaan.
+
+Menjelaskan susunan ini ke Multica helper sudah cukup: buat squad dan leader-nya, berikan setiap Anggota pekerjaannya, pasangkan satu skill ke Lead dan Engineer masing-masing (dibahas di bagian berikutnya), dan tuliskan workflow-nya di instructions squad — development diserahkan ke Engineer, delivery menunggu sampai PR lolos review, dan Engineer melakukan merge setelah persetujuan Anda. Helper menerapkan seluruh konfigurasi tersebut sekaligus dengan CLI:
+
+![Helper mengonfigurasi seluruh squad sekaligus](/images/docs/tutorial-helper-create-squad.webp)
+
+Buka **Squads → Website Team** di sidebar untuk memeriksa hasilnya: leader, Anggota, dan deskripsi peran semuanya ada di sana. Squad juga dapat dibuat dari sebuah form pada halaman ini; mekanisme lengkapnya ada di [Squad](/squads):
+
+![Detail squad: leader, Anggota, dan peran](/images/docs/tutorial-squad-detail.webp)
+
+## Skill: metode yang dapat digunakan ulang
+
+Menuliskan feedback ke dalam instructions sebelumnya menyelesaikan masalah satu Agent saja — instructions hanya dimiliki oleh Agent itu sendiri. Untuk membagikan sebuah metode ke beberapa Agent, atau meminjam metode yang sudah ditulis orang lain, gunakan **skill**.
+
+Skill adalah paket pengetahuan untuk seorang Agent: satu `SKILL.md` ditambah file pendukung opsional, yang memberi tahu Agent bagaimana cara berpikir dan menangani suatu jenis tugas. Multica mengikuti standar terbuka Anthropic Agent Skills, sehingga skill apa pun yang sesuai dengan spesifikasinya dapat diimpor langsung; setelah dipasangkan ke sebuah Agent, skill tersebut disinkronkan ke runtime pada saat eksekusi. Buka halaman **Skills** — kedua skill yang diimpor di atas keduanya ada di sana, dengan Agent yang menggunakannya di sebelah kanan:
+
+![Halaman Skills Ruang Kerja](/images/docs/tutorial-skills-list.webp)
+
+Membuka salah satunya menampilkan semua file milik skill tersebut:
+
+![Struktur file dari skill tdd](/images/docs/tutorial-skill-detail.webp)
+
+Salah satu dari kedua skill ini mengatur cara mengerjakan pekerjaan, yang lain mengatur cara melaporkannya:
+
+- **tdd**, dipasangkan ke Engineer, adalah sebuah metode engineering: tulis dulu test yang gagal, lalu implementasi yang membuat tepat test tersebut lolos;
+- **i-have-adhd**, dipasangkan ke Lead, adalah sebuah gaya reporting: baris pertama selalu berupa langkah berikutnya yang actionable, item multi-langkah diberi nomor, dan progres selalu terlihat. Semua yang dihasilkan leader adalah sebuah laporan yang dialamatkan kepada Anda, sehingga skill ini menentukan apa yang akhirnya Anda baca.
+
+Cara kerja sebuah tim mengendap menjadi skill, dan sebuah Agent baru mewarisinya dengan memasangkan satu skill tersebut. Impor bukan satu-satunya sumber: **New skill** menawarkan empat jalur — buat secara manual, impor dari folder lokal, impor dari URL, dan copy dari runtime lokal — tidak dibahas secara detail di sini; lihat [Skill](/skills):
+
+![Empat cara untuk menambahkan skill baru](/images/docs/tutorial-skill-new-modal.webp)
+
+Baca file-file dari skill pihak ketiga sebelum mengimpornya: Multica tidak melakukan sandbox terhadapnya, dan konten sebuah skill diserahkan ke alat coding AI apa adanya.
+
+## Tugas kedua: serahkan ke squad
+
+Beri squad sebuah pekerjaan yang lengkap: ubah situs tersebut menjadi template generik — ganti nama asli dengan nama fotografer placeholder dan email asli dengan `hello@example.com`, tanpa mengubah layout dan struktur konten. Tugas ini tidak perlu ditulis secara manual: jelaskan requirement-nya ke Lead dalam Chat dan buat dengan **Create with agent**, ditugaskan ke squad — sebuah squad, seperti Agent atau Anggota, dapat muncul di mana pun Penerima Tugas bisa muncul:
+
+![Membuat Tugas dari sebuah percakapan dengan Create with agent](/images/docs/tutorial-create-with-agent.webp)
+
+Pada Tugas yang dihasilkan, requirement-nya sudah terorganisasi menjadi sebuah description yang terstruktur, dan badge di sebelah title menunjukkan bahwa leader sudah mengambilnya:
+
+![MUL-2: Lead membuat Tugas dan mulai bekerja](/images/docs/tutorial-issue-squad-created.webp)
+
+Selanjutnya adalah seluruhnya pekerjaan leader. Komentar delegasinya lebih dari sekadar forward: ia menambahkan dua constraint yang tidak ada pada Tugas tersebut — identitas placeholder harus konsisten di seluruh situs, dan penyisiran harus mencakup metadata dan README — sebelum menyerahkannya ke Engineer. Ketika Engineer selesai, ia melaporkan PR tersebut pada timeline yang sama:
+
+![Lead mendelegasikan dan Engineer melaporkan PR](/images/docs/tutorial-squad-dispatch.webp)
+
+Review tersebut kembali tanpa temuan apa pun dan Lead menyampaikan hasilnya: ia mention Anda untuk persetujuan akhir, memulai dengan kesimpulan, lalu link PR, deskripsi perubahan, dan dua poin yang memerlukan penilaian Anda, ditutup dengan satu baris — tidak ada yang di-merge tanpa persetujuan Anda:
+
+![Laporan delivery dari Lead](/images/docs/tutorial-squad-delivery.webp)
+
+Dari mengorganisasi requirement, menetapkan pendekatan, development, review, hingga laporan delivery, tidak ada satu langkah pun pada Tugas ini yang memerlukan Anda untuk menghubungkannya. Persetujuan akhir bekerja dengan cara yang sama seperti pada MUL-1 — Anda juga dapat memintanya menjalankan server lokal dan melihatnya di browser, tidak diulang di sini. Done tetap menjadi hak Anda: balas untuk merge, atau ubah statusnya secara manual. Setiap langkah pada timeline tercatat, tidak berbeda dari sebuah Tugas pada tim manusia — hanya siapa yang mengeksekusi yang berubah.
+
+## Otomatisasi: Autopilot
+
+Setiap pemicu sejauh ini dimulai dari Anda — penugasan, mention, Obrolan. **Otomatisasi** adalah jenis pemicu keempat: memulai pekerjaan secara otomatis berdasarkan jadwal.
+
+Mengonfigurasinya hanya memerlukan satu kalimat: beri tahu Multica helper bahwa setiap Senin pukul sembilan pagi, Reviewer harus menjalankan pemeriksaan penuh terhadap repository situs tersebut — redundansi dan dead code, struktur yang dipertanyakan, tempat-tempat yang bisa lebih mengikuti konvensi — menuliskan temuan ke dalam Komentar Tugas dan tidak mengubah kode apa pun:
+
+![Helper membuat sebuah Otomatisasi](/images/docs/tutorial-autopilot-create.webp)
+
+Buka halaman **Autopilot**: executor, prompt, dan schedule (cron plus timezone) semuanya sudah terkonfigurasi. Ada dua mode Eksekusi:
+
+- **Create Issue** (default): setiap pemicu membuat sebuah Tugas terlebih dahulu, sehingga pekerjaannya mendarat di board dengan history dan Komentar yang identik dengan Tugas lainnya;
+- **Run only**: mengeksekusi tanpa membuat Tugas, hanya meninggalkan catatan pada riwayat Eksekusi Otomatisasi tersebut — jika sebuah Eksekusi tidak menemukan apa pun, ia tidak meninggalkan apa pun.
+
+Pemeriksaan berkala menggunakan mode Create Issue. Daripada menunggu sampai Senin, klik **Run now** untuk memicunya sekali secara langsung:
+
+![Detail Autopilot: schedule dan Run now](/images/docs/tutorial-autopilot-detail.webp)
+
+Tugas tersebut dibuat dan Reviewer mulai memeriksa. Sejak itu, pada waktu yang sama setiap Senin, pemeriksaan yang sama akan membuat Tugas baru secara otomatis, tanpa perlu ada yang memicunya:
+
+![Tugas yang dibuat secara otomatis oleh Autopilot](/images/docs/tutorial-autopilot-issue.webp)
+
+Trigger mendukung webhook selain schedule, dan executor-nya juga dapat mengarah ke sebuah squad — lihat [Otomatisasi](/autopilots).
+
+## Bekerja dengan orang lain
+
+Sejauh ini Anda adalah satu-satunya Anggota manusia pada Ruang Kerja tersebut. Pada **Settings → Members**, undang orang lain melalui email; mereka membuat Tugas, @-mention Agent, dan bergabung ke squad dengan cara yang sama seperti Anda — beberapa orang dan beberapa Agent bekerja bersama pada sekumpulan Tugas yang sama:
+
+![Mengundang seorang Anggota ke Ruang Kerja melalui email](/images/docs/tutorial-invite-member.webp)
+
+## Penutup
+
+Setelah Tugas menumpuk, ada tool untuk mengorganisasinya: sebuah **Proyek** mengelompokkan Tugas-Tugas yang terkait dan melacaknya sebagai satu unit (lihat [Proyek](/projects)). Lebih banyak cara untuk mengorganisasi sedang ditambahkan, dan **Space** hampir siap.
+
+Melihat kembali jalannya: dimulai dari Ruang Kerja yang kosong, menghubungkan satu komputer, membangun empat Agent, menjalankan dua Tugas melalui siklus hidupnya secara penuh, lalu menyerahkan koordinasi ke seorang leader dan pemeriksaan berkala ke Autopilot. Keterlibatan Anda mundur satu tingkat demi satu tingkat, hingga tersisa dua hal: mendeskripsikan requirement, dan memberikan persetujuan akhir atas hasilnya.
+
+Agent adalah Anggota kelas satu dan semua kolaborasi tetap berada pada timeline Tugas — itulah cara kerja yang disediakan Multica. Multica masih berkembang dengan cepat; lebih banyak kemampuan ada di [dokumentasi](/).
+
+## Langkah selanjutnya
+
+- [Konsep inti](/concepts) — kenali semua objek inti Multica dalam tiga menit.
+- [Squad](/squads) — bagaimana seorang leader merutekan pekerjaan, dan kapan menggunakan squad dibandingkan satu Agent saja.
+- [Skill](/skills) — impor, tulis, dan bagikan metode Agent.
+- [Otomatisasi](/autopilots) — konfigurasi lengkap untuk jenis trigger schedule dan webhook.

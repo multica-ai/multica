@@ -1,0 +1,160 @@
+---
+title: Otomatisasi
+description: Serahkan pekerjaan yang berulang ke agent secara otomatis, berdasarkan schedule atau webhook.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Otomatisasi menjalankan pekerjaan yang terjadi berulang kali — ringkasan progres harian, pengecekan dependency secara periodik, atau agent yang dipicu oleh sebuah event dari sistem eksternal.
+
+Setiap otomatisasi menyimpan sebuah Runbook, assignee, dan satu atau lebih trigger. Saat terpicu, Multica akan membuat tugas atau langsung menjalankan agent, dan menyimpan catatan untuk setiap eksekusi.
+
+## Membuat otomatisasi
+
+Buka **Autopilot** di sidebar, pilih template atau mulai dari kosong, lalu konfigurasikan:
+
+- **Name**: menjelaskan apa yang menjadi tanggung jawab otomatisasi ini;
+- **Runbook**: tujuan, latar belakang, batasan, dan langkah-langkah yang dibaca agent di setiap eksekusi;
+- **Assignee**: sebuah agent atau squad;
+- **Project**: opsional; memasukkan tugas yang dibuat otomatis ke dalam proyek tertentu;
+- **Execution mode**: buat tugas, atau hanya jalankan;
+- **Subscribers**: anggota yang akan diberi notifikasi setelah sebuah tugas dibuat secara otomatis;
+- **Triggers**: schedule atau webhook.
+
+Otomatisasi aktif secara default setelah disimpan; **Run now** menjalankan seluruh alur secara manual satu kali kapan saja.
+
+## Memilih mode eksekusi
+
+| Mode | Perilaku | Paling cocok untuk |
+|---|---|---|
+| **Buat Tugas** | Setiap trigger pertama-tama membuat sebuah tugas, lalu menugaskannya ke assignee; diskusi, status, dan catatan eksekusi semuanya tersimpan di tugas tersebut. | Pekerjaan yang perlu ditinjau, dikonfirmasi, atau ditindaklanjuti oleh tim. |
+| **Hanya Eksekusi** | Langsung membuat eksekusi tanpa tugas; hasilnya hanya terlihat di riwayat eksekusi otomatisasi tersebut. | Eksekusi latar belakang yang tidak memerlukan catatan kolaborasi. |
+
+Mode **Buat Tugas** menggunakan antrean eksekusi yang sama seperti tugas biasa: ketika runtime offline, tugas tetap dibuat dan eksekusi menunggu sampai runtime kembali online.
+
+**Hanya Eksekusi** memerlukan runtime yang tersedia pada saat trigger terjadi; jika tidak, eksekusi akan ditampilkan sebagai dilewati (skipped), dan tidak ada tugas yang menunggu yang ditinggalkan.
+
+## Menjalankan berdasarkan schedule
+
+Editor schedule memungkinkan Anda memilih waktu eksekusi, hari pengulangan, jendela waktu, dan timezone, serta menampilkan preview waktu eksekusi berikutnya. Satu otomatisasi dapat memiliki beberapa schedule; mengaktifkan atau menonaktifkan satu trigger tertentu dilakukan dengan `autopilot trigger-update` pada CLI — lihat [Menggunakan CLI](/cli) untuk parameternya.
+
+Saat Anda memerlukan aturan yang lebih kompleks, edit langsung cron standar 5 field:
+
+```text
+minute hour day month weekday
+```
+
+Contohnya:
+
+| Cron | Timezone | Arti |
+|---|---|---|
+| `0 9 * * 1-5` | `Asia/Shanghai` | Pukul 9:00 pada hari kerja |
+| `*/30 * * * *` | `UTC` | Setiap 30 menit |
+| `0 3 * * *` | `UTC` | Setiap hari pukul 3:00 |
+
+Cron tidak memiliki field detik, dan timezone menggunakan nama IANA seperti `Asia/Shanghai`. Sebelum menyimpan, periksa hasilnya dengan waktu "next runs" yang ditampilkan di halaman tersebut.
+
+![Editor autopilot: Runbook, pengaturan schedule, dan preview beberapa eksekusi berikutnya](/images/docs/autopilot-schedule.webp)
+
+## Menjalankan dari webhook
+
+Setelah menambahkan trigger webhook, Multica akan membuat sebuah URL unik. Kirim objek atau array JSON ke URL tersebut untuk memicu otomatisasi:
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-001" \
+  -d '{"event":"build.completed","eventPayload":{"status":"success"}}'
+```
+
+Payload disimpan pada catatan delivery dan eksekusi, lalu diteruskan ke agent. Pada mode create-issue, payload ini juga ditambahkan ke deskripsi tugas.
+
+Batasan pada request webhook:
+
+- body harus berupa objek atau array JSON yang valid, maksimal 256 KiB;
+- `Idempotency-Key` mencegah eksekusi duplikat ketika pengirim melakukan retry; delivery dari GitHub juga di-deduplikasi berdasarkan `X-GitHub-Delivery`;
+- tanpa idempotency key yang stabil, Multica tidak dapat menjamin bahwa request yang berulang hanya berjalan satu kali;
+- ketika trigger dinonaktifkan atau event tidak cocok, delivery akan dicatat sebagai diabaikan (ignored) dan tidak ada eksekusi yang dibuat.
+
+### Memfilter event
+
+Ketika satu sumber mengirimkan beberapa jenis event, tambahkan filter event pada trigger tersebut. Setiap baris menyimpan satu nama event beserta daftar action opsional; sebuah eksekusi akan terpicu jika ada satu baris yang cocok, dan membiarkan semua baris kosong berarti menerima setiap event.
+
+Misalnya, dengan `workflow_run` sebagai nama event dan `completed, failed` sebagai action, hanya dua jenis hasil `workflow_run` tersebut yang akan diterima. Multica mengenali event dan action dari header request dan field payload yang umum, termasuk `X-GitHub-Event` dari GitHub dan field `action` di dalam body.
+
+### Melindungi URL webhook
+
+<Callout type="warning">
+Token pada URL webhook adalah kredensial pemanggilan. Jangan menaruh URL lengkap di repository publik, tugas, atau screenshot. Jika URL bocor, klik tombol **Rotate URL** di sampingnya dan segera perbarui pengirimnya; URL lama akan langsung berhenti berfungsi.
+</Callout>
+
+Hanya pembuat otomatisasi, owner/admin ruang kerja, dan kolaborator yang diberi akses yang dapat melihat URL lengkap. UI menyembunyikan token pada URL secara default, dan menyalin (copy) tidak memerlukan URL tersebut untuk ditampilkan; klik URL atau ikon mata untuk melihat alamat lengkapnya.
+
+### Referensi response webhook
+
+Saat melakukan debugging pada pengirim, gunakan tabel ini untuk memahami response Multica:
+
+| Status HTTP | Status response | Arti |
+|---|---|---|
+| 200 | `accepted` | Diterima dan sebuah eksekusi dibuat; mengembalikan ID delivery dan eksekusi. |
+| 200 | `skipped` | Diterima, tetapi eksekusi ini dilewati (misalnya runtime offline pada mode run-only); menyertakan alasannya. |
+| 200 | `ignored` | Tidak ada eksekusi yang dibuat: trigger dinonaktifkan, otomatisasi dijeda atau diarsipkan, atau event terfilter; field `reason` menjelaskan alasannya. |
+| 200 | `duplicate` | Idempotency key cocok dengan delivery yang sudah ada; mengembalikan ID delivery asli dan tidak dijalankan lagi. |
+| 400 | Pesan error | Body kosong, bukan JSON yang valid, atau bukan objek/array JSON. |
+| 401 | `rejected` | Trigger memiliki signing secret yang dikonfigurasi, tetapi request tidak menyertakan signature atau signature-nya tidak cocok. |
+| 404 | Pesan error | Token pada URL tidak valid atau sudah di-rotate. |
+| 413 | Pesan error | Body melebihi 256 KiB. |
+| 429 | Pesan error | Terlalu banyak request; coba lagi nanti sesuai response header `Retry-After`. |
+| 500 | Pesan error | Error internal Multica; pengirim dapat mencoba lagi nanti. |
+
+Pengabaian di level bisnis — penjedaan, pengarsipan, dan filter event — mengembalikan 200 bukan 4xx, sehingga pengirim tidak melakukan retry tanpa henti.
+
+Urutan inferensi event dan action:
+
+1. jika body memiliki field string `event`, nilai ini langsung digunakan;
+2. jika tidak, header request `X-GitHub-Event`, dikombinasikan dengan field `action` pada body menjadi `github.<event>.<action>`;
+3. lalu header request `X-Gitlab-Event`;
+4. lalu header request `X-Event-Type`;
+5. lalu field `event`, `type`, dan `action` pada body;
+6. ketika semuanya tidak ada, event dicatat sebagai `webhook.received`.
+
+## Melihat eksekusi dan delivery
+
+Riwayat eksekusi menampilkan sumber trigger, waktu, status, tugas atau eksekusi yang terhubung, serta alasan kegagalan atau dilewatinya sebuah eksekusi. Trigger webhook juga menyimpan catatan delivery secara terpisah, termasuk event yang sudah diparsing, response, informasi deduplikasi, dan alasan kegagalan.
+
+Delivery webhook yang sudah selesai diproses dapat diulang (replay) dari tampilan detailnya. Replay membuat delivery dan eksekusi baru tanpa menimpa catatan aslinya; delivery yang gagal verifikasi signature atau masih dalam antrean tidak dapat di-replay, dan replay tidak ikut dalam proses deduplikasi.
+
+## Kegagalan, penjedaan, dan penghapusan
+
+Eksekusi yang gagal pada mode run-only tidak akan di-retry secara otomatis; schedule berikutnya tetap berjalan sesuai rencana. Mode create-issue menghasilkan eksekusi tugas biasa, dan kegagalan infrastruktur mengikuti aturan pada [Runs](/tasks#kegagalan-dan-percobaan-ulang-otomatis).
+
+Multica secara berkala memeriksa apakah eksekusi terbaru terus mengalami kegagalan: ketika dalam 7 hari terakhir terdapat minimal 50 eksekusi yang selesai atau gagal dengan tingkat kegagalan 90%, sistem akan menjeda otomatisasi tersebut dan memberi notifikasi kepada pembuatnya; perbaiki penyebabnya, lalu lanjutkan (resume) secara manual.
+
+Menjeda secara manual akan menghentikan schedule, webhook, dan **Run now**. Penghapusan sebenarnya adalah pengarsipan: trigger di masa depan berhenti, sementara riwayat eksekusi dan delivery tetap disimpan.
+
+## Perizinan
+
+- Anggota ruang kerja mana pun dapat membuat otomatisasi;
+- pembuat dan owner/admin ruang kerja dapat mengedit, menjalankan, menghapus, dan mengelola trigger;
+- pembuat dan owner/admin dapat menambahkan kolaborator ke akses pengelolaan;
+- kolaborator dapat mengedit, menjalankan, dan mengelola trigger, tetapi tidak dapat memberikan akses ke orang lain;
+- dapat mengelola sebuah otomatisasi tidak menjamin dapat menjalankan agent-nya — Access pada agent tetap berlaku.
+
+## Menggunakan CLI
+
+```bash
+multica autopilot get <autopilot-id> --output json
+multica autopilot trigger <autopilot-id>
+multica autopilot runs <autopilot-id>
+multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
+```
+
+`autopilot get` secara default mengatur `webhook_token`, `webhook_path`, dan `webhook_url` menjadi `null`, dan mengembalikan `has_webhook_token` beserta `webhook_token_hint` sebagai gantinya. Tambahkan `--show-secrets` hanya ketika Anda memang sengaja memerlukan kredensial aktifnya; CLI akan menampilkan peringatan ke stderr agar JSON yang di-pipe tetap valid.
+
+Lihat [Menggunakan CLI](/cli) untuk parameter lengkapnya.
+
+## Langkah selanjutnya
+
+- [Menugaskan tugas ke agent](/assigning-issues) — penugasan dan jendela konfirmasi.
+- [Inbox dan subscription](/inbox) — tempat notifikasi eksekusi diterima.
+- [Runs](/tasks) — status eksekusi dan penanganan kegagalan.

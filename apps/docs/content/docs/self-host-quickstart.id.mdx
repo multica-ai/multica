@@ -1,0 +1,393 @@
+---
+title: Mulai cepat self-host
+description: Jalankan Multica dengan Docker Compose, masuk, dan hubungkan komputer pertama Anda.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Self-hosting Multica terdiri dari dua bagian:
+
+| Bagian | Yang dijalankan | Tempatnya berada |
+|---|---|---|
+| **Layanan Multica** | Web, API, dan PostgreSQL | Satu mesin dengan Docker terinstal |
+| **Komputer** | Daemon Multica dan alat coding AI | Komputer yang benar-benar digunakan developer untuk bekerja |
+
+Keduanya bisa berupa mesin yang sama atau terpisah. Self-hosting hanya menggantikan bagian Multica Cloud.
+
+Panduan ini menggunakan Docker Compose. Untuk deployment Kubernetes, lihat [Self-hosting guide](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative) di repository.
+
+## Sebelum Anda mulai
+
+Mesin yang menjalankan layanan Multica memerlukan:
+
+- Docker Engine atau Docker Desktop, dengan `docker compose` yang berfungsi
+- Git, Make, curl, dan OpenSSL
+- Port `3000` dan `8080` bebas (tidak terpakai) di mesin tersebut
+
+Pastikan dulu Docker dan Compose tersedia:
+
+```bash
+docker info
+docker compose version
+```
+
+Multica menggunakan Compose v2, yang dipanggil sebagai `docker compose`. `docker-compose` v1 yang lama tidak didukung.
+
+Komputer tersebut juga memerlukan setidaknya satu [alat coding AI](/providers) yang terinstal dan sudah masuk (logged in), seperti Claude Code, Codex, atau Cursor. Multica CLI diinstal pada langkah 5.
+
+## 1. Jalankan Multica
+
+Pada mesin yang akan menjalankan layanan:
+
+```bash
+git clone --depth 1 https://github.com/multica-ai/multica.git
+cd multica
+make selfhost
+```
+
+Pada eksekusi pertama, `make selfhost` akan:
+
+1. Membuat `.env` dari `.env.example`
+2. Membuat secara acak `JWT_SECRET`, password PostgreSQL, dan `MULTICA_VCS_SECRET_KEY` (kunci enkripsi untuk integrasi Git self-hosted)
+3. Melakukan pull terhadap image PostgreSQL, Multica backend, dan Multica frontend
+4. Membuat volume persisten dan menjalankan ketiga container
+5. Menunggu sampai backend mulai merespons health check
+
+Menjalankan `make selfhost` lagi akan menggunakan ulang `.env` dan volume yang sudah ada; ia tidak membuat ulang secret.
+
+<Callout type="info">
+`make selfhost` melakukan pull terhadap image yang telah dipublikasikan dan tidak melakukan build terhadap kode pada checkout Anda. Untuk menguji source lokal, gunakan `make selfhost-build`.
+
+Image yang dipublikasikan mengikuti **release tag** terbaru, sementara `git clone` biasa akan checkout `main`, yang biasanya lebih maju. Jika Anda membangun apa pun dari checkout ini — CLI, atau image melalui `make selfhost-build` — checkout dulu release tag yang sesuai agar binary hasil build dan container yang berjalan tetap berada pada versi yang sama:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
+</Callout>
+
+## 2. Pastikan layanan sudah siap
+
+Periksa status container:
+
+```bash
+docker compose -f docker-compose.selfhost.yml ps
+```
+
+`postgres` seharusnya menunjukkan `healthy`, dan `backend` serta `frontend` seharusnya berjalan (running). Kemudian periksa backend, database, dan migration:
+
+```bash
+curl -fsS http://localhost:8080/readyz
+```
+
+Respons yang diharapkan adalah:
+
+```json
+{"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Container backend menjalankan migration database pada setiap startup sebelum melayani permintaan; tidak ada command migration manual yang perlu dijalankan.
+
+## 3. Pilih cara mengakses
+
+### Akses lokal
+
+Buka [http://localhost:3000](http://localhost:3000) secara langsung. Anda juga tidak perlu memberikan URL apa pun saat menjalankan `multica setup self-host` nanti.
+
+### Akses remote
+
+Docker Compose hanya mem-bind `3000` dan `8080` ke `127.0.0.1`. Jangan mengubahnya menjadi `0.0.0.0` untuk mengekspos port tersebut ke internet publik; gunakan reverse proxy dengan HTTPS sebagai gantinya.
+
+Contoh di bawah ini menggunakan dua domain:
+
+- `app.example.com`: aplikasi web Multica
+- `api.example.com`: API, health check, dan koneksi daemon
+
+Pertama, atur URL publik di `.env`:
+
+```bash
+FRONTEND_ORIGIN=https://app.example.com
+MULTICA_APP_URL=https://app.example.com
+MULTICA_PUBLIC_URL=https://api.example.com
+```
+
+Dengan konfigurasi ini, semua traffic browser tetap berada pada domain app, sehingga cookie tidak pernah melintasi domain dan `COOKIE_DOMAIN` tidak diperlukan. Jika sebaliknya browser berbicara langsung ke domain api, Anda harus mengaturnya — lihat [Environment variables](/environment-variables).
+
+Kemudian atur DNS dan proxy port lokal dengan Caddy:
+
+```text
+app.example.com {
+    # Hand browser WebSockets straight to the backend
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else goes to the frontend, which forwards API and login requests
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+
+api.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        flush_interval -1
+    }
+}
+```
+
+Jika Anda lebih memilih menyajikan semuanya pada **single origin** (satu domain, atau satu host dengan satu port — umum pada server kecil), arahkan path yang penting bagi daemon secara eksplisit ke backend dan biarkan frontend menangani sisanya:
+
+```text
+multica.example.com {
+    # CLI reachability probe: `multica setup` GETs <server-url>/health and
+    # needs a 200 — older web releases don't forward it, so route it directly
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Browser realtime WebSocket — the web image cannot proxy WS upgrades
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Daemon long-connection WebSocket: daemons dial {server-url}/api/daemon/ws
+    # (not /ws). Without this route the handshake fails and the daemon silently
+    # falls back to polling
+    handle /api/daemon/ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else goes to the frontend, which forwards API and login requests
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+Dengan single origin, arahkan kedua URL ke sana (`FRONTEND_ORIGIN` dan `MULTICA_APP_URL` di `.env`, lalu `--server-url` dan `--app-url` pada `multica setup self-host`).
+
+Caddy memperoleh sertifikat TLS dan meneruskan WebSocket. Setelah mengedit `.env`, buat ulang container dengan `up -d` agar konfigurasi baru berlaku:
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
+```
+
+Command terakhir mencetak `daemon_server_url`, URL yang digunakan daemon untuk mencapai API: `MULTICA_DAEMON_SERVER_URL` jika diatur, kemudian `MULTICA_PUBLIC_URL`, jika tidak maka URL app — `MULTICA_APP_URL`, dengan fallback ke `FRONTEND_ORIGIN`. Jika baik `MULTICA_APP_URL` maupun `FRONTEND_ORIGIN` tidak diatur, field tersebut dihilangkan sama sekali dari respons (sehingga grep tidak mencetak apa pun), bahkan jika `MULTICA_DAEMON_SERVER_URL` atau `MULTICA_PUBLIC_URL` diatur. Jika yang tercetak adalah alamat `localhost`, berarti `.env` masih membawa nilai default lokal: atur `FRONTEND_ORIGIN` dan `MULTICA_APP_URL` secara eksplisit ke URL publik, bukan mengandalkan referensi `${FRONTEND_PORT}` yang disalin dari `.env.example`, lalu buat ulang container.
+
+<Callout type="warning">
+`docker compose restart` hanya me-restart container yang sudah ada dan tidak membaca ulang `.env`. Setelah mengubah konfigurasi, jalankan `docker compose -f docker-compose.selfhost.yml up -d` untuk membaca ulang `.env`.
+</Callout>
+
+## 4. Masuk dan buat Ruang Kerja
+
+Buka `http://localhost:3000` secara lokal, atau `https://app.example.com` yang baru Anda konfigurasikan, dan masukkan email Anda untuk meminta kode verifikasi.
+
+Tidak ada layanan email yang dikonfigurasi secara default. Setelah meminta kode, baca kode tersebut dari log backend:
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend \
+  | grep "Verification code"
+```
+
+Log tersebut berisi baris seperti:
+
+```text
+[DEV] Verification code for you@example.com: 123456
+```
+
+Masukkan kode tersebut dan buat Ruang Kerja pertama Anda. Setelah Resend atau SMTP dikonfigurasi, kode dikirim melalui email dan Anggota tidak perlu lagi membaca log container — lihat [Auth setup](/auth-setup).
+
+<Callout type="warning">
+Deployment self-hosted secara default menggunakan `APP_ENV=production`, yang menonaktifkan kode verifikasi tetap. Jangan mengatur `MULTICA_DEV_VERIFICATION_CODE` pada instance publik.
+</Callout>
+
+## 5. Hubungkan sebuah komputer
+
+Jalankan command di bawah ini pada **komputer yang menjalankan alat coding AI Anda**, yang tidak harus sama dengan server yang menjalankan Docker.
+
+<Callout type="warning">
+Eksekusi berjalan dengan izin penuh milik user yang menjalankan daemon — Eksekusi dapat membaca dan menulis apa pun yang bisa diakses user tersebut. Jalankan daemon sebagai user Unix khusus, dalam container, atau dalam VM, bukan di bawah akun pribadi Anda. Lihat [security model](/security-model).
+</Callout>
+
+Instal Multica CLI terlebih dahulu:
+
+**macOS / Linux**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+```
+
+**Windows PowerShell**
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Jika layanan Multica berjalan pada komputer yang sama:
+
+```bash
+multica setup self-host
+```
+
+Jika layanan Multica berjalan pada mesin lain, berikan dua URL yang sudah Anda konfigurasikan sebelumnya:
+
+```bash
+multica setup self-host \
+  --server-url https://api.example.com \
+  --app-url https://app.example.com
+```
+
+Command ini pertama-tama memeriksa `<server-url>/health`, lalu membuka browser untuk menyelesaikan login. Setelah login, ia menyimpan kredensial lokal dan menjalankan daemon. Error `Server not reachable` pada langkah ini berarti probe tidak dapat memperoleh respons 200 dari `/health`: proxy meneruskan semuanya ke web release yang tidak meneruskan path tersebut, proxy sama sekali tidak merutekan `/health` ke backend, atau terjadi kegagalan tingkat yang lebih rendah (DNS, TLS, firewall, timeout, 5xx dari backend) — lihat [Pemecahan masalah](/troubleshooting#multica-setup-melaporkan-server-tidak-dapat-dijangkau).
+
+Pastikan koneksinya:
+
+```bash
+multica daemon status
+```
+
+Output seharusnya menunjukkan:
+
+- `Daemon: running`
+- `Agents` yang mencantumkan alat coding AI yang terinstal pada mesin ini
+- `Workspaces` lebih besar dari `0`
+
+## 6. Selesaikan eksekusi pertama
+
+Kembali ke Multica, setelah sebuah runtime online muncul di daftar runtime, buat sebuah Agent dan tugaskan Tugas pertama Anda kepadanya.
+
+Ketika Eksekusi tersebut menunjukkan status selesai dan balasan Agent muncul di timeline, berarti layanan self-hosted, komputer, dan alat coding AI semuanya sudah terhubung. Untuk langkah-langkah detail, lihat langkah 3-5 dari [mulai cepat](/cloud-quickstart).
+
+## Command admin yang umum
+
+Jalankan semua ini dari direktori repository `multica`:
+
+```bash
+# Check status
+docker compose -f docker-compose.selfhost.yml ps
+
+# Tail backend logs
+docker compose -f docker-compose.selfhost.yml logs -f backend
+
+# Apply .env changes
+docker compose -f docker-compose.selfhost.yml up -d
+
+# Stop the services, keeping the volumes
+docker compose -f docker-compose.selfhost.yml down
+```
+
+Untuk upgrade ke image yang dipublikasikan terbaru:
+
+```bash
+git pull --ff-only
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+curl -fsS http://localhost:8080/readyz
+```
+
+Ada dua cara untuk upgrade instalasi Docker Compose. Pada instalasi yang sudah ada, keduanya menghasilkan **hasil yang sama** — target `selfhost` dalam `Makefile` menjalankan `docker compose pull` + `up -d` yang sama, dan tambahan membuat `.env` saat file tersebut belum ada serta menunggu `/health` sebelum mencetak ringkasan status. Pilih yang Anda suka:
+
+```bash
+cd multica
+git pull
+make selfhost
+```
+
+```bash
+cd multica
+git pull
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+### Apa yang sebenarnya dilakukan `git pull`
+
+`git pull` memperbarui **`docker-compose.selfhost.yml` itu sendiri** — environment variable baru, service baru, healthcheck yang berubah. Ini **bukan** cara untuk mendapatkan versi Multica yang baru.
+
+Versi yang akhirnya Anda jalankan ditentukan oleh `docker compose pull`, yang menanyakan ke GHCR tag tersebut saat ini menunjuk ke mana. Checkout yang sudah tertinggal berbulan-bulan tetap akan menarik image `latest` hari ini; sebaliknya, `git pull` saja tidak mengubah apa pun sampai Anda melakukan pull image dan membuat ulang container.
+
+<Callout type="warning">
+**Jika Anda mem-pin `MULTICA_IMAGE_TAG`, kedua command tidak akan meng-upgrade apa pun.** Kedua image di-resolve sebagai `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml`, `services.backend.image` / `services.frontend.image`), dan `.env.example` menyertakan `MULTICA_IMAGE_TAG=latest`. Jika `.env` Anda mem-pin rilis tertentu, `pull` hanya mengambil ulang tag yang sama dan Anda tetap berada di versi lama — tanpa error, tanpa peringatan. Periksa sebelum upgrade:
+
+```bash
+grep MULTICA_IMAGE_TAG .env
+# MULTICA_IMAGE_TAG=v0.4.5   ← pinned: edit to `latest` (or the release you want) first
+```
+</Callout>
+
+### `.env` Anda tidak ditimpa
+
+`make selfhost` hanya membuat `.env` saat file tersebut **tidak ada**. Menjalankannya ulang pada instalasi yang sudah ada membiarkan `JWT_SECRET`, password Postgres, pengaturan email, dan `FRONTEND_ORIGIN` Anda tetap seperti semula.
+
+### Backup Postgres terlebih dahulu
+
+Migration hanya berjalan maju (forward-only), jadi buat dump sebelum mengupgrade deployment yang penting bagi Anda:
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec -T postgres \
+  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
+```
+
+<Callout type="warning">
+**Jangan menyalurkan (pipe) `pg_dump` langsung ke `gzip`.** Shell melaporkan exit status dari command *terakhir* dalam sebuah pipeline, sehingga `pg_dump … | gzip > backup.sql.gz` akan keluar dengan status `0` meskipun dump-nya gagal — meninggalkan arsip 20-byte yang secara format valid tapi tidak berisi apa pun. Mengarahkan ke file terlebih dahulu membuat exit status `pg_dump` sendiri yang menjadi penentu, dan `&&` hanya akan mengompresi dump yang benar-benar berhasil.
+</Callout>
+
+Gunakan `POSTGRES_USER` / `POSTGRES_DB` Anda sendiri dari `.env` jika Anda mengubahnya dari default `multica`. Data berada di named volume `multica_pgdata`, yang tetap ada setelah `docker compose down` — tetapi tidak setelah `down -v`.
+
+### Migration berjalan sendiri
+
+Seperti pada [Langkah 1](#1-jalankan-multica), container backend menjalankan `./migrate up` saat startup (`docker/entrypoint.sh`) sebelum melayani traffic. Tidak ada command upgrade terpisah — menjalankan image baru *adalah* langkah migration itu sendiri. Pantau prosesnya:
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs -f backend
+```
+
+Migration berjalan otomatis saat backend startup; migration yang melakukan backfill data historis (seperti 103) juga menyelesaikan backfill-nya secara otomatis. Dalam kasus yang jarang terjadi, backfill otomatis tersebut gagal dengan `refusing to drop legacy daily rollups` — lihat [Pemecahan masalah](/troubleshooting#migration-103-memblokir-upgrade).
+
+### Verifikasi dengan `/readyz`, bukan `/health`
+
+`/health` adalah probe **liveness** — ia mengembalikan `{"status":"ok"}` selama proses tersebut hidup, termasuk saat migration gagal. `/readyz` (`readyHandler`, didaftarkan di `server/cmd/server/router.go`; `/healthz` adalah alias-nya) memeriksa database dan kumpulan migration yang sudah diterapkan, sehingga inilah yang akan menangkap upgrade yang gagal:
+
+```bash
+curl -s localhost:8080/readyz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Apa pun selain HTTP 200 dengan kedua check bernilai `ok` berarti versi baru belum selesai melakukan migration — periksa log backend sebelum mengarahkan traffic ke sana.
+
+### Kubernetes
+
+Helm memiliki alur upgrade sendiri: atur `images.backend.tag` / `images.frontend.tag` ke rilis yang Anda inginkan di values file, lalu `helm upgrade`. Mengubah tag mengubah pod spec, sehingga Kubernetes melakukan pull image baru dan me-roll Deployment — ini adalah jalur yang andal.
+
+`kubectl -n multica rollout restart` **bukan** sebuah upgrade dengan sendirinya. Chart tersebut menyertakan `pullPolicy: IfNotPresent` (`deploy/helm/multica/values.yaml`), sehingga node yang sudah memiliki cache tag tersebut akan menggunakan ulang image lama dan restart tersebut diam-diam tidak mengubah apa pun — jebakan yang sama seperti `MULTICA_IMAGE_TAG` yang di-pin. Jika Anda ingin mengikuti floating tag dengan cara ini, atur `images.backend.pullPolicy` / `images.frontend.pullPolicy` ke `Always` terlebih dahulu. Lihat [Self-hosting guide](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
+
+<Callout type="warning">
+`docker compose down` tetap mempertahankan `pgdata` dan `backend_uploads`. Menambahkan `-v` akan menghapus volume tersebut, termasuk database; jangan menjalankan `docker compose down -v` kecuali Anda memang bermaksud menghapus seluruh instance.
+</Callout>
+
+## Masalah umum
+
+| Gejala | Periksa dulu |
+|---|---|
+| `/readyz` tidak mengembalikan `ok` | Jalankan `docker compose -f docker-compose.selfhost.yml logs backend postgres`. |
+| Kode verifikasi tidak kunjung datang | Minta kode, lalu cari `Verification code` di log backend. |
+| `setup self-host` melaporkan server tidak dapat dijangkau | Dari komputer tersebut, request `https://api.example.com/health` untuk memastikan DNS, TLS, dan reverse proxy semuanya dapat dijangkau. Respons 404 berarti proxy mengirim `/health` ke web release lama yang tidak meneruskannya — arahkan langsung ke backend ([Pemecahan masalah](/troubleshooting#multica-setup-melaporkan-server-tidak-dapat-dijangkau)). |
+| Daemon tidak mencantumkan `Agents` apa pun | Pastikan alat coding AI ada di `PATH` dan sudah login, lalu jalankan `multica daemon restart`. |
+| Tugas tetap dalam antrean | Jalankan `multica daemon status` untuk memastikan daemon berjalan dan terhubung ke Ruang Kerja. |
+
+Untuk skenario lainnya, lihat [Pemecahan masalah](/troubleshooting).
+
+## Langkah selanjutnya
+
+- [Auth setup](/auth-setup) — konfigurasikan email, login Google, dan ruang lingkup pendaftaran.
+- [Environment variables](/environment-variables) — referensi konfigurasi server lengkap.
+- [Self-hosting guide](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md) — Kubernetes, upgrade, dan deployment manual.
+- [Desktop app](/desktop-app) — hubungkan Desktop ke layanan self-hosted.

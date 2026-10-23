@@ -1,0 +1,10 @@
+{
+  "remove_label": "Hapus label {{name}}",
+  "resource_picker": {
+    "empty": "Tidak ada label",
+    "add": "Tambah label",
+    "search": "Cari label...",
+    "no_labels": "Buat label di Pengaturan terlebih dahulu",
+    "no_results": "Tidak ada label yang cocok"
+  }
+}

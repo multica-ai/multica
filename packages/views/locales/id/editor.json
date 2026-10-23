@@ -1,0 +1,168 @@
+{
+  "bubble_menu": {
+    "bold": "Tebal",
+    "italic": "Miring",
+    "strikethrough": "Coret",
+    "code": "Kode",
+    "highlight": "Sorot",
+    "link": "Tautan",
+    "list": "Daftar",
+    "task_list": "Daftar tugas",
+    "quote": "Kutipan",
+    "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Terapkan tautan",
+      "remove": "Hapus tautan",
+      "close": "Tutup editor tautan"
+    },
+    "heading_dropdown": {
+      "text": "Teks",
+      "normal_text": "Teks Biasa",
+      "heading_1": "Heading 1",
+      "heading_2": "Heading 2",
+      "heading_3": "Heading 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Daftar Bullet",
+      "ordered_list": "Daftar Bernomor",
+      "task_list": "Daftar Tugas"
+    },
+    "sub_issue": {
+      "tooltip": "Buat sub-tugas dari seleksi",
+      "created": "{{identifier}} dibuat",
+      "create_failed": "Gagal membuat sub-tugas"
+    }
+  },
+  "image": {
+    "view": "Lihat gambar",
+    "download": "Unduh",
+    "copy_link": "Salin tautan",
+    "delete": "Hapus",
+    "link_copied": "Tautan disalin",
+    "copy_link_failed": "Gagal menyalin tautan",
+    "copy_image": "Salin gambar",
+    "image_copied": "Gambar disalin",
+    "copy_image_failed": "Gagal menyalin gambar",
+    "canvas_label": "Kanvas gambar. Seret untuk menggeser, gulir untuk memperbesar, klik dua kali untuk beralih ke ukuran asli.",
+    "unavailable": "Gambar tersebut sudah tidak tersedia — dilewati."
+  },
+  "canvas": {
+    "zoom_in": "Perbesar",
+    "zoom_out": "Perkecil",
+    "zoom_fit": "Sesuaikan ke tampilan",
+    "zoom_actual": "Ukuran asli"
+  },
+  "attachment": {
+    "download_failed": "Gagal mengambil tautan unduhan. Coba lagi sesaat lagi.",
+    "preview": "Pratinjau",
+    "preview_loading": "Memuat pratinjau…",
+    "preview_failed": "Gagal memuat pratinjau",
+    "preview_too_large": "Berkas terlalu besar untuk dipratinjau. Silakan unduh.",
+    "preview_unsupported": "Jenis berkas ini tidak dapat dipratinjau.",
+    "close": "Tutup",
+    "open_in_new_tab": "Buka di tab baru",
+    "remove": "Hapus lampiran",
+    "previous": "Sebelumnya",
+    "next": "Berikutnya",
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "Semua deliverable",
+    "info": "Info",
+    "wrap_lines": "Lipat baris",
+    "viewport": "Lebar viewport",
+    "viewport_fill": "Sesuaikan",
+    "viewport_desktop": "Desktop",
+    "viewport_tablet": "Tablet",
+    "viewport_phone": "Ponsel",
+    "viewport_scale": "Diskalakan ke {{percent}}%",
+    "view_source": "Lihat sumber",
+    "view_mode": "Tampilan",
+    "view_tree": "Pohon",
+    "view_raw": "Mentah",
+    "structured_parse_failed": "Gagal mengurai berkas ini, sehingga ditampilkan sebagai teks.",
+    "tree_show_more": "Tampilkan lebih banyak ({{count}} tersisa)",
+    "tree_items_other": "{{count}} item",
+    "tree_keys_other": "{{count}} kunci",
+    "table_empty": "Tidak ada baris",
+    "table_rows_other": "{{count}} baris",
+    "table_columns_other": "{{count}} kolom",
+    "address": "Alamat",
+    "address_hint": "?query",
+    "reload": "Muat ulang"
+  },
+  "link_hover": {
+    "copy_link": "Salin tautan",
+    "open_link": "Buka tautan",
+    "link_copied": "Tautan disalin",
+    "copy_failed": "Gagal menyalin"
+  },
+  "mention": {
+    "group_users": "Pengguna",
+    "group_issues": "Tugas",
+    "all_members": "Semua anggota",
+    "agent_badge": "Agent",
+    "squad_badge": "Squad",
+    "searching": "Mencari...",
+    "no_results": "Tidak ada hasil",
+    "group_current": "Halaman saat ini",
+    "group_recent": "Baru dilihat",
+    "group_search": "Hasil pencarian",
+    "group_cancelled": "Dibatalkan"
+  },
+  "slash_command": {
+    "no_skills_configured": "Belum ada skill yang dikonfigurasi",
+    "no_results": "Tidak ada skill yang cocok",
+    "commands": {
+      "note": "Tambahkan catatan — tidak akan memicu agent apa pun"
+    }
+  },
+  "code_block": {
+    "html_preview": "Pratinjau HTML",
+    "copy_code": "Salin kode",
+    "show_preview": "Tampilkan pratinjau",
+    "show_source": "Tampilkan sumber",
+    "fullscreen": "Layar penuh"
+  },
+  "dynamic_block": {
+    "preview": "Pratinjau",
+    "source": "Sumber",
+    "view": "Tampilan",
+    "copy_source": "Salin sumber",
+    "show_all": "Tampilkan semua",
+    "rendering": "Merender...",
+    "error_html": "Pratinjau mengalami galat skrip",
+    "error_mermaid": "Gagal menggambar diagram ini",
+    "error_at_line": "{{message}} (baris {{line}})",
+    "view_source": "Lihat sumber",
+    "copy_error": "Salin galat"
+  },
+  "file_card": {
+    "uploading": "Mengunggah {{filename}}"
+  },
+  "upload": {
+    "failed": "Gagal mengunggah {{filename}}: {{reason}}",
+    "in_progress": "Mengunggah…",
+    "interrupted": "Unggahan terputus — berkas tidak tersimpan. Lampirkan lagi.",
+    "remove": "Hapus",
+    "uploading_label": "Mengunggah {{filename}}…",
+    "failed_label": "Gagal mengunggah {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Judul"
+  },
+  "mermaid": {
+    "diagram_label": "Diagram Mermaid",
+    "render_error": "Tidak dapat merender diagram Mermaid.",
+    "rendering": "Merender diagram…",
+    "viewer_title": "Diagram",
+    "canvas_label": "Kanvas diagram. Seret untuk menggeser, gulir untuk memperbesar.",
+    "open_viewer": "Buka penampil diagram",
+    "close_viewer": "Tutup",
+    "copy_source": "Salin sumber diagram",
+    "show_source": "Tampilkan sumber",
+    "show_diagram": "Tampilkan diagram",
+    "export": "Ekspor",
+    "export_png": "Unduh PNG",
+    "export_svg": "Unduh SVG",
+    "export_source": "Unduh .mmd"
+  }
+}
