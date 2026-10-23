@@ -209,10 +209,13 @@ to clear. `agent copy` still carries the source value and has no override flag.
 
 `model` is a first-class persisted column the daemon reads directly.
 `custom_args` are normally raw provider CLI args. The CLI help notes that some
-providers (codex app-server, openclaw) reject `--model` inside `custom_args` —
-but that is documented CLI guidance, not a server-enforced invariant; nothing
-on the create path inspects `custom_args` for a model flag. Provider
-backends may consume protocol selectors before launch:
+providers reject `--model` inside `custom_args`; provider backends filter flags
+they manage directly. For OpenClaw, `model` selects the registered OpenClaw
+agent ID (for example `main`). An optional `runtime_config.model_override`
+selects the underlying model for that run without creating a second OpenClaw
+agent or splitting its identity, workspace, sessions, or memory. The daemon
+emits native `--agent <model>` and `--model <model_override>` flags separately.
+Provider backends may also consume other protocol selectors before launch:
 
 - Pi filters `--thinking` because the first-class `thinking_level` field owns
   that flag and must be its only source.
