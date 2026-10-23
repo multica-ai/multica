@@ -55,6 +55,28 @@ export function SiteFooter() {
               </li>
             ))}
           </ul>
+          <div role="group" aria-label="Language" className="mt-6 flex flex-wrap items-center gap-1">
+            {locales.map((l) => (
+              <button
+                type="button"
+                key={l}
+                aria-pressed={l === locale}
+                onClick={() => setLocale(l)}
+                className={cn(
+                  "rounded-site-control px-2.5 py-1 text-site-small transition-colors",
+                  focusRing,
+                  l === locale
+                    ? "bg-site-hover text-site-ink"
+                    : "text-site-muted hover:text-site-ink",
+                )}
+              >
+                {localeLabels[l]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-4 text-site-small text-site-muted">
+            © {new Date().getFullYear()} Multica. All rights reserved.
+          </p>
         </div>
 
         <nav aria-label="Footer" className="grid grid-cols-2 gap-x-4 gap-y-site-block sm:grid-cols-3 lg:grid-cols-5">
@@ -80,31 +102,7 @@ export function SiteFooter() {
       </Container>
 
       <Container>
-        <div className="flex flex-col gap-4 border-t border-site-line py-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-site-small text-site-muted">
-            © {new Date().getFullYear()} Multica. All rights reserved.
-          </p>
-          <div role="group" aria-label="Language" className="flex items-center gap-1">
-            {locales.map((l) => (
-              <button
-                type="button"
-                key={l}
-                aria-pressed={l === locale}
-                onClick={() => setLocale(l)}
-                className={cn(
-                  "rounded-site-control px-2.5 py-1 text-site-small transition-colors",
-                  focusRing,
-                  l === locale
-                    ? "bg-site-hover text-site-ink"
-                    : "text-site-muted hover:text-site-ink",
-                )}
-              >
-                {localeLabels[l]}
-              </button>
-            ))}
-          </div>
-        </div>
-        <FooterWordmark className="pt-site-block pb-10" />
+        <FooterWordmark className="pb-10" />
       </Container>
     </footer>
   );
