@@ -35,6 +35,7 @@ func newProjectResourceUpdateTestCmd() *cobra.Command {
 	c.Flags().String("default-branch-hint", "", "")
 	c.Flags().String("local-path", "", "")
 	c.Flags().String("daemon-id", "", "")
+	c.Flags().String("agent-id", "", "")
 	c.Flags().String("ref-label", "", "")
 	c.Flags().String("execution-mode", "", "")
 	c.Flags().String("ref", "", "")
@@ -295,6 +296,30 @@ func TestBuildResourceRefFromFlagsLocalDirectoryMerges(t *testing.T) {
 		}
 		if ref["label"] != "renamed" {
 			t.Errorf("label not overridden: %v", ref["label"])
+		}
+	})
+
+	t.Run("agent binding is preserved and can be cleared to the daemon default", func(t *testing.T) {
+		existing := map[string]any{
+			"local_path": "/Users/foo/work/a",
+			"daemon_id":  "d1",
+			"agent_id":   "agent-a",
+		}
+		preserve := newProjectResourceUpdateTestCmd()
+		_ = preserve.Flags().Set("ref-label", "renamed")
+		ref, has, err := buildResourceRefFromFlags(preserve, "local_directory", existing)
+		if err != nil || !has || ref["agent_id"] != "agent-a" {
+			t.Fatalf("agent binding was not preserved: ref=%v has=%v err=%v", ref, has, err)
+		}
+
+		clear := newProjectResourceUpdateTestCmd()
+		_ = clear.Flags().Set("agent-id", "")
+		ref, has, err = buildResourceRefFromFlags(clear, "local_directory", existing)
+		if err != nil || !has {
+			t.Fatalf("clear agent binding: ref=%v has=%v err=%v", ref, has, err)
+		}
+		if _, ok := ref["agent_id"]; ok {
+			t.Fatalf("agent_id survived clear: %v", ref)
 		}
 	})
 
