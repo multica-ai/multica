@@ -478,7 +478,38 @@ func TestOpencodeErrorMessage(t *testing.T) {
 	}
 }
 
+func TestOpenCodeReportedCostOnly(t *testing.T) {
+	tests := []struct {
+		name string
+		last string
+		want int64
+	}{
+		{"reported cost", `"reportedCostUSD":0.0021`, 31_000_000},
+		{"estimate only", `"cost":0.0021`, 0},
+		{"missing cost", `"tokens":{"input":10}`, 0},
+		{"negative cost", `"reportedCostUSD":-1`, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+			ch := make(chan Message, 16)
+			lines := strings.Join([]string{
+				`{"type":"step_start","sessionID":"ses_cost","part":{"type":"step-start"}}`,
+				`{"type":"step_finish","sessionID":"ses_cost","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":100},"reportedCostUSD":0.001}}`,
+				`{"type":"step_start","sessionID":"ses_cost","part":{"type":"step-start"}}`,
+				`{"type":"text","sessionID":"ses_cost","part":{"type":"text","text":"done"}}`,
+				`{"type":"step_finish","sessionID":"ses_cost","part":{"type":"step-finish","reason":"stop","tokens":{"input":10},` + tc.last + `}}`,
+			}, "\n")
+			result := b.processEvents(strings.NewReader(lines), ch)
+			if result.usage.CostUSDTicks != tc.want {
+				t.Errorf("cost ticks: got %d, want %d", result.usage.CostUSDTicks, tc.want)
+			}
+		})
+	}
+}
+
 // ── Integration-level tests: processEvents ──
+
 //
 // These feed multiple JSON lines through processEvents and verify the
 // accumulated result (status, output, sessionID, error) and emitted messages.
