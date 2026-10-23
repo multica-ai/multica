@@ -3001,6 +3001,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		RuntimeConfig:         runtimeConfig,
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}
+	// Resolve the OpenClaw per-run model pin once, here, and carry it on the
+	// run input. The daemon no longer decodes it from the agent's mutable
+	// runtime_config at dispatch, so a concurrent config edit can never change
+	// a value an in-flight run already resolved. Only openclaw consumes it.
+	if runtime.Provider == "openclaw" {
+		resp.ModelOverride = openclawModelOverride(agent.RuntimeConfig)
+	}
 	// System agents carry a product-owned instruction layer that ships with
 	// this binary instead of being copied into their row at creation. That
 	// is what makes it hot-updatable: editing the embedded file and

@@ -300,6 +300,25 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 	gw["token"] = prev.Gateway.Token
 }
 
+// openclawModelOverride extracts an OpenClaw per-run model pin from an agent's
+// runtime_config JSON. The server resolves it once, at claim time, and carries
+// it on the run input so the daemon never decodes the pin from mutable agent
+// configuration. Returns "" when the field is absent or the payload is
+// malformed; the value is trimmed so a whitespace-only pin reads as absent.
+func openclawModelOverride(raw []byte) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	var rc struct {
+		ModelOverride string `json:"model_override"`
+	}
+	if err := json.Unmarshal(trimmed, &rc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(rc.ModelOverride)
+}
+
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
@@ -435,6 +454,12 @@ type AgentTaskResponse struct {
 	CreatedAt          string                   `json:"created_at"`
 	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir       string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	// ModelOverride is the per-run OpenClaw model pin resolved by the server at
+	// claim time from the agent's runtime_config. It is carried as a run input
+	// (not re-read by the daemon from mutable agent configuration) so each
+	// claimed run gets a frozen value. Mirrors internal/daemon/types.go, same
+	// JSON name. Empty for every non-openclaw provider.
+	ModelOverride string `json:"model_override,omitempty"`
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap
