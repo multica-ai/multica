@@ -107,9 +107,12 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 }
 
 // A localhost server URL is not the official cloud host, so this exercises the
-// self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
-// an operator opts in, and a daemon upgrade never starts deleting on its own.
-func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
+// self-host branch of defaultGCCompletedTaskTTL: retention is bounded by
+// default — an unattended host whose issues never go terminal must not pile up
+// completed envs without end (GH #9176) — while an explicit 0 still restores
+// unbounded retention, and a daemon upgrade never deletes without an env
+// override saying so.
+func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnSelfHostAndReadsEnv(t *testing.T) {
 	stageFakeAgent(t)
 	redirectTestHome(t, t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
@@ -123,8 +126,22 @@ func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *tes
 	if err != nil {
 		t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
 	}
+	if cfg.GCCompletedTaskTTL != DefaultGCCompletedTaskTTLSelfHost {
+		t.Fatalf("GCCompletedTaskTTL = %v, want the self-host default %v", cfg.GCCompletedTaskTTL, DefaultGCCompletedTaskTTLSelfHost)
+	}
+	if cfg.GCCompletedTaskTTL <= 0 {
+		t.Fatalf("GCCompletedTaskTTL = %s, want a bounded self-host default", cfg.GCCompletedTaskTTL)
+	}
+
+	// An explicit 0 has to win on self-host too — an operator with long-lived
+	// debug envs restores the old unbounded behavior without downgrading.
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
+	cfg, err = LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with self-host opt-out: %v", err)
+	}
 	if cfg.GCCompletedTaskTTL != 0 {
-		t.Fatalf("GCCompletedTaskTTL = %s, want disabled", cfg.GCCompletedTaskTTL)
+		t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the self-host default", cfg.GCCompletedTaskTTL)
 	}
 
 	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
