@@ -91,10 +91,13 @@ function StickyHeaderShell({
     );
   }
 
+  // `mb-1` reserves room for the fade's `h-1` below the header, so at rest the
+  // fade covers empty space instead of the first line of the body. Callers
+  // take the same 4px out of their bottom padding.
   return (
     <div
       className={cn(
-        "sticky top-0 z-10 transition-colors duration-700",
+        "sticky top-0 z-10 mb-1 transition-colors duration-700",
         !highlighted && stickyHeaderFadeClass,
         highlighted ? highlightedCommentBackgroundClass : "bg-card",
         className,
@@ -691,7 +694,7 @@ function CommentRow({
           highlight state while it occludes the body scrolling underneath. */}
       <StickyHeaderShell
         highlighted={isHighlighted}
-        className="flex items-center gap-2.5 px-4 max-md:px-3 pt-3 pb-2"
+        className="flex items-center gap-2.5 px-4 max-md:px-3 pt-3 pb-1"
       >
         <ActorAvatar
           actorType={entry.actor_type}
@@ -949,13 +952,15 @@ function ReplyToQuote({ entry, onJump }: { entry: TimelineEntry; onJump?: (comme
 }
 
 /** A run without a persisted reply still belongs to the agent, never its trigger author. */
-export function AgentRunComment({ run, standalone = false, commentProps, entering = false, replyTo }: {
+export function AgentRunComment({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId }: {
   run: CommentRun;
   standalone?: boolean;
   entering?: boolean;
   commentProps?: CommentCardProps;
   /** The input this run answers, shown when the thread no longer places the two together. */
   replyTo?: ReactNode;
+  /** The flashed jump target: the slot's comment id, or the run's task id until it has one. */
+  highlightedId?: string | null;
 }) {
   const viewState = useInlineCommentRunState();
   const replyEntry = commentProps?.entry;
@@ -974,11 +979,13 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   // The notice keeps its deep-link target and highlight in the run's slot.
   const slotEntry = reply ?? notice;
   const motionRef = useRunCommentMotion(entering, reply?.id, run.task.status);
+  const highlighted = (highlightedId ?? commentProps?.highlightedCommentId) === (slotEntry?.id ?? run.task.id);
   return (
     <div ref={motionRef} data-run-slot-id={run.task.id}
       data-run-comment-id={!reply ? run.task.id : undefined}
       id={!standalone && slotEntry ? `comment-${slotEntry.id}` : undefined}
-      className={cn(standalone ? !reply && "rounded-xl border bg-card" : "border-t border-border/50", !reply && "py-1.5", slotEntry && commentProps?.highlightedCommentId === slotEntry.id && highlightedCommentBackgroundClass)}>
+      className={cn("transition-colors duration-700", standalone ? !reply && "rounded-xl border" : "border-t border-border/50", !reply && "py-1.5",
+        highlighted ? highlightedCommentBackgroundClass : standalone && !reply && "bg-card")}>
       {commentProps && reply ? standalone ? (
         <CommentCard {...commentProps} runs={commentProps.runs ?? [run]} runViewState={viewState} />
       ) : (
@@ -1083,6 +1090,7 @@ function CommentCardImpl({
   // posts one.
   const renderThreadRow = (row: TimelineEntry | ThreadRunSlot) => "run" in row ? (
     <AgentRunComment key={row.run.task.id} run={row.run} entering={enteringRunIds?.has(row.run.task.id)}
+      highlightedId={highlightedCommentId}
       replyTo={row.replyTo && <ReplyToQuote entry={row.replyTo} onJump={onJumpToComment} />}
       commentProps={row.reply ? {
         issueId, entry: row.reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
@@ -1196,7 +1204,7 @@ function CommentCardImpl({
           <StickyHeaderShell
             sticky={stickyHeader}
             highlighted={isHighlighted}
-            className={cn("px-4 max-md:px-3", open ? "pt-3 pb-2" : "py-3")}
+            className={cn("px-4 max-md:px-3", !open ? "py-3" : stickyHeader ? "pt-3 pb-1" : "pt-3 pb-2")}
           >
             <div className="flex items-center gap-2.5">
               {deleted ? (

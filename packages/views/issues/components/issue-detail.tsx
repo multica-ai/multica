@@ -155,8 +155,12 @@ import {
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
 } from "@multica/core/issues/stores";
-import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
+import {
+  IssueSurfaceSelectionProvider,
+  useCreateIssueSurfaceSelection,
+  useIssueSurfaceSelection,
+} from "../surface/selection-context";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
@@ -839,9 +843,9 @@ function SubIssueRow({
   const locale = useLocale();
   const paths = useWorkspacePaths();
   const updateIssue = useUpdateIssue();
-  const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
+  const { selectedIds, toggle: toggleSelected } = useIssueSurfaceSelection();
+  const selected = selectedIds.has(child.id);
   const childStatusCatalog = useIssueStatuses(useWorkspaceId());
-  const toggleSelected = useIssueSelectionStore((s) => s.toggle);
   // Category, not key: a custom status in the done/cancelled categories is
   // finished work and has to strike through like any other. (MUL-6243)
   const isDone = issueBehavesAsAny(child, ["done", "closed"]);
@@ -2009,6 +2013,81 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       replyToRoot.has(commentId) ? jumpToReply(commentId) : jumpToThread(commentId),
     [replyToRoot, jumpToReply, jumpToThread],
   );
+  // Header chip jump to a run's block. A run is either its own top-level row
+  // or a slot inside the thread it answers, so find that row, undo whatever
+  // folds the thread, scroll the row into place, then let the effect below
+  // align the block itself once it mounts.
+  const [pendingRunJump, setPendingRunJump] = useState<{ taskId: string; rootId: string; flashId: string } | null>(null);
+  const jumpToRun = useCallback(
+    (taskId: string) => {
+      let index = items.findIndex((it) => it.kind === "run" && it.run.task.id === taskId);
+      let run = index >= 0 ? (items[index] as Extract<TimelineItem, { kind: "run" }>).run : undefined;
+      if (!run) {
+        for (const [rootId, runs] of commentRuns) {
+          run = runs.find((candidate) => candidate.task.id === taskId);
+          if (run) {
+            index = items.findIndex((it) => it.id === rootId);
+            break;
+          }
+        }
+      }
+      const rootItem = items[index];
+      if (!run || !rootItem) return;
+      const root = rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
+      const headsThread = run.hasReply && run.commentId === rootItem.id;
+      if (root && !headsThread) {
+        const collapse = useCommentCollapseStore.getState();
+        if (collapse.isCollapsed(id, root.id)) collapse.toggle(id, root.id);
+      }
+      if (
+        root && !expandedResolved.has(root.id) &&
+        deriveThreadResolution(root, timelineView.threadReplies.get(root.id) ?? EMPTY_REPLIES).kind !== "none"
+      ) {
+        toggleResolvedExpand(root.id, true);
+      }
+      if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      setPendingRunJump({ taskId, rootId: rootItem.id, flashId: run.hasReply && run.commentId ? run.commentId : taskId });
+    },
+    [id, items, commentRuns, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline],
+  );
+  // Same frame-by-frame landing as a reply jump. A run that has replied may
+  // only show as a log button in its comment's header, so align that comment.
+  useEffect(() => {
+    const container = scrollContainerEl;
+    if (!pendingRunJump || !container) return;
+    const { taskId, rootId, flashId } = pendingRunJump;
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const align = () => {
+      const el = container.querySelector<HTMLElement>(`[data-run-slot-id="${taskId}"]`)
+        ?? container.querySelector<HTMLElement>(`[data-run-id="${taskId}"]`)?.closest<HTMLElement>("[id^='comment-']");
+      if (!el) {
+        if (++frames < 60) rafId = requestAnimationFrame(align);
+        else setPendingRunJump(null);
+        return;
+      }
+      const stickyBar = document
+        .getElementById(`comment-${rootId}`)
+        ?.querySelector<HTMLElement>("[data-thread-sticky-bar]");
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - 16 - (stickyBar && !el.contains(stickyBar) ? stickyBar.offsetHeight : 0),
+      );
+      container.scrollTop = target;
+      if (Math.abs(target - last) > 1 && ++frames < 90) {
+        last = target;
+        rafId = requestAnimationFrame(align);
+        return;
+      }
+      flashJumpTarget(flashId);
+      setPendingRunJump(null);
+    };
+    rafId = requestAnimationFrame(align);
+    return () => cancelAnimationFrame(rafId);
+  }, [pendingRunJump, scrollContainerEl, flashJumpTarget]);
 
   const {
     reactions: issueReactions,
@@ -2098,17 +2177,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [issueId, setSubIssuesCollapsedFor],
   );
 
-  // Selection store is global (workspace-scoped); clear it whenever this
-  // issue detail is mounted or switched, so leftover selections from the
-  // main list view (or another sub-issue list) don't leak into this one.
-  const clearSelection = useIssueSelectionStore((s) => s.clear);
-  const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
-  const selectIds = useIssueSelectionStore((s) => s.select);
-  const deselectIds = useIssueSelectionStore((s) => s.deselect);
-  useEffect(() => {
-    clearSelection();
-    return clearSelection;
-  }, [id, clearSelection]);
+  // The sub-issue list owns its selection, reset per issue. Rows, select-all
+  // and the inline batch toolbar must read the same one: a peek renders this
+  // inside a surface whose own selection provider would otherwise win for the
+  // toolbar while the rows wrote elsewhere.
+  const subIssueSelection = useCreateIssueSurfaceSelection(`sub-issues:${id}`);
+  const {
+    selectedIds,
+    select: selectIds,
+    deselect: deselectIds,
+  } = subIssueSelection;
 
   const childIssueIds = useMemo(() => childIssues.map((c) => c.id), [childIssues]);
   const childSelectedCount = childIssueIds.filter((cid) =>
@@ -3013,6 +3091,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {reply?.resolved_at && !expandedResolved.has(reply.id) ? <ResolvedThreadBar
           entry={reply} replies={timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES}
           onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
+          highlightedId={highlightedId}
           commentProps={reply ? {
             issueId: id, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
@@ -3156,7 +3235,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {/* Live "agent is working" chip, leftmost in the right cluster so
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
-            <IssueAgentHeaderChip issueId={id} />
+            <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
@@ -3536,6 +3615,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // Provider hosts the shared right-click actions menu the rows
               // delegate to (one singleton menu, not one per row).
               <IssueContextMenuProvider>
+              <IssueSurfaceSelectionProvider selection={subIssueSelection}>
               <div className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
@@ -3598,7 +3678,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
                 {/* Inline batch toolbar — appears next to the rows when
                     selections exist, instead of as a far-away fixed bar. */}
-                <BatchActionToolbar issues={childIssues} placement="inline" />
+                <BatchActionToolbar
+                  issues={childIssues}
+                  placement="inline"
+                  clearSelectionOnApply
+                />
 
                 {/* List */}
                 {!subIssuesCollapsed && (() => {
@@ -3630,6 +3714,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   );
                 })()}
               </div>
+              </IssueSurfaceSelectionProvider>
               </IssueContextMenuProvider>
             );
           })()}

@@ -519,10 +519,13 @@ export function ActiveTaskRow({
   task,
   issueId,
   onTranscriptOpenChange,
+  onJump,
 }: {
   task: AgentTask;
   issueId: string;
   onTranscriptOpenChange?: (open: boolean, fromKeyboard?: boolean) => void;
+  /** Turns the trigger into a button that takes the reader to this run's block. */
+  onJump?: () => void;
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
@@ -575,14 +578,29 @@ export function ActiveTaskRow({
   // anyway would only ever be exercised by hand-written fixtures, which is a
   // test that asserts a scenario production cannot produce. Restore it in the
   // same change that adds incremental reporting + cache invalidation.
+  const triggerText = task.wakeup_id ? (
+    <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
+  ) : (
+    <TriggerText text={trigger} />
+  );
   return (
     <RowShell task={task}>
-      {task.wakeup_id ? (
-        <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
+      {onJump ? (
+        <button
+          type="button"
+          onClick={onJump}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-xs text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {triggerText}
+          <TaskCommentCoverage task={task} />
+          <span className="sr-only">{t(($) => $.execution_log.jump_to_run)}</span>
+        </button>
       ) : (
-        <TriggerText text={trigger} />
+        <>
+          {triggerText}
+          <TaskCommentCoverage task={task} />
+        </>
       )}
-      <TaskCommentCoverage task={task} />
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>

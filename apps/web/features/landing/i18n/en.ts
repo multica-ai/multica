@@ -402,10 +402,10 @@ export function createEnDict(
 
   privacy: {
     title: "Privacy Policy",
-    lastUpdated: "Last updated: September 24, 2026",
+    lastUpdated: "Last updated: October 22, 2026",
     intro: [
       "This Privacy Policy explains how Index Labs (Hong Kong) Limited (“Multica”, “we”, “us”) collects, uses, and shares personal information when you visit multica.ai, contact us, or use Multica Cloud, our hosted service, including the web, desktop, and mobile apps.",
-      "It does not cover Multica deployments you host yourself. The operator of a self-hosted deployment controls its data, and any AI providers, integrations, or analytics it uses depend on how they configure it. The only thing a self-hosted server sends us is a daily usage snapshot: a random ID for the deployment, so snapshots from the same server can be linked; the server version; approximate counts of workspaces, members, agents, and connected daemons; and the number of agent runs started, completed, failed, and cancelled that day. It contains no names, email addresses, or content. Setting DO_NOT_TRACK=1 turns off this snapshot.",
+      "It does not cover Multica deployments you host yourself. The operator of a self-hosted deployment controls its data, and any AI providers, integrations, or analytics it uses depend on how they configure it. The only thing a self-hosted server sends us is a daily usage snapshot: a random ID for the deployment, so snapshots from the same server can be linked; the server version; approximate counts of workspaces, members, agents, and connected daemons; the number of agent runs started, completed, failed, and cancelled that day; and approximate counts of members who opened the web or desktop app, and of members who personally started an agent run, over the previous 1, 7, and 28 days. It contains no names, email addresses, or content. Setting DO_NOT_TRACK=1 turns off this snapshot.",
     ],
     sections: [
       {
@@ -868,7 +868,7 @@ export function createEnDict(
           "Drag a status, built-in ones included, to set its place in boards, lists, and status menus.",
           "Give a custom status the icon shape you want.",
           "DeepSeek Harness Desktop is picked up as a runtime on its own, with no manual setup.",
-          "Self-hosted servers send one anonymous daily snapshot of deployment size and run volume; set DO_NOT_TRACK=1 to turn it off.",
+          "Self-hosted servers send one anonymous daily snapshot of deployment size, member activity, and run volume; set DO_NOT_TRACK=1 to turn it off.",
         ],
         improvements: [
           "Archiving a status tells you how many Issues still use it, and takes you to them.",

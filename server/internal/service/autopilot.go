@@ -1058,6 +1058,8 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)
 	}
+	// Only a manual "run now" carries HumanAction; schedule/webhook fires do not.
+	s.TaskSvc.RecordHumanDelegation(ctx, autopilotAttr)
 
 	// Update run with task reference.
 	updatedRun, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{

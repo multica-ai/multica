@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { mockNativeDialog } from "../test-utils/native-dialog";
 
@@ -43,6 +44,7 @@ vi.mock("../../i18n", () => ({
           fullscreen: "Fullscreen",
           close_preview: "Close",
         },
+        attachment: { reload: "Reload" },
       }),
   }),
 }));
@@ -152,6 +154,33 @@ describe("CodeBlockView — html language toggle", () => {
     expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Show preview" })).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+  });
+
+  it("reloads inline and enlarged HTML while preserving the editor and surface", () => {
+    render(<CodeBlockView {...makeProps("html", "<p>hello</p>")} />);
+    const original = document.querySelector("iframe");
+    const content = screen.getByTestId("nvc");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    const inline = document.querySelector("iframe");
+    expect(inline).not.toBe(original);
+    expect(inline?.getAttribute("srcdoc")).toBe("<p>hello</p>");
+    expect(screen.getByTestId("nvc")).toBe(content);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
+    expect(screen.getByRole("button", { name: "Reload" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reload" }));
+    const enlarged = dialog.querySelector("iframe");
+    expect(enlarged).not.toBe(inline);
+    expect(enlarged?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(document.querySelector("iframe")).toBe(enlarged);
+    expect(screen.getByTestId("nvc")).toBe(content);
+    expect(content.closest("pre")?.className).not.toContain("sr-only");
   });
 
   it("defers source edits until the retained preview is visible", () => {

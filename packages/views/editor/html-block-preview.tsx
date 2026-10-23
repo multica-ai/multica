@@ -14,7 +14,7 @@
  * `<NodeViewContent as="code" />` so the user can continue typing.
  */
 
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { HtmlPreviewSurface } from "./html-preview-surface";
 import { useT } from "../i18n";
@@ -105,7 +105,13 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [error, setError] = useState<DynamicBlockError | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const frameTitle = t(($) => $.code_block.html_preview);
+
+  const reload = () => {
+    setError(null);
+    setReloadKey((key) => key + 1);
+  };
 
   // Built after mount: the theme tokens come from the host's computed style.
   // A theme switch rebuilds the document, which reruns its scripts — a chart
@@ -126,6 +132,7 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
         error={error}
         fullscreen={fullscreen}
         onFullscreen={() => setFullscreen(true)}
+        onReload={reload}
         preview={({ active }) => (
           <HtmlBlockBody
             key={html}
@@ -134,6 +141,8 @@ export function HtmlBlockPreview({ html, title }: HtmlBlockPreviewProps) {
             title={frameTitle}
             active={active}
             fullscreen={fullscreen}
+            reloadKey={reloadKey}
+            onReload={reload}
             onFullscreenChange={setFullscreen}
             onError={setError}
           />
@@ -149,6 +158,8 @@ function HtmlBlockBody({
   title,
   active,
   fullscreen,
+  reloadKey,
+  onReload,
   onFullscreenChange,
   onError,
 }: {
@@ -157,14 +168,23 @@ function HtmlBlockBody({
   title: string;
   active: boolean;
   fullscreen: boolean;
+  reloadKey: number;
+  onReload: () => void;
   onFullscreenChange: (open: boolean) => void;
   onError: (error: DynamicBlockError) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [measured, reportHeight] = useReducer(nextHtmlBlockHeight, INITIAL_HTML_BLOCK_HEIGHT);
+  const [measured, setMeasured] = useState(INITIAL_HTML_BLOCK_HEIGHT);
   const [cachedHeight, setCachedHeight] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
+
+  useLayoutEffect(() => {
+    setMeasured(INITIAL_HTML_BLOCK_HEIGHT);
+    setLoaded(false);
+    setTimedOut(false);
+    setCachedHeight(readCachedHeight(html));
+  }, [html, srcDoc, reloadKey]);
 
   // The listener is registered once; these refs give it the current values.
   const activeRef = useRef(active);
@@ -174,10 +194,6 @@ function HtmlBlockBody({
     activeRef.current = active && !fullscreen;
     onErrorRef.current = onError;
   });
-
-  useEffect(() => {
-    setCachedHeight(readCachedHeight(html));
-  }, [html]);
 
   useEffect(() => {
     if (!active || fullscreen) return;
@@ -202,7 +218,9 @@ function HtmlBlockBody({
       }
       // A hidden frame lays out at zero width; what it reports is not its
       // height. It reports again once it is shown and resized back.
-      if (activeRef.current) reportHeight(message.height);
+      if (activeRef.current) {
+        setMeasured((previous) => nextHtmlBlockHeight(previous, message.height));
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -229,6 +247,7 @@ function HtmlBlockBody({
       open={fullscreen}
       inlineHeight={active ? bodyHeight : 0}
       onOpenChange={onFullscreenChange}
+      onReload={onReload}
       title={title}
     >
       <div
@@ -237,6 +256,7 @@ function HtmlBlockBody({
       >
         {srcDoc != null && (
           <CodeBlockIframe
+            key={reloadKey}
             ref={iframeRef}
             html={srcDoc}
             title={title}

@@ -92,6 +92,18 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
+
+  it("makes the trigger a jump button only when given a jump handler", () => {
+    const onJump = vi.fn();
+    const { rerender } = renderWithI18n(<ActiveTaskRow task={makeTask({})} issueId="issue-1" />);
+    expect(screen.queryByRole("button", { name: /Go to run/ })).not.toBeInTheDocument();
+
+    rerender(<ActiveTaskRow task={makeTask({})} issueId="issue-1" onJump={onJump} />);
+    const jump = screen.getByRole("button", { name: /Go to run/ });
+    expect(jump).toHaveTextContent("Started from comment");
+    fireEvent.click(jump);
+    expect(onJump).toHaveBeenCalledOnce();
+  });
 });
 
 describe("TaskCommentCoverage", () => {

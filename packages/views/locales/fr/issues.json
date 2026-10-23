@@ -725,6 +725,7 @@
     "retry_failed": "Échec de la relance de l'exécution",
     "retry_blocked": "Non relancée — vous n'avez pas la permission d'utiliser cet agent",
     "transcript_tooltip": "Voir la transcription",
+    "jump_to_run": "Aller à l'exécution",
     "cancel_failed": "Échec de l'annulation de l'exécution",
     "trigger_retry": "Relance",
     "trigger_retry_attempt": "Relance n° {{attempt}}",
