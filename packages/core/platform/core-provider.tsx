@@ -5,6 +5,7 @@ import { ApiClient } from "../api/client";
 import { installFreezeWatchdog } from "../diagnostics/freeze-watchdog";
 import { setApiInstance, setSchemaLogger } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
+import { MobileAppearanceSync } from "../appearance/mobile-appearance-sync";
 import { createChatStore, registerChatStore } from "../chat";
 import {
   I18nProvider,
@@ -197,6 +198,7 @@ export function CoreProvider({
   // through window.location.reload(), never client-side changeLanguage.
   const tree = (
     <QueryProvider>
+      <MobileAppearanceSync />
       <AuthInitializer
         onLogin={onLogin}
         storage={storage}

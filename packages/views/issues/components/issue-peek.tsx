@@ -21,7 +21,7 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { AppLink } from "../../navigation";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_CHROME_GUTTER } from "../../layout/page-header";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 import { IssueDetail } from "./issue-detail";
@@ -176,7 +176,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
         // panel with no way to close it but Esc.
         fallback={({ error }) => (
           <div className="flex flex-1 min-h-0 flex-col">
-            <div className={cn("flex h-12 shrink-0 items-center justify-end gap-1 border-b", PAGE_GUTTER)}>
+            <div className={cn("flex h-12 shrink-0 items-center justify-end gap-1 border-b", PAGE_CHROME_GUTTER)}>
               <IssuePeekTrailingActions issueId={issueId} />
             </div>
             <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
