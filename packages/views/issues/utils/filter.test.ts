@@ -6,6 +6,7 @@ import {
   filterAssigneeGroups,
   filterIssues,
   issueMatchesPropertyFilters,
+  issueMatchesWorkingMode,
   NO_PROPERTY_VALUE,
   type IssueFilters,
   type IssueFilterState,
@@ -22,7 +23,7 @@ const NO_FILTER: IssueFilters = {
   labelFilters: [],
 };
 
-const NO_FILTER_STATE: IssueFilterState = { ...NO_FILTER, workingOnly: false };
+const NO_FILTER_STATE: IssueFilterState = { ...NO_FILTER, workingMode: "all" };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -292,25 +293,25 @@ describe("filterIssues", () => {
   });
 
   // --- Agent running quick filter ---
-  it("keeps only running issues when agentRunningFilter is on", () => {
+  it("keeps only running issues when the working mode is working", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
-      agentRunningFilter: true,
+      agentWorkingMode: "working",
       runningIssueIds: new Set(["2", "4"]),
     });
     expect(result.map((i) => i.id)).toEqual(["2", "4"]);
   });
 
-  it("hides everything when agentRunningFilter is on but no ids running", () => {
+  it("hides everything when the working mode is working but no ids running", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
-      agentRunningFilter: true,
+      agentWorkingMode: "working",
       runningIssueIds: new Set(),
     });
     expect(result).toHaveLength(0);
   });
 
-  it("ignores runningIssueIds when agentRunningFilter is off", () => {
+  it("ignores runningIssueIds when the working mode is all", () => {
     // The set is irrelevant unless the toggle is true — this guards against
     // a future refactor accidentally applying the set as an implicit
     // pre-filter when the user hasn't asked for it.
@@ -321,11 +322,11 @@ describe("filterIssues", () => {
     expect(result).toHaveLength(4);
   });
 
-  it("composes agentRunningFilter with other filters (AND semantics)", () => {
+  it("composes the working mode with other filters (AND semantics)", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
       statusFilters: ["todo"],
-      agentRunningFilter: true,
+      agentWorkingMode: "working",
       runningIssueIds: new Set(["1", "2"]),
     });
     // Issue 2 is in_progress (filtered out by status), issue 1 is todo and
@@ -333,12 +334,12 @@ describe("filterIssues", () => {
     expect(result.map((i) => i.id)).toEqual(["1"]);
   });
 
-  it("applies workingOnly from activity context without treating queued issues as working", () => {
+  it("applies the working mode from activity context without treating queued issues as working", () => {
     const result = applyIssueFilters(
       issues,
       {
         ...NO_FILTER,
-        workingOnly: true,
+        workingMode: "working",
       },
       {
         activityByIssueId: new Map([
@@ -349,6 +350,82 @@ describe("filterIssues", () => {
     );
 
     expect(result.map((i) => i.id)).toEqual(["1"]);
+  });
+
+  // --- Not working: the exact complement of working ---
+  it("not_working keeps exactly the issues working would drop", () => {
+    const context = { runningIssueIds: new Set(["2", "4"]) };
+    const working = applyIssueFilters(issues, { ...NO_FILTER_STATE, workingMode: "working" }, context);
+    const notWorking = applyIssueFilters(issues, { ...NO_FILTER_STATE, workingMode: "not_working" }, context);
+    const all = applyIssueFilters(issues, NO_FILTER_STATE, context);
+    expect(notWorking.map((i) => i.id)).toEqual(["1", "3"]);
+    expect([...working, ...notWorking].map((i) => i.id).sort()).toEqual(all.map((i) => i.id).sort());
+    expect(working.some((w) => notWorking.some((n) => n.id === w.id))).toBe(false);
+  });
+
+  it("not_working over a LOADED empty projection keeps every issue", () => {
+    const result = applyIssueFilters(
+      issues,
+      { ...NO_FILTER_STATE, workingMode: "not_working" },
+      { runningIssueIds: new Set() },
+    );
+    expect(result).toHaveLength(issues.length);
+  });
+
+  it("not_working over an UNRESOLVED projection keeps nothing, never everything", () => {
+    // `undefined` means the projection has not loaded. Listing every issue
+    // would put the ones an agent is running on under "Not working".
+    const result = applyIssueFilters(
+      issues,
+      { ...NO_FILTER_STATE, workingMode: "not_working" },
+      { runningIssueIds: undefined },
+    );
+    expect(result).toHaveLength(0);
+    expect(
+      applyIssueFilters(issues, { ...NO_FILTER_STATE, workingMode: "working" }, {}),
+    ).toHaveLength(0);
+  });
+
+  it("not_working treats queued-only issues as not working (running is the only working state)", () => {
+    const result = applyIssueFilters(
+      issues,
+      { ...NO_FILTER_STATE, workingMode: "not_working" },
+      {
+        activityByIssueId: new Map([
+          ["1", { isWorking: true, isQueued: false, runningTasks: [], queuedTasks: [] }],
+          ["2", { isWorking: false, isQueued: true, runningTasks: [], queuedTasks: [] }],
+        ]),
+      },
+    );
+    expect(result.map((i) => i.id)).toEqual(["2", "3", "4"]);
+  });
+
+  it("an issue with several running agents stays working; it leaves not_working once, not per agent", () => {
+    // The projection is a SET of issue ids, so two agents on one issue are one
+    // member. Stopping one of them must not move the issue while the other runs.
+    const twoAgents = new Set(["2"]);
+    expect(issueMatchesWorkingMode("2", "not_working", { runningIssueIds: twoAgents })).toBe(false);
+    expect(issueMatchesWorkingMode("2", "working", { runningIssueIds: twoAgents })).toBe(true);
+    // One agent stops: the issue is still in the projection (the other runs).
+    expect(issueMatchesWorkingMode("2", "not_working", { runningIssueIds: new Set(["2"]) })).toBe(false);
+    // Last agent stops: it re-enters Not working.
+    expect(issueMatchesWorkingMode("2", "not_working", { runningIssueIds: new Set() })).toBe(true);
+  });
+
+  it("composes not_working with other filters (AND semantics)", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      agentWorkingMode: "not_working",
+      runningIssueIds: new Set(["1"]),
+    });
+    expect(result.map((i) => i.id)).not.toContain("1");
+    expect(result.every((i) => i.status === "todo")).toBe(true);
+  });
+
+  it("issueMatchesWorkingMode: all always matches", () => {
+    expect(issueMatchesWorkingMode("x", "all", {})).toBe(true);
+    expect(issueMatchesWorkingMode("x", undefined, {})).toBe(true);
   });
 
   // --- Show sub-issues display toggle ---
@@ -404,7 +481,7 @@ describe("filterAssigneeGroups", () => {
     const groups = [group("a1", [makeIssue({ id: "1" })])];
     expect(filterAssigneeGroups(groups, {})).toBe(groups);
     expect(filterAssigneeGroups(groups, { showSubIssues: true })).toBe(groups);
-    expect(filterAssigneeGroups(groups, { agentRunningFilter: false })).toBe(groups);
+    expect(filterAssigneeGroups(groups, { agentWorkingMode: "all" })).toBe(groups);
   });
 
   it("passes undefined through untouched", () => {
@@ -426,14 +503,14 @@ describe("filterAssigneeGroups", () => {
     ).toEqual([{ id: "a1", ids: ["P1"], total: 1 }]);
   });
 
-  it("keeps only running issues when agentRunningFilter is on", () => {
+  it("keeps only running issues when the working mode is working", () => {
     const groups = [
       group("a1", [makeIssue({ id: "1" }), makeIssue({ id: "2" })]),
       group("a2", [makeIssue({ id: "3" })]),
       group("none", [makeIssue({ id: "4" })]),
     ];
     const result = filterAssigneeGroups(groups, {
-      agentRunningFilter: true,
+      agentWorkingMode: "working",
       runningIssueIds: new Set(["2", "4"]),
     });
     expect(
@@ -444,7 +521,38 @@ describe("filterAssigneeGroups", () => {
     ]);
   });
 
-  it("composes showSubIssues and agentRunningFilter (AND semantics)", () => {
+  it("not_working keeps the complement per assignee group and drops emptied groups", () => {
+    const groups = [
+      group("a1", [makeIssue({ id: "1" }), makeIssue({ id: "2" })]),
+      group("a2", [makeIssue({ id: "3" })]),
+      group("none", [makeIssue({ id: "4" })]),
+    ];
+    const result = filterAssigneeGroups(groups, {
+      agentWorkingMode: "not_working",
+      runningIssueIds: new Set(["2", "3", "4"]),
+    });
+    expect(
+      result!.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total })),
+    ).toEqual([{ id: "a1", ids: ["1"], total: 1 }]);
+  });
+
+  it("not_working over an unresolved projection hides everything instead of listing running issues", () => {
+    const groups = [group("a1", [makeIssue({ id: "1" })])];
+    expect(
+      filterAssigneeGroups(groups, { agentWorkingMode: "not_working", runningIssueIds: undefined }),
+    ).toEqual([]);
+  });
+
+  it("not_working over a loaded empty projection keeps every group", () => {
+    const groups = [group("a1", [makeIssue({ id: "1" })]), group("a2", [makeIssue({ id: "2" })])];
+    const result = filterAssigneeGroups(groups, {
+      agentWorkingMode: "not_working",
+      runningIssueIds: new Set(),
+    });
+    expect(result!.map((g) => g.id)).toEqual(["a1", "a2"]);
+  });
+
+  it("composes showSubIssues and the working mode (AND semantics)", () => {
     const groups = [
       group("a1", [
         makeIssue({ id: "P", parent_issue_id: null }),
@@ -455,7 +563,7 @@ describe("filterAssigneeGroups", () => {
     // running → both dropped, group removed.
     const result = filterAssigneeGroups(groups, {
       showSubIssues: false,
-      agentRunningFilter: true,
+      agentWorkingMode: "working",
       runningIssueIds: new Set(["C"]),
     });
     expect(result).toEqual([]);

@@ -89,10 +89,8 @@ export function MyIssuesHeader({
     { value: "created", label: t(($) => $.header.scope.created_label), description: t(($) => $.header.scope.created_description) },
     { value: "agents", label: t(($) => $.header.scope.agents_label), description: t(($) => $.header.scope.agents_description) },
   ];
-  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
-  const toggleAgentRunningFilter = useViewStore(
-    (s) => s.toggleAgentRunningFilter,
-  );
+  const agentWorkingMode = useViewStore((s) => s.agentWorkingMode);
+  const cycleAgentWorkingMode = useViewStore((s) => s.cycleAgentWorkingMode);
   const scopeLabel = SCOPES.find((s) => s.value === scope)?.label ?? SCOPES[0]?.label;
 
   return (
@@ -156,14 +154,16 @@ export function MyIssuesHeader({
         </DropdownMenu>
 
         <div className="flex shrink-0 items-center gap-1">
-          {agentRunningFilter && (
+          {agentWorkingMode !== "all" && (
             <span className="mr-1 hidden text-caption text-muted-foreground md:inline">
-              {tIssues(($) => $.agent_activity.filter_active_label)}
+              {agentWorkingMode === "not_working"
+                ? tIssues(($) => $.agent_activity.filter_active_label_not_working)
+                : tIssues(($) => $.agent_activity.filter_active_label)}
             </span>
           )}
           <WorkspaceAgentWorkingChip
-            value={agentRunningFilter}
-            onToggle={toggleAgentRunningFilter}
+            value={agentWorkingMode}
+            onToggle={cycleAgentWorkingMode}
             agents={workingAgents}
           />
           <IssueDisplayControls

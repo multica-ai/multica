@@ -18,7 +18,7 @@ describe("archive precondition", () => {
   it("shows all matching work, including sub-issues and terminals, without changing a saved view", () => {
     const store = getIssueSurfaceViewStore("workspace:all");
     store.setState({ statusFilters: ["todo"], priorityFilters: ["urgent"], projectFilters: ["p"], dateFilter: { field: "created_at", preset: "today" } as never,
-      hiddenStatuses: ["shipped"], listCollapsedStatuses: ["shipped"], showSubIssues: false, agentRunningFilter: true });
+      hiddenStatuses: ["shipped"], listCollapsedStatuses: ["shipped"], showSubIssues: false, agentWorkingMode: "not_working" });
     const saved = getIssueSurfaceViewStore("view:v1");
     saved.setState({ statusFilters: ["backlog"] });
     useActiveIssueViewStore.getState().setActive("ws:workspace", "v1");
@@ -27,7 +27,7 @@ describe("archive precondition", () => {
     const previous = store.getState();
     const inspection = createIssueStatusListStore("shipped");
     expect(inspection.getState()).toMatchObject({ statusFilters: ["shipped"], priorityFilters: [], projectFilters: [], dateFilter: null,
-      hiddenStatuses: [], listCollapsedStatuses: [], showSubIssues: true, agentRunningFilter: false, viewMode: "list" });
+      hiddenStatuses: [], listCollapsedStatuses: [], showSubIssues: true, agentWorkingMode: "all", viewMode: "list" });
     inspection.getState().toggleListCollapsed("shipped");
     expect(store.getState()).toBe(previous);
     expect(createIssueStatusListStore("shipped").getState().listCollapsedStatuses).toEqual([]);

@@ -236,6 +236,17 @@ export function normalizeSortForGrouping(
     : { sortBy, sortDirection };
 }
 
+/**
+ * Quick filter on live agent activity: `working` keeps issues a visible agent
+ * is running on, `not_working` keeps the exact complement, `all` is off.
+ * Cycles all -> working -> not_working -> all.
+ */
+export type AgentWorkingMode = "all" | "working" | "not_working";
+
+export function nextAgentWorkingMode(mode: AgentWorkingMode): AgentWorkingMode {
+  return mode === "all" ? "working" : mode === "working" ? "not_working" : "all";
+}
+
 export interface IssueViewState {
   viewMode: ViewMode;
   grouping: IssueGrouping;
@@ -264,12 +275,12 @@ export interface IssueViewState {
    */
   propertyFilters: Record<string, PropertyFilterValue[]>;
   dateFilter: IssueDateFilter | null;
-  // When true, the list only shows issues that currently have at least one
-  // agent task in `running` status. Drives the workspace "agents working"
-  // quick filter chip in the issues header. Not persisted across reloads —
-  // running state changes second-to-second, a persisted toggle would let
-  // users return to an empty list with no obvious cause.
-  agentRunningFilter: boolean;
+  // "working" only shows issues that currently have at least one agent task in
+  // `running` status; "not_working" shows the rest. Drives the workspace
+  // "agents working" quick filter chip in the issues header. Not persisted
+  // across reloads — running state changes second-to-second, a persisted
+  // toggle would let users return to an empty list with no obvious cause.
+  agentWorkingMode: AgentWorkingMode;
   sortBy: SortField;
   sortDirection: SortDirection;
   /** Last explicit direction per field, so switching fields is reversible. */
@@ -329,7 +340,7 @@ export interface IssueViewState {
    *  for text/number/date/url, which build the array including "__none__"). */
   setPropertyFilterValues: (propertyId: string, optionIds: PropertyFilterValue[]) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
-  toggleAgentRunningFilter: () => void;
+  cycleAgentWorkingMode: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -375,7 +386,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   labelFilters: [],
   propertyFilters: {},
   dateFilter: null,
-  agentRunningFilter: false,
+  agentWorkingMode: "all",
   sortBy: "created_at",
   sortDirection: "desc",
   sortDirections: { created_at: "desc" },
@@ -496,8 +507,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       return { propertyFilters };
     }),
   setDateFilter: (filter) => set({ dateFilter: filter }),
-  toggleAgentRunningFilter: () =>
-    set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
+  cycleAgentWorkingMode: () =>
+    set((state) => ({ agentWorkingMode: nextAgentWorkingMode(state.agentWorkingMode) })),
   hideStatus: (status) =>
     set((state) =>
       state.hiddenStatuses.includes(status)
@@ -521,7 +532,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       labelFilters: [],
       propertyFilters: {},
       dateFilter: null,
-      agentRunningFilter: false,
+      agentWorkingMode: "all",
     }),
   resetFiltersTo: (snapshot) => set({ ...snapshot }),
   clearFilterDimension: (dimension) =>
@@ -659,7 +670,7 @@ export const viewStorePersistOptions = (name: string) => ({
   name,
   storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
   partialize: (state: IssueViewState) => ({
-    // NOTE: `agentRunningFilter` is intentionally NOT persisted — running
+    // NOTE: `agentWorkingMode` is intentionally NOT persisted — running
     // state changes second-to-second, and a stored toggle would let users
     // return to an unexplained empty list. Keep it ephemeral. See the
     // field comment on IssueViewState.

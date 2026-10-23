@@ -99,6 +99,11 @@ type issueTableFiltersRequest struct {
 	WorkingOnly      bool                         `json:"working_only,omitempty"`
 	WorkingIssueIDs  []string                     `json:"working_issue_ids,omitempty"`
 	IncludeSubIssues *bool                        `json:"include_sub_issues,omitempty"`
+	// NotWorkingIssueIDs is the inverse of WorkingIssueIDs: it excludes the
+	// supplied visible working-issue ids. An absent or empty list excludes
+	// nothing, so "projection loaded, zero running" lets every issue qualify.
+	// It cannot be combined with WorkingIssueIDs.
+	NotWorkingIssueIDs []string `json:"not_working_issue_ids,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -265,6 +270,7 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
 	normalized.Filters.Assignees = sortedUniqueActors(normalized.Filters.Assignees)
 	normalized.Filters.WorkingIssueIDs = sortedUniqueStrings(normalized.Filters.WorkingIssueIDs)
+	normalized.Filters.NotWorkingIssueIDs = sortedUniqueStrings(normalized.Filters.NotWorkingIssueIDs)
 	normalized.Filters.Creators = sortedUniqueActors(normalized.Filters.Creators)
 	for key, values := range normalized.Filters.Properties {
 		normalized.Filters.Properties[key] = sortedUniqueRawJSON(values)
@@ -664,6 +670,13 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		where = append(where, fmt.Sprintf("i.%s >= %s AND i.%s < %s", column, addArg(start), column, addArg(end)))
 	}
 
+	// A positive and a negative working-id filter cannot both hold. Refuse the
+	// request instead of silently picking one, so a client bug cannot turn into
+	// a plausible-looking but wrong list.
+	if spec.Filters.WorkingIssueIDs != nil && len(spec.Filters.NotWorkingIssueIDs) > 0 {
+		writeError(w, http.StatusBadRequest, "filters.working_issue_ids and filters.not_working_issue_ids are mutually exclusive")
+		return issueTableSQL{}, false
+	}
 	if spec.Filters.WorkingOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running')")
 	}
@@ -680,6 +693,16 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 				addArg(workingIssueIDs),
 			))
 		}
+	}
+	notWorkingIssueIDs, ok := parseIssueTableUUIDList(w, spec.Filters.NotWorkingIssueIDs, "filters.not_working_issue_ids")
+	if !ok {
+		return issueTableSQL{}, false
+	}
+	if len(notWorkingIssueIDs) > 0 {
+		where = append(where, fmt.Sprintf(
+			"NOT (i.id = ANY(%s::uuid[]))",
+			addArg(notWorkingIssueIDs),
+		))
 	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {
 		where = append(where, "i.parent_issue_id IS NULL")

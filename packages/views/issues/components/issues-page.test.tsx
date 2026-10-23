@@ -290,6 +290,7 @@ vi.mock("@multica/core/api", () => ({
 
 // Mock view store
 const mockViewState = {
+  agentWorkingMode: "all" as "all" | "working" | "not_working",
   viewMode: "board" as "board" | "list",
   grouping: "status" as "status" | "assignee",
   statusFilters: [] as string[],

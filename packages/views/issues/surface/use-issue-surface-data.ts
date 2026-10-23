@@ -8,6 +8,7 @@ import { childIssueProgressOptions } from "@multica/core/issues/queries";
 import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
 import type { IssueStatus, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
+import type { AgentWorkingMode } from "@multica/core/issues/stores/view-store";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
 import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
@@ -110,7 +111,7 @@ export function useIssueSurfaceData({
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
-  agentRunningFilter,
+  agentWorkingMode,
   creatorFilters,
   projectFilters,
   includeNoProject,
@@ -140,15 +141,17 @@ export function useIssueSurfaceData({
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
-  agentRunningFilter: boolean;
+  agentWorkingMode: AgentWorkingMode;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
   projectStatusFilters: ProjectStatus[];
   labelFilters: string[];
   propertyFilters: Record<string, PropertyFilterValue[]>;
-  /** Distinct running-task issue ids projected by `/api/working-agents`. */
-  workingIssueIDs: ReadonlySet<string>;
+  /** Distinct running-task issue ids projected by `/api/working-agents`.
+   *  `undefined` while that projection is unresolved — the client filter then
+   *  matches nothing rather than guessing (see `issueMatchesWorkingMode`). */
+  workingIssueIDs: ReadonlySet<string> | undefined;
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
@@ -230,12 +233,12 @@ export function useIssueSurfaceData({
       projectStatusFilters,
       labelFilters,
       propertyFilters,
-      workingOnly: agentRunningFilter,
+      workingMode: agentWorkingMode,
       showSubIssues,
     }),
     [
       assigneeFilters,
-      agentRunningFilter,
+      agentWorkingMode,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -301,7 +304,7 @@ export function useIssueSurfaceData({
   const workingFilterState = useMemo<IssueFilterState>(
     () => ({
       ...baseFilterState,
-      workingOnly: true,
+      workingMode: "working",
     }),
     [baseFilterState],
   );
@@ -401,7 +404,7 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
-      agentRunningFilter,
+      agentWorkingMode,
       runningIssueIds: workingIssueIDs,
       creatorFilters,
       projectFilters,
@@ -414,7 +417,7 @@ export function useIssueSurfaceData({
     }),
     [
       assigneeFilters,
-      agentRunningFilter,
+      agentWorkingMode,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,

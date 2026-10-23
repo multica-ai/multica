@@ -156,7 +156,7 @@ const mockViewState: Record<string, unknown> = {
   labelFilters: [],
   propertyFilters: {},
   cardPropertyIds: [],
-  agentRunningFilter: false,
+  agentWorkingMode: "all",
 };
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   ViewStoreProvider: ({ children }: { children: ReactNode }) => children,

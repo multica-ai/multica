@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkingAgentSummary } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -75,7 +75,7 @@ describe("WorkspaceAgentWorkingChip", () => {
   it("counts exactly the agents the surface projection supplies", () => {
     renderWithI18n(
       <WorkspaceAgentWorkingChip
-        value={false}
+        value="all"
         onToggle={() => {}}
         agents={[makeAgent("agent-1"), makeAgent("agent-2", 3), makeAgent("agent-3")]}
       />,
@@ -97,7 +97,7 @@ describe("WorkspaceAgentWorkingChip", () => {
   // other agents are busy elsewhere in the workspace.
   it("shows a known zero for a surface with no working rows", () => {
     renderWithI18n(
-      <WorkspaceAgentWorkingChip value={false} onToggle={() => {}} agents={[]} />,
+      <WorkspaceAgentWorkingChip value="all" onToggle={() => {}} agents={[]} />,
     );
 
     expect(
@@ -111,7 +111,7 @@ describe("WorkspaceAgentWorkingChip", () => {
   it("renders an indeterminate label while the projection is unresolved", () => {
     renderWithI18n(
       <WorkspaceAgentWorkingChip
-        value={false}
+        value="all"
         onToggle={() => {}}
         agents={undefined}
       />,
@@ -129,7 +129,7 @@ describe("WorkspaceAgentWorkingChip", () => {
   it("does not let the hover body downgrade an unresolved projection to zero", () => {
     renderWithI18n(
       <WorkspaceAgentWorkingChip
-        value={false}
+        value="all"
         onToggle={() => {}}
         agents={undefined}
       />,
@@ -144,7 +144,7 @@ describe("WorkspaceAgentWorkingChip", () => {
   it("does not dim the chip while the projection is unresolved", () => {
     renderWithI18n(
       <WorkspaceAgentWorkingChip
-        value={false}
+        value="all"
         onToggle={() => {}}
         agents={undefined}
       />,
@@ -157,7 +157,7 @@ describe("WorkspaceAgentWorkingChip", () => {
 
   it("keeps the active filter visually selected after the final agent stops", () => {
     renderWithI18n(
-      <WorkspaceAgentWorkingChip value onToggle={() => {}} agents={[]} />,
+      <WorkspaceAgentWorkingChip value="working" onToggle={() => {}} agents={[]} />,
     );
 
     expect(mockState.buttonVariant).toBe("brand");
@@ -204,29 +204,95 @@ describe("chipActivity", () => {
   });
 });
 
+describe("WorkspaceAgentWorkingChip tri-state", () => {
+  const agents = [makeAgent("agent-1"), makeAgent("agent-2")];
+
+  it("describes each of the three states without renaming the button", () => {
+    const expected = {
+      all: "showing all issues",
+      working: "showing only issues with agents working",
+      not_working: "showing only issues without agents working",
+    } as const;
+    for (const mode of ["all", "working", "not_working"] as const) {
+      cleanup();
+      renderWithI18n(<WorkspaceAgentWorkingChip value={mode} onToggle={() => {}} agents={agents} />);
+      // The count label is the accessible name in every state, so the number
+      // does not change when the chip is clicked.
+      const button = screen.getByRole("button", { name: "2 agents working" });
+      expect(button.getAttribute("data-working-mode")).toBe(mode);
+      const describedBy = button.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)?.textContent).toBe(expected[mode]);
+    }
+  });
+
+  it("marks each state with a distinct shape, not only colour", () => {
+    const icon = (mode: "all" | "working" | "not_working") => {
+      cleanup();
+      renderWithI18n(<WorkspaceAgentWorkingChip value={mode} onToggle={() => {}} agents={agents} />);
+      return document.querySelector("[data-state-icon]")?.getAttribute("data-state-icon") ?? null;
+    };
+    expect(icon("all")).toBeNull();
+    expect(icon("working")).toBe("working");
+    expect(icon("not_working")).toBe("not_working");
+  });
+
+  it("keeps the state glyph decorative and the accessible name unchanged", () => {
+    renderWithI18n(<WorkspaceAgentWorkingChip value="not_working" onToggle={() => {}} agents={agents} />);
+    const glyph = document.querySelector("[data-state-icon]")!;
+    expect(glyph.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByRole("button", { name: "2 agents working" })).toBeTruthy();
+  });
+
+  it("shows the glyph even when the projection is unresolved", () => {
+    renderWithI18n(<WorkspaceAgentWorkingChip value="working" onToggle={() => {}} agents={undefined} />);
+    expect(document.querySelector('[data-state-icon="working"]')).toBeTruthy();
+  });
+
+  it("wears the filled brand tier in both filtered states", () => {
+    for (const mode of ["working", "not_working"] as const) {
+      cleanup();
+      renderWithI18n(<WorkspaceAgentWorkingChip value={mode} onToggle={() => {}} agents={[]} />);
+      expect(mockState.buttonVariant).toBe("brand");
+    }
+  });
+
+  it("keeps the count when not_working is selected", () => {
+    renderWithI18n(<WorkspaceAgentWorkingChip value="not_working" onToggle={() => {}} agents={agents} />);
+    expect(screen.getByRole("button", { name: "2 agents working" })).toBeTruthy();
+  });
+
+  it("calls onToggle once per click and never owns the state itself", () => {
+    const onToggle = vi.fn();
+    renderWithI18n(<WorkspaceAgentWorkingChip value="all" onToggle={onToggle} agents={agents} />);
+    fireEvent.click(screen.getByRole("button", { name: "2 agents working" }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("chipAppearance", () => {
   it("wears the filled brand tier while the filter is on", () => {
-    expect(chipAppearance(true, "some").variant).toBe("brand");
+    expect(chipAppearance("working", "some").variant).toBe("brand");
   });
 
   it("wears the tint tier for activity without the filter", () => {
-    expect(chipAppearance(false, "some").variant).toBe("brandSubtle");
+    expect(chipAppearance("all", "some").variant).toBe("brandSubtle");
   });
 
   it("wears the plain tier with muted text when nothing is running", () => {
-    const appearance = chipAppearance(false, "none");
+    const appearance = chipAppearance("all", "none");
     expect(appearance.variant).toBe("outline");
     expect(appearance.className).toContain("text-muted-foreground");
   });
 
   it("stays neutral but undimmed while the projection is unknown", () => {
-    const appearance = chipAppearance(false, "unknown");
+    const appearance = chipAppearance("all", "unknown");
     expect(appearance.variant).toBe("outline");
     expect(appearance.className).not.toContain("text-muted-foreground");
   });
 
   it("does not mute the active zero state", () => {
-    const appearance = chipAppearance(true, "none");
+    const appearance = chipAppearance("working", "none");
     expect(appearance.variant).toBe("brand");
     expect(appearance.className).not.toContain("text-muted-foreground");
   });
