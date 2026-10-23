@@ -169,28 +169,42 @@
     "diagnostics_visibility": "可见性",
     "visibility_label": {
       "private": "私有",
-      "public": "公开"
+      "public": "公开",
+      "members": "指定成员"
+    },
+    "visibility_choice": {
+      "private": "私有",
+      "public": "公开",
+      "members": "指定成员"
     },
     "visibility_hint": {
       "private": "仅你可以在此运行时上创建智能体。",
-      "public": "工作区内任何成员都可以在此运行时上创建智能体。"
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。",
+      "members": "仅你和所选成员可以在此运行时上创建智能体。"
     },
     "visibility_hint_readonly": {
       "private": "仅运行时所有者可以在此运行时上创建智能体，也只有他们能切换为「公开」。",
-      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。"
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。",
+      "members": "仅所有者和所选成员可以在此运行时创建智能体。"
     },
+    "visibility_members_title": "共享给成员",
+    "visibility_members_search": "搜索成员",
+    "visibility_members_none": "工作区暂无其他成员。",
+    "visibility_members_no_match": "没有匹配的成员。",
+    "visibility_members_edit": "编辑",
+    "visibility_members_count_other": "{{count}} 位成员",
     "visibility_toast_updated": "可见性已设为\"{{visibility}}\"",
     "visibility_toast_failed": "更新可见性失败",
     "visibility_revoke_dialog": {
-      "title": "将此运行时设为私有？",
-      "description": "将 \"{{name}}\" 设为私有后，会解绑 {{count}} 个其他成员的智能体、取消此机器上的 {{taskCount}} 次活动运行，并暂停分配给这些智能体的已启用自动化。你自己的智能体和运行不受影响。",
+      "title": "限制运行时访问权限？",
+      "description": "限制 \"{{name}}\" 的访问权限将解绑 {{count}} 个受影响的智能体、取消 {{taskCount}} 次运行，并暂停分配给这些智能体的自动化。仍有权限的智能体和运行不受影响。",
       "warning": "服务端会立即撤销访问。已连接的守护进程会在常规取消检查时停止运行。离线机器需重新连接才能收到停止请求，本地进程在此期间可能继续执行。",
       "plan_changed": "弹窗打开期间，访问方案发生了变化。请重新确认。",
       "checkbox": "我已了解：列表中的其他成员智能体会被解绑，其活动运行会被取消，已启用的自动化会被暂停。",
       "cancel": "取消",
-      "confirm": "设为私有",
+      "confirm": "限制访问",
       "submitting": "正在撤销访问...",
-      "toast_success": "运行时已设为私有，其他成员的访问已撤销",
+      "toast_success": "已更新运行时访问权限",
       "toast_failed": "撤销运行时访问失败"
     },
     "delete_dialog": {

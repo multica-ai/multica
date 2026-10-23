@@ -174,28 +174,43 @@
     "diagnostics_visibility": "Visibility",
     "visibility_label": {
       "private": "Private",
-      "public": "Public"
+      "public": "Public",
+      "members": "Specific members"
+    },
+    "visibility_choice": {
+      "private": "Private",
+      "public": "Public",
+      "members": "Members"
     },
     "visibility_hint": {
       "private": "Only you can create agents on this runtime.",
-      "public": "Any workspace member can create agents on this runtime."
+      "public": "Any workspace member can create agents on this runtime.",
+      "members": "Only you and the selected members can create agents on this runtime."
     },
     "visibility_hint_readonly": {
       "private": "Only the runtime owner can create agents on this runtime, and only they can switch it to Public.",
-      "public": "Any workspace member can create agents on this runtime. Only the runtime owner can switch it back to Private."
+      "public": "Any workspace member can create agents on this runtime. Only the runtime owner can switch it back to Private.",
+      "members": "Only the owner and selected members can create agents on this runtime."
     },
+    "visibility_members_title": "Share with members",
+    "visibility_members_search": "Search members",
+    "visibility_members_none": "No other workspace members yet.",
+    "visibility_members_no_match": "No members match.",
+    "visibility_members_edit": "Edit",
+    "visibility_members_count_one": "{{count}} member",
+    "visibility_members_count_other": "{{count}} members",
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
     "visibility_revoke_dialog": {
-      "title": "Make this Runtime private?",
-      "description": "Making \"{{name}}\" private will unbind {{count}} teammate agents, cancel {{taskCount}} active runs on this machine, and pause active autopilots assigned to those agents. Your own agents and runs are unaffected.",
+      "title": "Restrict runtime access?",
+      "description": "Restricting access to \"{{name}}\" will unbind {{count}} affected agents, cancel {{taskCount}} active runs, and pause active autopilots assigned to those agents. Agents and runs that keep access are unaffected.",
       "warning": "Access is revoked immediately on the server. Connected daemons stop through their normal cancellation check. An offline machine cannot receive the stop request until it reconnects; its local process may continue meanwhile.",
       "plan_changed": "The access plan changed while this dialog was open. Review it and confirm again.",
       "checkbox": "I understand that the listed teammate agents will be unbound, their active runs cancelled, and their active autopilots paused.",
       "cancel": "Cancel",
-      "confirm": "Make Runtime private",
+      "confirm": "Restrict access",
       "submitting": "Revoking access...",
-      "toast_success": "Runtime is now private and teammate access was revoked",
+      "toast_success": "Runtime access updated",
       "toast_failed": "Failed to revoke runtime access"
     },
     "delete_dialog": {

@@ -533,6 +533,12 @@ jobs:
           check-latest: true
           cache-dependency-path: server/go.sum
 
+      - name: Test Windows WeCom media streaming and plaintext cleanup
+        working-directory: server
+        # These tests need no database. Windows must prove private file access,
+        # streaming without buffered fallback, and cleanup after process exit.
+        run: go test ./internal/integrations/wecom -v -run '^(TestStreamingDecrypt|TestMediaTempFile|TestPeekFile|TestIngest|TestTheStreamingPath)' -count=1 -timeout=5m
+
       - name: Test Windows execution-environment isolation
         working-directory: server
         # Keep this job scoped to the runtime regression it exists to prove.

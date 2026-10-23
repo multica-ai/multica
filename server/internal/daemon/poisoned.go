@@ -43,7 +43,15 @@ const (
 	FailureReasonAPIInvalidRequest       = string(taskfailure.ReasonAPIInvalidRequest)
 	FailureReasonCodexSemanticInactivity = "codex_semantic_inactivity"
 	FailureReasonCodexResumeOversized    = "codex_resume_oversized"
+	FailureReasonOpenCodeClockSkew       = "opencode_clock_skew"
 )
+
+func classifyOpenCodeClockSkew(provider, errMsg string) (string, bool) {
+	if provider == "opencode" && strings.HasPrefix(errMsg, agent.ErrOpenCodeClockSkew.Error()) {
+		return FailureReasonOpenCodeClockSkew, true
+	}
+	return "", false
+}
 
 // poisonedOutputMaxLen caps how long an output can be and still be
 // classified as a poisoned fallback. Real fallback messages are short,

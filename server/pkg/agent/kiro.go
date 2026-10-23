@@ -165,7 +165,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("start kiro: %w", err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr)
+	// Live panic watch: Kiro can panic inside its agent loop while the ACP
+	// process stays up, so session/prompt would never answer (MUL-8188).
+	runtimePanic := newACPRuntimePanicDetector()
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kiro:stderr] "), providerErr, runtimePanic)
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
@@ -182,6 +185,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// for Result.Output while retaining the full text for error detection.
 	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
+	// turnProducedMessage records whether the current prompt emitted any agent
+	// message before a runtime panic; a resumed session that panics before its
+	// first message is one the runtime cannot drive (MUL-8188).
+	var turnProducedMessage atomic.Bool
 	// Completion-preservation state for the -32603 close-handshake guard.
 	//
 	// Kiro raises `session/prompt -32603 "failed to generate a response"`
@@ -258,6 +265,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				}
 			}
 			deliverable.observe(msg)
+			turnProducedMessage.Store(true)
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -305,6 +313,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// resume. Only that is curable by starting a fresh session, so
 		// handshake/network failures below must leave it false.
 		var resumeRejected bool
+		// Set when the live panic detector aborted session/prompt.
+		var runtimePanicked bool
 		effectiveModel := strings.TrimSpace(opts.Model)
 
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -445,10 +455,23 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// shape can drive the turn.
 		// TODO: drop one field once Kiro lands on a single canonical payload.
 		streamingCurrentTurn.Store(true)
+		// promptCtx lets a live runtime panic abort the in-flight prompt.
+		// Without it a Kiro that panicked in its agent loop but kept the ACP
+		// process alive leaves session/prompt waiting until the task timeout
+		// or the idle watchdog (MUL-8188).
+		promptCtx, promptCancel := context.WithCancel(runCtx)
+		go func() {
+			select {
+			case <-runtimePanic.Detected():
+				b.cfg.Logger.Warn("kiro runtime panicked mid-turn; aborting the prompt", "pid", cmd.Process.Pid, "session_id", sessionID)
+				promptCancel()
+			case <-promptCtx.Done():
+			}
+		}()
 		// Steering opens only once the prompt is on the wire and closes as
 		// soon as it answers, so a supplement can never target setup or a
 		// finished turn.
-		_, err = c.requestAndNotifySent(runCtx, "session/prompt", map[string]any{
+		_, err = c.requestAndNotifySent(promptCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"content":   promptBlocks,
 			"prompt":    promptBlocks,
@@ -457,8 +480,17 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				supplements.active.Store(true)
 			}
 		})
+		promptCancel()
 		supplements.stop()
-		if err != nil {
+		if err != nil && runtimePanic.Fired() && runCtx.Err() == nil {
+			// Checked before the ctx classifiers: promptCtx was cancelled by
+			// the panic, not by the task. The panic may also have taken the
+			// process down ("kiro process exited"); either way the panic is
+			// the real cause. Error text and resume classification are
+			// settled after stderr drains (see below).
+			finalStatus = "failed"
+			runtimePanicked = true
+		} else if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
 				finalError = fmt.Sprintf("kiro timed out after %s", timeout)
@@ -539,6 +571,26 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
 
+		// A runtime panic during the prompt is the real failure, whichever
+		// path noticed it first: the live detector aborting the prompt, or
+		// the process dying and closing stdout before stderr was read. The
+		// Message/Location lines trail the header, so the text is only
+		// complete now that stderr has drained.
+		if runtimePanic.Fired() && (runtimePanicked || finalStatus == "failed") {
+			finalStatus = "failed"
+			finalError = "kiro runtime panicked: " + runtimePanic.Detail()
+			if opts.ResumeSessionID != "" && !turnProducedMessage.Load() {
+				// The resumed session loaded but the runtime crashed before
+				// the turn produced anything: this session cannot be driven,
+				// so let the daemon retry once from a fresh session and
+				// retire it. A panic after the turn made progress is not
+				// evidence against the session, so it stays resumable.
+				b.cfg.Logger.Warn("resumed kiro session panicked before its first message; signaling resume rejection so the daemon retries with a fresh session",
+					"session_id", sessionID,
+				)
+				resumeRejected = true
+			}
+		}
 		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text
