@@ -697,6 +697,7 @@
     "retry_failed": "실행을 다시 시도하지 못했습니다",
     "retry_blocked": "다시 시도되지 않음 — 이 에이전트를 사용할 권한이 없습니다",
     "transcript_tooltip": "트랜스크립트 보기",
+    "jump_to_run": "실행으로 이동",
     "cancel_failed": "실행을 취소하지 못했습니다",
     "trigger_retry": "다시 시도",
     "trigger_retry_attempt": "{{attempt}}번째 다시 시도",

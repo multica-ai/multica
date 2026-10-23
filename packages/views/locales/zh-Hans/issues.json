@@ -697,6 +697,7 @@
     "retry_failed": "重试运行失败",
     "retry_blocked": "未重试——你没有该智能体的使用权限",
     "transcript_tooltip": "查看记录",
+    "jump_to_run": "跳转到运行",
     "cancel_failed": "取消运行失败",
     "trigger_retry": "重试",
     "trigger_retry_attempt": "重试 #{{attempt}}",

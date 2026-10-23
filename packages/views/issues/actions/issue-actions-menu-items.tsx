@@ -351,6 +351,14 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
+      {/* Top level rather than under Relations: on a long issue the
+          sub-issues section's own "+" is scrolled far out of reach, and this
+          menu is pinned in the header. */}
+      <P.Item onClick={openCreateSubIssue}>
+        <Plus className="h-3.5 w-3.5" />
+        {t(($) => $.actions.create_sub_issue)}
+      </P.Item>
+
       {/* Relationship actions live under "Relations" — a semantically explicit
           label (unlike the old "More") so the first level tells you what the
           submenu does. Holds parent/sub-issue links today, and will grow
@@ -361,10 +369,6 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.relations)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={openCreateSubIssue}>
-            <Plus className="h-3.5 w-3.5" />
-            {t(($) => $.actions.create_sub_issue)}
-          </P.Item>
           <P.Item onClick={openSetParent}>
             <ArrowUp className="h-3.5 w-3.5" />
             {t(($) => $.actions.set_parent_issue)}

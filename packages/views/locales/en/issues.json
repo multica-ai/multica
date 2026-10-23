@@ -725,6 +725,7 @@
     "retry_failed": "Failed to retry run",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
     "transcript_tooltip": "View transcript",
+    "jump_to_run": "Go to run",
     "cancel_failed": "Failed to cancel run",
     "trigger_retry": "Retry",
     "trigger_retry_attempt": "Retry #{{attempt}}",

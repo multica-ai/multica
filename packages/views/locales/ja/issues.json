@@ -697,6 +697,7 @@
     "retry_failed": "実行を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
+    "jump_to_run": "実行に移動",
     "cancel_failed": "実行をキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",

@@ -32,6 +32,7 @@ import {
   CodeXml,
   Copy,
   Maximize2,
+  RotateCw,
   TriangleAlert,
   Workflow,
 } from "lucide-react";
@@ -87,6 +88,8 @@ interface DynamicBlockProps {
   error?: DynamicBlockError | null;
   /** Shows the fullscreen button when set. */
   onFullscreen?: () => void;
+  /** Reloads the current preview when the kind supports it. */
+  onReload?: () => void;
   /** Reveals the mounted preview while its surface is enlarged. */
   fullscreen?: boolean;
   /** Focus returns here when the kind's fullscreen surface closes. */
@@ -105,6 +108,7 @@ export function DynamicBlock({
   source,
   error,
   onFullscreen,
+  onReload,
   fullscreen = false,
   fullscreenButtonRef,
   preview,
@@ -180,6 +184,19 @@ export function DynamicBlock({
               {t(($) => $.dynamic_block.source)}
             </TabsTrigger>
           </TabsList>
+          {onReload && (
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              disabled={view !== "preview"}
+              onClick={onReload}
+              label={t(($) => $.attachment.reload)}
+            >
+              <RotateCw />
+            </IconButton>
+          )}
           {onFullscreen && (
             <IconButton
               ref={fullscreenButtonRef}
