@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { forwardRef, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TimelineEntry } from "@multica/core/types";
@@ -99,6 +99,24 @@ function renderThread(root: TimelineEntry, replies: TimelineEntry[]) {
 const actionMenus = () => screen.queryAllByRole("button", { name: "Comment actions" });
 
 describe("CommentCard — deleted comments", () => {
+  it("refreshes the live reply timestamp without restoring the deleted root header", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-11T07:05:40Z"));
+    const view = renderThread(tombstone("a", null), [
+      comment("bb", "a", { created_at: "2026-09-11T07:01:00Z" }),
+    ]);
+    try {
+      expect(screen.getAllByText("4m ago")).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(30_000));
+      expect(screen.getAllByText("5m ago")).toHaveLength(1);
+      expect(screen.getByText("This comment was deleted")).toBeTruthy();
+      expect(actionMenus()).toHaveLength(1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("renders no row for a deleted reply and keeps the replies to it", () => {
     const { container } = renderThread(comment("a", null), [tombstone("bb", "a"), comment("ccc", "bb")]);
 
