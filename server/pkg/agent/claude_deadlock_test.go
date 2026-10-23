@@ -74,6 +74,9 @@ func TestMain(m *testing.M) {
 	case "async_launched_tool_result":
 		runFakeClaudeAsyncLaunchedToolResult()
 		os.Exit(0)
+	case "all_failed_tool_results":
+		runFakeClaudeAllFailedToolResults(os.Getenv("CLAUDE_FAKE_DENIAL_KIND"))
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown CLAUDE_FAKE_MODE: %q\n", mode)
 		os.Exit(2)
@@ -184,6 +187,21 @@ func runFakeClaudeAsyncLaunchedToolResult() {
 	fmt.Println(`{"type":"system","session_id":"sess-async-launched"}`)
 	fmt.Println(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-async","content":{"status":"async_launched","message":"background task launched"}}]}}`)
 	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-async-launched","result":"parent turn completed early"}`)
+}
+
+func runFakeClaudeAllFailedToolResults(denialKind string) {
+	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
+		fmt.Fprintf(os.Stderr, "read prompt: %v", err)
+		os.Exit(51)
+	}
+	fmt.Println(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call-cancelled","name":"Bash","input":{"command":"pwd"}}]}}`)
+	classification := ""
+	if denialKind != "" {
+		classification = `,"toolDenialKind":"` + denialKind + `"`
+	}
+	fmt.Printf(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-cancelled","is_error":true%s,"content":"The user doesn't want to take this action right now."}]}}`+"\n", classification)
+	fmt.Println(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed."}]}}`)
+	fmt.Println(`{"type":"result","subtype":"success","is_error":false,"session_id":"sess-cancelled-tools","result":"The user doesn't want to take this action right now."}`)
 }
 
 // TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst verifies that the
@@ -388,5 +406,67 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for result — claude backend did not fail async_launched tool result")
+	}
+}
+
+func TestClaudeExecuteLogsWhenSuccessFollowsOnlyFailedToolResults(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name         string
+		denialKind   string
+		wantClass    string
+		wantCanceled string
+	}{
+		{name: "explicit cancellation metadata", denialKind: "cancelled", wantClass: "cancelled", wantCanceled: "1"},
+		{name: "metadata unavailable", wantClass: "unknown", wantCanceled: "0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatalf("os.Executable: %v", err)
+			}
+			var logs strings.Builder
+			env := map[string]string{"CLAUDE_FAKE_MODE": "all_failed_tool_results", "IS_SANDBOX": "1"}
+			if tt.denialKind != "" {
+				env["CLAUDE_FAKE_DENIAL_KIND"] = tt.denialKind
+			}
+			backend, err := New("claude", Config{
+				ExecutablePath: self,
+				Env:            env,
+				Logger:         slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+			})
+			if err != nil {
+				t.Fatalf("new claude backend: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "inspect the repository", ExecOptions{Timeout: 8 * time.Second})
+			if err != nil {
+				t.Fatalf("execute returned error: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			select {
+			case result := <-session.Result:
+				if result.Status != "completed" {
+					t.Fatalf("status = %q, want provider-reported completed", result.Status)
+				}
+				log := logs.String()
+				if !strings.Contains(log, "claude completed after every tool result failed") ||
+					!strings.Contains(log, "cancelled_tool_result_count="+tt.wantCanceled) ||
+					!strings.Contains(log, "cancellation_classification="+tt.wantClass) {
+					t.Fatalf("missing accurate failure diagnostic in logs: %s", log)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("timeout waiting for Claude result")
+			}
+		})
 	}
 }
