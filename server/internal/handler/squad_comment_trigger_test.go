@@ -65,7 +65,7 @@ func triggersContainIssueAssigneeSquadLeader(triggers []commentAgentTrigger) boo
 }
 
 // squadCommentTriggerFixture wires a squad assigned to a fresh issue and
-// returns the loaded db.Issue plus the leader agent UUID for use in
+// returns the loaded active db.Issue plus the leader agent UUID for use in
 // cascade integration tests.
 type squadCommentTriggerFixture struct {
 	Issue    db.Issue
@@ -104,8 +104,8 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
-		VALUES ($1, 'member', $2, $3, 'squad', $4)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, status)
+		VALUES ($1, 'member', $2, $3, 'squad', $4, 'todo')
 		RETURNING id
 	`, testWorkspaceID, testUserID, "squad comment trigger", squadID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
