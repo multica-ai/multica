@@ -12,13 +12,14 @@ import (
 )
 
 const createPersonalAccessToken = `-- name: CreatePersonalAccessToken :one
-INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at
+INSERT INTO personal_access_token (user_id, workspace_id, name, token_hash, token_prefix, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id
 `
 
 type CreatePersonalAccessTokenParams struct {
 	UserID      pgtype.UUID        `json:"user_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Name        string             `json:"name"`
 	TokenHash   string             `json:"token_hash"`
 	TokenPrefix string             `json:"token_prefix"`
@@ -28,6 +29,7 @@ type CreatePersonalAccessTokenParams struct {
 func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePersonalAccessTokenParams) (PersonalAccessToken, error) {
 	row := q.db.QueryRow(ctx, createPersonalAccessToken,
 		arg.UserID,
+		arg.WorkspaceID,
 		arg.Name,
 		arg.TokenHash,
 		arg.TokenPrefix,
@@ -44,6 +46,7 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
@@ -84,7 +87,7 @@ func (q *Queries) ExtendPersonalAccessTokenExpiry(ctx context.Context, arg Exten
 }
 
 const getPersonalAccessTokenByHash = `-- name: GetPersonalAccessTokenByHash :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id FROM personal_access_token
 WHERE token_hash = $1
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now())
@@ -103,12 +106,37 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.WorkspaceID,
+	)
+	return i, err
+}
+
+const getPersonalAccessTokenWorkspaceMemberForCreate = `-- name: GetPersonalAccessTokenWorkspaceMemberForCreate :one
+SELECT id, workspace_id, user_id, role, created_at FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type GetPersonalAccessTokenWorkspaceMemberForCreateParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetPersonalAccessTokenWorkspaceMemberForCreate(ctx context.Context, arg GetPersonalAccessTokenWorkspaceMemberForCreateParams) (Member, error) {
+	row := q.db.QueryRow(ctx, getPersonalAccessTokenWorkspaceMemberForCreate, arg.UserID, arg.WorkspaceID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, workspace_id FROM personal_access_token
 WHERE user_id = $1
   AND revoked = FALSE
 ORDER BY created_at DESC
@@ -133,6 +161,7 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 			&i.LastUsedAt,
 			&i.Revoked,
 			&i.CreatedAt,
+			&i.WorkspaceID,
 		); err != nil {
 			return nil, err
 		}
@@ -142,6 +171,21 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockWorkspaceForPersonalAccessTokenCreate = `-- name: LockWorkspaceForPersonalAccessTokenCreate :one
+SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE
+`
+
+// Application-layer replacement for a personal_access_token.workspace_id FK.
+// The workspace deletion transaction takes FOR UPDATE on this row before its
+// cleanup graph runs, so this lock makes validation plus insert atomic against
+// teardown without introducing a database relationship or cascade.
+func (q *Queries) LockWorkspaceForPersonalAccessTokenCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockWorkspaceForPersonalAccessTokenCreate, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const revokePersonalAccessToken = `-- name: RevokePersonalAccessToken :one
