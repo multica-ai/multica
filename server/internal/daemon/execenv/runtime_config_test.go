@@ -1649,14 +1649,46 @@ func TestInjectThenCleanupRoundTripByteExactBoundaries(t *testing.T) {
 	}
 }
 
+// Markdown formatters collapse the blank lines before an HTML block to one
+// and drop leading blank lines entirely. lfFormatter also rewrites CRLF to LF
+// (Prettier's default endOfLine); crlfFormatter keeps the file's CRLF style
+// and applies it to the whole file, including the managed block.
+func lfFormatter(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return strings.TrimLeft(s, "\n")
+}
+
+func crlfFormatter(s string) string {
+	return strings.ReplaceAll(lfFormatter(s), "\n", "\r\n")
+}
+
 func TestCleanupRuntimeConfigAfterFormatting(t *testing.T) {
 	t.Parallel()
-	for _, seed := range []string{"rules", "rules\n", "rules\n\n", "rules\r\n", ""} {
-		t.Run(fmt.Sprintf("seed=%q", seed), func(t *testing.T) {
+	for _, tc := range []struct {
+		name, seed string
+		format     func(string) string
+		want       string
+	}{
+		{"no newline", "rules", lfFormatter, "rules"},
+		{"one newline", "rules\n", lfFormatter, "rules\n"},
+		{"two newlines", "rules\n\n", lfFormatter, "rules\n\n"},
+		{"multi-line", "# Rules\n\n- a\n- b\n", lfFormatter, "# Rules\n\n- a\n- b\n"},
+		{"empty file", "", lfFormatter, ""},
+		{"blank file", "\n\n", lfFormatter, "\n\n"},
+		// The formatter rewrote the user's line endings itself; the restored
+		// boundary follows that style instead of leaving a stray CRLF.
+		{"crlf to lf", "a\r\nb\r\n", lfFormatter, "a\nb\n"},
+		{"crlf preserved", "a\r\nb\r\n", crlfFormatter, "a\r\nb\r\n"},
+		{"crlf two newlines preserved", "a\r\n\r\n", crlfFormatter, "a\r\n\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			path := filepath.Join(dir, "CLAUDE.md")
-			if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(tc.seed), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{}); err != nil {
@@ -1666,18 +1698,10 @@ func TestCleanupRuntimeConfigAfterFormatting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			start, _, found := locateMarkerBlock(string(injected))
-			if !found {
-				t.Fatal("injected brief has no marker")
-			}
-			// Markdown formatters collapse blank lines before an HTML block.
-			prefix := strings.TrimRight(string(injected[:start]), "\r\n")
-			if prefix != "" {
-				prefix += "\n\n"
-			}
-			if err := os.WriteFile(path, []byte(prefix+string(injected[start:])), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(tc.format(string(injected))), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			// Re-inject after formatting: metadata must survive the replace path.
 			if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{}); err != nil {
 				t.Fatal(err)
 			}
@@ -1686,15 +1710,21 @@ func TestCleanupRuntimeConfigAfterFormatting(t *testing.T) {
 			}
 			got, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("file must survive cleanup: %v", err)
 			}
-			if string(got) != seed {
-				t.Fatalf("cleanup changed user content after formatting: got %q, want %q", got, seed)
+			if string(got) != tc.want {
+				t.Fatalf("cleanup changed user content after formatting: got %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
+// Idempotency across the byte-exact boundaries: when a second Inject runs
+// against a file that already carries a marker block (the "replace in
+// place" branch), the surrounding bytes must stay untouched and the
+// subsequent Cleanup must still restore the user's original file
+// byte-exactly. This guards against a regression where the replace path
+// would re-normalise pre/post bytes the way the old cleanup did.
 func TestInjectReplaceThenCleanupRestoresByteExact(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -1744,17 +1774,24 @@ func TestInjectReplaceThenCleanupRestoresByteExact(t *testing.T) {
 func TestCleanupRuntimeConfigPreservesEditsAfterFormatting(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, prefix, suffix, want string
+		name, seed, prefix, suffix, want string
 	}{
-		{"edited body", "updated rules\n\n", "", "updated rules\n"},
-		{"added suffix", "rules\n\n", "\nnew section\n", "rules\n\nnew section\n"},
-		{"edited boundary", "rules\n\n\n\n", "", "rules\n\n"},
+		{"edited body", "rules\n", "updated rules\n\n", "", "updated rules\n"},
+		{"added suffix", "rules\n", "rules\n\n", "\nnew section\n", "rules\n\nnew section\n"},
+		{"edited boundary", "rules\n", "rules\n\n\n\n", "", "rules\n\n"},
+		// An empty prefix only means "blank original" when the metadata says
+		// so. Here the agent deleted the original body (and may have written
+		// a replacement after the block); the old trailing newline must not
+		// come back in front of the new content.
+		{"body replaced after block", "# Old\n", "", "# New\n", "# New\n"},
+		{"body deleted", "# Old\n", "", "", ""},
+		{"blank file gains content after block", "", "", "# New\n", "# New\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			path := filepath.Join(dir, "CLAUDE.md")
-			if err := os.WriteFile(path, []byte("rules\n"), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte(tc.seed), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := writeRuntimeConfigFile(path, "brief"); err != nil {
@@ -1776,7 +1813,7 @@ func TestCleanupRuntimeConfigPreservesEditsAfterFormatting(t *testing.T) {
 			}
 			got, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("pre-existing file must survive cleanup: %v", err)
 			}
 			if string(got) != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
@@ -1785,17 +1822,65 @@ func TestCleanupRuntimeConfigPreservesEditsAfterFormatting(t *testing.T) {
 	}
 }
 
-func TestRuntimeOriginalBoundaryRejectsInvalidMetadata(t *testing.T) {
+func TestParseRuntimeBoundaryMeta(t *testing.T) {
 	t.Parallel()
-	for _, metadata := range []string{`"text" -->`, `"\n"`, `invalid -->`, `"\n" -->\n`} {
-		block := runtimeMarkerBegin + "\n" + runtimeBoundaryPrefix + metadata
-		_, ok := runtimeOriginalBoundary(block)
-		want := metadata == `"\n" -->\n`
-		if ok != want {
-			t.Errorf("metadata %q: got valid=%v, want %v", metadata, ok, want)
+	for _, tc := range []struct {
+		metadata string
+		ok       bool
+		want     runtimeBoundaryMeta
+	}{
+		{`"\n" -->` + "\n", true, runtimeBoundaryMeta{boundary: "\n"}},
+		{`"\r\n\r\n" -->` + "\n", true, runtimeBoundaryMeta{boundary: "\r\n\r\n"}},
+		{`"" blank -->` + "\n", true, runtimeBoundaryMeta{boundary: "", blank: true}},
+		{`"\n" blank -->` + "\r\n", true, runtimeBoundaryMeta{boundary: "\n", blank: true}},
+		{`"text" -->`, false, runtimeBoundaryMeta{}},
+		{`"\n"`, false, runtimeBoundaryMeta{}},
+		{`"\n" bogus -->`, false, runtimeBoundaryMeta{}},
+		{`invalid -->`, false, runtimeBoundaryMeta{}},
+	} {
+		block := runtimeMarkerBegin + "\n" + runtimeBoundaryPrefix + tc.metadata
+		got, ok := parseRuntimeBoundaryMeta(block)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("metadata %q: got (%+v, %v), want (%+v, %v)", tc.metadata, got, ok, tc.want, tc.ok)
 		}
 	}
 }
+
+// A daemon that predates boundary metadata strips the metadata line together
+// with the block, and a current daemon cleaning a legacy block (no metadata)
+// keeps the fixed-separator behaviour, including deleting files it created.
+func TestCleanupRuntimeConfigLegacyBlockCompat(t *testing.T) {
+	t.Parallel()
+	legacyBlock := runtimeMarkerBegin + "\nbrief\n" + runtimeMarkerEnd + "\n"
+	for _, tc := range []struct {
+		name, content string
+		want          *string
+	}{
+		{"legacy appended", "rules\n" + runtimeManagedSeparator + legacyBlock, legacyWant("rules\n")},
+		{"legacy created", legacyBlock, nil},
+	} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+		if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := CleanupRuntimeConfig(dir, "claude"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path)
+		if tc.want == nil {
+			if !os.IsNotExist(err) {
+				t.Errorf("%s: created file must be removed, got %q (err %v)", tc.name, got, err)
+			}
+			continue
+		}
+		if err != nil || string(got) != *tc.want {
+			t.Errorf("%s: got %q (err %v), want %q", tc.name, got, err, *tc.want)
+		}
+	}
+}
+
+func legacyWant(s string) *string { return &s }
 
 // The fixed managed separator is the invariant that makes byte-exact
 // cleanup possible. This test pins it: writeRuntimeConfigFile must
