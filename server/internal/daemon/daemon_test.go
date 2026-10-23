@@ -163,6 +163,10 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		// OPENCLAW_STATE_DIR is intentionally NOT blocked: the daemon only
+		// supplies a default per-agent state dir, and an explicit value from the
+		// agent's custom_env must keep winning over it.
+		{key: "OPENCLAW_STATE_DIR", want: false},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
 		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
@@ -226,6 +230,56 @@ func TestPrepareDshTaskSessionRoot(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("session root mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestPrepareOpenclawTaskStateDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := prepareOpenclawTaskStateDir("work", "runtime-1", "agent_2")
+	if err != nil {
+		t.Fatalf("prepareOpenclawTaskStateDir: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "work", "openclaw-state", "runtime-1", "agent_2")
+	if got != want {
+		t.Fatalf("state dir = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat state dir: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("state dir mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestOpenclawStateDirUnsetHonorsUserConfiguration(t *testing.T) {
+	// Both the current and legacy names must be treated as a user choice, so
+	// the daemon leaves them alone instead of injecting its own default.
+	for _, tt := range []struct {
+		name   string
+		envVar string
+		value  string
+		unset  bool
+	}{
+		{name: "neither set", unset: true},
+		{name: "current set", envVar: "OPENCLAW_STATE_DIR", value: "/state", unset: false},
+		{name: "legacy set", envVar: "CLAWDBOT_STATE_DIR", value: "/legacy", unset: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OPENCLAW_STATE_DIR", "")
+			t.Setenv("CLAWDBOT_STATE_DIR", "")
+			os.Unsetenv("OPENCLAW_STATE_DIR")
+			os.Unsetenv("CLAWDBOT_STATE_DIR")
+			if tt.envVar != "" {
+				t.Setenv(tt.envVar, tt.value)
+			}
+			if got := openclawStateDirUnset(); got != tt.unset {
+				t.Fatalf("openclawStateDirUnset() = %v, want %v", got, tt.unset)
+			}
+		})
 	}
 }
 

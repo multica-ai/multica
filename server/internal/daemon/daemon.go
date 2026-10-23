@@ -8598,6 +8598,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if rootsValue, ok := composeOpenclawIncludeRoots(env.OpenclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
 		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
 	}
+	// Isolate OpenClaw's per-agent runtime state (sessions and, crucially, the
+	// state-directory ownership lock) so a Multica task never races the user's
+	// own OpenClaw instance — or a sibling agent — for the default ~/.openclaw
+	// directory. A resident OpenClaw process owns and locks that directory, and
+	// `openclaw agent --local` refuses to run against state it does not own, so
+	// every dispatched OpenClaw task failed while any OpenClaw agent was up on
+	// the host; the only way out was to hand-configure OPENCLAW_STATE_DIR per
+	// agent. The daemon now supplies that private directory itself.
+	//
+	// An explicit OPENCLAW_STATE_DIR keeps winning, whichever way the user set
+	// it: an exported shell var and `backends.openclaw.state_dir` are already in
+	// the daemon env (see applyOpenclawOverride), and the agent's custom_env is
+	// layered over this map just below. OPENCLAW_CONFIG_PATH above is unaffected
+	// and still points at the per-task wrapper, which $includes the user's live
+	// config, so models and auth profiles stay visible while only the private
+	// state moves.
+	// Gated on OpenclawConfigPath so the private state dir is only ever paired
+	// with the per-task wrapper: if preparation had not produced a config path
+	// there would be nothing to $include the user's live config, and moving the
+	// state dir out from under an unpinned `~/.openclaw` lookup would hide it.
+	if env.OpenclawConfigPath != "" && openclawStateDirUnset() {
+		stateDir, err := prepareOpenclawTaskStateDir(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare openclaw state dir: %w", err)
+		}
+		agentEnv["OPENCLAW_STATE_DIR"] = stateDir
+	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
@@ -10748,6 +10775,46 @@ func prepareDshTaskSessionRoot(profile, runtimeID, agentID string) (string, erro
 		return "", err
 	}
 	path := filepath.Join(profileDir, "dsh-sessions", runtimeSegment, agentSegment)
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// openclawStateDirUnset reports whether the user has left OpenClaw's state
+// directory unset, in which case the daemon supplies a private per-agent
+// default. Both the current (OPENCLAW_STATE_DIR) and legacy (CLAWDBOT_STATE_DIR)
+// names count as "set": OpenClaw and the daemon's own config discovery honour
+// the legacy var too, so a user who still relies on it keeps control.
+func openclawStateDirUnset() bool {
+	return strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR")) == "" &&
+		strings.TrimSpace(os.Getenv("CLAWDBOT_STATE_DIR")) == ""
+}
+
+// prepareOpenclawTaskStateDir keeps OpenClaw's runtime state — sessions and
+// the state-directory ownership lock — private to one Multica runtime/agent
+// pair, so a task never contends with the user's own OpenClaw instance or a
+// sibling agent for the default ~/.openclaw directory. Credentials, model
+// providers and registered agents stay in the user's config: the child still
+// receives OPENCLAW_CONFIG_PATH pointing at the per-task wrapper, which
+// $includes the live config, so only state moves here.
+func prepareOpenclawTaskStateDir(profile, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(profileDir, "openclaw-state", runtimeSegment, agentSegment)
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", err
 	}

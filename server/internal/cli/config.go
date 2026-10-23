@@ -204,6 +204,14 @@ type BackendOverrides struct {
 // shell script to inject OPENCLAW_STATE_DIR + run `launchctl setenv`
 // for GUI-launched daemons. With this field, those workarounds become
 // unnecessary.
+//
+// Leaving StateDir unset is also safe now: the daemon gives every OpenClaw
+// task a private per-(runtime, agent) state directory under its profile
+// (…/openclaw-state/<runtime>/<agent>) by default, so a task never contends
+// with the user's own OpenClaw instance for the ownership lock on the default
+// ~/.openclaw directory. Set this field only to relocate that state somewhere
+// specific; an explicit OPENCLAW_STATE_DIR (here, in the environment, or in the
+// agent's custom_env) always overrides the automatic default.
 type OpenClawOverride struct {
 	BinaryPath string `json:"binary_path,omitempty"`
 	StateDir   string `json:"state_dir,omitempty"`
