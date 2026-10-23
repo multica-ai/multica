@@ -121,14 +121,13 @@ type fakeAPIClient struct {
 	// threadReplyErr, when non-nil, is returned by the three send
 	// methods whenever the call carries a thread ReplyTarget, while the
 	// attempt is still recorded. Tests inject either a classified
-	// *APIError (to exercise the chat-level fallback) or an ambiguous
-	// transport error (to assert no fallback happens).
+	// *APIError or an ambiguous transport error (to assert neither
+	// failure can move a topic reply into the group chat).
 	threadReplyErr error
 }
 
 // errThreadReplyClassified is a Lark business error the fallback path
-// recognizes (230071 = group does not support reply in thread), so a
-// thread send that returns it triggers the chat-level retry.
+// recognizes (230071 = group does not support reply in thread).
 var errThreadReplyClassified = &APIError{Op: "send text message", Code: 230071, Msg: "group does not support reply in thread"}
 
 // errThreadReplyTransport is an ambiguous, non-classified failure: the
@@ -721,6 +720,35 @@ func TestPatcherRepliesNativelyInOrdinaryGroup(t *testing.T) {
 	}
 }
 
+func TestPatcherOrdinaryGroupReplyFallsBackOnClassifiedError(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	api.threadReplyErr = errThreadReplyClassified
+	taskID := uuidFromString(t, "ee776666-ee77-ee77-ee77-eeeeeeeeeeee")
+
+	if err := p.processEvent(t.Context(), events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	}); err != nil {
+		t.Fatalf("expected chat-level fallback to succeed, got %v", err)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("expected reply attempt and chat-level fallback; got %d sends", len(api.textSent))
+	}
+	if got := api.textSent[0].ReplyTarget; got.MessageID != "om_trigger" || got.InThread {
+		t.Errorf("expected ordinary message reply first; got %+v", got)
+	}
+	if got := api.textSent[1].ReplyTarget; got.IsSet() {
+		t.Errorf("expected chat-level fallback second; got %+v", got)
+	}
+}
+
 // TestPatcherSendsToChatWithoutTriggerMessage covers the one case that
 // still has nothing to reply to: a binding with no last_lark_message_id
 // at all (pre-#8234 rows, or a session whose trigger was never
@@ -780,35 +808,63 @@ func TestPatcherThreadReplyMarkdownRoutesToThread(t *testing.T) {
 	}
 }
 
-// TestPatcherThreadReplyFallsBackToChatLevel verifies that when a
-// threaded send fails with a classified "topic cannot receive this
-// reply" Lark error (e.g. the trigger message was recalled or the topic
-// was aggregated), the patcher retries once at the chat level so the
-// agent's reply is never silently lost.
-func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
+// A rejected topic reply must never become a new top-level message.
+func TestPatcherThreadReplyDoesNotFallBackToChatLevel(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	api.threadReplyErr = errThreadReplyClassified
 	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
 	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
 	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
 
-	p.handleEvent(events.Event{
+	err := p.processEvent(t.Context(), events.Event{
 		Type:          protocol.EventChatDone,
 		TaskID:        uuidString(taskID),
 		ChatSessionID: uuidString(q.binding.ChatSessionID),
 		Payload:       protocol.ChatDonePayload{Content: "reply that must survive"},
 	})
+	if !errors.Is(err, errThreadReplyClassified) {
+		t.Fatalf("expected the classified thread error, got %v", err)
+	}
 
 	api.mu.Lock()
 	defer api.mu.Unlock()
-	if len(api.textSent) != 2 {
-		t.Fatalf("expected two text sends (thread attempt + chat-level fallback); got %d", len(api.textSent))
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one thread attempt and no chat-level send; got %d", len(api.textSent))
 	}
-	if !api.textSent[0].ReplyTarget.IsSet() {
-		t.Errorf("first attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
+	if got := api.textSent[0].ReplyTarget; got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected only the original thread reply; got %+v", got)
 	}
-	if api.textSent[1].ReplyTarget.IsSet() {
-		t.Errorf("fallback attempt must be chat-level (empty ReplyTarget); got %+v", api.textSent[1].ReplyTarget)
+}
+
+// The binding still identifies a topic when a delivery loses its thread ID.
+// Its trigger must remain a thread reply and never gain a chat-level fallback.
+func TestPatcherTopicReplyWithMissingThreadIDStaysInThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChatType = string(ChatTypeGroup)
+	q.binding.ChannelChatID = "oc_test_chat:omt_topic"
+	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{}
+	api.threadReplyErr = errThreadReplyClassified
+	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
+
+	err := p.processEvent(t.Context(), events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "topic answer"},
+	})
+	if !errors.Is(err, errThreadReplyClassified) {
+		t.Fatalf("expected the classified thread error, got %v", err)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one thread attempt and no chat-level send; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].ReplyTarget; got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected a thread reply to the trigger; got %+v", got)
 	}
 }
 
