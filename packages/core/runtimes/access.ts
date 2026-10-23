@@ -3,10 +3,10 @@ import type { RuntimeDevice } from "../types";
 /**
  * Whether this member may run an agent on `runtime`.
  *
- * A private runtime is usable only by its owner; a public one by anyone in the
+ * A private runtime is usable by its owner and explicitly selected members; a public one by anyone in the
  * workspace; an ownerless one by nobody. Workspace role does not enter into
  * it: a private runtime is someone's own machine, so not even an admin may
- * bind an agent to it, and only the owner may flip it to public. The server
+ * bind an agent without a grant, and only the owner may change sharing. The server
  * enforces exactly this predicate (`canUseRuntimeForAgent`), so the picker and
  * the API/CLI never disagree (MUL-6126).
  *
@@ -28,5 +28,6 @@ export function isRuntimeUsableForUser(
   if (!runtime.owner_id) return false;
   if (!currentUserId) return true;
   if (runtime.owner_id === currentUserId) return true;
-  return runtime.visibility === "public";
+  return runtime.visibility === "public" ||
+    (runtime.visibility === "private" && (runtime.shared_with ?? []).includes(currentUserId));
 }

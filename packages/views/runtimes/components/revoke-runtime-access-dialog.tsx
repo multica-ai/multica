@@ -44,12 +44,14 @@ export function RevokeRuntimeAccessDialog({
   runtime,
   wsId,
   initialPlan,
+  sharedWith,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   runtime: AgentRuntime;
   wsId: string;
   initialPlan: RuntimeAccessRevocationPlan | null;
+  sharedWith?: string[];
 }) {
   const { t } = useT("runtimes");
   const revokeAccess = useRevokeRuntimeWorkspaceAccess(wsId);
@@ -72,6 +74,7 @@ export function RevokeRuntimeAccessDialog({
         runtimeId: runtime.id,
         expectedNonownerAgentIds: plan.agents.map((agent) => agent.id),
         expectedTaskIds: plan.activeTaskIds,
+        sharedWith,
       },
       {
         onSuccess: () => {

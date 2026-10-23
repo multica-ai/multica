@@ -852,6 +852,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				OwnerID:        prow.OwnerID,
 				LegacyDaemonID: prow.LegacyDaemonID,
 				Visibility:     prow.Visibility,
+				SharedWith:     prow.SharedWith,
 				ProfileID:      prow.ProfileID,
 			}
 		} else {
@@ -905,6 +906,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				OwnerID:        row.OwnerID,
 				LegacyDaemonID: row.LegacyDaemonID,
 				Visibility:     row.Visibility,
+				SharedWith:     row.SharedWith,
 				ProfileID:      row.ProfileID,
 			}
 		}
@@ -2464,8 +2466,7 @@ func (h *Handler) finalizeClaimDelivery(
 				Detail: "agent runtime changed before delivery",
 			}
 		}
-		if locked.Visibility == "private" && locked.OwnerID.Valid &&
-			(!agent.OwnerID.Valid || agent.OwnerID != locked.OwnerID) {
+		if locked.Visibility == "private" && locked.OwnerID.Valid && !service.RuntimeAllowsUser(locked, agent.OwnerID) {
 			agentOwnerID = agent.OwnerID
 			return &service.ClaimDeliveryAuthzError{
 				Reason: "error_runtime_access_denied",
@@ -2729,6 +2730,25 @@ func chatSessionResumeFallbackNeeded(priorSessionID, priorWorkDir string) bool {
 	return priorSessionID == "" || priorWorkDir == ""
 }
 
+// rerunSessionRetired reports whether a later run already retired the session
+// a manual retry would resume. The rerun path reads its exact source task, so
+// it bypasses the retired_sessions exclusion GetLastTaskSession applies; this
+// is that exclusion for the exact-source path (MUL-8188). A lookup error fails
+// closed — starting fresh in the reused workdir costs conversation context,
+// resuming an undrivable session costs the whole run.
+func (h *Handler) rerunSessionRetired(ctx context.Context, agentID pgtype.UUID, sessionID string) bool {
+	retired, err := h.Queries.IsTaskSessionRetired(ctx, db.IsTaskSessionRetiredParams{
+		AgentID:   agentID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		slog.Warn("daemon claim: retired-session lookup failed; starting the rerun fresh",
+			"agent_id", uuidToString(agentID), "error", err)
+		return true
+	}
+	return retired
+}
+
 func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	if task.AgentID != source.AgentID {
 		return false
@@ -2883,8 +2903,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_agent_runtime_changed", http.StatusConflict, "agent runtime changed before task delivery",
 		)
 	}
-	if runtime.Visibility == "private" && runtime.OwnerID.Valid &&
-		(!agent.OwnerID.Valid || agent.OwnerID != runtime.OwnerID) {
+	if runtime.Visibility == "private" && runtime.OwnerID.Valid && !service.RuntimeAllowsUser(runtime, agent.OwnerID) {
 		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
 		if !agent.OwnerID.Valid {
 			userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
@@ -3373,8 +3392,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
+				sourceSessionRetired := src.SessionID.Valid &&
+					h.rerunSessionRetired(r.Context(), task.AgentID, src.SessionID.String)
+				if sourceSessionRetired {
+					// The source's own conversation is gone for good; tell the
+					// agent rather than letting it assume continuity.
+					resp.PriorSessionResumeUnavailable = true
+				}
 				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
-					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
+					src.SessionID.Valid && src.RuntimeID == task.RuntimeID && !sourceSessionRetired {
 					resp.PriorSessionID = src.SessionID.String
 					// The deltas date from the run we actually resume, which on
 					// this path is the operator-chosen source — routinely NOT
@@ -5702,6 +5728,11 @@ type TaskCancelAckRequest struct {
 	// preserved worktree is the only pointer left to the agent's work.
 	ErrorMessage  string `json:"error_message,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	// RetiredSessionID: the session this run resumed and then produced no
+	// output on before it was cancelled — a session the runtime cannot drive
+	// (MUL-8188). Recorded so later triggers start fresh instead of resuming
+	// into the same hang. Older daemons never send it.
+	RetiredSessionID string `json:"retired_session_id,omitempty"`
 }
 
 func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
@@ -5722,6 +5753,7 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
+	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
 
 	// Terminal deliveries first, failing LOUD on persistence errors: these
 	// fields are the only pointer to a cancelled task's work, and the daemon
@@ -5773,6 +5805,17 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		delivered = true
+	}
+	if retired := strings.TrimSpace(req.RetiredSessionID); retired != "" {
+		// Fail loud like the deliveries above: the daemon retries the ack,
+		// and a dropped write leaves the undrivable session resumable.
+		// Not a client-visible field, so no rebroadcast is needed.
+		if err := h.TaskService.RetireCancelledTaskSession(r.Context(), task.ID, retired); err != nil {
+			slog.Error("cancel ack: retire session failed",
+				"task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to retire session")
+			return
+		}
 	}
 	if delivered {
 		// The task:cancelled broadcast fired at cancel time, before this ack —

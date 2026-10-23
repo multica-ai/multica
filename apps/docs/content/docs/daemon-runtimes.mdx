@@ -109,13 +109,15 @@ One daemon executes at most 20 runs at a time by default; each agent at most 6. 
 
 Once a limit is reached, new runs keep queueing. You can adjust a single agent's concurrency in the agent settings, and the machine-wide cap through `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
-## Private and public runtimes
+## Runtime sharing
 
 A local runtime is **private** by default: only the runtime owner can create agents on it. Workspace owners and admins are no exception — the runtime is someone else's computer, and running an agent there spends their machine and their tool credentials.
 
 Only the runtime owner can make it **public** — workspace admins can rename or delete a runtime, but sharing one is the owner's decision. Other workspace members can then select this runtime as well; that does not share the underlying AI coding tool's login credentials — it only lets members route their agents' runs to this computer.
 
-When the owner makes a public runtime **private** again, Multica shows the affected agents and active runs, including Agent Builder sessions, before applying the change. Confirmation unbinds those teammates' agents, cancels their queued, dispatched, running, local-directory-waiting and deferred runs with `runtime_access_revoked`, and pauses active autopilots assigned to the unbound agents. The owner's own agents and runs are unaffected. A changed plan requires renewed confirmation; concurrent chat writes may require a retry. To resume work, bind the agent to an accessible runtime, then explicitly resume its paused autopilots.
+To share with selected people, open the runtime's detail page, select **Specific members**, choose one or more workspace members, and **Save**. Those members can select the runtime and create agents on it. Only its owner can change the recipient list; recipients do not gain permission to rename, delete, or administer the runtime.
+
+When the owner removes members, limits a public runtime to specific members, or makes it **private** again, Multica shows the affected agents and active runs, including Agent Builder sessions, before applying the change. Confirmation unbinds those teammates' agents, cancels their queued, dispatched, running, local-directory-waiting and deferred runs with `runtime_access_revoked`, and pauses active autopilots assigned to the unbound agents. Agents and runs belonging to the owner or members who retain access are unaffected. A changed plan requires renewed confirmation; concurrent chat writes may require a retry. To resume work, bind the agent to an accessible runtime, then explicitly resume its paused autopilots.
 
 Cancellation preserves chat history and stores draft/attachment recovery data on the server. Web and desktop use the existing draft recovery UI; mobile does not yet expose that recovery UI. A started turn with no output waits for the daemon's cancellation acknowledgement or the server's finalize grace period before deciding whether to restore the input. A connected daemon observes cancellation through its regular check. If the computer is offline, server-side access is still revoked immediately, but the local process may continue until it receives cancellation after reconnecting; the server cannot guarantee an immediate remote stop.
 

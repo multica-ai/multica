@@ -4336,7 +4336,7 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
     status IN ('completed', 'cancelled')
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow', 'codex_resume_oversized', 'opencode_clock_skew')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
       -- A provider credential-resolution failure ("Could not resolve
@@ -4353,6 +4353,10 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       AND NOT (COALESCE(error, '') ILIKE '%could not resolve authentication method%')
       AND NOT (COALESCE(error, '') ~* 'must not be empty|must be non-?empty|must have non-?empty|non-?empty content|cannot be empty|should not be empty'
                AND COALESCE(error, '') ~* 'role[^a-z0-9]{0,2}assistant|assistant message|message at position|messages\.[0-9]|messages\[[0-9]')
+      -- MUL-8188: a runtime that names its own transcript invalid (Kiro panics
+      -- with "invalid conversation history received" on every prompt) replays
+      -- the same failure on every resume. Mirrors taskfailure.UnresumableHistory.
+      AND NOT (COALESCE(error, '') ILIKE '%invalid conversation history%')
     )
   )
   -- MUL-5722: a resume that overflowed the reader names no session, so it can
@@ -4932,6 +4936,33 @@ func (q *Queries) HasTaskForIssue(ctx context.Context, issueID pgtype.UUID) (boo
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const isTaskSessionRetired = `-- name: IsTaskSessionRetired :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue r
+    WHERE r.agent_id = $1
+      AND r.retired_session_id = $2::text
+) AS retired
+`
+
+type IsTaskSessionRetiredParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	SessionID string      `json:"session_id"`
+}
+
+// Whether any run of this agent explicitly retired session_id. The
+// manual-retry claim path resumes from its exact source task instead of
+// GetLastTaskSession / the chat pointer, so it must consult the retired set
+// itself; without this a retry of an older, resume-safe failed run revives a
+// session a later run already proved undrivable (MUL-8188). Session ids are
+// opaque runtime-issued ids, so (agent, session) identifies the transcript
+// whether the runs were issue or chat tasks.
+func (q *Queries) IsTaskSessionRetired(ctx context.Context, arg IsTaskSessionRetiredParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isTaskSessionRetired, arg.AgentID, arg.SessionID)
+	var retired bool
+	err := row.Scan(&retired)
+	return retired, err
 }
 
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
@@ -5664,20 +5695,21 @@ const listNonOwnerAgentsByRuntime = `-- name: ListNonOwnerAgentsByRuntime :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
 WHERE runtime_id = $1
   AND owner_id IS DISTINCT FROM $2
+  AND NOT COALESCE(owner_id = ANY($3::uuid[]), false)
 ORDER BY name ASC
 `
 
 type ListNonOwnerAgentsByRuntimeParams struct {
-	RuntimeID      pgtype.UUID `json:"runtime_id"`
-	RuntimeOwnerID pgtype.UUID `json:"runtime_owner_id"`
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
 }
 
-// Returns every agent bound to a runtime whose owner differs from its owner,
-// including hidden Builder execution carriers. This is the dependency plan shown before a public
-// runtime is made private: owner-owned agents keep their binding, while every
-// teammate-owned agent loses machine access.
+// Returns bound agents whose owners lose access under the desired shared_with
+// list, including hidden Builder execution carriers. Runtime-owner agents keep
+// their binding.
 func (q *Queries) ListNonOwnerAgentsByRuntime(ctx context.Context, arg ListNonOwnerAgentsByRuntimeParams) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listNonOwnerAgentsByRuntime, arg.RuntimeID, arg.RuntimeOwnerID)
+	rows, err := q.db.Query(ctx, listNonOwnerAgentsByRuntime, arg.RuntimeID, arg.RuntimeOwnerID, arg.SharedWith)
 	if err != nil {
 		return nil, err
 	}
@@ -5730,19 +5762,21 @@ const listNonOwnerAgentsByRuntimeForUpdate = `-- name: ListNonOwnerAgentsByRunti
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
 WHERE runtime_id = $1
   AND owner_id IS DISTINCT FROM $2
+  AND NOT COALESCE(owner_id = ANY($3::uuid[]), false)
 ORDER BY id
 FOR UPDATE NOWAIT
 `
 
 type ListNonOwnerAgentsByRuntimeForUpdateParams struct {
-	RuntimeID      pgtype.UUID `json:"runtime_id"`
-	RuntimeOwnerID pgtype.UUID `json:"runtime_owner_id"`
+	RuntimeID      pgtype.UUID   `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID   `json:"runtime_owner_id"`
+	SharedWith     []pgtype.UUID `json:"shared_with"`
 }
 
 // Runtime access-change locking serializes new bindings. NOWAIT avoids waiting
 // behind a writer that already holds an agent and needs the runtime row.
 func (q *Queries) ListNonOwnerAgentsByRuntimeForUpdate(ctx context.Context, arg ListNonOwnerAgentsByRuntimeForUpdateParams) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listNonOwnerAgentsByRuntimeForUpdate, arg.RuntimeID, arg.RuntimeOwnerID)
+	rows, err := q.db.Query(ctx, listNonOwnerAgentsByRuntimeForUpdate, arg.RuntimeID, arg.RuntimeOwnerID, arg.SharedWith)
 	if err != nil {
 		return nil, err
 	}
@@ -7761,6 +7795,7 @@ WHERE id = (
                         r.owner_id IS NULL
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
+                        OR a.owner_id = ANY(r.shared_with)
                     )
                 )
             )
@@ -7887,6 +7922,7 @@ WHERE id IN (
                         r.owner_id IS NULL
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
+                        OR a.owner_id = ANY(r.shared_with)
                     )
                 )
             )
@@ -8441,6 +8477,32 @@ type SetAgentTaskErrorIfEmptyParams struct {
 func (q *Queries) SetAgentTaskErrorIfEmpty(ctx context.Context, arg SetAgentTaskErrorIfEmptyParams) error {
 	_, err := q.db.Exec(ctx, setAgentTaskErrorIfEmpty, arg.Error, arg.FailureReason, arg.ID)
 	return err
+}
+
+const setAgentTaskRetiredSessionIDIfCancelled = `-- name: SetAgentTaskRetiredSessionIDIfCancelled :execrows
+UPDATE agent_task_queue
+SET retired_session_id = COALESCE(retired_session_id, $1)
+WHERE id = $2 AND status = 'cancelled'
+`
+
+type SetAgentTaskRetiredSessionIDIfCancelledParams struct {
+	RetiredSessionID pgtype.Text `json:"retired_session_id"`
+	ID               pgtype.UUID `json:"id"`
+}
+
+// Cancel-ack companion to CompleteAgentTask/FailAgentTask's retired_session_id
+// (MUL-8188). A resumed run that produced no output at all before it was
+// cancelled is the signature of a session the runtime cannot drive (Kiro
+// loaded the transcript, then hung on the first prompt). Without this the
+// cancelled row kept the session resumable and every later trigger re-entered
+// the same hang. Same status CAS and never-overwrite rule as the other
+// cancel-ack writes; the row count tells the caller whether it applied.
+func (q *Queries) SetAgentTaskRetiredSessionIDIfCancelled(ctx context.Context, arg SetAgentTaskRetiredSessionIDIfCancelledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAgentTaskRetiredSessionIDIfCancelled, arg.RetiredSessionID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setDeferredChannelIssueTaskRuntimeOverlay = `-- name: SetDeferredChannelIssueTaskRuntimeOverlay :execrows

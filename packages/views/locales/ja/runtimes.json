@@ -169,28 +169,42 @@
     "diagnostics_visibility": "公開範囲",
     "visibility_label": {
       "private": "非公開",
-      "public": "公開"
+      "public": "公開",
+      "members": "指定メンバー"
+    },
+    "visibility_choice": {
+      "private": "非公開",
+      "public": "公開",
+      "members": "メンバー"
     },
     "visibility_hint": {
       "private": "あなたのみが、このランタイムでエージェントを作成できます。",
-      "public": "ワークスペースのメンバーなら誰でも、このランタイムでエージェントを作成できます。"
+      "public": "ワークスペースのメンバーなら誰でも、このランタイムでエージェントを作成できます。",
+      "members": "あなたと選択したメンバーだけがこのランタイムでエージェントを作成できます。"
     },
     "visibility_hint_readonly": {
       "private": "このランタイムでエージェントを作成できるのは所有者だけで、公開に切り替えられるのも所有者だけです。",
-      "public": "ワークスペースのメンバーなら誰でも、このランタイムでエージェントを作成できます。非公開に戻せるのは所有者だけです。"
+      "public": "ワークスペースのメンバーなら誰でも、このランタイムでエージェントを作成できます。非公開に戻せるのは所有者だけです。",
+      "members": "所有者と選択したメンバーのみ、このランタイムでエージェントを作成できます。"
     },
+    "visibility_members_title": "メンバーと共有",
+    "visibility_members_search": "メンバーを検索",
+    "visibility_members_none": "ワークスペースに他のメンバーはいません。",
+    "visibility_members_no_match": "一致するメンバーはいません。",
+    "visibility_members_edit": "編集",
+    "visibility_members_count_other": "{{count}} 人のメンバー",
     "visibility_toast_updated": "公開範囲を {{visibility}} に設定しました",
     "visibility_toast_failed": "公開範囲を更新できませんでした",
     "visibility_revoke_dialog": {
-      "title": "この Runtime を private にしますか？",
-      "description": "\"{{name}}\" を private にすると、他のメンバーのエージェント {{count}} 件の接続を解除し、このマシン上のアクティブな実行 {{taskCount}} 件をキャンセルします。これらのエージェントに割り当てられた有効な自動化も一時停止します。自分のエージェントと実行には影響しません。",
+      "title": "ランタイムへのアクセスを制限しますか？",
+      "description": "「{{name}}」へのアクセスを制限すると、対象のエージェント {{count}} 件の紐付けを解除し、実行中の {{taskCount}} 件をキャンセルして、対象エージェントの有効なオートパイロットを一時停止します。アクセスを維持するエージェントと実行には影響しません。",
       "warning": "サーバー上のアクセスは直ちに取り消されます。接続中のデーモンは通常のキャンセル確認で停止します。オフラインのマシンは再接続するまで停止要求を受信できず、その間ローカルプロセスが続く場合があります。",
       "plan_changed": "このダイアログを開いている間にアクセス計画が変わりました。内容を確認して、もう一度確定してください。",
       "checkbox": "一覧の他メンバーのエージェントの接続が解除され、アクティブな実行がキャンセルされ、有効な自動化が一時停止することを理解しました。",
       "cancel": "キャンセル",
-      "confirm": "Runtime を private にする",
+      "confirm": "アクセスを制限",
       "submitting": "アクセスを取り消しています...",
-      "toast_success": "Runtime を private にし、他メンバーのアクセスを取り消しました",
+      "toast_success": "ランタイムのアクセスを更新しました",
       "toast_failed": "Runtime アクセスを取り消せませんでした"
     },
     "delete_dialog": {
