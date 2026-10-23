@@ -211,6 +211,61 @@ func TestWebhookHandler_AllowsDeclaredEvent(t *testing.T) {
 	}
 }
 
+func TestWebhookHandler_PayloadConditionsGateRuns(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookConditions Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerWithFilters(t, apID, []WebhookEventFilter{{
+		Event:   "issues",
+		Actions: []string{"labeled"},
+		Conditions: []WebhookPayloadCondition{
+			{Path: "label.name", Op: payloadOpEquals, Value: "agent"},
+			{Path: "sender.type", Op: payloadOpNotEquals, Value: "Bot"},
+		},
+	}})
+	if len(trig.EventFilters) != 1 || len(trig.EventFilters[0].Conditions) != 2 {
+		t.Fatalf("conditions should round-trip on create, got %#v", trig.EventFilters)
+	}
+	headers := map[string]string{"X-GitHub-Event": "issues"}
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "labeled", "label": map[string]any{"name": "bug"}, "sender": map[string]any{"type": "User"},
+	}, headers)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if w.Code != http.StatusOK || resp["status"] != "ignored" || resp["reason"] != "event_filtered" {
+		t.Fatalf("expected ignored/event_filtered, got %d %#v", w.Code, resp)
+	}
+
+	w = postWebhook(t, *trig.WebhookToken, map[string]any{
+		"action": "labeled", "label": map[string]any{"name": "agent"}, "sender": map[string]any{"type": "User"},
+	}, headers)
+	delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
+	if delivery.Status != deliveryStatusDispatched || !delivery.AutopilotRunID.Valid {
+		t.Fatalf("expected worker dispatch, got status=%s run=%v", delivery.Status, delivery.AutopilotRunID.Valid)
+	}
+}
+
+func TestCreateAutopilotTrigger_RejectsInvalidPayloadCondition(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ConditionInvalid Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
+		"kind": "webhook",
+		"event_filters": []map[string]any{{
+			"event":      "issues",
+			"conditions": []map[string]any{{"path": "label.name", "op": "matches", "value": "agent"}},
+		}},
+	})
+	req = withURLParam(req, "id", apID)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on unknown op, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestWebhookHandler_EmptyFiltersAllowsAll(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "WebhookEmptyFilter Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")

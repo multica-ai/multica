@@ -117,11 +117,16 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
 
 // serializeEventFilters returns a stable JSON string so the edit-mode dirty
 // check can compare the current filters against the snapshot taken on open
-// without depending on reference equality. Normalizes empty Actions to []
-// so omitted-vs-explicit-empty doesn't show as a phantom change.
+// without depending on reference equality. Normalizes empty Actions and
+// Conditions to [] so omitted-vs-explicit-empty doesn't show as a phantom
+// change.
 function serializeEventFilters(filters: WebhookEventFilter[]): string {
   return JSON.stringify(
-    filters.map((f) => ({ event: f.event, actions: f.actions ?? [] })),
+    filters.map((f) => ({
+      event: f.event,
+      actions: f.actions ?? [],
+      conditions: f.conditions ?? [],
+    })),
   );
 }
 

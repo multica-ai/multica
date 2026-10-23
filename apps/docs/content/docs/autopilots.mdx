@@ -82,6 +82,21 @@ When one source sends several event types, add event filters to the trigger. Eac
 
 For example, with `workflow_run` as the event name and `completed, failed` as the actions, only those two kinds of `workflow_run` results are accepted. Multica recognizes the event and action from common request headers and payload fields, including GitHub's `X-GitHub-Event` and the `action` field in the body.
 
+Each row can also carry `conditions` on payload fields: click **Condition** on the row, or set them through the API. Every condition must hold for the row to match; a filtered event is ignored before any run starts. `path` walks the payload with dots, where a number indexes an array and `*` means any element (`pull_request.labels.*.name`). `op` is `equals`, `not_equals`, `contains`, `in` or `exists`, and `ignore_case` applies to text. With `*`, `equals`, `contains`, `in` and `exists` hold if any element matches, and `not_equals` holds if none does. A missing field never matches, and `exists` ignores `null`. For example, this row only accepts ready pull requests labelled `needs-review` that target `main` or `release` and weren't opened by a bot:
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
 ### Protect the webhook URL
 
 <Callout type="warning">

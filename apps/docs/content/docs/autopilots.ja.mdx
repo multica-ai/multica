@@ -82,6 +82,21 @@ Webhook リクエストには次の制約があります。
 
 たとえばイベント名に `workflow_run`、Actions に `completed, failed` を指定すると、この 2 種類の `workflow_run` の結果だけを受け取ります。Multica は一般的なリクエストヘッダーと payload からイベントと action を判定します。GitHub の `X-GitHub-Event` と body の `action` にも対応しています。
 
+各行には payload のフィールドに対する `conditions` も設定できます。行の **条件** をクリックするか、API から設定します。すべての条件を満たしたときだけその行に一致し、除外されたイベントは実行が始まる前に無視されます。`path` はドット区切りで payload をたどり、数値は配列の添字、`*` は任意の要素を表します（`pull_request.labels.*.name`）。`op` は `equals`、`not_equals`、`contains`、`in`、`exists` のいずれかで、`ignore_case` はテキストに適用されます。`*` を使う場合、`equals`、`contains`、`in`、`exists` はいずれかの要素が一致すれば成立し、`not_equals` はどの要素も一致しないときに成立します。フィールドが存在しない場合は一致せず、`exists` は `null` を無視します。たとえば次の行は、準備ができていて `needs-review` ラベルが付き、`main` または `release` を対象とし、bot が作成したものではない pull request だけを受け取ります。
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
 ### Webhook URL を保護する
 
 <Callout type="warning">

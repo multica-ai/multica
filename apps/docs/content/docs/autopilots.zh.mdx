@@ -82,6 +82,21 @@ Webhook 请求的约束：
 
 例如，事件名填写 `workflow_run`，Actions 填写 `completed, failed`，只会接收这两类 `workflow_run` 结果。Multica 会从常见请求头和 payload 中识别事件与 action，包括 GitHub 的 `X-GitHub-Event` 和 body 中的 `action`。
 
+每行还可以设置针对 payload 字段的 `conditions`：点击该行的 **条件**，或通过 API 设置。所有条件都满足时该行才命中；被过滤的事件在任何运行开始前就会被忽略。`path` 用点号访问 payload，数字表示数组下标，`*` 表示任意元素（`pull_request.labels.*.name`）。`op` 可选 `equals`、`not_equals`、`contains`、`in` 或 `exists`，`ignore_case` 作用于文本。使用 `*` 时，`equals`、`contains`、`in` 和 `exists` 只要有一个元素匹配即成立，`not_equals` 要求没有任何元素匹配。字段不存在时永远不命中，`exists` 会忽略 `null`。例如，下面这一行只接收已就绪、带有 `needs-review` 标签、目标分支为 `main` 或 `release`、且不是由机器人创建的 pull request：
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
 ### 保护 Webhook URL
 
 <Callout type="warning">

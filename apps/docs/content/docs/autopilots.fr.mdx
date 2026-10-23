@@ -82,6 +82,21 @@ Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtr
 
 Par exemple, avec `workflow_run` comme nom d'événement et `completed, failed` comme actions, seuls ces deux types de résultats `workflow_run` sont acceptés. Multica reconnaît l'événement et l'action à partir des en-têtes de requête et des champs de charge utile courants, notamment l'en-tête `X-GitHub-Event` de GitHub et le champ `action` du corps.
 
+Chaque ligne peut aussi porter des `conditions` sur les champs de la charge utile : cliquez sur **Condition** dans la ligne, ou définissez-les via l'API. Toutes les conditions doivent être vraies pour que la ligne corresponde ; un événement filtré est ignoré avant le démarrage de toute exécution. `path` parcourt la charge utile avec des points : un nombre indexe un tableau et `*` désigne n'importe quel élément (`pull_request.labels.*.name`). `op` vaut `equals`, `not_equals`, `contains`, `in` ou `exists`, et `ignore_case` s'applique au texte. Avec `*`, `equals`, `contains`, `in` et `exists` sont vraies si un élément correspond, et `not_equals` si aucun ne correspond. Un champ absent ne correspond jamais, et `exists` ignore `null`. Par exemple, cette ligne n'accepte que les pull requests prêtes, étiquetées `needs-review`, qui ciblent `main` ou `release` et n'ont pas été ouvertes par un bot :
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
 ### Protéger l'URL du webhook
 
 <Callout type="warning">
