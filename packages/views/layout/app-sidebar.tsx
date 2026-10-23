@@ -74,6 +74,7 @@ import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
+import { useSidebarPreferencesStore } from "@multica/core/navigation";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -443,6 +444,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const hiddenItems = useSidebarPreferencesStore((s) => s.hiddenItems);
+  const isVisible = (item: { labelKey: NavLabelKey }) =>
+    !hiddenItems.some((key) => key === item.labelKey);
+  const visiblePersonalNav = personalNav.filter(isVisible);
+  const visibleWorkNav = workNav.filter(isVisible);
+  const visibleAiTeamNav = aiTeamNav.filter(isVisible);
+  const visibleUtilityNav = utilityNav.filter(isVisible);
 
   // On a phone the sidebar is a Sheet covering the page, so navigating out of
   // it has to dismiss it — otherwise the destination renders underneath and the
@@ -770,43 +778,45 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
 
         {/* Navigation */}
         <SidebarContent ref={sidebarScrollRef} style={sidebarFadeStyle}>
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {personalNav.map((item) => {
-                  const href = p[item.key]();
-                  const Icon = routeIconForPath(href);
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className={NAV_ITEM_CLASS_NAME}
-                      >
-                        <Icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "inbox" && unreadCount > 0 && (
-                          <CappedNumberFlow
-                            value={unreadCount}
-                            animated={false}
-                            className="ml-auto text-caption"
-                          />
-                        )}
-                        {item.key === "chat" && chatUnreadCount > 0 && (
-                          <CappedNumberFlow
-                            value={chatUnreadCount}
-                            animated={false}
-                            className="ml-auto text-caption"
-                          />
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {visiblePersonalNav.length > 0 && (
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu className="gap-0.5">
+                  {visiblePersonalNav.map((item) => {
+                    const href = p[item.key]();
+                    const Icon = routeIconForPath(href);
+                    const isActive = isNavActive(pathname, href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          render={<AppLink href={href} />}
+                          className={NAV_ITEM_CLASS_NAME}
+                        >
+                          <Icon />
+                          <span>{t(($) => $.nav[item.labelKey])}</span>
+                          {item.key === "inbox" && unreadCount > 0 && (
+                            <CappedNumberFlow
+                              value={unreadCount}
+                              animated={false}
+                              className="ml-auto text-caption"
+                            />
+                          )}
+                          {item.key === "chat" && chatUnreadCount > 0 && (
+                            <CappedNumberFlow
+                              value={chatUnreadCount}
+                              animated={false}
+                              className="ml-auto text-caption"
+                            />
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
 
           {visiblePinned.length > 0 && (
             <Collapsible defaultOpen>
@@ -857,60 +867,64 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </Collapsible>
           )}
 
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.work_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {workNav.map((item) => {
-                  const href = p[item.key]();
-                  const Icon = routeIconForPath(href);
-                  const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className={NAV_ITEM_CLASS_NAME}
-                      >
-                        <Icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {visibleWorkNav.length > 0 && (
+            <SidebarGroup>
+              <SidebarGroupLabel>{t(($) => $.sidebar.work_group)}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu className="gap-0.5">
+                  {visibleWorkNav.map((item) => {
+                    const href = p[item.key]();
+                    const Icon = routeIconForPath(href);
+                    const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          render={<AppLink href={href} />}
+                          className={NAV_ITEM_CLASS_NAME}
+                        >
+                          <Icon />
+                          <span>{t(($) => $.nav[item.labelKey])}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
 
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.ai_team_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {aiTeamNav.map((item) => {
-                  const href = p[item.key]();
-                  const Icon = routeIconForPath(href);
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className={NAV_ITEM_CLASS_NAME}
-                      >
-                        <Icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {visibleAiTeamNav.length > 0 && (
+            <SidebarGroup>
+              <SidebarGroupLabel>{t(($) => $.sidebar.ai_team_group)}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu className="gap-0.5">
+                  {visibleAiTeamNav.map((item) => {
+                    const href = p[item.key]();
+                    const Icon = routeIconForPath(href);
+                    const isActive = isNavActive(pathname, href);
+                    return (
+                      <SidebarMenuItem key={item.key}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          render={<AppLink href={href} />}
+                          className={NAV_ITEM_CLASS_NAME}
+                        >
+                          <Icon />
+                          <span>{t(($) => $.nav[item.labelKey])}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
         </SidebarContent>
 
         <SidebarFooter className="p-2">
           <SidebarMenu className="gap-0.5">
-            {utilityNav.map((item) => {
+            {visibleUtilityNav.map((item) => {
               const href = p[item.key]();
               const Icon = routeIconForPath(href);
               return (
