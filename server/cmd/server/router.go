@@ -763,8 +763,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				}
 			}
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
+	} else {
+		slog.Error("lark: invalid MULTICA_LARK_SECRET_KEY; lark integration disabled", "error", err)
 	}
 
 	// Slack integration. Multi-tenant B2 model (MUL-3666): Multica hosts ONE
@@ -870,8 +872,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 			slog.Info("slack integration enabled (BYO per-installation socket mode)")
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
+	} else {
+		slog.Error("slack: invalid MULTICA_SLACK_SECRET_KEY; slack integration disabled", "error", err)
 	}
 
 	// DingTalk uses one outbound Stream connection per BYO installation. The
@@ -920,8 +924,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 			slog.Info("dingtalk integration enabled (BYO per-installation stream mode)")
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
+	} else {
+		slog.Error("dingtalk: invalid MULTICA_DINGTALK_SECRET_KEY; dingtalk integration disabled", "error", err)
 	}
 
 	// WeCom smart-bot integration ("智能机器人" / aibot). Per-installation
@@ -1178,8 +1184,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				}
 			}
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+	} else {
+		slog.Error("wecom: invalid MULTICA_WECOM_SECRET_KEY; wecom integration disabled", "error", err)
 	}
 
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at
@@ -1239,8 +1247,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 			slog.Info("telegram integration enabled (per-installation long polling)")
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
+	} else {
+		slog.Error("telegram: invalid MULTICA_TELEGRAM_SECRET_KEY; telegram integration disabled", "error", err)
 	}
 
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
@@ -1312,8 +1322,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			h.VCSSecretBox = box
 			slog.Info("vcs integration enabled")
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
+	} else {
+		slog.Error("vcs: invalid MULTICA_VCS_SECRET_KEY; vcs integration disabled", "error", err)
 	}
 
 	// Plugin secrets use a dedicated deployment key. Keeping this separate from
@@ -1339,8 +1351,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 			slog.Info("Plugin secret encryption enabled")
 		}
-	} else {
+	} else if errors.Is(err, secretbox.ErrKeyNotSet) {
 		slog.Info("Plugin secrets disabled (MULTICA_PLUGIN_SECRET_KEY not set)")
+	} else {
+		slog.Error("plugins: invalid MULTICA_PLUGIN_SECRET_KEY; Plugin secrets disabled", "error", err)
 	}
 
 	// Hook engine. Event-triggered hooks are dispatched off the bus onto a
