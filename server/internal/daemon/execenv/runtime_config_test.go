@@ -1786,6 +1786,12 @@ func TestCleanupRuntimeConfigPreservesEditsAfterFormatting(t *testing.T) {
 		{"body replaced after block", "# Old\n", "", "# New\n", "# New\n"},
 		{"body deleted", "# Old\n", "", "", ""},
 		{"blank file gains content after block", "", "", "# New\n", "# New\n"},
+		// Newline-only originals: the formatter dropped the leading blank
+		// lines and the agent wrote a body after the block. The recorded
+		// newlines must not be restored in front of the new body.
+		{"newline-only file gains content after block", "\n", "", "# New\n", "# New\n"},
+		{"crlf-only file gains content after block", "\r\n", "", "# New\r\n", "# New\r\n"},
+		{"newline-only file left blank", "\n", "", "", "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

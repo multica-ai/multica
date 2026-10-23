@@ -495,7 +495,10 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 	// this version) two formatter-normalised shapes are restored from the
 	// record instead of by stripping a fixed width:
 	//   - the separator collapsed to a single blank line after user content;
-	//   - a blank pre-existing file whose separator the formatter dropped.
+	//   - a blank pre-existing file whose separator the formatter dropped,
+	//     and which is still blank apart from the block. If content now
+	//     follows the block, the agent wrote the file's new body; putting
+	//     the old blank lines back in front of it would leak a stray diff.
 	// Every other shape — legacy blocks, untouched separators, or user edits
 	// to the boundary — keeps the fixed-separator behaviour.
 	hadManagedSeparator := strings.HasSuffix(pre, runtimeManagedSeparator)
@@ -505,7 +508,7 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 	switch {
 	case hasMeta && trimmedPre != "" && runtimeIsCollapsedSeparator(gap):
 		pre = trimmedPre + runtimeBoundaryInStyle(meta.boundary, gap)
-	case hasMeta && meta.blank && pre == "":
+	case hasMeta && meta.blank && pre == "" && post == "":
 		pre = meta.boundary
 	case hadManagedSeparator:
 		pre = pre[:len(pre)-len(runtimeManagedSeparator)]
