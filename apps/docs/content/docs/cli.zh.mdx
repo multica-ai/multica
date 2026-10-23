@@ -284,6 +284,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `stop` / `status` / `restart` | 停止、查看状态、重启（`restart` 与 `start` 同一套 flag） | |
 | | `logs` | 查看守护进程日志 | `--follow`、`--lines` |
 | | `disk-usage` | 查看本机磁盘占用 | `--by-workspace`、`--by-task`、`--top` |
+| | `reap-workspaces` | 报告或移除状态为 done/cancelled 且 Git 工作树干净的任务目录 | 删除必须传 `--apply`；`--workspaces-root`、`--output` |
 | `runtime` | `list/usage/activity/update/rename/delete` | 查看和管理运行时 | `delete`：`--cascade`（解绑绑定的智能体、保留其数据并取消其运行） |
 | | `profile list/create/update/delete` | 管理自定义运行时 profile | |
 | | `profile set-path/unset-path <profile-id>` | 固定本机可执行文件路径（仅本地生效，不上传服务器） | |
