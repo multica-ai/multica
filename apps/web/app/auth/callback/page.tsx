@@ -20,6 +20,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "@multica/views/i18n";
 import { Loader2 } from "lucide-react";
 import { callbackErrorFrom, type CallbackError } from "./callback-error";
+import { parseGoogleOAuthState } from "../oauth-state";
 
 const authLogger = createLogger("auth.callback");
 
@@ -50,25 +51,17 @@ function CallbackContent() {
       return;
     }
 
-    const state = searchParams.get("state") || "";
-    const stateParts = state.split(",");
-    const isDesktop = stateParts.includes("platform:desktop");
-    const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    // Strip "next:" prefix, then drop anything that isn't a safe relative path
-    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
-    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
+    const parsedState = parseGoogleOAuthState(searchParams.get("state") || "");
+    const isDesktop = parsedState.isDesktop;
+    // Drop anything that isn't a safe relative path so an
+    // attacker-controlled `state=next:https://evil` cannot redirect here.
+    const nextUrl = sanitizeNextUrl(parsedState.nextRaw);
 
     // CLI callback params — carried across the Google OAuth round-trip so
     // headless/WSL2 `multica login` can receive the JWT after browser-based
     // Google auth completes.
-    const cliCallbackPart = stateParts.find((p) => p.startsWith("cli_callback:"));
-    const cliStatePart = stateParts.find((p) => p.startsWith("cli_state:"));
-    const cliCallbackRaw = cliCallbackPart
-      ? decodeURIComponent(cliCallbackPart.slice("cli_callback:".length))
-      : null;
-    const cliState = cliStatePart
-      ? decodeURIComponent(cliStatePart.slice("cli_state:".length))
-      : "";
+    const cliCallbackRaw = parsedState.cliCallbackRaw;
+    const cliState = parsedState.cliState;
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
