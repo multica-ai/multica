@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -289,6 +290,68 @@ func TestResolveTextFlag(t *testing.T) {
 		}
 	})
 
+	t.Run("process-substitution pipe via /dev/fd is accepted", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("/dev/fd is a Unix process-substitution spelling")
+		}
+		t.Chdir(t.TempDir())
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+		defer r.Close()
+		body := "子 issue 描述\n\nwith `code` and \"quotes\"."
+		if _, err := w.Write([]byte(body + "\n")); err != nil {
+			t.Fatalf("write pipe: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("close writer: %v", err)
+		}
+		path := fmt.Sprintf("/dev/fd/%d", r.Fd())
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("/dev/fd unavailable: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", path)
+		got, ok, err := resolveTextFlag(c, "description")
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != body {
+			t.Errorf("got %q, want %q", got, body)
+		}
+	})
+
+	t.Run("regular file reached through /dev/fd is still subject to the workdir guard", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("/dev/fd is a Unix process-substitution spelling")
+		}
+		t.Chdir(t.TempDir())
+		outside := t.TempDir()
+		stale := filepath.Join(outside, "stale.md")
+		if err := os.WriteFile(stale, []byte("another run's content"), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		f, err := os.Open(stale)
+		if err != nil {
+			t.Fatalf("open stale: %v", err)
+		}
+		defer f.Close()
+		path := fmt.Sprintf("/dev/fd/%d", f.Fd())
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("/dev/fd unavailable: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", path)
+		_, _, err = resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatal("expected rejection: /dev/fd spelling of a regular file outside the workdir")
+		}
+		if !strings.Contains(err.Error(), "allow-external-file") && !strings.Contains(err.Error(), "outside the current working directory") {
+			t.Errorf("error should still be the workdir guard, got %v", err)
+		}
+	})
+
 	t.Run("file plus stdin is rejected", func(t *testing.T) {
 		dir := t.TempDir()
 		path := dir + string(os.PathSeparator) + "x.md"
@@ -437,6 +500,32 @@ func TestFileWithinWorkingDir(t *testing.T) {
 						t.Errorf("fileWithinWorkingDir(%q) = %v, want %v", tc.path, got, tc.want)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestIsProcessLocalFDPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{path: "/dev/fd/11", want: true},
+		{path: "/dev/fd/0", want: true},
+		{path: "/proc/self/fd/11", want: true},
+		{path: "/dev/stdin", want: true},
+		{path: "/dev/fd/", want: false},
+		{path: "/dev/fd/11/extra", want: false},
+		{path: "/dev/fd/11.md", want: false},
+		{path: "/tmp/desc.md", want: false},
+		{path: "./description.md", want: false},
+		{path: "/dev/fd/../tmp/stale.md", want: false},
+		{path: "/proc/self/fd/../fd/11", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := isProcessLocalFDPath(tc.path); got != tc.want {
+				t.Errorf("isProcessLocalFDPath(%q) = %v, want %v", tc.path, got, tc.want)
 			}
 		})
 	}
