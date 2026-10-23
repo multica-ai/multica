@@ -8,6 +8,22 @@ const uploadMock = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 
+// Lets tests simulate an unsupported archetype / missing illustrated asset so
+// the generic procedural fallback keeps meaningful coverage now that all five
+// archetypes ship illustrated art.
+const catalogGate = vi.hoisted(() => ({ forceMissing: false }));
+vi.mock("@multica/ui/lib/avatar-catalog", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@multica/ui/lib/avatar-catalog")>();
+  return {
+    ...actual,
+    hasIllustratedAvatarAsset: (archetype: string, variant: string) =>
+      catalogGate.forceMissing
+        ? false
+        : actual.hasIllustratedAvatarAsset(archetype, variant),
+  };
+});
+
 vi.mock("sonner", () => ({
   toast: { error: toastError, success: toastSuccess },
 }));
@@ -42,6 +58,7 @@ import { AvatarUploadControl } from "./avatar-upload-control";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  catalogGate.forceMissing = false;
 });
 
 function imageFile() {
@@ -161,6 +178,29 @@ describe("AvatarUploadControl", () => {
       "aria-pressed",
       "false",
     );
+  });
+
+  // MAKE-291: a `gen:<seed>` display marker must preview as the generated
+  // avatar, not be handed to <img> as if it were a URL (which would 404 and
+  // drop the control to the Bot placeholder — losing the identity the server
+  // just resolved).
+  it("previews the generated avatar from a gen: marker", () => {
+    // Simulate a missing illustrated asset so the procedural preview path
+    // (SVG, no <img>) keeps coverage.
+    catalogGate.forceMissing = true;
+    renderWithI18n(
+      <AvatarUploadControl
+        variant="agent"
+        value="gen:android-0"
+        onUploaded={vi.fn()}
+        onEmojiSelected={vi.fn()}
+      />,
+    );
+
+    const svg = document.querySelector('[data-slot="generated-avatar"]');
+    expect(svg).not.toBeNull();
+    expect(svg?.getAttribute("data-avatar-seed")).toBe("android-0");
+    expect(document.querySelector("img")).toBeNull();
   });
 
   // An edit caller PATCHes on every pick. Two in flight at once are
