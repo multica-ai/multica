@@ -7,19 +7,44 @@ const MOBILE_BREAKPOINT = 768
 const COMPACT_BREAKPOINT = 1024
 
 function useIsBelow(breakpoint: number) {
-  const [isBelow, setIsBelow] = React.useState<boolean | undefined>(undefined)
+  const subscribe = React.useCallback(
+    (onStoreChange: () => void) => {
+      if (typeof window === "undefined") {
+        return () => {}
+      }
+      const mql = window.matchMedia ? window.matchMedia(`(max-width: ${breakpoint - 1}px)`) : null
+      if (mql) {
+        if (typeof mql.addEventListener === "function") {
+          mql.addEventListener("change", onStoreChange)
+        } else if (typeof (mql as unknown as { addListener?: (cb: () => void) => void }).addListener === "function") {
+          (mql as unknown as { addListener: (cb: () => void) => void }).addListener(onStoreChange)
+        }
+      }
+      window.addEventListener("resize", onStoreChange)
+      return () => {
+        if (mql) {
+          if (typeof mql.removeEventListener === "function") {
+            mql.removeEventListener("change", onStoreChange)
+          } else if (typeof (mql as unknown as { removeListener?: (cb: () => void) => void }).removeListener === "function") {
+            (mql as unknown as { removeListener: (cb: () => void) => void }).removeListener(onStoreChange)
+          }
+        }
+        window.removeEventListener("resize", onStoreChange)
+      }
+    },
+    [breakpoint]
+  )
 
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${breakpoint - 1}px)`)
-    const onChange = () => {
-      setIsBelow(window.innerWidth < breakpoint)
+  const getSnapshot = React.useCallback(() => {
+    if (typeof window === "undefined") {
+      return false
     }
-    mql.addEventListener("change", onChange)
-    setIsBelow(window.innerWidth < breakpoint)
-    return () => mql.removeEventListener("change", onChange)
+    return window.innerWidth < breakpoint
   }, [breakpoint])
 
-  return !!isBelow
+  const getServerSnapshot = React.useCallback(() => false, [])
+
+  return React.useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 export function useIsMobile() {
