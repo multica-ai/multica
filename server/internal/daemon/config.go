@@ -179,6 +179,8 @@ type Overrides struct {
 	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
 	// distinguishable from "flag not passed". nil = use env/default.
 	AgentTimeout                   *time.Duration
+	AgentIdleWatchdog             *time.Duration
+	AgentToolWatchdog             *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	CodexHandshakeTimeout          time.Duration
 	MaxConcurrentTasks             int
@@ -338,6 +340,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if overrides.AgentIdleWatchdog != nil {
+		agentIdleWatchdog = *overrides.AgentIdleWatchdog
+	}
 	// MULTICA_OPENCODE_IDLE_WATCHDOG narrows the no-message window for
 	// OpenCode's streamed model responses. Zero removes the provider-specific
 	// override and falls back to MULTICA_AGENT_IDLE_WATCHDOG; positive values
@@ -375,6 +380,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", agentIdleWatchdog)
 	if err != nil {
 		return Config{}, err
+	}
+	if overrides.AgentToolWatchdog != nil {
+		agentToolWatchdog = *overrides.AgentToolWatchdog
 	}
 
 	// Codex runs a semantic-inactivity timer of its own inside the app-server

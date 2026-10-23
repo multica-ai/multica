@@ -256,6 +256,63 @@ func TestResolveDaemonAgentTimeoutOverridePrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveDaemonWatchdogOverridePrecedence(t *testing.T) {
+	const envName = "TEST_MULTICA_WATCHDOG"
+	newCmd := func(changed bool, value time.Duration) *cobra.Command {
+		cmd := &cobra.Command{Use: "test"}
+		cmd.Flags().Duration("watchdog", 0, "")
+		if changed {
+			_ = cmd.Flags().Set("watchdog", value.String())
+		}
+		return cmd
+	}
+	cases := []struct {
+		name       string
+		flagChgd   bool
+		flag       time.Duration
+		env        string
+		cfg        string
+		want       *time.Duration
+		errSub     string
+	}{
+		{name: "explicit zero flag", flagChgd: true, want: durationPtr(0)},
+		{name: "cfg positive", cfg: "15m", want: durationPtr(15 * time.Minute)},
+		{name: "env suppresses cfg", env: "20m", cfg: "15m"},
+		{name: "cfg zero", cfg: "0s", want: durationPtr(0)},
+		{name: "cfg invalid", cfg: "bad", errSub: "not a valid duration"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env == "" {
+				t.Setenv(envName, "")
+			} else {
+				t.Setenv(envName, tc.env)
+			}
+			got, err := resolveDaemonWatchdogOverride(newCmd(tc.flagChgd, tc.flag), "watchdog", envName, tc.cfg)
+			if tc.errSub != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.errSub) {
+					t.Fatalf("error = %v, want %q", err, tc.errSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("got %v, want nil", got)
+				}
+				return
+			}
+			if got == nil || *got != *tc.want {
+				t.Fatalf("got %v, want %v", got, *tc.want)
+			}
+		})
+	}
+}
+
+func durationPtr(value time.Duration) *time.Duration { return &value }
+
 // TestResolveDaemonDisableSignalPrecedence pins the single-direction disable
 // signal shared by --no-auto-update and --no-auto-reload: flag OR falsy env OR
 // persisted cfg=true all disable; a truthy env leaves the override off so
