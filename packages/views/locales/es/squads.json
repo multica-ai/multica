@@ -1,0 +1,148 @@
+{
+  "page": {
+    "title": "Equipos",
+    "new_button": "Equipo nuevo",
+    "empty_no_squads": "Todavía no hay equipos.",
+    "empty_no_match": "Ningún equipo coincide con tus filtros.",
+    "table": {
+      "name": "Equipo",
+      "leader": "Líder",
+      "members": "Miembros",
+      "creator": "Creado por",
+      "created": "Creado"
+    },
+    "no_matches": "Ningún equipo coincide",
+    "row_menu": "Acciones de equipo",
+    "archive_action": "Archivar"
+  },
+  "inspector": {
+    "details_section": "Detalles",
+    "archive_button": "Archivar"
+  },
+  "member_type": {
+    "agent": "Agente",
+    "member": "Miembro"
+  },
+  "archive_dialog": {
+    "title": "¿Archivar este equipo?",
+    "description": "\"{{name}}\" se archivará. Las incidencias asignadas actualmente a este equipo se transferirán a su líder. Esto no se puede deshacer - crea un equipo nuevo si necesitas recuperar el enrutado.",
+    "cancel": "Cancelar",
+    "confirm": "Archivar",
+    "archiving": "Archivando…",
+    "success": "Equipo archivado"
+  },
+  "name_editor": {
+    "title": "Renombrar equipo",
+    "placeholder": "Nombre del equipo",
+    "required": "El nombre es obligatorio",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "saved": "Guardado",
+    "save_failed": "No se pudo guardar"
+  },
+  "add_member_dialog": {
+    "title": "Añadir miembro",
+    "description": "Elige miembros del espacio de trabajo o agentes.",
+    "label_member": "Miembro",
+    "label_role": "Rol",
+    "label_optional": "(opcional)",
+    "cancel": "Cancelar",
+    "select_target": "Selecciona un miembro o agente",
+    "search_placeholder": "Buscar miembros o agentes...",
+    "members_section": "Miembros",
+    "agents_section": "Agentes",
+    "role_placeholder": "p. ej., Revisor, Líder de frontend",
+    "add": "Añadir"
+  },
+  "role_editor": {
+    "empty": "Añadir rol…",
+    "placeholder": "Rol (p. ej., Revisor)"
+  },
+  "description_dialog": {
+    "title": "Editar descripción",
+    "placeholder_empty": "Añadir una descripción",
+    "cancel": "Cancelar",
+    "responsibility_placeholder": "¿De qué es responsable este equipo?",
+    "save": "Guardar"
+  },
+  "discard_changes_dialog": {
+    "title": "¿Descartar los cambios sin guardar?",
+    "description": "Hay cambios sin guardar en esta pestaña. Cambiar de pestaña los descartará.",
+    "keep_editing": "Seguir editando",
+    "discard_button": "Descartar"
+  },
+  "members_tab": {
+    "section_title": "Miembros",
+    "section_count_one": "{{count}} miembro en este equipo",
+    "section_count_other": "{{count}} miembros en este equipo",
+    "add_member_button": "Añadir miembro",
+    "create_agent_button": "Crear agente",
+    "leader_chip": "Líder",
+    "view_agent_tooltip": "Abrir detalle del agente",
+    "make_leader_tooltip": "Hacer líder del equipo",
+    "remove_member_tooltip": "Quitar del equipo",
+    "status_working": "Trabajando",
+    "status_idle": "Inactivo",
+    "status_offline": "Desconectado",
+    "status_unstable": "Inestable",
+    "status_archived": "Archivado",
+    "issue_status_blocked": "bloqueada",
+    "active_issue_more": "y {{count}} más",
+    "last_active_label": "última actividad {{time}}"
+  },
+  "detail_tabs": {
+    "members": "Miembros",
+    "instructions": "Instrucciones"
+  },
+  "details": {
+    "leader": "Líder",
+    "members": "Miembros",
+    "created_by": "Creado por",
+    "created": "Creado",
+    "updated": "Actualizado"
+  },
+  "toasts": {
+    "member_added": "Miembro añadido",
+    "member_add_failed": "No se pudo añadir el miembro",
+    "member_removed": "Miembro eliminado",
+    "member_remove_failed": "No se pudo eliminar el miembro",
+    "role_updated": "Rol actualizado",
+    "role_update_failed": "No se pudo actualizar el rol",
+    "leader_updated": "Líder actualizado",
+    "leader_update_failed": "No se pudo actualizar el líder",
+    "archive_failed": "No se pudo archivar el equipo",
+    "instructions_saved": "Instrucciones guardadas"
+  },
+  "profile_card": {
+    "unavailable": "Equipo no disponible",
+    "detail_link": "Detalle →",
+    "archived": "Archivado",
+    "member_count_one": "{{count}} miembro",
+    "member_count_other": "{{count}} miembros",
+    "members_section": "Miembros",
+    "more_members_one": "+{{count}} más",
+    "more_members_other": "+{{count}} más"
+  },
+  "instructions_tab": {
+    "description": "El líder lee estas instrucciones cada vez que trabaja en una incidencia asignada a este equipo.",
+    "unsaved_changes": "Cambios sin guardar",
+    "save_button": "Guardar",
+    "placeholder": "p. ej., Empieza siempre escribiendo un test que falle. Prefiere commits pequeños y atómicos."
+  },
+  "scope": {
+    "mine": "Míos",
+    "all": "Todos"
+  },
+  "toolbar": {
+    "display": "Mostrar",
+    "sort_by": "Ordenar por",
+    "direction_asc": "Ascendente",
+    "direction_desc": "Descendente",
+    "section_columns": "Columnas",
+    "result_count_title": "Equipos coincidentes / todos los equipos",
+    "filter_label": "Filtro",
+    "filter_active_count_one": "{{count}} filtro",
+    "filter_active_count_other": "{{count}} filtros",
+    "clear_filters": "Limpiar filtros"
+  }
+}

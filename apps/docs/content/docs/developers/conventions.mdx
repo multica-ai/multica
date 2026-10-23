@@ -28,14 +28,14 @@ Always live under `/{slug}/{section}` — `/{slug}/issues`, `/{slug}/agents`, `/
 
 The monorepo enforces strict package boundaries:
 
-| Package | May depend on | Must NOT depend on |
-| --- | --- | --- |
-| `packages/core` | nothing app-specific | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
-| `packages/ui` | nothing | `@multica/core`, business logic |
-| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
-| `apps/web/platform/` | `next/*` | other apps |
-| `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
-| `apps/mobile/` | types and pure functions from `@multica/core` | Web/Desktop React pages, stores, and platform implementations |
+| Package                      | May depend on                                 | Must NOT depend on                                                 |
+| ---------------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
+| `packages/core`              | nothing app-specific                          | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
+| `packages/ui`                | nothing                                       | `@multica/core`, business logic                                    |
+| `packages/views`             | `core/`, `ui/`                                | `next/*`, `react-router-dom`, stores                               |
+| `apps/web/platform/`         | `next/*`                                      | other apps                                                         |
+| `apps/desktop/.../platform/` | `react-router-dom`, electron                  | other apps                                                         |
+| `apps/mobile/`               | types and pure functions from `@multica/core` | Web/Desktop React pages, stores, and platform implementations      |
 
 If logic appears in both apps, it MUST be extracted to a shared package. There are no exceptions for "small" duplication. Mobile owns a separate UI, data layer, and release process; it shares only types and pure functions.
 
@@ -120,10 +120,10 @@ The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice
 
 `issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
 
-| Entity | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| Entity                                          | en      | zh-Hans  | ja         | ko         | fr            | es             |
+| ----------------------------------------------- | ------- | -------- | ---------- | ---------- | ------------- | -------------- |
+| the tracked unit of work (`issue`)              | Issue   | **任务** | **タスク** | **태스크** | **Tâche**     | **Incidencia** |
+| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行**   | **실행**   | **Exécution** | **Ejecución**  |
 
 Both concepts are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word. `Task` is no longer a user-facing product noun for an agent run; it remains only as the established internal identifier.
 
@@ -143,58 +143,58 @@ Other product nouns follow the same "translate what has a settled local word" te
 
 ### Don't translate — brands and acronyms
 
-| Category | Terms |
-| --- | --- |
-| Brands | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira |
-| Acronyms | API, CLI, URL, SDK, OAuth, JWT, SSO, WebSocket, HTTP, JSON, YAML, SQL |
+| Category | Terms                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------ |
+| Brands   | **Multica**, GitHub, Slack, Google, Anthropic, OpenAI, Claude, Codex, Cursor, Linear, Jira |
+| Acronyms | API, CLI, URL, SDK, OAuth, JWT, SSO, WebSocket, HTTP, JSON, YAML, SQL                      |
 
 ### Translate fully — concepts
 
-| English | Chinese |
-| --- | --- |
-| Workspace | **工作区** |
-| Agent | **智能体** |
-| Project | **项目** |
-| Autopilot | **自动化** |
-| Daemon | **守护进程** |
-| Runtime | **运行时** |
-| Inbox | **收件箱** |
-| Comment | **评论** |
-| Reply | **回复** |
-| Notifications | **通知** |
-| Member | **成员** |
-| Label | **标签** |
-| Settings | **设置** |
-| Onboarding | **上手引导** |
+| English       | Chinese      |
+| ------------- | ------------ |
+| Workspace     | **工作区**   |
+| Agent         | **智能体**   |
+| Project       | **项目**     |
+| Autopilot     | **自动化**   |
+| Daemon        | **守护进程** |
+| Runtime       | **运行时**   |
+| Inbox         | **收件箱**   |
+| Comment       | **评论**     |
+| Reply         | **回复**     |
+| Notifications | **通知**     |
+| Member        | **成员**     |
+| Label         | **标签**     |
+| Settings      | **设置**     |
+| Onboarding    | **上手引导** |
 
 ### Translate fully — generic UI words
 
-| English | Chinese |
-| --- | --- |
-| Invite / Invitation | 邀请 |
-| Search | 搜索 |
-| Email | 邮箱 (label) / 邮件 (action) |
-| Password | 密码 |
-| Sign in / Log in | 登录 |
-| Sign up | 注册 |
-| Sign out / Log out | 退出登录 |
-| Save / Cancel / Delete | 保存 / 取消 / 删除 |
-| Confirm / Continue / Back | 确认 / 继续 / 返回 |
-| Edit / New / Create / Add | 编辑 / 新建 / 创建 / 添加 |
-| Remove / Send / Open / Close | 移除 / 发送 / 打开 / 关闭 |
-| Preview / Download / Upload | 预览 / 下载 / 上传 |
-| Done / Loading... | 完成 / 加载中... |
-| Profile / Account / Appearance | 个人资料 / 账号 / 外观 |
-| Theme / Language | 主题 / 语言 |
-| Light / Dark / System | 浅色 / 深色 / 跟随系统 |
-| Active / Archived | 活跃 (or 启用) / 已归档 |
-| Status / Priority | 状态 / 优先级 |
-| Assignee / Reporter | 负责人 / 报告人 |
-| Description / Title | 描述 / 标题 |
-| Date / Time | 日期 / 时间 |
-| Today / Yesterday / Tomorrow | 今天 / 昨天 / 明天 |
-| Empty / Failed / Success | 空 / 失败 / 成功 |
-| Error / Warning | 错误 / 警告 |
+| English                        | Chinese                      |
+| ------------------------------ | ---------------------------- |
+| Invite / Invitation            | 邀请                         |
+| Search                         | 搜索                         |
+| Email                          | 邮箱 (label) / 邮件 (action) |
+| Password                       | 密码                         |
+| Sign in / Log in               | 登录                         |
+| Sign up                        | 注册                         |
+| Sign out / Log out             | 退出登录                     |
+| Save / Cancel / Delete         | 保存 / 取消 / 删除           |
+| Confirm / Continue / Back      | 确认 / 继续 / 返回           |
+| Edit / New / Create / Add      | 编辑 / 新建 / 创建 / 添加    |
+| Remove / Send / Open / Close   | 移除 / 发送 / 打开 / 关闭    |
+| Preview / Download / Upload    | 预览 / 下载 / 上传           |
+| Done / Loading...              | 完成 / 加载中...             |
+| Profile / Account / Appearance | 个人资料 / 账号 / 外观       |
+| Theme / Language               | 主题 / 语言                  |
+| Light / Dark / System          | 浅色 / 深色 / 跟随系统       |
+| Active / Archived              | 活跃 (or 启用) / 已归档      |
+| Status / Priority              | 状态 / 优先级                |
+| Assignee / Reporter            | 负责人 / 报告人              |
+| Description / Title            | 描述 / 标题                  |
+| Date / Time                    | 日期 / 时间                  |
+| Today / Yesterday / Tomorrow   | 今天 / 昨天 / 明天           |
+| Empty / Failed / Success       | 空 / 失败 / 成功             |
+| Error / Warning                | 错误 / 警告                  |
 
 ### Roles and status enums (lowercase English, not translated)
 

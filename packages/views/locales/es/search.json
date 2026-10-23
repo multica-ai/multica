@@ -1,0 +1,37 @@
+{
+  "title": "Buscar",
+  "description": "Busca páginas, incidencias, proyectos y miembros",
+  "placeholder": "Escribe un comando o busca...",
+  "groups": {
+    "pages": "Páginas",
+    "commands": "Comandos",
+    "members": "Miembros",
+    "projects": "Proyectos",
+    "issues": "Incidencias",
+    "cancelled": "Cancelado",
+    "recent": "Reciente"
+  },
+  "commands": {
+    "current_theme_aria": "Tema actual",
+    "new_issue": "Nueva incidencia",
+    "new_project": "Nuevo proyecto",
+    "copy_issue_link": "Copiar enlace de la incidencia",
+    "copy_identifier": "Copiar identificador ({{identifier}})",
+    "fold_all_comments": "Plegar todos los comentarios",
+    "unfold_all_comments": "Desplegar todos los comentarios",
+    "switch_to_light": "Cambiar a tema claro",
+    "switch_to_dark": "Cambiar a tema oscuro",
+    "use_system_theme": "Usar el tema del sistema"
+  },
+  "toast": {
+    "link_copied": "Enlace copiado",
+    "copied_identifier": "{{identifier}} copiado"
+  },
+  "empty": {
+    "no_results": "No se encontraron resultados.",
+    "type_to_search": "Escribe para buscar incidencias y proyectos"
+  },
+  "trigger": {
+    "label": "Buscar..."
+  }
+}
