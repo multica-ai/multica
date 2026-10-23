@@ -23,6 +23,7 @@ import {
   Brain,
   AlertCircle,
   AlertTriangle,
+  ArrowDown,
   ArrowUpRight,
   Copy,
   RotateCw,
@@ -281,6 +282,25 @@ export function ChatMessageList({
     return items;
   }, [messages, hasLive, pendingTaskId]);
 
+  const [isAwayFromLiveEnd, setIsAwayFromLiveEnd] = useState(false);
+  useEffect(() => {
+    const el = scrollContainerEl;
+    if (!el) return;
+    const update = () => {
+      setIsAwayFromLiveEnd(
+        el.scrollHeight - el.scrollTop - el.clientHeight > FOLLOW_EDGE_THRESHOLD,
+      );
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [scrollContainerEl, renderItems.length]);
+
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
   const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
 
@@ -313,6 +333,7 @@ export function ChatMessageList({
 
   return (
     <PreviewSequenceProvider items={previewSequence}>
+    <div className="relative min-h-0 flex-1">
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
@@ -320,11 +341,10 @@ export function ChatMessageList({
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
       // surface edge rather than being inset with the text.
-      // Hidden until Virtuoso has actually landed on the newest message. The
-      // container paints nothing for that whole window anyway — the rows are
-      // not measured yet — so this costs no visible time and spares the
-      // reader a frame of the wrong messages (see stick-to-bottom.ts).
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
+      // Keep the real rows hidden until Virtuoso has measured and corrected
+      // its initial estimate. A skeleton covers that interval so the pane is
+      // not blank, without exposing a frame at the wrong scroll position.
+      className={cn("h-full overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -398,7 +418,34 @@ export function ChatMessageList({
       </RichContentScrollRootProvider>
       )}
     </div>
+      {!hasReachedLiveEnd ? (
+        <div className={cn("absolute inset-0 bg-surface-raised", CHAT_GUTTER)}>
+          <div className={cn(CHAT_COLUMN, "pt-4")}>
+            <ChatSkeletonBody />
+          </div>
+        </div>
+      ) : null}
+      {hasReachedLiveEnd && isAwayFromLiveEnd ? <JumpToLatest onJump={pinToLiveEnd} /> : null}
+    </div>
     </PreviewSequenceProvider>
+  );
+}
+
+
+function JumpToLatest({ onJump }: { onJump: () => void }) {
+  const { t } = useT("chat");
+  const label = t(($) => $.message_list.jump_to_latest);
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 shadow-sm"
+      onClick={onJump}
+    >
+      <ArrowDown />
+      {label}
+    </Button>
   );
 }
 
