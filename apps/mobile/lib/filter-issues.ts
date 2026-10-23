@@ -8,6 +8,7 @@
  * label slots from the web filter are deferred to v2.
  */
 import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
+import { CLOSED_CATEGORIES, issueBehavesAsAny } from "./issue-status";
 
 export function filterIssues(
   issues: Issue[],
@@ -29,4 +30,23 @@ export function filterIssues(
     }
     return true;
   });
+}
+
+/**
+ * The list with "Show completed" off: drops issues in the done/closed
+ * categories, built-in or custom, by the same category rule as web's gantt
+ * toggle (`ganttCanvasRows` in packages/views/issues/surface/
+ * use-issue-surface-data.ts). A status selected in the status filter stays
+ * visible — an explicit choice outranks the default. An unresolved custom
+ * status stays visible too, so open work is never hidden by mistake.
+ */
+export function hideCompletedIssues(
+  issues: Issue[],
+  statusFilters: IssueStatus[],
+): Issue[] {
+  return issues.filter(
+    (issue) =>
+      statusFilters.includes(issue.status) ||
+      !issueBehavesAsAny(issue, CLOSED_CATEGORIES),
+  );
 }

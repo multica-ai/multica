@@ -16,6 +16,8 @@
  *   - Independent filter store (`useIssuesViewStore`) so workspace-level
  *     filters don't bleed into the per-user view.
  *
+ * Both lists hide completed issues until "Show completed" is turned on.
+ *
  * Filters beyond status/priority (assignee / project / label / creator)
  * are deferred — power-user features with non-trivial picker cost; ship
  * after the parity-critical scope tabs land.
@@ -44,12 +46,11 @@ import {
   useIssuesViewStore,
   type IssuesScope,
 } from "@/data/stores/issues-view-store";
-import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-workspace-change";
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useT } from "@/lib/i18n";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
-import { filterIssues } from "@/lib/filter-issues";
+import { filterIssues, hideCompletedIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
@@ -69,6 +70,7 @@ export default function IssuesPage() {
   const setScope = useIssuesViewStore((s) => s.setScope);
   const statusFilters = useIssuesViewStore((s) => s.statusFilters);
   const priorityFilters = useIssuesViewStore((s) => s.priorityFilters);
+  const showCompleted = useIssuesViewStore((s) => s.showCompleted);
 
   const openFilter = () => {
     if (!wsSlug) return;
@@ -77,11 +79,6 @@ export default function IssuesPage() {
       params: { workspace: wsSlug, scope: "all" },
     });
   };
-
-  useClearFiltersOnWorkspaceChange(
-    useIssuesViewStore.getState().clearFilters,
-    wsId,
-  );
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery(
     issueListOptions(wsId),
@@ -106,9 +103,14 @@ export default function IssuesPage() {
     return allIssues;
   }, [data, scope]);
 
-  const filtered = useMemo(
+  const matching = useMemo(
     () => filterIssues(scopedIssues, statusFilters, priorityFilters),
     [scopedIssues, statusFilters, priorityFilters],
+  );
+  const filtered = useMemo(
+    () =>
+      showCompleted ? matching : hideCompletedIssues(matching, statusFilters),
+    [matching, showCompleted, statusFilters],
   );
 
   const sections = useMemo(() => groupIssuesByStatus(filtered, catalog.statuses), [filtered, catalog.statuses]);
@@ -158,13 +160,23 @@ export default function IssuesPage() {
           </Button>
         </View>
       ) : showEmptyState ? (
-        <EmptyState
-          message={
-            hasActiveFilters
-              ? t("empty.filtered")
-              : t(`empty.${scope}`)
-          }
-        />
+        matching.length > 0 ? (
+          <EmptyState
+            message={t("empty.completed_hidden")}
+            actionLabel={t("filters.show_completed")}
+            onAction={() =>
+              useIssuesViewStore.getState().setShowCompleted(true)
+            }
+          />
+        ) : (
+          <EmptyState
+            message={
+              hasActiveFilters
+                ? t("empty.filtered")
+                : t(`empty.${scope}`)
+            }
+          />
+        )
       ) : (
         <SectionList
           sections={sections}
@@ -361,12 +373,25 @@ function SectionHeader({
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
-    <View className="flex-1 items-center justify-center px-6">
+    <View className="flex-1 items-center justify-center gap-3 px-6">
       <Text className="text-sm text-muted-foreground text-center">
         {message}
       </Text>
+      {actionLabel && onAction ? (
+        <Button variant="outline" size="sm" onPress={onAction}>
+          <Text>{actionLabel}</Text>
+        </Button>
+      ) : null}
     </View>
   );
 }

@@ -44,7 +44,8 @@
     "label": "Label",
     "clear": "Clear filters",
     "apply": "Apply",
-    "due_date": "Due date"
+    "due_date": "Due date",
+    "show_completed": "Show completed"
   },
   "list": {
     "empty": "No issues match your filters",
@@ -122,7 +123,8 @@
     "created": "You haven't created any issues.",
     "agents": "No issues assigned to agents or squads.",
     "all": "No issues in this workspace.",
-    "members": "No issues assigned to a member."
+    "members": "No issues assigned to a member.",
+    "completed_hidden": "Completed issues are hidden."
   },
   "menu": {
     "pin": "Pin",

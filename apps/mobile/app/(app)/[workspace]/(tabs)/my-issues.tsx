@@ -9,8 +9,8 @@
  * Category controls lifecycle behavior and ordering, not section identity.
  *
  * Status + Priority filters mirror web's MyIssuesHeader filter sub-menus.
- * Filter state lives in `useMyIssuesViewStore` and is cleared on workspace
- * change via the shared `useClearFiltersOnWorkspaceChange` hook.
+ * Filter state lives in `useMyIssuesViewStore`, persisted per user and
+ * workspace. Completed issues stay hidden until "Show completed" is on.
  */
 import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
@@ -36,12 +36,11 @@ import type { MyIssuesScope } from "@/data/queries/issue-keys";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMyIssuesViewStore } from "@/data/stores/my-issues-view-store";
-import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-workspace-change";
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useT } from "@/lib/i18n";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
-import { filterIssues } from "@/lib/filter-issues";
+import { filterIssues, hideCompletedIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
@@ -64,6 +63,7 @@ export default function MyIssues() {
   const setScope = useMyIssuesViewStore((s) => s.setScope);
   const statusFilters = useMyIssuesViewStore((s) => s.statusFilters);
   const priorityFilters = useMyIssuesViewStore((s) => s.priorityFilters);
+  const showCompleted = useMyIssuesViewStore((s) => s.showCompleted);
 
   const openFilter = () => {
     if (!wsSlug) return;
@@ -72,11 +72,6 @@ export default function MyIssues() {
       params: { workspace: wsSlug, scope: "my" },
     });
   };
-
-  useClearFiltersOnWorkspaceChange(
-    useMyIssuesViewStore.getState().clearFilters,
-    wsId,
-  );
 
   const filter = useMemo(
     () => (userId ? buildMyIssuesFilter(scope, userId) : { assignee_id: "" }),
@@ -93,9 +88,14 @@ export default function MyIssues() {
 
   // Apply client-side status + priority filter. Mirrors the predicate at
   // packages/views/issues/utils/filter.ts:30-34 via filterIssues().
-  const filtered = useMemo(
+  const matching = useMemo(
     () => filterIssues(data ?? [], statusFilters, priorityFilters),
     [data, statusFilters, priorityFilters],
+  );
+  const filtered = useMemo(
+    () =>
+      showCompleted ? matching : hideCompletedIssues(matching, statusFilters),
+    [matching, showCompleted, statusFilters],
   );
 
   const sections = useMemo(() => groupIssuesByStatus(filtered, catalog.statuses), [filtered, catalog.statuses]);
@@ -147,13 +147,23 @@ export default function MyIssues() {
           </Button>
         </View>
       ) : showEmptyState ? (
-        <EmptyState
-          message={
-            hasActiveFilters
-              ? t("empty.filtered")
-              : t(`empty.${scope}`)
-          }
-        />
+        matching.length > 0 ? (
+          <EmptyState
+            message={t("empty.completed_hidden")}
+            actionLabel={t("filters.show_completed")}
+            onAction={() =>
+              useMyIssuesViewStore.getState().setShowCompleted(true)
+            }
+          />
+        ) : (
+          <EmptyState
+            message={
+              hasActiveFilters
+                ? t("empty.filtered")
+                : t(`empty.${scope}`)
+            }
+          />
+        )
       ) : (
         <SectionList
           sections={sections}
@@ -346,12 +356,25 @@ function SectionHeader({
   );
 }
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
-    <View className="flex-1 items-center justify-center px-6">
+    <View className="flex-1 items-center justify-center gap-3 px-6">
       <Text className="text-sm text-muted-foreground text-center">
         {message}
       </Text>
+      {actionLabel && onAction ? (
+        <Button variant="outline" size="sm" onPress={onAction}>
+          <Text>{actionLabel}</Text>
+        </Button>
+      ) : null}
     </View>
   );
 }

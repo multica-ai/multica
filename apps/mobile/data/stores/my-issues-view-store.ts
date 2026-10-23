@@ -7,43 +7,57 @@
  * this is re-implemented locally.
  *
  * Empty filter array = "show all" (matches web's predicate semantics in
- * packages/views/issues/utils/filter.ts).
+ * packages/views/issues/utils/filter.ts). Completed issues are hidden until
+ * `showCompleted` is turned on — see `hideCompletedIssues`.
  *
- * No persist middleware in v1 — matches the existing mobile pattern
- * (auth-store / workspace-store use SecureStore manually for the few values
- * that need restart survival; everything else is in-memory). v2 can add
- * AsyncStorage persistence if cross-restart filter survival is desired.
+ * Persisted per user and workspace like web's store; see
+ * `./view-prefs-storage.ts` for the storage and hydration lifecycle.
  */
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { IssuePriority, IssueStatus } from "@multica/core/types";
 import type { MyIssuesScope } from "@/data/queries/issue-keys";
+import { issueViewPersistOptions, type IssueViewPrefs } from "./issue-view-prefs";
+import { registerViewPrefsStore } from "./view-prefs-storage";
 
-interface MyIssuesViewState {
-  scope: MyIssuesScope;
-  statusFilters: IssueStatus[];
-  priorityFilters: IssuePriority[];
+const SCOPES: readonly MyIssuesScope[] = ["assigned", "created", "agents"];
+
+interface MyIssuesViewState extends IssueViewPrefs<MyIssuesScope> {
   setScope: (scope: MyIssuesScope) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
+  setShowCompleted: (showCompleted: boolean) => void;
   clearFilters: () => void;
 }
 
-export const useMyIssuesViewStore = create<MyIssuesViewState>((set) => ({
-  scope: "assigned",
-  statusFilters: [],
-  priorityFilters: [],
-  setScope: (scope) => set({ scope }),
-  toggleStatusFilter: (status) =>
-    set((state) => ({
-      statusFilters: state.statusFilters.includes(status)
-        ? state.statusFilters.filter((s) => s !== status)
-        : [...state.statusFilters, status],
-    })),
-  togglePriorityFilter: (priority) =>
-    set((state) => ({
-      priorityFilters: state.priorityFilters.includes(priority)
-        ? state.priorityFilters.filter((p) => p !== priority)
-        : [...state.priorityFilters, priority],
-    })),
-  clearFilters: () => set({ statusFilters: [], priorityFilters: [] }),
-}));
+export const useMyIssuesViewStore = create<MyIssuesViewState>()(
+  persist(
+    (set) => ({
+      scope: "assigned",
+      statusFilters: [],
+      priorityFilters: [],
+      showCompleted: false,
+      setScope: (scope) => set({ scope }),
+      toggleStatusFilter: (status) =>
+        set((state) => ({
+          statusFilters: state.statusFilters.includes(status)
+            ? state.statusFilters.filter((s) => s !== status)
+            : [...state.statusFilters, status],
+        })),
+      togglePriorityFilter: (priority) =>
+        set((state) => ({
+          priorityFilters: state.priorityFilters.includes(priority)
+            ? state.priorityFilters.filter((p) => p !== priority)
+            : [...state.priorityFilters, priority],
+        })),
+      setShowCompleted: (showCompleted) => set({ showCompleted }),
+      clearFilters: () => set({ statusFilters: [], priorityFilters: [] }),
+    }),
+    issueViewPersistOptions<MyIssuesScope, MyIssuesViewState>(
+      "multica_my_issues_view",
+      SCOPES,
+    ),
+  ),
+);
+
+registerViewPrefsStore(useMyIssuesViewStore);

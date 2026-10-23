@@ -44,7 +44,8 @@
     "label": "标签",
     "clear": "清除筛选",
     "apply": "应用",
-    "due_date": "截止日期"
+    "due_date": "截止日期",
+    "show_completed": "显示已完成"
   },
   "list": {
     "empty": "没有符合筛选条件的任务",
@@ -120,7 +121,8 @@
     "created": "你还没有创建任务。",
     "agents": "没有分配给智能体或小队的任务。",
     "all": "该工作区还没有任务。",
-    "members": "没有分配给成员的任务。"
+    "members": "没有分配给成员的任务。",
+    "completed_hidden": "已完成的任务已隐藏。"
   },
   "menu": {
     "pin": "固定",
