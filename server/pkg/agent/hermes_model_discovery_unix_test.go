@@ -23,9 +23,11 @@ import (
 
 // TestDiscoverHermesModelsProbesPerModelEffort covers a runtime whose set_model
 // response is empty: the non-default model's catalog must come from the options
-// re-read through the session's model selector.
+// re-read through a model selector or the effort-only surface Clanka exposes.
 func TestDiscoverHermesModelsProbesPerModelEffort(t *testing.T) {
-	script := `#!/bin/sh
+	for _, modelSelector := range []bool{true, false} {
+		wantDefault := "high"
+		script := `#!/bin/sh
 while IFS= read -r line; do
  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
  case "$line" in
@@ -35,14 +37,23 @@ while IFS= read -r line; do
  esac
 done
 `
-	fakePath := filepath.Join(t.TempDir(), "hermes")
-	writeTestExecutable(t, fakePath, []byte(script))
-	models, err := discoverHermesModels(context.Background(), Command{Path: fakePath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 2 || models[1].Thinking == nil || models[1].Thinking.DefaultLevel != "high" || len(models[1].Thinking.SupportedLevels) != 2 {
-		t.Fatalf("models = %+v", models)
+		if !modelSelector {
+			// Clanka 0.13.0 exposes only thought_level and returns {} from set_model.
+			script = strings.ReplaceAll(script, `{"id":"model","currentValue":"a","options":[{"value":"a"},{"value":"b"}]},`, "")
+			script = strings.ReplaceAll(script, `"configId":"model"`, `"configId":"effort"`)
+			script = strings.ReplaceAll(script, `"effort"`, `"thought_level"`)
+			script = strings.ReplaceAll(script, `"currentValue":"high","options":[{"value":"high"},{"value":"max"}]`, `"currentValue":"low","options":[{"value":"low"},{"value":"high"}]`)
+			wantDefault = "low"
+		}
+		fakePath := filepath.Join(t.TempDir(), "hermes")
+		writeTestExecutable(t, fakePath, []byte(script))
+		models, err := discoverHermesModels(context.Background(), Command{Path: fakePath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(models) != 2 || models[1].Thinking == nil || models[1].Thinking.DefaultLevel != wantDefault || len(models[1].Thinking.SupportedLevels) != 2 {
+			t.Fatalf("models = %+v", models)
+		}
 	}
 }
 

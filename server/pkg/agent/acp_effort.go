@@ -230,7 +230,9 @@ func acpOptionsAfterModelSwitch(ctx context.Context, request acpRequestFn, sessi
 // each and reading the options it advertises there — the per-model read that
 // annotateACPThinkingForSessionModel cannot do from a single response. A model
 // whose switch yields no options keeps a nil Thinking rather than borrowing a
-// sibling's levels. A session with no configOptions at all (Hermes Agent) is
+// sibling's levels. Effort-only runtimes are probed by reapplying the initial
+// level on the throwaway session and reading the returned options.
+// A session with no configOptions at all (Hermes Agent) is
 // skipped outright: switching models there cannot surface a catalog.
 func probeACPModelEffort(ctx context.Context, request acpRequestFn, sessionResult json.RawMessage, models []Model) {
 	sessionID := extractACPSessionID(sessionResult)
@@ -251,6 +253,17 @@ func probeACPModelEffort(ctx context.Context, request acpRequestFn, sessionResul
 			continue
 		}
 		options, err := acpOptionsAfterModelSwitch(ctx, request, sessionID, models[i].ID, sessionResult, switched)
+		// Clanka returns {} from set_model and exposes no model selector.
+		// On this throwaway session, reapply the advertised effort to obtain
+		// a correlated, runtime-validated catalog for the selected model.
+		// Never copy the old catalog if the runtime rejects it or returns none.
+		if err == nil && options == nil {
+			if effort, ok := parseACPEffortOption(sessionResult); ok && effort.CurrentValue != "" {
+				options, err = request(ctx, "session/set_config_option", map[string]any{
+					"sessionId": sessionID, "configId": effort.ConfigID, "value": effort.CurrentValue,
+				})
+			}
+		}
 		if err != nil {
 			continue
 		}
