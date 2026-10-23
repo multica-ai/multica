@@ -162,6 +162,13 @@ WHERE agent_id = $1 AND skill_id = $2;
 -- name: RemoveAllAgentSkills :exec
 DELETE FROM agent_skill WHERE agent_id = $1;
 
+-- name: TouchAgentForSkillChange :exec
+-- Skill assignments already persist in agent_skill. Touch the parent Agent's
+-- last-modified timestamp in the same transaction as each assignment change.
+UPDATE agent
+SET updated_at = now()
+WHERE id = $1;
+
 -- name: ListAgentSkillsByWorkspace :many
 SELECT ask.agent_id, s.id, s.name, s.description, ask.enabled
 FROM agent_skill ask
