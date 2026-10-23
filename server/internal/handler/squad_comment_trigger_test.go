@@ -941,3 +941,27 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 		t.Fatalf("after @squad mention: expected 1 leader task, got %d", got)
 	}
 }
+
+// TestReviewAndDoneMemberCommentsAreQuiet keeps a member's plain verdict from
+// reopening work while preserving a deliberate squad mention.
+func TestReviewAndDoneMemberCommentsAreQuiet(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newSquadCommentTriggerFixture(t)
+	for _, status := range []string{"in_review", "done"} {
+		t.Run(status, func(t *testing.T) {
+			issue := fx.Issue
+			issue.Status = status
+			triggers, _ := testHandler.computeCommentAgentTriggers(context.Background(), issue, "PASS — accepted", nil, "member", testUserID, commentTriggerComputeOptions{})
+			if len(triggers) != 0 {
+				t.Fatalf("plain member verdict on %s woke %d agents", status, len(triggers))
+			}
+			mention := "please continue [@Squad](mention://squad/" + fx.SquadID + ")"
+			triggers, _ = testHandler.computeCommentAgentTriggers(context.Background(), issue, mention, nil, "member", testUserID, commentTriggerComputeOptions{})
+			if len(triggers) != 1 || triggers[0].Source != commentTriggerSourceMentionSquadLeader {
+				t.Fatalf("explicit squad mention on %s did not route to leader: %+v", status, triggers)
+			}
+		})
+	}
+}
