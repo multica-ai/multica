@@ -552,28 +552,36 @@ func (b *codeartsBackend) handleToolUseEvent(event codeartsEvent, ch chan<- Mess
 		_ = json.Unmarshal(event.Part.State.Input, &input)
 	}
 
+	state := event.Part.State
+	var startedAt, endedAt time.Time
+	if state != nil && state.Time != nil && state.Time.Start > 0 && state.Time.End >= state.Time.Start {
+		startedAt = time.UnixMilli(state.Time.Start).UTC()
+		endedAt = time.UnixMilli(state.Time.End).UTC()
+	}
+
 	// Emit the tool-use message.
 	trySend(ch, Message{
-		Type:   MessageToolUse,
-		Tool:   event.Part.Tool,
-		CallID: event.Part.CallID,
-		Input:  input,
+		Type:      MessageToolUse,
+		Tool:      event.Part.Tool,
+		CallID:    event.Part.CallID,
+		Input:     input,
+		StartedAt: startedAt,
 	})
 
 	// Pair every terminal tool-use with a tool-result. The daemon uses this
 	// pair to track in-flight tools, so dropping error results would leave its
 	// counter permanently elevated and suppress the normal idle watchdog.
-	state := event.Part.State
 	if state != nil && (state.Status == "completed" || state.Status == "error") {
 		outputStr := codeArtsExtractToolOutput(state.Output)
 		if state.Status == "error" && state.Error != "" {
 			outputStr = state.Error
 		}
 		trySend(ch, Message{
-			Type:   MessageToolResult,
-			Tool:   event.Part.Tool,
-			CallID: event.Part.CallID,
-			Output: outputStr,
+			Type:    MessageToolResult,
+			Tool:    event.Part.Tool,
+			CallID:  event.Part.CallID,
+			Output:  outputStr,
+			EndedAt: endedAt,
 		})
 	}
 }
@@ -697,10 +705,16 @@ type codeartsCacheTokens struct {
 
 // codeartsToolState represents the state of a tool invocation.
 type codeartsToolState struct {
-	Status string          `json:"status,omitempty"`
-	Input  json.RawMessage `json:"input,omitempty"`
-	Output any             `json:"output,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	Status string            `json:"status,omitempty"`
+	Input  json.RawMessage   `json:"input,omitempty"`
+	Output any               `json:"output,omitempty"`
+	Error  string            `json:"error,omitempty"`
+	Time   *codeartsToolTime `json:"time,omitempty"`
+}
+
+type codeartsToolTime struct {
+	Start int64 `json:"start,omitempty"`
+	End   int64 `json:"end,omitempty"`
 }
 
 // codeartsError represents an error event from codearts.

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +11,27 @@ import (
 	"testing"
 	"time"
 )
+
+func TestCodeArtsHandleToolUseEventCarriesReportedTimes(t *testing.T) {
+	b := &codeartsBackend{}
+	ch := make(chan Message, 2)
+	b.handleToolUseEvent(codeartsEvent{Type: "tool_use", Part: codeartsEventPart{
+		Tool: "bash", CallID: "call-1", State: &codeartsToolState{
+			Status: "completed", Input: json.RawMessage(`{"command":"pwd"}`), Output: "ok",
+			Time: &codeartsToolTime{Start: 1000, End: 1250},
+		},
+	}}, ch)
+	if len(ch) != 2 {
+		t.Fatalf("got %d messages, want 2", len(ch))
+	}
+	use, result := <-ch, <-ch
+	if got := use.StartedAt.UnixMilli(); got != 1000 {
+		t.Errorf("tool use start = %d, want 1000", got)
+	}
+	if got := result.EndedAt.UnixMilli(); got != 1250 {
+		t.Errorf("tool result end = %d, want 1250", got)
+	}
+}
 
 func TestCodeArtsProtocolFamilyDispatchesToIndependentBackend(t *testing.T) {
 	if !IsSupportedType("codearts") {
