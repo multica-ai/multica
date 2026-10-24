@@ -21,7 +21,6 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	t.Parallel()
 
 	args := buildAntigravityArgs(
-		"hello",
 		"/tmp/agy.log",
 		20*time.Minute,
 		ExecOptions{Cwd: "/work"},
@@ -29,7 +28,7 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	)
 
 	want := []string{
-		"-p", "hello",
+		"--input-format", "stream-json",
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 		"--print-timeout", "20m0s",
@@ -48,7 +47,6 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	// parens), not a slug. It must ride as a single argv element so no shell
 	// quoting is required, and it must sit before the user's custom args.
 	args := buildAntigravityArgs(
-		"hello",
 		"/tmp/agy.log",
 		20*time.Minute,
 		ExecOptions{Cwd: "/work", Model: "Claude Opus 4.6 (Thinking)"},
@@ -56,7 +54,7 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	)
 
 	want := []string{
-		"-p", "hello",
+		"--input-format", "stream-json",
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 		"--model", "Claude Opus 4.6 (Thinking)",
@@ -69,7 +67,7 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	}
 
 	// Empty model must omit the flag entirely so agy resolves its own default.
-	bare := buildAntigravityArgs("hi", "/tmp/agy.log", 0, ExecOptions{}, quietAntigravityLogger())
+	bare := buildAntigravityArgs("/tmp/agy.log", 0, ExecOptions{}, quietAntigravityLogger())
 	if slices.Contains(bare, "--model") {
 		t.Fatalf("--model must be omitted when opts.Model is empty; got %v", bare)
 	}
@@ -84,7 +82,6 @@ func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 	// must therefore be expressed by passing a value large enough to defer to the
 	// daemon's idle/tool watchdogs — NOT by omitting the flag.
 	args := buildAntigravityArgs(
-		"hello",
 		"/tmp/agy.log",
 		0,
 		ExecOptions{Cwd: "/work"},
@@ -92,7 +89,7 @@ func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 	)
 
 	want := []string{
-		"-p", "hello",
+		"--input-format", "stream-json",
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 		"--print-timeout", antigravityFormatTimeout(antigravityNoCapPrintTimeout),
@@ -197,7 +194,6 @@ func TestBuildAntigravityArgsResume(t *testing.T) {
 	t.Parallel()
 
 	args := buildAntigravityArgs(
-		"continue",
 		"/tmp/agy.log",
 		20*time.Minute,
 		ExecOptions{ResumeSessionID: "b8b263a4-4b2f-4339-acc9-78b248e2b606"},
@@ -214,11 +210,11 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
 	args := buildAntigravityArgs(
-		"go",
 		"/tmp/agy.log",
 		time.Minute,
 		ExecOptions{
 			ExtraArgs: []string{
+				"--input-format=text",
 				"--settings", "/tmp/biz-gate.json", // Claude Code-only daemon/profile arg; agy rejects it
 			},
 			// Each blocked flag below must be stripped silently — the daemon
@@ -233,6 +229,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"-c",
 				"--conversation", "bad-id",
 				"--model", "sneaky-model", // managed via ExecOptions.Model
+				"--input-format", "text",
 				"--output-format", "text",
 				"--dangerously-skip-permissions",
 				"--print-timeout", "1h",
@@ -245,21 +242,20 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	)
 
 	joined := strings.Join(args, " ")
-	// Prompt argument should appear exactly once — the daemon's, not the
-	// user's hijacked copy.
+	// Prompt overrides must not restore an argv prompt.
 	pCount := 0
 	for _, a := range args {
 		if a == "-p" {
 			pCount++
 		}
 	}
-	if pCount != 1 {
-		t.Errorf("expected exactly one -p flag, got args=%v", args)
+	if pCount != 0 {
+		t.Errorf("expected no -p flag, got args=%v", args)
 	}
 	if strings.Contains(joined, "hijacked-prompt") {
 		t.Errorf("custom -p value leaked through filter: %v", args)
 	}
-	if strings.Contains(joined, "-i") || strings.Contains(joined, "--prompt-interactive") {
+	if slices.Contains(args, "-i") || strings.Contains(joined, "--prompt-interactive") {
 		t.Errorf("interactive-mode flags leaked through filter: %v", args)
 	}
 	if strings.Contains(joined, "bad-id") {
@@ -267,6 +263,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "sneaky-model") {
 		t.Errorf("custom --model value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "--input-format text") || strings.Contains(joined, "--input-format=text") {
+		t.Errorf("custom input format leaked through filter: %v", args)
 	}
 	if strings.Contains(joined, "--output-format text") {
 		t.Errorf("custom --output-format value leaked through filter: %v", args)

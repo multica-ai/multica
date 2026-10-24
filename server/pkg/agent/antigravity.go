@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,7 @@ import (
 )
 
 // antigravityBackend implements Backend by spawning Google's Antigravity CLI
-// with a one-shot prompt (`agy -p <prompt>`). Despite the upstream flag name,
+// with a one-shot prompt on stdin. Despite the upstream flag name,
 // current agy print mode is still capable of running Antigravity tools; it is
 // the daemon-compatible mode because `agy -i` requires an attached TTY. Unlike
 // Claude / Codex / Cursor / Gemini, older Antigravity CLI releases exposed only
@@ -339,9 +340,12 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	logPath := logFile.Name()
 	_ = logFile.Close()
 
-	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
+	args := buildAntigravityArgs(logPath, timeout, opts, b.cfg.Logger)
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
+	// os/exec copies concurrently and closes stdin at EOF. agy completes the
+	// queued turn before exiting, without putting the prompt in Windows argv.
+	cmd.Stdin = bytes.NewReader(antigravityPromptInput(prompt))
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
@@ -793,6 +797,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--continue":                     blockedStandalone,
 	"--conversation":                 blockedWithValue, // managed via ExecOptions.ResumeSessionID
 	"--model":                        blockedWithValue, // managed via ExecOptions.Model / agent.model
+	"--input-format":                 blockedWithValue, // daemon sends one JSON user message on stdin
 	"--output-format":                blockedWithValue, // stream-json is required for token accounting
 	"--print-timeout":                blockedWithValue,
 	"--dangerously-skip-permissions": blockedStandalone, // always-on in daemon mode
@@ -803,7 +808,8 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
 // invocation.
 //
-//	agy -p <prompt> --dangerously-skip-permissions [--model <catalog id>]
+//	agy --input-format stream-json --output-format stream-json
+//	    --dangerously-skip-permissions [--model <catalog id>]
 //	    --print-timeout <duration> --log-file <tmp>
 //	    [--conversation <id>] [--add-dir <cwd>]
 //
@@ -820,9 +826,9 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // and rejects an unrecognised value up front (see antigravityModelError) —
 // by the time we build argv the value is either empty or known-good. When
 // opts.Model is empty we omit the flag and agy resolves its own default.
-func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts ExecOptions, logger *slog.Logger) []string {
+func buildAntigravityArgs(logPath string, timeout time.Duration, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
-		"-p", prompt,
+		"--input-format", "stream-json",
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 	}
@@ -847,6 +853,22 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	args = append(args, filterCustomArgs(opts.ExtraArgs, antigravityBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, logger)...)
 	return args
+}
+
+// antigravityPromptInput encodes one user turn. JSON escaping preserves embedded
+// newlines, quotes and backslashes within a single NDJSON frame.
+// Contract: https://www.antigravity.google/docs/cli/headless/#stream-prompts-from-stdin
+func antigravityPromptInput(prompt string) []byte {
+	message := struct {
+		Event   string `json:"event"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}{Event: "user"}
+	message.Message.Content = prompt
+	// This value contains only strings; marshaling cannot fail.
+	data, _ := json.Marshal(message)
+	return append(data, '\n')
 }
 
 // antigravityModelError returns an actionable error when `model` is non-empty
