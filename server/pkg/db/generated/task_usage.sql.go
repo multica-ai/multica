@@ -797,8 +797,9 @@ type UpsertTaskUsageParams struct {
 // detects the row as dirty and re-aggregates its bucket.
 // Without the conflict-side bump, a correction to historical token counts
 // would never propagate to the rollup.
-// cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
-// when it reports none. It is overwritten like the token counters so a
+// cost_usd_ticks is the upstream runtime's accounted price (1e-10 USD), NULL
+// when unavailable. It may be a provider charge or a runtime estimate.
+// It is overwritten like the token counters so a
 // corrected report replaces the previous figure rather than accumulating.
 func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
 	_, err := q.db.Exec(ctx, upsertTaskUsage,

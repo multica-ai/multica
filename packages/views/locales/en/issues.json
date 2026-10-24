@@ -793,7 +793,7 @@
     "cost_cache_write": "Cache write",
     "no_usage": "No usage recorded",
     "note_unmapped": "No price on file for {{models}}; their tokens are counted but their cost is not.",
-    "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure.",
+    "note_estimate": "Cost uses runtime accounting when available, otherwise published model rates. Runtime amounts may also be estimates.",
     "stat_tokens": "Tokens",
     "stat_output": "Output",
     "tokens_cached": "{{percent}} from cache",
