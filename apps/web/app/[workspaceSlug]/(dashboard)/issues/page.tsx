@@ -17,7 +17,7 @@ export default function Page() {
       <Suspense fallback={null}>
         <IssueViewUrlSync />
       </Suspense>
-      <IssuesPage />
+      <IssuesPage enableMindmap />
     </ErrorBoundary>
   );
 }

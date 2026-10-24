@@ -45,6 +45,9 @@ export interface IssueSortParam {
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
+  dependencies: (wsId: string) => [...issueKeys.all(wsId), "dependencies"] as const,
+  mindmap: (wsId: string, query: IssueTableQuerySpec) =>
+    [...issueKeys.tableAll(wsId), "mindmap", query] as const,
   /** PREFIX for invalidation — no sort. */
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
   /** FULL KEY for queryOptions — includes sort. */
@@ -196,6 +199,13 @@ export const issueKeys = {
   sourceContextPreview: (wsId: string, anchorCommentId: string) =>
     ["source-context", "preview", wsId, anchorCommentId] as const,
 };
+
+export function issueDependenciesOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.dependencies(wsId),
+    queryFn: () => api.listIssueDependencies(),
+  });
+}
 
 export function sourceContextPreviewOptions(
   wsId: string,

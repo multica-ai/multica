@@ -10,6 +10,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient issue dependencies", () => {
+  it("parses a complete response and fails closed on malformed data", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ complete: true, dependencies: [{ issue_id: "a", depends_on_issue_id: "b", type: "blocked_by" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ complete: true, dependencies: "invalid" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.listIssueDependencies()).toEqual({ complete: true, dependencies: [{ issue_id: "a", depends_on_issue_id: "b", type: "blocked_by" }] });
+    expect(await client.listIssueDependencies()).toEqual({ complete: false, dependencies: [] });
+  });
+});
+
 describe("ApiClient status reorder", () => {
   it("opts into built-in ordering and tolerates malformed responses", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ statuses: "invalid" }), {
