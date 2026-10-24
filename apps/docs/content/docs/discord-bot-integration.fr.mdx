@@ -1,0 +1,97 @@
+---
+title: Bot Discord
+description: Connectez un agent Multica à votre propre bot Discord pour les messages directs, les @mentions de serveur et /issue.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Multica utilise un bot que vous créez dans le [portail développeur Discord](https://discord.com/developers/applications). Un bot correspond à un agent Multica. Créez un bot distinct pour chaque agent qui a besoin de sa propre identité Discord.
+
+La prise en charge de Discord est [maintenue par la communauté](/community-maintained) : elle est livrée dans chaque version, mais sans SLA de support officiel. Signalez les problèmes dans les [issues GitHub](https://github.com/multica-ai/multica/issues).
+
+## Avant de commencer
+
+- Un propriétaire ou administrateur de l'espace de travail Multica doit connecter le bot.
+- Le serveur API doit pouvoir joindre `https://discord.com` et `wss://gateway.discord.gg`.
+- Vous avez besoin du jeton du bot, disponible dans le portail développeur Discord. Traitez-le comme un mot de passe.
+
+## 1. Créer le bot
+
+1. Ouvrez le [portail développeur Discord](https://discord.com/developers/applications) et créez une nouvelle application.
+2. Ouvrez **Bot**, cliquez sur **Reset Token** et copiez le jeton.
+3. Sous **Privileged Gateway Intents**, activez **Message Content Intent**. Multica lit le corps des messages via cette intention ; sans elle, les messages de serveur arrivent avec un contenu vide.
+4. Sous **OAuth2 → URL Generator**, sélectionnez le scope `bot` et les permissions **View Channels**, **Send Messages** et **Read Message History**. Ouvrez l'URL générée pour inviter le bot sur un serveur.
+
+<Callout type="warning">
+Ne collez jamais le jeton dans une tâche, un message de discussion, un journal ou un dépôt de code. S'il est exposé, réinitialisez-le dans le portail développeur Discord, puis reconnectez le bot avec le nouveau jeton.
+</Callout>
+
+## 2. Le connecter à un agent
+
+1. Dans Multica, ouvrez **Agents**, sélectionnez un agent et ouvrez **Integrations**.
+2. Cliquez sur **Connect Discord**.
+3. Collez le jeton du bot et cliquez sur **Connect**.
+
+Multica appelle Discord pour vérifier le bot, chiffre le jeton et démarre une connexion Gateway supervisée. Un bot déjà connecté à un autre agent ou espace de travail doit d'abord y être déconnecté.
+
+## Première utilisation et association de compte
+
+La première fois qu'un membre écrit au bot, celui-ci envoie un lien d'association de compte Multica à usage unique. Ouvrez-le, connectez-vous au même espace de travail Multica, puis revenez sur Discord et renvoyez le message. Le lien expire au bout de 15 minutes ; écrivez de nouveau au bot pour obtenir un nouveau lien.
+
+Dans un canal de serveur, le bot ne publie jamais le lien porteur d'identifiants. Il demande à l'expéditeur de commencer par un message direct.
+
+Seuls les membres actuels de l'espace de travail peuvent utiliser le bot. L'appartenance est revérifiée pour chaque message.
+
+## Utiliser le bot
+
+### Messages directs
+
+Ouvrez un message direct avec le bot et envoyez du texte directement. Aucune @mention n'est nécessaire.
+
+### Canaux de serveur
+
+Ajoutez le bot à un canal de serveur, puis @mentionnez-le. Un message de canal qui ne mentionne pas le bot ne démarre ni conversation ni tour. Chaque canal correspond à une discussion Multica continue.
+
+### Commandes
+
+- `/new` crée une nouvelle discussion Multica vide et y achemine les messages suivants de la conversation Discord. `/new <message>` crée la discussion avec ce message comme premier tour.
+- `/clear` conserve la discussion Multica en cours et applique un nouveau contexte visible par l'agent au prochain message non vide. `/clear <message>` utilise ce message comme premier tour après la limite de contexte.
+- `/issue <titre>` crée une tâche Multica ; les lignes suivantes servent de description facultative. `/issue` sans titre renvoie une aide d'utilisation.
+
+Discord n'enregistre pas `/issue`, `/new` ni `/clear` comme commandes slash natives. Envoyez-les comme texte de message. Dans un canal de serveur, incluez la @mention : `@YourBot /issue Corriger le build`.
+
+### Réponses et contenu pris en charge
+
+Le bot publie la réponse de l'agent à la fin de l'exécution, en citant le message déclencheur. Les réponses longues sont découpées sous la limite de 2000 caractères par message de Discord. Il n'y a ni diffusion en direct ni édition de message.
+
+Les fichiers joints à un message parviennent à l'agent sous forme de marqueur texte tel que `[File: rapport.pdf]` ; le fichier lui-même n'est pas téléchargé. L'agent ne peut pas encore renvoyer de fichiers dans Discord.
+
+## Gérer les connexions
+
+Ouvrez **Settings → Messaging → Discord** pour consulter les bots connectés. Les propriétaires et administrateurs peuvent en déconnecter un. La déconnexion ferme la connexion Gateway et arrête les réponses sortantes, mais conserve les conversations Multica et les enregistrements d'audit.
+
+## Configuration auto-hébergée
+
+Définissez une clé de chiffrement stable de 32 octets avant de démarrer le serveur API :
+
+```dotenv
+MULTICA_DISCORD_SECRET_KEY=<clé de 32 octets encodée en base64>
+```
+
+Générez-la avec `openssl rand -base64 32`. Conservez-la durablement : sa perte ou son renouvellement rend les jetons de bot existants illisibles et impose de reconnecter chaque bot.
+
+Les liens d'association utilisent `MULTICA_APP_URL`, avec repli sur `FRONTEND_ORIGIN`. L'adresse obtenue doit être joignable par les membres. Le réseau ou le proxy du serveur doit autoriser l'accès HTTPS à `discord.com` et l'accès WebSocket à `gateway.discord.gg` ; Go respecte les variables d'environnement standard `HTTPS_PROXY` et `NO_PROXY`.
+
+## Dépannage
+
+- **Le bot ne peut pas être vérifié** : vérifiez d'abord la connectivité du serveur et les réglages du proxy. Ne réinitialisez le jeton que si Discord lui-même rejette le jeton actuel.
+- **Les messages de serveur arrivent vides** : activez **Message Content Intent** pour l'application dans le portail développeur Discord, puis reconnectez.
+- **Aucune réponse dans un canal** : vérifiez que le bot peut voir le canal et que le message le @mentionne.
+- **Lien d'association expiré** : envoyez un nouveau message direct au bot et utilisez le lien le plus récent.
+- **Le bot ne s'exécute pas** : vérifiez si l'agent est archivé et si son [environnement d'exécution](/daemon-runtimes) est en ligne.
+
+## Étapes suivantes
+
+- [Intégrations de messagerie](/channels) — comparer les plateformes et comprendre la gestion des sessions et des identités.
+- [Discussion](/chat) — comment les messages du bot deviennent des exécutions d'agent.
+- [Tâches](/issues) — le travail créé par `/issue`.

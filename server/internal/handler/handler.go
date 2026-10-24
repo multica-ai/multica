@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/integrations/discord"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
@@ -382,6 +383,14 @@ type Handler struct {
 	// The process owner starts and joins it; the synchronous event bus only
 	// enqueues EventChatDone work.
 	TelegramOutbound *telegram.Outbound
+
+	// DiscordInstall owns the Discord bot install lifecycle (register a pasted
+	// bot token / list / revoke) and the at-rest encryption of the token. Nil
+	// unless MULTICA_DISCORD_SECRET_KEY is set.
+	DiscordInstall *discord.InstallService
+	// DiscordBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Discord account" prompt. Nil unless Discord is configured.
+	DiscordBindingTokens *discord.BindingTokenService
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the

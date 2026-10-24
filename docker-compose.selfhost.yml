@@ -217,6 +217,11 @@ services:
       # (bot_token_encrypted), so this single deployment-wide key is all
       # the operator needs to set here.
       MULTICA_TELEGRAM_SECRET_KEY: ${MULTICA_TELEGRAM_SECRET_KEY:-}
+      # Discord bot integration. MULTICA_DISCORD_SECRET_KEY is the opt-in:
+      # unset = integration disabled. It decrypts the per-installation bot
+      # token stored in channel_installation.config, so this single
+      # deployment-wide key is all the operator needs to set here.
+      MULTICA_DISCORD_SECRET_KEY: ${MULTICA_DISCORD_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:
