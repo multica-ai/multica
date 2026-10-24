@@ -2099,6 +2099,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		// without it an operator cannot read the tool budget actually in effect.
 		"tool_watchdog", d.cfg.AgentToolWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
+		"cursor_idle_watchdog", d.cfg.CursorIdleWatchdog,
 		// Derived from the watchdog budget too (Codex's own timer is not
 		// tool-aware), so it needs the same treatment as tool_watchdog: without
 		// it the effective Codex budget is invisible until a timeout fires.
@@ -8746,6 +8747,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var idleWatchdogTimeout time.Duration
 	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
+	}
+	if provider == "cursor" {
+		idleWatchdogTimeout = d.cfg.CursorIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
 		EnableTaskSupplement:       taskSupplementNegotiated,

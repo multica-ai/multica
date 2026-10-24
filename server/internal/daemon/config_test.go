@@ -1025,6 +1025,48 @@ func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_CursorIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CURSOR_IDLE_WATCHDOG", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.CursorIdleWatchdog != DefaultCursorIdleWatchdog {
+		t.Fatalf("CursorIdleWatchdog = %s, want default %s", cfg.CursorIdleWatchdog, DefaultCursorIdleWatchdog)
+	}
+
+	t.Setenv("MULTICA_CURSOR_IDLE_WATCHDOG", "7m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.CursorIdleWatchdog != 7*time.Minute {
+		t.Fatalf("CursorIdleWatchdog = %s, want 7m from env", cfg.CursorIdleWatchdog)
+	}
+
+	// Zero disables the Cursor-specific override while leaving the generic
+	// AgentIdleWatchdog as the fallback for Cursor runs.
+	t.Setenv("MULTICA_CURSOR_IDLE_WATCHDOG", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.CursorIdleWatchdog != 0 {
+		t.Fatalf("CursorIdleWatchdog = %s, want zero from env", cfg.CursorIdleWatchdog)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_CloudOn confirms the symmetric case: a
 // daemon pointed at Multica's hosted cloud keeps the historical opt-in
 // auto-update default. We pass the WSS form of the URL to also exercise that
