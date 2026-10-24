@@ -135,3 +135,52 @@ type UpdateOutboundCardStatusParams struct {
 	ID     pgtype.UUID
 	Status string
 }
+
+// UploadImageParams carries one image's bytes up to Lark's image endpoint
+// (POST /open-apis/im/v1/images) to obtain an image_key. Lark requires
+// image_type=message for anything sent into a chat; the returned key is
+// what `msg_type=image` and card `img` elements both consume.
+type UploadImageParams struct {
+	InstallationID InstallationCredentials
+	// Filename is advisory only — Lark keys the object and echoes the
+	// key back; it never sees the name. Kept for log lines.
+	Filename string
+	// Data is the raw image bytes. Lark caps this at 10 MiB and refuses
+	// a zero-byte body; the caller enforces both before calling.
+	Data []byte
+}
+
+// UploadFileParams carries one non-image file's bytes up to Lark's file
+// endpoint (POST /open-apis/im/v1/files) to obtain a file_key.
+//
+// FileType is Lark's own enum — opus / mp4 / pdf / doc / xls / ppt /
+// stream — and it is a claim about the bytes, not a label: Lark refuses a
+// body whose type disagrees with an over-specific claim rather than
+// downgrading it. See larkFileTypeFor for how the mapping is derived and
+// why `stream` is the safe default.
+type UploadFileParams struct {
+	InstallationID InstallationCredentials
+	Filename       string
+	// FileType must already be a value from Lark's enum; the caller
+	// resolves it (larkFileTypeFor) so this stays a transport type.
+	FileType string
+	Data     []byte
+}
+
+// SendImageParams posts an already-uploaded image (by image_key) into a
+// chat as its own `msg_type=image` message.
+type SendImageParams struct {
+	InstallationID InstallationCredentials
+	ChatID         ChatID
+	ImageKey       string
+	ReplyTarget    ReplyTarget
+}
+
+// SendFileParams posts an already-uploaded file (by file_key) into a chat
+// as its own `msg_type=file` message.
+type SendFileParams struct {
+	InstallationID InstallationCredentials
+	ChatID         ChatID
+	FileKey        string
+	ReplyTarget    ReplyTarget
+}

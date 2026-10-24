@@ -40,6 +40,24 @@ type fakePatcherQueries struct {
 	deliveriesByTask map[string]db.ChannelTaskDelivery
 	// tasksByID overrides `task` per task_id; empty falls back to `task`.
 	tasksByID map[string]db.AgentTaskQueue
+	// attachments is what the assistant message's files resolve to, and
+	// attachmentsErr forces the lookup to fail. attachmentLookups records
+	// every lookup so a test can assert what the delivery path asked for
+	// (and that it did not ask at all when it had nothing to do).
+	attachments       []db.Attachment
+	attachmentsErr    error
+	attachmentLookups []db.ListAttachmentsByChatMessageParams
+}
+
+// ListAttachmentsByChatMessage reads the fake's seeded rows. Unlike the
+// generated query it ignores the workspace scoping — tests seed rows and
+// ids together, so a workspace mismatch is not a shape any test needs to
+// express.
+func (f *fakePatcherQueries) ListAttachmentsByChatMessage(_ context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attachmentLookups = append(f.attachmentLookups, arg)
+	return f.attachments, f.attachmentsErr
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
