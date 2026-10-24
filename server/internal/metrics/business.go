@@ -52,6 +52,12 @@ type BusinessMetrics struct {
 	// See the funnel in internal/service/task_claim_decision.go and the
 	// prewarm table below.
 	taskClaimDecision *prometheus.CounterVec
+	// taskClaimConstraintDecision counts shadow-only claim constraint policy
+	// decisions (#6650 SPI) by claim path, decision, and reason; one increment
+	// per policy evaluation, which is a distinct counting unit from the
+	// per-claim-attempt taskClaimDecision above. See the funnel in
+	// internal/service/task_claim_constraint.go and the prewarm table below.
+	taskClaimConstraintDecision *prometheus.CounterVec
 
 	llmTokens         *prometheus.CounterVec
 	llmCostUSD        *prometheus.CounterVec
@@ -177,6 +183,12 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "claim_decision_total",
 			Help:      "Claim decisions by claim path, outcome, and reason; one increment per claim attempt or per poll-level decision that never enters a claim attempt.",
 		}, metricLabels("multica_agent_task_claim_decision_total")),
+		taskClaimConstraintDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "agent_task",
+			Name:      "claim_constraint_decision_total",
+			Help:      "Shadow-only claim constraint policy decisions by claim path, decision, and reason; one increment per policy evaluation (a unit distinct from the per-claim-attempt claim_decision_total).",
+		}, metricLabels("multica_agent_task_claim_constraint_decision_total")),
 		llmTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica",
 			Subsystem: "llm",
@@ -314,6 +326,7 @@ func NewBusinessMetrics() *BusinessMetrics {
 	}
 	m.prewarmFailureReasons()
 	m.prewarmClaimDecisions()
+	m.prewarmClaimConstraintDecisions()
 	for _, reason := range []string{RuntimeGCSkipEligibilityChanged, RuntimeGCSkipNonTerminalTask, RuntimeGCSkipWorkspaceMismatch} {
 		m.runtimeGCSkipped.WithLabelValues(reason).Add(0)
 	}
@@ -343,6 +356,7 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.taskInProgress,
 		m.taskIterations,
 		m.taskClaimDecision,
+		m.taskClaimConstraintDecision,
 		m.llmTokens,
 		m.llmCostUSD,
 		m.llmUnpricedTokens,
@@ -428,6 +442,17 @@ func (m *BusinessMetrics) RecordClaimDecision(claimPath, outcome, reason string)
 		return
 	}
 	m.taskClaimDecision.WithLabelValues(claimPath, outcome, reason).Inc()
+}
+
+// RecordClaimConstraintDecision counts one shadow-only claim constraint policy
+// decision. Labels are normalized upstream by the single funnel in
+// internal/service/task_claim_constraint.go; this method deliberately does not
+// re-normalize (same contract as RecordClaimDecision).
+func (m *BusinessMetrics) RecordClaimConstraintDecision(claimPath, decision, reason string) {
+	if m == nil {
+		return
+	}
+	m.taskClaimConstraintDecision.WithLabelValues(claimPath, decision, reason).Inc()
 }
 
 // RecordAgentRuntimeLookup counts one logical agent_runtime lookup — one
@@ -848,6 +873,40 @@ func claimDecisionSeries() []claimDecisionSeriesKey {
 		{"batch", "error_list", "error"},
 	} {
 		series = append(series, s)
+	}
+	return series
+}
+
+// prewarmClaimConstraintDecisions seeds every (claim_path, decision, reason)
+// series the shadow-only constraint funnel can emit, with the same rationale as
+// prewarmClaimDecisions above: a series that has not fired since this process
+// started reads as zero instead of as a missing series. The table mirrors
+// normalizeClaimConstraintAction / normalizeClaimConstraintReason in
+// internal/service/task_claim_constraint.go; keep the two in sync when a value
+// is added.
+func (m *BusinessMetrics) prewarmClaimConstraintDecisions() {
+	for _, s := range claimConstraintSeries() {
+		m.taskClaimConstraintDecision.WithLabelValues(s.claimPath, s.decision, s.reason).Add(0)
+	}
+}
+
+type claimConstraintSeriesKey struct{ claimPath, decision, reason string }
+
+// claimConstraintSeries enumerates the closed set of legal label combinations:
+// the two claim paths that evaluate a policy (the agent path has no candidate
+// list, so it never evaluates and stays out of the grid) crossed with the full
+// decision x reason grid. Values mirror the constants in
+// internal/service/task_claim_constraint.go. Note there is no decision=other:
+// the action normalizer folds an unrecognized action to "allow" (fail-open),
+// so "other" can only appear as a reason.
+func claimConstraintSeries() []claimConstraintSeriesKey {
+	var series []claimConstraintSeriesKey
+	for _, claimPath := range []string{"runtime", "batch"} {
+		for _, decision := range []string{"allow", "wait", "deny"} {
+			for _, reason := range []string{"allowed", "canary", "error", "other"} {
+				series = append(series, claimConstraintSeriesKey{claimPath, decision, reason})
+			}
+		}
 	}
 	return series
 }

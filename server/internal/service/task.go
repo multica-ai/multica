@@ -85,6 +85,12 @@ type TaskService struct {
 	// state for a self-hosted deployment with no MULTICA_LLM_* configuration.
 	// Wired in router.go from the same *llm.Client that backs chat auto-titling.
 	QuickActions ChatQuickActionsLLM
+	// ClaimConstraints is the optional claim constraint policy SPI (#6650
+	// admission/preflight): a candidate-stage evaluation seam on the claim
+	// polls. Nil disables constraint evaluation entirely; every claim path
+	// behaves exactly as before. Decisions are shadow-only: recorded, never
+	// enforced. See task_claim_constraint.go.
+	ClaimConstraints ClaimConstraintPolicy
 	// quickActionsInFlight (chat session id -> struct{}{}) and
 	// quickActionsRunning admit suggestion passes: one per session, and a
 	// process-wide ceiling. Both zero values are usable, so a TaskService built
@@ -3852,6 +3858,10 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
+		// Shadow-only constraint evaluation (#6650): the decision is recorded
+		// and never consulted — claimTask runs unconditionally below.
+		s.evaluateClaimConstraint(ctx, candidate.ID, candidate.AgentID, runtimeID, claimPathRuntime, candidatesByAgent[agentKey])
+
 		task, err := s.claimTask(ctx, candidate.AgentID, runtimeID, claimScope{
 			claimPath:  claimPathRuntime,
 			candidates: candidatesByAgent[agentKey],
@@ -4235,6 +4245,10 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			continue
 		}
 		triedAgents[agentKey] = struct{}{}
+
+		// Shadow-only constraint evaluation (#6650): the decision is recorded
+		// and never consulted — claimTask runs unconditionally below.
+		s.evaluateClaimConstraint(ctx, candidates[i].ID, candidates[i].AgentID, candidates[i].RuntimeID, claimPathBatch, candidatesByAgent[agentKey])
 
 		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID, claimScope{
 			claimPath:  claimPathBatch,
