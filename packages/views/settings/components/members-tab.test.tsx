@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { configStore } from "@multica/core/config";
-import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, BULK_MEMBER_PROVISIONING_FLAG } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockCreateMember = vi.hoisted(() => vi.fn());
@@ -128,6 +128,20 @@ beforeEach(() => {
 });
 
 describe("MembersTab", () => {
+  it.each(["member", "admin", "owner"])("only exposes provisioning to a flagged owner, not %s by default", async (role) => {
+    data.members[0] = member("user-1", "Ada Lovelace", role);
+    const { rerender } = renderWithI18n(<MembersTab />);
+    expect(screen.queryByRole("button", { name: "Provision members" })).toBeNull();
+    act(() => configStore.getState().setFeatureFlags({ [BULK_MEMBER_PROVISIONING_FLAG]: true }));
+    rerender(<MembersTab />);
+    if (role === "owner") {
+      await userEvent.click(screen.getByRole("button", { name: "Provision members" }));
+      expect(screen.getByRole("dialog", { name: "Provision seed members" })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("button", { name: "Provision members" })).toBeNull();
+    }
+  });
+
   it("lists members with their role and marks the current user", () => {
     renderWithI18n(<MembersTab />);
 

@@ -1,4 +1,30 @@
 import { z } from "zod";
+import type { ProvisionMembersResponse } from "../types/api";
+
+export const ProvisionMembersResponseSchema = z.object({
+  summary: z.object({
+    total: z.number(),
+    created: z.number(),
+    added: z.number().default(0),
+    already_member: z.number(),
+    duplicate: z.number(),
+    invalid: z.number(),
+    failed: z.number(),
+  }).loose(),
+  results: z.array(z.object({
+    email: z.string(),
+    role: z.enum(["owner", "member", "admin"]).optional(),
+    status: z.enum(["created", "added", "already_member", "duplicate", "invalid", "failed"]),
+    user_id: z.string().optional(),
+    member_id: z.string().optional(),
+    error: z.string().optional(),
+  }).loose().refine((result) => result.role !== "owner" || result.status === "already_member")),
+}).loose();
+
+export const EMPTY_PROVISION_MEMBERS_RESPONSE: ProvisionMembersResponse = {
+  summary: { total: 0, created: 0, added: 0, already_member: 0, duplicate: 0, invalid: 0, failed: 0 },
+  results: [],
+};
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
   WorkflowHandoffPreview,

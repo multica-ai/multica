@@ -34,6 +34,45 @@ The invitee accepts by logging in with that email — no prior signup is needed.
 
 The invitation link appears only in the email; there is no place in the product to view or copy it. If the email fails to send, the invitation record still exists — revoke it and send a new one.
 
+## Provisioning an enterprise seed cohort
+
+Self-hosted organizations can optionally enable bulk member provisioning for a
+known early-adopter group. With the feature enabled, a workspace owner can open
+Settings → Members → Provision members, paste up to 100 email addresses, and
+assign the member or admin role to the whole batch.
+
+Provisioning creates memberships immediately and sends no invitation email.
+New accounts still verify their email during first sign-in; provisioning does
+not create passwords or bypass authentication. Existing profiles and member
+roles are not overwritten. Matching pending invitations are reconciled.
+
+The capability is disabled by default. A self-hosted operator can enable it
+with `FF_SETTINGS_BULK_MEMBER_PROVISIONING=true`. Only owners can use the UI or
+API, only member/admin roles are accepted, and configured email/domain
+allowlists continue to apply when provisioning a new account.
+
+From the CLI:
+
+```bash
+multica workspace member provision alice@example.com my-workspace --name "Alice Example" --role member --output json
+```
+
+The workspace argument accepts a UUID, slug, or UUID prefix. If omitted, the
+usual `--workspace-id`, `MULTICA_WORKSPACE_ID`, or profile default is used.
+`--name` is optional, is trimmed, and cannot be blank when supplied. It applies
+only when creating an account; omitting it uses the email's local part.
+
+JSON output is a single per-email result. `created` means a new account and
+membership; `added` means an existing account gained membership;
+`already_member` means membership already existed. Retrying never changes a
+profile or existing role. Invalid or failed provisioning exits nonzero.
+The bulk API returns these per-entry outcomes plus summary counts.
+
+Provisioning is not available on Cloud-connected, seat-managed deployments
+(HTTP 503): it must not bypass their purchased-seat admission protocol. Use
+invitations there instead. This restriction does not affect self-hosted
+deployments without Cloud seat management.
+
 ## Change roles
 
 An `admin` can move roles between `admin` and `member`, and can remove members holding those two roles. Any change involving `owner` — promoting, changing, or removing — can only be performed by an `owner`.
