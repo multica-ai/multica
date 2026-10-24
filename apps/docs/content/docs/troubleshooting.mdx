@@ -111,6 +111,16 @@ To restore access:
 
 Repeat this after every CLI upgrade. Auto-update is on by default only for daemons connected to Multica Cloud; start the daemon with `--no-auto-update` so upgrades happen only when you run them. The CLI bundled with [Multica Desktop](/desktop-app) is signed with a Developer ID, so its grants survive upgrades.
 
+## Hermes runs reinstall dependencies after you use the Hermes CLI
+
+If you alternate between the Hermes CLI (or the Hermes desktop app) and Multica Hermes runs, each switch can add 30–60 seconds to startup while Hermes rebuilds its shared Python dependency environment. Each rebuild also leaves a new environment generation on disk until Hermes cleans it up.
+
+This happens when your own Hermes home sets `memory.provider` to a plugin that has Python dependencies. Each Multica run uses its own Hermes home, shares your installed dependencies, and turns the external memory provider off so memory is not shared across runs. Hermes works out which dependencies it needs from the active home's plugins, so your home and the run's home disagree, and each one treats the other's install as out of date. The underlying behavior is tracked upstream in [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726).
+
+To confirm, look in the [daemon log](#log-locations) for `hermes is reinstalling its dependency environment before this task starts`. A follow-up `hermes dependency reinstall finished` entry reports, in `startup_delay_ms`, how long Hermes took from launch until it was ready, including the reinstall.
+
+Until Hermes fixes this upstream, you can avoid the rebuilds by setting `memory.provider: ""` in your own Hermes `config.yaml`, which turns that memory plugin off for the CLI as well. Otherwise, expect the one-time delay after each switch.
+
 ## Realtime updates stop working
 
 If runs still execute but comments and status changes no longer appear live, the WebSocket is usually not connected.

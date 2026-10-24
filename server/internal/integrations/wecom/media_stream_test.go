@@ -26,6 +26,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -166,62 +167,37 @@ func TestStreamingDecryptRefusesAWrongKey(t *testing.T) {
 	otherB64 := base64.StdEncoding.EncodeToString(other)
 	ct := sealMedia(t, key, []byte("the real contents"))
 
-	if _, _, err := decryptToFile(otherB64, strings.NewReader(ct), t.TempDir()); err == nil {
+	dir := t.TempDir()
+	if _, _, err := decryptToFile(otherB64, strings.NewReader(ct), dir); err == nil {
 		t.Fatal("a wrong key produced a file")
 	}
+	assertMediaTempDirEmpty(t, dir)
 }
 
 // A truncated body is the same class of failure and must not half-succeed.
 func TestStreamingDecryptRefusesATruncatedBody(t *testing.T) {
 	key, keyB64 := mediaTestKey(t)
 	ct := sealMedia(t, key, []byte(strings.Repeat("x", 200)))
+	dir := t.TempDir()
 
 	// Cut mid-block: not a multiple of the cipher block at all.
-	if _, _, err := decryptToFile(keyB64, strings.NewReader(ct[:len(ct)-5]), t.TempDir()); err == nil {
+	if _, _, err := decryptToFile(keyB64, strings.NewReader(ct[:len(ct)-5]), dir); err == nil {
 		t.Fatal("a body cut mid-block produced a file")
 	}
 	// And cut on a block boundary, which only the pad check can catch.
-	if _, _, err := decryptToFile(keyB64, strings.NewReader(ct[:len(ct)-aes.BlockSize]), t.TempDir()); err == nil {
+	if _, _, err := decryptToFile(keyB64, strings.NewReader(ct[:len(ct)-aes.BlockSize]), dir); err == nil {
 		t.Fatal("a body cut on a block boundary produced a file")
 	}
+	assertMediaTempDirEmpty(t, dir)
 }
 
 func TestStreamingDecryptRefusesAnEmptyBody(t *testing.T) {
 	_, keyB64 := mediaTestKey(t)
-	if _, _, err := decryptToFile(keyB64, strings.NewReader(""), t.TempDir()); err == nil {
+	dir := t.TempDir()
+	if _, _, err := decryptToFile(keyB64, strings.NewReader(""), dir); err == nil {
 		t.Fatal("an empty body produced a file")
 	}
-}
-
-// The plaintext is an attachment. Its temp file must not be readable by
-// anyone else, and must not outlive the handle — including if the process
-// dies holding it.
-func TestTheTempFileIsPrivateAndUnlinked(t *testing.T) {
-	key, keyB64 := mediaTestKey(t)
-	dir := t.TempDir()
-	ct := sealMedia(t, key, []byte("secret contents"))
-
-	f, _, err := decryptToFile(keyB64, strings.NewReader(ct), dir)
-	if err != nil {
-		t.Fatalf("decryptToFile: %v", err)
-	}
-	defer f.Close()
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read dir: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("the temp directory still holds %d entries; the plaintext file was not unlinked", len(entries))
-	}
-
-	info, err := f.Stat()
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		t.Errorf("the plaintext file is mode %v, want no group or other access", perm)
-	}
+	assertMediaTempDirEmpty(t, dir)
 }
 
 // peekFile has to leave the file where it found it, or the upload sends a
@@ -279,9 +255,18 @@ type streamingStorage struct {
 	gotBytes  []byte
 	gotType   string
 	streamErr error
+	gotFile   *os.File
+	onStream  func()
 }
 
-func (s *streamingStorage) UploadStream(_ context.Context, key string, data io.Reader, size int64, contentType, filename string) (string, error) {
+func (s *streamingStorage) UploadStream(ctx context.Context, key string, data io.Reader, size int64, contentType, filename string) (string, error) {
+	s.gotFile, _ = data.(*os.File)
+	if s.onStream != nil {
+		s.onStream()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if s.streamErr != nil {
 		return "", s.streamErr
 	}
@@ -301,11 +286,15 @@ func (s *streamingStorage) UploadStream(_ context.Context, key string, data io.R
 // with its exact length, and the object must be byte-identical to what the
 // buffered path would have produced.
 func TestIngestPrefersTheStreamingPathAndUploadsTheRightBytes(t *testing.T) {
+	dir := t.TempDir()
+	setMediaTempDir(t, dir)
 	key, keyB64 := mediaTestKey(t)
 	plain := []byte(strings.Repeat("报告正文。", 4000))
 	ct := sealMedia(t, key, plain)
 
+	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
 		w.Header().Set("Content-Disposition", `attachment; filename="report.txt"`)
 		w.Write([]byte(ct))
 	}))
@@ -330,6 +319,11 @@ func TestIngestPrefersTheStreamingPathAndUploadsTheRightBytes(t *testing.T) {
 	if storage.gotSize != int64(len(plain)) {
 		t.Fatalf("ContentLength = %d, want %d — a wrong length is a corrupt object", storage.gotSize, len(plain))
 	}
+	if requests.Load() != 1 || len(storage.stored()) != 0 {
+		t.Fatalf("streaming retried or used buffered upload: requests=%d buffered=%d", requests.Load(), len(storage.stored()))
+	}
+	assertMediaTempFileClosed(t, storage.gotFile)
+	assertMediaTempDirEmpty(t, dir)
 	if !bytes.Equal(storage.gotBytes, plain) {
 		t.Fatalf("the uploaded object is %d bytes, want the %d-byte plaintext", len(storage.gotBytes), len(plain))
 	}

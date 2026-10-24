@@ -51,7 +51,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Input } from "@multica/ui/components/ui/input";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Bold,
   Italic,
@@ -216,35 +216,35 @@ function LinkEditBar({
           if (e.key === "Escape") { e.preventDefault(); onClose(); editor.commands.focus(); }
         }}
       />
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
-        aria-label={t(($) => $.bubble_menu.link_edit.apply)}
+        label={t(($) => $.bubble_menu.link_edit.apply)}
         onClick={apply}
         onMouseDown={(e) => e.preventDefault()}
       >
         <Check className="size-3.5" />
-      </Button>
+      </IconButton>
       {existingHref && (
-        <Button
+        <IconButton
           size="icon-xs"
           variant="ghost"
-          aria-label={t(($) => $.bubble_menu.link_edit.remove)}
+          label={t(($) => $.bubble_menu.link_edit.remove)}
           onClick={remove}
           onMouseDown={(e) => e.preventDefault()}
         >
           <Unlink className="size-3.5" />
-        </Button>
+        </IconButton>
       )}
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
-        aria-label={t(($) => $.bubble_menu.link_edit.close)}
+        label={t(($) => $.bubble_menu.link_edit.close)}
         onClick={() => { onClose(); editor.commands.focus(); }}
         onMouseDown={(e) => e.preventDefault()}
       >
         <X className="size-3.5" />
-      </Button>
+      </IconButton>
     </div>
   );
 }

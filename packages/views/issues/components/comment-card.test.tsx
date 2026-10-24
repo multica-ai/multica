@@ -129,7 +129,7 @@ describe("AttachmentList — layout (MUL-7649)", () => {
     expect(screen.getByText("MD · 2 KB")).toBeTruthy();
     expect(screen.getByText("CSV · 2 KB")).toBeTruthy();
     // The row form's Eye button is gone — the whole card opens the file.
-    expect(screen.queryByTitle("Preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
   });
 
   // MUL-7736: several screenshots used to shrink into one row of thumbnails,

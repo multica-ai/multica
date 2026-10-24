@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ExternalLink,
   Globe,
+  Users,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -74,6 +75,7 @@ import {
   pendingRuntimeCommandName,
 } from "./pending-runtime";
 import { useT, useTimeAgo } from "../../i18n";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
 // pieces are taken À LA CARTE here: subgrid template + var-width tracks +
@@ -261,19 +263,21 @@ function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
 // `🔒 Private` chip on every row turns the whole column into noise.
 function VisibilityBadge({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
-  if (runtime.visibility !== "public") return null;
+  const scope = runtime.visibility === "public" ? "public" : "members";
+  if (scope === "members" && !runtime.shared_with?.length) return null;
+  const Icon = scope === "public" ? Globe : Users;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span className="inline-flex shrink-0 items-center gap-0.5 rounded-xs bg-info/10 px-1 text-micro font-medium text-info">
-            <Globe className="h-2.5 w-2.5" />
-            {t(($) => $.detail.visibility_label.public)}
+            <Icon className="h-2.5 w-2.5" />
+            {t(($) => $.detail.visibility_label[scope])}
           </span>
         }
       />
       <TooltipContent>
-        {t(($) => $.detail.visibility_hint.public)}
+        {t(($) => $.detail.visibility_hint_readonly[scope])}
       </TooltipContent>
     </Tooltip>
   );
@@ -581,15 +585,20 @@ export function RuntimeRowMenu({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={t(($) => $.list.row_actions_aria)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
+        <DeferredTooltip
+          content={t(($) => $.list.row_actions_aria)}
+          trigger={
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={t(($) => $.list.row_actions_aria)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              }
+            />
           }
         />
         <DropdownMenuContent align="end" className="w-40">

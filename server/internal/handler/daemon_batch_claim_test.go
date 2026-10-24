@@ -56,8 +56,15 @@ func postBatchClaimWithCapabilities(t *testing.T, workspaceID string, runtimeIDs
 }
 
 func batchClaimRequest(workspaceID string, runtimeIDs []string, maxTasks int, capabilities string) *http.Request {
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim",
-		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks}, workspaceID, batchClaimTestDaemonID)
+	body := map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks}
+	// Own workspace: authenticate as the fixture runtimes' owner, as a real
+	// daemon does. Any other workspace stays a daemon-token scoping probe.
+	var req *http.Request
+	if workspaceID == testWorkspaceID {
+		req = newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/claim", body)
+	} else {
+		req = newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim", body, workspaceID, batchClaimTestDaemonID)
+	}
 	if capabilities != "" {
 		req.Header.Set("X-Client-Capabilities", capabilities)
 	}
@@ -68,6 +75,13 @@ func batchClaimRequest(workspaceID string, runtimeIDs []string, maxTasks int, ca
 // and the request body in batch-claim handler tests, so the daemon_id
 // consistency check passes on the happy path.
 const batchClaimTestDaemonID = "batch-claim-review"
+
+// asRuntimeOwner authenticates r as the fixture runtimes' owner (testUserID)
+// with no daemon-token context — the user-credential daemon path.
+func asRuntimeOwner(r *http.Request) *http.Request {
+	r.Header.Set("X-User-ID", testUserID)
+	return r
+}
 
 func TestClaimTasksByRuntime_ClaimPollHintSchedulesNextDeferredTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
@@ -288,8 +302,8 @@ func TestClaimTasksByRuntime_CancelsTaskWhenRuntimeOwnerMissing(t *testing.T) {
 	var rtNull string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, visibility, owner_id)
-		VALUES ($1, NULL, 'Ownerless RT', 'cloud', 'handler_test_runtime', 'online', 'x', '{}'::jsonb, now(), 'private', NULL)
-		RETURNING id`, testWorkspaceID).Scan(&rtNull); err != nil {
+		VALUES ($1, $2, 'Ownerless RT', 'cloud', 'handler_test_runtime', 'online', 'x', '{}'::jsonb, now(), 'private', NULL)
+		RETURNING id`, testWorkspaceID, batchClaimTestDaemonID).Scan(&rtNull); err != nil {
 		t.Fatalf("ownerless runtime: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, rtNull) })
@@ -297,23 +311,32 @@ func TestClaimTasksByRuntime_CancelsTaskWhenRuntimeOwnerMissing(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, rtNull, "Ownerless agent")
 	taskID := seedQueuedIssueTask(t, ctx, agentID, rtNull, issueID)
 
-	w := postBatchClaim(t, testWorkspaceID, []string{rtNull}, 1)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	// MUL-8154: a user credential never reaches an ownerless runtime — the
+	// batch skips it without touching the task.
+	userW := postBatchClaim(t, testWorkspaceID, []string{rtNull}, 1)
+	if userW.Code != http.StatusOK || strings.Contains(userW.Body.String(), taskID) {
+		t.Fatalf("user-credential batch claim reached the ownerless runtime: %d %s", userW.Code, userW.Body.String())
 	}
-	var resp batchClaimResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
+	var untouched string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&untouched); err != nil || untouched != "queued" {
+		t.Fatalf("task status after refused user claim = %q (%v), want queued", untouched, err)
 	}
-	if len(resp.Tasks) != 0 {
-		t.Fatalf("claimed %d tasks from owner-less runtime, want 0: %s", len(resp.Tasks), w.Body.String())
+
+	// Daemon tokens are owner-bound as well (MUL-8154): this daemon's own
+	// token cannot reach the ownerless runtime either.
+	w := httptest.NewRecorder()
+	testHandler.ClaimTasksByRuntime(w, newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim",
+		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": []string{rtNull}, "max_tasks": 1},
+		testWorkspaceID, batchClaimTestDaemonID))
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), taskID) {
+		t.Fatalf("daemon-token batch claim reached the ownerless runtime: %d %s", w.Code, w.Body.String())
 	}
 	var status string
 	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
 		t.Fatalf("read task status: %v", err)
 	}
-	if status != "cancelled" {
-		t.Fatalf("task status = %s, want cancelled (owner missing)", status)
+	if status != "queued" {
+		t.Fatalf("task status = %s, want untouched (queued)", status)
 	}
 }
 

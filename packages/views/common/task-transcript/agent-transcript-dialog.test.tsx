@@ -848,7 +848,7 @@ describe("AgentTranscriptDialog — work directory handoff", () => {
     expect(screen.getByText("Project directory")).toBeInTheDocument();
     expect(screen.getByText("project")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTitle("Copy project directory"));
+    await userEvent.click(screen.getByRole("button", { name: /^Project directory/ }));
     expect(copyTextMock).toHaveBeenCalledWith("/Users/dev/project");
   });
 
@@ -867,7 +867,7 @@ describe("AgentTranscriptDialog — work directory handoff", () => {
     expect(screen.getByText("Workdir")).toBeInTheDocument();
     expect(screen.getByText("workspace/task/worktree")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTitle("Copy working directory"));
+    await userEvent.click(screen.getByRole("button", { name: /^Workdir/ }));
     expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
   });
 
@@ -885,7 +885,7 @@ describe("AgentTranscriptDialog — work directory handoff", () => {
     expect(screen.getByText("Workdir")).toBeInTheDocument();
     expect(screen.getByText("workspace/task/worktree")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTitle("Copy working directory"));
+    await userEvent.click(screen.getByRole("button", { name: /^Workdir/ }));
     expect(copyTextMock).toHaveBeenCalledWith("/managed/preserved/worktree");
   });
 });
@@ -905,7 +905,7 @@ describe("AgentTranscriptDialog — delivered branch", () => {
     // Also shown as a produced artifact in the outcome row, hence getAllByText.
     expect(screen.getAllByText("agent/j/abc12345").length).toBeGreaterThan(0);
 
-    await userEvent.click(screen.getByTitle("Copy branch name"));
+    await userEvent.click(screen.getByRole("button", { name: /^Branch/ }));
     expect(copyTextMock).toHaveBeenCalledWith("agent/j/abc12345");
   });
 
@@ -914,7 +914,7 @@ describe("AgentTranscriptDialog — delivered branch", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Run details" }));
 
-    expect(screen.queryByTitle("Copy branch name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Branch/ })).not.toBeInTheDocument();
   });
 });
 

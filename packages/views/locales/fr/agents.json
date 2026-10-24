@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Agents",
-    "tagline": "Des coéquipiers IA qui prennent des tâches, commentent et mettent à jour les statuts.",
     "learn_more": "En savoir plus →",
     "new_agent": "Nouvel agent",
     "search_placeholder": "Rechercher des agents…",
@@ -171,6 +170,7 @@
   "inspector": {
     "section_profile": "Profil",
     "section_execution": "Exécution",
+    "qoder_execution_note": "Le modèle, les outils et les Skills se configurent sur l’agent QCA dans Qoder.",
     "section_access": "Accès",
     "section_properties": "Propriétés",
     "section_details": "Détails",
@@ -279,6 +279,7 @@
     "composio_mcp": "Applications MCP",
     "integrations": "Intégrations",
     "runtime_config": "Routage",
+    "qoder_agent": "Agent QCA",
     "discard_dialog_title": "Abandonner les modifications non enregistrées ?",
     "discard_dialog_description": "Cet onglet contient des modifications non enregistrées. Les quitter maintenant les abandonnera.",
     "discard_keep": "Continuer à modifier",
@@ -289,18 +290,8 @@
     "squad_title": "Créer un agent pour ce squad",
     "duplicate_title": "Dupliquer {{name}}",
     "back": "Revenir en arrière",
-    "eyebrow": "Création d'agent",
-    "choose_title": "Comment souhaitez-vous commencer ?",
-    "recommended": "Recommandé",
-    "continue": "Continuer",
-    "step_choose": "Choisir un point de départ",
-    "step_configure": "Vérifier et configurer",
     "step_ai": "Construire par la conversation",
     "modes": {
-      "blank": {
-        "title": "Partir de zéro",
-        "description": "Définissez vous-même le nom, les instructions et le runtime."
-      },
       "template": {
         "title": "Partir d'un modèle",
         "description": "Partez d'instructions et de skills sélectionnés, puis adaptez chaque détail à votre espace de travail."
@@ -362,12 +353,11 @@
     "live_draft_hint": "Vous pouvez modifier le brouillon directement.",
     "duplicate_env_notice": "Les instructions, les skills et les arguments de commande sont copiés. Les variables d'environnement, les serveurs MCP et la configuration de runtime locale à la machine ne le sont pas.",
     "duplicate_runtime_reset_notice": "Le runtime d'origine est indisponible : cette copie s'exécute donc sur un autre. Le modèle, le niveau de réflexion et la vitesse ont été effacés car ils ne valent que pour le runtime sur lequel ils ont été choisis.",
-    "create_and_open": "Créer et ouvrir l'agent",
+    "create_agent": "Créer l'agent",
     "create_and_add": "Créer et ajouter au squad",
     "creating": "Création de l'agent…",
     "create_failed": "Impossible de créer l'agent.",
     "name_conflict": "Un agent portant ce nom existe déjà.",
-    "created": "{{name}} a été créé",
     "drafts": {
       "title": "Brouillons",
       "untitled": "Brouillon sans titre",
@@ -377,6 +367,74 @@
       "discard_cancel": "Continuer à modifier",
       "banner": "Vous avez {{count}} brouillon(s) inachevé(s)",
       "pick_hint": "Choisissez-en un pour continuer."
+    },
+    "close": "Fermer",
+    "steps": {
+      "runtime": "Choisir le runtime",
+      "configure": "Configurer",
+      "done": "Terminé",
+      "aria": "Étapes de création de l'agent"
+    },
+    "configure_title": "Configurer l'agent",
+    "ask_ai": "Laisser l'IA rédiger",
+    "change_runtime": "Changer",
+    "runtime_label": "Runtime",
+    "runtime_loading": "Chargement du runtime…",
+    "runtime_missing": "Ce runtime n'est plus disponible.",
+    "cloud_fields_note": "Les Skills, le MCP et les amorces de conversation ne sont disponibles que sur les runtimes locaux et distants.",
+    "done": {
+      "loading": "Finalisation…",
+      "title": "{{name}} est prêt",
+      "runs_on": "S'exécute sur {{runtime}}",
+      "joined_squad": "Ajouté à l'escouade {{squad}}",
+      "next": "Et ensuite",
+      "assign_title": "Lui confier une première tâche",
+      "mention_title": "Le mentionner dans un ticket",
+      "squad_title": "L'ajouter à une escouade",
+      "open_squad_title": "Ouvrir {{squad}}",
+      "open_agent": "Ouvrir l'agent",
+      "back_to_list": "Retour aux agents"
+    },
+    "runtime_step": {
+      "title": "Où cet agent doit-il s'exécuter ?",
+      "search_placeholder": "Rechercher un harness ou une machine",
+      "groups": {
+        "machines": "Machines",
+        "cloud": "Services cloud"
+      },
+      "this_machine": "Cette machine",
+      "owner_you": "Vous",
+      "custom_badge": "Personnalisé",
+      "web_local_title": "Utilisez les harness de cet ordinateur avec l'application de bureau",
+      "download_desktop": "Télécharger l'application de bureau",
+      "harness_count_one": "{{count}} harness",
+      "harness_count_other": "{{count}} harness",
+      "local_starting": "Démarrage du démon local…",
+      "local_empty_title": "Aucun harness trouvé sur cette machine",
+      "local_empty_hint": "Installez une CLI comme Claude Code ou Codex et elle apparaîtra ici.",
+      "more_harnesses_one": "{{count}} de plus : {{names}}",
+      "more_harnesses_other": "{{count}} de plus : {{names}}",
+      "add_remote": "Connecter une machine",
+      "hidden_remote_one": "{{count}} autre machine n'est utilisable que par son propriétaire",
+      "hidden_remote_other": "{{count}} autres machines ne sont utilisables que par leur propriétaire",
+      "remote_warning": "Les tâches s'exécutent sur la machine de {{owner}}, y lisent et écrivent des fichiers, et l'usage est imputé au compte de {{owner}}.",
+      "no_match": "Aucun résultat pour « {{query}} »",
+      "hosted_by": "Par {{vendor}}",
+      "coming_soon": "Bientôt disponible",
+      "qoder_status": {
+        "not_configured": "Non connecté",
+        "starting": "Démarrage",
+        "ready": "Connecté",
+        "error": "Erreur",
+        "stopped": "En pause"
+      },
+      "connect": "Connecter",
+      "settings": "Paramètres",
+      "member_connect": "Demandez à un admin de le connecter",
+      "member_fix": "Demandez à un admin de corriger",
+      "footer_selected": "Sélection :",
+      "cancel": "Annuler",
+      "next": "Suivant"
     }
   },
   "create_dialog": {
@@ -446,7 +504,7 @@
   },
   "conversation_starters": {
     "label": "Amorces de conversation",
-    "hint": "Trois au maximum. En choisir une remplit le champ de saisie sans envoyer le message.",
+    "hint": "Proposées dans une nouvelle discussion avec cet agent. En choisir une remplit le champ de saisie sans envoyer le message.",
     "add": "Ajouter une suggestion",
     "item_label": "Libellé de la suggestion {{number}}",
     "prompt_label": "Prompt de la suggestion {{number}}",
@@ -455,13 +513,22 @@
     "incomplete": "Complétez ou supprimez chaque suggestion avant d'enregistrer.",
     "remove": "Supprimer la suggestion {{number}}",
     "preview_label": "Aperçu d'une nouvelle discussion",
-    "preview_defaults": "Voici les suggestions par défaut. Ajoutez une suggestion ci-dessus pour remplacer les trois."
+    "preview_defaults": "Voici les suggestions intégrées. Ajoutez les vôtres pour remplacer les trois.",
+    "create_hint": "Facultatif. Affichées dans une nouvelle discussion avec cet agent.",
+    "edit": "Modifier la suggestion {{number}}",
+    "remove_short": "Supprimer",
+    "done": "Terminé",
+    "untitled": "Suggestion sans titre",
+    "customize": "Personnaliser",
+    "defaults_summary_one": "{{count}} suggestion intégrée utilisée",
+    "defaults_summary_other": "{{count}} suggestions intégrées utilisées"
   },
   "tab_body": {
     "common": {
       "save": "Enregistrer",
       "add": "Ajouter",
-      "unsaved_changes": "Modifications non enregistrées"
+      "unsaved_changes": "Modifications non enregistrées",
+      "discard": "Annuler les modifications"
     },
     "instructions": {
       "intro": "Définissez le prompt système utilisé à chaque exécution. Markdown est pris en charge.",
@@ -473,7 +540,13 @@
       "system_layer_hide": "Masquer",
       "workspace_notes_label": "Notes de l'espace de travail",
       "workspace_notes_intro": "Ajoutez ci-dessous le contexte et les préférences de votre équipe. Ils s'appliquent par-dessus les instructions que Multica maintient pour cet agent. Le Markdown est pris en charge.",
-      "workspace_notes_placeholder": "Ajoutez le contexte que cet agent doit toujours avoir.\n\n# Exemple\nNotre dépôt principal est github.com/acme/platform.\nRédige les tâches en anglais même quand nous discutons en français.\nNous ne déployons pas le vendredi."
+      "workspace_notes_placeholder": "Ajoutez le contexte que cet agent doit toujours avoir.\n\n# Exemple\nNotre dépôt principal est github.com/acme/platform.\nRédige les tâches en anglais même quand nous discutons en français.\nNous ne déployons pas le vendredi.",
+      "mode_aria": "Mode de l'éditeur",
+      "mode_write": "Écrire",
+      "mode_preview": "Aperçu",
+      "preview_empty": "Rien à prévisualiser pour l'instant.",
+      "char_count_one": "{{count}} caractère",
+      "char_count_other": "{{count}} caractères"
     },
     "env": {
       "intro_readonly": "Injectées dans le processus de l'agent au lancement. Seuls les propriétaires et administrateurs de l'espace de travail peuvent lire ou modifier les valeurs ; chaque affichage et chaque modification sont consignés dans le journal d'audit de l'espace de travail.",

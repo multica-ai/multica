@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 
 import { useIsCompact } from "@multica/ui/hooks/use-mobile"
 import { cn } from "@multica/ui/lib/utils"
-import { Button } from "@multica/ui/components/ui/button"
+import { IconButton } from "@multica/ui/components/common/icon-button"
 import { Input } from "@multica/ui/components/ui/input"
 import { Separator } from "@multica/ui/components/ui/separator"
 import {
@@ -395,17 +395,19 @@ function Sidebar({
 function SidebarTrigger({
   className,
   onClick,
+  shortcut,
   ...props
-}: React.ComponentProps<typeof Button>) {
+}: Omit<React.ComponentProps<typeof IconButton>, "label">) {
   const { toggleSidebar } = useSidebar()
   const { t } = useTranslation("ui")
 
   return (
-    <Button
+    <IconButton
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
-      variant="ghost"
-      size="icon-sm"
+      label={t(($) => $.toggle_sidebar)}
+      shortcut={shortcut}
+      tooltipSide="bottom"
       className={cn(className)}
       onClick={(event) => {
         onClick?.(event)
@@ -414,8 +416,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">{t(($) => $.toggle_sidebar)}</span>
-    </Button>
+    </IconButton>
   )
 }
 

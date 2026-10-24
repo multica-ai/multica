@@ -341,7 +341,6 @@ function FloatingChatRow() {
     <SettingsRow
       anchor="chat"
       label={t(($) => $.chat.floating_label)}
-      description={t(($) => $.chat.floating_hint)}
     >
       <Switch
         checked={enabled}

@@ -9,7 +9,7 @@ import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repositor
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
 import type { IssueStatus, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { surfaceStatusOrder, useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
+import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
 import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
 import {
   applyIssueFilters,
@@ -63,7 +63,7 @@ export interface IssueSurfaceData {
   filteredGanttIssues: Issue[];
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  columnStatuses: IssueStatus[];
   statusPagination: IssueStatusPagination;
   activeFilters: Omit<IssueFilters, "statusFilters">;
   childProgressMap: Map<string, ChildProgress>;
@@ -374,6 +374,7 @@ export function useIssueSurfaceData({
   // Columns follow the project's workflow, or Default outside a project.
   // (MUL-7420)
   const { workflow: projectWorkflow } = useColumnWorkflow(wsId, projectId, statusFilters.length > 0);
+  const { workflow: scopeWorkflow } = useColumnWorkflow(wsId, projectId, false);
 
   const visibleStatuses = useMemo<IssueStatus[]>(() => {
     // An explicit exact-key filter wins over hidden column preferences.
@@ -387,10 +388,12 @@ export function useIssueSurfaceData({
     );
   }, [statusFilters, hiddenStatusKeys, catalog, projectWorkflow]);
 
-  // Each catalog status can be hidden or restored independently.
-  const hiddenStatuses = useMemo<IssueStatus[]>(
-    () => surfaceStatusOrder(statusColumnKeys(catalog), projectWorkflow).filter((s) => !visibleStatuses.includes(s)),
-    [catalog, projectWorkflow, visibleStatuses],
+  // The columns Display can show or hide: this surface's workflow steps, or
+  // the whole catalog without a workflow. A status filter does not change
+  // them, since it overrides hidden columns rather than replacing them.
+  const columnStatuses = useMemo<IssueStatus[]>(
+    () => workflowColumns(statusColumnKeys(catalog), scopeWorkflow),
+    [catalog, scopeWorkflow],
   );
 
   const activeFilters = useMemo(
@@ -459,7 +462,7 @@ export function useIssueSurfaceData({
     filteredGanttIssues,
     ganttIssues,
     visibleStatuses,
-    hiddenStatuses,
+    columnStatuses,
     statusPagination: serverStatusBranches.pagination,
     activeFilters,
     childProgressMap,

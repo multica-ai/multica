@@ -226,7 +226,20 @@ var issueCmd = &cobra.Command{
 var issueListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List issues in the workspace",
-	RunE:  runIssueList,
+	Long: "List issues in the workspace.\n\n" +
+		"--property filters by a custom property, one member per flag. \"Name=Value\" is\n" +
+		"equality; the value is an option name or id (select, multi_select), true or\n" +
+		"false (checkbox), a member name, email or id (actor types), one list entry\n" +
+		"(multi_text, multi_url), or the stored value itself (text, url, number, date as\n" +
+		"YYYY-MM-DD). Comparisons use the same flag:\n" +
+		"  number    \"Score>3\"  \"Score>=3\"  \"Score<3\"  \"Score<=3\"\n" +
+		"  date      \"Ship Date>2026-01-01\" (after)  \"Ship Date<2026-01-01\" (before)\n" +
+		"  text/url  \"Notes~=review\" (contains, case-insensitive; the needle is sent as typed)\n" +
+		"A comparison on any other type is rejected, as is != (the server has no not-equal\n" +
+		"filter) and >= or <= on a date (the error names the strict form to use instead).\n" +
+		"Repeating a property matches ANY of its members, so \"Score>1\" plus \"Score<10\"\n" +
+		"is not a range.",
+	RunE: runIssueList,
 }
 
 var issueGetCmd = &cobra.Command{
@@ -601,7 +614,7 @@ func init() {
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
-	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
+	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" or as a comparison such as "Score>=3", "Ship Date<2026-01-01" or "Notes~=review" (repeatable, one member per flag; quote it so the shell does not read < and > as redirection). Name is a property name (case-insensitive) or its UUID; a name containing =, <, >, ! or ~ has to be given by UUID. Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id. Repeating a property matches ANY of its members; different properties must ALL match. The per-type value forms and comparisons are in the command description above.`)
 	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination; while --output json reports has_more, advance it by the number of issues in that same response)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority, or property:<name-or-id> to sort by a custom property (select properties sort by option order)")

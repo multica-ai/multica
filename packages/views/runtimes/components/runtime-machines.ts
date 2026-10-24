@@ -15,6 +15,8 @@ export interface RuntimeMachine {
   daemonId: string | null;
   title: string;
   subtitle: string | null;
+  /** Compact OS/arch summary without the daemon-id fallback of `subtitle`. */
+  deviceSummary: string | null;
   deviceInfo: string | null;
   cliVersion: string | null;
   launchedBy: string | null;
@@ -132,6 +134,7 @@ function placeholderLocalMachine(
     daemonId,
     title: options.localMachineName ?? "This machine",
     subtitle: null,
+    deviceSummary: null,
     deviceInfo: null,
     cliVersion: null,
     launchedBy: null,
@@ -253,6 +256,7 @@ function finalizeRuntimeMachine(
     daemonId: draft.daemonId,
     title,
     subtitle,
+    deviceSummary: compactDeviceInfo(deviceInfo, title),
     deviceInfo,
     cliVersion: currentMachineMetadata(runtimes, "cli_version"),
     launchedBy: currentMachineMetadata(runtimes, "launched_by"),

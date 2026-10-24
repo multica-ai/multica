@@ -644,7 +644,7 @@ describe("body images with no attachment record", () => {
       render(<CaptionedBody captions={[caption]} />);
 
       act(() => {
-        fireEvent.click(screen.getAllByTitle("View")[0]!);
+        fireEvent.click(screen.getAllByRole("button", { name: "View" })[0]!);
       });
 
       expect(
@@ -658,7 +658,7 @@ describe("body images with no attachment record", () => {
     render(<CaptionedBody captions={["报告图表", "对比图"]} />);
 
     act(() => {
-      fireEvent.click(screen.getAllByTitle("View")[0]!);
+      fireEvent.click(screen.getAllByRole("button", { name: "View" })[0]!);
     });
     expectCounter("1 / 2");
 

@@ -196,7 +196,7 @@ export function createEnDict(
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends.",
+          "Multica supports 27 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since the source code is public, you can also add your own backends. Self-hosted deployments can also configure Qoder Cloud Agents as a managed remote runtime for issue runs, using a QCA PAT and an existing QCA agent.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -402,10 +402,10 @@ export function createEnDict(
 
   privacy: {
     title: "Privacy Policy",
-    lastUpdated: "Last updated: September 24, 2026",
+    lastUpdated: "Last updated: October 22, 2026",
     intro: [
       "This Privacy Policy explains how Index Labs (Hong Kong) Limited (“Multica”, “we”, “us”) collects, uses, and shares personal information when you visit multica.ai, contact us, or use Multica Cloud, our hosted service, including the web, desktop, and mobile apps.",
-      "It does not cover Multica deployments you host yourself. The operator of a self-hosted deployment controls its data, and any AI providers, integrations, or analytics it uses depend on how they configure it. The only thing a self-hosted server sends us is a daily usage snapshot: a random ID for the deployment, so snapshots from the same server can be linked; the server version; approximate counts of workspaces, members, agents, and connected daemons; and the number of agent runs started, completed, failed, and cancelled that day. It contains no names, email addresses, or content. Setting DO_NOT_TRACK=1 turns off this snapshot.",
+      "It does not cover Multica deployments you host yourself. The operator of a self-hosted deployment controls its data, and any AI providers, integrations, or analytics it uses depend on how they configure it. The only thing a self-hosted server sends us is a daily usage snapshot: a random ID for the deployment, so snapshots from the same server can be linked; the server version; approximate counts of workspaces, members, agents, and connected daemons; the number of agent runs started, completed, failed, and cancelled that day; and approximate counts of members who opened the web or desktop app, and of members who personally started an agent run, over the previous 1, 7, and 28 days. It contains no names, email addresses, or content. Setting DO_NOT_TRACK=1 turns off this snapshot.",
     ],
     sections: [
       {
@@ -522,6 +522,80 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.7.0",
+        date: "2026-10-23",
+        title: "Qoder Cloud Agents, runtimes shared with chosen members, PR conflict wakeups, and safer runs",
+        changes: [],
+        features: [
+          "Run Issues on Qoder Cloud Agents: when creating an agent, pick a machine or a cloud service, then link a Qoder Cloud Agents agent.",
+          "Qoder Cloud Agents connections support repo credentials, concurrency and timeout limits, pause and resume, disconnecting, and resuming sessions. For now they handle Issues only, not chat or local folders.",
+          "Share a runtime with specific members, not just everyone or only you. Tightening access shows the affected agents first.",
+          "Any member can create and duplicate workflows; creators and admins can edit, delete, and set up handoffs. The Default workflow stays with admins.",
+          "Agents can wake up when a linked GitHub PR hits a merge conflict, set from the sidebar or with --until-pr conflicts.",
+          "Kiro CLI 2.33.0 or later accepts new guidance mid-run, and Grok does too from the regular reply box.",
+          "Self-hosted admins can limit workspace creation to specific emails; everyone else can still sign in and join workspaces they are invited to.",
+          "The command line filters custom properties by number range, before or after a date, and text or URLs that contain a value.",
+        ],
+        improvements: [
+          "Icon buttons show clearer tooltips, with their name, shortcut, and why an action is unavailable, and the tooltips appear sooner.",
+          "Conversation starters moved to the agent's profile settings, save automatically, and show a new-chat preview.",
+          "Agent instructions have Write and Preview tabs, a character count, and a save bar that stays in view.",
+          "Board columns follow the workflow; restore hidden ones from Display → Columns, and use a status filter to find Issues outside the workflow.",
+          "With \"Create another\" on, the next Issue keeps its status, assignee, parent, and stage, and the More menu can create a sub-Issue directly.",
+          "Click the agent status at the top of an Issue to jump to its run in the execution log.",
+          "Embedded HTML previews can be reloaded to reset an interactive demo.",
+          "High priority is now orange, easier to tell apart from Medium's yellow, and small selects share one height.",
+          "When Hermes reinstalls its dependencies at startup, the daemon logs a warning and how long startup took, with a troubleshooting guide. The wait itself is not removed yet.",
+          "Self-hosted anonymous usage snapshots add bucketed counts of active members, with no member identities, and the privacy policy is updated.",
+          "The desktop app moves to Electron 44, along with security updates to Node and Go.",
+        ],
+        fixes: [
+          "Task credentials can no longer reach other workspaces or be swapped for long-lived ones, and a daemon can only claim and update tasks for runtimes its owner controls.",
+          "When an agent delivers to another branch or rewrites its starting point, Multica repairs it once if your base content is safe; failures show as local folder errors, not provider outages.",
+          "Removing injected instructions keeps the file's original line endings and your own edits, with no unrelated commits.",
+          "Kiro runs that panic fail quickly, and broken resumed sessions are retired instead of hanging.",
+          "OpenCode checks for future timestamps before resuming a session, and bundled OpenCode 2.x runs are no longer marked failed when the final step event is missing.",
+          "Cursor retries a limited number of times when the provider connection stalls, without mistaking local tool or MCP errors for network problems.",
+          "Hermes finds and applies the right reasoning effort for non-default models.",
+          "Kimi errors show what went wrong instead of [object Object].",
+          "A stuck task that fails for good leaves a failure note on the Issue.",
+          "A squad leader that is woken up keeps its leader role.",
+          "On Windows, startup no longer opens a flood of Git sign-in windows.",
+          "On Windows, WeCom media streams without extra downloads or leftover temporary files.",
+          "On mobile, reconnecting keeps your place instead of resetting navigation.",
+          "Bulk actions on sub-Issues work again, and the selection clears once an action succeeds.",
+          "The sticky comment header's shadow no longer covers the first line.",
+          "The saved views bar no longer crashes the page at certain widths.",
+          "Titles with line breaks or many spaces no longer freeze the page.",
+          "Hex strings in file paths are no longer misread as HTTP error codes once the daemon is updated.",
+          "Command line and daemon requests take less server work, easing a cause of server errors.",
+        ],
+      },
+      {
+        version: "0.6.5",
+        date: "2026-10-21",
+        title: "Clearer statuses for Issues outside projects, private CA repo sync, lighter background tabs, and steadier runs",
+        changes: [],
+        features: [
+          "Issues outside a project list only the Default workflow's statuses by default; search still finds every status.",
+        ],
+        improvements: [
+          "Background browser tabs stop refreshing the unread count until you return; the desktop badge keeps updating when minimized.",
+        ],
+        fixes: [
+          "A new workflow step can get its handler and instruction right away, before you save.",
+          "The project sidebar shows the workflow name, with the handoff count on hover.",
+          "A private CA set on a self-hosted server is trusted when the daemon syncs repos, and failed syncs show the exact error.",
+          "Self-hosted Forgejo, Gitea, and GitLab PRs wake agents when checks finish or the PR merges.",
+          "A wakeup rule stops showing an old error once a later check goes through.",
+          "The desktop tab bar's right-click menu and buttons follow your language.",
+          "Copilot starts even with very long context.",
+          "OpenCode 2.x lets you pick a thinking level again.",
+          "Codex runs on the default model now show an estimated cost.",
+          "Scrolling to the bottom of an Issue no longer pushes the page up or leaves a blank gap.",
+        ],
+      },
       {
         version: "0.6.4",
         date: "2026-10-20",
@@ -844,7 +918,7 @@ export function createEnDict(
           "Drag a status, built-in ones included, to set its place in boards, lists, and status menus.",
           "Give a custom status the icon shape you want.",
           "DeepSeek Harness Desktop is picked up as a runtime on its own, with no manual setup.",
-          "Self-hosted servers send one anonymous daily snapshot of deployment size and run volume; set DO_NOT_TRACK=1 to turn it off.",
+          "Self-hosted servers send one anonymous daily snapshot of deployment size, member activity, and run volume; set DO_NOT_TRACK=1 to turn it off.",
         ],
         improvements: [
           "Archiving a status tells you how many Issues still use it, and takes you to them.",

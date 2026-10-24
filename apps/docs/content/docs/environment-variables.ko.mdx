@@ -113,6 +113,7 @@ primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API �
 | `ALLOWED_EMAILS` | 비어 있음 | 가입을 허용할 전체 이메일 주소, 쉼표로 구분 |
 | `ALLOWED_EMAIL_DOMAINS` | 비어 있음 | 가입을 허용할 이메일 도메인, 쉼표로 구분 |
 | `DISABLE_WORKSPACE_CREATION` | `false` | 모든 사용자의 새 워크스페이스 생성을 금지. owner/admin 예외 없음 |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | 비어 있음 | 워크스페이스 생성을 허용할 전체 이메일 주소, 쉼표로 구분. 설정하면 그 외 사용자는 403을 받습니다. `DISABLE_WORKSPACE_CREATION=true`가 우선합니다. 다른 워크스페이스에 대한 접근 권한은 부여하지 않습니다 |
 | `MULTICA_DEV_VERIFICATION_CODE` | 비어 있음 | production이 아닌 환경에서 사용하는 고정 6자리 테스트 인증 코드 |
 
 allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입-범위-제어)을 참고하세요.
@@ -316,7 +317,7 @@ multica config show
 | `METRICS_ADDR` | 비어 있음 | Prometheus metrics listen 주소. 비어 있으면 시작하지 않음 |
 | `REALTIME_METRICS_TOKEN` | 비어 있음 | `/health/realtime`을 보호하는 bearer token |
 
-자사 셀프 호스트 텔레메트리는 UTC 기준 하루에 한 번 배포 단위 스냅샷을 고정되어 설정할 수 없는 `https://telemetry.multica.ai/v1/telemetry/events` 주소로 전송합니다. 정식 릴리스 버전, 작업 공간 수·중복을 제거한 멤버 수·활성 에이전트 수·지난 24시간 활성 데몬 수의 버킷, 그리고 지난 24시간 시작·완료·실패·취소된 실행의 집계만 포함합니다. 이름, 이메일 주소나 도메인, IP, 업무 ID, 호스트나 기기 정보, 저장소, 모델이나 plugin, prompt/output, 댓글이나 채팅, 파일 경로, token/비용, 자격 증명, 오류, stack, 로그는 전송하지 않습니다. 이 데이터는 셀프 호스트 버전 사용 현황, 배포 규모, 집계 사용량을 파악하는 데만 쓰며 결제, 라이선스, 인증, 보안 판단에는 사용하지 않습니다.
+자사 셀프 호스트 텔레메트리는 UTC 기준 하루에 한 번 배포 단위 스냅샷을 고정되어 설정할 수 없는 `https://telemetry.multica.ai/v1/telemetry/events` 주소로 전송합니다. 정식 릴리스 버전, 작업 공간 수·중복을 제거한 멤버 수·활성 에이전트 수·지난 24시간 활성 데몬 수의 버킷, 그리고 지난 24시간 시작·완료·실패·취소된 실행의 집계, 그리고 지난 1·7·28 완전한 UTC 일 동안 로그인해 웹 또는 데스크톱 앱을 연 멤버 수와 직접 에이전트 실행을 시작한(할당, 멘션, 댓글, 채팅, 수동 실행, 재실행. autopilot과 에이전트 간 위임은 제외) 멤버 수의 버킷만 포함합니다. 멤버는 배포 안에서만 집계되며 식별되지 않습니다. 이름, 이메일 주소나 도메인, IP, 업무 ID, 호스트나 기기 정보, 저장소, 모델이나 plugin, prompt/output, 댓글이나 채팅, 파일 경로, token/비용, 자격 증명, 오류, stack, 로그는 전송하지 않습니다. 이 데이터는 셀프 호스트 버전 사용 현황, 배포 규모, 집계 사용량, 멤버 활동을 파악하는 데만 쓰며 결제, 라이선스, 인증, 보안 판단에는 사용하지 않습니다.
 
 `DO_NOT_TRACK`과 `ANALYTICS_DISABLED`는 서로 독립적입니다. 전자는 이 익명 스냅샷을, 후자는 선택 사항인 PostHog 연동을 제어합니다.
 

@@ -1,6 +1,17 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "./api";
+import {
+  maybeRenewSession,
+  renewSessionNow,
+  resetSessionRenewalForTest,
+} from "./session-renewal";
+import { invalidateSessionEpoch } from "./session-epoch";
+import { sessionActivityResponderConfig } from "./session-activity";
+import * as SecureStore from "expo-secure-store";
+import { clearToken, getToken, setToken } from "./secure-storage";
+
 // The Keychain is async, and that is the whole point of these tests: `defer`
 // lets one operation be started and finished at a chosen moment, so a logout
 // and a renewal can be interleaved in either order.
@@ -68,17 +79,6 @@ vi.mock("./api", async () => {
   }
   return { api: apiMock, ApiError };
 });
-
-import { ApiError } from "./api";
-import {
-  maybeRenewSession,
-  renewSessionNow,
-  resetSessionRenewalForTest,
-} from "./session-renewal";
-import { invalidateSessionEpoch } from "./session-epoch";
-import { sessionActivityResponderConfig } from "./session-activity";
-import * as SecureStore from "expo-secure-store";
-import { clearToken, getToken, setToken } from "./secure-storage";
 
 function renewed(token: string, checkAgainInSeconds = 3600) {
   return {

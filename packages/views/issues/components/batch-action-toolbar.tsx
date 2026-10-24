@@ -36,6 +36,7 @@ import { useIssueSurfaceSelection } from "../surface/selection-context";
 export function BatchActionToolbar({
   issues,
   placement = "fixed-bottom",
+  clearSelectionOnApply = false,
 }: {
   /**
    * The universe of selectable issues at this call site (the same list the
@@ -51,6 +52,14 @@ export function BatchActionToolbar({
    * the selected rows (used inside scrollable sections like sub-issues).
    */
   placement?: "fixed-bottom" | "inline";
+  /**
+   * Drop the selection once a status / priority / assignee change fully
+   * applies. Off for full-screen lists, where the selection stays so several
+   * edits can be chained; on for sub-issues, where a batch edit is a one-shot
+   * dispatch and a lingering inline toolbar reads as unfinished. A partial or
+   * failed write keeps the selection so the user can retry.
+   */
+  clearSelectionOnApply?: boolean;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
@@ -120,6 +129,7 @@ export function BatchActionToolbar({
       if (updated < count) {
         toast.warning(t(($) => $.batch.update_partial, { updated, count }));
       } else {
+        if (clearSelectionOnApply) clear();
         toast.success(t(($) => $.batch.update_success, { count }));
       }
     } catch (err) {
@@ -160,6 +170,7 @@ export function BatchActionToolbar({
           mode: "assign",
           assigneeType: updates.assignee_type,
           assigneeId: updates.assignee_id,
+          onApplied: clearSelectionOnApply ? clear : undefined,
         });
         return;
       }
@@ -243,7 +254,9 @@ export function BatchActionToolbar({
         {/* Status */}
         <StatusPicker
           status={common.status}
-          projectId={sharedProjectId}
+          // No shared project spans projects (or none): not the Default-only
+          // list of a single issue outside a project. (MUL-8121)
+          projectId={sharedProjectId ?? undefined}
           allowedStatuses={allowedStatuses}
           onUpdate={handleBatchStatus}
           open={statusOpen}

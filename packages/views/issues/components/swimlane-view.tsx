@@ -57,7 +57,6 @@ import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
-import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { AppLink } from "../../navigation";
@@ -613,7 +612,6 @@ function SwimLaneViewImpl({
   unfilteredIssues,
   activeFilters: activeFiltersProp,
   visibleStatuses = BUILT_IN_STATUS_ORDER,
-  hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
@@ -627,13 +625,12 @@ function SwimLaneViewImpl({
    * status totals. Lane discovery still drives off the visible `issues`
    * set so that parents whose children are all in hidden statuses don't
    * produce empty rows, but header chrome (identifier, title, issue ref
-   * for the Open-parent link) and hidden-column counts read from here so
-   * a parent in a hidden status still surfaces its label correctly.
+   * for the Open-parent link) and status counts read from here so a
+   * parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
   activeFilters?: Omit<IssueFilters, "statusFilters">;
   visibleStatuses?: IssueStatus[];
-  hiddenStatuses?: IssueStatus[];
   onMoveIssue: (
     issueId: string,
     updates: SwimLaneMoveUpdates,
@@ -931,7 +928,7 @@ function SwimLaneViewImpl({
     return ids;
   }, [laneGroups, sortedStatuses]);
 
-  // Drives both visible status-header counts AND hidden-column panel rows.
+  // Drives the status-header counts.
   // Known limitation (parent grouping): `headerIssueIds` is derived from
   // lanes that exist in the current render (only parents with ≥1 visible
   // child). A parent whose children are all hidden doesn't get a lane, so
@@ -1463,6 +1460,7 @@ function SwimLaneViewImpl({
                       DeferredPopup. */}
                   <DeferredPopup
                     ariaHasPopup="menu"
+                    tooltip={t(($) => $.board.hide_column)}
                     triggerRender={
                       <Button
                         type="button"
@@ -1477,17 +1475,22 @@ function SwimLaneViewImpl({
                   >
                     {(open, onOpenChange) => (
                       <DropdownMenu open={open} onOpenChange={onOpenChange}>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={t(($) => $.board.hide_column)}
-                              className="rounded-full text-muted-foreground"
-                            >
-                              <MoreHorizontal className="size-3.5" />
-                            </Button>
+                        <DeferredTooltip
+                          content={t(($) => $.board.hide_column)}
+                          trigger={
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={t(($) => $.board.hide_column)}
+                                  className="rounded-full text-muted-foreground"
+                                >
+                                  <MoreHorizontal className="size-3.5" />
+                                </Button>
+                              }
+                            />
                           }
                         />
                         <DropdownMenuContent align="end">
@@ -1547,13 +1550,6 @@ function SwimLaneViewImpl({
           )}
         </SortableContext>
         </div>
-
-        {hiddenStatuses.length > 0 && (
-          <SwimLaneHiddenColumnsPanel
-            hiddenStatuses={hiddenStatuses}
-            statusTotals={statusTotals}
-          />
-        )}
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -1868,27 +1864,6 @@ function SwimLaneCell({
         />
       )}
     </div>
-  );
-}
-
-function SwimLaneHiddenColumnsPanel({
-  hiddenStatuses,
-  statusTotals,
-}: {
-  hiddenStatuses: IssueStatus[];
-  statusTotals: Map<IssueStatus, number>;
-}) {
-  return (
-    <HiddenColumnsPanel
-      hiddenStatuses={hiddenStatuses}
-      renderRow={(status) => (
-        <HiddenColumnRow
-          key={status}
-          status={status}
-          total={statusTotals.get(status) ?? 0}
-        />
-      )}
-    />
   );
 }
 

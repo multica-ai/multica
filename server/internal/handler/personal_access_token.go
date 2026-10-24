@@ -57,7 +57,15 @@ type CreatePATRequest struct {
 	ExpiresInDays *int   `json:"expires_in_days"`
 }
 
+// CreatePersonalAccessToken mints a PAT for the caller. Machine credentials
+// are refused here as a backstop to the router guard (MUL-8154): a PAT may be
+// non-expiring, so minting one from an agent task token would escalate a
+// 24-hour scoped credential into permanent account access.
 func (h *Handler) CreatePersonalAccessToken(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

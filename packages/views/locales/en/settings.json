@@ -683,8 +683,7 @@
     },
     "system": {
       "title": "System Notifications",
-      "description": "Show system notifications when Multica is in the background.",
-      "label": "Show system notifications"
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",
@@ -1226,6 +1225,15 @@
   "desktop": {
     "tabs": {
       "updates": "Updates"
+    },
+    "tab_bar": {
+      "pin": "Pin tab",
+      "unpin": "Unpin tab",
+      "close": "Close tab",
+      "close_others": "Close other tabs",
+      "open_window": "Open as new window",
+      "new": "New tab",
+      "pinned_name": "{{title}} (pinned)"
     },
     "updates": {
       "title": "Updates",

@@ -19,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -120,7 +119,7 @@ func TestClaimTasksByRuntime_HTTPFollowupDoesNotWaitForRecovery(t *testing.T) {
 	firstCompleted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wrapped := chimw.NewWrapResponseWriter(chimw.NewWrapResponseWriter(w, r.ProtoMajor), r.ProtoMajor)
-		r = r.WithContext(middleware.WithDaemonContext(r.Context(), testWorkspaceID, batchClaimTestDaemonID))
+		r = asRuntimeOwner(r)
 		if requests.Add(1) == 1 {
 			defer close(firstCompleted)
 			firstHandler.ClaimTasksByRuntime(wrapped, r)
@@ -243,7 +242,7 @@ func TestClaimTasksByRuntime_ResponsePrecedesRecoveryNotifications(t *testing.T)
 				return status, response, err
 			})
 			identity := daemonws.ClientIdentity{
-				DaemonID: batchClaimTestDaemonID, UserID: testUserID,
+				UserID:      testUserID, // user-credential connection: no daemon id
 				WorkspaceID: testWorkspaceID, WorkspaceIDs: []string{testWorkspaceID},
 				RuntimeIDs: []string{runtimeID}, Capabilities: protocol.DaemonCapabilityClaimPollHintsV1,
 			}
@@ -255,7 +254,7 @@ func TestClaimTasksByRuntime_ResponsePrecedesRecoveryNotifications(t *testing.T)
 				defer close(completed)
 				// The production logger and metrics both wrap the HTTP writer.
 				wrapped := chimw.NewWrapResponseWriter(chimw.NewWrapResponseWriter(w, r.ProtoMajor), r.ProtoMajor)
-				h.ClaimTasksByRuntime(wrapped, r.WithContext(middleware.WithDaemonContext(r.Context(), testWorkspaceID, batchClaimTestDaemonID)))
+				h.ClaimTasksByRuntime(wrapped, asRuntimeOwner(r))
 			}))
 			defer server.Close()
 			defer releaseEvent() // Release a blocked event before server shutdown on failure.

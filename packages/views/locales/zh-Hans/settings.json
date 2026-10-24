@@ -678,8 +678,7 @@
     },
     "system": {
       "title": "系统通知",
-      "description": "Multica 在后台时显示系统通知。",
-      "label": "显示系统通知"
+      "label": "Multica 在后台时显示系统通知"
     },
     "browser": {
       "label": "浏览器通知",
@@ -1220,6 +1219,15 @@
   "desktop": {
     "tabs": {
       "updates": "更新"
+    },
+    "tab_bar": {
+      "pin": "固定标签页",
+      "unpin": "取消固定标签页",
+      "close": "关闭标签页",
+      "close_others": "关闭其他标签页",
+      "open_window": "在新窗口打开",
+      "new": "新建标签页",
+      "pinned_name": "{{title}}（已固定）"
     },
     "updates": {
       "title": "更新",

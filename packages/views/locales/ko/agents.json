@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "에이전트",
-    "tagline": "태스크를 맡고, 댓글을 남기고, 상태를 업데이트하는 AI 팀원입니다.",
     "learn_more": "자세히 보기 →",
     "new_agent": "새 에이전트",
     "search_placeholder": "에이전트 검색...",
@@ -162,6 +161,7 @@
   "inspector": {
     "section_profile": "프로필",
     "section_execution": "실행 설정",
+    "qoder_execution_note": "모델, 도구, Skills는 Qoder의 QCA 에이전트에서 설정합니다.",
     "section_access": "접근 권한",
     "section_properties": "속성",
     "section_details": "세부 정보",
@@ -269,6 +269,7 @@
     "composio_mcp": "MCP 앱",
     "integrations": "연동",
     "runtime_config": "라우팅",
+    "qoder_agent": "QCA 에이전트",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -340,7 +341,7 @@
   },
   "conversation_starters": {
     "label": "대화 시작 예시",
-    "hint": "최대 3개입니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
+    "hint": "이 에이전트와 새 채팅을 시작하면 표시됩니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
     "add": "추천 추가",
     "item_label": "추천 {{number}} 라벨",
     "prompt_label": "추천 {{number}} 프롬프트",
@@ -349,13 +350,21 @@
     "incomplete": "각 제안을 완성하거나 삭제한 후 저장하세요.",
     "remove": "추천 {{number}} 삭제",
     "preview_label": "새 채팅 미리보기",
-    "preview_defaults": "지금은 기본 예시입니다. 위에서 하나를 추가하면 세 개 모두 교체됩니다."
+    "preview_defaults": "지금은 기본 추천입니다. 직접 추가하면 세 개 모두 교체됩니다.",
+    "create_hint": "선택 사항입니다. 이 에이전트와의 새 채팅에 표시됩니다.",
+    "edit": "추천 {{number}} 편집",
+    "remove_short": "삭제",
+    "done": "완료",
+    "untitled": "제목 없는 추천",
+    "customize": "사용자 지정",
+    "defaults_summary_other": "기본 추천 {{count}}개 사용 중"
   },
   "tab_body": {
     "common": {
       "save": "저장",
       "add": "추가",
-      "unsaved_changes": "저장하지 않은 변경사항"
+      "unsaved_changes": "저장하지 않은 변경사항",
+      "discard": "변경 취소"
     },
     "instructions": {
       "intro": "모든 실행에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
@@ -367,7 +376,12 @@
       "system_layer_hide": "접기",
       "workspace_notes_label": "워크스페이스 메모",
       "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
-      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
+      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다.",
+      "mode_aria": "편집 모드",
+      "mode_write": "작성",
+      "mode_preview": "미리보기",
+      "preview_empty": "아직 미리 볼 내용이 없습니다.",
+      "char_count_other": "{{count}}자"
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",
@@ -871,18 +885,8 @@
     "squad_title": "이 스쿼드용 에이전트 만들기",
     "duplicate_title": "{{name}} 복제",
     "back": "뒤로",
-    "eyebrow": "에이전트 만들기",
-    "choose_title": "어떻게 시작하시겠어요?",
-    "recommended": "추천",
-    "continue": "계속",
-    "step_choose": "시작 방법 선택",
-    "step_configure": "검토 및 설정",
     "step_ai": "대화로 만들기",
     "modes": {
-      "blank": {
-        "title": "빈 상태로 시작",
-        "description": "이름, 지침, 런타임을 직접 설정합니다."
-      },
       "template": {
         "title": "템플릿 사용",
         "description": "정리된 지침과 스킬을 바탕으로 워크스페이스에 맞게 세부 항목을 조정합니다."
@@ -944,12 +948,11 @@
     "live_draft_hint": "초안을 직접 수정할 수 있습니다.",
     "duplicate_env_notice": "지침, 스킬, 명령 인수는 복사됩니다. 환경 변수, MCP 서버, 머신 로컬 런타임 설정은 복사되지 않습니다.",
     "duplicate_runtime_reset_notice": "원래 런타임을 사용할 수 없어 이 복사본은 다른 런타임에서 실행됩니다. 모델, 추론 수준, 속도는 선택한 런타임에서만 유효하므로 초기화되었습니다.",
-    "create_and_open": "만들고 열기",
+    "create_agent": "에이전트 만들기",
     "create_and_add": "만들고 스쿼드에 추가",
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
     "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
-    "created": "{{name}}을(를) 만들었습니다",
     "drafts": {
       "title": "초안",
       "untitled": "제목 없는 초안",
@@ -959,6 +962,71 @@
       "discard_cancel": "계속 편집",
       "banner": "미완료 초안이 {{count}}개 있습니다",
       "pick_hint": "이어서 진행할 항목을 선택하세요."
+    },
+    "close": "닫기",
+    "steps": {
+      "runtime": "런타임 선택",
+      "configure": "구성",
+      "done": "완료",
+      "aria": "에이전트 생성 단계"
+    },
+    "configure_title": "에이전트 구성",
+    "ask_ai": "AI에게 작성 맡기기",
+    "change_runtime": "변경",
+    "runtime_label": "런타임",
+    "runtime_loading": "런타임을 불러오는 중…",
+    "runtime_missing": "이 런타임은 더 이상 사용할 수 없습니다.",
+    "cloud_fields_note": "Skills, MCP, 대화 시작 문구는 로컬 및 원격 런타임에서만 사용할 수 있습니다.",
+    "done": {
+      "loading": "마무리하는 중…",
+      "title": "{{name}} 준비 완료",
+      "runs_on": "{{runtime}}에서 실행",
+      "joined_squad": "스쿼드 {{squad}}에 추가됨",
+      "next": "다음 단계",
+      "assign_title": "첫 작업 할당하기",
+      "mention_title": "이슈에서 멘션하기",
+      "squad_title": "스쿼드에 추가",
+      "open_squad_title": "{{squad}} 열기",
+      "open_agent": "에이전트 열기",
+      "back_to_list": "에이전트 목록으로"
+    },
+    "runtime_step": {
+      "title": "이 에이전트를 어디서 실행할까요?",
+      "search_placeholder": "하네스 또는 머신 검색",
+      "groups": {
+        "machines": "머신",
+        "cloud": "클라우드 서비스"
+      },
+      "this_machine": "이 머신",
+      "owner_you": "나",
+      "custom_badge": "사용자 지정",
+      "web_local_title": "데스크톱 앱에서 이 컴퓨터의 하네스를 사용할 수 있습니다",
+      "download_desktop": "데스크톱 앱 다운로드",
+      "harness_count_other": "하네스 {{count}}개",
+      "local_starting": "로컬 데몬을 시작하는 중…",
+      "local_empty_title": "이 머신에서 하네스를 찾지 못했습니다",
+      "local_empty_hint": "Claude Code나 Codex 같은 CLI를 설치하면 여기에 표시됩니다.",
+      "more_harnesses_other": "{{count}}개 더: {{names}}",
+      "add_remote": "머신 연결",
+      "hidden_remote_other": "소유자만 사용할 수 있는 머신 {{count}}대는 표시하지 않습니다",
+      "remote_warning": "작업은 {{owner}}의 머신에서 실행되고, 그 머신의 파일을 읽고 쓰며, 사용량은 {{owner}}의 계정에 집계됩니다.",
+      "no_match": "“{{query}}”와 일치하는 항목이 없습니다",
+      "hosted_by": "제공: {{vendor}}",
+      "coming_soon": "출시 예정",
+      "qoder_status": {
+        "not_configured": "연결 안 됨",
+        "starting": "시작 중",
+        "ready": "연결됨",
+        "error": "오류",
+        "stopped": "일시 중지됨"
+      },
+      "connect": "연결",
+      "settings": "설정",
+      "member_connect": "관리자에게 연결을 요청하세요",
+      "member_fix": "관리자에게 해결을 요청하세요",
+      "footer_selected": "선택됨:",
+      "cancel": "취소",
+      "next": "다음"
     }
   },
   "actions": {

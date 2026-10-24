@@ -42,7 +42,7 @@ export function useUnbindAgentsAndDeleteRuntime(wsId: string) {
   });
 }
 
-// Confirmed public→private transition. Like runtime deletion, this changes
+// Confirmed access restriction to private or selected members. Like runtime deletion, this changes
 // runtime rows, agent bindings, and task presence, so every affected server
 // projection is invalidated after the transaction settles.
 export function useRevokeRuntimeWorkspaceAccess(wsId: string) {
@@ -52,15 +52,18 @@ export function useRevokeRuntimeWorkspaceAccess(wsId: string) {
       runtimeId,
       expectedNonownerAgentIds,
       expectedTaskIds,
+      sharedWith,
     }: {
       runtimeId: string;
       expectedNonownerAgentIds: string[];
       expectedTaskIds: string[];
+      sharedWith?: string[];
     }) =>
       api.revokeRuntimeWorkspaceAccess(
         runtimeId,
         expectedNonownerAgentIds,
         expectedTaskIds,
+        sharedWith,
       ),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -83,6 +86,7 @@ export function useUpdateRuntime(wsId: string) {
       runtimeId: string;
       patch: {
         visibility?: "private" | "public";
+        shared_with?: string[];
         // Empty string clears the custom name; omit to leave unchanged.
         custom_name?: string;
         apply_to_machine?: boolean;

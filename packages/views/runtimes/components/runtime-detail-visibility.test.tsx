@@ -226,9 +226,10 @@ describe("RuntimeDetail visibility section", () => {
 
   it("shows owner-editable visibility choices when the caller owns the runtime", () => {
     renderDetail(makeRuntime({ owner_id: "user-me" }));
-    expect(screen.getByText("Visibility")).toBeInTheDocument();
-    expect(screen.getByText("Private")).toBeInTheDocument();
-    expect(screen.getByText("Public")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Visibility" })).toBeInTheDocument();
+    for (const name of ["Private", "Public", "Members"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
   });
 
   it("opens a reviewed revocation plan instead of silently making an in-use public runtime private", async () => {
@@ -239,11 +240,11 @@ describe("RuntimeDetail visibility section", () => {
     });
     renderDetail(makeRuntime({ visibility: "public" }));
 
-    fireEvent.click(screen.getByText("Private"));
+    fireEvent.click(screen.getByRole("button", { name: "Private" }));
 
-    expect(await screen.findByText("Make this Runtime private?")).toBeInTheDocument();
+    expect(await screen.findByText("Restrict runtime access?")).toBeInTheDocument();
     expect(screen.getByText("Teammate Agent")).toBeInTheDocument();
-    expect(screen.getByText(/Your own agents and runs are unaffected/)).toBeInTheDocument();
+    expect(screen.getByText(/Agents and runs that keep access are unaffected/)).toBeInTheDocument();
     expect(screen.getByText(/pause active autopilots assigned to those agents/)).toBeInTheDocument();
   });
 
@@ -292,12 +293,88 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getAllByText("Research Pi")).toHaveLength(2);
   });
 
-  it("flips visibility to public when the owner clicks the Public choice", async () => {
+  it("applies Public in one click, without a separate Save step", async () => {
     renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
-    fireEvent.click(screen.getByText("Public"));
+    expect(screen.getByRole("button", { name: "Private" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Public" }));
     await waitFor(() =>
-      expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", { visibility: "public" }),
+      expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", { visibility: "public", shared_with: [] }),
     );
+  });
+
+  it("does not send a request when the active scope is clicked again", () => {
+    renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
+    fireEvent.click(screen.getByRole("button", { name: "Private" }));
+    expect(mockUpdateRuntime).not.toHaveBeenCalled();
+  });
+
+  it("saves the selected members only after explicit confirmation", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      { user_id: "user-alice", role: "member", name: "Alice" },
+      { user_id: "user-bob", role: "member", name: "Bob" },
+    ];
+    renderDetail(makeRuntime({}));
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    expect(await screen.findByText("Share with members")).toBeInTheDocument();
+    // The owner is never offered as a recipient.
+    expect(screen.queryByRole("checkbox", { name: "Me" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Alice" }));
+    expect(mockUpdateRuntime).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", {
+      visibility: "private", shared_with: ["user-alice"],
+    }));
+  });
+
+  it("discards the member draft on Cancel", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      { user_id: "user-alice", role: "member", name: "Alice" },
+    ];
+    renderDetail(makeRuntime({}));
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Alice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByText("Share with members")).not.toBeInTheDocument());
+    expect(mockUpdateRuntime).not.toHaveBeenCalled();
+  });
+
+  it("summarizes current recipients and reopens the picker with them selected", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      { user_id: "user-alice", role: "member", name: "Alice" },
+      { user_id: "user-bob", role: "member", name: "Bob" },
+    ];
+    renderDetail(makeRuntime({ shared_with: ["user-alice"] }));
+    expect(screen.getByRole("button", { name: "Members" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: /Alice.*Edit/ }));
+    expect(await screen.findByRole("checkbox", { name: "Alice" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Bob" })).not.toBeChecked();
+    // An unchanged selection is not saveable.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("filters a long member list by name", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "member", name: "Me" },
+      ...["Alice", "Bob", "Carol", "Dave", "Erin", "Frank", "Grace"].map((name) => ({
+        user_id: `user-${name.toLowerCase()}`, role: "member", name,
+      })),
+    ];
+    renderDetail(makeRuntime({}));
+    fireEvent.click(screen.getByRole("button", { name: "Members" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Search members" }), { target: { value: "gr" } });
+    expect(screen.getByRole("checkbox", { name: "Grace" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Alice" })).not.toBeInTheDocument();
+  });
+
+  it("shows a shared recipient the read-only scope and runtime usage", () => {
+    renderDetail(makeRuntime({ owner_id: "someone-else", shared_with: ["user-me"] }));
+    expect(screen.getByText("Specific members")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-section")).toBeInTheDocument();
   });
 
   it("renders a read-only visibility chip when the caller cannot edit", () => {

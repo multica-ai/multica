@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -24,18 +25,20 @@ function CopyButton({ text }: { text: string }) {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      aria-label={t(($) => $.cli_install.copy_aria)}
-    >
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-success" />
-      ) : (
-        <Copy className="h-3.5 w-3.5" />
-      )}
-    </button>
+    <TooltipHint label={t(($) => $.cli_install.copy_aria)}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="shrink-0 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label={t(($) => $.cli_install.copy_aria)}
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-success" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+      </button>
+    </TooltipHint>
   );
 }
 

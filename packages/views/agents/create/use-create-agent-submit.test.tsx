@@ -11,7 +11,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import enAgents from "../../locales/en/agents.json";
 
 const mockCreateAgent = vi.hoisted(() => vi.fn());
-const mockPush = vi.hoisted(() => vi.fn());
+const mockReplace = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -21,11 +21,12 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (agentId: string) => `/acme/agents/${agentId}`,
     squadDetail: (squadId: string) => `/acme/squads/${squadId}`,
+    newAgentDone: (agentId: string) => `/acme/agents/new/done/${agentId}`,
   }),
 }));
 
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ push: mockPush }),
+  useNavigation: () => ({ replace: mockReplace }),
 }));
 
 vi.mock("@multica/core/api", () => {
@@ -107,7 +108,7 @@ describe("useCreateAgentSubmit cache handoff", () => {
     let navigationSnapshot:
       | { path: string; list: Agent[] | undefined; detail: Agent | undefined }
       | undefined;
-    mockPush.mockImplementation((path: string) => {
+    mockReplace.mockImplementation((path: string) => {
       navigationSnapshot = {
         path,
         list: queryClient.getQueryData<Agent[]>(
@@ -138,7 +139,7 @@ describe("useCreateAgentSubmit cache handoff", () => {
     });
 
     expect(navigationSnapshot).toEqual({
-      path: "/acme/agents/agent-new",
+      path: "/acme/agents/new/done/agent-new",
       list: [CREATED_AGENT],
       detail: CREATED_AGENT,
     });

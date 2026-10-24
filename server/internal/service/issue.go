@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"log/slog"
 	"sort"
 	"time"
@@ -550,6 +551,13 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if opts.AssignedAgentRunFireAt.IsZero() {
 		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
 	}
+	// Creating an issue already assigned to an agent is the member delegating
+	// work. The run itself is attributed through the creator fallback, which
+	// system wakeups share, so record the action here, at the create, for both
+	// the immediate and the deferred (channel media) path.
+	if assignedTaskID.Valid && p.CreatorType == "member" {
+		s.TaskService.RecordHumanDelegation(ctx, attribution.DirectHumanRun(p.CreatorID, attribution.EvidenceIssueAssignment, issue.ID))
+	}
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels, AssignedTaskID: assignedTaskID}, nil
 }
@@ -995,5 +1003,12 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 			"squad_id", util.UUIDToString(squad.ID),
 			"leader_id", util.UUIDToString(squad.LeaderID),
 			"error", err)
+		return
+	}
+	// A member creating an issue assigned to a squad delegates the same way as
+	// one assigned to an agent (see Create). A trigger comment, when present,
+	// already recorded its author at enqueue.
+	if !triggerCommentID.Valid && authorType == "member" {
+		s.TaskService.RecordHumanDelegation(ctx, attribution.DirectHumanRun(issue.CreatorID, attribution.EvidenceIssueAssignment, issue.ID))
 	}
 }

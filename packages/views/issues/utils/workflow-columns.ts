@@ -24,10 +24,9 @@ export function workflowColumns(
 /**
  * The workflow a surface's columns follow (MUL-7420). A project surface shows
  * its project's columns. Elsewhere, while workflows are on, columns follow
- * Default. Statuses outside the workflow wait in the hidden-columns panel, and
- * a status filter that picks keys explicitly shows exactly those — on a
- * project too, which is how an issue left in a status its workflow no longer
- * lists is found.
+ * Default. A status outside the workflow is never a column; a status filter
+ * that picks keys explicitly shows exactly those — on a project too, which is
+ * how an issue left in a status its workflow no longer lists is found.
  */
 export function useColumnWorkflow(
   wsId: string,
@@ -41,16 +40,4 @@ export function useColumnWorkflow(
   if (projectId) return { workflow: projectWorkflow };
   if (!enabled) return { workflow: null };
   return { workflow: defaultWorkflow(workflows) };
-}
-
-/**
- * Every status a surface can show, in column order: the workflow's steps, then
- * the catalog statuses it leaves out. What is not visible of this list is the
- * hidden-columns panel.
- */
-export function surfaceStatusOrder(catalogKeys: readonly IssueStatus[], workflow: IssueWorkflow | null): IssueStatus[] {
-  if (!workflow) return [...catalogKeys];
-  const steps = workflowColumns(null, workflow);
-  const inWorkflow = new Set(steps);
-  return [...steps, ...catalogKeys.filter((key) => !inWorkflow.has(key))];
 }

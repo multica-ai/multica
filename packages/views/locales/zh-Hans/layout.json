@@ -40,6 +40,13 @@
     "loading_workspace": "正在加载工作区...",
     "loading_named_prefix": "正在加载"
   },
+  "window": {
+    "go_back": "后退",
+    "go_forward": "前进",
+    "hold_for_history": "长按查看历史",
+    "back_history": "后退历史",
+    "forward_history": "前进历史"
+  },
   "sidebar": {
     "unpin_tooltip": "取消固定",
     "workspaces_label": "工作区",
