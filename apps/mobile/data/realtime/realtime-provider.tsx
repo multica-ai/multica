@@ -10,7 +10,7 @@
  *   - a workspace slug + id (workspace-store, validated against
  *     workspace list)
  *
- * Workspace switch → unmount/remount → fresh client with the new slug.
+ * Workspace switch → replace the connection, preserving the navigation tree.
  *
  * Lifecycle signals:
  *   AppState 'background'  → pause socket (iOS will kill it anyway; clean
@@ -65,7 +65,17 @@ export function useWSClient(): WSClient | null {
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
-  const [client, setClient] = useState<WSClient | null>(null);
+  const [connection, setConnection] = useState<{
+    userId: string;
+    wsSlug: string;
+    client: WSClient;
+  } | null>(null);
+  // A previous workspace's client must never reach the new workspace's
+  // subscribers while its token is loading. Keep the provider unkeyed so
+  // navigation state and drafts survive the workspace store update.
+  const client = connection?.userId === userId && connection?.wsSlug === wsSlug
+    ? connection.client
+    : null;
 
   // Track NetInfo's last known state so we only force-reconnect on the
   // offline → online EDGE, not on every change event (NetInfo fires for
@@ -73,10 +83,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const lastConnectedRef = useRef<boolean | null>(null);
 
   useEffect(() => {
-    if (!userId || !wsSlug) {
-      setClient(null);
-      return;
-    }
+    if (!userId || !wsSlug) return;
 
     let cancelled = false;
     let ws: WSClient | null = null;
@@ -99,7 +106,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         logger: console,
       });
       ws.connect();
-      setClient(ws);
+      setConnection({ userId, wsSlug, client: ws });
 
       // ── AppState ────────────────────────────────────────────────
       appStateSub = AppState.addEventListener(
@@ -138,7 +145,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       appStateSub?.remove();
       netInfoUnsub?.();
       ws?.disconnect();
-      setClient(null);
+      setConnection(null);
     };
   }, [userId, wsSlug]);
 

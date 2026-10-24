@@ -1,9 +1,11 @@
 import type { ZodType } from "zod";
+import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -2016,6 +2018,34 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
   }
 
+  async listQoderEnvironments(wsId: string, token: string, baseUrl: string, signal?: AbortSignal) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/environments`, { method: "POST", body: JSON.stringify({ qoder_token: token, base_url: baseUrl }), signal }));
+  }
+  async listQoderAgents(wsId: string) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/agents`));
+  }
+  async stopQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/stop`, { method: "POST" }));
+  }
+  // Refuses with 409 `runtime_delete_plan_changed` and the current
+  // `active_agents` when the confirmed list no longer matches.
+  async disconnectQoderConnection(wsId: string, expectedActiveAgentIds: string[]) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "DELETE", body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }) }));
+  }
+  async getQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`));
+  }
+  // Saving keeps a paused connection paused; use resumeQoderConnection to run again.
+  async saveQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "PUT", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) }));
+  }
+  async resumeQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/resume`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) }));
+  }
+  async checkQoderConnection(wsId: string, input: QoderInput): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/qoder/check`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) });
+  }
+
   async listRuntimes(
     params?: { workspace_id?: string; owner?: "me" },
     workspaceSlug?: string,
@@ -2026,9 +2056,10 @@ export class ApiClient {
     // workspace_id alone is not enough: the server resolves the workspace from
     // the slug header first, so a caller listing another workspace's runtimes
     // must override the header too.
-    return this.fetch(`/api/runtimes?${search}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`, {
       headers: workspaceHeader(workspaceSlug),
     });
+    return parseWithFallback(raw, AgentRuntimeSchema.array(), [], { endpoint: "listRuntimes" });
   }
 
   async listCloudRuntimeNodes(
@@ -2375,6 +2406,7 @@ export class ApiClient {
     runtimeId: string,
     patch: {
       visibility?: "private" | "public";
+      shared_with?: string[];
       /**
        * Custom display name. Pass an empty string to clear it (the server
        * reverts to the default name). Omit to leave it unchanged — a JSON
@@ -2385,13 +2417,14 @@ export class ApiClient {
       apply_to_machine?: boolean;
     },
   ): Promise<AgentRuntime> {
-    return this.fetch(`/api/runtimes/${runtimeId}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+    return parseWithFallback(raw, AgentRuntimeSchema, EMPTY_RUNTIME, { endpoint: "updateRuntime" });
   }
 
-  // Confirmed counterpart to a public→private visibility PATCH. The PATCH
+  // Confirmed counterpart to a runtime access restriction PATCH. The PATCH
   // returns a structured 409 when teammates still have bound agents or active
   // tasks on the runtime; callers present that plan, then submit its exact
   // agent/task ID sets here. The server rechecks both sets in one transaction.
@@ -2399,12 +2432,14 @@ export class ApiClient {
     runtimeId: string,
     expectedNonownerAgentIds: string[],
     expectedTaskIds: string[],
+    sharedWith?: string[],
   ): Promise<void> {
     await this.fetch(`/api/runtimes/${runtimeId}/revoke-workspace-access`, {
       method: "POST",
       body: JSON.stringify({
         expected_nonowner_agent_ids: expectedNonownerAgentIds,
         expected_task_ids: expectedTaskIds,
+        shared_with: sharedWith,
       }),
     });
   }

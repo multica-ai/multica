@@ -142,6 +142,11 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// Grok Build 1.0.14 supports atomic delivery of in-turn interjections
 		// through its x.ai/interject ACP extension.
 		minimum = "1.0.14"
+	case "kiro":
+		// 2.33.0 is the oldest kiro-cli verified to fold `_session/steer`
+		// into the running ACP turn (queued, then injected at the next
+		// tool/message boundary of the same session/prompt).
+		minimum = "2.33.0"
 	case "cursor":
 		// 2026.10.14 is the oldest build verified to forward postToolUse
 		// additional_context into the model turn in --print mode.

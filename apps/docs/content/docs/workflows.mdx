@@ -24,7 +24,7 @@ In the web or desktop app, a workspace `owner` or `admin` can create workflows:
 1. Open **Settings → Workflows** and choose **New workflow**. Start blank or use the **Delivery**, **Content**, or **Community** template.
 2. Name the workflow and choose its status columns. Drag the middle columns into the order your team uses.
 3. Select a column and choose what happens when an issue enters it: **No handoff**, **Hand to agent**, or **Hand to member**. You can also choose the **Project lead** from the member picker.
-4. For an agent step, write what it should do. Choose where it should move the issue when finished (the next column if you leave it unset), and where to send it back if changes are needed.
+4. For an agent step, write what it should do. Choose where it should move the issue when finished (the next column if you leave it unset), and where to send it back if the step rejects the work it received and it needs rework. Use **Blocked**, not the send-back choice, when the step cannot continue for an outside reason.
 5. Preview the agent's brief, then save.
 
 If you added a new status, save the workflow before setting up that status's handoff.

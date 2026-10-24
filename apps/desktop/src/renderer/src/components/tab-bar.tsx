@@ -33,11 +33,13 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import { useT } from "@multica/views/i18n";
 import {
   useTabPresentation,
   ResourceLeadingVisual,
@@ -181,6 +183,7 @@ function SortableTabItem({
    */
   showSeparator: boolean;
 }) {
+  const { t } = useT("settings");
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
@@ -193,6 +196,15 @@ function SortableTabItem({
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
   const { visual, title } = useTabPresentation(tab.url, tab.title);
+  const pinLabel = tab.pinned
+    ? t(($) => $.desktop.tab_bar.unpin)
+    : t(($) => $.desktop.tab_bar.pin);
+  const closeLabel = t(($) => $.desktop.tab_bar.close);
+  const closeOthersLabel = t(($) => $.desktop.tab_bar.close_others);
+  const openWindowLabel = t(($) => $.desktop.tab_bar.open_window);
+  const tabName = tab.pinned
+    ? t(($) => $.desktop.tab_bar.pinned_name, { title })
+    : title;
 
   // Persist the active tab's resolved title so it survives as the next
   // session's first-frame fallback. The tab strip itself always renders the
@@ -279,10 +291,9 @@ function SortableTabItem({
         e.preventDefault();
         handleClose(e);
       }}
-      aria-label={tab.pinned ? `${title} (pinned)` : title}
+      aria-label={tabName}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
-      title={tab.pinned ? `${title} (pinned)` : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
         // The 36px frame contains a centered 32px content row and a 4px
@@ -310,8 +321,8 @@ function SortableTabItem({
         onClick={handleTogglePin}
         onPointerDown={stopDragOnAction}
         role="button"
-        aria-label={tab.pinned ? "Unpin tab" : "Pin tab"}
-        title={tab.pinned ? "Unpin tab" : "Pin tab"}
+        aria-label={pinLabel}
+        title={pinLabel}
         className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
       >
         {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
@@ -321,7 +332,7 @@ function SortableTabItem({
           onClick={handleClose}
           onPointerDown={stopDragOnAction}
           role="button"
-          aria-label="Close tab"
+          aria-label={closeLabel}
           className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
         >
           <X className="size-2.5" />
@@ -386,13 +397,15 @@ function SortableTabItem({
           />
         )}
         <ContextMenu>
-          <ContextMenuTrigger render={tabButton} />
+          <TooltipHint label={tab.pinned ? tabName : undefined} side="bottom">
+            <ContextMenuTrigger render={tabButton} />
+          </TooltipHint>
           <ContextMenuContent>
             {issueWindowPath && (
               <>
                 <ContextMenuItem onClick={handleOpenAsWindow}>
                   <AppWindow />
-                  Open as new window
+                  {openWindowLabel}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
               </>
@@ -401,12 +414,12 @@ function SortableTabItem({
               {tab.pinned ? (
                 <>
                   <PinOff />
-                  Unpin tab
+                  {pinLabel}
                 </>
               ) : (
                 <>
                   <Pin />
-                  Pin tab
+                  {pinLabel}
                 </>
               )}
             </ContextMenuItem>
@@ -417,7 +430,7 @@ function SortableTabItem({
               onClick={() => closeTab(tab.id)}
             >
               <X />
-              Close tab
+              {closeLabel}
             </ContextMenuItem>
             <ContextMenuItem
               variant="destructive"
@@ -425,7 +438,7 @@ function SortableTabItem({
               onClick={() => closeOtherTabs(tab.id)}
             >
               <ListX />
-              Close other tabs
+              {closeOthersLabel}
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
@@ -508,8 +521,10 @@ function NewTabEdgeFeedback({
 }
 
 function NewTabButton() {
+  const { t } = useT("settings");
   const addTab = useTabStore((s) => s.addTab);
   const setActiveTab = useTabStore((s) => s.setActiveTab);
+  const newTabLabel = t(($) => $.desktop.tab_bar.new);
 
   const handleClick = () => {
     // New tab opens in the currently active workspace — tabs are scoped
@@ -522,16 +537,17 @@ function NewTabButton() {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      aria-label="New tab"
-      title="New tab"
-      style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-      className="flex size-7 shrink-0 items-center justify-center self-center rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
-    >
-      <Plus className="size-3.5" />
-    </button>
+    <TooltipHint label={newTabLabel} side="bottom">
+      <button
+        type="button"
+        onClick={handleClick}
+        aria-label={newTabLabel}
+        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        className="flex size-7 shrink-0 items-center justify-center self-center rounded-md text-faint-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground"
+      >
+        <Plus className="size-3.5" />
+      </button>
+    </TooltipHint>
   );
 }
 

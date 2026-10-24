@@ -17,7 +17,7 @@
  *      background, and a stale `Date.now()` baseline would leave the
  *      `unstable → offline` transition stuck until the next unrelated
  *      refetch. We clearInterval on background and force a recompute
- *      (`setTick(t => t + 1)`) the instant the app comes back active.
+ *      (`setNow(Date.now())`) the instant the app comes back active.
  *   2. No `useWorkspaceId` Context — accept `wsId` as a param so the hook
  *      works outside `WorkspaceIdProvider` (e.g. avatars rendered before
  *      workspace is resolved on cold start).
@@ -41,14 +41,14 @@ const PRESENCE_TICK_MS = 30_000;
 // recompute (not waiting on the next tick) so the user never sees a stale
 // dot the moment they reopen the app.
 function usePresenceTick(): number {
-  const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(Date.now);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
 
     const start = () => {
       if (interval) return;
-      interval = setInterval(() => setTick((t) => t + 1), PRESENCE_TICK_MS);
+      interval = setInterval(() => setNow(Date.now()), PRESENCE_TICK_MS);
     };
     const stop = () => {
       if (!interval) return;
@@ -67,7 +67,7 @@ function usePresenceTick(): number {
         // wall clock has moved while we were backgrounded, so e.g. a
         // runtime that was "unstable" 4 min ago is now "offline" and we
         // want that visible on the very first frame after resume.
-        setTick((t) => t + 1);
+        setNow(Date.now());
         start();
       } else {
         stop();
@@ -80,7 +80,7 @@ function usePresenceTick(): number {
     };
   }, []);
 
-  return tick;
+  return now;
 }
 
 /**
@@ -105,7 +105,7 @@ export function useWorkspacePresenceMap(wsId: string | null | undefined): {
     ...agentTaskSnapshotOptions(wsId ?? null),
     enabled: !!wsId,
   });
-  const tick = usePresenceTick();
+  const now = usePresenceTick();
 
   const byAgent = useMemo(() => {
     // Treat errored queries as empty — a 404 / 5xx on the snapshot endpoint
@@ -122,10 +122,9 @@ export function useWorkspacePresenceMap(wsId: string | null | undefined): {
       agents: safeAgents,
       runtimes: safeRuntimes,
       snapshot: safeSnapshot,
-      now: Date.now(),
+      now,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick is intentional
-  }, [agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
+  }, [agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, now]);
 
   return {
     byAgent,
@@ -169,7 +168,7 @@ export function useAgentPresence(
     ...agentTaskSnapshotOptions(wsId ?? null),
     enabled: !!wsId,
   });
-  const tick = usePresenceTick();
+  const now = usePresenceTick();
 
   return useMemo<AgentPresenceDetail | "loading">(() => {
     if (!wsId || !agentId) return "loading";
@@ -189,8 +188,7 @@ export function useAgentPresence(
       agent,
       runtime,
       tasks,
-      now: Date.now(),
+      now,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick is intentional
-  }, [wsId, agentId, agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
+  }, [wsId, agentId, agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, now]);
 }

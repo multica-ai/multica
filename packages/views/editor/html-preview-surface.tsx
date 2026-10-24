@@ -8,7 +8,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { X } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../i18n";
 
@@ -22,6 +22,7 @@ export function HtmlPreviewSurface({
   open,
   inlineHeight,
   onOpenChange,
+  onReload,
   title,
   children,
 }: {
@@ -29,6 +30,7 @@ export function HtmlPreviewSurface({
   /** The inline body's height, or zero when its preview is hidden. */
   inlineHeight: number;
   onOpenChange: (open: boolean) => void;
+  onReload?: () => void;
   title: string;
   children: ReactNode;
 }) {
@@ -102,17 +104,30 @@ export function HtmlPreviewSurface({
             <span id={titleId} className="sr-only">
               {title}
             </span>
-            <Button
-              ref={closeRef}
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="absolute top-2 right-2"
-              aria-label={t(($) => $.code_block.close_preview)}
-              onClick={() => dialogRef.current?.close()}
-            >
-              <X />
-            </Button>
+            <div className="absolute top-2 right-2 flex gap-1">
+              {onReload && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title={t(($) => $.attachment.reload)}
+                  aria-label={t(($) => $.attachment.reload)}
+                  onClick={onReload}
+                >
+                  <RotateCw />
+                </Button>
+              )}
+              <Button
+                ref={closeRef}
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t(($) => $.code_block.close_preview)}
+                onClick={() => dialogRef.current?.close()}
+              >
+                <X />
+              </Button>
+            </div>
           </>
         )}
       </dialog>

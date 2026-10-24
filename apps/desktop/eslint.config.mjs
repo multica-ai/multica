@@ -5,7 +5,7 @@ export default [
   ...reactConfig,
   { ignores: ["out/", "dist/"] },
   {
-    files: ["scripts/**/*.{mjs,js}"],
+    files: ["scripts/**/*.{mjs,js,cjs}"],
     languageOptions: {
       globals: { ...globals.node },
     },

@@ -138,6 +138,7 @@ export const BoardColumn = memo(function BoardColumn({
   const viewBaseline = useViewBaseline();
   const statusFixedByView = !!status && viewBaseline?.status.has(status) === true;
   const { t } = useT("issues");
+  const { t: tCommon } = useT("common");
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -229,19 +230,35 @@ export const BoardColumn = memo(function BoardColumn({
           {status && (
             <DeferredPopup
               ariaHasPopup="menu"
+              tooltip={tCommon(($) => $.more_actions)}
               triggerRender={
-                <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-full text-muted-foreground"
+                  aria-label={tCommon(($) => $.more_actions)}
+                >
                   <MoreHorizontal className="size-3.5" />
                 </Button>
               }
             >
               {(open, onOpenChange) => (
                 <DropdownMenu open={open} onOpenChange={onOpenChange}>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
-                        <MoreHorizontal className="size-3.5" />
-                      </Button>
+                  <DeferredTooltip
+                    content={tCommon(($) => $.more_actions)}
+                    trigger={
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="rounded-full text-muted-foreground"
+                            aria-label={tCommon(($) => $.more_actions)}
+                          >
+                            <MoreHorizontal className="size-3.5" />
+                          </Button>
+                        }
+                      />
                     }
                   />
                   <DropdownMenuContent align="end">
@@ -266,6 +283,7 @@ export const BoardColumn = memo(function BoardColumn({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
+                  aria-label={t(($) => $.board.add_issue_tooltip)}
                   onClick={() => {
                     const data = {
                       ...(group.createData ?? {}),

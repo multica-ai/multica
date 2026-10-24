@@ -43,8 +43,8 @@ func runningSteerableTask(t *testing.T, f supplementFixture, name string) (agent
 
 func completeTaskViaDaemon(t *testing.T, taskID string) {
 	t.Helper()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete",
-		map[string]any{"output": "done"}, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/complete",
+		map[string]any{"output": "done"})
 	testutil.Call(t, testHandler.CompleteTask, withURLParam(req, "taskId", taskID)).Want(http.StatusOK)
 }
 
@@ -58,7 +58,7 @@ func outcomeFor(outcomes []CommentTriggerOutcome, agentID string) (CommentTrigge
 }
 
 func TestCreateCommentSteersTheThreadAgentsRunningTurn(t *testing.T) {
-	for _, provider := range []string{"codex", "cursor"} {
+	for _, provider := range []string{"codex", "grok", "cursor", "kiro"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newSupplementFixture(t, provider, "running", true)
 			dbfx.Exec(t, `UPDATE comment SET content = $2 WHERE id = $1`, f.triggerID,

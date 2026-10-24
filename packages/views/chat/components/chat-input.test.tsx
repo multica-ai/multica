@@ -1012,12 +1012,19 @@ describe("ChatInput attachment wiring", () => {
 
     // While the upload is pending the SubmitButton must be disabled.
     // Bypassing this would send the message with the attachment id
-    // missing from the body.
+    // missing from the body. It is aria-disabled rather than natively
+    // disabled so its "uploading" tooltip stays reachable.
     await waitFor(() => {
       const buttons = screen.getAllByRole("button");
       const sendButton = buttons[buttons.length - 1]!;
-      expect(sendButton).toBeDisabled();
+      expect(sendButton).toHaveAttribute("aria-disabled", "true");
+      expect(sendButton).toHaveAttribute("aria-busy", "true");
     });
+    {
+      const buttons = screen.getAllByRole("button");
+      fireEvent.click(buttons[buttons.length - 1]!);
+    }
+    expect(onSend).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveUpload!(makeUpload({ id: "att-slow", link: "https://cdn.example/att-slow.png", filename: "slow.png" }));
@@ -1649,5 +1656,33 @@ describe("ChatInput revoked-access placeholder", () => {
     renderInput({ agentName: "Multica" });
 
     expect(editorProps.last?.placeholder).toBe("Message Multica…");
+  });
+});
+
+// A natively disabled send button takes no hover or focus, so the reason it is
+// blocked would never reach its tooltip; the blocked composer keeps it
+// aria-disabled and names the same reason as the placeholder.
+describe("ChatInput send disabled reason", () => {
+  function sendButton() {
+    const buttons = screen.getAllByRole("button");
+    return buttons[buttons.length - 1]!;
+  }
+
+  it("keeps the send button reachable and describes why it is blocked", () => {
+    const onSend = vi.fn();
+    renderInput({ disabled: true, agentArchived: true, onSend });
+
+    const button = sendButton();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("stays natively disabled when the composer is only empty", () => {
+    renderInput({ agentName: "Multica" });
+
+    expect(sendButton()).toBeDisabled();
+    expect(sendButton()).not.toHaveAttribute("aria-disabled");
   });
 });

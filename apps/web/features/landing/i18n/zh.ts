@@ -196,7 +196,7 @@ export function createZhDict(
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 27 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 27 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002因为源码公开，你也可以自己添加后端。 自托管部署还可以使用 QCA PAT 和已有 QCA 智能体，将 Qoder Cloud Agents 配置为执行任务的托管远端运行时。",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -386,10 +386,10 @@ export function createZhDict(
 
   privacy: {
     title: "隐私政策",
-    lastUpdated: "最后更新：2026 年 9 月 24 日",
+    lastUpdated: "最后更新：2026 年 10 月 22 日",
     intro: [
       "本隐私政策说明 Index Labs (Hong Kong) Limited（下称「Multica」或「我们」）在你访问 multica.ai、联系我们或使用我们的托管服务 Multica Cloud（包括网页端、桌面端和移动端）时，如何收集、使用和共享个人信息。",
-      "本政策不适用于你自行部署的 Multica。自托管部署的数据由部署方控制，它使用哪些 AI 服务商、集成或分析工具，取决于部署方的配置。自托管服务器唯一会发送给我们的是每天一次的使用快照，内容包括：一个随机生成的部署 ID（用于关联同一台服务器的历次快照）、服务器版本、工作区、成员、智能体和已连接守护进程的大致数量，以及当天开始、完成、失败和取消的运行次数。快照不含任何姓名、邮箱或内容。设置 DO_NOT_TRACK=1 即可关闭这份快照。",
+      "本政策不适用于你自行部署的 Multica。自托管部署的数据由部署方控制，它使用哪些 AI 服务商、集成或分析工具，取决于部署方的配置。自托管服务器唯一会发送给我们的是每天一次的使用快照，内容包括：一个随机生成的部署 ID（用于关联同一台服务器的历次快照）、服务器版本、工作区、成员、智能体和已连接守护进程的大致数量，当天开始、完成、失败和取消的运行次数，以及过去 1、7、28 天内打开过网页端或桌面端的成员、亲自发起过智能体运行的成员的大致人数。快照不含任何姓名、邮箱或内容。设置 DO_NOT_TRACK=1 即可关闭这份快照。",
       "本政策以英文版本为准。如中文版本与英文版本不一致，以英文版本为准。",
     ],
     sections: [
@@ -507,6 +507,80 @@ export function createZhDict(
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.7.0",
+        date: "2026-10-23",
+        title: "Qoder Cloud Agents、运行时按成员共享、PR 冲突唤醒、更安全",
+        changes: [],
+        features: [
+          "可以用 Qoder Cloud Agents 运行 Issue：创建智能体时先选机器或云服务，再关联 Qoder Cloud Agents 的智能体。",
+          "Qoder Cloud Agents 连接支持仓库凭证、并发和超时限制、暂停与恢复、断开连接和续接会话。目前只处理 Issue，不支持聊天和本地目录。",
+          "运行时除了私有和公开，还能共享给指定成员；收紧访问前会先列出受影响的智能体。",
+          "所有成员都能创建和复制工作流，创建者和管理员可以修改、删除和配置交接；Default 工作流仍由管理员维护。",
+          "关联的 GitHub PR 出现合并冲突时可以唤醒智能体，可在侧栏设置，也可用 --until-pr conflicts。",
+          "Kiro CLI 2.33.0+ 运行中可补充指导，Grok 在普通回复框里也可以。",
+          "自托管管理员可以只允许指定邮箱创建工作区，其他人仍能登录并加入受邀的工作区。",
+          "命令行可以按数字大小、日期前后，以及文本或链接是否包含某个值来筛选自定义属性。",
+        ],
+        improvements: [
+          "图标按钮的悬停提示更清楚，会显示名称、快捷键和不可用的原因，出现得也更快。",
+          "开场建议移到智能体的资料设置里，自动保存，还能预览新聊天里的样子。",
+          "智能体指令支持编写和预览切换，显示字符数，保存栏始终可见。",
+          "看板的列跟随所属工作流；隐藏的列从 显示 → 列 恢复，工作流之外的 Issue 用状态筛选查找。",
+          "勾选“继续创建”时，下一个 Issue 会沿用状态、负责人、父 Issue 和阶段；更多菜单里也能直接创建子 Issue。",
+          "点击 Issue 顶部的智能体状态，可以直接跳到执行记录里对应的运行。",
+          "嵌入的 HTML 预览可以重新加载，重置交互演示。",
+          "高优先级改为橙色，和中优先级的黄色更好区分；小尺寸选择框高度统一。",
+          "Hermes 启动时重装依赖，守护进程会记录警告和启动耗时，并提供排查指南；等待本身暂未消除。",
+          "自托管的匿名使用快照新增活跃成员的分段统计，不含成员身份，隐私政策同步更新。",
+          "桌面端升级到 Electron 44，Node 和 Go 也有安全更新。",
+        ],
+        fixes: [
+          "任务凭证不能再访问其他工作区或换取长期凭证；守护进程只能领取和更新其所有者运行时上的任务。",
+          "智能体把交付推到其他分支或改写了起点时，在基线内容安全的前提下会自动修复一次；失败会显示为本地目录错误，不再误报服务商故障。",
+          "清理注入的指令时，会保留文件原有的换行和你自己的修改，不再产生无关提交。",
+          "Kiro 运行崩溃时会尽快失败，损坏的续接会话会被弃用，不再一直挂住。",
+          "OpenCode 续接会话前会检查未来时间戳；内置的 OpenCode 2.x 缺少最后一步事件时，不再被误判为失败。",
+          "Cursor 遇到服务商连接中断会有限重试，不会把本地工具或 MCP 报错当成网络问题。",
+          "Hermes 选用非默认模型时，能找到并应用对应的推理强度。",
+          "Kimi 出错时会说明原因，不再只显示 [object Object]。",
+          "卡住的任务最终失败时，会在 Issue 里留下失败说明。",
+          "被唤醒的小队队长仍保留队长身份。",
+          "Windows 上启动时不再弹出大量 Git 登录窗口。",
+          "Windows 上的企业微信媒体以流式处理，不再重复下载或残留临时文件。",
+          "移动端重新连接后会停留在原页面，不再重置导航。",
+          "子 Issue 的批量操作恢复正常，操作成功后会清除勾选。",
+          "评论固定标题的阴影不再遮住第一行。",
+          "已保存视图栏在特定宽度下不再让页面崩溃。",
+          "标题里有换行或大量空格时，网页不再卡死。",
+          "守护进程更新后，文件路径里的十六进制片段不再被误认成 HTTP 错误码。",
+          "命令行和守护进程的请求占用更少服务端资源，减少一类服务端错误。",
+        ],
+      },
+      {
+        version: "0.6.5",
+        date: "2026-10-21",
+        title: "项目外 Issue 状态更清楚、私有 CA 可同步仓库、后台更省、运行更稳",
+        changes: [],
+        features: [
+          "不在项目里的 Issue，状态选择默认只列 Default 工作流的状态，搜索仍能找到全部状态。",
+        ],
+        improvements: [
+          "网页在后台标签页时不再刷新未读数，回到页面再更新；桌面端最小化时角标照常更新。",
+        ],
+        fixes: [
+          "新建的工作流步骤不用先保存，就能设置处理人和指令。",
+          "项目侧栏优先显示工作流名称，交接数量移到悬停提示里。",
+          "自托管服务器配置的私有 CA，守护进程同步仓库时也会信任，同步失败会显示具体原因。",
+          "自托管的 Forgejo、Gitea、GitLab 上，PR 检查完成或合并时也能唤醒智能体。",
+          "唤醒规则在后续检查恢复正常后，不再一直显示之前的错误。",
+          "桌面端标签栏的右键菜单和按钮会跟随界面语言。",
+          "Copilot 遇到很长的上下文也能正常启动。",
+          "OpenCode 2.x 又能选择思考级别了。",
+          "Codex 使用默认模型时也能估算花费。",
+          "Issue 详情滚到底部时，页面不再被顶起或留出空白。",
+        ],
+      },
       {
         version: "0.6.4",
         date: "2026-10-20",

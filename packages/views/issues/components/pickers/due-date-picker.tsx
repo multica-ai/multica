@@ -10,6 +10,7 @@ export function DueDatePicker({
   onUpdate,
   trigger,
   triggerRender,
+  tooltip,
   open,
   onOpenChange,
   align = "start",
@@ -19,6 +20,8 @@ export function DueDatePicker({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement<Record<string, unknown>>;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -37,6 +40,7 @@ export function DueDatePicker({
       highlightOverdue
       trigger={trigger}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       open={open}
       onOpenChange={onOpenChange}
       align={align}

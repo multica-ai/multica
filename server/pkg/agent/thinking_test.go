@@ -962,8 +962,11 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	// Sonnet does not advertise xhigh.
 	check("claude-sonnet-4-6[1m]", "xhigh", false)
 
-	// A model a verified catalog does not list still fails closed (no guess).
-	check("claude-nonexistent", "high", false)
+	// Claude's picker may omit runnable explicit models. An unlisted model is
+	// unknown, rather than evidence that its saved effort is unsupported.
+	if ok, err := ValidateThinkingLevelWith(claudeVerifiedCatalog, "claude", "claude-nonexistent", "high"); ok || !errors.Is(err, errUnverifiedCatalog) {
+		t.Errorf("unlisted Claude model = (%v, %v), want unknown capability", ok, err)
+	}
 }
 
 // TestValidateThinkingLevel_CodexEmptyModelFailsClosed pins the MUL-4347

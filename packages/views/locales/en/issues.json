@@ -206,6 +206,8 @@
     "grouping_section": "Grouping",
     "ordering_section": "Ordering",
     "card_properties_section": "Card properties",
+    "columns_section": "Columns",
+    "columns_locked_by_filter": "Clear the status filter to show or hide columns.",
     "ascending_title": "Ascending",
     "descending_title": "Descending",
     "newest_first": "Newest first",
@@ -363,18 +365,13 @@
     "toggle_collapse": "Toggle lane"
   },
   "board": {
-    "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
-    "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
     "empty_grouping": "No matching issues",
     "no_value": "No value",
     "ordered_by": "Board ordered by {{field}}",
-    "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column.",
-    "filter_to_status": "Filter to this status",
-    "outside_workflow": "Not in this board’s workflow",
-    "workflow_columns_note": "Columns come from the board’s workflow; views outside a project use Default."
+    "manual_reorder_hint": "Switch to Manual ordering to rearrange issues within a column."
   },
   "peek": {
     "panel_label": "Issue preview",
@@ -728,6 +725,7 @@
     "retry_failed": "Failed to retry run",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
     "transcript_tooltip": "View transcript",
+    "jump_to_run": "Go to run",
     "cancel_failed": "Failed to cancel run",
     "trigger_retry": "Retry",
     "trigger_retry_attempt": "Retry #{{attempt}}",
@@ -1297,6 +1295,7 @@
       "children_stage": "Stage {{stage}}",
       "pr_checks": "CI finishes",
       "pr_merged": "It merges",
+      "pr_conflicts": "It has merge conflicts",
       "choose_issue": "Choose an issue",
       "pick_issue_title": "Watch an issue",
       "pick_issue_description": "Wake the agent when this issue reaches the state you choose.",
@@ -1354,6 +1353,7 @@
       "children_stage": "When stage {{stage}}'s sub-issues all finish",
       "pr_checks": "When a linked PR's CI finishes",
       "pr_merged": "When a linked PR merges",
+      "pr_conflicts": "When a linked PR has merge conflicts",
       "other_done": "When {{issue}} is done",
       "other_ended": "When {{issue}} is done or cancelled",
       "other_in_review": "When {{issue}} moves to In Review",
@@ -1376,6 +1376,7 @@
       "children_stage": "Waiting for stage {{stage}}",
       "pr_checks": "Waiting for CI",
       "pr_merged": "Waiting for the PR to merge",
+      "pr_conflicts": "Watching for merge conflicts",
       "other_done": "Waiting for {{issue}}",
       "other_ended": "Waiting for {{issue}} to end",
       "other_in_review": "Waiting for {{issue}} to reach review",
@@ -1546,7 +1547,7 @@
       "instructions": "Handoff instructions",
       "instructions_placeholder": "What should happen in this step?",
       "next": "When done, move to",
-      "back": "When changes are needed, move back to",
+      "back": "If rejected, send back to",
       "none_option": "Not set",
       "save": "Save",
       "create": "Create",
@@ -1561,6 +1562,7 @@
       "copy_name": "{{name}} copy",
       "more": "More actions",
       "steps_hint": "Drag to reorder the middle columns. Backlog and Blocked are optional. A new status is created when you save.",
+      "status_needs_admin": "{{names}} would be new statuses. Only workspace admins can add statuses: remove these columns or ask an admin to add the statuses first.",
       "reorder": "Reorder {{name}}",
       "card_hand_to": "Hand to",
       "card_then": "then → {{status}}",
@@ -1574,7 +1576,7 @@
       "target_squad": "Squad · leader dispatches",
       "target_member": "Member",
       "instructions_hint": "Sent to the handler with this run, alongside the issue description and comments.",
-      "next_hint": "Written into the handler’s brief so it knows which status comes next. The system never advances the status when a run ends.",
+      "next_hint": "The handler moves the issue itself and sends it back only for rework, not blockers. A run ending never changes the status.",
       "preview_brief": "Preview the agent’s brief",
       "preview_title": "Brief for the “{{status}}” step",
       "preview_description": "What the handler’s run receives when an issue enters this step. Saved changes are not required to preview.",
@@ -1590,8 +1592,7 @@
       "step_off": "Switched off: this workflow leaves the status out. Turn it on in the step list to use it.",
       "status_new_hint": "A new status. It is added to the status library when you save.",
       "no_other_status": "Every status is already a step.",
-      "no_handoff_step": "This step doesn't hand off: issues entering it keep their assignee and start no run.",
-      "new_step_handoff": "Save the workflow first; the new status can hand off after that."
+      "no_handoff_step": "This step doesn't hand off: issues entering it keep their assignee and start no run."
     },
     "mapping": {
       "title": "Move issues into {{name}}",
@@ -1634,6 +1635,7 @@
     },
     "picker": {
       "header": "{{workflow}} · from project “{{project}}”",
+      "header_no_project": "{{workflow}} statuses · no project",
       "footer": "Only this issue’s workflow statuses are shown. The right side is who entering the status hands it to."
     },
     "confirm": {
@@ -1674,8 +1676,7 @@
     },
     "detail": {
       "follows_project": "(from project)",
-      "card_title": "{{workflow}} · from {{project}}",
-      "card_hint": "The project’s workflow decides these columns and handoffs."
+      "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
     "handoff": {
@@ -1684,7 +1685,7 @@
       "next_default": "Next column ({{status}})",
       "saved": "Handoff saved",
       "error": "Couldn't save the handoff",
-      "read_only": "Handoffs belong to the workflow; workspace admins change them.",
+      "read_only": "Handoffs belong to the workflow; its owner and workspace admins change them.",
       "to": "Hand to",
       "members": "Members",
       "mode_none": "No handoff",

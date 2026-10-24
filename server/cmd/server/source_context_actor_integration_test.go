@@ -59,10 +59,12 @@ func TestSourceContextRoutesRejectAuthoritativeTaskToken(t *testing.T) {
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
-		// Auth must discard both spoofed values and stamp the token's
-		// authoritative actor source and workspace before route guards run.
+		// Auth must discard the spoofed actor source and stamp the token's
+		// authoritative one before route guards run. A conflicting
+		// X-Workspace-ID is no longer overwritten but rejected outright
+		// (GitHub #9403), so it is deliberately not sent here: the 403s
+		// below must come from the human-only route guard.
 		req.Header.Set("X-Actor-Source", "member")
-		req.Header.Set("X-Workspace-ID", "00000000-0000-0000-0000-000000000099")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("perform request: %v", err)

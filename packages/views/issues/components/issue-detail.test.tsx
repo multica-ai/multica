@@ -616,6 +616,10 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import {
+  IssueSurfaceSelectionProvider,
+  useCreateIssueSurfaceSelection,
+} from "../surface/selection-context";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1670,6 +1674,28 @@ describe("IssueDetail (shared)", () => {
     expect(userReply.nextElementSibling).toBe(agentBlock);
     expect(within(agentBlock as HTMLElement).getByRole("button", { name: "Retry run" })).toBeInTheDocument();
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
+  });
+
+  it("jumps from a header chip row to the run's block in its thread", async () => {
+    const root = mockTimeline[0]!;
+    const task: AgentTask = {
+      id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+      status: "running", priority: 0, created_at: "2026-01-16T00:00:00Z",
+      started_at: "2026-01-16T00:00:00Z", dispatched_at: null, completed_at: null, result: null, error: null,
+      trigger_comment_id: root.id, delivered_comment_ids: [root.id],
+    };
+    mockApiObj.listTimeline.mockResolvedValue([root]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+    const { container } = renderIssueDetail();
+    await waitFor(() => expect(container.querySelector(`[data-run-slot-id="${task.id}"]`)).not.toBeNull());
+    const block = container.querySelector(`[data-run-slot-id="${task.id}"]`)!;
+    expect(block.className).not.toContain(highlightedCommentBackgroundClass);
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude Agent is working" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Go to run/ }));
+
+    expect(scrollToIndexSpy).toHaveBeenLastCalledWith({ index: expect.any(Number), align: "start", offset: -16 });
+    await waitFor(() => expect(block.className).toContain(highlightedCommentBackgroundClass));
   });
 
   describe("a run's failure notice (MUL-7692)", () => {
@@ -3115,6 +3141,37 @@ describe("IssueDetail (shared)", () => {
       // Chip renders only on the row that has a value for the property.
       expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
+    });
+
+    it("drives the inline batch toolbar from row checkboxes inside a surface peek", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({ id: "child-1", number: 11, identifier: "TES-11", title: "Fix login flow" }),
+          subIssue({ id: "child-2", number: 12, identifier: "TES-12", title: "Ship dashboards" }),
+        ],
+      });
+      function SurfaceHost() {
+        const selection = useCreateIssueSurfaceSelection("surface");
+        return (
+          <IssueSurfaceSelectionProvider selection={selection}>
+            <IssueDetail issueId="issue-1" />
+          </IssueSurfaceSelectionProvider>
+        );
+      }
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={createTestQueryClient()}>
+            <SurfaceHost />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Select TES-11" }));
+      expect(await screen.findByText("1 selected")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select all sub-issues" }));
+      expect(await screen.findByText("2 selected")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Select TES-12" })).toBeChecked();
     });
 
     it("mutes the due date on done sub-issues even when past", async () => {

@@ -85,33 +85,64 @@ export function useStatusOptions(
   );
 }
 
+const CATEGORY_RANK = new Map<IssueStatusCategory, number>(ALL_STATUSES.map((c, i) => [c, i]));
+
 /**
  * The statuses an issue in `projectId` may take: its project workflow's steps
  * in workflow order, or the whole catalog when the project has none. Every
  * single-issue status control offers this set, so a status the workflow
  * refuses is never on offer. (MUL-7420)
+ *
+ * `projectId` is three-valued:
+ * - a project id: that project's workflow;
+ * - `null`: an issue outside any project. It offers the workspace Default
+ *   workflow's statuses, as a project on Default does, so statuses another
+ *   project's workflow added stay out of its list. Default has no handoffs
+ *   here — the server applies none outside a project — so `workflow` stays
+ *   null and `defaultScope` names the Default instead. The server still
+ *   accepts any status, so `catalog` keeps the full set reachable by search,
+ *   and `currentStatus` stays listed even when Default leaves it out.
+ *   (MUL-8121)
+ * - `undefined`: a surface spanning projects; the whole catalog.
  */
 export function useIssueStatusOptions(
   wsId: string,
   projectId: string | null | undefined,
-): { options: StatusOption[]; workflow: IssueWorkflow | null; project: Project | null } {
+  currentStatus?: IssueStatus | null,
+): {
+  options: StatusOption[];
+  workflow: IssueWorkflow | null;
+  project: Project | null;
+  defaultScope: IssueWorkflow | null;
+  catalog: StatusOption[];
+} {
   const catalogOptions = useStatusOptions(wsId);
   const { categoryOf, colorOf, iconOf } = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
-  const { workflow, project } = useProjectWithWorkflow(wsId, projectId);
+  const { workflow, project, defaultWorkflow } = useProjectWithWorkflow(wsId, projectId);
+  const defaultScope = projectId === null && !workflow ? defaultWorkflow ?? null : null;
   const options = useMemo<StatusOption[]>(() => {
-    if (!workflow) return catalogOptions;
+    const listed = workflow ?? defaultScope;
+    if (!listed) return catalogOptions;
     const byKey = new Map(catalogOptions.map((o) => [o.key, o]));
-    return workflow.steps.map(
-      (step) =>
-        byKey.get(step.status_key) ?? {
-          key: step.status_key,
-          category: categoryOf(step.status_key),
-          label: labelOf(step.status_key),
-          color: colorOf(step.status_key),
-          icon: iconOf(step.status_key),
-        },
-    );
-  }, [catalogOptions, categoryOf, colorOf, iconOf, labelOf, workflow]);
-  return { options, workflow, project };
+    const optionOf = (key: IssueStatus): StatusOption =>
+      byKey.get(key) ?? {
+        key,
+        category: categoryOf(key),
+        label: labelOf(key),
+        color: colorOf(key),
+        icon: iconOf(key),
+      };
+    const steps = listed.steps.map((step) => optionOf(step.status_key));
+    if (!defaultScope || !currentStatus || steps.some((o) => o.key === currentStatus)) return steps;
+    // The current status is outside Default (e.g. the issue left a project
+    // whose workflow added it): keep it visible and checked, after the last
+    // step of its category, so it can still be seen and moved off.
+    const current = optionOf(currentStatus);
+    const rank = CATEGORY_RANK.get(current.category) ?? ALL_STATUSES.length;
+    let at = steps.length;
+    while (at > 0 && (CATEGORY_RANK.get(steps[at - 1]!.category) ?? 0) > rank) at -= 1;
+    return [...steps.slice(0, at), current, ...steps.slice(at)];
+  }, [catalogOptions, categoryOf, colorOf, currentStatus, defaultScope, iconOf, labelOf, workflow]);
+  return { options, workflow, project, defaultScope, catalog: catalogOptions };
 }

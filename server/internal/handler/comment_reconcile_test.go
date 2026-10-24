@@ -18,9 +18,9 @@ import (
 func completeTaskViaHandler(t *testing.T, taskID, output string) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 		map[string]any{"output": output},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

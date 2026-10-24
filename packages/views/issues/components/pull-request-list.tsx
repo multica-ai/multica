@@ -38,7 +38,7 @@ import type {
   GitHubPullRequestState,
   PRAutoComplete,
 } from "@multica/core/types";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -211,14 +211,14 @@ function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: R
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-xs"
-            aria-label={t(($) => $.pr_automation.row_menu)}
+            label={t(($) => $.pr_automation.row_menu)}
             className="absolute top-0.5 right-0 opacity-0 group-hover/pr:opacity-100 group-focus-within/pr:opacity-100 data-popup-open:opacity-100 [@media(pointer:coarse)]:opacity-100"
           >
             <MoreHorizontal />
-          </Button>
+          </IconButton>
         }
       />
       <DropdownMenuContent align="end" className="w-56">

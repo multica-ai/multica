@@ -154,11 +154,11 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 // runtimeVerdict combines runtime health with the ownership binding that
 // determines whether this agent can execute there.
 func runtimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
-	if rt.Visibility == "private" && rt.OwnerID.Valid && (!agent.OwnerID.Valid || agent.OwnerID != rt.OwnerID) {
+	if rt.Visibility == "private" && rt.OwnerID.Valid && !RuntimeAllowsUser(rt, agent.OwnerID) {
 		return AgentVerdict{
 			Availability: AgentBlocked,
 			Reason:       dispatch.ReasonRuntimeAccessDenied,
-			Detail:       "agent owner does not match private runtime owner",
+			Detail:       "agent owner does not have access to the private runtime",
 		}
 	}
 	if rt.Status == "online" {
@@ -269,7 +269,7 @@ func RuntimeUnusableNotice(agentName string, verdict AgentVerdict) string {
 	}
 	if verdict.Reason == dispatch.ReasonRuntimeAccessDenied {
 		return fmt.Sprintf(
-			"%s cannot run on this private runtime, so this trigger was not queued. Make the runtime's machine public, or rebind/copy the agent to a runtime its owner can use.",
+			"%s cannot run on this private runtime, so this trigger was not queued. Ask its owner to share the runtime with the agent owner or make it public, or rebind/copy the agent to a runtime its owner can use.",
 			name,
 		)
 	}

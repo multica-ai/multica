@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "智能体",
-    "tagline": "能领取任务、留下评论、推进状态的 AI 队友。",
     "learn_more": "了解更多 →",
     "new_agent": "新建智能体",
     "search_placeholder": "搜索智能体...",
@@ -162,6 +161,7 @@
   "inspector": {
     "section_profile": "资料",
     "section_execution": "执行配置",
+    "qoder_execution_note": "模型、工具和 skill 在 Qoder 的 QCA 智能体上设置。",
     "section_access": "访问权限",
     "section_properties": "属性",
     "section_details": "详情",
@@ -269,6 +269,7 @@
     "composio_mcp": "MCP 应用",
     "integrations": "集成",
     "runtime_config": "路由",
+    "qoder_agent": "QCA 智能体",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -279,18 +280,8 @@
     "squad_title": "为小队创建智能体",
     "duplicate_title": "复制 {{name}}",
     "back": "返回",
-    "eyebrow": "创建智能体",
-    "choose_title": "你想从哪里开始？",
-    "recommended": "推荐",
-    "continue": "继续",
-    "step_choose": "选择起点",
-    "step_configure": "检查并配置",
     "step_ai": "通过对话创建",
     "modes": {
-      "blank": {
-        "title": "从空白开始",
-        "description": "手动填写名称、指令和运行时。"
-      },
       "template": {
         "title": "使用模板",
         "description": "从整理好的指令和 skill 开始，再根据工作区需要修改每个细节。"
@@ -352,12 +343,11 @@
     "live_draft_hint": "可直接修改草稿。",
     "duplicate_env_notice": "指令、skill 和命令行参数会被复制。环境变量、MCP 服务器和本机运行时配置不会复制。",
     "duplicate_runtime_reset_notice": "原运行时当前不可用，副本已改用其他运行时。模型、思考等级和速度只在所选运行时上有效，因此已被清空。",
-    "create_and_open": "创建并打开",
+    "create_agent": "创建智能体",
     "create_and_add": "创建并加入小队",
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
     "name_conflict": "工作区中已存在同名智能体。",
-    "created": "已创建 {{name}}",
     "drafts": {
       "title": "创建草稿",
       "untitled": "未命名草稿",
@@ -367,6 +357,71 @@
       "discard_cancel": "继续编辑",
       "banner": "您有 {{count}} 条未完成的创建",
       "pick_hint": "选一条继续。"
+    },
+    "close": "关闭",
+    "steps": {
+      "runtime": "选择运行时",
+      "configure": "配置",
+      "done": "完成",
+      "aria": "创建智能体步骤"
+    },
+    "configure_title": "配置智能体",
+    "ask_ai": "让 AI 帮我写",
+    "change_runtime": "更换",
+    "runtime_label": "运行时",
+    "runtime_loading": "正在加载运行时…",
+    "runtime_missing": "这个运行时已不可用。",
+    "cloud_fields_note": "Skills、MCP 和聊天开场白只在本机和远端运行时可用，这里不显示。",
+    "done": {
+      "loading": "正在完成…",
+      "title": "{{name}} 已就绪",
+      "runs_on": "运行在 {{runtime}}",
+      "joined_squad": "已加入小队：{{squad}}",
+      "next": "接下来",
+      "assign_title": "指派第一个任务",
+      "mention_title": "在任务里 @ 它",
+      "squad_title": "加入小队",
+      "open_squad_title": "打开 {{squad}}",
+      "open_agent": "打开智能体",
+      "back_to_list": "返回智能体列表"
+    },
+    "runtime_step": {
+      "title": "这个智能体在哪里运行？",
+      "search_placeholder": "搜索 harness 或机器",
+      "groups": {
+        "machines": "机器",
+        "cloud": "云服务"
+      },
+      "this_machine": "本机",
+      "owner_you": "你",
+      "custom_badge": "自定义",
+      "web_local_title": "在桌面端可以使用这台电脑上的 harness",
+      "download_desktop": "下载桌面端",
+      "harness_count_other": "{{count}} 个 harness",
+      "local_starting": "正在启动本机守护进程…",
+      "local_empty_title": "这台机器上没有找到 harness",
+      "local_empty_hint": "安装 Claude Code、Codex 等 CLI 后，会出现在这里。",
+      "more_harnesses_other": "其余 {{count}} 个：{{names}}",
+      "add_remote": "连接机器",
+      "hidden_remote_other": "另有 {{count}} 台机器仅所有者可用，不在这里显示",
+      "remote_warning": "任务会在 {{owner}} 的机器上执行，读写那台机器上的文件，用量计入 {{owner}} 的账号。",
+      "no_match": "没有与「{{query}}」匹配的结果",
+      "hosted_by": "由 {{vendor}} 提供",
+      "coming_soon": "即将推出",
+      "qoder_status": {
+        "not_configured": "未连接",
+        "starting": "启动中",
+        "ready": "已连接",
+        "error": "出错",
+        "stopped": "已暂停"
+      },
+      "connect": "连接",
+      "settings": "设置",
+      "member_connect": "需要管理员连接",
+      "member_fix": "需要管理员处理",
+      "footer_selected": "已选：",
+      "cancel": "取消",
+      "next": "下一步"
     }
   },
   "create_dialog": {
@@ -435,7 +490,7 @@
   },
   "conversation_starters": {
     "label": "对话开场建议",
-    "hint": "最多三条。点击后填入输入框，不会发送。",
+    "hint": "新建对话时显示。点击后填入输入框，不会发送。",
     "add": "添加建议",
     "item_label": "建议 {{number}} 的标题",
     "prompt_label": "建议 {{number}} 的提示词",
@@ -444,13 +499,21 @@
     "incomplete": "请填写完整或移除每条建议后再保存。",
     "remove": "移除建议 {{number}}",
     "preview_label": "新对话预览",
-    "preview_defaults": "以上是内置的默认值。在上方添加一条建议即可整组替换。"
+    "preview_defaults": "以上是内置建议。添加你自己的建议即可整组替换。",
+    "create_hint": "可选。新建与这个智能体的对话时显示。",
+    "edit": "编辑建议 {{number}}",
+    "remove_short": "移除",
+    "done": "完成",
+    "untitled": "未命名建议",
+    "customize": "自定义",
+    "defaults_summary_other": "正在使用 {{count}} 条内置建议"
   },
   "tab_body": {
     "common": {
       "save": "保存",
       "add": "添加",
-      "unsaved_changes": "未保存的修改"
+      "unsaved_changes": "未保存的修改",
+      "discard": "放弃修改"
     },
     "instructions": {
       "intro": "设置每次运行都会使用的 System Prompt，支持 Markdown。",
@@ -462,7 +525,12 @@
       "system_layer_hide": "收起",
       "workspace_notes_label": "工作区补充",
       "workspace_notes_intro": "在下面补充你们团队的上下文和偏好，它们会叠加在 Multica 为这个智能体维护的指令之上。支持 Markdown。",
-      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
+      "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。",
+      "mode_aria": "编辑模式",
+      "mode_write": "编辑",
+      "mode_preview": "预览",
+      "preview_empty": "还没有可预览的内容。",
+      "char_count_other": "{{count}} 个字符"
     },
     "env": {
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",

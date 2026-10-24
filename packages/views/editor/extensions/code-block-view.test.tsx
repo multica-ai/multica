@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { mockNativeDialog } from "../test-utils/native-dialog";
 
@@ -43,6 +44,7 @@ vi.mock("../../i18n", () => ({
           fullscreen: "Fullscreen",
           close_preview: "Close",
         },
+        attachment: { reload: "Reload" },
       }),
   }),
 }));
@@ -97,7 +99,7 @@ describe("CodeBlockView — html language toggle", () => {
     });
     const frame = document.querySelector("iframe");
     expect(frame).toBeTruthy();
-    const toggle = screen.getByTitle("Show source");
+    const toggle = screen.getByRole("button", { name: "Show source" });
     fireEvent.click(toggle);
     expect(document.querySelector("iframe")).toBe(frame);
     expect(frame?.closest("[hidden]")).toBeTruthy();
@@ -140,7 +142,7 @@ describe("CodeBlockView — html language toggle", () => {
     fireEvent.click(opener);
     expect(screen.getByRole("dialog").querySelector("iframe")).toBe(original);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByTitle("Show source"));
+    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
     expect(editorContent.closest("pre")?.className).not.toContain("sr-only");
     fireEvent.click(opener);
     expect(screen.getByRole("dialog").querySelector("iframe")).toBe(original);
@@ -149,9 +151,36 @@ describe("CodeBlockView — html language toggle", () => {
 
   it("does not show the toggle or an iframe for a non-html language", () => {
     render(<CodeBlockView {...makeProps("typescript", "const x = 1;")} />);
-    expect(screen.queryByTitle("Show source")).toBeNull();
-    expect(screen.queryByTitle("Show preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show preview" })).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+  });
+
+  it("reloads inline and enlarged HTML while preserving the editor and surface", () => {
+    render(<CodeBlockView {...makeProps("html", "<p>hello</p>")} />);
+    const original = document.querySelector("iframe");
+    const content = screen.getByTestId("nvc");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    const inline = document.querySelector("iframe");
+    expect(inline).not.toBe(original);
+    expect(inline?.getAttribute("srcdoc")).toBe("<p>hello</p>");
+    expect(screen.getByTestId("nvc")).toBe(content);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
+    expect(screen.getByRole("button", { name: "Reload" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reload" }));
+    const enlarged = dialog.querySelector("iframe");
+    expect(enlarged).not.toBe(inline);
+    expect(enlarged?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(document.querySelector("iframe")).toBe(enlarged);
+    expect(screen.getByTestId("nvc")).toBe(content);
+    expect(content.closest("pre")?.className).not.toContain("sr-only");
   });
 
   it("defers source edits until the retained preview is visible", () => {
@@ -162,7 +191,7 @@ describe("CodeBlockView — html language toggle", () => {
     const editorContent = screen.getByTestId("nvc");
 
     rerender(<CodeBlockView {...makeProps("html", "<p>pending</p>")} />);
-    fireEvent.click(screen.getByTitle("Show source"));
+    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
     act(() => vi.advanceTimersByTime(250));
     expect(frame.getAttribute("srcdoc")).toBe("<p>initial</p>");
     rerender(<CodeBlockView {...makeProps("html", "<p>edited</p>")} />);
@@ -178,7 +207,7 @@ describe("CodeBlockView — html language toggle", () => {
     rerender(<CodeBlockView {...makeProps("html", "<p>latest</p>")} />);
     act(() => vi.advanceTimersByTime(250));
     expect(frame.getAttribute("srcdoc")).toBe("<p>edited</p>");
-    fireEvent.click(screen.getByTitle("Show preview"));
+    fireEvent.click(screen.getByRole("button", { name: "Show preview" }));
     act(() => vi.advanceTimersByTime(250));
     expect(frame.getAttribute("srcdoc")).toBe("<p>latest</p>");
     expect(document.querySelector("iframe")).toBe(frame);
