@@ -75,18 +75,22 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	return b.String()
 }
 
+// taskHasProjectWorkflow reports whether this run's prompt carries a
+// [Project workflow] block — the same condition buildProjectWorkflowBlock
+// renders on — so the runtime brief points at it instead of its built-in
+// status rules (MUL-8145).
+func taskHasProjectWorkflow(task Task) bool {
+	return task.ProjectWorkflow != nil && strings.TrimSpace(task.ProjectWorkflow.Brief) != ""
+}
+
 // buildProjectWorkflowBlock carries the issue's project workflow and current
 // step (MUL-7420). It varies by project and by step, so it lives here and not
 // in the cached brief (MUL-5377).
 func buildProjectWorkflowBlock(task Task) string {
-	if task.ProjectWorkflow == nil {
+	if !taskHasProjectWorkflow(task) {
 		return ""
 	}
-	brief := strings.TrimSpace(task.ProjectWorkflow.Brief)
-	if brief == "" {
-		return ""
-	}
-	return "[Project workflow]\n" + brief + "\n\n"
+	return "[Project workflow]\n" + strings.TrimSpace(task.ProjectWorkflow.Brief) + "\n\n"
 }
 
 // buildJoinedWakeupsBlock carries wakeups that fired while this run was

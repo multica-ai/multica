@@ -7831,6 +7831,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		IssueStatuses:                    convertIssueStatusesForEnv(task.IssueStatuses),
 		IssueStatusesOmitted:             task.IssueStatusesOmitted,
+		HasProjectWorkflow:               taskHasProjectWorkflow(task),
 		ConnectedApps:                    task.ConnectedApps,
 	}
 

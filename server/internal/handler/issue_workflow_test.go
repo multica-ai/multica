@@ -786,7 +786,7 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	quietProject := createWorkflowTestProject(t, "Workflow quiet project")
 	quiet := dbfx.Issue(t, "no handoffs", testutil.Cols{"project_id": quietProject, "status": "todo"})
 	quietIssue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(quiet))
-	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil, false) != nil {
 		t.Fatal("a Default project without handoffs must not carry a workflow")
 	}
 
@@ -817,7 +817,7 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 
 	plain := dbfx.Issue(t, "no workflow", testutil.Cols{"status": "todo"})
 	plainIssue, _ := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(plain))
-	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil) != nil {
+	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil, false) != nil {
 		t.Fatal("an issue outside a project must not carry a workflow")
 	}
 }
@@ -830,7 +830,7 @@ func claimBriefForTest(t *testing.T, issueID string, task db.AgentTaskQueue) str
 	if err != nil {
 		t.Fatalf("load issue: %v", err)
 	}
-	got := testHandler.claimProjectWorkflow(context.Background(), issue, &task)
+	got := testHandler.claimProjectWorkflow(context.Background(), issue, &task, false)
 	if got == nil {
 		t.Fatalf("claim of %s carries no workflow", issueID)
 	}
