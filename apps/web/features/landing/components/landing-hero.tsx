@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
+import { SmartLink } from "./docs-link";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { HERO_PROVIDERS } from "./provider-marks";
@@ -80,7 +81,7 @@ export function LandingHero() {
 function WorksWithRow({ label, href }: { label: string; href: string }) {
   return (
     <div className="mt-12 flex flex-col items-center gap-6">
-      <Link
+      <SmartLink
         href={href}
         className="group inline-flex items-center gap-1.5 text-body text-white/60 transition-colors hover:text-white"
       >
@@ -89,7 +90,7 @@ function WorksWithRow({ label, href }: { label: string; href: string }) {
           className="size-3.5 transition-transform group-hover:translate-x-0.5"
           aria-hidden
         />
-      </Link>
+      </SmartLink>
 
       {/*
         Explicit column counts, not free wrapping: with `flex-wrap` the 14 marks
