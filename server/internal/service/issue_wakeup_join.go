@@ -124,11 +124,11 @@ func acknowledgedBySelf(ctx context.Context, q *db.Queries, w db.IssueWakeup, ag
 
 // hasWaitingRun reports whether a run of the agent that runs as this person
 // is waiting to start on the issue. A firing then keeps its inputs for it.
-func hasWaitingRun(ctx context.Context, q *db.Queries, issueID, agentID, runAs pgtype.UUID) (bool, error) {
+func hasWaitingRun(ctx context.Context, q *db.Queries, issueID, agentID, runAs, leaderSquadID pgtype.UUID) (bool, error) {
 	if !runAs.Valid {
 		return false, nil
 	}
-	_, err := q.FindWaitingIssueRun(ctx, db.FindWaitingIssueRunParams{IssueID: issueID, AgentID: agentID, OriginatorUserID: runAs})
+	_, err := q.FindWaitingIssueRun(ctx, db.FindWaitingIssueRunParams{IssueID: issueID, AgentID: agentID, OriginatorUserID: runAs, LeaderSquadID: leaderSquadID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -359,6 +359,16 @@ func (s *IssueWakeupService) mayJoin(ctx context.Context, q *db.Queries, issue d
 		return "", false, err
 	}
 	if !w.SystemRule.Valid {
+		leader, err := squadCompletionWakeupLeader(ctx, q, w)
+		if errors.Is(err, ErrWakeupForbidden) {
+			return "", false, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		if leader.IsLeaderTask && (!task.IsLeaderTask || task.SquadID != leader.SquadID) {
+			return "", false, nil
+		}
 		if w.AgentID != task.AgentID || w.CreatedBy != task.OriginatorUserID || (w.Mode == "once" && w.LastTaskID.Valid) {
 			return "", false, nil
 		}

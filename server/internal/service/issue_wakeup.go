@@ -535,6 +535,11 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		if old.CreatedBy != member && membership.Role != "owner" && membership.Role != "admin" {
 			return out, ErrWakeupForbidden
 		}
+		// Keep the leader provenance when a person edits or re-enables an
+		// automatic completion wait without changing its target.
+		if old.SourceTaskID.Valid && old.AgentID == agentID && old.FilterTaskID == filterTask && old.ID == squadCompletionWakeupID(agentID, filterTask) {
+			source = old.SourceTaskID
+		}
 		if enable != nil && old.Enabled {
 			if enable.Rearm || enable.At != nil {
 				return out, ErrWakeupConflict
@@ -597,34 +602,41 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 		}
 		activities = append(activities, created)
 	}
-	// Subscribe and inspect the concrete source under the same row lock. This
-	// closes the already-terminal race even if the caller exits immediately.
-	if filterTask.Valid && slices.Contains([]string{"completed", "failed", "cancelled"}, target.Status) && slices.Contains(in.EventTypes, eventcontract.TaskEvent(target.Status)) {
-		payload, _ := json.Marshal(map[string]any{
-			"event_id": util.UUIDToString(target.ID) + ":" + target.Status, "event_type": eventcontract.TaskEvent(target.Status), "version": 1,
-			"occurred_at": target.CompletedAt, "observed_at": now, "registration_snapshot": true,
-			"workspace_id": util.UUIDToString(issue.WorkspaceID), "issue_id": util.UUIDToString(issue.ID),
-			"task_id": util.UUIDToString(target.ID), "source_task_id": util.UUIDToString(target.ID), "status": target.Status,
-			"agent_id": util.UUIDToString(target.AgentID), "actor_type": "agent", "actor_id": util.UUIDToString(target.AgentID),
-			"retry_of_task_id": target.RetryOfTaskID, "rerun_of_task_id": target.RerunOfTaskID,
-		})
-		_, err = q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: out.ID, Revision: out.Revision, EventKey: util.UUIDToString(target.ID) + ":" + target.Status, EventType: "task." + target.Status, Payload: payload})
-		if err != nil {
-			return out, err
-		}
-		if out.Mode == "once" {
-			out.Enabled = false
-			err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: out.ID, Enabled: false})
-			if err != nil {
-				return out, err
-			}
-		}
+	if err = recordTaskWakeupSnapshot(ctx, q, &out, target, now); err != nil {
+		return out, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return out, err
 	}
 	s.publishWakeupActivities(activities...)
 	return out, nil
+}
+
+// Subscribe and inspect the concrete source under the same row lock so a
+// terminal transition immediately before registration is delivered as well.
+func recordTaskWakeupSnapshot(ctx context.Context, q *db.Queries, out *db.IssueWakeup, target db.AgentTaskQueue, now time.Time) error {
+	if target.ID.Valid && slices.Contains([]string{"completed", "failed", "cancelled"}, target.Status) && slices.Contains(out.EventTypes, eventcontract.TaskEvent(target.Status)) {
+		payload, _ := json.Marshal(map[string]any{
+			"event_id": util.UUIDToString(target.ID) + ":" + target.Status, "event_type": eventcontract.TaskEvent(target.Status), "version": 1,
+			"occurred_at": target.CompletedAt, "observed_at": now, "registration_snapshot": true,
+			"workspace_id": util.UUIDToString(out.WorkspaceID), "issue_id": util.UUIDToString(out.IssueID),
+			"task_id": util.UUIDToString(target.ID), "source_task_id": util.UUIDToString(target.ID), "status": target.Status,
+			"agent_id": util.UUIDToString(target.AgentID), "actor_type": "agent", "actor_id": util.UUIDToString(target.AgentID),
+			"retry_of_task_id": target.RetryOfTaskID, "rerun_of_task_id": target.RerunOfTaskID,
+		})
+		_, err := q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: out.ID, Revision: out.Revision, EventKey: util.UUIDToString(target.ID) + ":" + target.Status, EventType: "task." + target.Status, Payload: payload})
+		if err != nil {
+			return err
+		}
+		if out.Mode == "once" {
+			out.Enabled = false
+			err = q.AdvanceIssueWakeup(ctx, db.AdvanceIssueWakeupParams{ID: out.ID, Enabled: false})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *IssueWakeupService) authorize(ctx context.Context, q *db.Queries, ws, member pgtype.UUID, a db.Agent) error {
@@ -954,7 +966,7 @@ func (s *IssueWakeupService) systemRuleRunWaiting(ctx context.Context, q *db.Que
 	if err != nil {
 		return false, err
 	}
-	return hasWaitingRun(ctx, q, issue.ID, target.Agent.ID, runAs.UserID)
+	return hasWaitingRun(ctx, q, issue.ID, target.Agent.ID, runAs.UserID, pgtype.UUID{})
 }
 
 func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) error {
@@ -1019,7 +1031,14 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	if agent.ID.Valid && agent.RuntimeID != candidate.RuntimeID {
 		return tx.Commit(ctx)
 	}
+	leader, roleErr := squadCompletionWakeupLeader(ctx, q, w)
+	if roleErr != nil && !errors.Is(roleErr, ErrWakeupForbidden) {
+		return roleErr
+	}
 	authErr := s.authorize(ctx, q, w.WorkspaceID, w.CreatedBy, agent)
+	if roleErr != nil {
+		authErr = roleErr
+	}
 	if w.DisabledAt.Valid || !active || authErr != nil {
 		if authErr != nil && !errors.Is(authErr, ErrWakeupForbidden) {
 			return authErr
@@ -1263,7 +1282,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			}
 			return commit()
 		}
-		waiting, err := hasWaitingRun(ctx, q, issue.ID, w.AgentID, w.CreatedBy)
+		waiting, err := hasWaitingRun(ctx, q, issue.ID, w.AgentID, w.CreatedBy, leader.SquadID)
 		if err != nil {
 			return err
 		}
@@ -1323,8 +1342,9 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		if err = guardIssueNotInTriage(ctx, q, issue.ID, OriginNamed); err != nil {
 			return err
 		}
-		var squadID pgtype.UUID
-		if issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+		// Completion handoffs retain the source turn's squad on other issues too.
+		squadID := leader.SquadID
+		if !squadID.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
 			squad, squadErr := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 				ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID,
 			})
@@ -1490,6 +1510,9 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 		return ErrWakeupForbidden
 	}
 	if err != nil {
+		return err
+	}
+	if _, err := squadCompletionWakeupLeader(ctx, s.Tasks.Queries, w); err != nil {
 		return err
 	}
 	return s.authorize(ctx, s.Tasks.Queries, w.WorkspaceID, w.CreatedBy, agent)

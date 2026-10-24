@@ -63,6 +63,8 @@ After the first dispatch, the leader is woken up automatically by **most subsequ
 
 Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
 
+When a leader records `no_action` after receiving replies from delegated worker runs, Multica registers a one-shot completion wakeup for each worker. A worker that ends without another comment still prompts the leader to review the result and remaining authorized work. Replies merged into the same leader run are included. These wakeups use the existing wakeup controls and permissions; disabling or deleting a wait is respected, and recording the same evaluation again does not rearm it. They request a new evaluation, not an automatic repeat of the delegation.
+
 <Callout type="info">
 **Why the leader doesn't trigger when a member posts an `@`-mention.** Once a squad member directly `@`s someone, that comment is a deliberate hand-off — having the leader wake up to "observe" the routing would just produce a no-op turn and clutter the timeline. Agent-authored comments are the exception: when an agent posts a result that `@`s another agent, the leader still wakes up so it can coordinate the thread.
 </Callout>
