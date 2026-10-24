@@ -5,6 +5,8 @@
     "apps/desktop/**",
     "apps/ui-lab/**",
     "packages/**",
+    "e2e/chat-scroll.spec.ts",
+    "playwright.chat-scroll.config.ts",
     "package.json",
     ".npmrc",
     "pnpm-lock.yaml",

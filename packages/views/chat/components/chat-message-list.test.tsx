@@ -29,13 +29,13 @@ vi.mock("react-virtuoso", () => ({
     computeItemKey: (i: number, item: unknown) => string;
     components?: { Footer?: (p: { context?: unknown }) => ReactElement | null };
     context?: unknown;
-    followOutput?: (atBottom: boolean) => "smooth" | "auto" | false;
+    followOutput?: false | ((atBottom: boolean) => "smooth" | "auto" | false);
   }) => {
     const Footer = components?.Footer;
     return (
       <div
-        data-follow-at-bottom={String(followOutput?.(true))}
-        data-follow-away-from-bottom={String(followOutput?.(false))}
+        data-follow-at-bottom={String(followOutput && followOutput(true))}
+        data-follow-away-from-bottom={String(followOutput && followOutput(false))}
       >
         {data.map((item, i) => (
           <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>

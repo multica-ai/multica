@@ -20,6 +20,8 @@ for (const [name, files, selected] of [
   ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality"]],
   ["UI Lab", ["apps/ui-lab/src/app.tsx"], ["frontend", "quality"]],
+  ["chat scroll browser regression", ["e2e/chat-scroll.spec.ts"], ["frontend"]],
+  ["chat scroll browser config", ["playwright.chat-scroll.config.ts"], ["frontend"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc"]],
   ["agent process code", ["server/pkg/agent/cursor_background.go"], ["backend", "runtime"]],

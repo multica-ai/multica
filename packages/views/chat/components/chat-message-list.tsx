@@ -199,16 +199,11 @@ export function ChatMessageList({
     setScrollContainerEl(node);
   }, []);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  // The bottom-stick corrects through Virtuoso, never by writing `scrollTop`
-  // on the container: `scrollHeight` is an estimate over the unrendered rows,
-  // so the pixel bottom moves as Virtuoso measures (see stick-to-bottom.ts).
-  const pinToLiveEnd = useCallback(() => {
-    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
-  }, []);
-  const { isFollowing, onContentHeightChanged, hasReachedLiveEnd } = useStickToBottom(
+  const { followOutput, onContentHeightChanged, hasReachedLiveEnd } = useStickToBottom(
     scrollContainerEl,
-    pinToLiveEnd,
+    virtuosoRef,
     active,
+    isFetchingOlderMessages,
   );
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
@@ -355,15 +350,9 @@ export function ChatMessageList({
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
-        // Follow rapid streamed output only while Virtuoso says the reader is
-        // at the live end. An in-flight smooth animation temporarily reports
-        // "not at bottom" on the next append and permanently drops the follow
-        // (#6697), so live growth must use an immediate scroll. `isFollowing`
-        // narrows this further: the reader may have scrolled away by input the
-        // 120px `atBottom` band forgives (see stick-to-bottom.ts).
-        followOutput={(atBottom) =>
-          !isFetchingOlderMessages && atBottom && isFollowing() ? "auto" : false
-        }
+        // Literal false also stops Virtuoso's resize-follow branches, which
+        // do not consult a followOutput function before issuing a new pin.
+        followOutput={followOutput}
         // `followOutput` never fires for a single row growing mid-stream, so
         // content resizes route to the bottom-stick through Virtuoso's own
         // height signal instead.

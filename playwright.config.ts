@@ -3,9 +3,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  // The performance scenario has its own config: one worker, no retries, and a
-  // running production build. It must not be swept up by the ordinary suite.
-  testIgnore: "**/perf/**",
+  // Performance and self-contained chat scroll tests each have their own config.
+  testIgnore: ["**/perf/**", "**/chat-scroll.spec.ts"],
   timeout: 60000,
   workers: 1,
   retries: 0,
