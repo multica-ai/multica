@@ -124,6 +124,31 @@ import frUsage from "./fr/usage.json";
 import frUi from "./fr/ui.json";
 import frSquads from "./fr/squads.json";
 import frBilling from "./fr/billing.json";
+import viCommon from "./vi/common.json";
+import viAuth from "./vi/auth.json";
+import viSettings from "./vi/settings.json";
+import viIssues from "./vi/issues.json";
+import viAgents from "./vi/agents.json";
+import viEditor from "./vi/editor.json";
+import viOnboarding from "./vi/onboarding.json";
+import viInvite from "./vi/invite.json";
+import viLabels from "./vi/labels.json";
+import viMembers from "./vi/members.json";
+import viMyIssues from "./vi/my-issues.json";
+import viSearch from "./vi/search.json";
+import viInbox from "./vi/inbox.json";
+import viWorkspace from "./vi/workspace.json";
+import viProjects from "./vi/projects.json";
+import viAutopilots from "./vi/autopilots.json";
+import viSkills from "./vi/skills.json";
+import viChat from "./vi/chat.json";
+import viModals from "./vi/modals.json";
+import viRuntimes from "./vi/runtimes.json";
+import viLayout from "./vi/layout.json";
+import viUsage from "./vi/usage.json";
+import viUi from "./vi/ui.json";
+import viSquads from "./vi/squads.json";
+import viBilling from "./vi/billing.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -263,5 +288,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: frUi,
     squads: frSquads,
     billing: frBilling,
+  },
+  vi: {
+    common: viCommon,
+    auth: viAuth,
+    settings: viSettings,
+    issues: viIssues,
+    agents: viAgents,
+    editor: viEditor,
+    onboarding: viOnboarding,
+    invite: viInvite,
+    labels: viLabels,
+    members: viMembers,
+    "my-issues": viMyIssues,
+    search: viSearch,
+    inbox: viInbox,
+    workspace: viWorkspace,
+    projects: viProjects,
+    autopilots: viAutopilots,
+    skills: viSkills,
+    chat: viChat,
+    modals: viModals,
+    runtimes: viRuntimes,
+    layout: viLayout,
+    usage: viUsage,
+    ui: viUi,
+    squads: viSquads,
+    billing: viBilling,
   },
 };

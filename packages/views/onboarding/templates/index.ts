@@ -22,6 +22,10 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   // Mika's onboarding content has no French variant yet, so French users
   // read the English copy rather than an untranslated placeholder.
   fr: "en",
+  // Mika's onboarding content has no Vietnamese variant yet, so
+  // Vietnamese users read the English copy rather than an untranslated
+  // placeholder.
+  vi: "en",
 };
 
 /**

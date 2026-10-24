@@ -1,0 +1,38 @@
+{
+  "title": "Tìm kiếm",
+  "description": "Tìm kiếm trang, công việc, dự án và thành viên",
+  "placeholder": "Nhập một lệnh hoặc tìm kiếm...",
+  "groups": {
+    "pages": "Trang",
+    "commands": "Lệnh",
+    "members": "Thành viên",
+    "projects": "Dự án",
+    "issues": "Công việc",
+    "cancelled": "Đã hủy",
+    "recent": "Gần đây",
+    "workspaces": "Không gian làm việc"
+  },
+  "commands": {
+    "current_theme_aria": "Giao diện hiện tại",
+    "new_issue": "Công việc mới",
+    "new_project": "Dự án mới",
+    "copy_issue_link": "Sao chép liên kết công việc",
+    "copy_identifier": "Sao chép định danh ({{identifier}})",
+    "fold_all_comments": "Thu gọn tất cả bình luận",
+    "unfold_all_comments": "Mở rộng tất cả bình luận",
+    "switch_to_light": "Chuyển sang giao diện sáng",
+    "switch_to_dark": "Chuyển sang giao diện tối",
+    "use_system_theme": "Dùng giao diện hệ thống"
+  },
+  "toast": {
+    "link_copied": "Đã sao chép liên kết",
+    "copied_identifier": "Đã sao chép {{identifier}}"
+  },
+  "empty": {
+    "no_results": "Không tìm thấy kết quả nào.",
+    "type_to_search": "Nhập để tìm kiếm công việc và dự án"
+  },
+  "trigger": {
+    "label": "Tìm kiếm..."
+  }
+}

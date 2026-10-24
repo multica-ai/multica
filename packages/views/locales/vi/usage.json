@@ -1,0 +1,111 @@
+{
+  "title": "Phân tích",
+  "tab_usage": "Mức sử dụng",
+  "header": {
+    "timezone_and_updated": "{{tz}} · cập nhật {{time}}",
+    "refresh": "Làm mới"
+  },
+  "filter": {
+    "project_label": "Dự án",
+    "all_projects": "Tất cả dự án",
+    "period_label": "Kỳ"
+  },
+  "kpi": {
+    "cost_label": "Chi phí · {{days}} ngày",
+    "tokens_label": "Token · {{days}} ngày",
+    "tokens_hint": "Đầu vào {{input}} · Đầu ra {{output}}",
+    "run_time_label": "Thời gian chạy · {{days}} ngày",
+    "run_time_hint": "Trên {{tasks}} lần chạy",
+    "tasks_label": "Số lần chạy · {{days}} ngày",
+    "tasks_hint": "{{failed}} thất bại"
+  },
+  "dim": {
+    "label": "Chiều phân tích",
+    "daily": "Theo ngày",
+    "weekly": "Theo tuần"
+  },
+  "daily": {
+    "title_cost": "Chi phí theo ngày",
+    "title_tokens": "Token theo ngày",
+    "title_time": "Thời gian chạy theo ngày",
+    "title_tasks": "Số lần chạy theo ngày",
+    "title_errors": "Lỗi theo ngày",
+    "metric_cost": "Chi phí",
+    "metric_tokens": "Token",
+    "metric_time": "Thời gian",
+    "metric_tasks": "Số lần chạy",
+    "no_data": "Không có mức sử dụng trong khoảng này.",
+    "metric_label": "Chỉ số"
+  },
+  "weekly": {
+    "title_cost": "Chi phí theo tuần",
+    "title_tokens": "Token theo tuần",
+    "title_time": "Thời gian chạy theo tuần",
+    "title_tasks": "Số lần chạy theo tuần",
+    "title_errors": "Lỗi theo tuần",
+    "partial_label": "{{range}} (một phần · {{covered}} / 7 ngày)"
+  },
+  "errors": {
+    "kpi_failed_label": "Lần chạy thất bại · {{days}} ngày",
+    "kpi_failed_hint": "Trong tổng số {{total}} lần chạy",
+    "kpi_rate_label": "Tỷ lệ thất bại · {{days}} ngày",
+    "kpi_agents_label": "Agent bị ảnh hưởng · {{days}} ngày",
+    "kpi_agents_hint": "Nặng nhất {{name}} · {{count}}",
+    "tooltip_rate": "Tỷ lệ lỗi",
+    "class": {
+      "auth": "Xác thực",
+      "rate_limit": "Giới hạn tốc độ",
+      "timeout": "Hết thời gian chờ",
+      "provider": "Nhà cung cấp",
+      "runtime": "Runtime",
+      "agent": "Agent",
+      "other": "Khác"
+    },
+    "title": "Lỗi",
+    "summary": "{{failed}} trong {{total}} lần chạy thất bại · {{rate}}",
+    "mix_title": "Cơ cấu lỗi · {{failed}}",
+    "mix_label": "Cơ cấu lỗi",
+    "codes_label": "Mã lỗi",
+    "by_agent": "Agent gây lỗi nhiều nhất",
+    "sort_label": "Xếp hạng agent theo",
+    "sort_failed": "Số lần thất bại",
+    "sort_rate": "Tỷ lệ",
+    "header_agent": "Agent",
+    "header_failed": "Thất bại",
+    "header_runs": "Số lần chạy",
+    "header_rate": "Tỷ lệ",
+    "other_agents": "Agent khác",
+    "low_sample": "Ít hơn {{count}} lần chạy trong khoảng này — tỷ lệ này không có ý nghĩa.",
+    "no_data": "Không có lần chạy thất bại nào trong khoảng này.",
+    "show_reasons": "Hiện mã lỗi",
+    "hide_reasons": "Ẩn mã lỗi",
+    "show_all": "Hiện tất cả {{count}}",
+    "show_less": "Hiện {{count}} đầu"
+  },
+  "leaderboard": {
+    "title": "Bảng xếp hạng",
+    "caption": "{{count}} agent",
+    "caption_with_deleted": "{{count}} agent · {{deleted}} đã xóa",
+    "sort_label": "Xếp hạng agent theo",
+    "deleted_agents": "Agent đã xóa",
+    "other_agents": "Agent khác",
+    "header_agent": "Agent",
+    "header_tokens": "Token",
+    "header_cost": "Chi phí",
+    "header_time": "Thời gian",
+    "header_tasks": "Số lần chạy",
+    "usage_unreported_other": "{{count}} lần chạy không báo cáo mức sử dụng",
+    "usage_unreported_pending_other": "{{count}} lần chạy không báo cáo mức sử dụng · tổng số vẫn đang được xử lý",
+    "usage_totals_pending": "Tổng mức sử dụng vẫn đang được xử lý",
+    "show_all": "Hiện tất cả",
+    "show_less": "Hiện {{count}} đầu",
+    "no_data": "Không có hoạt động của agent trong khoảng này."
+  },
+  "empty": {
+    "title": "Chưa có mức sử dụng",
+    "body": "Chạy agent để xem mức sử dụng token và thời gian chạy."
+  },
+  "duration": {
+    "less_than_minute": "<1 phút"
+  }
+}

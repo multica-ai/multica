@@ -99,4 +99,9 @@ const EMERGENCY_COPY = {
     description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
     reload: "Recharger",
   },
+  vi: {
+    title: "Đã xảy ra sự cố",
+    description: "Trang gặp lỗi không mong muốn. Hãy thử tải lại.",
+    reload: "Tải lại",
+  },
 } as const;

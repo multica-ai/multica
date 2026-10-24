@@ -1,0 +1,121 @@
+{
+  "page": {
+    "title": "Hộp thư đến",
+    "back": "Hộp thư đến"
+  },
+  "menu": {
+    "mark_all_read": "Đánh dấu tất cả là đã đọc",
+    "archive_all": "Lưu trữ tất cả",
+    "archive_all_read": "Lưu trữ tất cả đã đọc",
+    "archive_completed": "Lưu trữ đã hoàn thành"
+  },
+  "filters": {
+    "tooltip": "Lọc hộp thư đến",
+    "active_count_other": "{{count}} bộ lọc đang áp dụng",
+    "status": "Trạng thái",
+    "priority": "Mức ưu tiên",
+    "from": "Từ",
+    "unread_only": "Chỉ chưa đọc",
+    "notification_count_other": "{{count}} thông báo",
+    "clear": "Xóa bộ lọc",
+    "empty": "Không có thông báo nào khớp với bộ lọc của bạn",
+    "no_agents_working": "Không có agent nào đang làm việc"
+  },
+  "context_menu": {
+    "mark_read": "Đánh dấu là đã đọc",
+    "mark_unread": "Đánh dấu là chưa đọc",
+    "archive": "Lưu trữ",
+    "unarchive": "Hủy lưu trữ",
+    "open_in_new_tab": "Mở trong tab mới"
+  },
+  "list": {
+    "loading_selection": "Đang tải thông báo…",
+    "empty": "Không có thông báo",
+    "mark_done_tooltip": "Đánh dấu là xong",
+    "archive_tooltip": "Lưu trữ",
+    "time": {
+      "just_now": "Vừa xong",
+      "minutes": "{{count}} phút",
+      "hours": "{{count}} giờ",
+      "days": "{{count}} ngày"
+    },
+    "archived_title": "Đã lưu trữ",
+    "archived_empty": "Không có thông báo đã lưu trữ",
+    "unarchive_tooltip": "Hủy lưu trữ",
+    "actions_aria": "Thao tác với thông báo",
+    "load_more": "Tải thêm",
+    "loading_more": "Đang tải…",
+    "retry": "Thử lại"
+  },
+  "detail": {
+    "select_prompt": "Chọn một thông báo để xem chi tiết",
+    "empty": "Hộp thư đến của bạn trống",
+    "original_input": "Nội dung nhập gốc",
+    "retry_with_context": "Thử lại với ngữ cảnh",
+    "edit_advanced": "Chỉnh sửa dưới dạng biểu mẫu nâng cao",
+    "autopilot_quota_exceeded_body": "Không gian làm việc này đã đạt giới hạn {{limit}} lần chạy autopilot cho kỳ hiện tại. Các lần chạy autopilot tiếp theo sẽ không bắt đầu cho đến khi hạn mức được đặt lại {{resetAt}}.",
+    "autopilot_quota_upgrade": "Xem các lựa chọn nâng cấp",
+    "archive": "Lưu trữ",
+    "unarchive": "Hủy lưu trữ"
+  },
+  "types": {
+    "issue_assigned": "Đã giao",
+    "issue_subscribed": "Đã theo dõi",
+    "unassigned": "Đã gỡ giao việc",
+    "assignee_changed": "Người được giao đã thay đổi",
+    "status_changed": "Trạng thái đã thay đổi",
+    "priority_changed": "Mức ưu tiên đã thay đổi",
+    "start_date_changed": "Ngày bắt đầu đã thay đổi",
+    "due_date_changed": "Ngày đến hạn đã thay đổi",
+    "new_comment": "Bình luận mới",
+    "mentioned": "Được nhắc đến",
+    "review_requested": "Được yêu cầu duyệt",
+    "task_completed": "Lần chạy đã hoàn thành",
+    "task_failed": "Lần chạy thất bại",
+    "agent_blocked": "Agent bị chặn",
+    "agent_completed": "Agent đã hoàn thành",
+    "reaction_added": "Đã bày tỏ cảm xúc",
+    "quick_create_done": "Đã tạo bằng agent",
+    "quick_create_failed": "Tạo bằng agent thất bại",
+    "quick_create_unconfirmed": "Tạo bằng agent chưa được xác nhận",
+    "autopilot_paused": "Autopilot đã tạm dừng",
+    "children_done": "Các công việc con đã hoàn thành",
+    "autopilot_quota_exceeded": "Đã đạt giới hạn số lần chạy autopilot"
+  },
+  "labels": {
+    "set_status_to": "Đặt trạng thái thành",
+    "set_priority_to": "Đặt mức ưu tiên thành",
+    "assigned_to": "Đã giao cho {{name}}",
+    "removed_assignee": "Đã gỡ người được giao",
+    "set_start_date_to": "Đặt ngày bắt đầu là {{date}}",
+    "removed_start_date": "Đã gỡ ngày bắt đầu",
+    "set_due_date_to": "Đặt ngày đến hạn là {{date}}",
+    "removed_due_date": "Đã gỡ ngày đến hạn",
+    "reacted_to_comment": "Đã bày tỏ cảm xúc {{emoji}} với bình luận của bạn",
+    "created_with_agent": "Đã tạo bằng agent: {{identifier}}",
+    "failed_with_detail": "Thất bại: {{detail}}",
+    "autopilot_quota_blocked": "Lần chạy bị chặn vì đã đạt giới hạn",
+    "children_done_stage": "Các công việc con của giai đoạn {{stage}} đã hoàn thành"
+  },
+  "toasts": {
+    "source_context_retry_started": "Đã bắt đầu thử lại với ngữ cảnh gốc",
+    "archived": "Đã lưu trữ thông báo",
+    "unarchived": "Đã khôi phục thông báo"
+  },
+  "errors": {
+    "archived_lookup_failed": "Không tải được thông báo đã liên kết",
+    "source_context_retry_failed": "Không thử lại được với ngữ cảnh gốc",
+    "source_context_retry_unavailable": "Ngữ cảnh này không còn thử lại được nữa. Hãy bắt đầu lại từ điểm rẽ nhánh.",
+    "mark_read_failed": "Không đánh dấu đã đọc được",
+    "mark_unread_failed": "Không đánh dấu chưa đọc được",
+    "archive_failed": "Không lưu trữ được",
+    "mark_done_failed": "Không đánh dấu là xong được",
+    "mark_all_read_failed": "Không đánh dấu tất cả là đã đọc được",
+    "archive_all_failed": "Không lưu trữ tất cả được",
+    "archive_all_read_failed": "Không lưu trữ các mục đã đọc được",
+    "archive_completed_failed": "Không lưu trữ các mục đã hoàn thành được",
+    "unarchive_failed": "Không hủy lưu trữ được",
+    "archived_load_failed": "Không tải được thông báo đã lưu trữ",
+    "filters_load_failed": "Không tải được bộ lọc"
+  }
+}
