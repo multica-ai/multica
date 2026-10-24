@@ -228,7 +228,7 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 // agent-authored worker-result comment on a squad-assigned issue wakes the
 // assigned squad leader so the leader→worker→leader coordination loop stays
 // closed, while the leader's own self-trigger loop stays suppressed.
-func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader(t *testing.T) {
+func TestShouldEnqueueSquadLeaderOnComment_UnverifiedAgentCommentsStayQuiet(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -267,8 +267,8 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 	// squad-assigned issue — the assigned leader must wake to coordinate.
 	t.Run("worker agent comment wakes squad leader", func(t *testing.T) {
 		clearTasks()
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "pushed the fix, PR is up", "agent", fx.OtherID); !got {
-			t.Fatalf("worker agent comment: expected leader to wake, got skip")
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "pushed the fix, PR is up", "agent", fx.OtherID); got {
+			t.Fatal("unverified worker comment woke leader")
 		}
 	})
 
@@ -280,8 +280,8 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 		clearTasks()
 		insertLeaderTask(true, "completed")  // older leader task
 		insertLeaderTask(false, "completed") // newer worker task → latest role is worker
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "done with my worker slice", "agent", fx.LeaderID); !got {
-			t.Fatalf("dual-role worker comment: expected leader to wake, got skip")
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "done with my worker slice", "agent", fx.LeaderID); got {
+			t.Fatal("unverified dual-role comment woke leader")
 		}
 	})
 
@@ -453,8 +453,8 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 1 {
-		t.Fatalf("after worker comment from dual-role agent: expected 1 queued leader task, got %d", leaderTasks)
+	if leaderTasks != 0 {
+		t.Fatalf("unverified dual-role worker comment queued %d leader tasks", leaderTasks)
 	}
 }
 

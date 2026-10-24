@@ -191,7 +191,7 @@ func TestWorkerReplyReconcileBoundaries(t *testing.T) {
 			})
 			workerTaskID := dbfx.Task(t, workerID, testutil.Cols{
 				"runtime_id": workerRuntimeID, "issue_id": issueID, "status": "running",
-				"trigger_comment_id": rootID, "squad_id": squadID,
+				"trigger_comment_id": rootID, "squad_id": squadID, "delegated_from_task_id": taskID,
 				"originator_user_id": testUserID, "accountable_user_id": testUserID,
 			})
 			first := claimWorkerReplyRun(t, runtimeID)
