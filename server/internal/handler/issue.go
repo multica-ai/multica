@@ -772,17 +772,18 @@ var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z][a-z0-9]*-(\d+)$`)
 
 // parseQueryNumber extracts an issue number from the query if it looks like
 // an identifier (e.g. "MUL-123" or "V2-12") or a bare number (e.g. "123").
+// Numbers outside PostgreSQL int4 range remain ordinary text search terms.
 func parseQueryNumber(q string) (int, bool) {
 	q = strings.TrimSpace(q)
 	// Check for identifier pattern like "MUL-123"
 	if m := identifierNumberRe.FindStringSubmatch(q); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
-			return n, true
+		if n, err := strconv.ParseInt(m[1], 10, 32); err == nil && n > 0 {
+			return int(n), true
 		}
 	}
 	// Check for bare number
-	if n, err := strconv.Atoi(q); err == nil && n > 0 {
-		return n, true
+	if n, err := strconv.ParseInt(q, 10, 32); err == nil && n > 0 {
+		return int(n), true
 	}
 	return 0, false
 }
