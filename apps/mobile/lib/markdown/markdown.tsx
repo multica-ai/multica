@@ -41,8 +41,12 @@ import { useCallback, useMemo } from "react";
 import { Linking, View } from "react-native";
 import { router } from "expo-router";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
-import type { Attachment } from "@multica/core/types";
+import {
+  attachmentIdFromDownloadURL,
+  type Attachment,
+} from "@multica/core/types";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { openAttachment } from "@/lib/open-attachment";
 import { preprocessMobileMarkdown } from "./preprocess";
 import { useMarkdownStyle } from "./markdown-style";
 import { splitMarkdown } from "./split-markdown";
@@ -161,6 +165,13 @@ export function Markdown({
           if (type === "issue") router.push(`/${wsSlug}/issue/${id}`);
           else if (type === "project") router.push(`/${wsSlug}/project/${id}`);
         }
+        return;
+      }
+      // File cards (`[📎 name](/api/attachments/{id}/download)`) point at the
+      // auth-gated download path, which a bare Linking.openURL cannot
+      // authenticate. Re-sign through the API first.
+      if (attachmentIdFromDownloadURL(url)) {
+        void openAttachment(url);
         return;
       }
       // Everything else — http(s), mailto, tel, app-scheme deep links —
