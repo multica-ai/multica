@@ -282,7 +282,7 @@ export function createJaDict(
         {
           version: "0.7.0",
           date: "2026-10-23",
-          title: "Qoder Cloud Agents への対応、指定したメンバーとのランタイム共有、PR の競合での再開、より安全な実行",
+          title: "ワークフロー機能を全面開放、Qoder Cloud Agents への対応、指定したメンバーとのランタイム共有",
           changes: [],
           features: [
             "Qoder Cloud Agents で Issue を実行できます。エージェントの作成時にマシンかクラウドサービスを選び、Qoder Cloud Agents のエージェントと連携します。",
