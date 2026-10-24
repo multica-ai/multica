@@ -5,7 +5,7 @@ description: What a Multica run can reach on the machine that executes it, and w
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-When an agent picks up a run, the daemon spawns an AI coding tool (Codex, Claude Code, and so on) as a child process. Understanding what that process can touch is the whole security model.
+When an agent picks up a run, the daemon spawns an AI coding tool (Codex, Claude Code, and so on) as a child process. Multica's security model comes down to what that process can touch.
 
 ## The boundary is the daemon user
 
@@ -17,9 +17,7 @@ Multica makes no filesystem-sandbox guarantee. One narrow exception exists today
 Multica does not sandbox the filesystem for you. If the daemon runs as your personal user account, a run can read your SSH keys, edit your shell profile, and delete your documents. Isolation has to come from the boundary you put the daemon in.
 </Callout>
 
-This is deliberate. Agents are asked to install dependencies, run builds, use your cloud CLIs, and drive tooling that expects a normal home directory. A partial filesystem sandbox breaks that work in ways that are hard to diagnose — the tool reports "not logged in" or silently uses the wrong account — while still not protecting the thing that matters most, since it cannot stop a run from reading credentials and sending them over the network.
-
-So Multica does not pretend to be the boundary. Put one around it.
+This is deliberate. Agents are asked to install dependencies, run builds, use your cloud CLIs, and drive tooling that expects a normal home directory. A partial filesystem sandbox breaks that work in ways that are hard to diagnose — the tool reports "not logged in" or silently uses the wrong account — while still not protecting the thing that matters most, since it cannot stop a run from reading credentials and sending them over the network. So Multica does not treat itself as the boundary; the boundary goes around it.
 
 ## Recommended setups
 

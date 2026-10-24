@@ -4,6 +4,7 @@ description: メール認証コード、Google ログイン、新規登録の範
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica はデフォルトでメール認証コードによるログインを使い、Google OAuth を追加することもできます。既存のユーザーはいつでも再ログインできます。サインアップ制限は、新しいアカウントを作成できるかどうかだけを決めます。
 
@@ -15,15 +16,28 @@ Multica はデフォルトでメール認証コードによるログインを使
 
 ### Resend を使う
 
-1. [Resend](https://resend.com/) で送信ドメインを検証し、API key を作成します。
-2. 次を設定します:
+<Steps>
+<Step>
 
-   ```dotenv
-   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-   RESEND_FROM_EMAIL=noreply@example.com
-   ```
+[Resend](https://resend.com/) で送信ドメインを検証し、API key を作成します。
 
-3. API サービスを再起動します。
+</Step>
+<Step>
+
+次を設定します:
+
+```dotenv
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=noreply@example.com
+```
+
+</Step>
+<Step>
+
+API サービスを再起動します。
+
+</Step>
+</Steps>
 
 `RESEND_FROM_EMAIL` は、Resend で検証済みのドメインに属している必要があります。
 
@@ -57,7 +71,7 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### メールサービスがない場合の動作
 
-サーバーは起動しますが、認証コードと招待リンクはログに書き込まれるだけで、メールは送信されません。ローカル開発には向きますが、プロダクションには向きません。
+サーバーは起動しますが、認証コードと招待リンクはログに書き込まれるだけで、メールは送信されません。このモードはローカル開発専用です。
 
 起動ログには、現在使っているのが `Resend API`、`SMTP relay`、`DEV mode` のどれかが表示されます。
 
@@ -78,22 +92,38 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 
 ## Google ログイン
 
-1. [Google Cloud Console](https://console.cloud.google.com/) で OAuth 2.0 client を作成します。
-2. Multica フロントエンドのコールバックアドレスを **Authorized redirect URIs** に追加します:
+<Steps>
+<Step>
 
-   ```text
-   https://multica.example.com/auth/callback
-   ```
+[Google Cloud Console](https://console.cloud.google.com/) で OAuth 2.0 client を作成します。
 
-3. 次を設定します:
+</Step>
+<Step>
 
-   ```dotenv
-   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
-   ```
+Multica フロントエンドのコールバックアドレスを **Authorized redirect URIs** に追加します:
 
-4. API サービスを再起動します。
+```text
+https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+次を設定します:
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+API サービスを再起動します。
+
+</Step>
+</Steps>
 
 Google Console と `GOOGLE_REDIRECT_URI` のアドレスは、プロトコル、ポート、末尾のスラッシュを含めて完全に一致している必要があります。設定が反映されると、ログインページに Google ログインボタンが表示されます。フロントエンドイメージの再ビルドは不要です。
 
@@ -144,7 +174,7 @@ ALLOWED_EMAILS=partner@example.net
 
 セッションはスライド更新されます。以下の値はサインインからのカウントダウンではなく、**アイドル**の上限です。残り有効期間が半分を下回ると、次のリクエストで完全な有効期間に再発行されるため、使い続けているアカウントが定期的にサインアウトされることはありません。絶対的な上限はありません。
 
-この上限は片側のみです。半分を下回ってからでないと再発行されないため、最後の利用時点で半分以上残っていたセッションは延長されません。常に耐えられるアイドル時間は、以下の値の半分です。
+この上限は片側のみです。半分を下回ってからでないと再発行されないため、最後の利用時点で半分以上残っていたセッションは延長されません。確実に維持されるアイドル時間は、以下の値の半分だけです。
 
 `AUTH_TOKEN_TTL` で調整でき、Go duration または正の整数秒を受け付けます:
 

@@ -1,0 +1,115 @@
+---
+title: Recherche, raccourcis et préférences
+description: Rechercher et exécuter des commandes avec ⌘K, consulter et modifier les raccourcis clavier, chercher du texte dans une tâche et régler vos préférences personnelles comme le thème, la langue et le fuseau horaire.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Les touches ci-dessous sont notées pour macOS. Sous Windows et Linux, `⌘` devient `Ctrl` ; les tableaux donnent les deux.
+
+## Recherche
+
+Appuyez sur `⌘K`, ou cliquez sur **Rechercher...** en haut de la barre latérale. Sans saisie, la fenêtre propose **Nouvelle tâche** et les tâches ouvertes récemment. Dès que vous tapez, les résultats sont regroupés :
+
+| Groupe | Ce qu'il trouve |
+|---|---|
+| **Pages** | Les pages de l'espace de travail : boîte de réception, discussion, tâches, projets, agents, paramètres, etc. |
+| **Commandes** | Nouvelle tâche, Nouveau projet, et le passage au thème clair, sombre ou du système. Sur la page d'une tâche s'ajoutent Copier le lien de la tâche, Copier l'identifiant, Replier tous les commentaires et Déplier tous les commentaires. |
+| **Membres** | Recherche par nom ou par e-mail. |
+| **Espaces de travail** | Vos autres espaces de travail ; en choisir un vous y fait passer. |
+| **Projets**, **Tâches** | Correspondances dans les titres, mais aussi dans les descriptions de projets et de tâches et dans les commentaires. L'extrait trouvé s'affiche sous le résultat, et les tâches terminées sont incluses. |
+| **Annulés** | Les projets et tâches annulés sont regroupés à la fin au lieu de se mêler au reste. |
+
+Choisir un résultat l'ouvre. Maintenez `⌘` (`Ctrl` sous Windows et Linux) en cliquant ou en appuyant sur Entrée pour l'ouvrir dans un nouvel onglet. `Échap` ferme la recherche.
+
+## Raccourcis clavier
+
+| Action | macOS | Windows / Linux | Remarques |
+|---|---|---|---|
+| Ouvrir la recherche | `⌘K` | `Ctrl+K` | |
+| Créer une tâche | `C` | `C` | Ouvre votre mode de création préféré. Sur la page d'un projet, la nouvelle tâche est préremplie avec ce projet. |
+| Afficher ou masquer la barre latérale gauche | `⌘B` | `Ctrl+B` | |
+| Afficher ou masquer la barre latérale droite | `⌘/` | `Ctrl+/` | Uniquement sur les pages qui en ont une, comme une tâche. |
+| Afficher ou masquer la fenêtre de discussion | `⌘J` | `Ctrl+J` | À l'ouverture, le curseur se place dans la zone de saisie. Voir [Discuter depuis n'importe quelle page](/chat#discuter-depuis-nimporte-quelle-page). |
+| Rechercher dans la tâche | `⌘F` | `Ctrl+F` | Voir plus bas. |
+| Archiver la notification | `E` | `E` | Archive la notification ouverte dans la boîte de réception, ou la restaure quand vous consultez les archives. |
+| Envoyer | `⌘↵` | `Ctrl+Enter` | Envoie commentaires et messages de discussion, et sert aussi à créer des tâches. |
+| Revenir en arrière | `⌘[` | `Ctrl+[` | |
+| Avancer | `⌘]` | `Ctrl+]` | |
+
+Les raccourcis à une seule touche (`C`, `E`) et Revenir en arrière / Avancer ne réagissent pas pendant que vous tapez dans un champ.
+
+Le groupe **Navigation** propose aussi d'aller à la boîte de réception, aux discussions, à Mes tâches, aux tâches, aux projets, aux automatisations, aux agents, aux squads, aux statistiques, aux runtimes, aux skills et aux paramètres. Aucune de ces actions n'a de touche par défaut : attribuez-en à celles que vous utilisez.
+
+### Raccourcis système fixes
+
+Ceux-ci ne se modifient pas. Sauf `Échap`, ils ne fonctionnent que dans l'[application de bureau](/desktop-app) ; dans un navigateur, c'est le navigateur qui gère ces touches.
+
+| Action | macOS | Windows / Linux |
+|---|---|---|
+| Ouvrir les paramètres | `⌘,` | `Ctrl+,` |
+| Fermer l'onglet actif | `⌘W` | `Ctrl+W` |
+| Sélectionner l'onglet 1 à 8 | `⌘1`–`⌘8` | `Ctrl+1`–`Ctrl+8` |
+| Sélectionner le dernier onglet | `⌘9` | `Ctrl+9` |
+| Zoom avant / Zoom arrière / Réinitialiser le zoom | `⌘+` / `⌘−` / `⌘0` | `Ctrl++` / `Ctrl+-` / `Ctrl+0` |
+| Fermer la fenêtre ou le menu | `Échap` | `Échap` |
+
+## Modifier un raccourci
+
+<Steps>
+<Step>
+
+Ouvrez **Paramètres → Raccourcis**. Le champ de recherche en haut retrouve une action par son nom.
+
+</Step>
+<Step>
+
+Cliquez sur les touches à droite d'une action. Quand « Appuyez sur les touches » s'affiche, tapez la nouvelle combinaison. `Échap` annule ; `Suppr` efface le raccourci de l'action.
+
+</Step>
+<Step>
+
+Les deux boutons au bout de chaque ligne rétablissent la valeur par défaut de l'action ou la désactivent. **Rétablir les valeurs par défaut**, en haut, annule toutes les personnalisations d'un coup.
+
+</Step>
+</Steps>
+
+Les raccourcis ne sont enregistrés que sur l'appareil utilisé. Sur un autre ordinateur, ou en passant du navigateur à l'application de bureau, il faut les redéfinir.
+
+L'enregistrement refuse certaines combinaisons et en indique la raison sous les touches :
+
+- une combinaison déjà attribuée à une autre action ;
+- les combinaisons réservées au navigateur, à la fenêtre de bureau ou au système, comme `⌘W`, `⌘R`, `⌘Q`, `⌘,`, les touches d'édition (copier, coller…), `⌘0`–`⌘9` et les touches de zoom. Dans un navigateur, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D` et `⌘U` sont aussi exclus ; l'application de bureau les accepte. Sous Windows et Linux, toute combinaison avec la touche Windows / Super est refusée ;
+- les actions qui fonctionnent aussi dans un champ de saisie, comme Ouvrir la recherche, la fenêtre de discussion ou Rechercher dans la tâche, exigent `⌘`, `Ctrl` ou `Control`, pour ne jamais se déclencher pendant la frappe ;
+- **Envoyer** ne peut être que `↵` ou `⌘↵`.
+
+<Callout>
+Si **Envoyer** est réglé sur `↵`, utilisez `Maj+Entrée` pour aller à la ligne : cela insère un paragraphe, poursuit une liste ou ajoute un saut de ligne dans un bloc de code.
+</Callout>
+
+## Rechercher dans une tâche
+
+Sur la page d'une tâche, `⌘F` ouvre la barre de recherche de Multica plutôt que celle du navigateur. La recherche du navigateur ne voit que les commentaires affichés à l'écran ; celle-ci parcourt toute la chronologie, titre, description et commentaires compris.
+
+La casse est ignorée. La barre indique « position/total », ou « Aucune correspondance ». `↵` passe à la correspondance suivante, `Maj+Entrée` à la précédente, `Échap` ferme la barre. Un texte coupé par un changement de mise en forme (à moitié en gras, par exemple) n'est pas trouvé.
+
+Dans l'application de bureau, seul l'onglet visible réagit à `⌘F`.
+
+## Préférences
+
+Les préférences personnelles se trouvent dans **Paramètres → Préférences** et s'appliquent immédiatement. Chaque groupe est enregistré à un endroit différent :
+
+| Groupe | Réglage | Enregistré |
+|---|---|---|
+| **Langue et région** | Langue : English, 中文, 한국어, 日本語, Français. La page se recharge après un changement.<br />Fuseau horaire : suit le navigateur par défaut ; sert aux dates et graphiques de tous vos espaces de travail. La liste couvre tous les fuseaux et se filtre par recherche. | Dans votre compte, synchronisé sur vos autres appareils |
+| **Apparence** | Thème : Clair, Sombre ou Système. Vous pouvez aussi taper « thème » dans la recherche pour en changer. | Sur cet appareil |
+| **Commentaires et discussion** | **Épingler la barre de commentaire en bas** : la zone de commentaire reste visible pendant la lecture d'une longue chronologie.<br />**En répondant à un agent en cours d'exécution** : choix par défaut entre « Ajouter à l'exécution en cours » et « Démarrer après cette exécution », modifiable pour chaque message avant l'envoi ; voir [Réorienter un agent en cours d'exécution](/mentioning-agents#réorienter-un-agent-en-cours-dexécution).<br />**Fenêtre de discussion flottante** : désactivée, le bouton de discussion n'apparaît plus en bas à droite. | Sur cet appareil |
+| **Ouverture des tâches** | Un clic sur une carte ou une ligne ouvre la page complète ou l'aperçu latéral. Maj+clic ouvre l'autre. | Sur cet appareil |
+| **Champs affichés à la création de tâches** | Les champs gardés dans la barre d'outils pour « Création avec un agent » et « Création manuelle ». Les champs masqués restent accessibles depuis le menu ⋯ et réapparaissent tant qu'ils contiennent une valeur. | Sur cet appareil, pour l'espace de travail actuel |
+
+## Étapes suivantes
+
+- [Discuter avec des agents](/chat) — la fenêtre de discussion flottante, les messages en file d'attente et Réorienter.
+- [Tâches](/issues) — contenu d'une tâche, statuts et vues.
+- [Commentaires](/comments) — commentaires, annotations et @mentions.

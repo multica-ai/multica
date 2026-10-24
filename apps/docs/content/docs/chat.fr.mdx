@@ -1,30 +1,63 @@
 ---
 title: "Discuter avec des agents"
-description: "Conversation privée en tête-à-tête avec un agent, en dehors de toute tâche. L'agent démarre sans aucun contexte de tâche et ne crée jamais de tâches de lui-même — mais il agit avec vos accès à l'espace de travail lorsque vous le lui demandez explicitement."
+description: "Conversation en tête-à-tête avec un agent, visible de vous seul. L'agent démarre sans contexte de tâche et ne crée pas de tâches de lui-même ; quand vous le lui demandez explicitement, il agit avec vos accès à l'espace de travail."
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { ChatDemo } from "@/components/demos/chat-demo";
+import { ChatQueueDemo } from "@/components/demos/chat-queue-demo";
 
-Discussion convient aux sujets qui n'ont pas encore pris la forme d'une tâche claire : clarifier des idées, faire le point sur l'espace de travail, discuter d'une approche, ou confier d'abord un petit travail à un agent.
+Discussion convient aux sujets qui n'ont pas encore pris la forme d'une tâche claire : clarifier des idées, faire le point sur l'espace de travail, discuter d'une approche, poser une question qui ne relève d'aucune tâche, ou confier d'abord un petit travail à un agent.
 
-**Une discussion est une conversation en tête-à-tête entre vous et un [agent](/agents)**, en dehors du tableau des [tâches](/issues). L'agent démarre **sans aucun contexte de tâche** — il ne regarde pas votre tableau et ne transformera pas la conversation en tâches de lui-même — et l'ensemble de la conversation est **entièrement privé** (personne d'autre dans l'[espace de travail](/workspaces), pas même les administrateurs, ne peut la voir). Elle convient pour discuter d'une approche avec un agent, faire un brainstorming ou poser une question qui ne relève d'aucune tâche.
+Une discussion est une conversation en tête-à-tête entre vous et un [agent](/agents), en dehors du tableau des [tâches](/issues). Elle est **entièrement privée** : personne d'autre dans l'[espace de travail](/workspaces), pas même les administrateurs, ne peut la voir.
 
-Une discussion n'est **liée à aucune tâche** : l'agent ne reçoit pas automatiquement la description et les commentaires d'une tâche, mais il peut toujours utiliser le CLI Multica pour consulter les espaces de travail, projets, tâches et skills dans la limite de ses autorisations.
+Une discussion n'est **liée à aucune tâche**. L'agent ne regarde pas votre tableau, ne reçoit pas automatiquement la description et les commentaires d'une tâche, et ne transforme pas la conversation en tâches de lui-même. Il peut toujours utiliser le CLI Multica pour consulter les espaces de travail, projets, tâches et skills dans la limite de ses autorisations, et quand vous le lui demandez explicitement, il agit avec vos accès à l'espace de travail, par exemple pour créer une tâche.
 
 Une discussion peut aussi porter un contexte. Cliquez sur **+** en bas à gauche de la zone de saisie et choisissez **Contexte de projet** pour rattacher un [projet](/projects) à la conversation ; lorsque l'agent s'exécute, il reçoit la description, les dépôts et les autres ressources de ce projet.
 
-![Une discussion avec un agent : une question dont la réponse est organisée dans un tableau](/images/docs/chat-conversation.webp)
-
 ## Démarrer une conversation
 
-1. Ouvrez **Discussion** dans la barre latérale.
-2. Cliquez sur Nouvelle discussion et choisissez un agent que vous avez la permission d'exécuter.
-3. Saisissez un message ; vous pouvez aussi joindre des images ou des fichiers.
-4. Après l'envoi, Multica crée une exécution pour le message, et la réponse revient dans la conversation en cours.
+<Steps>
+<Step>
+
+Ouvrez **Discussion** dans la barre latérale.
+
+</Step>
+<Step>
+
+Cliquez sur Nouvelle discussion et choisissez un agent que vous avez la permission d'exécuter.
+
+</Step>
+<Step>
+
+Saisissez un message ; vous pouvez aussi joindre des images ou des fichiers.
+
+</Step>
+<Step>
+
+Après l'envoi, Multica crée une exécution pour le message, et la réponse revient dans la conversation en cours.
+
+</Step>
+</Steps>
 
 Si le runtime est hors ligne, le message attend son retour en ligne. Une fois l'agent archivé, ou si vous perdez la permission de l'exécuter, vous ne pouvez plus envoyer de nouveaux messages.
 
-Avant le premier message, Discussion affiche jusqu'à trois amorces de conversation configurées pour l'agent sélectionné. En choisir une copie son prompt complet dans la zone de saisie sans l'envoyer, pour que vous puissiez d'abord l'adapter. Les agents sans amorces configurées utilisent des exemples généraux localisés.
+Avant le premier message, Discussion affiche jusqu'à trois amorces de conversation configurées pour l'agent sélectionné. En choisir une remplit seulement la zone de saisie avec son prompt complet, sans rien envoyer : vous pouvez d'abord le modifier. Les agents sans amorces configurées affichent des exemples généraux.
+
+Après la réponse de l'agent, des **Questions de suivi** s'affichent parfois en dessous. Un clic sur l'une d'elles l'envoie aussitôt.
+
+<ChatDemo />
+
+## Discuter depuis n'importe quelle page
+
+Inutile de quitter la page en cours pour discuter. Les pages de l'espace de travail affichent un bouton de discussion rond en bas à droite (son info-bulle indique « Demander à Multica ») qui ouvre une fenêtre de discussion flottante. Cette fenêtre et la page **Discussion** partagent les mêmes conversations : une discussion commencée d'un côté se poursuit de l'autre.
+
+- Appuyez sur `⌘J` (`Ctrl+J` sous Windows et Linux) pour ouvrir ou fermer la fenêtre flottante ; à l'ouverture, le curseur se place dans la zone de saisie. La touche fonctionne aussi pendant que vous tapez dans cette zone. Vous pouvez la modifier dans **Paramètres → Raccourcis** ; voir [Recherche, raccourcis et préférences](/shortcuts).
+- Faites glisser les bords de la fenêtre pour la redimensionner, ou développez-la et réduisez-la. Pendant qu'un agent répond, le bouton de discussion fermé pulse légèrement.
+- La page **Discussion** elle-même n'affiche pas ce bouton, et `⌘J` n'y fait rien : la page montre déjà la même conversation.
+
+Si vous ne voulez pas de la fenêtre flottante, désactivez **Fenêtre de discussion flottante** dans **Paramètres → Préférences → Commentaires et discussion**. La discussion n'est alors accessible que depuis la barre latérale. Ce réglage ne s'applique qu'à l'appareil utilisé.
 
 ## Discussion ou tâches
 
@@ -35,7 +68,7 @@ Avant le premier message, Discussion affiche jusqu'à trois amorces de conversat
 | Permettre à vos coéquipiers de voir le contexte et de poursuivre la discussion | **Tâche** |
 | Un coup d'œil rapide aux informations de l'espace de travail, sans besoin de garder une trace du travail | **Discussion** |
 
-Les discussions directes créées dans Multica ne sont visibles que par leur créateur ; les autres membres et les administrateurs de l'espace de travail ne peuvent pas les lire. Les conclusions que toute l'équipe doit voir doivent être consignées dans une tâche, une description de projet ou un skill.
+Seul leur créateur peut lire les discussions directes créées dans Multica ; les autres membres et les administrateurs ne le peuvent pas. Consignez les conclusions que l'équipe doit voir dans une tâche, une description de projet ou un skill.
 
 ## Contexte sur plusieurs tours
 
@@ -47,7 +80,28 @@ Si la session locale n'existe plus, si le contexte ne peut pas être poursuivi, 
 
 Pendant l'exécution de l'agent, l'interface affiche la phase en cours et l'activité des outils. Dépliez **Afficher les détails** pour inspecter l'exécution en entier.
 
-Pour l'interrompre, cliquez sur le bouton Arrêter à côté de la zone de saisie. Le contenu déjà renvoyé dans la conversation est conservé ; la saisie pas encore traitée est restaurée dans l'éditeur lorsque c'est possible.
+Pour l'interrompre, cliquez sur le bouton Arrêter à côté de la zone de saisie (affiché quand la zone est vide). Le contenu déjà renvoyé dans la conversation est conservé.
+
+Si l'agent n'avait encore rien produit, le message que vous venez d'envoyer est retiré de la conversation et revient dans la zone de saisie, pièces jointes comprises : vous pouvez le corriger et le renvoyer. L'arrêt met parfois un moment à aboutir ; recharger la page ou fermer la fenêtre entre-temps ne fait pas perdre le message, qui revient dans la zone de saisie à la prochaine ouverture de la conversation. Si la zone contient déjà un autre brouillon, le message attend que vous la vidiez.
+
+## Envoyer des messages pendant une réponse
+
+Vous pouvez continuer à écrire pendant que l'agent répond. Dès que la zone de saisie contient du texte, le bouton d'envoi devient **Mettre le message en file d'attente**. Les messages en file n'interrompent pas la réponse en cours : ils attendent dans une file au-dessus de la zone de saisie et sont traités dans l'ordre une fois la réponse terminée.
+
+| Action | Résultat |
+|---|---|
+| **Réorienter** | Place ce message en tête de file et arrête la réponse en cours. Ce que l'agent a déjà écrit reste dans la conversation, puis il traite ce message. |
+| Retirer (icône corbeille) | Retire le message de la file ; il n'est jamais envoyé à l'agent. |
+| **⋯ → Modifier le message en file d'attente** | Remet le message et ses pièces jointes dans la zone de saisie pour le modifier et le renvoyer. |
+| **⋯ → Tout effacer** | Retire tous les messages en file. La réponse en cours continue. |
+
+**Réorienter** n'est pas disponible tant que la réponse en cours n'a pas vraiment commencé (par exemple quand elle attend encore qu'un runtime la prenne en charge), ni si vous avez perdu la permission d'exécuter l'agent.
+
+<ChatQueueDemo />
+
+<Callout>
+Ici, **Réorienter** arrête d'abord la réponse en cours. Dans les commentaires d'une tâche, [Ajouter à l'exécution en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) fonctionne autrement : l'exécution n'est pas interrompue, l'agent lit le message à la fin de l'étape en cours et poursuit la tâche d'origine.
+</Callout>
 
 ## Organiser la liste des conversations
 
@@ -68,4 +122,5 @@ La suppression d'une conversation est irréversible et arrête toutes les exécu
 
 - [Assigner des tâches aux agents](/assigning-issues) — transformer une discussion en travail suivi.
 - [Boîte de réception et abonnements](/inbox) — suivre l'activité de l'équipe qui vous concerne.
+- [Recherche, raccourcis et préférences](/shortcuts) — ouvrir la discussion, rechercher et changer de page au clavier.
 - [Matrice des fournisseurs](/providers) — capacités de session et de modèle de chaque outil de codage IA.

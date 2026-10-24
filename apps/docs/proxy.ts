@@ -3,14 +3,14 @@ import { i18n } from "@/lib/i18n";
 
 const BASE_PATH = "/docs";
 
-// Self-contained i18n middleware. We don't use fumadocs-core's built-in
+// Self-contained i18n proxy. We don't use fumadocs-core's built-in
 // middleware because it isn't basePath-aware — both its rewrite targets
 // and redirect Location headers are built from the basePath-stripped path,
 // leaving URLs like `/en/agents` or `/` that Next then fails to resolve
 // inside a basePath-mounted app. Logic mirrors fumadocs's default-locale
 // flavor: hide `/en` prefix for the default language, keep `/zh` prefix
 // for other languages.
-export default function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const pathLocale = i18n.languages.find(
     (loc) => pathname === `/${loc}` || pathname.startsWith(`/${loc}/`),

@@ -4,6 +4,7 @@ description: エージェント用の Slack Bot を作成し、DM、チャンネ
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica では、自分で作成した Slack app を使います。接続すると、チームメンバーは Bot へ DM を送る、チャンネルで @メンションする、`/issue` でタスクを作成する、`/new` で新しい Multica Chat を開始する、`/clear` で現在の Chat のエージェントコンテキストをリセットするといった操作ができます。
 
@@ -16,7 +17,12 @@ Multica では、自分で作成した Slack app を使います。接続する�
 - `xoxb-` で始まる Bot User OAuth Token
 - `xapp-` で始まる App-level Token
 
-## 1. manifest から Slack app を作成する
+## Bot を接続する
+
+<Steps>
+<Step>
+
+### manifest から Slack app を作成する [#1-manifest-から-slack-app-を作成する]
 
 [Slack API Apps](https://api.slack.com/apps) を開き、**Create New App → From a manifest** をクリックして Slack workspace を選びます。次の内容を **YAML** に貼り付けてください。
 
@@ -81,25 +87,31 @@ Slack の slash command 名は workspace 全体で共有されます。インス
 
 Bot は Socket Mode で Slack へ接続するため、公開 Request URL や OAuth Redirect URL の設定は不要です。
 
-## 2. 2 つの token を取得する
+</Step>
+<Step>
 
-### Bot token
+### 2 つの token を取得する [#2-2-つの-token-を取得する]
+
+#### Bot token
 
 1. Slack app で **Install App** を開きます。
 2. **Install to Workspace** をクリックし、権限を承認します。
 3. `xoxb-` で始まる **Bot User OAuth Token** をコピーします。
 
-### App-level token
+#### App-level token
 
 1. **Basic Information → App-Level Tokens** を開きます。
 2. **Generate Token and Scopes** をクリックします。
 3. `connections:write` scope を追加します。
 4. token を生成し、`xapp-` で始まる値をコピーします。
 
-## 3. エージェントへ接続する
+</Step>
+<Step>
+
+### エージェントへ接続する [#3-エージェントへ接続する]
 
 1. Multica で**エージェント**を開き、Slack に接続するエージェントを選びます。
-2. **連携**を開き、**Slack に接続**をクリックします。
+2. **連携**を開き、**Slack を接続**をクリックします。
 3. Bot token と App-level token を入力します。
 4. **接続**をクリックします。
 
@@ -108,6 +120,9 @@ Multica は 2 つの token が同じ app のものか確認します。接続に
 <Callout type="warning">
 2 つの token は暗号化して Multica サーバーに保存されます。Token は認証情報です。タスク、コメント、コードリポジトリには書き込まないでください。ほかのエージェントやワークスペースに接続済みの app をそのまま再利用することはできません。先に元の接続を解除してください。
 </Callout>
+
+</Step>
+</Steps>
 
 ## 初回利用
 
@@ -131,7 +146,7 @@ Bot が応答するのは、明示的に @メンションされたチャンネ�
 
 ### ファイルを送る
 
-DM、または Bot を @ メンションしたチャンネルのメッセージに、そのままファイルを添付します。ファイルは同じ作業の添付ファイルとして届くので、エージェントは依頼内容と合わせて読み取れます。
+DM、または Bot を @ メンションしたチャンネルのメッセージに、そのままファイルを添付します。ファイルは添付ファイルとしてエージェントに渡され、メッセージと一緒に処理されます。
 
 これには `files:read` scope が必要です。添付ファイル対応より前にインストールした app の場合は、手順 1 の注意書きを参照してください。1 ファイルあたり 20 MiB 以下、1 メッセージにつき最大 10 件です。サイズ超過、アップロード処理中、または Slack 以外（Google Drive や Dropbox のリンクなど）にあるファイルはスキップされますが、メッセージ本文はエージェントに渡ります。
 
@@ -147,7 +162,7 @@ DM、または Bot を @ メンションしたチャンネルのメッセージ�
 
 ### `/new` で新しい Chat を開始する
 
-Bot との DM で `/new` を送ると、空の新しい Chat がすぐに作成され、Multica に表示されます。`/new <メッセージ>` では、そのメッセージが新しい Chat の最初のターンになります。引数なしの `/new` は、最初の有効なユーザーメッセージが届くまで「新しいチャット」と表示され、その後は既存の最初のメッセージに基づくタイトル処理が使われます。
+Bot との DM で `/new` を送ると、空の新しい Chat がすぐに作成され、Multica に表示されます。`/new <メッセージ>` では、そのメッセージが新しい Chat の最初のターンになります。引数なしの `/new` で作成した Chat は、最初の有効なメッセージが届くまで「新しいチャット」と表示され、その後は最初のメッセージからタイトルが付きます。
 
 以前の Chat は Multica の Web、デスクトップ、モバイルに残り、引き続きメッセージを送信できます。新しい Chat に切り替わるのは、この Slack 会話からの後続メッセージだけです。
 

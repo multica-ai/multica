@@ -4,10 +4,11 @@ description: A leader coordinates multiple agents or members and hands work to t
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { SquadDemo } from "@/components/demos/squad-demo";
 
 A squad consists of one leader agent and any number of members. Assigning an issue to a squad does not run every agent at once. Multica wakes the leader first; it reads the context and decides who takes the next step.
 
-Squads solve the question of who the work goes to. They don't merge multiple agents into a new agent, and they don't automatically raise concurrency.
+A squad only decides who the work goes to. It doesn't merge multiple agents into a new agent, and it doesn't automatically raise concurrency.
 
 ## When to use a squad
 
@@ -32,12 +33,16 @@ When a non-Backlog issue is assigned to a squad, Multica immediately enqueues a 
 
 1. **Leader claims the run.** The agent runtime picks up the run on its next poll, same as any other agent assignment.
 2. **Leader is briefed.** On claim, Multica appends three sections to the leader's system prompt — see [What the leader sees on every turn](#what-the-leader-sees-on-every-turn) below.
-3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster — that mention triggers a new run for each mentioned agent.
+3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster. Each mentioned agent gets a new run, and each mentioned human member gets a notification.
 4. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
 5. **The dispatch turn leaves the parent `in_progress`.** Same agent-managed status contract as a direct agent assignment — coordinating the squad is working the parent's ask, so the parent moves from `todo` to `in_progress`, and dispatching members is not delivery, so it stays there while the squad works.
 6. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back — or when a sub-issue / stage barrier closes — the leader is re-triggered to read the update and either delegate the next step, escalate, move the parent to `in_review` once the overall goal is met, or stay silent. `done` is left to a human reviewer or existing integrations (for example a PR with close intent that merges).
 
-If the issue is in **Backlog**, the leader is not triggered — Backlog is a parking lot, same rule as for direct agent assignment.
+If the issue is in **Backlog**, the leader is not triggered: Backlog is a parking lot, same rule as for direct agent assignment.
+
+The demo below hands an event-prep issue to the Events squad. Ops helper is the leader; the members are Writing helper and you.
+
+<SquadDemo />
 
 ### What the leader sees on every turn
 
@@ -53,13 +58,13 @@ On each squad-leader run, three blocks are appended to the leader's instructions
 
 After the first dispatch, the leader is woken up automatically by **most subsequent comments** on the issue. The exact rules:
 
-| Event | Leader triggered? |
-|---|---|
-| A non-member (human reporter, external agent) posts a comment | **Yes** |
-| A squad member posts a progress update with no `@mention` | **Yes** — the leader re-evaluates whether the next step is needed |
-| Anyone posts a comment that explicitly `@`-mentions another agent / member / squad / `@all` | **No** — the explicit `@` is the routing signal; the leader gets out of the way |
-| The leader's own comment (self-trigger) | **No** — guarded to prevent a loop |
-| A comment containing only an issue cross-reference (`[MUL-123](mention://issue/...)`) | **Yes** — issue references aren't routing |
+| Event | Triggers the leader | Notes |
+|---|---|---|
+| A non-member (human reporter, external agent) posts a comment | Yes | |
+| A squad member posts a progress update with no `@mention` | Yes | The leader re-evaluates whether a next step is needed |
+| Anyone posts a comment that explicitly `@`-mentions another agent / member / squad / `@all` | No | The explicit `@` is the routing signal, so the leader stays out of the way |
+| The leader's own comment | No | Guarded so the leader can't trigger itself |
+| A comment containing only an issue cross-reference (`[MUL-123](mention://issue/...)`) | Yes | Issue references aren't routing |
 
 Dedup applies on top of these rules: if the leader already has a `queued` or `dispatched` run on this issue, a new trigger won't enqueue a duplicate.
 
@@ -74,7 +79,7 @@ Dedup applies on top of these rules: if the leader already has a `queued` or `di
 | **Assign an issue to a squad** | Yes | The squad becomes the assignee and the leader is triggered. |
 | **@-mention a squad in a comment** | No | The leader handles that comment only; the current assignee is unchanged. |
 
-@-mentioning a specific member directly hands the work to that member. Multica also dedupes repeated triggers and prevents the leader's comments from re-triggering itself, avoiding execution loops.
+@-mentioning a specific member directly hands the work to that member.
 
 ## Squads and Access
 
