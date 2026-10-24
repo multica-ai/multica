@@ -150,8 +150,13 @@ type AutopilotTriggerResponse struct {
 	SigningSecretHint *string `json:"signing_secret_hint"`
 	Label             *string `json:"label"`
 	LastFiredAt       *string `json:"last_fired_at"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
+	// The frozen trigger owner used to resolve automatic run authority. Legacy
+	// values may have been inferred by backfill; NULL remains unknown. Ordinary
+	// edits only update published_by and never replace this recorded principal.
+	CreatedByType *string `json:"created_by_type"`
+	CreatedByID   *string `json:"created_by_id"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 	// EventFilters is the declared event scope. Only present for webhook
 	// triggers; omitted when the trigger accepts all events. Serializes as
 	// a JSON array of {event, actions?} objects — never as a base64 string
@@ -231,6 +236,8 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 		WebhookToken:   textToPtr(t.WebhookToken),
 		Label:          textToPtr(t.Label),
 		LastFiredAt:    timestampToPtr(t.LastFiredAt),
+		CreatedByType:  textToPtr(t.CreatedByType),
+		CreatedByID:    uuidToPtr(t.CreatedByID),
 		CreatedAt:      timestampToString(t.CreatedAt),
 		UpdatedAt:      timestampToString(t.UpdatedAt),
 	}
