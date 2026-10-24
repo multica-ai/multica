@@ -160,44 +160,26 @@ function useInternalLinkHandler() {
   }, []);
 }
 
-/**
- * Bridge between the renderer and the Electron main process for inbox-level
- * OS integration. Mounted inside WorkspaceSlugProvider so it can resolve the
- * current workspace's id for the badge hook.
- *
- * Two responsibilities:
- *   1. Mirror the unread inbox count onto the dock/taskbar badge.
- *   2. When the user clicks an OS notification, open the notified
- *      workspace's inbox focused on that item. The route uses the `slug`
- *      that the notification was *emitted* with — not the currently active
- *      workspace — so a notification from workspace A always opens A's
- *      inbox even if the user has since switched to workspace B. Marking
- *      the row read is handled by InboxPage's selected-item effect, which
- *      covers both click-to-select and URL-param-select paths.
- *
- * The click routes through `useNavigation().push` — NOT the
- * `multica:navigate` event, whose handler `openTab`s into the ACTIVE
- * workspace's tab group. The navigation adapter detects a cross-workspace
- * path and translates it into `switchWorkspace(slug, path)`, so clicking a
- * workspace-A notification while B is active performs a real workspace
- * switch instead of mounting A's inbox inside B's tab group (#3766).
- */
+// 通知使用发出时的工作区路径，在前台标签打开收件箱。
+// 导航适配器负责跨工作区切换；InboxPage 根据选中的工单标记已读。
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
   useDesktopUnreadBadge(workspace?.id ?? null);
-  const { push } = useNavigation();
+  const navigation = useNavigation();
   // The adapter identity changes with the active tab's location; the ref
   // keeps the main-process subscription stable across navigations.
-  const pushRef = useRef(push);
+  const navigationRef = useRef(navigation);
   useEffect(() => {
-    pushRef.current = push;
-  }, [push]);
+    navigationRef.current = navigation;
+  }, [navigation]);
 
   useEffect(() => {
     return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
       if (!slug) return;
       const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
-      pushRef.current(inboxPath);
+      navigationRef.current.openInNewTab!(inboxPath, undefined, { activate: true });
+      // 已有收件箱标签会被复用，需要更新查询参数才能选中这次通知。
+      navigationRef.current.push(inboxPath);
     });
   }, []);
 

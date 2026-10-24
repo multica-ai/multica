@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { RESOURCES } from "@multica/views/locales";
+import { getActiveTab, useTabStore } from "@/stores/tab-store";
 
 // The shell resolves the mocked `getCurrentSlug()` against the workspace list
 // before mounting workspace-scoped chrome, so the list has to contain it or
@@ -12,10 +13,7 @@ import { RESOURCES } from "@multica/views/locales";
 // desktop-layout.workspace-gate.test.tsx.
 const WORKSPACES = [{ id: "ws-1", slug: "acme" }];
 
-// The shell is the only thing under test here, so everything it mounts around
-// the sidebar is stubbed out. What survives is the pair that has to agree:
-// `WindowToolbar`'s own trigger, and the `hasExternalTrigger` the provider
-// publishes to every page header inside the canvas.
+// 隔离页面内容，保留真实导航适配器和标签存储来验证通知点击。
 vi.mock("@/hooks/use-tab-history", () => ({
   useTabHistory: () => ({
     canGoBack: false,
@@ -30,22 +28,16 @@ vi.mock("@/hooks/use-tab-history", () => ({
   useNavigationInputBindings: () => {},
 }));
 
-vi.mock("@/platform/navigation", () => ({
-  DesktopNavigationProvider: ({ children }: { children: ReactNode }) => (
-    <>{children}</>
-  ),
-  routeContentLinkPath: vi.fn(),
-}));
-
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/paths")>(),
   WorkspaceSlugProvider: ({ children }: { children: ReactNode }) => (
     <>{children}</>
   ),
-  paths: { workspace: () => ({ inbox: () => "/acme/inbox" }) },
   useCurrentWorkspace: () => null,
 }));
 
-vi.mock("@multica/core/platform", () => ({
+vi.mock("@multica/core/platform", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/platform")>(),
   getCurrentSlug: () => "acme",
   subscribeToCurrentSlug: () => () => {},
 }));
@@ -55,10 +47,6 @@ vi.mock("@multica/core/workspace", () => ({
     queryKey: ["workspace-list"],
     queryFn: async () => WORKSPACES,
   }),
-}));
-
-vi.mock("@multica/views/navigation", () => ({
-  useNavigation: () => ({ push: vi.fn() }),
 }));
 
 vi.mock("@multica/views/platform", () => ({
@@ -104,13 +92,18 @@ vi.mock("./tab-content", () => ({
 }));
 
 const { DesktopShell } = await import("./desktop-layout");
+let inboxOpen: Parameters<typeof window.desktopAPI.onInboxOpen>[0] | null = null;
 
 function renderShell() {
   (
     window as unknown as { desktopAPI: Record<string, unknown> }
   ).desktopAPI = {
+    runtimeConfig: { ok: true, config: { appUrl: "https://app.example" } },
     onNavigationGesture: () => () => {},
-    onInboxOpen: () => () => {},
+    onInboxOpen: (listener: NonNullable<typeof inboxOpen>) => {
+      inboxOpen = listener;
+      return () => { inboxOpen = null; };
+    },
   };
 
   const qc = new QueryClient({
@@ -133,6 +126,33 @@ beforeEach(() => {
     value: 1280,
   });
   localStorage.clear();
+  useTabStore.getState().reset();
+  useTabStore.getState().switchWorkspace("acme");
+});
+
+describe("DesktopShell notification navigation", () => {
+  it.each(["acme", "butter"])("opens a %s notification without replacing existing tabs", (slug) => {
+    const store = useTabStore.getState();
+    store.switchWorkspace(slug, `/${slug}/projects`);
+    store.switchWorkspace("acme");
+    const previous = useTabStore.getState().byWorkspace;
+    renderShell();
+
+    act(() => inboxOpen!({ slug, itemId: "notification-1", issueKey: "MUL-1" }));
+
+    const updated = useTabStore.getState();
+    expect(updated.activeWorkspaceSlug).toBe(slug);
+    expect(getActiveTab(updated)?.url).toBe(`/${slug}/inbox?issue=MUL-1`);
+    expect(updated.byWorkspace[slug].tabs).toHaveLength(previous[slug].tabs.length + 1);
+    for (const tab of previous[slug].tabs) {
+      expect(updated.byWorkspace[slug].tabs.find((candidate) => candidate.id === tab.id)).toEqual(tab);
+    }
+    if (slug !== "acme") expect(updated.byWorkspace.acme).toEqual(previous.acme);
+
+    act(() => inboxOpen!({ slug, itemId: "notification-2", issueKey: "MUL-2" }));
+    expect(getActiveTab(useTabStore.getState())?.url).toBe(`/${slug}/inbox?issue=MUL-2`);
+    expect(useTabStore.getState().byWorkspace[slug].tabs).toHaveLength(updated.byWorkspace[slug].tabs.length);
+  });
 });
 
 describe("DesktopShell sidebar trigger", () => {
