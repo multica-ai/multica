@@ -63,6 +63,9 @@ func backendResumeContinuityNotice(task Task) string {
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
+	if opts.readOnlyLocalDirectory != "" {
+		fmt.Fprintf(&b, "[LOCAL DIRECTORY — read-only by convention]\nRepository path: %q\nYour working directory is task-owned scratch space. This run has no repository checkout and holds no repository lock. Inspect the repository with read-only commands such as git -C <path> log/show/diff. Do not edit it, check out branches, create worktrees, or run commands that write to it (including builds or dependency installation). Other tasks may be writing there concurrently; prefer committed revisions for stable review. This is an instruction, not an OS-enforced sandbox.\n\n", opts.readOnlyLocalDirectory)
+	}
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase))
 	if task.PriorSessionResumeUnavailable {
@@ -103,6 +106,7 @@ func buildJoinedWakeupsBlock(notes string) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
+	readOnlyLocalDirectory  string
 	sharedLocalDirectory    bool
 	worktreeReplayConflicts []string
 	worktreeBranch          string
@@ -111,6 +115,11 @@ type promptOpts struct {
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
 type PromptOption func(*promptOpts)
+
+// WithReadOnlyLocalDirectory provides repository context without making it the cwd.
+func WithReadOnlyLocalDirectory(path string) PromptOption {
+	return func(o *promptOpts) { o.readOnlyLocalDirectory = path }
+}
 
 // WithSharedLocalDirectory marks a turn that runs inside the user's own
 // directory WITHOUT holding its path mutex — today, a chat turn on an in_place

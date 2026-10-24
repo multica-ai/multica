@@ -141,6 +141,39 @@ multica project resource remove <project-id> <resource-id>
 
 Resource changes affect runs created afterwards; they do not rewrite records of runs that already ended.
 
+## Per-agent execution mode
+
+An agent can override a project's `local_directory` execution mode using the
+`local_directory_mode` key in its existing `runtime_config` object:
+
+```bash
+multica agent update <agent-id> --runtime-config '{"local_directory_mode":"none"}'
+multica agent get <agent-id> --output json
+```
+
+`--runtime-config` replaces the whole object. Preserve any other runtime settings
+when updating it. Remove the key or set it to `""` to inherit the project's mode.
+The override applies only to local directories assigned to the executing daemon;
+projects without one keep their existing behavior. Squad-leader tasks continue
+using their managed task directory regardless of this setting.
+
+- `none`: use a plain task-owned working directory, with no local worktree,
+  snapshot, finalization, or per-repository lock. The prompt includes the local
+  repository path for read-only inspection of committed revisions. Multica writes
+  its context files only in the task directory. Read-only access is an agent
+  instruction, **not an OS-enforced write barrier**; use it only for trusted roles
+  that will not edit the repository or run commands that write into it. Concurrent
+  writers can change the checkout during inspection.
+- `in_place`: run in the configured local directory with the existing writer lock
+  behavior (chat turns retain their existing exemption).
+- `worktree`: use the existing isolated worktree and finalization flow.
+
+Existing agents without an override keep the project's mode. Unsupported values
+fail the task instead of silently running in the shared directory. Upgrade the
+executing daemon before using this option; older daemons do not honor the key.
+The setting is per agent across its projects; it does not introduce a project
+specific override or change GitHub repository checkout behavior.
+
 ## Next steps
 
 - [Projects](/projects) — learn about project context, progress, and the lead.

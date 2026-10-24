@@ -1213,3 +1213,114 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 	}
 	release()
 }
+
+func TestAgentLocalDirectoryMode(t *testing.T) {
+	const daemonID = "daemon"
+	raw, _ := json.Marshal(localDirectoryRef{LocalPath: t.TempDir(), DaemonID: daemonID, ExecutionMode: "worktree"})
+	for _, tc := range []struct {
+		name, config, want string
+		invalid            bool
+	}{
+		{"inherit", `{}`, "worktree", false},
+		{"null", `null`, "worktree", false},
+		{"empty", `{"local_directory_mode":""}`, "worktree", false},
+		{"none", `{"local_directory_mode":"none"}`, "none", false},
+		{"in place", `{"local_directory_mode":"in_place"}`, "in_place", false},
+		{"worktree", `{"local_directory_mode":"worktree"}`, "worktree", false},
+		{"unknown", `{"local_directory_mode":"snapshot"}`, "", true},
+		{"wrong type", `{"local_directory_mode":true}`, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := Task{ProjectResources: []ProjectResourceData{{ResourceType: localDirectoryResourceType, ResourceRef: raw}}, Agent: &AgentData{RuntimeConfig: json.RawMessage(tc.config)}}
+			got, err := localDirectoryAssignmentForTask(task, daemonID)
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("invalid override accepted")
+				}
+				return
+			}
+			if err != nil || got == nil || got.Ref.ExecutionMode != tc.want {
+				t.Fatalf("assignment=%+v err=%v want=%s", got, err, tc.want)
+			}
+			if got.SkipsCheckout() != (tc.want == "none") {
+				t.Fatal("incorrect checkout decision")
+			}
+			task.IsLeaderTask = true
+			if got, err := localDirectoryAssignmentForTask(task, daemonID); err != nil || got != nil {
+				t.Fatalf("leader bound to repository: %+v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestNoneModeSkipsHeldRepositoryLockAndPreservesWriterLock(t *testing.T) {
+	const daemonID = "daemon"
+	path := t.TempDir()
+	raw, _ := json.Marshal(localDirectoryRef{LocalPath: path, DaemonID: daemonID, ExecutionMode: "in_place"})
+	task := Task{ID: "review", ProjectResources: []ProjectResourceData{{ResourceType: localDirectoryResourceType, ResourceRef: raw}}, Agent: &AgentData{RuntimeConfig: json.RawMessage(`{"local_directory_mode":"none"}`)}}
+	assignment, err := localDirectoryAssignmentForTask(task, daemonID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{cfg: Config{DaemonID: daemonID}, localPathLocks: NewLocalPathLocker(), logger: slog.Default()}
+	release, err := d.localPathLocks.Acquire(context.Background(), assignment.RealPath, "writer", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	unlock, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default())
+	if abort || unlock != nil {
+		t.Fatal("none-mode turn acquired a repository lock")
+	}
+	if holder := d.localPathLocks.Holder(assignment.RealPath); holder != "writer" {
+		t.Fatalf("writer lock lost: %q", holder)
+	}
+	task.PriorWorkDir = path
+	if _, reuse := shouldReusePriorWorkdir(task, assignment, t.TempDir()); reuse {
+		t.Fatal("none mode reused a previous repository cwd")
+	}
+	prompt := BuildPrompt(task, "codex", WithReadOnlyLocalDirectory(path))
+	for _, want := range []string{path, "read-only by convention", "no repository checkout", "not an OS-enforced sandbox"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+}
+
+func TestRunTaskNoneModeLeavesLocalDirectoryUntouched(t *testing.T) {
+	d, _, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+	d.cfg.DaemonID = "daemon"
+	shared := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, "sentinel"), []byte("unchanged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(localDirectoryRef{LocalPath: shared, DaemonID: d.cfg.DaemonID, ExecutionMode: "worktree"})
+	task := leaderReuseTestTask("task-none")
+	task.IsLeaderTask = false
+	task.Agent.RuntimeConfig = json.RawMessage(`{"local_directory_mode":"none"}`)
+	task.ProjectResources = []ProjectResourceData{{ResourceType: localDirectoryResourceType, ResourceRef: raw}}
+	task.Repos = []RepoData{{URL: "https://example.invalid/no-automatic-checkout.git"}}
+	task.PriorWorkDir = shared
+	result, err := d.runTask(context.Background(), task, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.WorkDir == shared || result.WorkDir == "" || result.DurableWorkDir != "" || result.BranchName != "" {
+		t.Fatalf("unexpected repository binding: %+v", result)
+	}
+	if rel, err := filepath.Rel(result.EnvRoot, result.WorkDir); err != nil || rel != "workdir" {
+		t.Fatalf("workdir outside task env: %q %v", rel, err)
+	}
+	files, err := os.ReadDir(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name() != "sentinel" {
+		t.Fatalf("shared directory changed: %v", files)
+	}
+	content, err := os.ReadFile(filepath.Join(shared, "sentinel"))
+	if err != nil || string(content) != "unchanged" {
+		t.Fatalf("sentinel changed: %q %v", content, err)
+	}
+}
