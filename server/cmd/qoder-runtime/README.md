@@ -189,7 +189,7 @@ Multica agent linked to an existing QCA Agent and uses the configured environmen
 Workspace administrators can open **Runtimes → Add → Cloud services → Qoder Cloud Agents** to configure one
 managed QCA connection per workspace, load environments from the PAT and check environment access, bind GitHub
 repository tokens, and **Connect**. The Qoder Cloud Agents page can later **Pause** an idle runtime, resume it, or
-**Disconnect** it. The menu entry only appears when the server has `MULTICA_VCS_SECRET_KEY` set. The existing project
+**Disconnect** it. The menu entry remains visible without `MULTICA_VCS_SECRET_KEY`; opening it shows the required server setup instead of a connection form. The existing project
 resource picker selects the repository and starting branch. The managed form
 offers Qoder's official regions, `https://api.qoder.com/api/v1/cloud` (Global) and
 `https://api.qoder.com.cn/api/v1/cloud` (China); a PAT works only in the region
