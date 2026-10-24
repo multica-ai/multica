@@ -28,6 +28,10 @@ export const scenes = [
     id: "detail",
     label: "detail",
   },
+  {
+    id: "skillVersions",
+    label: "skillVersions",
+  },
 ] as const;
 export type Scene = (typeof scenes)[number]["id"];
 export type PreviewSettings = {

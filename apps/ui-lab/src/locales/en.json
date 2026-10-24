@@ -402,6 +402,7 @@
       "assigneePicker": "Assignee picker",
       "comments": "Comments",
       "agentRun": "Agent run",
+      "skillVersions": "Skill versions (mock)",
       "sidebar": "Sidebar",
       "list": "Issue list",
       "detail": "Issue detail",

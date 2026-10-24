@@ -295,6 +295,12 @@ export function Preview() {
             draft={settings.draft}
             speed={settings.playbackSpeed}
           />
+        ) : settings.scene === "skillVersions" ? (
+          <ProductPreview
+            key="skillVersions"
+            scene="skillVersions"
+            locale={settings.locale}
+          />
         ) : settings.scene === "list" ? (
           <ProductPreview key="list" scene="list" locale={settings.locale} />
         ) : (
