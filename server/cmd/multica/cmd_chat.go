@@ -47,7 +47,26 @@ channel.`,
 	RunE: runChatThread,
 }
 
+var chatTriggerCmd = &cobra.Command{
+	Use:   "trigger",
+	Short: "Read this task's sealed input and channel reply target",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		output, _ := cmd.Flags().GetString("output")
+		if output != "json" {
+			return fmt.Errorf("chat trigger supports only --output json")
+		}
+		resp, err := fetchChatRead(cmd, "/api/chat/trigger", "")
+		if err != nil {
+			return err
+		}
+		return cli.PrintJSON(os.Stdout, resp)
+	},
+}
+
 func init() {
+	chatTriggerCmd.Flags().String("output", "json", "Output format: json")
+	chatCmd.AddCommand(chatTriggerCmd)
 	for _, c := range []*cobra.Command{chatHistoryCmd, chatThreadCmd} {
 		c.Flags().Int("limit", 0, "Maximum number of messages to return (the server clamps the range)")
 		c.Flags().String("before", "", "Opaque cursor (a next_cursor from a prior page) to read older messages")
