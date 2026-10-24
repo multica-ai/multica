@@ -46,4 +46,16 @@ export interface Attachment {
   content_type: string;
   size_bytes: number;
   created_at: string;
+  /**
+   * An image's displayed pixel size, so a body can reserve its box before the
+   * image loads. Absent for other files and for older uploads.
+   */
+  width?: number;
+  height?: number;
+  /**
+   * Inline-load URL of a downscaled copy of a large image, with the same
+   * semantics as `download_url` (may be signed and short-lived; never
+   * persist). Absent when the image has no preview — show the original.
+   */
+  preview_url?: string;
 }

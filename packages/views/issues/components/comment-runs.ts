@@ -331,3 +331,43 @@ export function orderThreadWithRuns(
     return { run: item, reply, replyTo };
   });
 }
+
+const LONG_THREAD_HEAD = 1;
+const LONG_THREAD_TAIL = 3;
+const LONG_THREAD_MIN_FOLDED = 2;
+
+/** The middle of a long thread, folded behind a bar until the reader opens it. */
+export interface LongThreadFold {
+  head: (TimelineEntry | ThreadRunSlot)[];
+  folded: TimelineEntry[];
+  tail: (TimelineEntry | ThreadRunSlot)[];
+}
+
+/**
+ * Splits a long thread's rows into its first reply, its latest few and the
+ * comments between them, so the thread mounts a bounded number of replies
+ * (and their media) however long it grows. No fold when it would hide only a
+ * row or two, or when a row in the middle must stay on screen: a run still
+ * working, or the comment being highlighted.
+ */
+export function foldLongThread(
+  rows: readonly (TimelineEntry | ThreadRunSlot)[],
+  highlightedCommentId?: string | null,
+): LongThreadFold | null {
+  const shown = rows.filter((row) => "run" in row || !isDeletedComment(row));
+  const end = shown.length - LONG_THREAD_TAIL;
+  if (end - LONG_THREAD_HEAD < LONG_THREAD_MIN_FOLDED) return null;
+  const middle = shown.slice(LONG_THREAD_HEAD, end);
+  const pinned = middle.some((row) => "run" in row
+    ? isActiveCommentRun(row.run.task) || (!!highlightedCommentId && row.reply?.id === highlightedCommentId)
+    : row.id === highlightedCommentId);
+  if (pinned) return null;
+  return {
+    head: shown.slice(0, LONG_THREAD_HEAD),
+    folded: middle.flatMap((row) => {
+      const entry = "run" in row ? row.reply : row;
+      return entry && !isDeletedComment(entry) ? [entry] : [];
+    }),
+    tail: shown.slice(end),
+  };
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/imagepreview"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -107,7 +108,20 @@ type AttachmentResponse struct {
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	CreatedAt   string `json:"created_at"`
+	// Width and Height are an image's displayed pixel size, so a body can
+	// reserve its box before it loads. Absent for other files and for images
+	// uploaded before they were recorded.
+	Width  *int32 `json:"width,omitempty"`
+	Height *int32 `json:"height,omitempty"`
+	// PreviewURL loads a downscaled copy of a large image for inline display,
+	// with the same load semantics as DownloadURL (signed or stable path) and
+	// the same rule: never persist it. Absent when the image has no preview;
+	// the original is then shown inline.
+	PreviewURL string `json:"preview_url,omitempty"`
 }
+
+// attachmentVariantPreview selects the preview object on the download endpoint.
+const attachmentVariantPreview = "preview"
 
 // attachmentURLMode selects how DownloadURL is rendered on a response.
 //
@@ -179,6 +193,12 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
+	if a.Width.Valid && a.Height.Valid {
+		resp.Width, resp.Height = &a.Width.Int32, &a.Height.Int32
+	}
+	if a.PreviewUrl.Valid && a.PreviewUrl.String != "" {
+		resp.PreviewURL = h.attachmentPreviewURL(a.PreviewUrl.String, id, mode)
+	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
 		resp.IssueID = &s
@@ -243,6 +263,32 @@ func (h *Handler) buildMarkdownURL(a db.Attachment, id string) string {
 		return publicURL + relPath
 	}
 	return relPath
+}
+
+// attachmentPreviewURL is the inline-load URL of a stored preview, chosen the
+// way the client already loads the original: a CloudFront-signed URL, the
+// storage URL itself when it is public (public CDN, local /uploads), or the
+// stable download path with the preview variant, which the server re-signs or
+// proxies per request.
+func (h *Handler) attachmentPreviewURL(previewURL, id string, mode attachmentURLMode) string {
+	if h.CFSigner != nil {
+		if mode == attachmentURLModeStable {
+			return attachmentPreviewDownloadPath(id)
+		}
+		return h.CFSigner.SignedURL(previewURL, time.Now().Add(h.attachmentDownloadURLTTL()))
+	}
+	if h.storageURLIsPubliclyReadable(previewURL) || isSiteRelativeLocalUpload(previewURL) {
+		return previewURL
+	}
+	return attachmentPreviewDownloadPath(id)
+}
+
+func attachmentPreviewDownloadPath(id string) string {
+	return util.AttachmentDownloadPath(id) + "?variant=" + attachmentVariantPreview
+}
+
+func isSiteRelativeLocalUpload(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "/uploads/")
 }
 
 // storageURLIsPubliclyReadable returns true when the deployment has signaled
@@ -553,6 +599,15 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.ChatSessionID = task.ChatSessionID
 		}
 
+		var preview imagepreview.Result
+		if imagepreview.Supports(contentType) {
+			preview, _ = imagepreview.Process(r.Context(), data, key)
+		}
+		if preview.Width > 0 && preview.Height > 0 {
+			params.Width = pgtype.Int4{Int32: int32(preview.Width), Valid: true}
+			params.Height = pgtype.Int4{Int32: int32(preview.Height), Valid: true}
+		}
+
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
 			slog.Error("file upload failed", "error", err)
@@ -560,6 +615,15 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.Url = link
+		// The preview is an optimization: without it bodies show the original.
+		if preview.Preview != nil {
+			previewLink, err := h.Storage.Upload(r.Context(), imagepreview.PreviewKey(key), preview.Preview, preview.PreviewContentType, header.Filename)
+			if err != nil {
+				slog.Warn("image preview upload failed", "key", key, "error", err)
+			} else {
+				params.PreviewUrl = pgtype.Text{String: previewLink, Valid: true}
+			}
+		}
 
 		var att db.CreateAttachmentRow
 		if params.CommentID.Valid {
@@ -733,6 +797,14 @@ func (h *Handler) writeSignedAttachmentMetadata(w http.ResponseWriter, r *http.R
 			} else {
 				resp.AttachmentDownloadURL = dlURL
 			}
+			if resp.PreviewURL != "" {
+				previewKey := h.Storage.KeyFromURL(att.PreviewUrl.String)
+				if previewURL, err := presigner.PresignGetWithContentDisposition(r.Context(), previewKey, h.attachmentDownloadURLTTL(), ""); err != nil {
+					slog.Warn("failed to presign attachment preview URL", "id", uuidToString(att.ID), "key", previewKey, "error", err)
+				} else {
+					resp.PreviewURL = previewURL
+				}
+			}
 		}
 	case attachmentDownloadModeProxy:
 		// Proxy mode has no signed storage URL to offer, so this response
@@ -861,6 +933,11 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
+	// An image without a preview serves the original, so a stale or
+	// hand-written preview link still shows the image.
+	if r.URL.Query().Get("variant") == attachmentVariantPreview && att.PreviewUrl.Valid && att.PreviewUrl.String != "" {
+		att = previewAttachment(att, h.Storage.KeyFromURL(att.PreviewUrl.String))
+	}
 
 	key := h.Storage.KeyFromURL(att.Url)
 	switch h.resolveAttachmentDownloadMode(att.Url) {
@@ -904,6 +981,16 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusInternalServerError, "invalid attachment download mode")
 	}
+}
+
+// previewAttachment describes the preview object as the attachment the download
+// paths serve: its own URL and content type, and an unknown size, since
+// SizeBytes is the original's.
+func previewAttachment(att db.Attachment, previewKey string) db.Attachment {
+	att.Url = att.PreviewUrl.String
+	att.ContentType = imagepreview.ContentTypeForPreviewKey(previewKey)
+	att.SizeBytes = -1
+	return att
 }
 
 func (h *Handler) resolveAttachmentDownloadMode(rawURL string) attachmentDownloadMode {
@@ -1601,20 +1688,26 @@ func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachm
 
 // deleteS3Object removes a single file from S3 by its CDN URL.
 func (h *Handler) deleteS3Object(ctx context.Context, url string) {
-	if h.Storage == nil || url == "" {
-		return
-	}
-	h.Storage.Delete(ctx, h.Storage.KeyFromURL(url))
+	h.deleteS3Objects(ctx, []string{url})
 }
 
-// deleteS3Objects removes multiple files from S3 by their CDN URLs.
+// deleteS3Objects removes multiple files from S3 by their CDN URLs, together
+// with any image preview stored beside them. Deleting a preview that was never
+// written is a no-op on every backend.
 func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 	if h.Storage == nil || len(urls) == 0 {
 		return
 	}
-	keys := make([]string, len(urls))
-	for i, u := range urls {
-		keys[i] = h.Storage.KeyFromURL(u)
+	keys := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if u == "" {
+			continue
+		}
+		key := h.Storage.KeyFromURL(u)
+		keys = append(keys, key)
+		if previewKey := imagepreview.PreviewKey(key); previewKey != "" {
+			keys = append(keys, previewKey)
+		}
 	}
 	h.Storage.DeleteKeys(ctx, keys)
 }

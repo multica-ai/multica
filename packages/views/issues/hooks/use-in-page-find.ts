@@ -113,6 +113,8 @@ export interface UseInPageFindResult {
   closeFind: () => void;
   goNext: () => void;
   goPrev: () => void;
+  /** The active match's live range, if any. */
+  getActiveRange: () => Range | undefined;
 }
 
 export function useInPageFind(options: {
@@ -311,6 +313,11 @@ export function useInPageFind(options: {
     });
   }, []);
 
+  const getActiveRange = useCallback(
+    () => (activeIndexRef.current >= 0 ? rangesRef.current[activeIndexRef.current] : undefined),
+    [],
+  );
+
   return {
     open,
     query,
@@ -323,5 +330,6 @@ export function useInPageFind(options: {
     closeFind,
     goNext,
     goPrev,
+    getActiveRange,
   };
 }

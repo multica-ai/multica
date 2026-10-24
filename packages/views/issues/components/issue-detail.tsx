@@ -1913,40 +1913,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
     jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
   }, []);
-  // Jump to a mounted comment: any row in flat mode, or a reply inside a
-  // rendered thread. Drive the container's scrollTop directly — never native
-  // scrollIntoView, which also scrolls the desktop shell (#3929).
-  const jumpToComment = useCallback(
-    (commentId: string) => {
-      const el = document.getElementById(`comment-${commentId}`);
-      const container = scrollContainerEl;
-      if (!el || !container) return;
-      const c = container.getBoundingClientRect();
-      const e = el.getBoundingClientRect();
-      container.scrollTop = Math.max(0, container.scrollTop + (e.top - c.top) - 16);
-      flashJumpTarget(commentId);
-    },
-    [scrollContainerEl, flashJumpTarget],
-  );
-  const jumpToThread = useCallback(
-    (threadId: string) => {
-      // Flat mode mounts every row, so the anchor is always in the DOM.
-      if (isFlatTimeline) return jumpToComment(threadId);
-      // Virtualized mode: the target row may not be mounted, so scroll by
-      // index and let Virtuoso mount it. Offset leaves a small top gap.
-      const index = items.findIndex((it) => it.id === threadId);
-      if (index < 0) return;
-      virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
-      flashJumpTarget(threadId);
-    },
-    [isFlatTimeline, items, jumpToComment, flashJumpTarget],
-  );
   // Minimap jump to a reply. A reply's anchor exists only while its thread is
   // open, so first undo whatever hides it — the reader's own collapse, a root
-  // resolution folding the whole thread into a bar, or a reply resolution
-  // folding the other replies — then mount the thread and let the effect
-  // below align the reply once its row lands.
+  // resolution folding the whole thread into a bar, a reply resolution
+  // folding the other replies, or a long thread folding its middle — then
+  // mount the thread and let the effect below align the reply once its row
+  // lands.
   const [pendingReplyJump, setPendingReplyJump] = useState<{ replyId: string; rootId: string } | null>(null);
+  // Long threads the reader has opened past their middle fold, this session.
+  const [expandedLongThreads, setExpandedLongThreads] = useState<ReadonlySet<string>>(() => new Set());
+  const expandLongThread = useCallback(
+    (rootId: string) =>
+      setExpandedLongThreads((prev) => (prev.has(rootId) ? prev : new Set(prev).add(rootId))),
+    [],
+  );
+  // Find renders every reply; a thread the reader steps into a match in stays
+  // whole once find closes, so the match doesn't fold away under them.
+  const getFindActiveRange = find.getActiveRange;
+  useEffect(() => {
+    if (!find.open || find.activeIndex < 0) return;
+    const node = getFindActiveRange()?.startContainer;
+    const anchor = (node instanceof Element ? node : node?.parentElement)?.closest("[id^='comment-']");
+    const rootId = anchor ? replyToRoot.get(anchor.id.slice("comment-".length)) : undefined;
+    if (rootId) expandLongThread(rootId);
+  }, [find.open, find.activeIndex, find.matchCount, getFindActiveRange, replyToRoot, expandLongThread]);
   const jumpToReply = useCallback(
     (replyId: string) => {
       const rootId = replyToRoot.get(replyId);
@@ -1956,6 +1946,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       if (!rootId || !root) return;
       const collapse = useCommentCollapseStore.getState();
       if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
+      expandLongThread(rootId);
       if (!expandedResolved.has(rootId)) {
         const resolution = deriveThreadResolution(root, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES);
         if (resolution.kind === "root" || (resolution.kind === "reply" && resolution.resolutionId !== replyId)) {
@@ -1965,7 +1956,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
       setPendingReplyJump({ replyId, rootId });
     },
-    [id, items, replyToRoot, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline],
+    [id, items, replyToRoot, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline, expandLongThread],
   );
   // Land the pending reply once its row is in the DOM. The expansion commits
   // on the next render and Virtuoso mounts the thread a frame or two later, so
@@ -2008,6 +1999,36 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     rafId = requestAnimationFrame(align);
     return () => cancelAnimationFrame(rafId);
   }, [pendingReplyJump, scrollContainerEl, flashJumpTarget]);
+  // Jump to a mounted comment: any row in flat mode, or a reply inside a
+  // rendered thread. Drive the container's scrollTop directly — never native
+  // scrollIntoView, which also scrolls the desktop shell (#3929). A reply that
+  // is not mounted (folded away) takes the reply path, which unfolds it.
+  const jumpToComment = useCallback(
+    (commentId: string) => {
+      const el = document.getElementById(`comment-${commentId}`);
+      const container = scrollContainerEl;
+      if (!el && replyToRoot.has(commentId)) return jumpToReply(commentId);
+      if (!el || !container) return;
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      container.scrollTop = Math.max(0, container.scrollTop + (e.top - c.top) - 16);
+      flashJumpTarget(commentId);
+    },
+    [scrollContainerEl, replyToRoot, jumpToReply, flashJumpTarget],
+  );
+  const jumpToThread = useCallback(
+    (threadId: string) => {
+      // Flat mode mounts every row, so the anchor is always in the DOM.
+      if (isFlatTimeline) return jumpToComment(threadId);
+      // Virtualized mode: the target row may not be mounted, so scroll by
+      // index and let Virtuoso mount it. Offset leaves a small top gap.
+      const index = items.findIndex((it) => it.id === threadId);
+      if (index < 0) return;
+      virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      flashJumpTarget(threadId);
+    },
+    [isFlatTimeline, items, jumpToComment, flashJumpTarget],
+  );
   const jumpToMinimapTarget = useCallback(
     (commentId: string) =>
       replyToRoot.has(commentId) ? jumpToReply(commentId) : jumpToThread(commentId),
@@ -2272,6 +2293,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!el || !container) return;
 
     didHighlightRef.current = highlightCommentId;
+    // The deep link renders the timeline flat; keep the landed thread whole
+    // for when it goes back to folding long threads.
+    if (rootId && rootId !== highlightCommentId) expandLongThread(rootId);
     // Record the landing in the memento so a remount that merely restores
     // this view (tab switch back) skips the jump instead of replaying it
     // over the restored scroll position.
@@ -2314,7 +2338,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       cancelAnimationFrame(rafId);
       clearTimeout(fade);
     };
-  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
+  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand, expandLongThread]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -3101,6 +3125,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onCopyLink: actions.copyCommentLink, onJumpToComment: jumpToComment,
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
             expandedResolvedIds: expandedResolved, onResolvedExpandChange: toggleResolvedExpand,
+            foldLongThread: !isFlatTimeline && !expandedLongThreads.has(reply.id), onExpandLongThread: expandLongThread,
             highlightedCommentId: highlightedId,
             runs: commentRuns.get(reply.id) ?? EMPTY_COMMENT_RUNS, enteringRunIds,
           } : undefined} />}
@@ -3141,6 +3166,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
+            foldLongThread={!isFlatTimeline && !expandedLongThreads.has(item.id)}
+            onExpandLongThread={expandLongThread}
             highlightedCommentId={highlightedId}
           />
         </div>

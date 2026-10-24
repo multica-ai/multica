@@ -33,7 +33,7 @@ import {
   Maximize2,
   Trash2,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -52,6 +52,7 @@ import {
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
+import { imageDimensions, imagePreviewURL } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
 // Public API
@@ -118,6 +119,21 @@ interface Normalized {
   uploading: boolean;
   width?: number;
   height?: number;
+  /** Downscaled copy an inline image renders instead of the original. */
+  previewUrl?: string;
+}
+
+function recordImageFields(
+  record: AttachmentRecord | undefined,
+): Pick<Normalized, "width" | "height" | "previewUrl"> {
+  if (!record) return {};
+  const dims = imageDimensions(record);
+  const previewUrl = imagePreviewURL(record);
+  return {
+    width: dims?.width,
+    height: dims?.height,
+    previewUrl: previewUrl ? absolutizeMediaURL(previewUrl) : undefined,
+  };
 }
 
 function normalize(
@@ -136,9 +152,12 @@ function normalize(
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
+      ...recordImageFields(input.attachment),
     };
   }
   const record = input.url ? resolve(input.url) : undefined;
+  const fromRecord = recordImageFields(record);
+  const ownSize = input.width !== undefined || input.height !== undefined;
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
@@ -169,8 +188,9 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
-    width: input.width,
-    height: input.height,
+    width: ownSize ? input.width : fromRecord.width,
+    height: ownSize ? input.height : fromRecord.height,
+    previewUrl: input.uploading ? undefined : fromRecord.previewUrl,
   };
 }
 
@@ -300,12 +320,26 @@ export function Attachment({
   // freshly signed URL on clients that can't load the endpoint natively, or —
   // on deployments that have no signed URL to give — to an object URL built
   // from the authenticated byte fetch. Only the image branch renders a native
-  // resource load, so only it opts into that byte fetch.
+  // resource load, so only it opts into that byte fetch — and only for the
+  // bytes it paints: the preview when the image has one, the original once
+  // the preview fails to load.
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const previewUrl =
+    kind === "image" && !previewFailed ? state.previewUrl : undefined;
   const { url: mediaUrl } = useResignedInlineMedia(
     state.attachmentId,
     state.url,
-    kind === "image",
+    kind === "image" && !previewUrl,
   );
+  const previewMedia = useResignedInlineMedia(
+    state.attachmentId,
+    previewUrl ?? "",
+    true,
+    "preview",
+  );
+  // A preview that has not finished upgrading would only fail to load and be
+  // mistaken for a broken preview.
+  const imageSrc = previewUrl ? (previewMedia.pending ? "" : previewMedia.url) : mediaUrl;
   // Object URLs are session-local, so anything that hands a URL to the user or
   // to another surface keeps the durable pick instead.
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
@@ -359,7 +393,8 @@ export function Attachment({
     return (
       <>
         <ImageAttachmentView
-          src={mediaUrl}
+          src={imageSrc}
+          onError={previewUrl ? () => setPreviewFailed(true) : undefined}
           linkUrl={shareUrl}
           alt={state.filename}
           uploading={state.uploading}
@@ -425,6 +460,8 @@ export function Attachment({
 
 interface ImageAttachmentViewProps {
   src: string;
+  /** Called instead of showing the broken image when `src` fails to load. */
+  onError?: () => void;
   /**
    * URL handed to the user by Copy Link. Splits from `src` only when `src` is
    * a session-local object URL (proxy-mode byte fallback) — pasting a `blob:`
@@ -445,6 +482,7 @@ interface ImageAttachmentViewProps {
 
 function ImageAttachmentView({
   src,
+  onError,
   linkUrl,
   alt,
   uploading,
@@ -474,6 +512,23 @@ function ImageAttachmentView({
   // cursor: zoom-in }` keys off this same flag for the cursor affordance.
   const clickable = !editable && !uploading;
 
+  // An image that has not loaded has no size of its own (the figure shrinks
+  // to it), so its box is reserved up front: from its pixel size when known,
+  // otherwise as a fixed-ratio placeholder. Once anything has painted the box
+  // follows the image.
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setLoaded(true);
+  }, []);
+  const sized = !!width && !!height;
+  const pending = !loaded && !sized && !uploading;
+  const sizeStyle = sized
+    ? ({
+        "--image-width": `${width}px`,
+        "--image-aspect": `${width! / height!}`,
+      } as CSSProperties)
+    : undefined;
+
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
   // the NodeViewWrapper still emits its own outer .image-node div around
@@ -487,16 +542,25 @@ function ImageAttachmentView({
           className,
         )}
         data-clickable={clickable || undefined}
+        data-sized={sized || undefined}
+        data-pending={pending || undefined}
+        style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
       >
         <img
+          ref={imgRef}
           src={src || undefined}
           alt={alt}
           width={width}
           height={height}
+          loading="lazy"
+          decoding="async"
+          data-loaded={loaded || undefined}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
+          onLoad={() => setLoaded(true)}
+          onError={() => (onError ? onError() : setLoaded(true))}
         />
         {!uploading && src && (
           <span

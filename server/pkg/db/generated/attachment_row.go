@@ -18,5 +18,8 @@ func (r CreateAttachmentRow) Attachment() Attachment {
 		ChatSessionID: r.ChatSessionID,
 		ChatMessageID: r.ChatMessageID,
 		TaskID:        r.TaskID,
+		Width:         r.Width,
+		Height:        r.Height,
+		PreviewUrl:    r.PreviewUrl,
 	}
 }
