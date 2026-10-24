@@ -1,0 +1,127 @@
+{
+  "page": {
+    "title": "Odebrane",
+    "back": "Odebrane"
+  },
+  "menu": {
+    "mark_all_read": "Oznacz wszystkie jako przeczytane",
+    "archive_all": "Zarchiwizuj wszystkie",
+    "archive_all_read": "Zarchiwizuj wszystkie przeczytane",
+    "archive_completed": "Zarchiwizuj ukończone"
+  },
+  "filters": {
+    "tooltip": "Filtruj skrzynkę",
+    "active_count_one": "{{count}} aktywny filtr",
+    "active_count_few": "{{count}} aktywne filtry",
+    "active_count_many": "{{count}} aktywnych filtrów",
+    "active_count_other": "{{count}} aktywnego filtra",
+    "status": "Status",
+    "priority": "Priorytet",
+    "from": "Od",
+    "unread_only": "Tylko nieprzeczytane",
+    "no_agents_working": "Brak pracujących agentów",
+    "notification_count_one": "{{count}} powiadomienie",
+    "notification_count_few": "{{count}} powiadomienia",
+    "notification_count_many": "{{count}} powiadomień",
+    "notification_count_other": "{{count}} powiadomienia",
+    "clear": "Wyczyść filtry",
+    "empty": "Brak powiadomień pasujących do filtrów"
+  },
+  "context_menu": {
+    "mark_read": "Oznacz jako przeczytane",
+    "mark_unread": "Oznacz jako nieprzeczytane",
+    "archive": "Archiwizuj",
+    "unarchive": "Przywróć z archiwum",
+    "open_in_new_tab": "Otwórz w nowej karcie"
+  },
+  "list": {
+    "loading_selection": "Wczytywanie powiadomienia…",
+    "empty": "Brak powiadomień",
+    "mark_done_tooltip": "Oznacz jako ukończone",
+    "archive_tooltip": "Archiwizuj",
+    "time": {
+      "just_now": "właśnie teraz",
+      "minutes": "{{count}} min",
+      "hours": "{{count}} godz.",
+      "days": "{{count}} dni"
+    },
+    "archived_title": "Zarchiwizowane",
+    "archived_empty": "Brak zarchiwizowanych powiadomień",
+    "unarchive_tooltip": "Przywróć z archiwum",
+    "actions_aria": "Akcje powiadomienia",
+    "load_more": "Wczytaj więcej",
+    "loading_more": "Wczytywanie…",
+    "retry": "Ponów"
+  },
+  "detail": {
+    "select_prompt": "Wybierz powiadomienie, aby zobaczyć szczegóły",
+    "empty": "Twoja skrzynka jest pusta",
+    "original_input": "Oryginalna treść",
+    "retry_with_context": "Ponów z kontekstem",
+    "edit_advanced": "Edytuj jako formularz zaawansowany",
+    "autopilot_quota_exceeded_body": "Ta przestrzeń robocza osiągnęła limit {{limit}} uruchomień autopilota w bieżącym okresie. Kolejne uruchomienia autopilota nie zaczną się, dopóki limit nie zostanie zresetowany {{resetAt}}.",
+    "autopilot_quota_upgrade": "Zobacz opcje aktualizacji planu",
+    "archive": "Archiwizuj",
+    "unarchive": "Przywróć z archiwum"
+  },
+  "types": {
+    "issue_assigned": "Przypisano",
+    "issue_subscribed": "Obserwowane",
+    "unassigned": "Cofnięto przypisanie",
+    "assignee_changed": "Zmieniono osobę przypisaną",
+    "status_changed": "Zmieniono status",
+    "priority_changed": "Zmieniono priorytet",
+    "start_date_changed": "Zmieniono datę rozpoczęcia",
+    "due_date_changed": "Zmieniono termin",
+    "new_comment": "Nowy komentarz",
+    "mentioned": "Wspomniano",
+    "review_requested": "Zażądano recenzji",
+    "task_completed": "Uruchomienie ukończone",
+    "task_failed": "Uruchomienie nie powiodło się",
+    "agent_blocked": "Agent zablokowany",
+    "agent_completed": "Agent ukończył",
+    "reaction_added": "Zareagowano",
+    "quick_create_done": "Utworzono z agentem",
+    "quick_create_failed": "Tworzenie z agentem nie powiodło się",
+    "quick_create_unconfirmed": "Tworzenie z agentem niepotwierdzone",
+    "autopilot_paused": "Autopilot wstrzymany",
+    "children_done": "Podzadania ukończone",
+    "autopilot_quota_exceeded": "Osiągnięto limit uruchomień autopilota"
+  },
+  "labels": {
+    "set_status_to": "Ustawiono status na",
+    "set_priority_to": "Ustawiono priorytet na",
+    "assigned_to": "Przypisano do {{name}}",
+    "removed_assignee": "Usunięto osobę przypisaną",
+    "set_start_date_to": "Ustawiono datę rozpoczęcia na {{date}}",
+    "removed_start_date": "Usunięto datę rozpoczęcia",
+    "set_due_date_to": "Ustawiono termin na {{date}}",
+    "removed_due_date": "Usunięto termin",
+    "reacted_to_comment": "Zareagowano {{emoji}} na Twój komentarz",
+    "created_with_agent": "Utworzono z agentem: {{identifier}}",
+    "failed_with_detail": "Nie powiodło się: {{detail}}",
+    "autopilot_quota_blocked": "Uruchomienie zablokowane, ponieważ osiągnięto limit",
+    "children_done_stage": "Podzadania etapu {{stage}} ukończone"
+  },
+  "toasts": {
+    "source_context_retry_started": "Rozpoczęto ponowienie z oryginalnym kontekstem",
+    "archived": "Powiadomienie zarchiwizowane",
+    "unarchived": "Powiadomienie przywrócone"
+  },
+  "errors": {
+    "archived_lookup_failed": "Nie udało się wczytać powiązanego powiadomienia",
+    "source_context_retry_failed": "Nie udało się ponowić z oryginalnym kontekstem",
+    "source_context_retry_unavailable": "Tego kontekstu nie można już ponowić. Zacznij ponownie od punktu rozwidlenia.",
+    "mark_read_failed": "Nie udało się oznaczyć jako przeczytane",
+    "mark_unread_failed": "Nie udało się oznaczyć jako nieprzeczytane",
+    "archive_failed": "Archiwizowanie nie powiodło się",
+    "mark_done_failed": "Nie udało się oznaczyć jako ukończone",
+    "mark_all_read_failed": "Nie udało się oznaczyć wszystkich jako przeczytane",
+    "archive_all_failed": "Nie udało się zarchiwizować wszystkich",
+    "archive_all_read_failed": "Nie udało się zarchiwizować przeczytanych",
+    "archive_completed_failed": "Nie udało się zarchiwizować ukończonych",
+    "unarchive_failed": "Przywracanie z archiwum nie powiodło się",
+    "archived_load_failed": "Nie udało się wczytać zarchiwizowanych powiadomień",
+    "filters_load_failed": "Nie udało się wczytać filtrów"
+  }
+}

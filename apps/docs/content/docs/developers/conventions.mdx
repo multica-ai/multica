@@ -120,10 +120,10 @@ The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice
 
 `issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
 
-| Entity | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| Entity | en | zh-Hans | ja | ko | fr | pl |
+| --- | --- | --- | --- | --- | --- | --- |
+| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** | **Zadanie** |
+| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** | **Uruchomienie** |
 
 Both concepts are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word. `Task` is no longer a user-facing product noun for an agent run; it remains only as the established internal identifier.
 
@@ -221,6 +221,8 @@ Always put **a single space** between an English word (entity / brand / acronym)
 ### Plurals and counts
 
 i18next uses `_one` / `_other`; Chinese has no grammatical number, only fill `_other`.
+Polish has four CLDR categories and i18next does not fall back from `_few`/`_many`
+to `_other` within a language, so plural keys ship all four forms:
 
 ```json
 // en/issues.json
@@ -232,6 +234,14 @@ i18next uses `_one` / `_other`; Chinese has no grammatical number, only fill `_o
 // zh-Hans/issues.json
 {
   "issue_count_other": "{{count}} 个任务"
+}
+
+// pl/issues.json
+{
+  "issue_count_one": "{{count}} zadanie",
+  "issue_count_few": "{{count}} zadania",
+  "issue_count_many": "{{count}} zadań",
+  "issue_count_other": "{{count}} zadania"
 }
 ```
 

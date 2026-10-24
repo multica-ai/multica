@@ -1,0 +1,117 @@
+{
+  "title": "Analityka",
+  "tab_usage": "Użycie",
+  "header": {
+    "timezone_and_updated": "{{tz}} · zaktualizowano {{time}}",
+    "refresh": "Odśwież"
+  },
+  "filter": {
+    "project_label": "Projekt",
+    "all_projects": "Wszystkie projekty",
+    "period_label": "Okres"
+  },
+  "kpi": {
+    "cost_label": "Koszt · {{days}}D",
+    "tokens_label": "Tokeny · {{days}}D",
+    "tokens_hint": "Wejście {{input}} · Wyjście {{output}}",
+    "run_time_label": "Czas uruchomień · {{days}}D",
+    "run_time_hint": "Na podstawie {{tasks}} uruchomień",
+    "tasks_label": "Uruchomienia · {{days}}D",
+    "tasks_hint": "Nieudane: {{failed}}"
+  },
+  "dim": {
+    "label": "Wymiar",
+    "daily": "Dziennie",
+    "weekly": "Tygodniowo"
+  },
+  "daily": {
+    "title_cost": "Koszt dzienny",
+    "title_tokens": "Tokeny dzienne",
+    "title_time": "Dzienny czas uruchomień",
+    "title_tasks": "Dzienne uruchomienia",
+    "title_errors": "Błędy dzienne",
+    "metric_cost": "Koszt",
+    "metric_tokens": "Tokeny",
+    "metric_time": "Czas",
+    "metric_tasks": "Uruchomienia",
+    "no_data": "Brak użycia w tym okresie.",
+    "metric_label": "Metryka"
+  },
+  "weekly": {
+    "title_cost": "Koszt tygodniowy",
+    "title_tokens": "Tokeny tygodniowe",
+    "title_time": "Tygodniowy czas uruchomień",
+    "title_tasks": "Tygodniowe uruchomienia",
+    "title_errors": "Błędy tygodniowe",
+    "partial_label": "{{range}} (częściowy · {{covered}} / 7 dni)"
+  },
+  "errors": {
+    "kpi_failed_label": "Nieudane uruchomienia · {{days}}D",
+    "kpi_failed_hint": "Spośród {{total}} uruchomień",
+    "kpi_rate_label": "Wskaźnik błędów · {{days}}D",
+    "kpi_agents_label": "Dotknięci agenci · {{days}}D",
+    "kpi_agents_hint": "Najgorszy: {{name}} · {{count}}",
+    "tooltip_rate": "Wskaźnik błędów",
+    "class": {
+      "auth": "Uwierzytelnianie",
+      "rate_limit": "Limit zapytań",
+      "timeout": "Przekroczenie czasu",
+      "provider": "Dostawca",
+      "runtime": "Runtime",
+      "agent": "Agent",
+      "other": "Inne"
+    },
+    "title": "Błędy",
+    "summary": "{{failed}} z {{total}} uruchomień nie powiodło się · {{rate}}",
+    "mix_title": "Rozkład błędów · {{failed}}",
+    "mix_label": "Rozkład błędów",
+    "codes_label": "Kody błędów",
+    "by_agent": "Najwięksi winowajcy",
+    "sort_label": "Sortuj winowajców według",
+    "sort_failed": "Liczba błędów",
+    "sort_rate": "Wskaźnik",
+    "header_agent": "Agent",
+    "header_failed": "Nieudane",
+    "header_runs": "Uruchomienia",
+    "header_rate": "Wskaźnik",
+    "other_agents": "Pozostali agenci",
+    "low_sample": "W tym okresie wykonano mniej niż {{count}} uruchomień — ten wskaźnik nie jest miarodajny.",
+    "no_data": "Brak nieudanych uruchomień w tym okresie.",
+    "show_reasons": "Pokaż kody błędów",
+    "hide_reasons": "Ukryj kody błędów",
+    "show_all": "Pokaż wszystkie ({{count}})",
+    "show_less": "Pokaż tylko pierwsze {{count}}"
+  },
+  "leaderboard": {
+    "title": "Ranking",
+    "caption": "Agentów: {{count}}",
+    "caption_with_deleted": "Agentów: {{count}} · usuniętych: {{deleted}}",
+    "sort_label": "Sortuj agentów według",
+    "deleted_agents": "Usunięci agenci",
+    "other_agents": "Pozostali agenci",
+    "header_agent": "Agent",
+    "header_tokens": "Tokeny",
+    "header_cost": "Koszt",
+    "header_time": "Czas",
+    "header_tasks": "Uruchomienia",
+    "usage_unreported_one": "{{count}} uruchomienie nie zgłosiło użycia",
+    "usage_unreported_few": "{{count}} uruchomienia nie zgłosiły użycia",
+    "usage_unreported_many": "{{count}} uruchomień nie zgłosiło użycia",
+    "usage_unreported_other": "{{count}} uruchomienia nie zgłosiło użycia",
+    "usage_unreported_pending_one": "{{count}} uruchomienie nie zgłosiło użycia · sumy są wciąż przetwarzane",
+    "usage_unreported_pending_few": "{{count}} uruchomienia nie zgłosiły użycia · sumy są wciąż przetwarzane",
+    "usage_unreported_pending_many": "{{count}} uruchomień nie zgłosiło użycia · sumy są wciąż przetwarzane",
+    "usage_unreported_pending_other": "{{count}} uruchomienia nie zgłosiło użycia · sumy są wciąż przetwarzane",
+    "usage_totals_pending": "Sumy użycia są wciąż przetwarzane",
+    "show_all": "Pokaż wszystko",
+    "show_less": "Pokaż tylko pierwsze {{count}}",
+    "no_data": "Brak aktywności agentów w tym okresie."
+  },
+  "empty": {
+    "title": "Brak danych o użyciu",
+    "body": "Uruchom agentów, aby zobaczyć użycie tokenów i czas uruchomień."
+  },
+  "duration": {
+    "less_than_minute": "<1 min"
+  }
+}

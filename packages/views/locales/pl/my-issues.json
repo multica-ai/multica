@@ -1,0 +1,47 @@
+{
+  "page": {
+    "breadcrumb": "Moje zadania",
+    "workspace_fallback": "Przestrzeń robocza",
+    "empty_title": "Brak zadań przypisanych do Ciebie",
+    "empty_description": "Tutaj pojawią się zadania, które utworzysz lub które będą Ci przypisane."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Wszystkie",
+      "all_description": "Przypisane do mnie, utworzone przeze mnie lub dotyczące moich agentów i zespołów",
+      "assigned_label": "Przypisane",
+      "assigned_description": "Zadania przypisane do mnie",
+      "created_label": "Utworzone",
+      "created_description": "Zadania utworzone przeze mnie",
+      "agents_label": "Moje agenty i zespoły",
+      "agents_description": "Zadania przypisane do moich agentów"
+    },
+    "filter_button": "Filtruj",
+    "filter_status": "Status",
+    "filter_priority": "Priorytet",
+    "issue_count_one": "{{count}} zadanie",
+    "issue_count_few": "{{count}} zadania",
+    "issue_count_many": "{{count}} zadań",
+    "issue_count_other": "{{count}} zadań",
+    "reset_filters": "Zresetuj wszystkie filtry",
+    "display_settings": "Ustawienia wyświetlania",
+    "grouping": "Grupowanie",
+    "group_status": "Status",
+    "group_assignee": "Osoba przypisana",
+    "ordering": "Kolejność",
+    "ascending": "Rosnąco",
+    "descending": "Malejąco",
+    "card_properties": "Właściwości karty",
+    "view_board": "Widok tablicy",
+    "view_list": "Widok listy",
+    "view_swimlane": "Widok torów",
+    "view_label": "Widok",
+    "view_board_short": "Tablica",
+    "view_list_short": "Lista",
+    "view_swimlane_short": "Tory",
+    "sort_manual": "Ręcznie"
+  },
+  "errors": {
+    "move_failed": "Nie udało się przenieść zadania"
+  }
+}

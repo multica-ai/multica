@@ -118,10 +118,10 @@ Multica 的产品名词分两类：
 
 `issue` 是这个「用户提出、智能体去做的事」的英文产品名。在英文之外的每种语言里，它就是当地最日常的那个「任务」词：
 
-| 实体 | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| 提交出来的一件事（`issue`） | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| 智能体的一次执行记录（API / DB 中为 `task`） | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| 实体 | en | zh-Hans | ja | ko | fr | pl |
+| --- | --- | --- | --- | --- | --- | --- |
+| 提交出来的一件事（`issue`） | Issue | **任务** | **タスク** | **태스크** | **Tâche** | **Zadanie** |
+| 智能体的一次执行记录（API / DB 中为 `task`） | **Run** | **运行** | **実行** | **실행** | **Exécution** | **Uruchomienie** |
 
 这两个概念用户都看得到，而且**不是一回事** —— 一个任务下面可以有多次运行。任何一种语言都不能把两者写成同一个词。`Task` 不再是智能体单次运行的用户侧产品名，只保留为已经稳定的内部标识符。
 
@@ -219,6 +219,7 @@ UI 里展示这些值时保持英文（必要时用 code-style 包起来）：
 ### 复数与计数
 
 i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`。
+波兰语有四个 CLDR 复数类别，且 i18next 在同一语言内不会从 `_few`/`_many` 回退到 `_other`，所以复数键必须四种形式都写全：
 
 ```json
 // en/issues.json
@@ -230,6 +231,14 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 // zh-Hans/issues.json
 {
   "issue_count_other": "{{count}} 个任务"
+}
+
+// pl/issues.json
+{
+  "issue_count_one": "{{count}} zadanie",
+  "issue_count_few": "{{count}} zadania",
+  "issue_count_many": "{{count}} zadań",
+  "issue_count_other": "{{count}} zadania"
 }
 ```
 

@@ -1,0 +1,132 @@
+{
+  "avatar_upload": {
+    "change": "Zmień avatar",
+    "remove": "Usuń",
+    "select_image": "Wybierz plik obrazu.",
+    "updated": "Zaktualizowano avatar",
+    "failed": "Nie udało się przesłać avatara",
+    "upload_image": "Prześlij obraz",
+    "emoji_label": "Emoji",
+    "more_emojis": "Więcej emoji…",
+    "emoji_loading": "Wczytywanie…"
+  },
+  "avatar_crop": {
+    "title": "Edytuj avatar",
+    "zoom": "Powiększenie",
+    "zoom_in": "Powiększ",
+    "zoom_out": "Pomniejsz",
+    "rotate": "Obróć",
+    "reset": "Resetuj",
+    "cancel": "Anuluj",
+    "apply": "Zapisz",
+    "uploading": "Przesyłanie…",
+    "loading": "Wczytywanie…",
+    "load_failed": "Nie udało się wczytać obrazu"
+  },
+  "color_picker": {
+    "saturation": "Nasycenie i jasność",
+    "hue": "Odcień",
+    "hex": "Kolor HEX",
+    "eyedropper": "Pobierz kolor z ekranu",
+    "presets": "Presety",
+    "random": "Losowy"
+  },
+  "save": "Zapisz",
+  "cancel": "Anuluj",
+  "delete": "Usuń",
+  "confirm": "Potwierdź",
+  "loading": "Wczytywanie...",
+  "time": {
+    "just_now": "właśnie teraz",
+    "minutes_ago": "{{count}} min temu",
+    "hours_ago": "{{count}} godz. temu",
+    "days_ago": "{{count}} dni temu"
+  },
+  "lark_bind": {
+    "page_title": "Powiąż konto Lark",
+    "redeeming": "Realizowanie tokenu powiązania…",
+    "needs_auth_description": "Zaloguj się do Multica, aby ukończyć powiązanie. Token w linku wiąże Twoje konto Lark z tym użytkownikiem Multica, więc musisz być najpierw zalogowany.",
+    "sign_in": "Zaloguj się",
+    "done_title": "Konta zostały powiązane.",
+    "done_description": "Twoja następna wiadomość do bota w Lark trafi prosto do agenta. Możesz zamknąć tę kartę.",
+    "error_title": "Nie udało się ukończyć powiązania",
+    "error_admin_hint": "Jeśli ten problem się powtarza, poproś administratora przestrzeni roboczej o ponowne wysłanie linku powiązania z Lark.",
+    "error_missing_token": "W linku brakuje tokenu powiązania. Poproś bota o wysłanie nowego w Lark.",
+    "error_expired": "Ten link powiązania jest nieprawidłowy lub wygasł (linki są ważne 15 minut). Poproś bota o wysłanie nowego.",
+    "error_already_bound": "To konto Lark jest już powiązane z innym użytkownikiem Multica. Przeniesienie konta wymaga wcześniejszego jawnego rozwiązania powiązania.",
+    "error_not_member": "Jesteś zalogowany do konta Multica, które nie jest członkiem tej przestrzeni roboczej.",
+    "error_unknown": "Coś poszło nie tak. Spróbuj ponownie, a jeśli problem nie ustąpi, skontaktuj się z administratorem przestrzeni roboczej."
+  },
+  "slack_bind": {
+    "page_title": "Połącz konto Slack",
+    "redeeming": "Łączenie konta…",
+    "needs_auth_description": "Zaloguj się do Multica, aby ukończyć łączenie kont. Token w linku łączy Twoje konto Slack z tym użytkownikiem Multica, więc musisz być najpierw zalogowany.",
+    "sign_in": "Zaloguj się",
+    "done_title": "Konta zostały połączone.",
+    "done_description": "Twoja następna wiadomość do bota w Slacku trafi prosto do agenta. Możesz zamknąć tę kartę.",
+    "error_title": "Nie udało się ukończyć łączenia kont",
+    "error_admin_hint": "Jeśli ten problem się powtarza, napisz ponownie do bota w Slacku, aby uzyskać nowy link.",
+    "error_missing_token": "W linku brakuje tokenu. Napisz ponownie do bota w Slacku, aby uzyskać nowy.",
+    "error_expired": "Ten link jest nieprawidłowy lub wygasł (linki są ważne 15 minut). Napisz ponownie do bota, aby uzyskać nowy.",
+    "error_already_bound": "To konto Slack jest już połączone z innym użytkownikiem Multica. Przeniesienie konta wymaga wcześniejszego jawnego rozłączenia kont.",
+    "error_not_member": "Jesteś zalogowany do konta Multica, które nie jest członkiem tej przestrzeni roboczej.",
+    "error_unknown": "Coś poszło nie tak. Spróbuj ponownie, a jeśli problem nie ustąpi, skontaktuj się z administratorem przestrzeni roboczej."
+  },
+  "dingtalk_bind": {
+    "page_title": "Połącz konto DingTalk",
+    "redeeming": "Łączenie konta…",
+    "needs_auth_description": "Zaloguj się do Multica, aby ukończyć łączenie kont. Token w linku łączy Twoje konto DingTalk z tym użytkownikiem Multica, więc musisz być najpierw zalogowany.",
+    "sign_in": "Zaloguj się",
+    "done_title": "Konta zostały połączone.",
+    "done_description": "Twoja następna wiadomość do bota w DingTalk trafi prosto do agenta. Możesz zamknąć tę kartę.",
+    "error_title": "Nie udało się ukończyć łączenia kont",
+    "error_admin_hint": "Jeśli ten problem się powtarza, napisz ponownie do bota w DingTalk, aby uzyskać nowy link.",
+    "error_missing_token": "W linku brakuje tokenu. Napisz ponownie do bota w DingTalk, aby uzyskać nowy.",
+    "error_expired": "Ten link jest nieprawidłowy lub wygasł (linki są ważne 15 minut). Napisz ponownie do bota, aby uzyskać nowy.",
+    "error_already_bound": "To konto DingTalk jest już połączone z innym użytkownikiem Multica. Przeniesienie konta wymaga wcześniejszego jawnego rozłączenia kont.",
+    "error_not_member": "Jesteś zalogowany do konta Multica, które nie jest członkiem tej przestrzeni roboczej.",
+    "error_unknown": "Coś poszło nie tak. Spróbuj ponownie, a jeśli problem nie ustąpi, skontaktuj się z administratorem przestrzeni roboczej."
+  },
+  "telegram_bind": {
+    "page_title": "Połącz konto Telegram",
+    "redeeming": "Łączenie konta…",
+    "needs_auth_description": "Zaloguj się do Multica, aby ukończyć łączenie kont. Token w linku łączy Twoje konto Telegram z tym użytkownikiem Multica, więc musisz być najpierw zalogowany.",
+    "sign_in": "Zaloguj się",
+    "done_title": "Konta zostały połączone.",
+    "done_description": "Twoja następna wiadomość do bota w Telegramie trafi prosto do agenta. Możesz zamknąć tę kartę.",
+    "error_title": "Nie udało się ukończyć łączenia kont",
+    "error_admin_hint": "Jeśli ten problem się powtarza, napisz ponownie do bota w Telegramie, aby uzyskać nowy link.",
+    "error_missing_token": "W linku brakuje tokenu. Napisz ponownie do bota w Telegramie, aby uzyskać nowy.",
+    "error_expired": "Ten link jest nieprawidłowy lub wygasł (linki są ważne 15 minut). Napisz ponownie do bota, aby uzyskać nowy.",
+    "error_already_bound": "To konto Telegram jest już połączone z innym użytkownikiem Multica. Przeniesienie konta wymaga wcześniejszego jawnego rozłączenia kont.",
+    "error_not_member": "Jesteś zalogowany do konta Multica, które nie jest członkiem tej przestrzeni roboczej.",
+    "error_unknown": "Coś poszło nie tak. Spróbuj ponownie, a jeśli problem nie ustąpi, skontaktuj się z administratorem przestrzeni roboczej."
+  },
+  "expandable_description": {
+    "expand": "Pokaż więcej",
+    "collapse": "Pokaż mniej"
+  },
+  "wecom_bind": {
+    "page_title": "Połącz konto Multica",
+    "redeeming": "Łączenie konta…",
+    "needs_auth_description": "Zaloguj się do Multica, aby ukończyć łączenie kont. Token w linku łączy Twoją tożsamość WeCom z tym użytkownikiem Multica, więc musisz być najpierw zalogowany.",
+    "sign_in": "Zaloguj się",
+    "done_title": "Konta zostały połączone.",
+    "done_description": "Twoja następna wiadomość do inteligentnego bota w WeCom trafi prosto do agenta. Możesz zamknąć tę kartę.",
+    "error_title": "Nie udało się ukończyć łączenia kont",
+    "error_admin_hint": "Jeśli ten problem się powtarza, napisz ponownie do bota w WeCom, aby uzyskać nowy link.",
+    "error_missing_token": "W linku brakuje tokenu. Napisz ponownie do bota w WeCom, aby uzyskać nowy.",
+    "error_expired": "Ten link jest nieprawidłowy lub wygasł (linki są ważne 15 minut). Napisz ponownie do bota, aby uzyskać nowy.",
+    "error_already_bound": "Ta tożsamość WeCom jest już połączona z innym użytkownikiem Multica. Przeniesienie konta wymaga wcześniejszego jawnego rozłączenia kont.",
+    "error_not_member": "Jesteś zalogowany do konta Multica, które nie jest członkiem tej przestrzeni roboczej.",
+    "error_unknown": "Coś poszło nie tak. Spróbuj ponownie, a jeśli problem nie ustąpi, skontaktuj się z administratorem przestrzeni roboczej."
+  },
+  "not_found": {
+    "title": "Nie znaleziono strony",
+    "description": "Strona, której szukasz, nie istnieje lub została przeniesiona.",
+    "back_to_multica": "Wróć do Multica"
+  },
+  "navigation": {
+    "open_in_new_tab": "Otwórz w nowej karcie"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "title": "Szukaj",
+  "description": "Szukaj stron, zadań, projektów i członków",
+  "placeholder": "Wpisz polecenie lub szukaj...",
+  "groups": {
+    "pages": "Strony",
+    "commands": "Polecenia",
+    "members": "Członkowie",
+    "projects": "Projekty",
+    "issues": "Zadania",
+    "cancelled": "Anulowane",
+    "recent": "Ostatnie",
+    "workspaces": "Przestrzenie robocze"
+  },
+  "commands": {
+    "current_theme_aria": "Bieżący motyw",
+    "new_issue": "Nowe zadanie",
+    "new_project": "Nowy projekt",
+    "copy_issue_link": "Kopiuj link do zadania",
+    "copy_identifier": "Kopiuj identyfikator ({{identifier}})",
+    "fold_all_comments": "Zwiń wszystkie komentarze",
+    "unfold_all_comments": "Rozwiń wszystkie komentarze",
+    "switch_to_light": "Przełącz na jasny motyw",
+    "switch_to_dark": "Przełącz na ciemny motyw",
+    "use_system_theme": "Użyj motywu systemowego"
+  },
+  "toast": {
+    "link_copied": "Link skopiowany",
+    "copied_identifier": "Skopiowano {{identifier}}"
+  },
+  "empty": {
+    "no_results": "Nie znaleziono wyników.",
+    "type_to_search": "Wpisz, aby wyszukać zadania i projekty"
+  },
+  "trigger": {
+    "label": "Szukaj..."
+  }
+}

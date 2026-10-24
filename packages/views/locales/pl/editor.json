@@ -1,0 +1,194 @@
+{
+  "bubble_menu": {
+    "bold": "Pogrubienie",
+    "italic": "Kursywa",
+    "strikethrough": "Przekreślenie",
+    "code": "Kod",
+    "highlight": "Wyróżnienie",
+    "link": "Link",
+    "list": "Lista",
+    "task_list": "Lista zadań",
+    "quote": "Cytat",
+    "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Zastosuj link",
+      "remove": "Usuń link",
+      "close": "Zamknij edytor linków"
+    },
+    "heading_dropdown": {
+      "text": "Tekst",
+      "normal_text": "Zwykły tekst",
+      "heading_1": "Nagłówek 1",
+      "heading_2": "Nagłówek 2",
+      "heading_3": "Nagłówek 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Lista punktowana",
+      "ordered_list": "Lista numerowana",
+      "task_list": "Lista zadań"
+    },
+    "sub_issue": {
+      "tooltip": "Utwórz podzadanie z zaznaczenia",
+      "created": "Utworzono {{identifier}}",
+      "create_failed": "Nie udało się utworzyć podzadania"
+    }
+  },
+  "image": {
+    "view": "Wyświetl obraz",
+    "download": "Pobierz",
+    "copy_link": "Kopiuj link",
+    "delete": "Usuń",
+    "link_copied": "Skopiowano link",
+    "copy_link_failed": "Nie udało się skopiować linku",
+    "copy_image": "Kopiuj obraz",
+    "image_copied": "Skopiowano obraz",
+    "copy_image_failed": "Nie udało się skopiować obrazu",
+    "canvas_label": "Płótno obrazu. Przeciągnij, aby przesunąć widok, przewijaj, aby zmienić powiększenie, kliknij dwukrotnie, aby przełączyć rozmiar rzeczywisty.",
+    "unavailable": "Ten obraz nie jest już dostępny — pominięto go."
+  },
+  "canvas": {
+    "zoom_in": "Powiększ",
+    "zoom_out": "Pomniejsz",
+    "zoom_fit": "Dopasuj do widoku",
+    "zoom_actual": "Rozmiar rzeczywisty"
+  },
+  "attachment": {
+    "download_failed": "Nie udało się uzyskać linku do pobrania. Spróbuj ponownie za chwilę.",
+    "preview": "Podgląd",
+    "preview_loading": "Wczytywanie podglądu…",
+    "preview_failed": "Nie udało się wczytać podglądu",
+    "preview_too_large": "Plik jest za duży, aby wyświetlić podgląd. Pobierz go.",
+    "preview_unsupported": "Podgląd tego typu pliku jest niedostępny.",
+    "close": "Zamknij",
+    "open_in_new_tab": "Otwórz w nowej karcie",
+    "remove": "Usuń załącznik",
+    "previous": "Poprzedni",
+    "next": "Następny",
+    "sequence_position": "{{index}} / {{total}}",
+    "overview": "Wszystkie rezultaty",
+    "info": "Informacje",
+    "wrap_lines": "Zawijaj wiersze",
+    "viewport": "Szerokość widoku",
+    "viewport_fill": "Dopasuj",
+    "viewport_desktop": "Komputer",
+    "viewport_tablet": "Tablet",
+    "viewport_phone": "Telefon",
+    "viewport_scale": "Skalowanie do {{percent}}%",
+    "view_source": "Pokaż źródło",
+    "view_mode": "Widok",
+    "view_tree": "Drzewo",
+    "view_raw": "Surowy",
+    "structured_parse_failed": "Nie udało się odczytać struktury tego pliku, dlatego jest wyświetlany jako tekst.",
+    "tree_show_more": "Pokaż więcej (jeszcze {{count}})",
+    "tree_items_one": "{{count}} element",
+    "tree_items_few": "{{count}} elementy",
+    "tree_items_many": "{{count}} elementów",
+    "tree_items_other": "{{count}} elementu",
+    "tree_keys_one": "{{count}} klucz",
+    "tree_keys_few": "{{count}} klucze",
+    "tree_keys_many": "{{count}} kluczy",
+    "tree_keys_other": "{{count}} klucza",
+    "table_empty": "Brak wierszy",
+    "table_rows_one": "{{count}} wiersz",
+    "table_rows_few": "{{count}} wiersze",
+    "table_rows_many": "{{count}} wierszy",
+    "table_rows_other": "{{count}} wiersza",
+    "table_columns_one": "{{count}} kolumna",
+    "table_columns_few": "{{count}} kolumny",
+    "table_columns_many": "{{count}} kolumn",
+    "table_columns_other": "{{count}} kolumny",
+    "address": "Adres",
+    "address_hint": "?zapytanie",
+    "reload": "Odśwież"
+  },
+  "link_hover": {
+    "copy_link": "Kopiuj link",
+    "open_link": "Otwórz link",
+    "link_copied": "Skopiowano link",
+    "copy_failed": "Nie udało się skopiować"
+  },
+  "mention": {
+    "group_users": "Użytkownicy",
+    "group_issues": "Zadania",
+    "all_members": "Wszyscy członkowie",
+    "agent_badge": "Agent",
+    "squad_badge": "Zespół",
+    "searching": "Szukanie...",
+    "no_results": "Brak wyników",
+    "group_current": "Bieżąca strona",
+    "group_recent": "Ostatnio oglądane",
+    "group_search": "Wyniki wyszukiwania",
+    "group_cancelled": "Anulowane"
+  },
+  "slash_command": {
+    "no_skills_configured": "Brak skonfigurowanych skills",
+    "no_results": "Brak pasujących skills",
+    "commands": {
+      "note": "Dodaj notatkę — nie uruchomi żadnych agentów"
+    }
+  },
+  "code_block": {
+    "html_preview": "Podgląd HTML",
+    "close_preview": "Zamknij",
+    "copy_code": "Kopiuj kod",
+    "show_preview": "Pokaż podgląd",
+    "show_source": "Pokaż źródło",
+    "fullscreen": "Pełny ekran"
+  },
+  "dynamic_block": {
+    "preview": "Podgląd",
+    "source": "Źródło",
+    "view": "Widok",
+    "copy_source": "Kopiuj źródło",
+    "show_all": "Pokaż wszystko",
+    "rendering": "Renderowanie...",
+    "error_html": "W podglądzie wystąpił błąd skryptu",
+    "error_mermaid": "Nie udało się narysować tego diagramu",
+    "error_at_line": "{{message}} (linia {{line}})",
+    "view_source": "Pokaż źródło",
+    "copy_error": "Kopiuj błąd"
+  },
+  "file_card": {
+    "uploading": "Przesyłanie {{filename}}"
+  },
+  "upload": {
+    "failed": "Nie udało się przesłać pliku {{filename}}: {{reason}}",
+    "in_progress": "Przesyłanie…",
+    "interrupted": "Przesyłanie zostało przerwane — plik nie został zapisany. Załącz go ponownie.",
+    "remove": "Usuń",
+    "uploading_label": "Przesyłanie {{filename}}…",
+    "failed_label": "Nie udało się przesłać pliku {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Tytuł"
+  },
+  "mermaid": {
+    "diagram_label": "Diagram Mermaid",
+    "render_error": "Nie udało się wyrenderować diagramu Mermaid.",
+    "rendering": "Renderowanie diagramu…",
+    "viewer_title": "Diagram",
+    "canvas_label": "Płótno diagramu. Przeciągnij, aby przesunąć widok, przewijaj, aby zmienić powiększenie.",
+    "open_viewer": "Otwórz podgląd diagramu",
+    "close_viewer": "Zamknij",
+    "copy_source": "Kopiuj źródło diagramu",
+    "show_source": "Pokaż źródło",
+    "show_diagram": "Pokaż diagram",
+    "export": "Eksportuj",
+    "export_png": "Pobierz PNG",
+    "export_svg": "Pobierz SVG",
+    "export_source": "Pobierz .mmd"
+  },
+  "table": {
+    "reset_widths": "Resetuj szerokości",
+    "expand": "Rozwiń tabelę",
+    "copy_markdown": "Kopiuj jako Markdown",
+    "copy_csv": "Kopiuj jako CSV",
+    "copied": "Skopiowano",
+    "resize_column": "Zmień szerokość kolumny {{name}}",
+    "expanded_title": "Tabela",
+    "filter_placeholder": "Filtruj wiersze",
+    "clear_filter": "Wyczyść filtr",
+    "no_matches": "Brak pasujących wierszy",
+    "close": "Zamknij"
+  }
+}

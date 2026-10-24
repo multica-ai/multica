@@ -14,6 +14,9 @@ export const localeLabels: Record<Locale, string> = {
   // The landing dictionary has no French variant yet, so `locales` above still
   // offers four languages; this label only satisfies the Record type.
   fr: "FR",
+  // Same for Polish: label satisfies the Record type until a landing
+  // dictionary variant exists.
+  pl: "PL",
 };
 
 export function toLandingDictionaryLocale(

@@ -124,6 +124,31 @@ import frUsage from "./fr/usage.json";
 import frUi from "./fr/ui.json";
 import frSquads from "./fr/squads.json";
 import frBilling from "./fr/billing.json";
+import plCommon from "./pl/common.json";
+import plAuth from "./pl/auth.json";
+import plSettings from "./pl/settings.json";
+import plIssues from "./pl/issues.json";
+import plAgents from "./pl/agents.json";
+import plEditor from "./pl/editor.json";
+import plOnboarding from "./pl/onboarding.json";
+import plInvite from "./pl/invite.json";
+import plLabels from "./pl/labels.json";
+import plMembers from "./pl/members.json";
+import plMyIssues from "./pl/my-issues.json";
+import plSearch from "./pl/search.json";
+import plInbox from "./pl/inbox.json";
+import plWorkspace from "./pl/workspace.json";
+import plProjects from "./pl/projects.json";
+import plAutopilots from "./pl/autopilots.json";
+import plSkills from "./pl/skills.json";
+import plChat from "./pl/chat.json";
+import plModals from "./pl/modals.json";
+import plRuntimes from "./pl/runtimes.json";
+import plLayout from "./pl/layout.json";
+import plUsage from "./pl/usage.json";
+import plUi from "./pl/ui.json";
+import plSquads from "./pl/squads.json";
+import plBilling from "./pl/billing.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -263,5 +288,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: frUi,
     squads: frSquads,
     billing: frBilling,
+  },
+  pl: {
+    common: plCommon,
+    auth: plAuth,
+    settings: plSettings,
+    issues: plIssues,
+    agents: plAgents,
+    editor: plEditor,
+    onboarding: plOnboarding,
+    invite: plInvite,
+    labels: plLabels,
+    members: plMembers,
+    "my-issues": plMyIssues,
+    search: plSearch,
+    inbox: plInbox,
+    workspace: plWorkspace,
+    projects: plProjects,
+    autopilots: plAutopilots,
+    skills: plSkills,
+    chat: plChat,
+    modals: plModals,
+    runtimes: plRuntimes,
+    layout: plLayout,
+    usage: plUsage,
+    ui: plUi,
+    squads: plSquads,
+    billing: plBilling,
   },
 };

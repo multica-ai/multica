@@ -1,0 +1,11 @@
+{
+  "attach_file": "Załącz plik",
+  "toggle_sidebar": "Przełącz lewy panel",
+  "copy_code": "Kopiuj kod",
+  "plain_text": "zwykły tekst",
+  "error_boundary": {
+    "title": "Coś poszło nie tak podczas wyświetlania tej sekcji.",
+    "description": "Wystąpił nieoczekiwany błąd.",
+    "try_again": "Spróbuj ponownie"
+  }
+}

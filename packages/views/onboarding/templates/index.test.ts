@@ -18,4 +18,8 @@ describe("pickContentLang", () => {
   it("uses English authored content for the supported French UI locale", () => {
     expect(pickContentLang("fr-FR")).toBe("en");
   });
+
+  it("uses English authored content for the supported Polish UI locale", () => {
+    expect(pickContentLang("pl-PL")).toBe("en");
+  });
 });

@@ -99,4 +99,9 @@ const EMERGENCY_COPY = {
     description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
     reload: "Recharger",
   },
+  pl: {
+    title: "Wystąpił problem",
+    description: "Strona napotkała nieoczekiwany błąd. Spróbuj ją odświeżyć.",
+    reload: "Odśwież",
+  },
 } as const;

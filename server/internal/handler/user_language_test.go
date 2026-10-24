@@ -32,6 +32,27 @@ func TestUpdateMeFrenchLanguageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUpdateMePolishLanguageRoundTrip(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	userID := dbfx.User(t, "Polish user", "lang-pl@multica.ai", testutil.Cols{"language": "en"})
+	var updated UserResponse
+	testutil.Call(t, testHandler.UpdateMe, newPatchMeRequest(userID, `{"language":"pl"}`)).Want(http.StatusOK).JSON(&updated)
+	if updated.Language == nil || *updated.Language != "pl" {
+		t.Fatalf("updated language = %v, want pl", updated.Language)
+	}
+
+	// A fresh request after reload must restore Polish, not the old preference.
+	get := newRequest(http.MethodGet, "/api/me", nil)
+	get.Header.Set("X-User-ID", userID)
+	var reloaded UserResponse
+	testutil.Call(t, testHandler.GetMe, get).Want(http.StatusOK).JSON(&reloaded)
+	if reloaded.Language == nil || *reloaded.Language != "pl" {
+		t.Fatalf("reloaded language = %v, want pl", reloaded.Language)
+	}
+}
+
 func newLanguageTestUser(t *testing.T, email string) string {
 	t.Helper()
 	ctx := context.Background()

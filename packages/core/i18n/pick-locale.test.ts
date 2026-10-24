@@ -24,6 +24,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["ja"])).toBe("ja");
     expect(matchLocale(["en"])).toBe("en");
     expect(matchLocale(["fr"])).toBe("fr");
+    expect(matchLocale(["pl"])).toBe("pl");
   });
 
   it("collapses region-tagged BCP-47 to the supported base", () => {
@@ -33,6 +34,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["ja-JP"])).toBe("ja");
     expect(matchLocale(["fr-FR"])).toBe("fr");
     expect(matchLocale(["fr-CA"])).toBe("fr");
+    expect(matchLocale(["pl-PL"])).toBe("pl");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {

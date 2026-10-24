@@ -1,0 +1,56 @@
+{
+  "header": {
+    "back": "Wstecz",
+    "log_out": "Wyloguj się"
+  },
+  "not_found": {
+    "title": "Nie znaleziono zaproszenia",
+    "description": "To zaproszenie mogło wygasnąć, zostać cofnięte albo nie należy do Twojego konta.",
+    "go_to_dashboard": "Przejdź do panelu"
+  },
+  "accepted": {
+    "title": "Dołączyłeś do {{workspace_name}}!",
+    "redirecting": "Przekierowywanie do przestrzeni roboczej..."
+  },
+  "declined": {
+    "title": "Zaproszenie odrzucone",
+    "description": "Nie zostaniesz dodany do tej przestrzeni roboczej.",
+    "go_to_dashboard": "Przejdź do panelu"
+  },
+  "main": {
+    "join_title": "Dołącz do {{workspace_name}}",
+    "fallback_workspace_name": "przestrzeni roboczej",
+    "invited_role_admin": "zaprosił Cię do dołączenia jako administrator.",
+    "invited_role_member": "zaprosił Cię do dołączenia jako członek.",
+    "already_handled_accepted": "To zaproszenie zostało już przyjęte.",
+    "already_handled_declined": "To zaproszenie zostało już odrzucone.",
+    "expired": "To zaproszenie wygasło.",
+    "decline": "Odrzuć",
+    "declining": "Odrzucanie...",
+    "accept": "Zaakceptuj i dołącz",
+    "joining": "Dołączanie..."
+  },
+  "errors": {
+    "accept_failed": "Nie udało się przyjąć zaproszenia",
+    "decline_failed": "Nie udało się odrzucić zaproszenia"
+  },
+  "batch": {
+    "log_out": "Wyloguj się",
+    "empty_title": "Brak zaproszeń w toku",
+    "empty_hint": "Przejdź dalej, aby skonfigurować własną przestrzeń roboczą.",
+    "empty_continue": "Przejdź do konfiguracji",
+    "title": "Dostałeś zaproszenia",
+    "subtitle": "Wybierz przestrzenie robocze, do których chcesz dołączyć. Pozostałe możesz zawsze obsłużyć później z panelu bocznego.",
+    "submit_skip": "Pomiń i skonfiguruj własną przestrzeń roboczą",
+    "submit_join_one": "Dołącz do 1 przestrzeni roboczej",
+    "submit_join_few": "Dołącz do {{count}} przestrzeni roboczych",
+    "submit_join_many": "Dołącz do {{count}} przestrzeni roboczych",
+    "submit_join_other": "Dołącz do {{count}} przestrzeni roboczych",
+    "joining": "Dołączanie...",
+    "error_generic": "Nie udało się przetworzyć zaproszeń. Spróbuj ponownie.",
+    "row_workspace_fallback": "Przestrzeń robocza",
+    "row_inviter_fallback": "Ktoś",
+    "row_invited_admin": "{{inviter}} zaprosił Cię jako administratora",
+    "row_invited_member": "{{inviter}} zaprosił Cię jako członka"
+  }
+}

@@ -7,6 +7,7 @@ import enAgents from "../../../locales/en/agents.json";
 import frAgents from "../../../locales/fr/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
+import plAgents from "../../../locales/pl/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 
 import {
@@ -25,6 +26,7 @@ const AGENT_RESOURCES = {
   ja: jaAgents,
   ko: koAgents,
   fr: frAgents,
+  pl: plAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -117,6 +119,7 @@ describe("cancelReasonLabel", () => {
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
+      pl: "Anulowane przez system",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {

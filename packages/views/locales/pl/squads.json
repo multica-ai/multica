@@ -1,0 +1,156 @@
+{
+  "page": {
+    "title": "Zespoły",
+    "new_button": "Nowy zespół",
+    "empty_no_squads": "Nie ma jeszcze żadnych zespołów.",
+    "empty_no_match": "Brak zespołów pasujących do filtrów.",
+    "table": {
+      "name": "Zespół",
+      "leader": "Lider",
+      "members": "Członkowie",
+      "creator": "Utworzył",
+      "created": "Utworzono"
+    },
+    "no_matches": "Brak pasujących zespołów",
+    "row_menu": "Akcje zespołu",
+    "archive_action": "Zarchiwizuj"
+  },
+  "inspector": {
+    "details_section": "Szczegóły",
+    "archive_button": "Zarchiwizuj"
+  },
+  "member_type": {
+    "agent": "Agent",
+    "member": "Członek"
+  },
+  "archive_dialog": {
+    "title": "Zarchiwizować ten zespół?",
+    "description": "Zespół „{{name}}” zostanie zarchiwizowany. Zadania aktualnie przypisane do tego zespołu zostaną przeniesione do jego lidera. Tej operacji nie można cofnąć — jeśli znowu będziesz potrzebować tego routingu, utwórz nowy zespół.",
+    "cancel": "Anuluj",
+    "confirm": "Zarchiwizuj",
+    "archiving": "Archiwizowanie…",
+    "success": "Zarchiwizowano zespół"
+  },
+  "name_editor": {
+    "title": "Zmień nazwę zespołu",
+    "placeholder": "Nazwa zespołu",
+    "required": "Nazwa jest wymagana",
+    "cancel": "Anuluj",
+    "save": "Zapisz",
+    "saved": "Zapisano",
+    "save_failed": "Nie udało się zapisać"
+  },
+  "add_member_dialog": {
+    "title": "Dodaj członka",
+    "description": "Wybierz członków przestrzeni roboczej lub agentów.",
+    "label_member": "Członek",
+    "label_role": "Rola",
+    "label_optional": "(opcjonalnie)",
+    "cancel": "Anuluj",
+    "select_target": "Wybierz członka lub agenta",
+    "search_placeholder": "Szukaj członków lub agentów...",
+    "members_section": "Członkowie",
+    "agents_section": "Agneci",
+    "role_placeholder": "np. Recenzent, Lider frontendu",
+    "add": "Dodaj"
+  },
+  "role_editor": {
+    "empty": "Dodaj rolę…",
+    "placeholder": "Rola (np. Recenzent)"
+  },
+  "description_dialog": {
+    "title": "Edytuj opis",
+    "placeholder_empty": "Dodaj opis",
+    "cancel": "Anuluj",
+    "responsibility_placeholder": "Za co odpowiada ten zespół?",
+    "save": "Zapisz"
+  },
+  "discard_changes_dialog": {
+    "title": "Odrzucić niezapisane zmiany?",
+    "description": "Masz niezapisane zmiany na tej karcie. Przełączenie karty spowoduje ich odrzucenie.",
+    "keep_editing": "Kontynuuj edycję",
+    "discard_button": "Odrzuć"
+  },
+  "members_tab": {
+    "section_title": "Członkowie",
+    "section_count_one": "{{count}} członek w tym zespole",
+    "section_count_few": "{{count}} członków w tym zespole",
+    "section_count_many": "{{count}} członków w tym zespole",
+    "section_count_other": "{{count}} członków w tym zespole",
+    "add_member_button": "Dodaj członka",
+    "create_agent_button": "Utwórz agenta",
+    "leader_chip": "Lider",
+    "view_agent_tooltip": "Otwórz szczegóły agenta",
+    "make_leader_tooltip": "Ustaw jako lidera zespołu",
+    "remove_member_tooltip": "Usuń z zespołu",
+    "status_working": "Pracuje",
+    "status_idle": "Bezczenny",
+    "status_offline": "Offline",
+    "status_unstable": "Niestabilny",
+    "status_archived": "Zarchiwizowany",
+    "issue_status_blocked": "zablokowane",
+    "active_issue_more": "i {{count}} więcej",
+    "last_active_label": "ostatnia aktywność {{time}}"
+  },
+  "detail_tabs": {
+    "members": "Członkowie",
+    "instructions": "Instrukcje"
+  },
+  "details": {
+    "leader": "Lider",
+    "members": "Członkowie",
+    "created_by": "Utworzył",
+    "created": "Utworzono",
+    "updated": "Zaktualizowano"
+  },
+  "toasts": {
+    "member_added": "Dodano członka",
+    "member_add_failed": "Nie udało się dodać członka",
+    "member_removed": "Usunięto członka",
+    "member_remove_failed": "Nie udało się usunąć członka",
+    "role_updated": "Zaktualizowano rolę",
+    "role_update_failed": "Nie udało się zaktualizować roli",
+    "leader_updated": "Zaktualizowano lidera",
+    "leader_update_failed": "Nie udało się zaktualizować lidera",
+    "archive_failed": "Nie udało się zarchiwizować zespołu",
+    "instructions_saved": "Zapisano instrukcje"
+  },
+  "profile_card": {
+    "unavailable": "Zespół niedostępny",
+    "detail_link": "Szczegóły →",
+    "archived": "Zarchiwizowany",
+    "member_count_one": "{{count}} członek",
+    "member_count_few": "{{count}} członków",
+    "member_count_many": "{{count}} członków",
+    "member_count_other": "{{count}} członków",
+    "members_section": "Członkowie",
+    "more_members_one": "+{{count}} więcej",
+    "more_members_few": "+{{count}} więcej",
+    "more_members_many": "+{{count}} więcej",
+    "more_members_other": "+{{count}} więcej"
+  },
+  "instructions_tab": {
+    "description": "Lider czyta te instrukcje za każdym razem, gdy pracuje nad zadaniem przypisanym do tego zespołu.",
+    "unsaved_changes": "Niezapisane zmiany",
+    "save_button": "Zapisz",
+    "placeholder": "np. Zawsze zaczynaj od napisania testu, który się nie powiedzie. Preferuj małe, atomowe commity."
+  },
+  "scope": {
+    "mine": "Moje",
+    "all": "Wszystkie"
+  },
+  "toolbar": {
+    "display": "Widok",
+    "sort_by": "Sortuj według",
+    "direction_asc": "Rosnąco",
+    "direction_desc": "Malejąco",
+    "section_columns": "Kolumny",
+    "result_count_title": "Pasujące zespoły / wszystkie zespoły",
+    "filter_label": "Filtr",
+    "filter_active_count_one": "{{count}} filtr",
+    "filter_active_count_few": "{{count}} filtry",
+    "filter_active_count_many": "{{count}} filtrów",
+    "filter_active_count_other": "{{count}} filtru",
+    "clear_filters": "Wyczyść filtry"
+  }
+}
