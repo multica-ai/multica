@@ -302,7 +302,19 @@
       "cancel": "Cancel",
       "import": "Import",
       "importing": "Importing…",
-      "toast_imported": "Skill imported"
+      "toast_imported": "Skill imported",
+      "select_all": "Select all",
+      "import_count": "Import {{count}}",
+      "done": "Done",
+      "stop": "Stop after current",
+      "unreadable": "Could not read this skill. Choose the folder again.",
+      "uncertain": "The result is uncertain. Check the refreshed skill list before retrying. Existing names remain locked; review them in the list.",
+      "check_results": "Check results",
+      "retry_ready": "Not found in the refreshed list. You can retry this item.",
+      "uncertain_manual": "The result is uncertain and the archive’s skill name is unknown. Check the skills list manually before importing this archive again.",
+      "check_failed": "Could not verify the skill list. Imports with uncertain results remain locked. Try checking again or review the list manually.",
+      "workspace_changed": "The workspace changed. Remaining imports were stopped. Close this dialog and reopen it in the intended workspace.",
+      "summary": "Imported: {{success}} · Failed or uncertain: {{failed}}"
     },
     "url": {
       "url_label": "Skill URL",

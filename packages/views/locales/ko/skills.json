@@ -286,7 +286,19 @@
       "cancel": "취소",
       "import": "가져오기",
       "importing": "가져오는 중...",
-      "toast_imported": "스킬을 가져왔습니다"
+      "toast_imported": "스킬을 가져왔습니다",
+      "select_all": "모두 선택",
+      "import_count": "{{count}}개 가져오기",
+      "done": "완료",
+      "stop": "현재 항목 후 중지",
+      "unreadable": "skill을 읽을 수 없습니다. 폴더를 다시 선택하세요.",
+      "uncertain": "결과가 불확실합니다. 재시도 전에 목록을 새로 고쳐 확인하세요. 같은 이름이 있으면 잠금이 유지됩니다.",
+      "check_results": "결과 확인",
+      "retry_ready": "새로 고친 목록에 없습니다. 다시 시도할 수 있습니다.",
+      "uncertain_manual": "결과가 불확실하며 압축 파일의 스킬 이름을 확인할 수 없습니다. 다시 가져오기 전에 목록을 직접 확인하세요.",
+      "check_failed": "목록을 검증할 수 없습니다. 결과가 불확실한 항목은 잠금이 유지됩니다. 다시 확인하거나 목록을 직접 검토하세요.",
+      "workspace_changed": "워크스페이스가 변경되어 나머지 가져오기를 중지했습니다. 대화상자를 닫고 대상 워크스페이스에서 다시 여세요.",
+      "summary": "성공: {{success}} · 실패 또는 미확인: {{failed}}"
     },
     "url": {
       "url_label": "스킬 URL",

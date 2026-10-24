@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { createAuthStore } from "../auth";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
@@ -2679,6 +2680,26 @@ describe("ApiClient workspace MCP servers", () => {
 });
 
 describe("importSkillArchive", () => {
+  it("pins archive upload and CSRF retry headers to the original workspace", async () => {
+    setCurrentWorkspace("workspace-a", "ws-1");
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        setCurrentWorkspace("workspace-b", "ws-2");
+        return new Response(JSON.stringify({ error: "CSRF validation failed" }), { status: 403 });
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "created", skill: { id: "alpha", workspace_id: "ws-1", name: "alpha" } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const result = await new ApiClient("https://api.example.test").importSkillArchive(
+        new File(["zip"], "alpha.skill"), "fail", { workspaceSlug: "workspace-a" },
+      );
+      expect(result.workspace_id).toBe("ws-1");
+      expect(fetchMock.mock.calls.map((call) => call[1].headers["X-Workspace-Slug"])).toEqual(["workspace-a", "workspace-a"]);
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
+  });
+
   it("POSTs multipart form data without a JSON content-type", async () => {
     const skill = {
       id: "skill-1",

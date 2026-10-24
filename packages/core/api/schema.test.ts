@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
@@ -155,6 +156,32 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listSkills();
       expect(res).toEqual([]);
+    });
+
+    it.each([{ body: { skills: [] } }, { body: null }, { body: [{ id: "missing-identity" }] }])(
+      "rejects malformed skill lists for absence checks while preserving rendering fallback: %j",
+      async ({ body }) => {
+        stubFetchJson(body);
+        const client = new ApiClient("https://api.example.test");
+        await expect(client.listSkills()).resolves.toEqual([]);
+        stubFetchJson(body);
+        await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+      },
+    );
+
+    it("does not accept a defaulted 204 response as proof of absence", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(null, { status: 204 })));
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listSkills()).resolves.toEqual([]);
+      await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+    });
+
+    it("accepts a verified empty list and older valid rows for absence checks", async () => {
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toEqual([]);
+      stubFetchJson([baseSkill]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toMatchObject([{ id: "skill-1", name: "review-helper" }]);
     });
 
     it("treats a missing labels field as an empty array (older backends)", async () => {
