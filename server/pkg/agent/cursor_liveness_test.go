@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -104,6 +105,10 @@ func TestCursorBackgroundCloseRetriesUnconfirmedCleanup(t *testing.T) {
 // The fake shell has its own group and an already-running child before Cursor
 // reports success.pid, matching the process relationships observed in #8050.
 func runFakeCursorStream(mode string) {
+	if strings.HasPrefix(mode, "first-output-") {
+		runFakeCursorFirstOutput(mode)
+		return
+	}
 	if mode == "leaf" {
 		duration, _ := time.ParseDuration(os.Getenv("CURSOR_FAKE_DURATION"))
 		time.Sleep(duration)
