@@ -99,4 +99,9 @@ const EMERGENCY_COPY = {
     description: "La page a rencontré une erreur inattendue. Essayez de la recharger.",
     reload: "Recharger",
   },
+  ru: {
+    title: "Что-то пошло не так",
+    description: "На странице произошла непредвиденная ошибка. Попробуйте перезагрузить.",
+    reload: "Перезагрузить",
+  },
 } as const;

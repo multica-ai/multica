@@ -41,7 +41,7 @@ function flattenKeys(obj: unknown, prefix = ""): string[] {
 }
 
 function normalizePlural(key: string): string {
-  return key.replace(/_(one|other)$/, "_count");
+  return key.replace(/_(one|few|many|other)$/, "_count");
 }
 
 function keySet(bundle: Record<string, unknown>): Set<string> {
@@ -106,6 +106,50 @@ describe("dead plural-key guard", () => {
           .filter((key) => key.endsWith("_one"))
           .map((key) => `${ns}:${key}`),
       );
+      expect(offenders).toEqual([]);
+    });
+  }
+});
+
+// Missing plural-form guard: the mirror of the check above. i18next picks the
+// suffix from Intl.PluralRules, so a plural set without a category the locale
+// needs (e.g. ru `_few` for 2–4, `_many` for 5–20) does not fall back to the
+// locale's `_other` — it falls back to the English string. Parity cannot catch
+// this because it normalizes every suffix away.
+describe("missing plural-form guard", () => {
+  for (const locale of translatedLocales) {
+    // Only categories that everyday counts reach: fr `many` exists in CLDR but
+    // fires only for millions, so requiring it would be noise.
+    const rules = new Intl.PluralRules(locale);
+    const categories = [
+      ...new Set(
+        [...Array.from({ length: 1001 }, (_, n) => n), 1.5].map((n) =>
+          rules.select(n),
+        ),
+      ),
+    ].sort();
+
+    const bundle = RESOURCES[locale as keyof typeof RESOURCES];
+    it(`${locale} plural sets cover every category (${categories.join("/")})`, () => {
+      const offenders = Object.keys(bundle).flatMap((ns) => {
+        const keys = new Set(flattenKeys(bundle[ns]));
+        const bases = new Set(
+          [...keys]
+            .filter((key) => /_(zero|one|two|few|many|other)$/.test(key))
+            .map((key) => key.replace(/_(zero|one|two|few|many|other)$/, "")),
+        );
+        // EN ships `_other` alone where a count of 1 never reaches the string
+        // (the UI shows the item's own label instead), so `one` is not owed.
+        const enKeys = new Set(flattenKeys(en[ns] ?? {}));
+        return [...bases].flatMap((base) =>
+          categories
+            .filter(
+              (category) => category !== "one" || enKeys.has(`${base}_one`),
+            )
+            .filter((category) => !keys.has(`${base}_${category}`))
+            .map((category) => `${ns}:${base}_${category}`),
+        );
+      });
       expect(offenders).toEqual([]);
     });
   }
