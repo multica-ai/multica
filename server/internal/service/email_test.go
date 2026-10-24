@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -409,6 +410,57 @@ func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
 	}
 	if !strings.Contains(p.Html, "https://multica.ai/invite/abc") {
 		t.Errorf("body missing invite URL: %s", p.Html)
+	}
+}
+
+func TestConfigured(t *testing.T) {
+	tests := []struct {
+		name       string
+		smtpHost   string
+		resendKey  string
+		wantConfig bool
+	}{
+		{"neither set → unconfigured", "", "", false},
+		{"smtp only", "smtp.example.com", "", true},
+		{"resend only", "", "re_xxx", true},
+		{"both set", "smtp.example.com", "re_xxx", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SMTP_HOST", tt.smtpHost)
+			t.Setenv("RESEND_API_KEY", tt.resendKey)
+			s := NewEmailService()
+			if got := s.Configured(); got != tt.wantConfig {
+				t.Errorf("Configured() = %v, want %v", got, tt.wantConfig)
+			}
+		})
+	}
+}
+
+func TestSendNotification_DevModePrintsToStdout(t *testing.T) {
+	t.Setenv("SMTP_HOST", "")
+	t.Setenv("RESEND_API_KEY", "")
+
+	s := NewEmailService()
+
+	// dev mode: call should not return error, body printed to stdout
+	err := s.SendNotification(context.Background(), "alice@example.com",
+		"[Multica] new mention",
+		"plain body",
+		"<p>html body</p>")
+	if err != nil {
+		t.Fatalf("dev-mode SendNotification returned error: %v", err)
+	}
+}
+
+func TestSendNotification_RejectsEmptyTo(t *testing.T) {
+	t.Setenv("SMTP_HOST", "")
+	t.Setenv("RESEND_API_KEY", "")
+	s := NewEmailService()
+
+	err := s.SendNotification(context.Background(), "", "subj", "text", "<p>html</p>")
+	if err == nil {
+		t.Fatal("expected error for empty to")
 	}
 }
 
