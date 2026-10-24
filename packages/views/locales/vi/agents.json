@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Agent",
-    "tagline": "Đồng đội AI nhận công việc, bình luận và cập nhật trạng thái.",
     "learn_more": "Tìm hiểu thêm →",
     "new_agent": "Agent mới",
     "search_placeholder": "Tìm kiếm agent…",
@@ -162,6 +161,7 @@
   "inspector": {
     "section_profile": "Hồ sơ",
     "section_execution": "Thực thi",
+    "qoder_execution_note": "Model, công cụ và skill được đặt trên QCA agent trong Qoder.",
     "section_access": "Quyền truy cập",
     "section_properties": "Thuộc tính",
     "section_details": "Chi tiết",
@@ -269,6 +269,7 @@
     "composio_mcp": "Ứng dụng MCP",
     "integrations": "Tích hợp",
     "runtime_config": "Định tuyến",
+    "qoder_agent": "QCA Agent",
     "discard_dialog_title": "Hủy các thay đổi chưa lưu?",
     "discard_dialog_description": "Bạn có thay đổi chưa lưu trong tab này. Rời đi bây giờ sẽ hủy chúng.",
     "discard_keep": "Tiếp tục chỉnh sửa",
@@ -279,18 +280,8 @@
     "squad_title": "Tạo agent cho squad này",
     "duplicate_title": "Nhân bản {{name}}",
     "back": "Quay lại",
-    "eyebrow": "Tạo agent",
-    "choose_title": "Bạn muốn bắt đầu thế nào?",
-    "recommended": "Được đề xuất",
-    "continue": "Tiếp tục",
-    "step_choose": "Chọn điểm bắt đầu",
-    "step_configure": "Xem lại và cấu hình",
     "step_ai": "Xây dựng qua trò chuyện",
     "modes": {
-      "blank": {
-        "title": "Bắt đầu trống",
-        "description": "Tự đặt tên, hướng dẫn và runtime."
-      },
       "template": {
         "title": "Dùng mẫu",
         "description": "Bắt đầu từ hướng dẫn và các skill có sẵn, rồi tùy chỉnh mọi chi tiết cho không gian làm việc của bạn."
@@ -352,12 +343,11 @@
     "live_draft_hint": "Bạn có thể chỉnh sửa trực tiếp bản nháp.",
     "duplicate_env_notice": "Hướng dẫn, skill và tham số lệnh được sao chép. Biến môi trường, máy chủ MCP và cấu hình runtime cục bộ trên máy thì không.",
     "duplicate_runtime_reset_notice": "Runtime gốc không khả dụng, nên bản sao này chạy trên runtime khác. Model, mức suy luận và tốc độ đã bị xóa vì chúng chỉ áp dụng cho runtime đã chọn chúng.",
-    "create_and_open": "Tạo & mở agent",
+    "create_agent": "Tạo agent",
     "create_and_add": "Tạo & thêm vào squad",
     "creating": "Đang tạo agent…",
     "create_failed": "Không tạo được agent.",
     "name_conflict": "Đã có agent dùng tên này.",
-    "created": "Đã tạo {{name}}",
     "drafts": {
       "title": "Bản nháp",
       "untitled": "Bản nháp chưa có tiêu đề",
@@ -367,6 +357,71 @@
       "discard_cancel": "Tiếp tục chỉnh sửa",
       "banner": "Bạn có {{count}} bản nháp chưa hoàn thành",
       "pick_hint": "Chọn một bản để tiếp tục."
+    },
+    "close": "Đóng",
+    "steps": {
+      "runtime": "Chọn runtime",
+      "configure": "Cấu hình",
+      "done": "Hoàn tất",
+      "aria": "Các bước tạo agent"
+    },
+    "configure_title": "Cấu hình agent",
+    "ask_ai": "Để AI viết giúp",
+    "change_runtime": "Đổi",
+    "runtime_label": "Runtime",
+    "runtime_loading": "Đang tải runtime…",
+    "runtime_missing": "Runtime này không còn khả dụng.",
+    "cloud_fields_note": "Skill, MCP và câu mở đầu cuộc trò chuyện chỉ có trên runtime cục bộ và runtime từ xa.",
+    "done": {
+      "loading": "Đang hoàn tất…",
+      "title": "{{name}} đã sẵn sàng",
+      "runs_on": "Chạy trên {{runtime}}",
+      "joined_squad": "Đã thêm vào squad {{squad}}",
+      "next": "Tiếp theo",
+      "assign_title": "Giao công việc đầu tiên cho nó",
+      "mention_title": "Nhắc tới nó trong một công việc",
+      "squad_title": "Thêm nó vào một squad",
+      "open_squad_title": "Mở {{squad}}",
+      "open_agent": "Mở agent",
+      "back_to_list": "Quay lại danh sách agent"
+    },
+    "runtime_step": {
+      "title": "Agent này nên chạy ở đâu?",
+      "search_placeholder": "Tìm harness hoặc máy",
+      "groups": {
+        "machines": "Máy",
+        "cloud": "Dịch vụ đám mây"
+      },
+      "this_machine": "Máy này",
+      "owner_you": "Bạn",
+      "custom_badge": "Tùy chỉnh",
+      "web_local_title": "Dùng harness trên máy tính này với ứng dụng desktop",
+      "download_desktop": "Tải ứng dụng desktop",
+      "harness_count_other": "{{count}} harness",
+      "local_starting": "Đang khởi động daemon cục bộ…",
+      "local_empty_title": "Không tìm thấy harness nào trên máy này",
+      "local_empty_hint": "Cài một CLI như Claude Code hoặc Codex, nó sẽ xuất hiện ở đây.",
+      "more_harnesses_other": "Thêm {{count}}: {{names}}",
+      "add_remote": "Kết nối một máy",
+      "hidden_remote_other": "Thêm {{count}} máy chỉ chủ sở hữu của chúng mới dùng được",
+      "remote_warning": "Công việc chạy trên máy của {{owner}}, đọc và ghi file ở đó, và tính vào tài khoản của {{owner}}.",
+      "no_match": "Không có gì khớp với “{{query}}”",
+      "hosted_by": "Bởi {{vendor}}",
+      "coming_soon": "Sắp ra mắt",
+      "qoder_status": {
+        "not_configured": "Chưa kết nối",
+        "starting": "Đang khởi động",
+        "ready": "Đã kết nối",
+        "error": "Lỗi",
+        "stopped": "Đã tạm dừng"
+      },
+      "connect": "Kết nối",
+      "settings": "Cài đặt",
+      "member_connect": "Nhờ quản trị viên kết nối",
+      "member_fix": "Nhờ quản trị viên sửa",
+      "footer_selected": "Đã chọn:",
+      "cancel": "Hủy",
+      "next": "Tiếp"
     }
   },
   "create_dialog": {
@@ -435,7 +490,7 @@
   },
   "conversation_starters": {
     "label": "Câu mở đầu trò chuyện",
-    "hint": "Tối đa ba câu. Chọn một câu sẽ điền vào khung soạn mà không gửi.",
+    "hint": "Được gợi ý trong cuộc trò chuyện mới với agent này. Chọn một gợi ý sẽ điền vào khung soạn mà không gửi.",
     "add": "Thêm gợi ý",
     "item_label": "Nhãn gợi ý {{number}}",
     "prompt_label": "Nội dung gợi ý {{number}}",
@@ -444,13 +499,21 @@
     "incomplete": "Hoàn thành hoặc loại bỏ từng gợi ý trước khi lưu.",
     "remove": "Loại bỏ gợi ý {{number}}",
     "preview_label": "Xem trước cuộc trò chuyện mới",
-    "preview_defaults": "Đây là các gợi ý mặc định có sẵn. Thêm một gợi ý ở trên để thay cả ba."
+    "preview_defaults": "Đây là các gợi ý có sẵn. Thêm gợi ý của bạn để thay cả ba.",
+    "create_hint": "Không bắt buộc. Hiện trong cuộc trò chuyện mới với agent này.",
+    "edit": "Sửa gợi ý {{number}}",
+    "remove_short": "Loại bỏ",
+    "done": "Xong",
+    "untitled": "Gợi ý chưa có tên",
+    "customize": "Tùy chỉnh",
+    "defaults_summary_other": "Đang dùng {{count}} gợi ý có sẵn"
   },
   "tab_body": {
     "common": {
       "save": "Lưu",
       "add": "Thêm",
-      "unsaved_changes": "Thay đổi chưa lưu"
+      "unsaved_changes": "Thay đổi chưa lưu",
+      "discard": "Hủy bỏ"
     },
     "instructions": {
       "intro": "Đặt prompt hệ thống dùng cho mọi lượt chạy. Hỗ trợ Markdown.",
@@ -462,7 +525,12 @@
       "system_layer_hide": "Ẩn",
       "workspace_notes_label": "Ghi chú của không gian làm việc",
       "workspace_notes_intro": "Thêm bối cảnh và tùy chọn của nhóm bạn bên dưới. Chúng áp dụng chồng lên hướng dẫn mà Multica duy trì cho agent này. Hỗ trợ Markdown.",
-      "workspace_notes_placeholder": "Thêm bối cảnh mà agent này nên luôn có.\n\n# Ví dụ\nRepo chính của chúng tôi là github.com/acme/platform.\nHãy viết công việc bằng tiếng Anh ngay cả khi chúng ta trò chuyện bằng tiếng Việt.\nChúng tôi không triển khai vào thứ Sáu."
+      "workspace_notes_placeholder": "Thêm bối cảnh mà agent này nên luôn có.\n\n# Ví dụ\nRepo chính của chúng tôi là github.com/acme/platform.\nHãy viết công việc bằng tiếng Anh ngay cả khi chúng ta trò chuyện bằng tiếng Việt.\nChúng tôi không triển khai vào thứ Sáu.",
+      "mode_aria": "Chế độ soạn thảo",
+      "mode_write": "Soạn",
+      "mode_preview": "Xem trước",
+      "preview_empty": "Chưa có gì để xem trước.",
+      "char_count_other": "{{count}} ký tự"
     },
     "env": {
       "intro_readonly": "Được tiêm vào tiến trình agent khi khởi chạy. Chỉ chủ sở hữu và quản trị viên của không gian làm việc mới đọc hoặc sửa được giá trị; mọi lần xem và sửa đều được ghi vào nhật ký kiểm toán của không gian làm việc.",
@@ -905,6 +973,7 @@
       "runtime_offline": "Daemon ngoại tuyến",
       "runtime_reconnect_timeout": "Daemon không kết nối lại kịp thời",
       "runtime_recovery": "Daemon đã khởi động lại",
+      "runtime_access_revoked": "Quyền truy cập runtime đã bị thu hồi",
       "timeout": "Lượt chạy quá thời gian",
       "iteration_limit": "Chạm giới hạn số vòng lặp",
       "agent_blocked": "Đang chờ thông tin từ con người",
@@ -936,8 +1005,7 @@
       "agent_error": "Lỗi thực thi agent",
       "codex_semantic_inactivity": "Codex quá thời gian do không hoạt động",
       "manual": "Bị người dùng hủy",
-      "user_cancelled": "Bị người dùng hủy",
-      "runtime_access_revoked": "Quyền truy cập runtime đã bị thu hồi"
+      "user_cancelled": "Bị người dùng hủy"
     }
   },
   "last_active": {

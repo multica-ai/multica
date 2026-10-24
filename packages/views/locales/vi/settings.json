@@ -16,6 +16,7 @@
       "reorder": "Sắp xếp lại {{name}}"
     },
     "reorder_hint": "Kéo thả trong cùng một nhóm để sắp xếp lại bảng, danh sách và menu.",
+    "built_in_dialog": {},
     "editor": {
       "create_title": "Trạng thái mới",
       "edit_title": "Chỉnh sửa trạng thái",
@@ -140,14 +141,14 @@
     "field_name": "Tên",
     "field_name_placeholder": "Code Review",
     "field_target": "Chạy với vai trò",
+    "no_target": "Không có đích",
+    "no_target_hint": "Đăng một tin nhắn mà không nhắc tới ai.",
     "field_prompt": "Prompt",
     "field_prompt_placeholder": "Review code liên quan tới công việc này. Tập trung vào tính đúng đắn và các trường hợp biên.",
     "prompt_hint": "Gửi nguyên văn. Agent đã nhìn thấy công việc.",
     "template_not_supported": "Biến chưa được hỗ trợ — hãy xóa {{token}}. Agent đã đọc công việc này.",
     "delete_title": "Xóa thao tác nhanh này?",
-    "delete_description": "Nó sẽ biến mất khỏi mọi thanh bên của công việc. Các lượt chạy trước vẫn còn trong nhật ký thực thi. Hãy lưu trữ thay thế nếu bạn có thể muốn dùng lại.",
-    "no_target": "Không có đích",
-    "no_target_hint": "Đăng một tin nhắn mà không nhắc tới ai."
+    "delete_description": "Nó sẽ biến mất khỏi mọi thanh bên của công việc. Các lượt chạy trước vẫn còn trong nhật ký thực thi. Hãy lưu trữ thay thế nếu bạn có thể muốn dùng lại."
   },
   "auto_save": {
     "saving": "Đang lưu…",
@@ -677,8 +678,7 @@
     },
     "system": {
       "title": "Thông báo hệ thống",
-      "description": "Hiện thông báo hệ thống khi Multica chạy nền.",
-      "label": "Hiện thông báo hệ thống"
+      "label": "Hiện thông báo hệ thống khi Multica chạy nền"
     },
     "browser": {
       "label": "Thông báo trình duyệt",
@@ -1219,6 +1219,15 @@
   "desktop": {
     "tabs": {
       "updates": "Cập nhật"
+    },
+    "tab_bar": {
+      "pin": "Ghim tab",
+      "unpin": "Bỏ ghim tab",
+      "close": "Đóng tab",
+      "close_others": "Đóng các tab khác",
+      "open_window": "Mở thành cửa sổ mới",
+      "new": "Tab mới",
+      "pinned_name": "{{title}} (đã ghim)"
     },
     "updates": {
       "title": "Cập nhật",

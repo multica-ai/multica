@@ -16,10 +16,10 @@
     "priority": "Mức ưu tiên",
     "from": "Từ",
     "unread_only": "Chỉ chưa đọc",
+    "no_agents_working": "Không có agent nào đang làm việc",
     "notification_count_other": "{{count}} thông báo",
     "clear": "Xóa bộ lọc",
-    "empty": "Không có thông báo nào khớp với bộ lọc của bạn",
-    "no_agents_working": "Không có agent nào đang làm việc"
+    "empty": "Không có thông báo nào khớp với bộ lọc của bạn"
   },
   "context_menu": {
     "mark_read": "Đánh dấu là đã đọc",

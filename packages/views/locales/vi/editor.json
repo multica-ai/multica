@@ -117,11 +117,11 @@
   },
   "code_block": {
     "html_preview": "Xem trước HTML",
+    "close_preview": "Đóng",
     "copy_code": "Sao chép code",
     "show_preview": "Hiện bản xem trước",
     "show_source": "Hiện nguồn",
-    "fullscreen": "Toàn màn hình",
-    "close_preview": "Đóng"
+    "fullscreen": "Toàn màn hình"
   },
   "dynamic_block": {
     "preview": "Xem trước",

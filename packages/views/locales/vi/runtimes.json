@@ -1,10 +1,9 @@
 {
   "page": {
     "title": "Runtime",
-    "tagline": "Các máy và cloud worker đang chạy phiên CLI cho agent của bạn.",
     "learn_more": "Tìm hiểu thêm →",
-    "connect_remote": "Thêm máy tính",
-    "search_placeholder": "Tìm runtime…",
+    "connect_remote": "Thêm máy",
+    "search_placeholder": "Tìm…",
     "scope_mine": "Của tôi",
     "scope_all": "Tất cả",
     "live": "Trực tiếp",
@@ -13,7 +12,7 @@
     "filter_all_description": "Tất cả runtime trong chế độ xem này",
     "empty": {
       "title": "Chưa có runtime nào",
-      "hint": "Bản desktop tự động phát hiện máy tính này. Kết nối các máy tính khác tại đây."
+      "hint": "Bản desktop tự động phát hiện máy tính này. Thêm các máy khác tại đây."
     },
     "no_matches": {
       "title": "Không có kết quả khớp",
@@ -25,6 +24,52 @@
     "bootstrapping": {
       "title": "Đang khởi động runtime cục bộ…",
       "hint": "Đang kết nối tới không gian làm việc..."
+    },
+    "add": "Thêm",
+    "add_menu": {
+      "machines": "Máy",
+      "this_computer": "Máy tính này",
+      "this_computer_connected": "Đã kết nối · {{name}}",
+      "this_computer_download": "Tải ứng dụng desktop để kết nối nó",
+      "other_machine": "Máy khác hoặc máy chủ",
+      "other_machine_hint": "Chạy hai lệnh trên máy đó",
+      "cloud_services": "Dịch vụ đám mây",
+      "qoder_manage_hint": "Đã kết nối · quản lý kết nối",
+      "cloud_runtime_hint": "Cấp một node đám mây do Multica vận hành"
+    },
+    "columns": {
+      "name": "Tên",
+      "harness": "Harness",
+      "agents": "Agent",
+      "workload": "Tải công việc",
+      "status": "Trạng thái"
+    },
+    "groups": {
+      "machines": {
+        "title": "Máy"
+      },
+      "cloud": {
+        "title": "Dịch vụ đám mây",
+        "coming_soon": "Sắp ra mắt"
+      }
+    },
+    "rows": {
+      "this_computer_title": "Chạy trên máy tính này",
+      "this_computer_hint": "Tải ứng dụng desktop và đăng nhập; Claude Code, Codex và các CLI khác trên máy tính này sẽ tự xuất hiện ở đây",
+      "download_desktop": "Tải bản desktop",
+      "add_machine_title": "Thêm máy khác hoặc máy chủ",
+      "add_machine_hint": "Chạy hai lệnh trên máy đó để agent dùng được các CLI đã cài ở đó",
+      "view_commands": "Xem các lệnh",
+      "owner_you": "Bạn",
+      "connect": "Kết nối",
+      "not_connected": "Chưa kết nối",
+      "provided_by": "Bởi {{vendor}}",
+      "no_matches": "Không có máy hay dịch vụ đám mây nào khớp"
+    },
+    "filters": {
+      "all": "Tất cả",
+      "online": "Trực tuyến",
+      "offline": "Ngoại tuyến"
     }
   },
   "mika_setup": {
@@ -75,7 +120,7 @@
     "rename": "Đổi tên máy",
     "rename_dialog": {
       "title": "Đổi tên máy",
-      "description": "Dùng cho máy tính này và tất cả runtime của nó.",
+      "description": "Dùng cho máy này và tất cả runtime của nó.",
       "placeholder": "vd. MacBook của Bohan",
       "hint": "Để trống để dùng tên mặc định của thiết bị.",
       "cancel": "Hủy",
@@ -124,18 +169,44 @@
     "diagnostics_visibility": "Khả năng hiển thị",
     "visibility_label": {
       "private": "Riêng tư",
-      "public": "Công khai"
+      "public": "Công khai",
+      "members": "Thành viên cụ thể"
+    },
+    "visibility_choice": {
+      "private": "Riêng tư",
+      "public": "Công khai",
+      "members": "Thành viên"
     },
     "visibility_hint": {
       "private": "Chỉ bạn mới tạo được agent trên runtime này.",
-      "public": "Mọi thành viên trong không gian làm việc đều tạo được agent trên runtime này."
+      "public": "Mọi thành viên trong không gian làm việc đều tạo được agent trên runtime này.",
+      "members": "Chỉ bạn và các thành viên đã chọn mới tạo được agent trên runtime này."
     },
     "visibility_hint_readonly": {
       "private": "Chỉ chủ sở hữu runtime mới tạo được agent trên runtime này, và chỉ họ mới chuyển được sang Công khai.",
-      "public": "Mọi thành viên trong không gian làm việc đều tạo được agent trên runtime này. Chỉ chủ sở hữu runtime mới chuyển lại được sang Riêng tư."
+      "public": "Mọi thành viên trong không gian làm việc đều tạo được agent trên runtime này. Chỉ chủ sở hữu runtime mới chuyển lại được sang Riêng tư.",
+      "members": "Chỉ chủ sở hữu và các thành viên đã chọn mới tạo được agent trên runtime này."
     },
+    "visibility_members_title": "Chia sẻ với thành viên",
+    "visibility_members_search": "Tìm thành viên",
+    "visibility_members_none": "Chưa có thành viên nào khác trong không gian làm việc.",
+    "visibility_members_no_match": "Không có thành viên nào khớp.",
+    "visibility_members_edit": "Sửa",
+    "visibility_members_count_other": "{{count}} thành viên",
     "visibility_toast_updated": "Đã đặt khả năng hiển thị thành {{visibility}}",
     "visibility_toast_failed": "Không cập nhật được khả năng hiển thị",
+    "visibility_revoke_dialog": {
+      "title": "Hạn chế quyền truy cập runtime?",
+      "description": "Hạn chế quyền truy cập vào \"{{name}}\" sẽ gỡ gắn kết {{count}} agent bị ảnh hưởng, hủy {{taskCount}} lượt chạy đang hoạt động và tạm dừng các autopilot đang gán cho những agent đó. Agent và lượt chạy còn giữ quyền truy cập không bị ảnh hưởng.",
+      "warning": "Quyền truy cập bị thu hồi ngay lập tức trên máy chủ. Các daemon đang kết nối sẽ dừng qua cơ chế kiểm tra hủy thông thường. Máy đang ngoại tuyến sẽ không nhận được yêu cầu dừng cho tới khi kết nối lại; tiến trình cục bộ của nó có thể vẫn tiếp tục trong lúc đó.",
+      "plan_changed": "Kế hoạch truy cập đã thay đổi trong lúc hộp thoại này đang mở. Hãy xem lại và xác nhận lần nữa.",
+      "checkbox": "Tôi hiểu rằng các agent của đồng đội trong danh sách sẽ bị gỡ gắn kết, các lượt chạy đang hoạt động của chúng sẽ bị hủy, và các autopilot đang bật của chúng sẽ bị tạm dừng.",
+      "cancel": "Hủy",
+      "confirm": "Hạn chế quyền truy cập",
+      "submitting": "Đang thu hồi quyền truy cập...",
+      "toast_success": "Đã cập nhật quyền truy cập runtime",
+      "toast_failed": "Thu hồi quyền truy cập runtime thất bại"
+    },
     "delete_dialog": {
       "self_heal_notice": "Runtime này được quản lý bởi một daemon cục bộ đang chạy. Việc xóa sẽ thành công, nhưng daemon sẽ đăng ký lại một runtime mới trong vài giây — hãy dừng tiến trình daemon trước để loại bỏ vĩnh viễn.",
       "profile_backed_notice": "Runtime này được đăng ký từ một hồ sơ runtime tùy chỉnh. Việc xóa chỉ loại bỏ phiên runtime hiện tại; daemon đang chạy có thể đăng ký lại khi hồ sơ vẫn còn. Hãy xóa hồ sơ runtime tùy chỉnh khỏi mục Runtime tùy chỉnh để loại bỏ vĩnh viễn.",
@@ -178,19 +249,7 @@
     "toast_deleted": "Đã xóa runtime",
     "toast_delete_failed": "Không xóa được runtime",
     "running_chip_other": "· {{count}} đang chạy",
-    "queued_chip_other": "· {{count}} đang chờ",
-    "visibility_revoke_dialog": {
-      "title": "Đặt Runtime này thành riêng tư?",
-      "description": "Đặt \"{{name}}\" thành riêng tư sẽ gỡ gắn kết {{count}} agent của đồng đội, hủy {{taskCount}} lượt chạy đang hoạt động trên máy này và tạm dừng các autopilot đang gán cho những agent đó. Agent và lượt chạy của chính bạn không bị ảnh hưởng.",
-      "warning": "Quyền truy cập bị thu hồi ngay lập tức trên máy chủ. Các daemon đang kết nối sẽ dừng qua cơ chế kiểm tra hủy thông thường. Máy đang ngoại tuyến sẽ không nhận được yêu cầu dừng cho tới khi kết nối lại; tiến trình cục bộ của nó có thể vẫn tiếp tục trong lúc đó.",
-      "plan_changed": "Kế hoạch truy cập đã thay đổi trong lúc hộp thoại này đang mở. Hãy xem lại và xác nhận lần nữa.",
-      "checkbox": "Tôi hiểu rằng các agent của đồng đội trong danh sách sẽ bị gỡ gắn kết, các lượt chạy đang hoạt động của chúng sẽ bị hủy, và các autopilot đang bật của chúng sẽ bị tạm dừng.",
-      "cancel": "Hủy",
-      "confirm": "Đặt Runtime thành riêng tư",
-      "submitting": "Đang thu hồi quyền truy cập...",
-      "toast_success": "Runtime giờ đã riêng tư và quyền truy cập của đồng đội đã bị thu hồi",
-      "toast_failed": "Thu hồi quyền truy cập runtime thất bại"
-    }
+    "queued_chip_other": "· {{count}} đang chờ"
   },
   "detail_page": {
     "not_found_title": "Không tìm thấy runtime",
@@ -199,16 +258,16 @@
   "running_other": "{{count}} đang chạy",
   "queued_other": "{{count}} đang chờ",
   "connect": {
-    "title": "Thêm máy tính",
-    "description": "Chạy hai lệnh sau trên máy tính bạn muốn thêm. Chúng tôi sẽ phát hiện ra ngay khi daemon trực tuyến.",
+    "title": "Thêm máy",
+    "description": "Chạy hai lệnh sau trên máy bạn muốn thêm. Chúng tôi sẽ phát hiện ra ngay khi daemon trực tuyến.",
     "step1_label": "Cài đặt Multica CLI",
     "platform_group": "Chọn nền tảng của bạn",
     "platform_macos_linux": "macOS / Linux",
     "platform_windows": "Windows",
     "step2_label": "Khởi động daemon",
     "step2_hint": "Mở trình duyệt để đăng nhập, sau đó giữ daemon chạy ở chế độ nền.",
-    "live_listening": "Đang chờ máy tính của bạn",
-    "troubleshooting": "Không mở được trình duyệt trên máy tính đó?",
+    "live_listening": "Đang chờ máy của bạn",
+    "troubleshooting": "Không mở được trình duyệt trên máy đó?",
     "trouble_intro": "Hãy dùng token thay cho đăng nhập qua trình duyệt. Cách này thay thế bước 2 và dùng được ở bất cứ đâu có terminal.",
     "trouble_token_hint_prefix": "Tạo token trong ",
     "trouble_token_hint_destination": "Cài đặt → Token",
@@ -217,8 +276,8 @@
     "trouble_view_logs": "Xem nhật ký",
     "copy_aria": "Sao chép",
     "cancel": "Hủy",
-    "success_title": "Đã kết nối máy tính",
-    "success_description": "Đã kết nối máy tính. Giờ bạn có thể tạo agent.",
+    "success_title": "Đã kết nối máy",
+    "success_description": "Đã kết nối máy. Giờ bạn có thể tạo agent.",
     "view_runtime": "Xem runtime",
     "create_agent": "Tạo agent"
   },
@@ -461,5 +520,138 @@
     "table_cache_r": "Cache đọc",
     "table_cache_w": "Cache ghi",
     "no_data": "Chưa có dữ liệu sử dụng"
+  },
+  "qoder": {
+    "title": "Runtime QCA",
+    "description": "Kết nối Qoder Cloud Agents. Multica quản lý việc thực thi và lưu thông tin đăng nhập dưới dạng mã hóa. Quản trị viên không gian làm việc có thể thay đổi cấu hình này.",
+    "loading": "Đang tải…",
+    "unavailable": "Cần thiết lập phía máy chủ: hãy cấu hình MULTICA_VCS_SECRET_KEY.",
+    "online": "Trực tuyến",
+    "error": "Lỗi kết nối",
+    "starting": "Đang khởi động",
+    "not_configured": "Chưa cấu hình",
+    "name": "Tên runtime",
+    "region": "Khu vực",
+    "region_global": "Toàn cầu (qoder.com)",
+    "region_cn": "Trung Quốc (qoder.com.cn)",
+    "region_hint": "Dùng đúng trang nơi bạn đã tạo PAT; PAT chỉ hoạt động trong khu vực của chính nó.",
+    "keep_secret": "Để trống để giữ token đã lưu",
+    "repositories": "Ủy quyền GitHub",
+    "repositories_hint": "Gắn một token cho mỗi repository. Chọn repository và nhánh bắt đầu trong dự án của bạn.",
+    "remove": "Loại bỏ",
+    "add_repository": "Thêm repository",
+    "saved": "Đã lưu. Máy chủ sẽ tự khởi động runtime.",
+    "check": "Kiểm tra kết nối",
+    "working": "Đang xử lý…",
+    "stop": "Tạm dừng",
+    "stopped": "Đã tạm dừng",
+    "offline": "Ngoại tuyến; đang kết nối lại",
+    "checking": "Đang kiểm tra kết nối...",
+    "check_passed": "Kết nối thành công",
+    "check_failed": "Kết nối thất bại",
+    "environment": "Môi trường",
+    "select_environment": "Chọn một môi trường",
+    "no_environments": "Không có môi trường khả dụng. Tạo một môi trường trong Qoder rồi làm mới.",
+    "refresh_catalog": "Làm mới danh sách",
+    "agent": "QCA Agent",
+    "select_agent": "Chọn một QCA Agent",
+    "agent_hint": "Dùng PAT đã lưu trong runtime từ xa để liên kết một QCA Agent. Quản lý model, công cụ và skill của nó trong Qoder.",
+    "no_agents": "Không có QCA Agent khả dụng. Tạo một agent trong Qoder rồi làm mới.",
+    "agent_unavailable": "QCA Agent đã liên kết không còn khả dụng. Hãy chọn agent khác.",
+    "save_agent": "Lưu liên kết",
+    "agent_saved": "Đã lưu liên kết QCA Agent",
+    "agent_save_failed": "Không lưu được liên kết QCA Agent",
+    "cloud_title": "Qoder Cloud Agents",
+    "managed": "Dịch vụ được quản lý",
+    "cloud_description": "Chạy agent trên Qoder Cloud bằng một kết nối dùng chung, không phải duy trì máy cục bộ.",
+    "configure_credentials": "Cấu hình thông tin đăng nhập",
+    "add_agent": "Thêm agent",
+    "add_agent_description": "Tạo một agent Multica liên kết với QCA Agent có sẵn. Nó sẽ dùng môi trường và thông tin đăng nhập đã cấu hình cho Qoder Cloud.",
+    "agent_name": "Tên agent",
+    "cancel": "Hủy",
+    "shared_credentials_hint": "Thông tin đăng nhập được dùng chung trong không gian làm việc này. PAT được mã hóa và không bao giờ hiển thị lại sau khi lưu.",
+    "agent_count_other": "{{count}} agent",
+    "github_url": "URL GitHub",
+    "github_token": "Token GitHub",
+    "execution": "Thực thi",
+    "concurrency": "Lượt chạy đồng thời",
+    "concurrency_hint": "Lượt chạy vượt giới hạn này sẽ chờ trong hàng đợi.",
+    "run_timeout": "Thời gian chờ mỗi lượt chạy (phút)",
+    "run_timeout_hint": "Lượt chạy kéo dài quá thời gian này sẽ bị hủy và đánh dấu thất bại.",
+    "data_disclosure_title": "Multica gửi gì tới Qoder",
+    "data_disclosure": "Tiêu đề và mô tả của công việc, các bình luận liên quan, bối cảnh dự án và hướng dẫn của agent. Token GitHub chỉ được dùng để gắn repository cho một lượt chạy.",
+    "usage": "{{active}} trên {{limit}} đang chạy · {{queued}} đang chờ",
+    "open_settings": "Mở cài đặt",
+    "default_repository": "Repository mặc định",
+    "default_repository_hint": "Được gắn khi dự án của công việc không có repository. Kết nối cần một token GitHub cho repository này.",
+    "default_branch": "Nhánh",
+    "default_branch_placeholder": "Nhánh mặc định",
+    "create_agent": "Tạo agent với nó",
+    "connect": {
+      "submit": "Kết nối",
+      "connected": "Đã kết nối Qoder. Nó sẽ sẵn sàng trong vài giây.",
+      "token": "Token truy cập cá nhân",
+      "token_rejected": "{{region}} không chấp nhận token này. Token chỉ hoạt động trên trang đã tạo ra nó.",
+      "retry_cn": "Thử lại trên trang Trung Quốc",
+      "retry_global": "Thử lại trên trang Toàn cầu",
+      "verifying": "Đang xác minh token…",
+      "verified": "Token đã xác minh",
+      "environment_waiting": "Môi trường sẽ tải sau khi token được xác minh",
+      "repo_count_other": "{{count}} repository",
+      "optional": "Không bắt buộc",
+      "execution_summary": "Tối đa {{concurrency}} cùng lúc · giới hạn {{timeout}} phút"
+    },
+    "stop_confirm": {
+      "title": "Tạm dừng Qoder Cloud Agents?",
+      "description": "Công việc mới sẽ không được gửi tới Qoder cho tới khi nó được tiếp tục.",
+      "cancel": "Hủy",
+      "description_agents_other": "{{count}} agent này giữ nguyên hướng dẫn và lịch sử nhưng không nhận được công việc mới cho tới khi Qoder được tiếp tục hoặc chúng chuyển sang runtime khác."
+    },
+    "connect_title": "Kết nối Qoder Cloud Agents",
+    "connect_description": "Multica chạy công việc trong sandbox của Qoder.",
+    "page": {
+      "configuration": "Cấu hình",
+      "agents_title": "Agent",
+      "pause_title": "Tạm dừng Qoder",
+      "pause_hint": "Ngừng gửi công việc mới tới Qoder. Thông tin đăng nhập và agent được giữ nguyên, bạn tiếp tục lại lúc nào cũng được.",
+      "resume_title": "Tiếp tục Qoder",
+      "resume": "Tiếp tục",
+      "resumed": "Qoder đang khởi động.",
+      "disconnect_title": "Ngắt kết nối Qoder",
+      "disconnect_hint": "Xóa PAT và các token repository đã lưu và gỡ runtime này. Agent đang dùng nó sẽ bị gỡ gắn kết và giữ nguyên lịch sử.",
+      "disconnect": "Ngắt kết nối",
+      "not_connected_title": "Qoder chưa được kết nối",
+      "not_connected_hint": "Nhờ quản trị viên không gian làm việc kết nối Qoder Cloud Agents.",
+      "workload_idle": "Đang rảnh",
+      "connection_title": "Kết nối",
+      "edit": "Sửa",
+      "edit_connection_title": "Sửa kết nối",
+      "edit_connection_hint": "Kết nối được kiểm tra trước khi lưu.",
+      "test_and_save": "Kiểm tra và lưu",
+      "save": "Lưu",
+      "token_saved": "Đã lưu",
+      "repositories_hint": "Agent chỉ clone được các repository được ủy quyền tại đây.",
+      "repo_token_saved": "Đã lưu token",
+      "repo_actions": "Thao tác cho {{repo}}",
+      "replace_token": "Thay token",
+      "replace_token_title": "Thay token cho {{repo}}",
+      "open_on_github": "Mở trên GitHub",
+      "remove_repository_title": "Loại bỏ {{repo}}?",
+      "remove_repository_description": "Token của nó sẽ bị xóa và agent không clone được nó nữa.",
+      "edit_limits": "Sửa cài đặt thực thi",
+      "run_timeout": "Thời gian chờ mỗi lượt chạy",
+      "manage_title": "Quản lý",
+      "minutes_other": "{{count}} phút"
+    },
+    "disconnect_confirm": {
+      "title": "Ngắt kết nối Qoder Cloud Agents?",
+      "description": "PAT và các token repository đã lưu sẽ bị xóa và runtime Qoder bị gỡ. Muốn dùng lại Qoder, bạn phải kết nối lại từ đầu.",
+      "description_agents_other": "{{count}} agent này sẽ bị gỡ gắn kết. Chúng giữ nguyên hướng dẫn và lịch sử và có thể chuyển sang runtime khác.",
+      "plan_changed": "Danh sách agent trên Qoder đã thay đổi. Hãy xem lại danh sách và xác nhận lần nữa.",
+      "confirm": "Ngắt kết nối",
+      "working": "Đang ngắt kết nối…",
+      "cancel": "Hủy",
+      "done": "Đã ngắt kết nối Qoder"
+    }
   }
 }

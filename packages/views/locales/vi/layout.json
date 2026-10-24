@@ -40,6 +40,13 @@
     "loading_workspace": "Đang tải không gian làm việc…",
     "loading_named_prefix": "Đang tải"
   },
+  "window": {
+    "go_back": "Quay lại",
+    "go_forward": "Đi tiếp",
+    "hold_for_history": "Giữ để xem lịch sử",
+    "back_history": "Lịch sử quay lại",
+    "forward_history": "Lịch sử đi tiếp"
+  },
   "sidebar": {
     "unpin_tooltip": "Bỏ ghim",
     "workspaces_label": "Không gian làm việc",

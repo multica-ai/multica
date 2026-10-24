@@ -59,6 +59,7 @@
       "runtime_offline": "Agent hiện đang ngoại tuyến nên không thể trả lời. Hãy thử lại khi nó trực tuyến trở lại.",
       "runtime_access_denied": "Agent này không thể chạy trên runtime riêng tư của nó nên không thể trả lời. Hãy đặt runtime ở chế độ công khai, hoặc gắn lại/sao chép agent sang một runtime mà chủ sở hữu của nó có thể dùng.",
       "runtime_recovery": "Agent đã khởi động lại trước khi có thể hoàn thành. Hãy thử lại.",
+      "runtime_access_revoked": "Quyền truy cập runtime đã bị thu hồi. Hãy gắn agent vào một runtime có thể truy cập được trước khi bắt đầu lượt chạy khác.",
       "manual": "Câu trả lời này đã bị hủy.",
       "skill_bundle_unavailable": "Không tải được các skill của agent nên nó chưa bao giờ bắt đầu. Đây thường là sự cố kết nối — hãy thử lại.",
       "runtime_cli_timeout": "OpenClaw CLI trên máy không phản hồi kịp thời nên lần chạy này chưa bao giờ bắt đầu. Đây là lỗi quá thời gian khởi động cục bộ, không phải sự cố mạng — thử lại cũng không ích gì cho đến khi CLI nhanh hơn hoặc thời gian chờ được tăng lên (MULTICA_OPENCLAW_CLI_TIMEOUT).",
@@ -70,8 +71,7 @@
       "context_overflow": "Cuộc trò chuyện này đã quá dài so với model. Hãy bắt đầu một phiên mới, hoặc chia yêu cầu của bạn thành các bước nhỏ hơn.",
       "runtime_missing_executable": "Không chạy được CLI của agent trên máy này. Hãy kiểm tra xem nó đã được cài đặt đúng và có trong PATH chưa, rồi thử lại.",
       "runtime_version_unsupported": "CLI của agent quá cũ so với runtime này. Hãy nâng cấp nó, rồi thử lại.",
-      "fallback": "Đã xảy ra lỗi và agent không thể hoàn thành câu trả lời. Hãy thử lại.",
-      "runtime_access_revoked": "Quyền truy cập runtime đã bị thu hồi. Hãy gắn agent vào một runtime có thể truy cập được trước khi bắt đầu lượt chạy khác."
+      "fallback": "Đã xảy ra lỗi và agent không thể hoàn thành câu trả lời. Hãy thử lại."
     },
     "tools_other": "{{count}} công cụ",
     "tool_result_named": "Kết quả {{tool}}: ",
