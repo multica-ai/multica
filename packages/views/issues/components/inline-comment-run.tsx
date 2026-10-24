@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
@@ -105,8 +106,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   // Historical, collapsed runs still don't fetch transcripts.
   const loadTranscript = task.status === "running" || (presentation === "inline" && expanded) || fullLogOpen;
   const { data, isPending, isError, refetch } = useTaskMessages(task.id, active, loadTranscript);
+  const workspaceId = useWorkspaceId();
+  const { data: runtimes } = useQuery({
+    ...runtimeListOptions(workspaceId ?? ""),
+    enabled: !!workspaceId && !!task.runtime_id && task.status === "running",
+  });
   const items = useMemo(() => buildTimeline(data ?? []), [data]);
-  const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, loadTranscript);
+  const formatText = useTraceIssueLabels(workspaceId, task.issue_id, items, loadTranscript);
   const steps = useMemo(() => buildSteps(items), [items]);
   const rows = useMemo(() => groupSteps(steps), [steps]);
   // Messages that steered this turn, placed in its step list where it read them.
@@ -128,13 +134,16 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const latest = steps.findLast((step) => step.kind !== "text" || step.item.content?.trim());
   const pendingCall = steps.findLast((step) => isCallStep(step) && !step.result);
   const current = pendingCall ?? latest;
+  const openclawEmpty = task.status === "running" && steps.length === 0 && !isPending && !isError
+    && runtimes?.find((runtime) => runtime.id === task.runtime_id)?.provider === "openclaw";
+  const emptyLabel = tAgents(($) => $.transcript.openclaw_live_unavailable);
   // Keep the last activity visible after a tool returns, until new progress arrives.
   const activitySummary = current && isCallStep(current)
     ? redactSecrets(traceToolArgSummary(current.call?.input, { formatText }) || current.tool)
     : current?.kind === "text" ? redactSecrets(formatText(current.item.content ?? ""))
     : current?.kind === "thinking" ? thinkingPreview(current.item.content, formatText) || t(($) => $.inline_run.thinking)
     : current?.kind === "error" ? t(($) => $.inline_run.error)
-    : t(($) => $.inline_run.waiting_response);
+    : openclawEmpty ? expanded ? statusText : emptyLabel : t(($) => $.inline_run.waiting_response);
   const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
@@ -233,7 +242,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
             <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
-          {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
+          {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{openclawEmpty ? emptyLabel : t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
           {interleaveSteers(rows.slice(-visibleCount), steers, rows.length > visibleCount).map((item) => "steer" in item

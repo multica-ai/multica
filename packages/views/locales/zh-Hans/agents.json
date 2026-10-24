@@ -889,6 +889,7 @@
     "copy_filtered": "复制筛选结果",
     "copied": "已复制",
     "waiting_events": "等待事件中...",
+    "openclaw_live_unavailable": "OpenClaw 不提供实时日志。回复将在运行结束后显示。",
     "no_data": "未记录执行数据。",
     "sort_chronological": "最早在前",
     "sort_newest_first": "最新在前",
