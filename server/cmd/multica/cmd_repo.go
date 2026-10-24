@@ -54,7 +54,9 @@ var repoCheckoutCmd = &cobra.Command{
 		"Running it again where the repository is already checked out never silently discards work: a checkout " +
 		"that has uncommitted changes, untracked files, or unpushed commits, or is already on this task's branch, " +
 		"is kept as it is and only its remote refs are fetched. Pass --fresh to discard its uncommitted changes and " +
-		"untracked files and start over on a new branch; commits stay on the old branch, but push any you still need first.",
+		"untracked files and start over on a new branch; commits stay on the old branch, but push any you still need first.\n\n" +
+		"A versioned .multica/sparse-profile enables sparse checkout for new task worktrees. Pass --full to use a full tree " +
+		"or widen an existing sparse tree; --fresh reapplies the profile from the selected ref.",
 	Args: exactArgs(1),
 	RunE: runRepoCheckout,
 }
@@ -62,6 +64,7 @@ var repoCheckoutCmd = &cobra.Command{
 var (
 	repoCheckoutRef   string
 	repoCheckoutFresh bool
+	repoCheckoutFull  bool
 )
 
 func init() {
@@ -76,6 +79,7 @@ func init() {
 
 	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
 	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFresh, "fresh", false, "discard an existing checkout's uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref); commits stay on the old branch")
+	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutFull, "full", false, "use a full checkout instead of the repository's sparse profile; widen an existing sparse checkout")
 
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoAddCmd)
@@ -372,6 +376,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		"checkout_mode": strings.TrimSpace(os.Getenv("MULTICA_REPO_CHECKOUT_MODE")),
 		"retry_busy":    true,
 		"fresh":         repoCheckoutFresh,
+		"full":          repoCheckoutFull,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -443,6 +448,7 @@ type repoCheckoutResult struct {
 	Kept             string `json:"kept"`
 	UncommittedFiles int    `json:"uncommitted_files"`
 	UnpushedCommits  int    `json:"unpushed_commits"`
+	SparseWidened    bool   `json:"sparse_widened"`
 }
 
 // repoCheckoutSummary says what the checkout did. A kept checkout has to read
@@ -459,8 +465,12 @@ func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
 	if result.Kept == "task_branch" {
 		branch += ", this task's branch"
 	}
+	changeDescription := "nothing was reset, cleaned, or switched; only remote refs were fetched."
+	if result.SparseWidened {
+		changeDescription = "nothing was reset, cleaned, or switched; --full disabled sparse checkout and materialized excluded files."
+	}
 	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
-		"nothing was reset, cleaned, or switched; only remote refs were fetched.\n"+
+		changeDescription+"\n"+
 		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
 		"re-run with --fresh; commits stay on the old branch, but push any you still need first.",
 		repoURL, result.Path, branch,
