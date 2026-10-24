@@ -644,7 +644,21 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	existing, err := h.Queries.GetProjectResourceInWorkspace(r.Context(), db.GetProjectResourceInWorkspaceParams{
+	// The read-decide-write flow below derives every column it writes back
+	// from the row read here. Two concurrent partial updates would otherwise
+	// interleave read→read→write→write, and the second writer's stale snapshot
+	// would silently revert the first writer's change (#9238). Taking the row
+	// lock at read time inside a short transaction serializes competitors:
+	// they block on this row until the write commits, then re-read fresh.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start update transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	existing, err := qtx.GetProjectResourceInWorkspaceForUpdate(r.Context(), db.GetProjectResourceInWorkspaceForUpdateParams{
 		ID: resourceUUID, WorkspaceID: project.WorkspaceID,
 	})
 	if err != nil {
@@ -784,7 +798,7 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	updated, err := h.Queries.UpdateProjectResource(r.Context(), db.UpdateProjectResourceParams{
+	updated, err := qtx.UpdateProjectResource(r.Context(), db.UpdateProjectResourceParams{
 		ID:          existing.ID,
 		ResourceRef: nextRef,
 		Label:       nextLabel,
@@ -795,6 +809,10 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusConflict, "this resource is already attached to the project")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "failed to update project resource")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update project resource")
 		return
 	}
