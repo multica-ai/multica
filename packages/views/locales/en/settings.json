@@ -651,6 +651,11 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
+    "following": {
+      "title": "Following",
+      "label": "Automatically follow agent-created sub-issues",
+      "description": "When you ask an agent to work on an issue, follow the sub-issues it creates."
+    },
     "title": "Inbox Notifications",
     "description": "Muted events remain visible on the issue.",
     "toast_failed": "Failed to update notification settings",

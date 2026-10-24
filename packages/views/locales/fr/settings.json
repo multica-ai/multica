@@ -651,6 +651,11 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
+    "following": {
+      "title": "Abonnements",
+      "label": "Suivre automatiquement les sous-tâches créées par les agents",
+      "description": "Lorsque vous confiez une tâche à un agent, suivez les sous-tâches qu’il crée."
+    },
     "title": "Notifications de la boîte de réception",
     "description": "Les événements désactivés restent visibles dans la tâche.",
     "toast_failed": "Échec de la mise à jour des réglages de notification",

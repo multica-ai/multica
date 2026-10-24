@@ -59,6 +59,22 @@ export function NotificationsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)} scope="workspace-only">
+      <SettingsSection title={t(($) => $.notifications.following.title)} anchor="following">
+        <SettingsCard>
+          <SettingsRow
+            anchor="sub_issue_following"
+            label={t(($) => $.notifications.following.label)}
+            description={t(($) => $.notifications.following.description)}
+          >
+            <Switch
+              checked={preferences.sub_issue_following !== "muted"}
+              aria-label={t(($) => $.notifications.following.label)}
+              onCheckedChange={(checked) => handleToggle("sub_issue_following", checked)}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
       <SettingsSection
         title={t(($) => $.notifications.title)}
         description={t(($) => $.notifications.description)}

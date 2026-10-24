@@ -646,6 +646,11 @@
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
+    "following": {
+      "title": "关注",
+      "label": "自动关注智能体创建的子任务",
+      "description": "当你让智能体处理任务时，自动关注它创建的子任务。"
+    },
     "title": "收件箱通知",
     "description": "关闭通知后，仍可在任务中查看相关动态。",
     "toast_failed": "更新通知设置失败",

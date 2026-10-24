@@ -646,6 +646,11 @@
     "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
   },
   "notifications": {
+    "following": {
+      "title": "팔로우",
+      "label": "에이전트가 만든 하위 태스크 자동 팔로우",
+      "description": "에이전트에게 태스크를 맡기면 에이전트가 만드는 하위 태스크를 팔로우합니다."
+    },
     "title": "인박스 알림",
     "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
