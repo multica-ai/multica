@@ -52,7 +52,11 @@ Add the Bot to a DingTalk group, then send `@your-bot <message>`. You must @-men
 
 ### Send images
 
-Direct messages and group chats both support messages containing text and images. Supported image formats are PNG, JPEG, GIF, WebP, and BMP. Each message can contain up to 4 images, with a maximum size of 10 MB per image. Files and voice messages are not currently supported.
+Direct messages and group chats both support messages containing text and images. Supported image formats are PNG, JPEG, GIF, WebP, and BMP. Each message can contain up to 4 images, with a maximum size of 10 MB per image. Voice messages are not currently supported.
+
+### Send files
+
+Send a PDF, DOCX, XLSX, PPTX, ZIP, plain-text file, or supported image as a file message (up to 10 MB). Multica preserves the filename, checks the downloaded content, and attaches the file to the chat so the agent can download it by attachment ID. Rejected files produce a failure notice. Legacy binary Office formats (`.doc`, `.xls`, `.ppt`) are not supported.
 
 In group messages containing both text and images, the @-mention of the Bot is also included in the message sent to the agent. To remove the Bot's name precisely, add the **DingTalk Group Basic Information Management** permission (`qyapi_chat_manage`).
 
