@@ -3623,7 +3623,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		s.recordClaimDecision(agentID, runtimeID, outcome, scope, decisionDetail)
 		// Surface the attempt to the poll loops for queue-wait attribution
 		// (route B): claimTask itself never holds the candidate task ids.
-		attempt = claimAttempt{Outcome: outcome, Running: decisionDetail.running, MaxConcurrent: decisionDetail.maxConcurrent}
+		attempt = claimAttempt{Outcome: outcome}
 	}()
 
 	err = s.runInTx(ctx, func(qtx *db.Queries) error {

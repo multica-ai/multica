@@ -4,7 +4,6 @@
     "stop": "중지",
     "stopping": "중지 중...",
     "queued": "사용 가능한 에이전트를 기다리고 있습니다.",
-    "queued_constraint": "대기열에 있음 — {{reason}}",
     "queue_constraint_agent_capacity": "에이전트 동시 실행 한도에 도달했습니다",
     "queue_constraint_attempted_unclaimed": "대기열이 사용 중입니다",
     "queue_constraint_agent_rebound": "에이전트가 다른 런타임으로 이동했습니다",

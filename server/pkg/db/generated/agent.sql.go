@@ -6105,7 +6105,7 @@ WHERE atq.runtime_id = $1
             OR r.visibility = 'private'
         )
   )
-ORDER BY atq.priority DESC, atq.created_at ASC
+ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
 `
 
 // Returns rows the runtime is authorized to attempt to claim. Status is restricted to
@@ -6215,7 +6215,7 @@ WHERE atq.runtime_id = ANY($1::uuid[])
             OR r.visibility = 'private'
         )
   )
-ORDER BY atq.priority DESC, atq.created_at ASC
+ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
 `
 
 // Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns

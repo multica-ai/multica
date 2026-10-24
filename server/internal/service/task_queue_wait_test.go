@@ -26,7 +26,7 @@ func TestQueueWaitUpdatesForAgent(t *testing.T) {
 	candidates := []db.AgentTaskQueue{waitRow(head, ""), waitRow(tail, "")}
 
 	t.Run("no_capacity attributes every candidate row of the agent", func(t *testing.T) {
-		got := queueWaitUpdatesForAgent(candidates, claimAttempt{Outcome: claimOutcomeNoCapacity, Running: 1, MaxConcurrent: 1})
+		got := queueWaitUpdatesForAgent(candidates, claimAttempt{Outcome: claimOutcomeNoCapacity})
 		if len(got) != 2 {
 			t.Fatalf("updates = %v, want 2", got)
 		}

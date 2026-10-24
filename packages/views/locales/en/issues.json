@@ -4,7 +4,6 @@
     "stop": "Stop",
     "stopping": "Stopping...",
     "queued": "Waiting for an available agent.",
-    "queued_constraint": "Queued — {{reason}}",
     "queue_constraint_agent_capacity": "the agent is at its concurrency limit",
     "queue_constraint_attempted_unclaimed": "queue busy",
     "queue_constraint_agent_rebound": "the agent moved to another runtime",

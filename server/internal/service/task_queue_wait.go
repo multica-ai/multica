@@ -55,12 +55,11 @@ const (
 
 // claimAttempt is the outcome of one claimTask call, surfaced to the poll
 // loops so they can attribute the wait on the candidate rows they hold.
-// Outcome reuses the claimOutcome* constants; Running/MaxConcurrent carry the
-// capacity numbers behind a no_capacity attempt (zero otherwise).
+// Outcome reuses the claimOutcome* constants. The capacity numbers behind a
+// no_capacity outcome are claim-decision funnel inputs (claimDecisionDetail)
+// and are not needed here: attribution only consumes the outcome.
 type claimAttempt struct {
-	Outcome       string
-	Running       int64
-	MaxConcurrent int64
+	Outcome string
 }
 
 // queueWaitReasonForOutcome maps a claim outcome onto the persisted wait

@@ -394,7 +394,7 @@ describe("InlineCommentRun", () => {
 
   it("names the constraint holding a queued run back", () => {
     setup(task({ status: "queued", queue_constraint: "agent_capacity" }));
-    expect(screen.getByText("Queued — the agent is at its concurrency limit")).toBeInTheDocument();
+    expect(screen.getByText("the agent is at its concurrency limit")).toBeInTheDocument();
     expect(screen.queryByText("Waiting for an available agent.")).not.toBeInTheDocument();
   });
 

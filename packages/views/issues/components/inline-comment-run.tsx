@@ -139,10 +139,13 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : t(($) => $.inline_run.waiting_response);
   // A queued run names the constraint the last claim poll recorded (#8551);
   // without one (older server, no attribution yet) it keeps the plain copy.
-  // The phrase is a snapshot, not a live verdict — see queue-wait-copy.ts.
+  // The status chip already announces "Queued" (sr-only while progress shows),
+  // so the summary line carries only the constraint phrase itself — prefixing
+  // it would read the same state twice. The phrase is a snapshot, not a live
+  // verdict — see queue-wait-copy.ts.
   const queueConstraint = task.status === "queued" ? queueConstraintPhrase(task.queue_constraint, t) : undefined;
   const summary = task.status === "queued"
-    ? queueConstraint ? t(($) => $.inline_run.queued_constraint, { reason: queueConstraint }) : t(($) => $.inline_run.queued)
+    ? queueConstraint ?? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : activitySummary;

@@ -4,7 +4,6 @@
     "stop": "停止",
     "stopping": "停止中...",
     "queued": "利用可能なエージェントを待っています。",
-    "queued_constraint": "キュー待ち — {{reason}}",
     "queue_constraint_agent_capacity": "エージェントの同時実行上限に達しています",
     "queue_constraint_attempted_unclaimed": "キューが混雑しています",
     "queue_constraint_agent_rebound": "エージェントが別のランタイムに移動しました",

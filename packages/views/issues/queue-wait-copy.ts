@@ -1,8 +1,9 @@
 import type { useT } from "../i18n";
 
 // Queue-wait constraint labels for a queued run's inline summary (#8551):
-// "Queued — {{reason}}" where the reason names the constraint the server's
-// last claim poll recorded on the run's queue row.
+// the phrase alone is the summary line, naming the constraint the server's
+// last claim poll recorded on the run's queue row. The queued status itself
+// is announced by the run's status chip, so the phrase must not repeat it.
 //
 // Phrases state only what the recorded value proves. attempted_unclaimed is
 // deliberately neutral ("queue busy" class): its common cause is another

@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -93,6 +97,24 @@ func TestQueueWaitDBAgentCapacityClearsOnClaim(t *testing.T) {
 		t.Fatalf("second poll claimed %s, want nil", util.UUIDToString(second.ID))
 	}
 	wantReason(t, f.pool, tail, queueWaitAgentCapacity)
+
+	// Third phase, promised above: settle the head so the tail becomes
+	// claimable, and the claim must clear the tail's attribution on its way
+	// out of 'queued' — a later read must not mistake the recorded wait for a
+	// live one.
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE agent_task_queue SET status = 'completed', completed_at = now(), prepare_lease_expires_at = NULL WHERE id = $1`, head,
+	); err != nil {
+		t.Fatalf("settle head: %v", err)
+	}
+	third, err := f.svc.ClaimTaskForRuntime(ctx, f.runtimeID)
+	if err != nil {
+		t.Fatalf("third poll: %v", err)
+	}
+	if third == nil || util.UUIDToString(third.ID) != tail {
+		t.Fatalf("third poll claimed %v, want tail %s", third, tail)
+	}
+	wantReason(t, f.pool, tail, "")
 }
 
 // TestQueueWaitDBAttemptedUnclaimedHeadOnly pins the runtime-offline shape of
@@ -126,28 +148,140 @@ func TestQueueWaitDBAttemptedUnclaimedHeadOnly(t *testing.T) {
 	wantReason(t, f.pool, tail, "")
 }
 
+// queueWaitUpdateTracer counts executions of the UpdateQueueWaitReasons
+// statement on its pool. The steady-state guarantee is "no statement sent",
+// which the persisted value alone cannot prove: an UPDATE whose IS DISTINCT
+// FROM guard matched zero rows also leaves the value unchanged. Only the wire
+// distinguishes the two.
+type queueWaitUpdateTracer struct{ updates int }
+
+func (tr *queueWaitUpdateTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	// sqlc keeps its "-- name: UpdateQueueWaitReasons :exec" marker as the
+	// first line of the statement text, so the marker names this query and no
+	// other statement in the claim path.
+	if strings.Contains(data.SQL, "UpdateQueueWaitReasons") {
+		tr.updates++
+	}
+	return ctx
+}
+
+func (tr *queueWaitUpdateTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {}
+
+// tracedQueueWaitPool opens a dedicated pool (same DATABASE_URL as the shared
+// one) whose connections report every query to the tracer. A separate pool is
+// required because the shared pool's tracer would count other tests' writes.
+func tracedQueueWaitPool(t *testing.T, tracer pgx.QueryTracer) *pgxpool.Pool {
+	t.Helper()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+	}
+	cfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		t.Fatalf("parse DATABASE_URL: %v", err)
+	}
+	cfg.ConnConfig.Tracer = tracer
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("open traced pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
 // TestQueueWaitDBSteadyStateNoRewrite covers the steady state: a second poll
-// with the same outcome must not rewrite the row. The zero-write guarantee
-// itself is pinned by the pure test (a row already carrying the reason yields
-// no update); here the behavior is asserted end to end — the value survives a
-// repeated poll unchanged and the poll keeps returning cleanly.
+// with the same outcome must not rewrite the row. The pure test pins the
+// diffing logic (a row already carrying the reason yields no update); here a
+// query tracer on a dedicated pool proves the end-to-end zero-write behavior —
+// the first poll issues exactly one attribution UPDATE and the second poll
+// issues none at all, not even one that the IS DISTINCT FROM guard would turn
+// into a no-op.
 func TestQueueWaitDBSteadyStateNoRewrite(t *testing.T) {
 	f := newClaimDecisionFixture(t, 0)
 	taskID := f.insertTask(t, "queued")
 
+	tracer := &queueWaitUpdateTracer{}
+	pool := tracedQueueWaitPool(t, tracer)
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+
 	ctx := context.Background()
-	for i := 0; i < 2; i++ {
-		claimed, err := f.svc.ClaimTaskForRuntime(ctx, f.runtimeID)
-		if err != nil {
-			t.Fatalf("poll %d: %v", i+1, err)
-		}
-		if claimed != nil {
-			t.Fatalf("poll %d claimed a task at max_concurrent_tasks=0", i+1)
-		}
+	claimed, err := svc.ClaimTaskForRuntime(ctx, f.runtimeID)
+	if err != nil {
+		t.Fatalf("first poll: %v", err)
 	}
-	// First poll wrote agent_capacity; the second poll read the same value
-	// back through the candidate SELECT and issued no update for it.
+	if claimed != nil {
+		t.Fatal("first poll claimed a task at max_concurrent_tasks=0")
+	}
+	if tracer.updates != 1 {
+		t.Fatalf("first poll issued %d UpdateQueueWaitReasons statement(s), want 1", tracer.updates)
+	}
 	wantReason(t, f.pool, taskID, queueWaitAgentCapacity)
+
+	claimed, err = svc.ClaimTaskForRuntime(ctx, f.runtimeID)
+	if err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+	if claimed != nil {
+		t.Fatal("second poll claimed a task at max_concurrent_tasks=0")
+	}
+	// The second poll read the same value back through the candidate SELECT
+	// and must not have issued the UPDATE again.
+	if tracer.updates != 1 {
+		t.Fatalf("second poll issued %d UpdateQueueWaitReasons statement(s), want 0", tracer.updates-1)
+	}
+	wantReason(t, f.pool, taskID, queueWaitAgentCapacity)
+}
+
+// TestQueueWaitDBBatchClaimAttribution is the batch-path twin of the singular
+// lifecycle above: with max_concurrent_tasks=1 and two queued tasks on one
+// runtime, the first ClaimTasksForRuntimes claims the head (clearing any
+// attribution it carried) and the second attributes the still-queued tail
+// agent_capacity. Pins that the batch loop feeds its attempts into
+// recordQueueWaitReasons and that the dispatched head stays out of the write —
+// the candidate SELECT's status='queued' filter excludes it, and the UPDATE's
+// own fence would reject it even if a stale row were listed.
+func TestQueueWaitDBBatchClaimAttribution(t *testing.T) {
+	f := newClaimDecisionFixture(t, 1)
+	otherIssue := f.fx.Issue(t, "queue wait batch second issue")
+	head := f.insertTask(t, "queued")
+	tail := f.fx.Task(t, util.UUIDToString(f.agentID), testutil.Cols{
+		"runtime_id": util.UUIDToString(f.runtimeID),
+		"issue_id":   otherIssue,
+		"status":     "queued",
+	})
+
+	// Simulate an attribution an earlier poll wrote for the head, so the
+	// claim-clear is observable on the very first batch claim.
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE agent_task_queue SET queue_wait_reason = 'attempted_unclaimed' WHERE id = $1`, head,
+	); err != nil {
+		t.Fatalf("seed head attribution: %v", err)
+	}
+
+	ctx := context.Background()
+	first, err := f.svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{f.runtimeID}, 2)
+	if err != nil {
+		t.Fatalf("first batch claim: %v", err)
+	}
+	if len(first) != 1 || util.UUIDToString(first[0].ID) != head {
+		t.Fatalf("first batch claim returned %v, want head %s", first, head)
+	}
+	// Leaving the queue cleared the head's attribution; the tail was never
+	// attempted by this batch (one attempt per agent), so it carries none yet.
+	wantReason(t, f.pool, head, "")
+	wantReason(t, f.pool, tail, "")
+
+	second, err := f.svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{f.runtimeID}, 2)
+	if err != nil {
+		t.Fatalf("second batch claim: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("second batch claim returned %v, want none", second)
+	}
+	// The dispatched head occupies the agent's only slot: the batch poll
+	// attributes the tail agent_capacity and never touches the head.
+	wantReason(t, f.pool, tail, queueWaitAgentCapacity)
+	wantReason(t, f.pool, head, "")
 }
 
 // TestQueueWaitDBWriteFailureNeverBreaksClaim pins the nil path: when the
