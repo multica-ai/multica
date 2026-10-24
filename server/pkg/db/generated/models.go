@@ -1416,6 +1416,7 @@ type RuntimeProfile struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	RuntimeType    string             `json:"runtime_type"`
+	SkipIfMissing  bool               `json:"skip_if_missing"`
 }
 
 type SearchIndexChange struct {
