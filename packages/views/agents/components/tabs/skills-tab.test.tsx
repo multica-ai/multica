@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -58,9 +58,9 @@ vi.mock("@multica/core/runtimes", async () => {
     );
   return {
     ...actual,
-    runtimeCapabilitiesOptions: (runtimeId: string | null) => ({
-      queryKey: ["runtime-capabilities", runtimeId],
-      queryFn: () => mockRuntimeCapabilities(runtimeId),
+    runtimeCapabilitiesOptions: (runtimeId: string | null, scope?: unknown) => ({
+      queryKey: ["runtime-capabilities", runtimeId, scope],
+      queryFn: () => mockRuntimeCapabilities(runtimeId, scope),
       enabled: Boolean(runtimeId),
       retry: false,
     }),
@@ -215,6 +215,14 @@ describe("SkillsTab", () => {
 
     expect(await screen.findByText("Local review")).toBeInTheDocument();
     expect(screen.getByText("Host-level review workflow")).toBeInTheDocument();
+  });
+
+  it("requests the selected Hermes agent scope", async () => {
+    renderSkillsTab({}, { ...onlineRuntime, provider: "hermes" });
+    await waitFor(() => expect(mockRuntimeCapabilities).toHaveBeenCalledWith(
+      "runtime-1",
+      { workspaceId: "ws-1", agentId: agent.id, agentUpdatedAt: agent.updated_at, customArgs: agent.custom_args },
+    ));
   });
 
   it("turns a controllable inherited skill off for this agent", async () => {

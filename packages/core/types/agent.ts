@@ -1301,6 +1301,8 @@ export interface RuntimeLocalMcpServerSummary {
 }
 
 export interface RuntimeLocalSkillListRequest {
+  agent_id?: string;
+  agent_updated_at?: string;
   id: string;
   runtime_id: string;
   status: RuntimeLocalSkillStatus;

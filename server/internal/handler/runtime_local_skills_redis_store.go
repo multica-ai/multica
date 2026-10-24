@@ -79,15 +79,17 @@ func NewRedisLocalSkillListStore(rdb redis.UniversalClient) *RedisLocalSkillList
 	return &RedisLocalSkillListStore{rdb: rdb}
 }
 
-func (s *RedisLocalSkillListStore) Create(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
+func (s *RedisLocalSkillListStore) Create(ctx context.Context, input LocalSkillListRequestInput) (*RuntimeLocalSkillListRequest, error) {
 	now := time.Now()
 	req := &RuntimeLocalSkillListRequest{
-		ID:        randomID(),
-		RuntimeID: runtimeID,
-		Status:    RuntimeLocalSkillPending,
-		Supported: true,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:             randomID(),
+		RuntimeID:      input.RuntimeID,
+		AgentID:        input.AgentID,
+		AgentUpdatedAt: input.AgentUpdatedAt,
+		Status:         RuntimeLocalSkillPending,
+		Supported:      true,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -95,7 +97,7 @@ func (s *RedisLocalSkillListStore) Create(ctx context.Context, runtimeID string)
 	}
 
 	requestKey := localSkillListKey(req.ID)
-	pendingKey := localSkillListPendingKey(runtimeID)
+	pendingKey := localSkillListPendingKey(input.RuntimeID)
 	// Creation does not require a Redis transaction: the request is not
 	// observable by dispatchers until it is added to the pending set. A plain
 	// pipeline also works on managed Redis deployments that deny MULTI.
