@@ -54,6 +54,14 @@ type APIClient interface {
 	// the user's transcript. Returns the card's message_id.
 	SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error)
 
+	// SendMarkdownCardToOpenID posts a markdown card to a user by their
+	// per-installation open_id rather than to a chat. This is the
+	// notification path: the recipient of an inbox item is a member with
+	// a channel_user_binding, and that row carries an open_id, not a
+	// chat_id. Lark accepts receive_id_type=open_id on the same
+	// /im/v1/messages endpoint.
+	SendMarkdownCardToOpenID(ctx context.Context, p SendMarkdownCardToOpenIDParams) (string, error)
+
 	// SendBindingPromptCard is the dedicated "you need to bind"
 	// outbound. Kept separate from SendInteractiveCard so the
 	// abstraction stays stable when the production card template
@@ -332,6 +340,22 @@ type SendMarkdownCardParams struct {
 	ReplyTarget ReplyTarget
 }
 
+// SendMarkdownCardToOpenIDParams addresses a markdown card to a person
+// instead of a chat. Notification pushes have no chat context: the
+// recipient is a bound member whose channel_user_binding row holds their
+// per-installation open_id.
+type SendMarkdownCardToOpenIDParams struct {
+	InstallationID InstallationCredentials
+	OpenID         OpenID
+	// Markdown is the body, with the same schema-2.0 dialect as
+	// SendMarkdownCardParams.
+	Markdown string
+	// Summary, when non-empty, is the single-line preview Lark shows in
+	// the chat list and the desktop notification. For a notification that
+	// is the whole point — the card is not open — so callers set it.
+	Summary string
+}
+
 // BindingPromptParams carries the data needed to render and send the
 // member-binding prompt card (single CTA: open the binding URL).
 type BindingPromptParams struct {
@@ -451,6 +475,11 @@ func (s *stubAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 
 func (s *stubAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	s.log.Warn("lark stub client: SendMarkdownCard called", "chat_id", string(p.ChatID))
+	return "", ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) SendMarkdownCardToOpenID(ctx context.Context, p SendMarkdownCardToOpenIDParams) (string, error) {
+	s.log.Warn("lark stub client: SendMarkdownCardToOpenID called", "open_id", string(p.OpenID))
 	return "", ErrAPIClientNotConfigured
 }
 

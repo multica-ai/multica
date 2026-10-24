@@ -502,6 +502,62 @@ func (c *httpAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardPar
 	return nil
 }
 
+// SendMarkdownCardToOpenID posts a markdown card straight to a person.
+// It shares SendMarkdownCard's card envelope and differs only in the
+// address: receive_id_type=open_id with the binding's per-installation
+// open_id, the same addressing SendBindingPromptCard already uses. No
+// reply target — a notification has no parent message to thread under.
+func (c *httpAPIClient) SendMarkdownCardToOpenID(ctx context.Context, p SendMarkdownCardToOpenIDParams) (string, error) {
+	if p.OpenID == "" {
+		return "", errors.New("lark http client: missing open_id")
+	}
+	if p.Markdown == "" {
+		return "", errors.New("lark http client: missing markdown body")
+	}
+	card := map[string]any{
+		"schema": "2.0",
+		"body": map[string]any{
+			"elements": []any{
+				map[string]any{"tag": "markdown", "content": p.Markdown},
+			},
+		},
+	}
+	if p.Summary != "" {
+		card["config"] = map[string]any{
+			"summary": map[string]any{"content": p.Summary},
+		}
+	}
+	cardBytes, err := json.Marshal(card)
+	if err != nil {
+		return "", fmt.Errorf("lark http client: encode markdown card: %w", err)
+	}
+	q := url.Values{}
+	q.Set("receive_id_type", "open_id")
+	body := map[string]string{
+		"receive_id": string(p.OpenID),
+		"msg_type":   "interactive",
+		"content":    string(cardBytes),
+	}
+	path := "/open-apis/im/v1/messages?" + q.Encode()
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			MessageID string `json:"message_id"`
+		} `json:"data"`
+	}
+	if err := c.doAuthedJSON(ctx, p.InstallationID, http.MethodPost, path, body, &resp); err != nil {
+		return "", fmt.Errorf("lark http client: send markdown card to open_id: %w", err)
+	}
+	if resp.Code != 0 || resp.Data.MessageID == "" {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return "", &APIError{Op: "send markdown card to open_id", Code: resp.Code, Msg: resp.Msg}
+	}
+	return resp.Data.MessageID, nil
+}
+
 // SendBindingPromptCard renders the member-binding card and posts it
 // directly to the unbound user's open_id (not the chat). Keeping the
 // card template inside this client — rather than the dispatcher —

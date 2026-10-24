@@ -70,6 +70,10 @@ func (s *stubAPIClientWithRecorder) SendMarkdownCard(ctx context.Context, p Send
 	return "lark-md-msg-id", nil
 }
 
+func (s *stubAPIClientWithRecorder) SendMarkdownCardToOpenID(ctx context.Context, p SendMarkdownCardToOpenIDParams) (string, error) {
+	return "lark-md-msg-id", nil
+}
+
 func (s *stubAPIClientWithRecorder) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

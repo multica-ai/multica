@@ -149,6 +149,11 @@ type PatcherQueries interface {
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
+	// FindChannelBindingForMember resolves the recipient of an inbox
+	// notification to their Lark binding. No row means the member has no
+	// Lark binding, and the notification stays in the in-app inbox.
+	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChatSessionBinding, error)
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
@@ -248,6 +253,11 @@ func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
+	// inbox:new is the notification path: an assignment or a mention lands
+	// in a member's inbox and, when that member has a Lark binding, also
+	// reaches them in Lark. Without this subscription Lark only carried
+	// replies to conversations the member had already started.
+	bus.Subscribe(protocol.EventInboxNew, p.handleInboxNew)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {
@@ -264,6 +274,102 @@ func (p *Patcher) handleEvent(e events.Event) {
 			"error", err,
 		)
 	}
+}
+
+func (p *Patcher) handleInboxNew(e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	item, ok := payload["item"].(map[string]any)
+	if !ok {
+		return
+	}
+	// Only members receive notifications; agents have no Lark binding to
+	// resolve and nothing to read the card.
+	if rt, _ := item["recipient_type"].(string); rt != "member" {
+		return
+	}
+	// Not every inbox type earns an interruption. See
+	// inboxNotifiableTypes for which do and why.
+	if t, _ := item["type"].(string); !inboxNotifiable(t) {
+		return
+	}
+	recipientIDStr, _ := item["recipient_id"].(string)
+	workspaceIDStr, _ := item["workspace_id"].(string)
+	if recipientIDStr == "" || workspaceIDStr == "" {
+		return
+	}
+
+	// A fresh background ctx with a tight timeout: bus delivery is
+	// synchronous, so a stuck Lark HTTP call would wedge the publisher.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.deliverInbox(ctx, item, recipientIDStr, workspaceIDStr); err != nil {
+		p.cfg.Logger.Warn("lark patcher: inbox notification failed",
+			"workspace_id", workspaceIDStr,
+			"recipient_id", recipientIDStr,
+			"error", err,
+		)
+	}
+}
+
+// deliverInbox pushes one inbox item to the member's Lark binding. A
+// missing binding is not an error: the item is already in the in-app
+// inbox, and Lark delivery is a convenience on top of it.
+func (p *Patcher) deliverInbox(ctx context.Context, item map[string]any, recipientIDStr, workspaceIDStr string) error {
+	recipientID, err := util.ParseUUID(recipientIDStr)
+	if err != nil || !recipientID.Valid {
+		return nil
+	}
+	workspaceID, err := util.ParseUUID(workspaceIDStr)
+	if err != nil || !workspaceID.Valid {
+		return nil
+	}
+	binding, err := p.queries.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+		WorkspaceID:   workspaceID,
+		MulticaUserID: recipientID,
+		ChannelType:   channelTypeFeishu,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup member binding: %w", err)
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, binding.InstallationID)
+	if err != nil {
+		return fmt.Errorf("load installation: %w", err)
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+
+	slug := ""
+	if ws, err := p.queries.GetWorkspace(ctx, workspaceID); err == nil {
+		slug = ws.Slug
+	}
+	content := buildInboxMarkdown(item, workspaceIDStr, slug)
+	if content == "" {
+		return nil
+	}
+	title, _ := item["title"].(string)
+	summary := title
+	if summary == "" {
+		summary = inboxTypeLabel(item["type"].(string))
+	}
+
+	_, err = p.client.SendMarkdownCardToOpenID(ctx, SendMarkdownCardToOpenIDParams{
+		InstallationID: creds,
+		OpenID:         OpenID(binding.ChannelUserID),
+		Markdown:       content,
+		Summary:        summary,
+	})
+	if err != nil {
+		return fmt.Errorf("send notification card: %w", err)
+	}
+	return nil
 }
 
 func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {

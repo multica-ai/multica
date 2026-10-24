@@ -40,6 +40,12 @@ type fakePatcherQueries struct {
 	deliveriesByTask map[string]db.ChannelTaskDelivery
 	// tasksByID overrides `task` per task_id; empty falls back to `task`.
 	tasksByID map[string]db.AgentTaskQueue
+	// inbox notification lookup: the member's Lark binding and the
+	// workspace whose slug goes into the deep link.
+	memberBinding    db.ChannelUserBinding
+	memberBindingErr error
+	workspace        db.Workspace
+	workspaceErr     error
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -78,6 +84,12 @@ func (f *fakePatcherQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.A
 }
 func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error) {
 	return f.installation, f.installationErr
+}
+func (f *fakePatcherQueries) FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
+	return f.memberBinding, f.memberBindingErr
+}
+func (f *fakePatcherQueries) GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error) {
+	return f.workspace, f.workspaceErr
 }
 func (f *fakePatcherQueries) GetLarkChatSessionBindingBySession(ctx context.Context, sessID pgtype.UUID) (ChatSessionBinding, error) {
 	return f.binding, f.bindingErr
@@ -118,6 +130,10 @@ type fakeAPIClient struct {
 	mdCardErr      error
 	mdCardReturn   string
 	bindingSent    []BindingPromptParams
+	// openIDSent records SendMarkdownCardToOpenID calls — the inbox
+	// notification path.
+	openIDSent   []SendMarkdownCardToOpenIDParams
+	openIDSendErr error
 	// threadReplyErr, when non-nil, is returned by the three send
 	// methods whenever the call carries a thread ReplyTarget, while the
 	// attempt is still recorded. Tests inject either a classified
@@ -169,6 +185,12 @@ func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 		return "", f.threadReplyErr
 	}
 	return f.mdCardReturn, f.mdCardErr
+}
+func (f *fakeAPIClient) SendMarkdownCardToOpenID(ctx context.Context, p SendMarkdownCardToOpenIDParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.openIDSent = append(f.openIDSent, p)
+	return f.mdCardReturn, f.openIDSendErr
 }
 func (f *fakeAPIClient) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
 	f.mu.Lock()
