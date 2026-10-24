@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+// linkedTo reports whether dst is linked to src by any link kind the
+// create*Link helpers produce: a symlink (or Windows junction) whose target is
+// src, or — the Windows fallback when symlink creation is denied — a hard link
+// sharing the source's file identity. A copied file shares neither (issue
+// #8926).
+func linkedTo(t *testing.T, src, dst string) bool {
+	t.Helper()
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		return false
+	}
+	if fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		target, err := os.Readlink(dst)
+		return err == nil && filepath.Clean(target) == filepath.Clean(src)
+	}
+	srcFi, err := os.Stat(src)
+	if err != nil {
+		return false
+	}
+	dstFi, err := os.Stat(dst)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(srcFi, dstFi)
+}
+
 func TestEnsureSymlink_SkipsWhenSourceMissing(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -13,7 +39,7 @@ func TestEnsureSymlink_SkipsWhenSourceMissing(t *testing.T) {
 	src := filepath.Join(dir, "missing.json")
 	dst := filepath.Join(dir, "link.json")
 
-	if err := ensureSymlink(src, dst); err != nil {
+	if err := ensureSymlink(src, dst, testLogger()); err != nil {
 		t.Fatalf("ensureSymlink: %v", err)
 	}
 
@@ -35,7 +61,7 @@ func TestEnsureSymlink_ReplacesStaleRegularFile(t *testing.T) {
 	// the Windows copy fallback in createFileLink) must be replaced so the
 	// per-task home picks up changes to the shared source — otherwise a
 	// once-stale auth.json never refreshes across env reuses.
-	if err := ensureSymlink(src, dst); err != nil {
+	if err := ensureSymlink(src, dst, testLogger()); err != nil {
 		t.Fatalf("ensureSymlink: %v", err)
 	}
 
@@ -65,7 +91,7 @@ func TestEnsureSymlink_RefreshesAfterCopyFallbackThenSrcChange(t *testing.T) {
 	os.WriteFile(src, []byte(`{"refresh_token":"v2"}`), 0o644)
 
 	// Reuse path runs ensureSymlink again — expected to refresh dst from src.
-	if err := ensureSymlink(src, dst); err != nil {
+	if err := ensureSymlink(src, dst, testLogger()); err != nil {
 		t.Fatalf("ensureSymlink: %v", err)
 	}
 
@@ -109,7 +135,7 @@ func TestCreateFileLink(t *testing.T) {
 	dst := filepath.Join(dir, "link.json")
 	os.WriteFile(src, []byte(`{"key":"value"}`), 0o644)
 
-	if err := createFileLink(src, dst); err != nil {
+	if err := createFileLink(src, dst, testLogger()); err != nil {
 		t.Fatalf("createFileLink: %v", err)
 	}
 
@@ -119,6 +145,13 @@ func TestCreateFileLink(t *testing.T) {
 	}
 	if string(data) != `{"key":"value"}` {
 		t.Errorf("content = %q", data)
+	}
+
+	// The entry must share the source's bytes — a symlink, or on Windows
+	// without symlink privilege a hard link — not a copy that drifts and
+	// duplicates the source into every task home (issue #8926).
+	if !linkedTo(t, src, dst) {
+		t.Errorf("dst is a copy, not a link to src")
 	}
 }
 
