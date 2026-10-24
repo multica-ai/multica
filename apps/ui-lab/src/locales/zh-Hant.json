@@ -1,0 +1,553 @@
+{
+  "lab": {
+    "preview": {
+      "source": "當前程式碼",
+      "preview": "預覽",
+      "originalFrame": "原版介面",
+      "editedFrame": "調整後的介面",
+      "unchanged": "與當前程式碼一致",
+      "back": "返回修改版",
+      "original": "檢視原版",
+      "compare": "並排對比",
+      "unavailable": "當前預覽提供任務列表和詳情，其他頁面尚未配置樣例資料。",
+      "changeCount_other": "{{count}} 項修改",
+      "changeCount_one": "{{count}} 項修改"
+    },
+    "theme": {
+      "light": "淺色",
+      "dark": "深色",
+      "label": "預覽主題",
+      "lightLabel": "淺色主題",
+      "darkLabel": "深色主題"
+    },
+    "notice": {
+      "saved": "方案已儲存到此瀏覽器",
+      "copied": "CSS 已複製",
+      "copyFailed": "無法訪問剪貼簿，請選擇程式碼手動複製，或下載 CSS",
+      "exported": "CSS 已匯出",
+      "storageFailed": "瀏覽器無法儲存草稿，請匯出 CSS 以保留修改。",
+      "dismiss": "關閉提示",
+      "loaded": "已載入：{{name}}"
+    },
+    "nav": {
+      "toggle": "切換場景導航",
+      "internal": "內部工作臺",
+      "scenes": "元件與場景",
+      "previewScenes": "預覽場景",
+      "saved": "已存方案",
+      "empty": "暫無方案",
+      "workbench": "工作臺"
+    },
+    "actions": {
+      "undo": "撤銷",
+      "redo": "重做",
+      "save": "儲存方案",
+      "export": "匯出修改",
+      "deleteDesign": "刪除方案 {{name}}"
+    },
+    "save": {
+      "title": "儲存設計方案",
+      "description": "儲存在當前瀏覽器，最多 20 份。",
+      "name": "方案名稱",
+      "placeholder": "例如：更緊湊的任務檢視"
+    },
+    "export": {
+      "title": "匯出設計修改",
+      "description": "合併到 packages/ui/styles/tokens.css 的對應程式碼塊。匯出不會寫回原始碼。",
+      "copy": "複製 CSS",
+      "download": "下載 CSS"
+    },
+    "scenes": {
+      "components": "元件總覽",
+      "button": "Button 按鈕",
+      "list": "任務列表",
+      "detail": "任務詳情",
+      "dialog": "彈窗",
+      "motion": "動效",
+      "colors": "顏色"
+    },
+    "language": {
+      "label": "語言"
+    },
+    "panels": {
+      "expandLeft": "展開左側欄",
+      "collapseLeft": "摺疊左側欄",
+      "expandRight": "展開右側欄",
+      "collapseRight": "摺疊右側欄"
+    }
+  },
+  "button": {
+    "variants": {
+      "primary": "主要操作",
+      "secondary": "次要操作",
+      "soft": "柔和填充",
+      "ghost": "輕量操作",
+      "brand": "品牌強調",
+      "brandSoft": "品牌淺色",
+      "destructive": "危險操作",
+      "link": "連結樣式"
+    },
+    "actions": {
+      "create": "建立任務",
+      "continue": "繼續",
+      "submit": "提交任務",
+      "more": "更多操作",
+      "dialog": "開啟對話方塊",
+      "save": "儲存修改",
+      "saveExample": "儲存示例",
+      "saveNext": "儲存並繼續建立下一項任務",
+      "compactAdd": "緊湊新增",
+      "quick": "快捷操作",
+      "addSize": "新增任務 {{size}}"
+    },
+    "page": {
+      "title": "按鈕",
+      "variantCount": "8 種外觀",
+      "sizeCount": "8 種尺寸",
+      "contents": "按鈕頁面目錄",
+      "playground": "試用",
+      "variants": "外觀與狀態",
+      "context": "使用場景",
+      "try": "試用按鈕",
+      "sizes": "尺寸與圖示"
+    },
+    "controls": {
+      "label": "按鈕文字",
+      "content": "內容",
+      "leading": "前置圖示",
+      "trailing": "後置圖示",
+      "textOnly": "僅文字",
+      "iconOnly": "僅圖示",
+      "state": "狀態",
+      "icon": "圖示",
+      "text": "文字"
+    },
+    "states": {
+      "default": "預設",
+      "disabled": "禁用",
+      "loading": "載入中",
+      "invalid": "無效輸入",
+      "interactive": "預設 / 可互動",
+      "processing": "處理中",
+      "submitting": "提交中...",
+      "submitted": "已提交",
+      "complete": "示例提交完成",
+      "clicked_other": "已觸發 {{count}} 次示例操作",
+      "clicked_one": "已觸發 {{count}} 次示例操作"
+    },
+    "geometry": {
+      "height": "高度",
+      "padding": "內邊距"
+    },
+    "context": {
+      "submit": "提交與反饋",
+      "triggers": "彈層觸發器",
+      "popover": "彈層內容",
+      "saveDescription": "儲存當前修改。",
+      "length": "文字長度",
+      "compact": "緊湊空間"
+    }
+  },
+  "inspector": {
+    "sections": {
+      "size": "尺寸",
+      "appearance": "外觀",
+      "type": "文字",
+      "adjustSize": "調整尺寸",
+      "colors": "顏色",
+      "moreColors": "更多顏色",
+      "density": "列表密度"
+    },
+    "changes": {
+      "modified": "已修改",
+      "reset": "重置全部修改",
+      "resetTitle": "重置全部修改（可撤銷）",
+      "resetButton": "重置按鈕引數",
+      "resetButtonTitle": "重置全部按鈕尺寸",
+      "unchanged": "與原版一致",
+      "empty": "所有引數均使用當前程式碼的值",
+      "export": "匯出 CSS",
+      "restore": "恢復原版值"
+    },
+    "panel": {
+      "label": "設計引數",
+      "tabs": "屬性面板",
+      "design": "設計",
+      "changes": "修改",
+      "system": "設計系統"
+    },
+    "scope": {
+      "component": "元件",
+      "global": "全域性",
+      "shared": "共享",
+      "theme": "全域性 · {{theme}}"
+    },
+    "actions": {
+      "edit": "編輯{{label}}",
+      "size": "尺寸 {{size}}",
+      "restore": "恢復 {{key}} {{scope}}",
+      "scrub": "拖動調整{{label}}",
+      "scrubHint": "{{token}}\n左右拖動調整，Shift 加速；點選輸入數值。",
+      "reset": "重置{{label}}",
+      "invalid": "請輸入 {{min}}–{{max}} 之間的數值。"
+    }
+  },
+  "tokens": {
+    "labels": {
+      "gap": "圖文間距",
+      "brand": "品牌色",
+      "primary": "主要操作背景",
+      "primaryText": "主要操作文字",
+      "secondary": "次要操作背景",
+      "secondaryText": "次要操作文字",
+      "destructive": "危險操作顏色",
+      "ring": "聚焦輪廓",
+      "shell": "外層框架",
+      "page": "頁面背景",
+      "surface": "內容表面",
+      "raised": "浮層背景",
+      "hover": "懸停背景",
+      "selected": "選中背景",
+      "foreground": "正文顏色",
+      "muted": "次要文字",
+      "height": "按鈕高度",
+      "padding": "水平內邊距",
+      "rowHeight": "任務行高",
+      "radius": "基礎圓角",
+      "caption": "輔助文字",
+      "label": "資訊標籤",
+      "body": "正文",
+      "lineHeight": "正文行高",
+      "title": "標題",
+      "enterDuration": "進入時長",
+      "exitDuration": "退出時長",
+      "enterEasing": "進入曲線",
+      "exitEasing": "退出曲線",
+      "faint": "弱化圖示",
+      "surfaceText": "容器文字",
+      "selectedText": "選中文字",
+      "cardText": "卡片文字",
+      "popoverText": "浮層文字",
+      "brandText": "品牌色上的文字",
+      "accent": "強調背景",
+      "accentText": "強調文字",
+      "mutedFill": "弱化背景",
+      "success": "成功",
+      "warning": "警告",
+      "info": "資訊",
+      "border": "邊框",
+      "surfaceBorder": "容器邊框",
+      "inputBorder": "輸入框邊框",
+      "sidebar": "側欄背景",
+      "sidebarText": "側欄文字",
+      "sidebarPrimary": "側欄主要操作",
+      "sidebarPrimaryText": "側欄主要操作文字",
+      "sidebarAccent": "側欄懸停",
+      "sidebarAccentText": "側欄懸停文字",
+      "sidebarBorder": "側欄邊框",
+      "sidebarRing": "側欄焦點環",
+      "chart1": "圖表 1",
+      "chart2": "圖表 2",
+      "chart3": "圖表 3",
+      "chart4": "圖表 4",
+      "chart5": "圖表 5"
+    }
+  },
+  "color": {
+    "feedback": {
+      "invalid": "請輸入 3 位或 6 位 HEX 色值。",
+      "copied": "已複製色值",
+      "copyFailed": "無法複製，請選擇色值後手動複製。",
+      "gamut": "超出 sRGB，HEX 為近似值。"
+    },
+    "roles": {
+      "searchLabel": "搜尋顏色角色",
+      "searchPlaceholder": "搜尋顏色或變數...",
+      "title": "顏色角色",
+      "empty": "沒有找到匹配的顏色。",
+      "current": "顏色角色：{{label}}"
+    },
+    "controls": {
+      "picker": "顏色色板",
+      "hex": "HEX 色值",
+      "copy": "複製 HEX 色值",
+      "restoreTitle": "恢復此顏色的原版值",
+      "restore": "恢復原版顏色",
+      "original": "原版",
+      "current": "當前",
+      "reset": "重置此顏色",
+      "presets": "快捷色",
+      "advanced": "精確調整",
+      "close": "關閉顏色編輯器",
+      "use": "使用顏色 {{color}}",
+      "editor": "{{label}}顏色編輯器",
+      "opacity": "不透明度"
+    },
+    "channels": {
+      "lightness": "明度",
+      "chroma": "色度",
+      "hue": "色相"
+    }
+  },
+  "gallery": {
+    "surfaces": {
+      "shell": "框架",
+      "page": "頁面",
+      "surface": "表面",
+      "raised": "浮層",
+      "hover": "懸停",
+      "selected": "選中"
+    },
+    "dialog": {
+      "open": "開啟彈窗",
+      "title": "新建任務",
+      "description": "填寫任務標題。",
+      "label": "彈窗任務標題",
+      "placeholder": "輸入任務標題..."
+    },
+    "sections": {
+      "title": "基礎元件",
+      "surfaces": "表面與層次",
+      "forms": "輸入與選擇",
+      "status": "狀態與標籤",
+      "typography": "文字層級",
+      "elevation": "浮層與圓角",
+      "feedback": "載入與空狀態"
+    },
+    "actions": {
+      "new": "新建",
+      "outline": "邊框按鈕",
+      "delete": "刪除",
+      "disabled": "不可用"
+    },
+    "form": {
+      "title": "元件任務標題",
+      "placeholder": "為任務起一個名字...",
+      "notify": "通知負責人",
+      "autopilot": "自動化",
+      "disabled": "禁用輸入框",
+      "readonly": "只讀狀態",
+      "attention": "需關注"
+    },
+    "type": {
+      "heading": "小細節，構成好體驗",
+      "body": "Build with intention. 讓智慧體和團隊一起工作。",
+      "label": "任務屬性 · 負責人 · 專案",
+      "caption": "次要資訊也應該清楚可讀 · 2 分鐘前",
+      "cardTitle": "產品體驗最佳化",
+      "cardDescription": "內外層圓角的關係",
+      "empty": "所有通知都已處理"
+    }
+  },
+  "fixtures": {
+    "issues": {
+      "titles": [
+        "統一任務列表與詳情頁的視覺層次",
+        "最佳化命令選單的鍵盤導航",
+        "最佳化智慧體執行中的反饋與狀態展示",
+        "檢查中英文混排，以及很長的任務標題在窄視窗中的截斷表現",
+        "為選單和彈窗建立一致的圓角規則",
+        "完善深色模式下的選中與懸停狀態",
+        "讓空狀態保持清晰、輕量"
+      ],
+      "description": "## 目標\n\n讓團隊更容易找到當前最重要的資訊。標題清晰、正文舒適，次要資訊保持安靜。\n\n## 驗收標準\n\n- [x] 共享同一套語義顏色與圓角\n- [ ] 中英文混排與長標題表現自然\n- [ ] 選中狀態在懸停時依然清晰\n\nBuild with intention. 讓智慧體和團隊一起工作。"
+    },
+    "comments": {
+      "first": "先檢查列表的密度，再比較詳情頁中的文字層級。"
+    }
+  },
+  "system": {
+    "modules": {
+      "foundations": "設計基礎",
+      "components": "基礎元件",
+      "patterns": "組合模式",
+      "product": "業務元件",
+      "layouts": "頁面佈局",
+      "changes": "修改管理"
+    },
+    "descriptions": {
+      "foundations": "顏色、字型、間距與視覺規則。",
+      "components": "基礎控制元件、變體與互動狀態。",
+      "patterns": "由元件組成的常用操作流程。",
+      "product": "任務、團隊與智慧體介面。",
+      "layouts": "頁面結構與響應式佈局。",
+      "changes": "檢視、儲存與匯出設計修改。"
+    },
+    "pages": {
+      "colors": "顏色",
+      "typography": "字型",
+      "spacing": "間距",
+      "radius": "圓角",
+      "shadows": "陰影",
+      "motion": "動效",
+      "icons": "圖示",
+      "gallery": "元件總覽",
+      "button": "按鈕",
+      "input": "輸入框",
+      "select": "選擇器",
+      "checkbox": "覈取方塊",
+      "switch": "開關",
+      "badge": "標籤",
+      "tabs": "選項卡",
+      "tooltip": "提示框",
+      "dialog": "對話方塊",
+      "popover": "彈出層",
+      "forms": "表單",
+      "filters": "搜尋與篩選",
+      "properties": "屬性編輯",
+      "confirmation": "操作確認",
+      "feedback": "載入、空狀態與錯誤",
+      "issueRow": "任務行",
+      "statusPicker": "狀態選擇器",
+      "assigneePicker": "負責人選擇器",
+      "comments": "評論",
+      "agentRun": "智慧體執行",
+      "sidebar": "側邊欄",
+      "list": "任務列表",
+      "detail": "任務詳情",
+      "settings": "設定頁",
+      "split": "分欄佈局",
+      "review": "修改記錄",
+      "saved": "儲存方案",
+      "export": "CSS 匯出",
+      "impact": "影響範圍",
+      "source": "應用到原始碼"
+    },
+    "navigation": {
+      "overview": "總覽",
+      "title": "設計系統",
+      "expand": "展開或收起{{module}}"
+    },
+    "status": {
+      "available": "已接入",
+      "planned": "待補充",
+      "progress": "{{ready}} / {{total}} 已接入"
+    },
+    "empty": {
+      "message": "後續在這裡補充示例與規範。",
+      "back": "返回{{module}}",
+      "notFound": "頁面不存在"
+    },
+    "changes": {
+      "reset": "重置全部",
+      "return": "開啟按鈕工作臺"
+    }
+  },
+  "motion": {
+    "actions": {
+      "open": "開啟",
+      "close": "關閉",
+      "replay": "重播"
+    },
+    "controls": {
+      "title": "動效",
+      "speed": "預覽速度",
+      "reduced": "系統已啟用減少動態效果，動畫已關閉。"
+    },
+    "easing": {
+      "standard": "標準",
+      "linear": "線性",
+      "easeOut": "緩出",
+      "easeIn": "緩入"
+    }
+  },
+  "rules": {
+    "content": {
+      "title": "使用規則與程式碼",
+      "download": "下載 Markdown"
+    }
+  },
+  "dialog": {
+    "controls": {
+      "example": "示例",
+      "form": "表單",
+      "long": "長內容"
+    },
+    "actions": {
+      "open": "開啟彈窗",
+      "cancel": "取消",
+      "save": "儲存"
+    },
+    "content": {
+      "title": "編輯任務",
+      "description": "更新任務標題。",
+      "label": "標題",
+      "defaultTitle": "檢查介面",
+      "item": "檢查項 {{number}}：確認佈局、內容和操作在窄屏下仍可訪問。"
+    },
+    "states": {
+      "open": "已開啟",
+      "closed": "已關閉",
+      "saved": "已儲存示例"
+    }
+  },
+  "palette": {
+    "page": {
+      "title": "顏色",
+      "search": "搜尋顏色",
+      "placeholder": "搜尋名稱或 token...",
+      "empty": "沒有匹配的顏色",
+      "count": "{{count}} 個 token",
+      "edit": "編輯{{label}}",
+      "aliases": "別名",
+      "selected": "當前顏色",
+      "sample": "實際效果"
+    },
+    "groups": {
+      "surfaces": "背景與容器",
+      "content": "文字與圖示",
+      "actions": "操作",
+      "feedback": "反饋",
+      "borders": "邊框與焦點",
+      "charts": "圖表",
+      "sidebar": "側欄"
+    },
+    "sample": {
+      "title": "檢查介面",
+      "description": "分配前更新任務內容。",
+      "create": "新建任務",
+      "cancel": "取消"
+    }
+  },
+  "colorUsage": {
+    "sections": "顏色分割槽",
+    "palette": "色板",
+    "title": "用途與對比度",
+    "mapping": "用途對映",
+    "preview": "互動狀態",
+    "hint": "懸停、按住滑鼠或用 Tab 聚焦。點選上方 token 可編輯。",
+    "roles": {
+      "action": "主要操作",
+      "brand": "啟用的篩選 / 開關",
+      "tabs": "標籤頁 · 文字 / 指示線",
+      "input": "輸入框 · 文字 / 邊框",
+      "focus": "鍵盤焦點",
+      "error": "輸入錯誤"
+    },
+    "states": {
+      "default": "預設",
+      "hover": "懸停",
+      "pressed": "按下",
+      "focus": "聚焦",
+      "selected": "選中",
+      "invalid": "錯誤",
+      "disabled": "禁用"
+    },
+    "unmeasured": "未測量",
+    "pass": "透過",
+    "fail": "未透過",
+    "exempt": "豁免 · 已禁用",
+    "text": "文字",
+    "focusBorder": "焦點邊框",
+    "mainAction": "主要操作",
+    "activeFilter": "分配給我",
+    "overview": "概覽",
+    "activity": "動態",
+    "overviewContent": "任務詳情",
+    "activityContent": "最近更新",
+    "taskName": "任務名稱",
+    "rules": "規則與測量說明",
+    "scope": "文字目標為 4.5:1；焦點邊框與內外相鄰背景的目標均為 3:1。基於過渡結束後的實際 sRGB 顏色計算，併合成透明度。禁用控制元件豁免，背景圖片和整體透明度不測量。佔位文字、標籤頁指示線和焦點環幾何形態需單獨檢查；此處不代表完整的無障礙審查。",
+    "policy": "主要操作保持中性色，品牌色標識啟用的控制元件。標籤頁使用正文色和次要文字色；輸入錯誤使用 destructive，焦點使用 ring。匯出前檢查明暗主題。修改 token 會影響所有使用它的元件。"
+  }
+}

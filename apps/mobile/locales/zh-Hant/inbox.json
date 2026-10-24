@@ -1,0 +1,92 @@
+{
+  "title": "收件箱",
+  "empty": {
+    "title": "已處理全部通知",
+    "body": "通知和智慧體更新會顯示在這裡。"
+  },
+  "actions": {
+    "mark_read": "標記已讀",
+    "mark_unread": "標記未讀",
+    "mark_all_read": "全部標為已讀",
+    "archive": "歸檔",
+    "archive_all": "全部歸檔",
+    "archive_all_read": "歸檔已讀",
+    "archive_completed": "歸檔已完成項",
+    "inbox_actions": "收件箱操作"
+  },
+  "filters": {
+    "all": "全部",
+    "unread": "未讀"
+  },
+  "archive": {
+    "confirm_title": "全部歸檔？",
+    "confirm_body": "這會歸檔所有收件箱專案，包括已讀和未讀。你仍可在任務頁中找到它們。"
+  },
+  "errors": {
+    "load_failed": "收件箱載入失敗：{{message}}"
+  },
+  "detail": {
+    "priority_none": "無優先順序",
+    "priority_low": "低",
+    "priority_medium": "中",
+    "priority_high": "高",
+    "priority_urgent": "緊急",
+    "status_todo": "todo",
+    "status_in_progress": "in_progress",
+    "status_done": "done",
+    "status_blocked": "blocked",
+    "notification": "通知",
+    "close": "關閉通知",
+    "unavailable": "此通知已不可用。",
+    "billing_disabled": "該工作區無法修改賬單設定。請聯絡工作區管理員。",
+    "contact_admin": "請讓工作區所有者或管理員檢視賬單選項。",
+    "review_billing": "檢視賬單選項",
+    "review_billing_web": "在網頁端開啟 Multica 檢視賬單選項。"
+  },
+  "type": {
+    "assigned": "已分配",
+    "subscribed": "已訂閱",
+    "unassigned": "已取消分配",
+    "reassigned": "重新分配",
+    "status_changed": "狀態已更改",
+    "priority_changed": "優先順序已更改",
+    "start_date_changed": "開始日期已更改",
+    "due_date_changed": "截止日期已更改",
+    "new_comment": "新評論",
+    "mentioned": "提到了你",
+    "review_requested": "請求稽覈",
+    "task_completed": "執行完成",
+    "task_failed": "執行失敗",
+    "agent_blocked": "智慧體受阻",
+    "agent_completed": "智慧體已完成",
+    "reaction_added": "新增了表情",
+    "quick_create_done": "快速建立完成",
+    "quick_create_failed": "快速建立失敗",
+    "quick_create_unconfirmed": "快速建立需要確認",
+    "autopilot_paused": "自動化已暫停",
+    "children_done": "子任務已全部結束",
+    "autopilot_quota_exceeded": "自動化執行次數已達上限",
+    "set_status": "狀態設為",
+    "set_priority": "優先順序設為",
+    "assigned_to": "分配給 {{name}}",
+    "removed_assignee": "移除了負責人",
+    "set_due_date": "截止日期設為 {{date}}",
+    "removed_due_date": "移除了截止日期",
+    "reacted_with": "回應了 {{emoji}}",
+    "created_with_agent": "由智慧體建立：{{identifier}}",
+    "failed_with_detail": "失敗：{{detail}}",
+    "run_limit_blocked": "已達到上限，本次執行被阻止"
+  },
+  "body": {
+    "autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。",
+    "autopilot_limit": "該工作區已達到當前週期 {{limit}} 次自動化執行的上限。此執行未啟動。額度將在 {{resetAt}} 重置。"
+  },
+  "actions.archive_completed": "歸檔已完成項",
+  "detail.status_todo": "todo",
+  "detail.status_done": "done",
+  "detail.status_blocked": "blocked",
+  "type.task_completed": "執行完成",
+  "type.task_failed": "執行失敗",
+  "type.run_limit_blocked": "已達到上限，本次執行被阻止",
+  "body.autopilot_title_limit": "自動化 \"{{title}}\" 未啟動，因為該工作區已達到當前週期 {{limit}} 次執行的上限。額度將在 {{resetAt}} 重置。"
+}

@@ -1,0 +1,55 @@
+{
+  "actions": {
+    "add": "新增",
+    "back": "返回",
+    "cancel": "取消",
+    "close": "關閉",
+    "confirm": "確認",
+    "continue": "繼續",
+    "copy": "複製",
+    "create": "建立",
+    "delete": "刪除",
+    "discard": "放棄",
+    "done": "完成",
+    "download": "下載",
+    "edit": "編輯",
+    "more": "更多",
+    "open": "開啟",
+    "remove": "移除",
+    "retry": "重試",
+    "save": "儲存",
+    "search": "搜尋",
+    "send": "傳送",
+    "share": "分享",
+    "upload": "上傳"
+  },
+  "fields": {
+    "assignee": "負責人",
+    "description": "描述",
+    "due_date": "截止日期",
+    "email": "郵箱",
+    "label": "標籤",
+    "name": "名稱",
+    "priority": "優先順序",
+    "project": "專案",
+    "status": "狀態",
+    "title": "標題"
+  },
+  "states": {
+    "loading": "載入中...",
+    "saving": "儲存中...",
+    "sending": "傳送中...",
+    "offline": "離線",
+    "empty": "暫無內容",
+    "error": "出現錯誤"
+  },
+  "time": {
+    "just_now": "剛剛",
+    "minutes_ago_other": "{{count}} 分鐘前",
+    "hours_ago_other": "{{count}} 小時前",
+    "days_ago_other": "{{count}} 天前",
+    "weeks_ago_other": "{{count}} 周前"
+  },
+  "states.empty": "暫無內容",
+  "states.error": "出現錯誤"
+}
