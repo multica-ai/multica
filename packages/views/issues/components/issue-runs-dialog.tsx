@@ -150,7 +150,7 @@ export function IssueRunsDialog({
           `max-w-5xl` does not beat — `!` wins it, matching the transcript
           dialog. Fixed height so the chart stays put while the list scrolls. */}
       <DialogContent className="flex !h-[min(56rem,calc(100dvh-4rem))] !w-[calc(100vw-4rem)] !max-w-5xl flex-col !gap-0 overflow-hidden !p-0">
-        <DialogHeader className="px-6 pt-5 pb-4">
+        <DialogHeader className="px-6 py-5">
           <DialogTitle>{t(($) => $.runs_timeline.title)}</DialogTitle>
           <DialogDescription>
             {issueTitle ? `${identifier} · ${issueTitle}` : identifier}
@@ -164,7 +164,7 @@ export function IssueRunsDialog({
             {timeline.pricedCount > 0 && <CostSplit timeline={timeline} />}
             {/* `min-h-0`: the dialog is a flex column; without it this flex
                 item sizes to its content and the list never scrolls. */}
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-6 pb-5">
               <RunDayList timeline={timeline} issueId={issueId} />
               <div className="mt-4 space-y-1 text-micro text-muted-foreground">
                 {unmapped.length > 0 && (
@@ -418,8 +418,8 @@ function RunActivityChart({
     metric === "tokens" ? t(($) => $.runs_timeline.stack_type) : t(($) => $.runs_timeline.stack_agent);
 
   return (
-    <div className="mt-5 border-b px-6 pb-3">
-      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div className="mt-6 border-b px-6 pb-5">
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
         {viewSwitch}
         <Segmented
           label={t(($) => $.runs_timeline.metric_label)}
@@ -650,7 +650,7 @@ function CostSplit({ timeline }: { timeline: RunTimeline }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
   return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-3 border-b px-6 py-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-x-8 gap-y-5 border-b px-6 py-5 sm:grid-cols-2">
       <ShareBand
         title={t(($) => $.runs_timeline.by_agent)}
         shares={timeline.costByAgent}
@@ -704,7 +704,7 @@ function ShareBand({
   return (
     <section aria-label={title} className="min-w-0">
       <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground">{title}</div>
-      <div aria-hidden className="mt-1.5 mb-1.5 flex h-1.5 gap-0.5 overflow-hidden rounded-full">
+      <div aria-hidden className="my-2 flex h-1.5 gap-0.5 overflow-hidden rounded-full">
         {entries.map((e) => (
           <span key={e.key} className={e.swatch} style={shareStyle(e.cost, entriesTotal)} />
         ))}
@@ -779,7 +779,7 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
         const priced = group.runs.some((r) => r.usage);
         return (
           <section key={group.dayMs} aria-label={dayLabel(group.dayMs)}>
-            <div className="flex items-baseline gap-2 border-b pt-4 pb-1.5 text-micro text-muted-foreground">
+            <div className="flex items-baseline gap-2 border-b pt-5 pb-2 text-micro text-muted-foreground">
               <span className="font-medium uppercase tracking-wider text-foreground">
                 {dayLabel(group.dayMs)}
               </span>

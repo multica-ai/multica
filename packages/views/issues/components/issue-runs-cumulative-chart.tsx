@@ -162,8 +162,8 @@ export function RunCumulativeChart({
         : "translateX(-50%)";
 
   return (
-    <div className="mt-5 border-b px-6 pb-3">
-      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div className="mt-6 border-b px-6 pb-5">
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
         {viewSwitch}
         <div className="ml-auto flex items-center gap-4 text-caption text-muted-foreground">
           {timeline.pricedCount > 0 && (
