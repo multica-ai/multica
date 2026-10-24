@@ -6,6 +6,7 @@
 // per-task preparers in `server/internal/daemon/execenv/` materialise MCP
 // config for CLIs that do not receive it through ExecOptions.
 const MCP_SUPPORTED_PROVIDERS = new Set([
+  "antigravity",
   "claude",
   "codebuddy",
   "codearts",

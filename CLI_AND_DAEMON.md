@@ -428,6 +428,96 @@ If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and call
 The daemon launches Qoder and Qoder CN as `qodercli --yolo --acp` and `qoderclicn --yolo --acp`, respectively, matching their ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`. It writes the task brief to `QWEN.md`; when an agent has managed `mcp_config`, the daemon writes a 0600 per-run JSON file and passes it through `--mcp-config <path>`, then removes it after the process exits. A null config preserves Qwen Code native MCP settings.
 
+#### Antigravity workspace MCP
+
+Antigravity's MCP configuration tab accepts the standard `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "local": { "command": "node", "args": ["/absolute/path/to/server.js"] },
+    "remote": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+The daemon creates `.agents/plugins/multica/plugin.json` and
+`.agents/plugins/multica/mcp_config.json` in the task's actual launch directory.
+Antigravity discovers MCP through this workspace plugin, not a root `mcp.json`.
+Stdio entries retain their command, arguments and environment. Remote entries
+use native Streamable HTTP; the daemon emits matching `url` and `serverUrl`
+fields because plugin validation in agy 1.3.5 requires `serverUrl`. Supplying
+different values for those two fields is rejected. No stdio bridge is installed.
+
+The target is agy 1.3.0 or newer, based on the native HTTP field reports in
+[upstream #8670](https://github.com/multica-ai/multica/issues/8670); the plugin
+schema follows reported agy 1.3.5 validation. Automated config/lifecycle tests
+have been run on Linux. Native CLI tool calls still require platform-specific
+acceptance testing; no macOS or Windows end-to-end certification is claimed.
+Older versions and legacy HTTP+SSE are outside this integration's scope, and
+the field reports are not a guarantee for every later CLI version.
+
+Unset or JSON `null` MCP configuration writes no plugin and leaves native MCP
+discovery unchanged. An explicit empty object writes an empty server set for
+this plugin; it does **not** disable other workspace or global MCP servers.
+The daemon never edits `~/.gemini/config/mcp_config.json` and does not promise
+hermetic isolation from Antigravity's independently configured global plugins.
+
+The reserved `multica` plugin directory must not already exist, even if empty;
+rename a user-owned plugin using that name before starting a managed task.
+Symlinked `.agents` or `plugins` directories are rejected rather than writing
+outside the task directory. Conflicts and malformed configurations fail task
+preparation without overwriting user files. Separate task workdirs keep their
+generated configs independent; do not run multiple managed tasks in one workdir.
+
+Generated files use mode `0600` and newly created directories use `0700` on
+POSIX. Sidecar cleanup removes only daemon-created files and empty directories,
+preserving existing directories and sibling plugins. Resuming a managed task
+refreshes the server set, including removing stale config when MCP is unset.
+Local-directory and local-worktree teardown cleans sidecars after success or
+startup failure. Managed resumable task directories retain sidecars under the
+existing task retention policy until reuse refresh or garbage collection;
+credential-bearing plugin files are not eagerly removed from those directories
+at process exit. An abrupt daemon/process crash may also leave files behind.
+Inspect stale local files before manually removing them; preparation refuses
+to overwrite an existing plugin that is not cleaned through its manifest.
+
+Before certifying a platform, verify from a real Multica task (not only
+`agy mcp list`): configure a local stdio test server and a native Streamable HTTP
+test endpoint, ask the agent to discover and call a deterministic tool on each,
+and record the agy version, OS, task launch directory and redacted tool results.
+Repeat with changed and unset configurations on a resumed task; check that
+local-directory/worktree completion and a forced startup failure remove managed
+files without changing a pre-existing sibling plugin or global config. Verify
+managed task retention and subsequent reuse/GC cleanup separately. Never include authorization
+headers or generated credential-bearing config files in logs or PR evidence.
+
+The opt-in dual-transport fixture runs `Prepare`, launches the Antigravity
+backend in its generated task directory, and verifies server-side initialize,
+tools/list and tools/call audits (including tool name, arguments, response and
+HTTP session headers). Each task probe has an independent timeout; failed or
+timed-out launches fail the test. It also checks a separately prepared task,
+managed config retention, `Reuse` replacement/removal and explicit environment
+cleanup. It does not exercise the daemon's complete task orchestration,
+local-worktree finalization or scheduled GC; those still need acceptance evidence.
+With an authenticated CLI and explicit authorization to make model requests:
+
+```sh
+cd server
+MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration -p 1 \
+  -count=1 -v -timeout 180s ./internal/daemon/execenv \
+  -run '^TestAntigravityLiveDualTrackE2E$'
+```
+
+This requires `agy`, `python3` and `git` on PATH, uses the CLI's default model,
+and logs the exact checkout SHA, CLI version, task directory and synthetic MCP
+audit records. Keep the checkout clean when collecting evidence for a commit.
+Without both the build tag and opt-in, this test never resolves or executes
+the installed CLI. Default regression tests use only test-owned executables.
+
 #### `mcp_config` on ACP runtimes
 
 ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.

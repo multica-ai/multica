@@ -605,6 +605,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: prepare omp mcp config: %w", err)
 	}
+	if err := prepareAntigravityMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
+		return nil, fmt.Errorf("execenv: prepare antigravity mcp config: %w", err)
+	}
 
 	// Persist managed-env provenance for non-local resumable envs at Prepare time
 	// (not on completion, where .gc_meta.json is written). A same-issue
@@ -903,6 +906,13 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
 		logger.Warn("execenv: refresh omp mcp config failed; forcing fresh prepare", "error", err)
+		return nil
+	}
+	if err := prepareAntigravityMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
+		logger.Warn("execenv: refresh antigravity mcp config failed; forcing fresh prepare", "error", err)
+		if rollbackErr := rollBackPreparedSidecars(*manifest); rollbackErr != nil {
+			logger.Warn("execenv: roll back sidecars after failed antigravity refresh", "error", rollbackErr)
+		}
 		return nil
 	}
 

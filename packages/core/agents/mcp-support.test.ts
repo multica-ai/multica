@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { providerSupportsMcpConfig } from "./mcp-support";
@@ -5,9 +7,9 @@ import { providerSupportsMcpConfig } from "./mcp-support";
 describe("providerSupportsMcpConfig", () => {
   it("accepts a provider whose runtime consumes mcp_config", () => {
     expect(providerSupportsMcpConfig("claude")).toBe(true);
+    expect(providerSupportsMcpConfig("antigravity")).toBe(true);
   });
   it("rejects providers whose runtime ignores mcp_config", () => {
-    expect(providerSupportsMcpConfig("antigravity")).toBe(false);
     expect(providerSupportsMcpConfig("copilot")).toBe(false);
     expect(providerSupportsMcpConfig("pi")).toBe(true);
     // ZeroClaw's ACP server never reads `params.mcpServers` — MCP lives in
