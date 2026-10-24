@@ -445,7 +445,12 @@ function readCookie(name: string): string {
   const prefix = `${name}=`;
   const parts = document.cookie ? document.cookie.split("; ") : [];
   for (const part of parts) {
-    if (part.startsWith(prefix)) return decodeURIComponent(part.slice(prefix.length));
+    if (!part.startsWith(prefix)) continue;
+    try {
+      return decodeURIComponent(part.slice(prefix.length));
+    } catch {
+      return "";
+    }
   }
   return "";
 }
