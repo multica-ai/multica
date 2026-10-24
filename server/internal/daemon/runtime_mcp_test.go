@@ -627,3 +627,95 @@ func TestMergeRuntimeAndAgentMcpConfigKimiIsPassthrough(t *testing.T) {
 		t.Fatalf("kimi merge must be a passthrough, got %s", merged)
 	}
 }
+
+// stubPasswdHome points osUserHome at dir for the duration of the test,
+// simulating a passwd entry that disagrees with $HOME.
+func stubPasswdHome(t *testing.T, dir string) {
+	t.Helper()
+	previous := osUserHome
+	osUserHome = func() (string, error) { return dir, nil }
+	t.Cleanup(func() { osUserHome = previous })
+}
+
+// A service manager or container runtime can rewrite $HOME from the passwd
+// entry while the pod spec sets $HOME elsewhere, so the CLIs write their user
+// config under a home the daemon never looks at (issue #9230). $HOME stays
+// authoritative; the passwd home is a fallback only when $HOME has no config.
+func TestLoadRuntimeMcpServerConfigsClaudeFallsBackToPasswdHome(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	passwdHome := t.TempDir()
+	stubPasswdHome(t, passwdHome)
+	if err := os.WriteFile(filepath.Join(passwdHome, ".claude.json"), []byte(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := loadRuntimeMcpServerConfigs("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("claude must stay supported")
+	}
+	entry, ok := servers["fetch"]
+	if !ok {
+		t.Fatalf("passwd-home fallback must find the user config, got %#v", servers)
+	}
+	mapped, ok := entry.(map[string]any)
+	if !ok || mapped["command"] != "uvx" {
+		t.Fatalf("fetch entry = %#v", entry)
+	}
+}
+
+func TestLoadRuntimeMcpServerConfigsClaudePrefersHomeOverPasswdHome(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	passwdHome := t.TempDir()
+	stubPasswdHome(t, passwdHome)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"home-server":{"command":"home-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(passwdHome, ".claude.json"), []byte(`{"mcpServers":{"passwd-server":{"command":"passwd-cmd"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := loadRuntimeMcpServerConfigs("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("claude must stay supported")
+	}
+	if _, ok := servers["home-server"]; !ok {
+		t.Fatalf("$HOME config must win, got %#v", servers)
+	}
+	if _, ok := servers["passwd-server"]; ok {
+		t.Fatalf("passwd-home config must not be merged when $HOME has the file, got %#v", servers)
+	}
+}
+
+// An explicit CODEX_HOME is the user saying where the Codex config lives; the
+// passwd-home fallback must not second-guess it.
+func TestLoadRuntimeMcpServerConfigsCodexExplicitHomeSkipsPasswdFallback(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	passwdHome := t.TempDir()
+	stubPasswdHome(t, passwdHome)
+	codexConfigDir := filepath.Join(passwdHome, ".codex")
+	if err := os.MkdirAll(codexConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexConfigDir, "config.toml"), []byte("[mcp_servers.leak]\ncommand = \"leak-cmd\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
+
+	servers, supported, err := loadRuntimeMcpServerConfigs("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Fatal("codex must stay supported")
+	}
+	if len(servers) != 0 {
+		t.Fatalf("explicit CODEX_HOME must disable the passwd fallback, got %#v", servers)
+	}
+}
