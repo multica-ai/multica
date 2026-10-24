@@ -1191,3 +1191,67 @@ func TestHandoffDoesNotAlsoWakeTheHandler(t *testing.T) {
 		t.Fatal("another agent's wakeup missed the assignment")
 	}
 }
+
+func TestDescriptionUpdatePreservesWorkflowHandoff(t *testing.T) {
+	seedTestCatalog(t)
+	reviewer := seededReadyAgentID(t)
+	engineer := dbfx.Agent(t, "Description handoff engineer", handlerTestRuntimeID(t))
+	projectID := deliveryProject(t, "Description handoff project", reviewer)
+	setColumnHandoff(t, projectID, "in_review", handToAgent(reviewer, "Review saved evidence.")).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "Saved result handoff", testutil.Cols{
+		"project_id": projectID, "status": "in_progress", "assignee_type": "agent", "assignee_id": engineer,
+	})
+
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_review", "description": "Artifact V2; ready for review."}).Want(http.StatusOK)
+	_, kind, id := issueStatusAndAssignee(t, issueID)
+	if kind != "agent" || id != reviewer {
+		t.Fatalf("saved assignee = %s/%s, want workflow reviewer %s", kind, id, reviewer)
+	}
+	if n := taskCountFor(t, issueID, reviewer); n != 1 {
+		t.Fatalf("reviewer runs = %d, want one without any follow-up comment", n)
+	}
+	if n := taskCountFor(t, issueID, engineer); n != 0 {
+		t.Fatalf("engineer runs = %d, want none", n)
+	}
+	issue, err := testHandler.Queries.GetIssue(context.Background(), util.MustParseUUID(issueID))
+	if err != nil || issue.Description.String != "Artifact V2; ready for review." {
+		t.Fatalf("saved result = %q, err = %v", issue.Description.String, err)
+	}
+	updateIssueForTest(t, issueID, map[string]any{"status": "in_review", "description": "Artifact V2; ready for review."}).Want(http.StatusOK)
+	if n := taskCountFor(t, issueID, reviewer); n != 1 {
+		t.Fatalf("unchanged-status retry created %d reviewer runs, want one", n)
+	}
+}
+
+func TestBatchDescriptionUpdatePreservesWorkflowHandoff(t *testing.T) {
+	seedTestCatalog(t)
+	reviewer := seededReadyAgentID(t)
+	engineer := dbfx.Agent(t, "Batch description handoff engineer", handlerTestRuntimeID(t))
+	projectID := deliveryProject(t, "Batch description handoff project", reviewer)
+	setColumnHandoff(t, projectID, "in_review", handToAgent(reviewer, "Review saved evidence.")).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "Batch saved result handoff", testutil.Cols{
+		"project_id": projectID, "status": "in_progress", "assignee_type": "agent", "assignee_id": engineer,
+	})
+	testutil.Call(t, testHandler.BatchUpdateIssues, workflowRequest(http.MethodPost, "/api/issues/batch", map[string]any{
+		"issue_ids": []string{issueID}, "updates": map[string]any{"status": "in_review", "description": "Batch artifact V2."},
+	})).Want(http.StatusOK)
+	_, kind, id := issueStatusAndAssignee(t, issueID)
+	if kind != "agent" || id != reviewer || taskCountFor(t, issueID, reviewer) != 1 || taskCountFor(t, issueID, engineer) != 0 {
+		t.Fatalf("batch saved assignee = %s/%s; want reviewer %s and one reviewer-only run", kind, id, reviewer)
+	}
+}
+
+func TestDescriptionHandoffExplicitMemberOverride(t *testing.T) {
+	seedTestCatalog(t)
+	reviewer := seededReadyAgentID(t)
+	projectID := deliveryProject(t, "Description explicit member project", reviewer)
+	setColumnHandoff(t, projectID, "in_review", handToAgent(reviewer, "Review saved evidence.")).Want(http.StatusOK)
+	issueID := dbfx.Issue(t, "Human saved result", testutil.Cols{"project_id": projectID, "status": "in_progress"})
+	updateIssueForTest(t, issueID, map[string]any{
+		"status": "in_review", "description": "Finished result for human acceptance.", "assignee_type": "member", "assignee_id": testUserID,
+	}).Want(http.StatusOK)
+	_, kind, id := issueStatusAndAssignee(t, issueID)
+	if kind != "member" || id != testUserID || taskCountFor(t, issueID, reviewer) != 0 {
+		t.Fatalf("explicit member overridden: assignee=%s/%s", kind, id)
+	}
+}

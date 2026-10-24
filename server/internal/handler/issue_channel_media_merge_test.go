@@ -81,7 +81,7 @@ func TestRefreshUntouchedNullableIssueParamsKeepsValidatedAssigneePair(t *testin
 
 	refreshUntouchedNullableIssueParams(&params, current, map[string]json.RawMessage{
 		"assignee_id": json.RawMessage(`"77777777-7777-4777-8777-777777777777"`),
-	})
+	}, false)
 
 	if params.AssigneeType.String != "member" || params.AssigneeID != oldID {
 		t.Fatalf("validated assignee pair was recombined: type=%#v id=%#v", params.AssigneeType, params.AssigneeID)
