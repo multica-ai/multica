@@ -357,8 +357,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 		// Internal protocol failures cancel the process to unblock its pipes.
 		// Preserve the actual failure instead of reporting a user cancellation.
-		if supplements != nil && writeErr != nil && ctx.Err() == nil && terminalReasonError == "" && !errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			terminalReasonError = fmt.Sprintf("claude input/control protocol failed: %v", writeErr)
+		if writeErr != nil && ctx.Err() == nil && !sawResult && scanErr == nil && !errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			if streamProcessExitCode(exitErr) > 0 {
+				// The CLI exited on its own with an error. EOF closes stdin and
+				// wakes the supplement handshake, whose subsequent prompt write
+				// can fail and cancel runCtx. That pipe error is consequential;
+				// preserve the provider exit instead of calling it cancellation
+				// or a control-protocol failure (GH #8816).
+				terminalReasonError = fmt.Sprintf("claude exited with error: %v", exitErr)
+				b.cfg.Logger.Debug("claude input write failed after provider exit", "error", writeErr)
+			} else if supplements != nil {
+				terminalReasonError = fmt.Sprintf("claude input/control protocol failed: %v", writeErr)
+			}
 		}
 
 		if !sawResult && usageSnapshot != nil {
@@ -425,8 +435,25 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// The account-binding 400 arrives in the result event (finalError);
 		// "no conversation found" is printed to stderr. Check both.
 		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		// A quick exit alone cannot distinguish poisoned history from a bad
+		// installation or credentials. Require a notification replay appended
+		// during THIS attempt, with no assistant progress or other diagnosis.
+		// The daemon already bounds recovery to one fresh attempt and retires
+		// only the requested session mapping; the JSONL remains untouched.
+		if !resumeRejected && finalStatus == "failed" && opts.ResumeSessionID != "" && sessionID == opts.ResumeSessionID &&
+			assistantEventCount == 0 && !sawResult && invalidEventCount == 0 && scanErr == nil &&
+			ctx.Err() == nil && !errors.Is(runCtx.Err(), context.DeadlineExceeded) &&
+			duration <= claudeNotificationResumeWindow && streamProcessExitCode(exitErr) == 1 &&
+			strings.TrimSpace(stderrTail) == "" && usageSnapshot != nil {
+			var notificationErr error
+			resumeRejected, notificationErr = usageSnapshot.appendedTaskNotification(opts.ResumeSessionID)
+			if notificationErr != nil {
+				b.cfg.Logger.Warn("claude notification replay evidence unavailable; keeping session", "error", notificationErr)
+			}
+		}
 		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
 		if resumeRejected {
+			reportedSessionID = ""
 			// A rejected resume may emit usage for a newly-created session. Its
 			// totals do not share the requested session's baseline.
 			if lastUsageResult != nil {
