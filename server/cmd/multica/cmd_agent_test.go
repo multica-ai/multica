@@ -38,6 +38,7 @@ func newAgentTasksTestCmd() *cobra.Command {
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().Int("limit", 200, "")
 	cmd.Flags().String("before", "", "")
+	cmd.Flags().Bool("with-cursor", false, "")
 	cmd.Flags().String("profile", "", "")
 	return cmd
 }
@@ -102,6 +103,85 @@ func TestRunAgentTasksPagination(t *testing.T) {
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(output), &rows); err != nil {
 		t.Fatalf("stdout must remain JSON: %s", output)
+	}
+}
+
+// Contract: with --output json --with-cursor, stdout carries the truncation
+// signal as {"tasks": [...], "next_cursor": "<cursor>"}, and the stderr hint
+// stays for humans reading the terminal.
+func TestRunAgentTasksJSONWithCursorEmitsNextPage(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	cursor := "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Agent-Tasks-Next-Cursor", cursor)
+		_, _ = w.Write([]byte(`[{"id":"task-1"}]`))
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newAgentTasksTestCmd()
+	if err := cmd.Flags().Set("with-cursor", "true"); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	output, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Tasks      []map[string]any `json:"tasks"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(output), &page); err != nil {
+		t.Fatalf("stdout must be the wrapper object: %s", output)
+	}
+	if len(page.Tasks) != 1 || page.Tasks[0]["id"] != "task-1" {
+		t.Fatalf("tasks = %v, want one task-1 row", page.Tasks)
+	}
+	if page.NextCursor == nil || *page.NextCursor != cursor {
+		t.Fatalf("next_cursor = %v, want %q", page.NextCursor, cursor)
+	}
+	if !strings.Contains(stderr.String(), cursor) {
+		t.Fatalf("stderr hint missing cursor: %q", stderr.String())
+	}
+}
+
+// Contract: on the last page (no next-cursor header) next_cursor is null, so
+// scripts can stop their walk on the JSON itself.
+func TestRunAgentTasksJSONWithCursorNullOnLastPage(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"task-1"}]`))
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newAgentTasksTestCmd()
+	if err := cmd.Flags().Set("with-cursor", "true"); err != nil {
+		t.Fatal(err)
+	}
+	output, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Tasks      []map[string]any `json:"tasks"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(output), &page); err != nil {
+		t.Fatalf("stdout must be the wrapper object: %s", output)
+	}
+	if page.NextCursor != nil {
+		t.Fatalf("next_cursor = %v, want null on the last page", *page.NextCursor)
+	}
+	if len(page.Tasks) != 1 {
+		t.Fatalf("tasks = %v, want one row", page.Tasks)
 	}
 }
 
