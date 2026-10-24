@@ -10,6 +10,7 @@ import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
 import { telegramInstallationsOptions } from "@multica/core/telegram";
+import { sharecrmInstallationsOptions } from "@multica/core/sharecrm";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -18,6 +19,7 @@ import { SlackTab } from "./slack-tab";
 import { DingTalkTab } from "./dingtalk-tab";
 import { WecomTab } from "./wecom-tab";
 import { TelegramTab } from "./telegram-tab";
+import { ShareCRMTab } from "./sharecrm-tab";
 import { SettingsCard, SettingsTab } from "./settings-layout";
 import { IntegrationChannelIcon } from "./integration-channel-icon";
 import {
@@ -86,6 +88,11 @@ export function ChannelsTab() {
     enabled: canView,
     select: hasActiveInstallation,
   });
+  const sharecrm = useQuery({
+    ...sharecrmInstallationsOptions(wsId),
+    enabled: canView,
+    select: hasActiveInstallation,
+  });
   const channels: ChannelEntry[] = [
     {
       id: "lark",
@@ -121,6 +128,13 @@ export function ChannelsTab() {
       description: t(($) => $.telegram.page_description),
       content: <TelegramTab />,
       state: telegram,
+    },
+    {
+      id: "sharecrm",
+      label: t(($) => $.sharecrm.section_title),
+      description: t(($) => $.sharecrm.page_description),
+      content: <ShareCRMTab />,
+      state: sharecrm,
     },
   ];
   const requested = resolveSettingsLocation(navigation.searchParams).integration;
