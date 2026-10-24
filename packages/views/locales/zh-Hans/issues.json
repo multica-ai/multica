@@ -3,7 +3,7 @@
     "label": "{{name}} 的运行",
     "stop": "停止",
     "stopping": "正在停止...",
-    "queued": "等待可用的智能体。",
+    "queued": "等待运行时领取本次运行。",
     "starting": "正在准备智能体会话。",
     "waiting_directory": "等待其他运行释放工作目录。",
     "thinking": "思考中",
