@@ -382,7 +382,15 @@
     "removed_toast": "공유 MCP 서버를 제거했습니다",
     "save_failed_toast": "공유 MCP 서버를 저장하지 못했습니다",
     "rename_failed_toast": "공유 MCP 서버 이름을 변경하지 못했습니다",
-    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다"
+    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다",
+    "test_elapsed": "{{count}} ms",
+    "test_connection": "연결 테스트",
+    "test_no_runtime": "내가 소유한 온라인 런타임이 없습니다",
+    "test_choose_runtime": "내 런타임 선택",
+    "test_ok": "{{runtime}}에서 성공 · {{detail}}",
+    "test_fail": "{{runtime}}에서 실패: {{detail}}",
+    "test_tool_count_other": "도구 {{count}}개",
+    "test_failed_toast": "연결을 테스트하지 못했습니다"
   },
   "page": {
     "title": "설정",

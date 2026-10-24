@@ -12,6 +12,7 @@ import enAgents from "../../locales/en/agents.json";
 const mockCreate = vi.hoisted(() => vi.fn());
 const mockUpdate = vi.hoisted(() => vi.fn());
 const mockDelete = vi.hoisted(() => vi.fn());
+const mockProbe = vi.hoisted(() => vi.fn());
 
 const server = (over: Record<string, unknown>) => ({
   id: "srv-1",
@@ -25,13 +26,21 @@ const server = (over: Record<string, unknown>) => ({
 
 const data = vi.hoisted(() => ({
   servers: [] as Array<Record<string, unknown>>,
+  runtimes: [] as Array<Record<string, unknown>>,
   isLoading: false,
+  probeResult: undefined as Record<string, unknown> | undefined,
   role: "owner" as "owner" | "admin" | "member",
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: <T,>(options: T) => options,
-  useQuery: () => ({ data: data.servers, isLoading: data.isLoading }),
+  useQuery: (options: { queryKey?: readonly unknown[] }) => {
+    const key = options.queryKey ?? [];
+    if (key.includes("runtimes")) {
+      return { data: data.runtimes, isLoading: false, isFetched: true };
+    }
+    return { data: data.servers, isLoading: data.isLoading };
+  },
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
@@ -43,6 +52,16 @@ vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspaceMcpServer: () => ({ mutateAsync: mockCreate, isPending: false }),
   useUpdateWorkspaceMcpServer: () => ({ mutateAsync: mockUpdate, isPending: false }),
   useDeleteWorkspaceMcpServer: () => ({ mutateAsync: mockDelete, isPending: false }),
+  useProbeWorkspaceMcpServer: () => ({
+    data: data.probeResult,
+    mutateAsync: async (input: unknown) => {
+      data.probeResult = undefined;
+      const result = await mockProbe(input);
+      data.probeResult = result;
+      return result;
+    },
+    isPending: false,
+  }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -74,13 +93,33 @@ describe("McpTab", () => {
     vi.clearAllMocks();
     data.role = "owner";
     data.isLoading = false;
+    data.probeResult = undefined;
     data.servers = [
       server({ id: "srv-1", name: "linear", transport: "http" }),
       server({ id: "srv-2", name: "local-tool", transport: "stdio" }),
     ];
+    data.runtimes = [
+      {
+        id: "rt-1",
+        name: "Codex (host)",
+        custom_name: "",
+        provider: "codex",
+        status: "online",
+        owner_id: "user-1",
+      },
+    ];
     mockCreate.mockResolvedValue({});
     mockUpdate.mockResolvedValue({});
     mockDelete.mockResolvedValue({});
+    mockProbe.mockResolvedValue({
+      id: "probe-1",
+      status: "completed",
+      runtime_id: "rt-1",
+      runtime_name: "Codex (host)",
+      elapsed_ms: 123,
+      updated_at: "2026-10-16T08:00:00Z",
+      tools: ["search"],
+    });
   });
 
   it("shows each transport as visible text beside its labeled icon", async () => {
@@ -524,9 +563,56 @@ describe("McpTab", () => {
       screen.queryByRole("button", { name: /^Replace configuration / }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: /Remove server/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Test connection/ })).toBeNull();
     expect(
       screen.getByText(/Only workspace owners and admins/),
     ).toBeInTheDocument();
+  });
+
+  it("shows the immediate probe result for a runtime the user owns", async () => {
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: "Test connection linear" }));
+
+    await waitFor(() =>
+      expect(mockProbe).toHaveBeenCalledWith({
+        serverId: "srv-1",
+        runtimeId: "rt-1",
+      }),
+    );
+    expect(await screen.findByText(/Succeeded on Codex \(host\)/)).toBeInTheDocument();
+    expect(screen.getByText(/1 tool/)).toBeInTheDocument();
+    expect(screen.getByText("search")).toBeInTheDocument();
+    expect(screen.getByText(/123 ms/)).toBeInTheDocument();
+  });
+
+  it("clears the displayed result when the server configuration changes", async () => {
+    const user = userEvent.setup();
+    const view = render(<McpTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "Test connection linear" }));
+    expect(await screen.findByText(/Succeeded on/)).toBeInTheDocument();
+    data.servers = [server({ updated_at: "2026-10-17T00:00:00Z" })];
+    view.rerender(<McpTab />);
+    expect(screen.queryByText(/Succeeded on/)).toBeNull();
+  });
+
+  it("requires an explicit runtime selection when several owned daemons are online", async () => {
+    data.runtimes.push({ ...data.runtimes[0], id: "rt-2", name: "Claude (other)", provider: "claude" });
+    const user = userEvent.setup();
+    render(<McpTab />, { wrapper: Wrapper });
+    const button = screen.getByRole("button", { name: "Test connection linear" });
+    expect(button).toBeDisabled();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Choose your runtime" }), "rt-2");
+    await user.click(button);
+    expect(mockProbe).toHaveBeenCalledWith({ serverId: "srv-1", runtimeId: "rt-2" });
+  });
+
+  it("disables Test connection when the user has no online runtime", () => {
+    data.runtimes = [];
+    render(<McpTab />, { wrapper: Wrapper });
+
+    expect(screen.getByRole("button", { name: "Test connection linear" })).toBeDisabled();
   });
 
   it("says how many agents use each server, when the server reports it", () => {

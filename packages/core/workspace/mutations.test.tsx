@@ -14,6 +14,7 @@ import {
   useCreateWorkspace,
   useDeleteWorkspace,
   useLeaveWorkspace,
+  useProbeWorkspaceMcpServer,
   useUpdateWorkspaceMcpServer,
 } from "./mutations";
 
@@ -387,4 +388,40 @@ describe("useLeaveWorkspace", () => {
     });
     expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-3");
   });
+});
+
+
+describe("useProbeWorkspaceMcpServer", () => {
+  it("polls one request until completion without changing the server library", async () => {
+    const qc = new QueryClient();
+    const first = { id: "probe-1", status: "pending" };
+    const completed = { ...first, status: "completed", tools: ["search"] };
+    const probeWorkspaceMcpServer = vi.fn().mockResolvedValue(first);
+    const getWorkspaceMcpProbe = vi.fn().mockResolvedValueOnce({ ...first, status: "running" }).mockResolvedValue(completed);
+    setApiInstance({ probeWorkspaceMcpServer, getWorkspaceMcpProbe } as unknown as ApiClient);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const { result } = renderHook(() => useProbeWorkspaceMcpServer("ws-1"), { wrapper: createWrapper(qc) });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ serverId: "server-1", runtimeId: "runtime-1" })).resolves.toEqual(completed);
+    });
+    expect(probeWorkspaceMcpServer).toHaveBeenCalledWith("ws-1", "server-1", "runtime-1");
+    expect(getWorkspaceMcpProbe).toHaveBeenCalledTimes(2);
+    expect(getWorkspaceMcpProbe).toHaveBeenLastCalledWith("ws-1", "server-1", "probe-1");
+    expect(invalidate).not.toHaveBeenCalled();
+    qc.clear();
+  });
+
+  it.each([{ id: "", status: "" }, { id: "probe-1", status: "future-status" }])(
+    "rejects an invalid or unknown probe response %j",
+    async (response) => {
+      const qc = new QueryClient();
+      const probeWorkspaceMcpServer = vi.fn().mockResolvedValue(response);
+      setApiInstance({ probeWorkspaceMcpServer } as unknown as ApiClient);
+      const { result } = renderHook(() => useProbeWorkspaceMcpServer("ws-1"), { wrapper: createWrapper(qc) });
+      await act(async () => {
+        await expect(result.current.mutateAsync({ serverId: "server-1" })).rejects.toThrow("Invalid MCP probe response");
+      });
+      qc.clear();
+    },
+  );
 });

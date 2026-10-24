@@ -384,7 +384,16 @@
     "removed_toast": "Shared MCP server removed",
     "save_failed_toast": "Could not save the shared MCP server",
     "rename_failed_toast": "Could not rename the shared MCP server",
-    "remove_failed_toast": "Could not remove the shared MCP server"
+    "remove_failed_toast": "Could not remove the shared MCP server",
+    "test_elapsed": "{{count}} ms",
+    "test_connection": "Test connection",
+    "test_no_runtime": "No online runtime you own is available",
+    "test_choose_runtime": "Choose your runtime",
+    "test_ok": "Succeeded on {{runtime}} · {{detail}}",
+    "test_fail": "Failed on {{runtime}}: {{detail}}",
+    "test_tool_count_one": "{{count}} tool",
+    "test_tool_count_other": "{{count}} tools",
+    "test_failed_toast": "Could not test the connection"
   },
   "page": {
     "title": "Settings",

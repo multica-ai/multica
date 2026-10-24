@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Blocks, Loader2, Plug, Plus, Server } from "lucide-react";
+import type { TFunction } from "i18next";
+import {
+  ArrowRight,
+  Blocks,
+  Loader2,
+  Plug,
+  Plus,
+  Server,
+  Unplug,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -25,9 +34,14 @@ import { workspaceMcpServersOptions } from "@multica/core/workspace/queries";
 import {
   useCreateWorkspaceMcpServer,
   useDeleteWorkspaceMcpServer,
+  useProbeWorkspaceMcpServer,
   useUpdateWorkspaceMcpServer,
 } from "@multica/core/workspace/mutations";
-import type { WorkspaceMcpServer } from "@multica/core/types";
+import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import type {
+  WorkspaceMcpProbeRequest,
+  WorkspaceMcpServer,
+} from "@multica/core/types";
 import { McpServerDialog } from "../../agents/components/tabs/mcp-server-dialog";
 import type { ManagedMcpServer } from "../../agents/components/tabs/mcp-config-model";
 import { McpServerRow } from "../../common/mcp-server-row";
@@ -41,6 +55,10 @@ import {
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import { useComposioAvailable } from "./connected-apps-tab";
 import { settingsHref } from "./settings-navigation";
+import {
+  buildRuntimeMachines,
+  runtimeRowLabel,
+} from "../../runtimes/components/runtime-machines";
 
 /**
  * The workspace MCP server library (GH #6062).
@@ -69,6 +87,19 @@ export function McpTab() {
   const createServer = useCreateWorkspaceMcpServer(wsId);
   const updateServer = useUpdateWorkspaceMcpServer(wsId);
   const deleteServer = useDeleteWorkspaceMcpServer(wsId);
+  const probeServer = useProbeWorkspaceMcpServer(wsId);
+  const runtimesQuery = useQuery({
+    ...runtimeListOptions(wsId, "me"),
+    enabled: canManage && wsId !== "",
+  });
+  const ownedOnline = useMemo(
+    () => (runtimesQuery.data ?? []).filter((runtime) => runtime.status === "online"),
+    [runtimesQuery.data],
+  );
+  const runtimeMachines = useMemo(
+    () => buildRuntimeMachines(ownedOnline, { now: Date.now() }),
+    [ownedOnline],
+  );
 
   const servers = useMemo(() => serversQuery.data ?? [], [serversQuery.data]);
   const existingNames = useMemo(
@@ -88,6 +119,18 @@ export function McpTab() {
   const [deletingServer, setDeletingServer] = useState<WorkspaceMcpServer | null>(
     null,
   );
+  const [probeRuntimeId, setProbeRuntimeId] = useState("");
+  const [probingId, setProbingId] = useState<string | null>(null);
+  const [probeTarget, setProbeTarget] = useState<{
+    serverId: string;
+    configVersion: string;
+  } | null>(null);
+  const selectedRuntimeId =
+    ownedOnline.length === 1
+      ? ownedOnline[0]?.id ?? ""
+      : ownedOnline.some((runtime) => runtime.id === probeRuntimeId)
+        ? probeRuntimeId
+        : "";
 
   // The dialog is shared with the agent MCP tab, which hands it the saved
   // entry to prefill. Here there is nothing to prefill — an edit always
@@ -187,6 +230,26 @@ export function McpTab() {
     }
   };
 
+  const handleProbe = async (server: WorkspaceMcpServer) => {
+    if (probingId || selectedRuntimeId === "") return;
+    setProbingId(server.id);
+    try {
+      setProbeTarget({ serverId: server.id, configVersion: server.updated_at });
+      await probeServer.mutateAsync({
+        serverId: server.id,
+        runtimeId: selectedRuntimeId,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t(($) => $.mcp.test_failed_toast),
+      );
+    } finally {
+      setProbingId(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deletingServer) return;
     try {
@@ -217,21 +280,46 @@ export function McpTab() {
         description={t(($) => $.mcp.write_only_note)}
         action={
           canManage ? (
-            <Button
-              size="sm"
-              disabled={renamePending}
-              onClick={() => {
-                cancelRename();
-                setEditingServer(null);
-                setEditorOpen(true);
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              {t(($) => $.mcp.add_server)}
-            </Button>
+            <div className="flex items-center gap-2">
+              {ownedOnline.length > 1 ? (
+                <select
+                  aria-label={t(($) => $.mcp.test_choose_runtime)}
+                  className="h-8 max-w-48 rounded-md border border-input bg-background px-2 text-caption"
+                  value={probeRuntimeId}
+                  disabled={probingId !== null}
+                  onChange={(event) => setProbeRuntimeId(event.target.value)}
+                >
+                  <option value="">{t(($) => $.mcp.test_choose_runtime)}</option>
+                  {runtimeMachines.map((machine) => (
+                    <optgroup key={machine.id} label={machine.title}>
+                      {machine.runtimes.map((runtime) => (
+                        <option key={runtime.id} value={runtime.id}>
+                          {runtimeRowLabel(runtime, machine.title)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              ) : null}
+              <Button
+                size="sm"
+                disabled={renamePending}
+                onClick={() => {
+                  cancelRename();
+                  setEditingServer(null);
+                  setEditorOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                {t(($) => $.mcp.add_server)}
+              </Button>
+            </div>
           ) : null
         }
       >
+        {canManage && runtimesQuery.isFetched && ownedOnline.length === 0 ? (
+          <p className="text-caption text-muted-foreground">{t(($) => $.mcp.test_no_runtime)}</p>
+        ) : null}
         <SettingsCard>
           {serversQuery.isLoading ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
@@ -246,64 +334,103 @@ export function McpTab() {
             </div>
           ) : (
             <ul className="divide-y divide-surface-border">
-              {servers.map((server) => (
-                <McpServerRow
-                  key={server.name}
-                  name={server.name}
-                  transport={server.transport}
-                  meta={
-                    server.agent_count === undefined
-                      ? undefined
-                      : server.agent_count > 0
-                        ? t(($) => $.mcp_usage.agent_count, { count: server.agent_count })
-                        : t(($) => $.mcp_usage.none)
-                  }
-                  status={
-                    server.enabled === false ? (
-                      <Badge variant="secondary">
-                        {t(($) => $.mcp.disabled_badge)}
-                      </Badge>
-                    ) : undefined
-                  }
-                  canManage={canManage}
-                  actionsDisabled={renamePending}
-                  rename={
-                    renamingServer?.id === server.id
-                      ? {
-                          draft: renameDraft,
-                          error: renameError,
-                          pending: renamePending,
-                          onChange: (value) => {
-                            setRenameDraft(value);
-                            setRenameError("");
-                          },
-                          onCancel: cancelRename,
-                          onSubmit: () => void handleRename(),
+              {servers.map((server) => {
+                const result =
+                  probeTarget?.serverId === server.id &&
+                  probeTarget.configVersion === server.updated_at &&
+                  probingId === null
+                    ? probeServer.data
+                    : undefined;
+                const runtime = ownedOnline.find(
+                  (runtime) => runtime.id === result?.runtime_id,
+                );
+                return (
+                  <McpServerRow
+                    key={server.name}
+                    name={server.name}
+                    transport={server.transport}
+                    meta={mcpRowMeta(
+                      t,
+                      server.agent_count,
+                      result,
+                      runtime ? runtimeDisplayLabel(runtime) : undefined,
+                    )}
+                    details={result ? <ProbeDetails result={result} /> : undefined}
+                    extraAction={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-busy={probingId === server.id}
+                        disabled={
+                          probingId !== null ||
+                          renamePending ||
+                          ownedOnline.length === 0 ||
+                          (ownedOnline.length > 1 && selectedRuntimeId === "")
                         }
-                      : undefined
-                  }
-                  labels={{
-                    rename: t(($) => $.mcp.rename_action),
-                    renameAria: t(($) => $.mcp.rename_server),
-                    renameSave: t(($) => $.mcp.rename_save),
-                    renameCancel: t(($) => $.mcp.rename_cancel),
-                    configure: t(($) => $.mcp.replace_config),
-                    configureAria: t(($) => $.mcp.replace_config),
-                    remove: t(($) => $.mcp.remove_action),
-                    removeAria: t(($) => $.mcp.remove_server),
-                  }}
-                  onRenameStart={() => startRename(server)}
-                  onConfigure={() => {
-                    cancelRename();
-                    setEditingServer(server);
-                    setEditorOpen(true);
-                  }}
-                  onRemove={() => {
-                    cancelRename();
-                    setDeletingServer(server);
-                  }}
-                />
-              ))}
+                        aria-label={`${t(($) => $.mcp.test_connection)} ${server.name}`}
+                        title={
+                          runtimesQuery.isFetched && ownedOnline.length === 0
+                            ? t(($) => $.mcp.test_no_runtime)
+                            : undefined
+                        }
+                        onClick={() => void handleProbe(server)}
+                      >
+                        {probingId === server.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+                        ) : (
+                          <Unplug className="h-4 w-4" />
+                        )}
+                        {t(($) => $.mcp.test_connection)}
+                      </Button>
+                    }
+                    status={
+                      server.enabled === false ? (
+                        <Badge variant="secondary">
+                          {t(($) => $.mcp.disabled_badge)}
+                        </Badge>
+                      ) : undefined
+                    }
+                    canManage={canManage}
+                    actionsDisabled={renamePending || probingId !== null}
+                    rename={
+                      renamingServer?.id === server.id
+                        ? {
+                            draft: renameDraft,
+                            error: renameError,
+                            pending: renamePending,
+                            onChange: (value) => {
+                              setRenameDraft(value);
+                              setRenameError("");
+                            },
+                            onCancel: cancelRename,
+                            onSubmit: () => void handleRename(),
+                          }
+                        : undefined
+                    }
+                    labels={{
+                      rename: t(($) => $.mcp.rename_action),
+                      renameAria: t(($) => $.mcp.rename_server),
+                      renameSave: t(($) => $.mcp.rename_save),
+                      renameCancel: t(($) => $.mcp.rename_cancel),
+                      configure: t(($) => $.mcp.replace_config),
+                      configureAria: t(($) => $.mcp.replace_config),
+                      remove: t(($) => $.mcp.remove_action),
+                      removeAria: t(($) => $.mcp.remove_server),
+                    }}
+                    onRenameStart={() => startRename(server)}
+                    onConfigure={() => {
+                      cancelRename();
+                      setEditingServer(server);
+                      setEditorOpen(true);
+                    }}
+                    onRemove={() => {
+                      cancelRename();
+                      setDeletingServer(server);
+                    }}
+                  />
+                );
+              })}
             </ul>
           )}
         </SettingsCard>
@@ -351,6 +478,70 @@ export function McpTab() {
         </AlertDialogContent>
       </AlertDialog>
     </SettingsTab>
+  );
+}
+
+function mcpRowMeta(
+  t: TFunction<"settings">,
+  agentCount: number | undefined,
+  result: WorkspaceMcpProbeRequest | undefined,
+  runtimeLabel?: string,
+) {
+  const agentLabel =
+    agentCount === undefined
+      ? null
+      : agentCount > 0
+        ? t(($) => $.mcp_usage.agent_count, { count: agentCount })
+        : t(($) => $.mcp_usage.none);
+  const probeLabel = result ? formatProbeResult(t, result, runtimeLabel) : null;
+  if (!agentLabel && !probeLabel) return undefined;
+  return (
+    <>
+      {agentLabel}
+      {agentLabel && probeLabel ? " · " : null}
+      {probeLabel ? <span role="status">{probeLabel}</span> : null}
+    </>
+  );
+}
+
+function formatProbeResult(
+  t: TFunction<"settings">,
+  result: WorkspaceMcpProbeRequest,
+  runtimeLabel?: string,
+) {
+  const runtime = runtimeLabel || result.runtime_name || result.runtime_id;
+  if (result.status === "completed") {
+    return t(($) => $.mcp.test_ok, {
+      runtime,
+      detail: t(($) => $.mcp.test_tool_count, { count: result.tools?.length ?? 0 }),
+    });
+  }
+  return t(($) => $.mcp.test_fail, {
+    runtime,
+    detail: result.error_code || result.error || result.status,
+  });
+}
+
+function ProbeDetails({ result }: { result: WorkspaceMcpProbeRequest }) {
+  const { t } = useT("settings");
+  const timestamp = new Date(result.updated_at);
+  return (
+    <div className="mt-1 space-y-1 text-caption text-muted-foreground">
+      <p>
+        {Number.isNaN(timestamp.getTime()) ? null : (
+          <>
+            <time dateTime={result.updated_at}>{timestamp.toLocaleString()}</time>
+            {" · "}
+          </>
+        )}
+        {t(($) => $.mcp.test_elapsed, { count: result.elapsed_ms ?? 0 })}
+      </p>
+      {result.tools?.length ? (
+        <p className="max-h-28 overflow-y-auto break-all">
+          <code>{result.tools.join(", ")}</code>
+        </p>
+      ) : null}
+    </div>
   );
 }
 

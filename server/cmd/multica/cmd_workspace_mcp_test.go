@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ const (
 
 func newWorkspaceMcpTestCmd(use string) *cobra.Command {
 	cmd := &cobra.Command{Use: use}
+	cmd.SetContext(context.Background())
 	cmd.Flags().String("workspace-id", "", "")
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().String("server-url", "", "")
@@ -438,5 +440,64 @@ func TestRunAgentMcpListNeverPrintsSecrets(t *testing.T) {
 		if strings.Contains(out, marker) {
 			t.Fatalf("agent mcp list leaked %q: %q", marker, out)
 		}
+	}
+}
+
+func TestRunWorkspaceMcpProbePollsAndPrintsOnlySafeFields(t *testing.T) {
+	for _, output := range []string{"table", "json"} {
+		t.Run(output, func(t *testing.T) {
+			var polls int
+			mcpTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				response := poisonedServerResponse("linear")
+				response["id"] = "probe-1"
+				response["runtime_name"] = "My daemon"
+				response["runtime_id"] = "runtime-1"
+				response["status"] = "pending"
+				if r.Method == http.MethodPost {
+					var body map[string]string
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["runtime_id"] != "runtime-1" {
+						t.Errorf("probe body=%v error=%v", body, err)
+					}
+				} else {
+					polls++
+					if !strings.HasSuffix(r.URL.Path, "/probes/probe-1") {
+						t.Errorf("poll path=%s", r.URL.Path)
+					}
+					response["status"] = "completed"
+					response["tools"] = []string{"search", "fetch"}
+					response["elapsed_ms"] = 123
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			})
+			cmd := newWorkspaceMcpTestCmd("probe")
+			cmd.Flags().String("runtime-id", "runtime-1", "")
+			_ = cmd.Flags().Set("output", output)
+			out, err := captureStdout(t, func() error { return runWorkspaceMcpProbe(cmd, []string{testMcpServerID}) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if polls != 1 || !strings.Contains(out, "search") || !strings.Contains(out, "My daemon") {
+				t.Fatalf("polls=%d output=%q", polls, out)
+			}
+			for _, marker := range workspaceMcpLeakMarkers {
+				if strings.Contains(out, marker) {
+					t.Fatalf("output leaked %q", marker)
+				}
+			}
+		})
+	}
+}
+
+func TestRunWorkspaceMcpProbeFailureReturnsError(t *testing.T) {
+	mcpTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "probe-1", "status": "failed", "error_code": "unauthorized"})
+	})
+	cmd := newWorkspaceMcpTestCmd("probe")
+	cmd.Flags().String("runtime-id", "runtime-1", "")
+	out, err := captureStdout(t, func() error { return runWorkspaceMcpProbe(cmd, []string{testMcpServerID}) })
+	if err == nil || !strings.Contains(out, "unauthorized") {
+		t.Fatalf("output=%q error=%v", out, err)
 	}
 }

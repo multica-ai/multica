@@ -45,6 +45,26 @@ export interface WorkspaceMcpServer {
   updated_at: string;
 }
 
+/**
+ * Immediate result of one on-demand workspace MCP probe.
+ * It is not stored on the library row. Tool names only — no schemas,
+ * urls, commands, headers, or env.
+ */
+export interface WorkspaceMcpProbeRequest {
+  id: string;
+  workspace_id: string;
+  server_id: string;
+  runtime_id: string;
+  runtime_name: string;
+  status: string;
+  error_code?: string;
+  error?: string;
+  elapsed_ms?: number;
+  tools?: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Member {
   id: string;
   workspace_id: string;

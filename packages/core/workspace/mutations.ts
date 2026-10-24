@@ -125,6 +125,41 @@ export function useUpdateWorkspaceMcpServer(wsId: string) {
   });
 }
 
+/**
+ * Runs one on-demand probe and waits until the daemon reports a terminal
+ * status. Nothing is written onto the library row, so the server list is
+ * left alone.
+ */
+export function useProbeWorkspaceMcpServer(wsId: string) {
+  return useMutation({
+    mutationFn: async ({
+      serverId,
+      runtimeId,
+    }: {
+      serverId: string;
+      runtimeId?: string;
+    }) => {
+      const first = await api.probeWorkspaceMcpServer(wsId, serverId, runtimeId);
+      if (first.id === "") {
+        throw new Error("Invalid MCP probe response");
+      }
+      const deadline = Date.now() + 100_000;
+      let current = first;
+      while (current.status === "pending" || current.status === "running") {
+        if (Date.now() > deadline) {
+          throw new Error("The daemon did not finish the probe in time");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        current = await api.getWorkspaceMcpProbe(wsId, serverId, current.id);
+      }
+      if (!["completed", "failed", "timeout"].includes(current.status)) {
+        throw new Error("Invalid MCP probe response");
+      }
+      return current;
+    },
+  });
+}
+
 export function useDeleteWorkspaceMcpServer(wsId: string) {
   const queryClient = useQueryClient();
   return useMutation({

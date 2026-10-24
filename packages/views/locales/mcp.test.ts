@@ -10,9 +10,12 @@ import { RESOURCES } from "./index";
 const AGENT_KEYS = Object.keys(enAgents.tab_body.mcp_config) as Array<
   keyof typeof enAgents.tab_body.mcp_config
 >;
-const SETTINGS_KEYS = Object.keys(enSettings.mcp) as Array<
+const SETTINGS_KEYS = (Object.keys(enSettings.mcp) as Array<
   keyof typeof enSettings.mcp
->;
+>).filter(
+  (key): key is Exclude<keyof typeof enSettings.mcp, `${string}_one` | `${string}_other`> =>
+    !key.endsWith("_one") && !key.endsWith("_other"),
+);
 
 describe("MCP locale contracts", () => {
   it.each(SUPPORTED_LOCALES)(
@@ -58,6 +61,21 @@ describe("MCP locale contracts", () => {
         for (const token of tokens) {
           expect(resolved, context).toContain(`test-${token}`);
         }
+      }
+    },
+  );
+
+  it.each(SUPPORTED_LOCALES)(
+    "resolves MCP tool counts using the locale's plural rules in %s",
+    (locale) => {
+      const i18n = createI18n(locale, RESOURCES);
+      for (const count of [0, 1, 2]) {
+        const category = new Intl.PluralRules(locale).select(count);
+        expect(i18n.getResource(locale, "settings", `mcp.test_tool_count_${category}`)).toBeTypeOf("string");
+        const resolved = i18n.t(($) => $.mcp.test_tool_count, { ns: "settings", count });
+        expect(resolved).toContain(String(count));
+        expect(resolved).not.toContain("{{");
+        expect(resolved).not.toContain("mcp.test_tool_count");
       }
     },
   );

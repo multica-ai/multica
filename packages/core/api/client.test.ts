@@ -2650,6 +2650,46 @@ describe("ApiClient workspace MCP servers", () => {
     expect(JSON.parse(String(init.body))).toEqual({ name: "linear-v2" });
   });
 
+  it("parses a probe and drops secret fields a server should not return", async () => {
+    const fetchMock = stubJSON({
+      id: "probe-1",
+      workspace_id: "ws-1",
+      server_id: "srv-1",
+      runtime_id: "rt-1",
+      runtime_name: "home",
+      status: "completed",
+      tools: ["search"],
+      config: { headers: { Authorization: "Bearer sk-live-probe" } },
+      url: "https://mcp.example/sk-live-url",
+    });
+
+    const result = await new ApiClient("https://api.example.test")
+      .probeWorkspaceMcpServer("ws-1", "srv-1", "rt-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/workspaces/ws-1/mcp-servers/srv-1/probe");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ runtime_id: "rt-1" });
+    expect(result).toMatchObject({
+      id: "probe-1",
+      status: "completed",
+      runtime_name: "home",
+      tools: ["search"],
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-live");
+  });
+
+  it("falls back when a probe response is not a probe", async () => {
+    stubJSON({ nope: true, tools: [{ name: "search", inputSchema: { secret: "sk-live" } }] });
+
+    const result = await new ApiClient("https://api.example.test")
+      .getWorkspaceMcpProbe("ws-1", "srv-1", "probe-1");
+
+    expect(result.id).toBe("");
+    expect(result.tools).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("sk-live");
+  });
+
   it("assigns and un-assigns a server on the agent routes", async () => {
     const assigned = [{ ...server, enabled: true }];
     let fetchMock = stubJSON(assigned);

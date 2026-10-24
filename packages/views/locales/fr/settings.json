@@ -384,7 +384,16 @@
     "removed_toast": "Serveur MCP partagé retiré",
     "save_failed_toast": "Impossible d'enregistrer le serveur MCP partagé",
     "rename_failed_toast": "Impossible de renommer le serveur MCP partagé",
-    "remove_failed_toast": "Impossible de retirer le serveur MCP partagé"
+    "remove_failed_toast": "Impossible de retirer le serveur MCP partagé",
+    "test_elapsed": "{{count}} ms",
+    "test_connection": "Tester la connexion",
+    "test_no_runtime": "Aucun runtime en ligne dont vous êtes propriétaire",
+    "test_choose_runtime": "Choisir votre runtime",
+    "test_ok": "Réussi sur {{runtime}} · {{detail}}",
+    "test_fail": "Échec sur {{runtime}} : {{detail}}",
+    "test_tool_count_one": "{{count}} outil",
+    "test_tool_count_other": "{{count}} outils",
+    "test_failed_toast": "Impossible de tester la connexion"
   },
   "page": {
     "title": "Paramètres",

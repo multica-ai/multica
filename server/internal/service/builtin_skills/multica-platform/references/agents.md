@@ -293,12 +293,13 @@ Provider support is not uniform: Qwen Code accepts a managed `mcp_config` throug
 #### Workspace MCP servers
 
 A workspace keeps a LIBRARY of MCP servers (workspace Settings → MCP, or
-`multica workspace mcp list|add|update|remove`). Adding one there gives it to
+`multica workspace mcp list|add|update|remove|probe`). Adding one there gives it to
 NO agent — same shape as a workspace skill. It reaches an agent only when
 someone assigns it:
 
 ```bash
 multica workspace mcp list --output table        # find the server id
+multica workspace mcp probe <server-id>          # handshake on a daemon you own
 multica agent mcp add <agent-id> <server-id>     # give it to one agent
 multica agent mcp disable <agent-id> <server-id> # stop sending it, keep the assignment
 multica agent mcp remove <agent-id> <server-id>  # take it away
@@ -320,6 +321,9 @@ because nothing is inherited in the first place.
 
 The stored entry is **write-only** — reads return the server's name and
 transport, never urls, commands, headers, or env, for any role.
+`workspace mcp probe` is owner/admin only, runs on an online daemon the
+caller owns, does not change assignment, and does not store result history.
+It supports stdio and Streamable HTTP; legacy SSE returns `unsupported_transport`.
 
 ## Skill binding
 

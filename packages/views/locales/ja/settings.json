@@ -382,7 +382,15 @@
     "removed_toast": "共有 MCP サーバーを削除しました",
     "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
     "rename_failed_toast": "共有 MCP サーバーの名前を変更できませんでした",
-    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした",
+    "test_elapsed": "{{count}} ms",
+    "test_connection": "接続をテスト",
+    "test_no_runtime": "自分が所有するオンラインのランタイムがありません",
+    "test_choose_runtime": "自分のランタイムを選択",
+    "test_ok": "{{runtime}} で成功 · {{detail}}",
+    "test_fail": "{{runtime}} で失敗: {{detail}}",
+    "test_tool_count_other": "ツール {{count}} 個",
+    "test_failed_toast": "接続をテストできませんでした"
   },
   "page": {
     "title": "設定",

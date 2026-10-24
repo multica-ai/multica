@@ -263,7 +263,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `runs <id>` | 実行履歴を表示 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | |
 | `workspace` | `list/get/create/update/switch` | ワークスペースを管理。`switch` は現在のプロファイルのデフォルトワークスペースを設定 | |
-| | `mcp list/add/update/remove` | ワークスペースの MCP サーバーライブラリを管理 | 書き込みは owner/admin のみ。ここに追加したサーバーはどのエージェントにも割り当てられません — `multica agent mcp add` で割り当てます。`list` は名前と transport のみを表示し、保存されたエントリは書き込み専用でどのロールにも返りません。`--server-config-file` / `--server-config-stdin` はトークンをシェル履歴から守ります |
+| | `mcp list/add/update/remove/probe` | ワークスペースの MCP サーバーライブラリを管理 | 書き込みは owner/admin のみ。ここに追加したサーバーはどのエージェントにも割り当てられません — `multica agent mcp add` で割り当てます。`list` は名前と transport のみを表示し、保存されたエントリは書き込み専用でどのロールにも返りません。`probe <server-id>` は呼び出し元が所有するオンラインのランタイムでハンドシェイクし（複数あるときは `--runtime-id`）、秘匿済みの結果を履歴に保存せずに表示します。stdio と Streamable HTTP をサポートし、旧式の SSE は `unsupported_transport` を返します。`--server-config-file` / `--server-config-stdin` はトークンをシェル履歴から守ります |
 | | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |
 | `repo` | `list/add/remove/checkout` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト | `--url`（繰り返し可）；`checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | スキルを管理 | |

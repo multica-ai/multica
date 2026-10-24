@@ -92,6 +92,7 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  WorkspaceMcpProbeRequest,
   WorkspaceMcpServer,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
@@ -3629,6 +3630,37 @@ export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
   workspace_id: "",
   name: "",
   transport: "unknown",
+  created_at: "",
+  updated_at: "",
+};
+
+/**
+ * Same write-only rule as the library row: unknown keys are stripped, and
+ * `id` is required so a payload that is not a probe falls back empty instead
+ * of looking like a finished test.
+ */
+export const WorkspaceMcpProbeRequestSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  server_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  runtime_name: z.string().default(""),
+  status: z.string().default(""),
+  error_code: z.string().optional(),
+  error: z.string().optional(),
+  elapsed_ms: z.number().optional(),
+  tools: z.array(z.string()).optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const EMPTY_WORKSPACE_MCP_PROBE: WorkspaceMcpProbeRequest = {
+  id: "",
+  workspace_id: "",
+  server_id: "",
+  runtime_id: "",
+  runtime_name: "",
+  status: "",
   created_at: "",
   updated_at: "",
 };
