@@ -48,6 +48,7 @@
     "forward_history": "Forward history"
   },
   "sidebar": {
+    "unavailable_pin": "Unavailable item",
     "unpin_tooltip": "Unpin",
     "workspaces_label": "Workspaces",
     "create_workspace": "Create workspace",

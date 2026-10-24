@@ -9,6 +9,12 @@ export const pinKeys = {
 export function pinListOptions(wsId: string, userId: string) {
   return queryOptions({
     queryKey: pinKeys.list(wsId, userId),
-    queryFn: () => api.listPins(),
+    queryFn: async () => {
+      const pins = await api.listPins(wsId);
+      if (pins.some((pin) => pin.workspace_id !== wsId)) {
+        throw new Error("Pin response does not match the requested workspace");
+      }
+      return pins;
+    },
   });
 }

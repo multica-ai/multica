@@ -35,7 +35,7 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, invitationApi
         id: "pin-1",
         workspace_id: "ws-1",
         user_id: "user-1",
-        item_type: "issue" as const,
+        item_type: "issue" as "issue" | "project",
         item_id: "issue-1",
         position: 0,
         created_at: "2026-05-06T00:00:00Z",
@@ -178,7 +178,7 @@ vi.mock("@multica/core/inbox/queries", () => ({
   unreadWorkspaceIds: (entries: { workspace_id: string; count: number }[]) =>
     new Set(entries.filter((s) => s.count > 0).map((s) => s.workspace_id)),
 }));
-vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
+vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: (_wsId: string, id: string) => ({ queryKey: ["issue", id] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
   openCreateIssueWithPreference: vi.fn(),
@@ -187,7 +187,7 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: 
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
-vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
+vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: (_wsId: string, id: string) => ({ queryKey: ["project", id] }) }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
   workspaceKeys: { myInvitations: () => ["invitations"] },
@@ -201,7 +201,10 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   },
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
-    if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "issue" || queryKey[0] === "project") {
+      if (queryKey[1] === "live-item") return { isPending: false, isError: false, data: { title: "Live pin", status: "todo" } };
+      return detail.current;
+    }
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
@@ -219,10 +222,55 @@ describe("PinRow", () => {
     workspaces.current = [];
   });
 
-  it("unpins missing details", async () => {
+  it.each(["issue", "project"] as const)("retains a %s pin across a stale 404 and recovery", async (itemType) => {
+    const originalPins = pins.current;
+    pins.current = [{ ...originalPins[0]!, item_type: itemType }];
+    try {
+      detail.current = { isPending: false, isError: true, data: null, error: new ApiError("missing", 404, "Not Found") };
+      const { rerender } = render(<AppSidebar />);
+      expect(deletePin).not.toHaveBeenCalled();
+      detail.current = {
+        isPending: false, isError: false, error: null,
+        data: { identifier: "MUL-123", title: "Recovered pin", name: "Recovered pin", status: "todo" },
+      };
+      rerender(<AppSidebar />);
+      expect(await screen.findByText("Recovered pin")).toBeInTheDocument();
+      expect(deletePin).not.toHaveBeenCalled();
+    } finally {
+      pins.current = originalPins;
+    }
+  });
+
+  it.each(["issue", "project"] as const)("lets users remove unavailable %s pins from the preview", (itemType) => {
+    const originalPins = pins.current;
+    pins.current = Array.from({ length: 6 }, (_, index) => ({
+      ...originalPins[0]!, id: `pin-${index}`, item_id: index === 5 ? "live-item" : `item-${index}`, item_type: itemType,
+    }));
     detail.current = { isPending: false, isError: true, data: null, error: new ApiError("missing", 404, "Not Found") };
-    render(<AppSidebar />);
-    await waitFor(() => expect(deletePin).toHaveBeenCalledTimes(1));
+    try {
+      renderWithI18n(<AppSidebar />);
+      expect(screen.getAllByText("Unavailable item")).toHaveLength(5);
+      expect(deletePin).not.toHaveBeenCalled();
+      fireEvent.click(screen.getAllByRole("button", { name: "Unpin" })[0]!);
+      expect(deletePin).toHaveBeenCalledWith({ itemType, itemId: "item-0" });
+      fireEvent.click(screen.getByRole("button", { name: "Show 1 more…" }));
+      expect(screen.getByText("Live pin")).toBeInTheDocument();
+    } finally {
+      pins.current = originalPins;
+    }
+  });
+
+  it("does not render pins belonging to another workspace", () => {
+    const originalPins = pins.current;
+    pins.current = [{ ...originalPins[0]!, workspace_id: "ws-2" }];
+    detail.current = { isPending: false, isError: false, data: { identifier: "OTHER-1", title: "Other workspace pin", status: "todo" }, error: null };
+    try {
+      render(<AppSidebar />);
+      expect(screen.queryByText("Other workspace pin")).not.toBeInTheDocument();
+      expect(deletePin).not.toHaveBeenCalled();
+    } finally {
+      pins.current = originalPins;
+    }
   });
 
   it("ignores non-404 errors", async () => {

@@ -48,6 +48,7 @@
     "forward_history": "前进历史"
   },
   "sidebar": {
+    "unavailable_pin": "内容暂不可用",
     "unpin_tooltip": "取消固定",
     "workspaces_label": "工作区",
     "create_workspace": "创建工作区",
