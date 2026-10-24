@@ -164,6 +164,28 @@ describe.each(SURFACES)("sanitize contract — $name", ({ render: renderSurface 
     expect(container.querySelector("mark")?.textContent).toBe("hi");
   });
 
+  // Alert callouts are built after the sanitizer, from constants. Raw HTML must
+  // not reach that markup: no alert class, no data-alert tag, no <svg> icon.
+  it("keeps alert-callout markup out of raw HTML", () => {
+    const container = renderSurface(
+      [
+        '<div class="markdown-alert x"><svg><path d="M0 0h1"/></svg>raw</div>',
+        "",
+        '<blockquote data-alert="caution"><p>quoted</p></blockquote>',
+      ].join("\n"),
+    );
+
+    const rawDiv = Array.from(container.querySelectorAll("div")).find(
+      (div) => div.textContent === "raw",
+    );
+    expect(rawDiv).toBeDefined();
+    expect(rawDiv?.hasAttribute("class")).toBe(false);
+    expect(container.querySelector(".x, .markdown-alert")).toBeNull();
+    expect(container.querySelector("svg, path")).toBeNull();
+    expect(container.querySelector("[data-alert]")).toBeNull();
+    expect(container.querySelector("blockquote")?.textContent).toBe("quoted");
+  });
+
   it("allows the slash:// protocol", () => {
     const container = renderSurface("[/deploy](slash://skill/abc-123)");
 
