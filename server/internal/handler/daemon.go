@@ -5301,15 +5301,15 @@ type TaskUsagePayload struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	// CostUSDTicks is the provider's own price for this usage in 1e-10 USD.
+	// CostUSDTicks is upstream runtime accounting for this usage in 1e-10 USD.
 	// Absent or 0 from every daemon that doesn't have one (older builds, and
-	// every provider except Grok today) — stored as NULL so the reader knows
-	// to fall back to rate-table estimation rather than reading a real $0.
+	// older providers) — stored as NULL so the reader knows to fall back to
+	// rate-table estimation rather than reading a real $0.
 	CostUSDTicks int64 `json:"cost_usd_ticks"`
 }
 
-// authoritativeCostTicks converts a reported cost into the nullable column.
-// Only a positive figure is authoritative: 0 is what a daemon that knows
+// authoritativeCostTicks converts runtime-accounted cost into the nullable column.
+// Only a positive figure is usable: 0 is what a daemon that knows
 // nothing about cost sends, and storing it would claim a genuine $0 spend and
 // suppress the estimate. Negative is nonsense from a malformed report.
 func authoritativeCostTicks(ticks int64) pgtype.Int8 {

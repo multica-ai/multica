@@ -793,7 +793,7 @@
     "cost_cache_write": "Écriture du cache",
     "no_usage": "Aucune consommation enregistrée",
     "note_unmapped": "Aucun tarif connu pour {{models}} ; leurs tokens sont comptés, mais pas leur coût.",
-    "note_estimate": "Le coût est estimé d'après les tarifs publiés des modèles, sauf lorsque le fournisseur a communiqué son propre chiffre.",
+    "note_estimate": "Le coût provient du calcul du runtime s'il est disponible, sinon des tarifs publiés des modèles. Le calcul du runtime peut aussi être une estimation.",
     "stat_tokens": "Tokens",
     "stat_output": "Sortie",
     "tokens_cached": "{{percent}} depuis le cache",

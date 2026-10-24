@@ -478,16 +478,17 @@ func TestOpencodeErrorMessage(t *testing.T) {
 	}
 }
 
-func TestOpenCodeReportedCostOnly(t *testing.T) {
+func TestOpenCodeAccountedCost(t *testing.T) {
 	tests := []struct {
 		name string
 		last string
 		want int64
 	}{
-		{"reported cost", `"reportedCostUSD":0.0021`, 31_000_000},
-		{"estimate only", `"cost":0.0021`, 0},
+		{"two priced steps", `"cost":0.0021`, 31_000_000},
+		{"zero cost step", `"cost":0`, 10_000_000},
 		{"missing cost", `"tokens":{"input":10}`, 0},
-		{"negative cost", `"reportedCostUSD":-1`, 0},
+		{"negative cost", `"cost":-1`, 0},
+		{"overflow cost", `"cost":1000000000`, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -495,7 +496,7 @@ func TestOpenCodeReportedCostOnly(t *testing.T) {
 			ch := make(chan Message, 16)
 			lines := strings.Join([]string{
 				`{"type":"step_start","sessionID":"ses_cost","part":{"type":"step-start"}}`,
-				`{"type":"step_finish","sessionID":"ses_cost","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":100},"reportedCostUSD":0.001}}`,
+				`{"type":"step_finish","sessionID":"ses_cost","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":100},"cost":0.001}}`,
 				`{"type":"step_start","sessionID":"ses_cost","part":{"type":"step-start"}}`,
 				`{"type":"text","sessionID":"ses_cost","part":{"type":"text","text":"done"}}`,
 				`{"type":"step_finish","sessionID":"ses_cost","part":{"type":"step-finish","reason":"stop","tokens":{"input":10},` + tc.last + `}}`,
@@ -505,6 +506,53 @@ func TestOpenCodeReportedCostOnly(t *testing.T) {
 				t.Errorf("cost ticks: got %d, want %d", result.usage.CostUSDTicks, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenCodeDoesNotReportPartialCost(t *testing.T) {
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 16)
+	lines := strings.Join([]string{
+		`{"type":"step_start","sessionID":"ses_partial","part":{"type":"step-start"}}`,
+		`{"type":"step_finish","sessionID":"ses_partial","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":100},"cost":0.001}}`,
+		`{"type":"text","sessionID":"ses_partial","part":{"type":"text","text":"last answer"}}`,
+	}, "\n")
+	result := b.processEvents(strings.NewReader(lines), ch)
+	if result.usage.CostUSDTicks != 0 {
+		t.Errorf("partial cost ticks: got %d, want 0", result.usage.CostUSDTicks)
+	}
+}
+
+func TestOpenCodeExecuteReturnsAccountedCost(t *testing.T) {
+	t.Parallel()
+	fakePath := filepath.Join(t.TempDir(), "opencode")
+	script := strings.Replace(fakeOpencodeScript(),
+		`"part":{"type":"step-finish"}`,
+		`"part":{"type":"step-finish","reason":"stop","tokens":{"input":10},"cost":0.0021}`,
+		1)
+	writeTestExecutable(t, fakePath, []byte(script))
+	backend, err := New("opencode", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "cost test", ExecOptions{
+		Cwd: t.TempDir(), Model: "openrouter/test-model", Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	if got := result.Usage["openrouter/test-model"].CostUSDTicks; got != 21_000_000 {
+		t.Errorf("cost ticks = %d, want 21000000", got)
 	}
 }
 

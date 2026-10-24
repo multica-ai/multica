@@ -757,7 +757,7 @@
     "cost_cache_write": "缓存写",
     "no_usage": "没有用量记录",
     "note_unmapped": "{{models}} 没有维护价格，token 已计入，费用未计入。",
-    "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。",
+    "note_estimate": "费用优先使用运行时的计算值，否则按模型公开价格估算。运行时的计算值也可能是估算。",
     "stat_tokens": "Token",
     "stat_output": "输出",
     "tokens_cached": "{{percent}} 来自缓存",
