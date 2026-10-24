@@ -58,7 +58,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
+      - "10.0.0.40:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
@@ -224,7 +224,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "10.0.0.40:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
       REMOTE_API_URL: ${REMOTE_API_URL:-http://backend:8080}
