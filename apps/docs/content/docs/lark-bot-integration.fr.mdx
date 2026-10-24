@@ -56,6 +56,10 @@ Safari reste sur la page de connexion après une connexion réussie.
 
 La première ligne devient le titre et le reste la description. Envoyer `/issue` seul ne crée rien ; le bot répond alors en indiquant le format attendu.
 
+## Images et fichiers produits par l’agent
+
+Lorsque l’envoi de pièces jointes est activé, le texte et les images prises en charge d’une réponse apparaissent dans un même message Feishu. Les images mettent ce message à jour une fois importées ; les fichiers arrivent séparément dans la même conversation. Une réponse composée uniquement d’images peut utiliser un message image. La limite est de 10 Mo par image ; les formats non pris en charge, les images plus grandes ou explicitement refusées sont envoyés comme fichiers, dans la limite de 30 Mo. Le stockage objet et l’autorisation d’importer des ressources de l’application sont nécessaires. En cas d’échec ou de livraison incertaine, les pièces jointes restent disponibles dans la réponse Multica. Vérifiez la conversation avant de demander un nouvel envoi.
+
 ## Gérer les connexions
 
 Ouvrez **Paramètres → Messagerie → Lark** pour voir les bots connectés dans l'espace de travail. Les propriétaires et administrateurs de l'espace de travail peuvent les déconnecter ici ; le propriétaire d'un agent peut aussi gérer son propre bot depuis la page **Intégrations** de cet agent.

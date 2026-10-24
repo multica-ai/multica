@@ -56,6 +56,10 @@ Safari stays on the login page after a successful sign-in.
 
 The first line becomes the title and the rest becomes the description. Sending `/issue` alone creates nothing; the Bot replies with the required format instead.
 
+## Images and files from the agent
+
+When file delivery is enabled, text and supported images attached to an agent’s reply appear together in one Feishu message. Images update that message as they finish uploading; files arrive separately in the same conversation. An image-only reply can use an image message. Supported images are limited to 10 MB; unsupported, larger, or explicitly rejected images are sent as files, up to 30 MB. This requires object storage and the application’s resource upload permission. If delivery fails or cannot be confirmed, the attachments remain available on the reply in Multica. Check the conversation before requesting a resend.
+
 ## Manage connections
 
 Open **Settings → Messaging → Lark** to view the Bots connected in the workspace. Workspace owners and admins can disconnect them here; an agent's owner can also manage their own Bot from that agent's **Integrations** page.
