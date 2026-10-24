@@ -412,6 +412,20 @@ WHERE c.issue_id = @issue_id
   )
   -- Nor does a comment whose author chose not to start this agent for it.
   AND NOT COALESCE(@agent_id::uuid = ANY(c.suppressed_agent_ids), false)
+  -- Nor one already handed off to a LATER task for this agent, whatever that
+  -- task's status. This is what makes a replayed terminal callback safe: the
+  -- follow-up a first reconciliation created may since have run and gone
+  -- terminal, so a queued-only merge check cannot see it and would enqueue a
+  -- second one. Scoped to tasks created after this run so the completing task
+  -- and its predecessors never mask a comment they did not deliver.
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue later
+      WHERE later.issue_id = c.issue_id
+        AND later.agent_id = @agent_id
+        AND later.created_at > @since
+        AND (later.trigger_comment_id = c.id
+             OR c.id = ANY(later.coalesced_comment_ids))
+  )
   AND (
       (
           c.author_type IN ('member', 'agent')
