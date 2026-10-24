@@ -198,7 +198,7 @@ export function WorkflowHandoffConfirmDialog({
                     ? t(($) => $.workflows.confirm.stop_label, { name: prevName })
                     : t(($) => $.workflows.confirm.cancel_queued_label, { name: prevName })}
                 </label>
-                <p className="ml-6 mt-1 text-caption leading-5 text-muted-foreground">
+                <p className="ms-6 mt-1 text-caption leading-5 text-muted-foreground">
                   {started
                     ? t(($) => $.workflows.confirm.stop_hint)
                     : t(($) => $.workflows.confirm.queued_hint, { name: prevName })}

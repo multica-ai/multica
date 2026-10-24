@@ -323,7 +323,7 @@ export function StepWorkspace({
           {t(($) => $.step_workspace.url_label)}
         </FieldLabel>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground aria-invalid:border-destructive">
-          <span className="select-none pl-3 font-mono text-body text-muted-foreground">
+          <span className="select-none ps-3 font-mono text-body text-muted-foreground">
             {`${urlHost}/`}
           </span>
           <Input
@@ -496,7 +496,7 @@ function ExistingWorkspaceCard({
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
-        "flex w-full items-center gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-all",
+        "flex w-full items-center gap-4 rounded-lg border bg-card px-5 py-4 text-start transition-all",
         selected
           ? "border-foreground shadow-[inset_0_0_0_1px_var(--color-foreground)]"
           : "hover:border-foreground/20 hover:bg-accent/30",
@@ -548,7 +548,7 @@ function CreateNewWorkspaceCard({
         aria-checked={selected}
         aria-expanded={selected}
         onClick={onSelect}
-        className="flex w-full items-center gap-4 px-5 py-4 text-left"
+        className="flex w-full items-center gap-4 px-5 py-4 text-start"
       >
         <div
           aria-hidden

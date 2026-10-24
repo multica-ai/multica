@@ -172,7 +172,7 @@ export function AgentBatchToolbar({
                 },
               }}
             >
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
+        <div className="me-1 flex items-center gap-1.5 border-e ps-1 pe-2">
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
@@ -200,7 +200,7 @@ export function AgentBatchToolbar({
               )
             }
           >
-            <ArchiveRestore className="mr-1 size-3.5" />
+            <ArchiveRestore className="me-1 size-3.5" />
             {t(($) => $.row_actions.restore)}
           </Button>
         )}
@@ -223,7 +223,7 @@ export function AgentBatchToolbar({
             disabled={!allManageable || busy}
             onClick={() => setConfirmArchive(true)}
           >
-            <Archive className="mr-1 size-3.5" />
+            <Archive className="me-1 size-3.5" />
             {t(($) => $.row_actions.archive)}
           </Button>
         )}
@@ -272,7 +272,7 @@ export function AgentBatchToolbar({
               }}
             >
               {busy ? (
-                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                <Loader2 className="me-1 size-3.5 animate-spin" />
               ) : null}
               {t(($) => $.row_actions.archive_dialog_confirm)}
             </Button>
@@ -335,7 +335,7 @@ export function AgentBatchToolbar({
               }}
             >
               {busy ? (
-                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                <Loader2 className="me-1 size-3.5 animate-spin" />
               ) : null}
               {t(($) => $.row_actions.set_access_dialog_confirm)}
             </Button>

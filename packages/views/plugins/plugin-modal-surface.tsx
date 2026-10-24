@@ -127,7 +127,7 @@ export function PluginModalMenuItems({
         <Item key={pluginModalKey(target)} onClick={() => setOpen(target)}>
           <Plug className="h-3.5 w-3.5" />
           <span className="truncate">{target.surface.name}</span>
-          <span className="ml-auto truncate pl-3 text-caption text-muted-foreground">
+          <span className="ms-auto truncate ps-3 text-caption text-muted-foreground">
             {target.installation.name}
           </span>
         </Item>

@@ -79,12 +79,12 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
         <ChevronRight
           className={cn(
             "!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform",
-            open && "rotate-90",
+            open && "rotate-90 rtl:-rotate-90",
           )}
         />
       </button>
       {open ? (
-        <div className="space-y-0.5 pl-2">
+        <div className="space-y-0.5 ps-2">
           {visible.map((action) => (
             <QuickActionRow
               key={action.id}
@@ -96,7 +96,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
           {hiddenCount > 0 ? (
             <button
               type="button"
-              className="w-full rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+              className="w-full rounded-md px-2 py-1 text-start text-caption text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
               onClick={() => setShowAll(true)}
             >
               {t(($) => $.detail.quick_actions_more, { count: hiddenCount })}
@@ -200,7 +200,7 @@ function QuickActionRow({
         disabled={running}
         onClick={() => void handleRun()}
         className={cn(
-          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors",
+          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-body transition-colors",
           "hover:bg-accent/70 disabled:cursor-default disabled:opacity-60",
         )}
       >
@@ -226,7 +226,7 @@ function QuickActionRow({
   return (
     <Tooltip>
       <TooltipTrigger render={row} />
-      <TooltipContent side="left">
+      <TooltipContent side="inline-start">
         <div className="space-y-0.5">
           <div className="font-medium">{action.name}</div>
           {action.description ? <div>{action.description}</div> : null}

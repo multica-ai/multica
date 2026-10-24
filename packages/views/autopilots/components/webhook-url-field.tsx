@@ -86,7 +86,7 @@ export function WebhookUrlField({ url, size = "sm", actions }: WebhookUrlFieldPr
           <button
             type="button"
             onClick={() => setRevealedUrl(url)}
-            className={cn(valueClassName, "text-left cursor-pointer transition-colors hover:bg-muted/70")}
+            className={cn(valueClassName, "text-start cursor-pointer transition-colors hover:bg-muted/70")}
             aria-label={t(($) => $.trigger_row.hidden_url_aria)}
           >
             {maskAutopilotWebhookUrl(url)}

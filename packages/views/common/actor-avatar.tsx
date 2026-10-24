@@ -264,7 +264,7 @@ export function AgentStatusDot({ agentId, size }: { agentId: string; size?: Avat
       aria-label={t(($) => $.presence_status_aria, {
         status: t(($) => $.availability[detail.availability]),
       })}
-      className={`absolute bottom-0 right-0 rounded-full ring-1 ring-background ${dotClass} ${dotSize}`}
+      className={`absolute bottom-0 inset-e-0 rounded-full ring-1 ring-background ${dotClass} ${dotSize}`}
     />
   );
 }

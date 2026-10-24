@@ -351,13 +351,13 @@ function OffendersCard({
             <span>{t(($) => $.errors.header_agent)}</span>
             <span />
             <span
-              className={`text-right ${sortBy === "failed" ? "text-foreground" : ""}`}
+              className={`text-end ${sortBy === "failed" ? "text-foreground" : ""}`}
             >
               {t(($) => $.errors.header_failed)}
             </span>
-            <span className="text-right">{t(($) => $.errors.header_runs)}</span>
+            <span className="text-end">{t(($) => $.errors.header_runs)}</span>
             <span
-              className={`text-right ${sortBy === "rate" ? "text-foreground" : ""}`}
+              className={`text-end ${sortBy === "rate" ? "text-foreground" : ""}`}
             >
               {t(($) => $.errors.header_rate)}
             </span>
@@ -565,11 +565,11 @@ function AgentFailureItem({
         </div>
       </div>
       <span
-        className={`text-right text-caption tabular-nums ${sortBy === "failed" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+        className={`text-end text-caption tabular-nums ${sortBy === "failed" ? "font-medium text-foreground" : "text-muted-foreground"}`}
       >
         {row.failed}
       </span>
-      <span className="text-right text-caption tabular-nums text-muted-foreground">
+      <span className="text-end text-caption tabular-nums text-muted-foreground">
         {row.total}
       </span>
       <span
@@ -578,7 +578,7 @@ function AgentFailureItem({
             ? t(($) => $.errors.low_sample, { count: MIN_RATE_SAMPLE })
             : undefined
         }
-        className={`text-right text-caption tabular-nums ${
+        className={`text-end text-caption tabular-nums ${
           sortBy === "rate" && !weakSample
             ? "font-medium text-foreground"
             : "text-muted-foreground"

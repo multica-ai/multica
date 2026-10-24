@@ -168,7 +168,7 @@ describe("ThreadMinimap", () => {
       act(() => vi.advanceTimersByTime(30 + 150)); // rAF flush + intent delay
 
       const card = screen.getByRole("list").closest("div");
-      expect(card).toHaveClass("right-8");
+      expect(card).toHaveClass("inset-e-8");
       expect(card?.className).not.toMatch(/(?:^|\s)left-/);
     } finally {
       vi.useRealTimers();

@@ -165,7 +165,7 @@ export function InboxList({
         <button
           type="button"
           onClick={onOpenArchived}
-          className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-start text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           <span className="flex size-7 shrink-0 items-center justify-center">
             <Archive className="size-4" />

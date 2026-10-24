@@ -82,7 +82,7 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
           key={key}
           type="button"
           onClick={() => onChoose(key)}
-          className="group flex items-start gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+          className="group flex items-start gap-3 rounded-lg border bg-card p-4 text-start transition-colors hover:border-primary/40 hover:bg-accent/40"
         >
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground group-hover:text-foreground">
             <Icon className="h-4 w-4" />
@@ -270,7 +270,7 @@ function SourceCard({
       <button
         type="button"
         onClick={() => openExternal(browseUrl)}
-        className="mt-0.5 block max-w-full truncate text-left font-mono text-caption text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
+        className="mt-0.5 block max-w-full truncate text-start font-mono text-caption text-brand underline decoration-brand/40 underline-offset-2 hover:decoration-brand"
       >
         {exampleHost}
       </button>
@@ -722,7 +722,7 @@ export function CreateSkillDialog({
                         resetLocal();
                         setMethod("chooser");
                       }}
-                      className="-ml-1 mt-px rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
+                      className="-ms-1 mt-px rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
                       aria-label={t(($) => $.create.back_aria)}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />

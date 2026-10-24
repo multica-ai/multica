@@ -120,7 +120,7 @@ export function LandingFooter() {
                   l === locale
                     ? "text-white/70"
                     : "text-white/30 hover:text-white/50",
-                  i > 0 && "border-l border-white/16",
+                  i > 0 && "border-s border-white/16",
                 )}
               >
                 {localeLabels[l]}

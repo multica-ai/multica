@@ -492,7 +492,7 @@ function StatusRow({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`group/row relative flex min-h-12 items-center gap-2 bg-card py-2 pl-2 pr-4 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
+      className={`group/row relative flex min-h-12 items-center gap-2 bg-card py-2 ps-2 pe-4 motion-reduce:transition-none! ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
     >
       {canReorder ? (
         <TooltipHint label={t(($) => $.issue_statuses.actions.reorder, { name: label })}>

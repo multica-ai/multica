@@ -257,12 +257,12 @@ export function QuickActionsTab() {
       <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative w-full sm:max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute inset-s-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t(($) => $.quick_actions.search_placeholder)}
-              className="pl-9"
+              className="ps-9"
             />
           </div>
           <Button className="gap-2" onClick={() => setCreating(true)}>
@@ -520,7 +520,7 @@ function QuickActionDialog({
                   aria-pressed={form.visibility === option}
                   onClick={() => setForm((f) => ({ ...f, visibility: option }))}
                   className={cn(
-                    "flex items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+                    "flex items-start gap-2 rounded-lg border px-3 py-2 text-start transition-colors",
                     form.visibility === option
                       ? "border-primary bg-accent/50"
                       : "border-surface-border hover:bg-accent/30",

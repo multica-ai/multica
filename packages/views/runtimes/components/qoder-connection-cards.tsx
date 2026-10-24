@@ -135,7 +135,7 @@ export function QoderSection({
 }) {
   return (
     <section className={cn("rounded-lg border bg-card", className)}>
-      <div className="flex min-h-10 items-center gap-2 border-b py-1.5 pl-4 pr-2">
+      <div className="flex min-h-10 items-center gap-2 border-b py-1.5 ps-4 pe-2">
         <h2 className={cn("text-caption font-semibold", titleClassName)}>
           {title}
         </h2>
@@ -145,7 +145,7 @@ export function QoderSection({
           </span>
         )}
         {actions && (
-          <div className="ml-auto flex items-center gap-1.5">{actions}</div>
+          <div className="ms-auto flex items-center gap-1.5">{actions}</div>
         )}
       </div>
       {children}
@@ -582,7 +582,7 @@ export function QoderRepositoriesCard({
       ) : (
         <ul className="divide-y">
           {repositories.map((url) => (
-            <li key={url} className="flex items-center gap-3 py-2 pl-4 pr-2">
+            <li key={url} className="flex items-center gap-3 py-2 ps-4 pe-2">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
                 <FolderGit2 aria-hidden="true" className="size-3.5" />
               </span>

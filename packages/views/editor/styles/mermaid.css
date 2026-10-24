@@ -67,12 +67,12 @@
 }
 
 .rich-text-editor .mermaid-diagram::before {
-  left: 0;
+  inset-inline-start: 0;
   background: linear-gradient(to right, var(--muted), transparent);
 }
 
 .rich-text-editor .mermaid-diagram::after {
-  right: 0;
+  inset-inline-end: 0;
   background: linear-gradient(to left, var(--muted), transparent);
 }
 
@@ -147,7 +147,7 @@
 .rich-text-editor .mermaid-diagram-toolbar {
   position: absolute;
   top: 0.5rem;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   display: flex;
   gap: 1px;
   padding: 0.25rem;
@@ -192,7 +192,7 @@
    instead (below). */
 .rich-text-editor .mermaid-diagram-zoom {
   position: absolute;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   bottom: 0.5rem;
   display: flex;
   align-items: center;
@@ -255,10 +255,10 @@
 .rich-text-editor .mermaid-diagram-toolbar .mermaid-diagram-zoom {
   position: static;
   padding: 0 0.25rem 0 0;
-  margin-right: 0.25rem;
+  margin-inline-end: 0.25rem;
   background: none;
   border: 0;
-  border-right: 1px solid color-mix(in srgb, white 20%, transparent);
+  border-inline-end: 1px solid color-mix(in srgb, white 20%, transparent);
   border-radius: 0;
   box-shadow: none;
   opacity: 1;

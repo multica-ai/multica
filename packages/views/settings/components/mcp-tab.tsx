@@ -419,11 +419,11 @@ function ToolSourcesOverview() {
                 {source.title}
                 {source.href ? (
                   <ArrowRight
-                    className="ml-auto size-3.5 text-muted-foreground"
+                    className="ms-auto size-3.5 text-muted-foreground"
                     aria-hidden="true"
                   />
                 ) : (
-                  <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-micro font-medium text-muted-foreground">
+                  <span className="ms-auto rounded-full bg-muted px-2 py-0.5 text-micro font-medium text-muted-foreground">
                     {t(($) => $.mcp_sources.current)}
                   </span>
                 )}
@@ -435,7 +435,7 @@ function ToolSourcesOverview() {
           );
           const className = cn(
             "block px-4 py-3.5",
-            index > 0 && "border-t border-surface-border sm:border-l sm:border-t-0",
+            index > 0 && "border-t border-surface-border sm:border-s sm:border-t-0",
           );
           return source.href ? (
             <AppLink

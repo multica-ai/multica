@@ -123,11 +123,11 @@ export function SourceContextPreviewCard({
     >
       <button
         type="button"
-        className="flex w-full min-w-0 shrink-0 items-center gap-2 px-3 py-2 text-left text-caption hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="flex w-full min-w-0 shrink-0 items-center gap-2 px-3 py-2 text-start text-caption hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
         aria-expanded={expanded}
         onClick={toggleExpanded}
       >
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", expanded && "rotate-90")} aria-hidden />
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", expanded && "rotate-90 rtl:-rotate-90")} aria-hidden />
         <span className="min-w-0 truncate font-medium">
           {t(($) => $.source_context.preview_summary, {
             identifier: preview.source_issue.identifier,

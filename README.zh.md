@@ -35,7 +35,7 @@ Multica 是一个源码公开的团队工作区。你像给同事派活一样，
 
 [官网](https://multica.ai) · [文档](https://multica.ai/docs/zh) · [快速开始](https://multica.ai/docs/zh/cloud-quickstart) · [下载](https://multica.ai/download) · [愿景](VISION.zh.md) · [自托管](https://multica.ai/docs/zh/self-host-quickstart) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
 
-**[English](README.md) | 简体中文**
+**[English](README.md) | 简体中文 | [العربية](README.ar.md)**
 
 </div>
 

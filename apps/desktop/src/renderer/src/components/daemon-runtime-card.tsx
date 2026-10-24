@@ -155,7 +155,7 @@ export function DaemonRuntimeActions() {
         {isRunning && (
           <>
             <Button size="sm" variant="ghost" onClick={() => setPanelOpen(true)}>
-              <ScrollText className="size-3.5 mr-1.5" />
+              <ScrollText className="size-3.5 me-1.5" />
               {t(($) => $.desktop.daemon.view_logs)}
             </Button>
             {externallyManaged ? (
@@ -171,7 +171,7 @@ export function DaemonRuntimeActions() {
                   onClick={handleRestart}
                   disabled={actionLoading}
                 >
-                  <RotateCw className="size-3.5 mr-1.5" />
+                  <RotateCw className="size-3.5 me-1.5" />
                   {t(($) => $.desktop.daemon.restart)}
                 </Button>
                 <Button
@@ -180,7 +180,7 @@ export function DaemonRuntimeActions() {
                   onClick={handleStopClick}
                   disabled={actionLoading}
                 >
-                  <Square className="size-3.5 mr-1.5" />
+                  <Square className="size-3.5 me-1.5" />
                   {t(($) => $.desktop.daemon.stop)}
                 </Button>
               </>
@@ -191,9 +191,9 @@ export function DaemonRuntimeActions() {
         {isStopped && (
           <Button size="sm" onClick={handleStart} disabled={actionLoading}>
             {actionLoading ? (
-              <Activity className="size-3.5 mr-1.5 animate-pulse" />
+              <Activity className="size-3.5 me-1.5 animate-pulse" />
             ) : (
-              <Play className="size-3.5 mr-1.5" />
+              <Play className="size-3.5 me-1.5" />
             )}
             {t(($) => $.desktop.daemon.start)}
           </Button>
@@ -206,7 +206,7 @@ export function DaemonRuntimeActions() {
             onClick={handleRetryInstall}
             disabled={actionLoading}
           >
-            <RotateCw className="size-3.5 mr-1.5" />
+            <RotateCw className="size-3.5 me-1.5" />
             {t(($) => $.desktop.daemon.retry_setup)}
           </Button>
         )}
@@ -219,9 +219,9 @@ export function DaemonRuntimeActions() {
             </span>
             <Button size="sm" onClick={handleReauth} disabled={actionLoading}>
               {actionLoading ? (
-                <Activity className="size-3.5 mr-1.5 animate-pulse" />
+                <Activity className="size-3.5 me-1.5 animate-pulse" />
               ) : (
-                <LogIn className="size-3.5 mr-1.5" />
+                <LogIn className="size-3.5 me-1.5" />
               )}
               {t(($) => $.desktop.daemon.signin_again)}
             </Button>
@@ -230,7 +230,7 @@ export function DaemonRuntimeActions() {
 
         {(isTransitioning || isInstalling) && (
           <Button size="sm" variant="outline" disabled>
-            <Activity className="size-3.5 mr-1.5 animate-pulse" />
+            <Activity className="size-3.5 me-1.5 animate-pulse" />
             {daemonStateLabel(status.state, t)}
           </Button>
         )}

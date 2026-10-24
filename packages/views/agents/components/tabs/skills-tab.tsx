@@ -180,7 +180,7 @@ export function SkillsTab({
                   <button
                     type="button"
                     onClick={() => setSelected({ kind: "workspace", id: skill.id })}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span
                       className={cn(
@@ -299,7 +299,7 @@ export function SkillsTab({
                   <button
                     type="button"
                     onClick={() => setSelected({ kind: "runtime", skill })}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span
                       className={cn(
@@ -446,7 +446,7 @@ function SkillDetailDialog({
     <Dialog open={selected !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <div className="flex items-center gap-2 pr-8">
+          <div className="flex items-center gap-2 pe-8">
             <DialogTitle>{title}</DialogTitle>
             <Badge variant={runtimeSkill ? "secondary" : "outline"}>
               {runtimeSkill

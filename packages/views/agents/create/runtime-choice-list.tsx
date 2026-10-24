@@ -54,12 +54,12 @@ const COMING_SOON = [
   { provider: "claude", name: "Claude Managed Agents", vendor: "Anthropic" },
 ];
 
-const ROW = "flex w-full min-w-0 items-center gap-3 px-4 text-left";
+const ROW = "flex w-full min-w-0 items-center gap-3 px-4 text-start";
 const INTERACTIVE =
   "transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 const SELECTED = "bg-brand/5 shadow-[inset_2px_0_0_var(--brand)] hover:bg-brand/5";
 /** Lines child rows up under their machine's tile, past the chevron. */
-const CHILD_INDENT = "pl-11";
+const CHILD_INDENT = "ps-11";
 
 function Highlight({ text, query }: { text: string; query: string }) {
   const q = query.trim().toLowerCase();
@@ -100,7 +100,7 @@ function Tile({ children, dot }: { children: ReactNode; dot?: ReactNode }) {
   );
 }
 
-const TILE_DOT = "absolute -bottom-0.5 -right-0.5 ring-2 ring-card";
+const TILE_DOT = "absolute -bottom-0.5 -inset-e-0.5 ring-2 ring-card";
 
 function GroupHeader({
   icon: Icon,
@@ -198,17 +198,17 @@ function LogoStack({ options }: { options: HarnessOption[] }) {
   const shown = options.slice(0, LOGO_STACK_LIMIT);
   const extra = options.length - shown.length;
   return (
-    <span aria-hidden="true" className="hidden items-center pr-1 sm:flex">
+    <span aria-hidden="true" className="hidden items-center pe-1 sm:flex">
       {shown.map((option) => (
         <span
           key={option.runtime.id}
-          className="-mr-1 flex size-5 items-center justify-center rounded-sm bg-background ring-1 ring-border"
+          className="-me-1 flex size-5 items-center justify-center rounded-sm bg-background ring-1 ring-border"
         >
           <ProviderLogo provider={option.runtime.provider} className="size-3" />
         </span>
       ))}
       {extra > 0 ? (
-        <span className="ml-2 font-mono text-micro text-muted-foreground">+{extra}</span>
+        <span className="ms-2 font-mono text-micro text-muted-foreground">+{extra}</span>
       ) : null}
     </span>
   );
@@ -267,7 +267,7 @@ function MachineBlock({
           aria-hidden="true"
           className={cn(
             "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
+            open && "rotate-90 rtl:-rotate-90",
           )}
         />
         <Tile dot={<HealthDot health={machine.health} className={TILE_DOT} />}>
@@ -288,7 +288,7 @@ function MachineBlock({
             {subtitle}
           </span>
         ) : null}
-        <span className="ml-auto flex shrink-0 items-center gap-4 text-caption text-muted-foreground">
+        <span className="ms-auto flex shrink-0 items-center gap-4 text-caption text-muted-foreground">
           {!open && harnesses.length > 0 ? <LogoStack options={harnesses} /> : null}
           <span className="hidden tabular-nums sm:inline">
             {t(($) => $.creation_studio.runtime_step.harness_count, {
@@ -668,7 +668,7 @@ export function RuntimeChoiceList({
               <button
                 type="button"
                 onClick={onAddRemote}
-                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm font-medium text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="ms-auto inline-flex shrink-0 items-center gap-1 rounded-sm font-medium text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Plus aria-hidden="true" className="size-3.5" />
                 {t(($) => $.creation_studio.runtime_step.add_remote)}

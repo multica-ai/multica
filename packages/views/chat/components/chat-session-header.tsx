@@ -196,7 +196,7 @@ export function ChatSessionHeader({
             <button
               type="button"
               onClick={startRename}
-              className="block max-w-full truncate text-left text-body font-semibold text-foreground outline-none hover:text-foreground/80 focus-visible:text-foreground/80"
+              className="block max-w-full truncate text-start text-body font-semibold text-foreground outline-none hover:text-foreground/80 focus-visible:text-foreground/80"
             >
               {title}
             </button>

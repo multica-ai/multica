@@ -96,7 +96,7 @@ export function CloudWaitlistExpand({
           className="text-caption font-medium text-muted-foreground"
         >
           {t(($) => $.cloud_waitlist.reason_label)}
-          <span className="ml-2 font-normal text-muted-foreground">
+          <span className="ms-2 font-normal text-muted-foreground">
             {t(($) => $.cloud_waitlist.optional)}
           </span>
         </Label>

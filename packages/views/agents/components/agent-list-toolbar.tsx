@@ -201,7 +201,7 @@ export function AgentListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
+    <span className="ms-auto ps-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
@@ -213,13 +213,13 @@ export function AgentListToolbar({
           scope buttons. */}
       <div className="flex min-w-0 items-center gap-2">
         <div className="relative hidden shrink-0 md:block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             aria-label={t(($) => $.page.search_placeholder)}
             placeholder={t(($) => $.page.search_placeholder)}
-            className="h-8 w-56 pl-8 text-body"
+            className="h-8 w-56 ps-8 text-body"
           />
         </div>
 
@@ -265,7 +265,7 @@ export function AgentListToolbar({
               {AGENT_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
+                  <span className="ms-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>
@@ -320,7 +320,7 @@ export function AgentListToolbar({
                     role="button"
                     tabIndex={-1}
                     aria-label={t(($) => $.toolbar.clear_filters)}
-                    className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
+                    className="-me-1 ms-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();

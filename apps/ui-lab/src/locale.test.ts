@@ -45,6 +45,7 @@ describe("UI Lab language preference", () => {
       scene: "button",
       theme: "light",
       buttonScale: "default",
+      direction: "ltr",
       draft: emptyDraft(),
     };
     for (const locale of [

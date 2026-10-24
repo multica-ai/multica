@@ -735,7 +735,7 @@ function CommentRow({
           </span>
         )}
 
-        <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
+        <div data-comment-actions className="ms-auto flex shrink-0 items-center gap-0.5">
           {!edit.editing && <QuickEmojiPicker
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
             ariaLabel={t(($) => $.comment.add_reaction)}
@@ -821,12 +821,12 @@ function CommentRow({
           />
         </div>
       </StickyHeaderShell>
-      {replyTo && <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 pb-1.5">{replyTo}</div>}
+      {replyTo && <div className="ps-12 pe-4 max-md:ps-3 max-md:pe-3 pb-1.5">{replyTo}</div>}
 
       {edit.editing ? (
         <div
           {...edit.dropZoneProps}
-          className="relative pl-12 pr-4 max-md:pl-3 max-md:pr-3 pt-1"
+          className="relative ps-12 pe-4 max-md:ps-3 max-md:pe-3 pt-1"
           onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
         >
           <div className="text-body leading-relaxed">
@@ -905,30 +905,30 @@ function CommentRow({
         <>
           <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+            data-comment-content={entry.id} className="ps-12 pe-4 max-md:ps-3 max-md:pe-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
-          <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
+          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 ps-12 pe-4 max-md:ps-3 max-md:pe-3" />
+          <div className="ps-12 pe-4 max-md:ps-3 max-md:pe-3">
             <SteerReceipts issueId={issueId} entry={entry} />
           </div>
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
               issueId={issueId}
               taskId={entry.source_task_id}
-              className="mt-2 pl-12 pr-4 max-md:pl-3 max-md:pr-3"
+              className="mt-2 ps-12 pe-4 max-md:ps-3 max-md:pe-3"
             />
           )}
         </>
       )}
-      <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">{runMetadata}</div>
+      <div className="ps-12 pe-4 max-md:ps-3 max-md:pe-3">{runMetadata}</div>
       {!edit.editing && <ReactionBar
         reactions={reactions}
         showPicker={false}
         currentUserId={currentUserId}
         onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
         getActorName={getActorName}
-        className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3"
+        className="mt-1.5 ps-12 pe-4 max-md:ps-3 max-md:pe-3"
       />}
     </div>
   );
@@ -944,7 +944,7 @@ function ReplyToQuote({ entry, onJump }: { entry: TimelineEntry; onJump?: (comme
   });
   return (
     <button type="button" disabled={!onJump} onClick={() => onJump?.(entry.id)} title={label}
-      className="flex max-w-full min-w-0 items-center gap-1.5 rounded-xs text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:hover:text-muted-foreground">
+      className="flex max-w-full min-w-0 items-center gap-1.5 rounded-xs text-start text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:hover:text-muted-foreground">
       <CornerUpLeft aria-hidden className="size-3 shrink-0" />
       <span className="min-w-0 truncate">{label}</span>
     </button>
@@ -1186,7 +1186,7 @@ function CommentCardImpl({
           type="button"
           onClick={onCollapseResolved}
           data-thread-sticky-bar
-          className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-b border-border/50 bg-muted px-4 max-md:px-3 py-2.5 text-left text-body text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
+          className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-b border-border/50 bg-muted px-4 max-md:px-3 py-2.5 text-start text-body text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
           aria-label={t(($) => $.comment.resolve.collapse)}
         >
           <ListChevronsDownUp className="h-3.5 w-3.5" />
@@ -1259,7 +1259,7 @@ function CommentCardImpl({
                 </span>
               )}
 
-              <div data-comment-actions className="ml-auto flex shrink-0 items-center gap-0.5">
+              <div data-comment-actions className="ms-auto flex shrink-0 items-center gap-0.5">
                 <DeferredTooltip
                   content={toggleLabel}
                   trigger={
@@ -1273,7 +1273,7 @@ function CommentCardImpl({
                       onClick={handleToggle}
                       className={commentActionClassName}
                     >
-                      <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90")} />
+                      <ChevronRight aria-hidden className={cn("h-3.5 w-3.5 transition-transform motion-reduce:transition-none", open && "rotate-90 rtl:-rotate-90")} />
                     </Button>
                   }
                 />
@@ -1376,7 +1376,7 @@ function CommentCardImpl({
             {edit.editing ? (
               <div
                 {...edit.dropZoneProps}
-                className="relative pl-8 max-md:pl-0"
+                className="relative ps-8 max-md:ps-0"
                 onKeyDown={(e) => { if (e.key === "Escape") edit.cancelEdit(); }}
               >
                 <div className="text-body leading-relaxed">
@@ -1455,30 +1455,30 @@ function CommentCardImpl({
               <>
                 <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+            data-comment-content={entry.id} className="ps-8 max-md:ps-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
-                <div className="pl-8 max-md:pl-0">
+                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 ps-8 max-md:ps-0" />
+                <div className="ps-8 max-md:ps-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
                 </div>
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}
                     taskId={entry.source_task_id}
-                    className="mt-2 pl-8 max-md:pl-0"
+                    className="mt-2 ps-8 max-md:ps-0"
                   />
                 )}
               </>
             )}
-            <div className="pl-8 max-md:pl-0">{renderRuns(entry.id)}</div>
+            <div className="ps-8 max-md:ps-0">{renderRuns(entry.id)}</div>
             {!edit.editing && <ReactionBar
               reactions={reactions}
               showPicker={false}
               currentUserId={currentUserId}
               onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
               getActorName={getActorName}
-              className="mt-1.5 pl-8 max-md:pl-0"
+              className="mt-1.5 ps-8 max-md:ps-0"
             />}
           </div>
         )}
@@ -1510,7 +1510,7 @@ function CommentCardImpl({
                   type="button"
                   onClick={() => onResolvedExpandChange(entry.id, false)}
                   data-thread-sticky-bar
-                  className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-t border-border/50 bg-muted px-4 max-md:px-3 py-2.5 text-left text-body text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
+                  className="sticky top-0 z-20 flex w-full items-center gap-2.5 border-t border-border/50 bg-muted px-4 max-md:px-3 py-2.5 text-start text-body text-muted-foreground transition-colors cursor-pointer hover:bg-accent hover:text-accent-foreground"
                   aria-label={t(($) => $.comment.resolve.collapse)}
                 >
                   <ListChevronsDownUp className="h-3.5 w-3.5" />

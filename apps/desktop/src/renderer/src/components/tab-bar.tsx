@@ -37,6 +37,7 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
+import { isRtl } from "@multica/ui/lib/direction";
 import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
 import { useT } from "@multica/views/i18n";
@@ -116,8 +117,13 @@ function getTabScrollTarget(
 ): number {
   const scrollerRect = scroller.getBoundingClientRect();
   const tabRect = tab.getBoundingClientRect();
-  const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-  const hasHiddenLeft = scroller.scrollLeft > 1;
+  // scrollLeft runs over [0, max] in LTR and [-max, 0] in RTL; the physical
+  // deltas below are the same either way, only the bounds move.
+  const range = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+  const rtl = isRtl(scroller);
+  const minScrollLeft = rtl ? -range : 0;
+  const maxScrollLeft = rtl ? 0 : range;
+  const hasHiddenLeft = scroller.scrollLeft > minScrollLeft + 1;
   const hasHiddenRight = scroller.scrollLeft < maxScrollLeft - 1;
   const visibleLeft =
     scrollerRect.left + (hasHiddenLeft ? TAB_SCROLL_FADE_SIZE : 0);
@@ -125,7 +131,10 @@ function getTabScrollTarget(
     scrollerRect.right - (hasHiddenRight ? TAB_SCROLL_FADE_SIZE : 0);
 
   if (tabRect.left < visibleLeft) {
-    return Math.max(0, scroller.scrollLeft - (visibleLeft - tabRect.left));
+    return Math.max(
+      minScrollLeft,
+      scroller.scrollLeft - (visibleLeft - tabRect.left),
+    );
   }
   if (tabRect.right > visibleRight) {
     return Math.min(
@@ -309,7 +318,7 @@ function SortableTabItem({
     >
       <ResourceLeadingVisual visual={visual} />
       <span
-        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
+        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-start"
         style={{
           maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
           WebkitMaskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
@@ -393,7 +402,7 @@ function SortableTabItem({
           // arrives rather than lingering 2px off its rounded edge.
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-2 h-4 w-px bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
+            className="pointer-events-none absolute inset-s-0 top-2 h-4 w-px bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
           />
         )}
         <ContextMenu>
@@ -491,7 +500,7 @@ function NewTabEdgeFeedback({
       key={`${signal.tabId}-${signal.sequence}`}
       aria-hidden
       data-new-tab-edge-feedback="true"
-      className="pointer-events-none absolute top-1 bottom-1 right-0 z-20 w-8 rounded-r-lg bg-gradient-to-l from-primary/35 via-primary/10 to-transparent"
+      className="pointer-events-none absolute top-1 bottom-1 inset-e-0 z-20 w-8 rounded-e-lg bg-gradient-to-l rtl:bg-gradient-to-r from-primary/35 via-primary/10 to-transparent"
       initial={{
         opacity: shouldReduceMotion ? 0.45 : 0,
         x: shouldReduceMotion ? 0 : 4,

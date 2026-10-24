@@ -112,7 +112,7 @@ function DeleteWakeup({ wakeup, onDeleted }: { wakeup: IssueWakeup; onDeleted: (
   const [open, setOpen] = useState(false);
   return (
     <AlertDialog open={open} onOpenChange={(next) => !remove.isPending && setOpen(next)}>
-      <Button variant="ghost" size="sm" className="ml-auto text-destructive hover:text-destructive" onClick={() => setOpen(true)}>
+      <Button variant="ghost" size="sm" className="ms-auto text-destructive hover:text-destructive" onClick={() => setOpen(true)}>
         {t(($) => $.wakeups.detail.delete)}
       </Button>
       <AlertDialogContent>
@@ -182,11 +182,11 @@ function WakeupRow({
           render={
             <button
               type="button"
-              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-1.5 text-left text-caption hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-1.5 text-start text-caption hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
         >
-          <span className="flex min-h-8 min-w-0 items-start gap-2 py-1 pl-2 pr-1">
+          <span className="flex min-h-8 min-w-0 items-start gap-2 py-1 ps-2 pe-1">
             <Icon
               className="mt-px size-3.5 shrink-0 text-muted-foreground"
               aria-hidden="true"
@@ -195,7 +195,7 @@ function WakeupRow({
               {text.trigger(wakeup)}
             </span>
           </span>
-          <span className="col-span-2 min-w-0 break-words pl-7.5 pr-2">
+          <span className="col-span-2 min-w-0 break-words ps-7.5 pe-2">
             <span className="block text-muted-foreground">
               {text.summary(wakeup, closed)}
             </span>
@@ -431,7 +431,7 @@ export function WakeupsSection({
             {current.length + systemRules.length}
           </span>
           <ChevronRight
-            className={`size-3 text-muted-foreground ${open ? "rotate-90" : ""}`}
+            className={`size-3 text-muted-foreground ${open ? "rotate-90 rtl:-rotate-90" : ""}`}
             aria-hidden="true"
           />
         </button>
@@ -469,7 +469,7 @@ export function WakeupsSection({
                 className="flex min-h-9 w-full items-center gap-1 rounded-md px-2 py-1 text-caption text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
               >
                 <ChevronRight
-                  className={`size-3 ${historyOpen ? "rotate-90" : ""}`}
+                  className={`size-3 ${historyOpen ? "rotate-90 rtl:-rotate-90" : ""}`}
                   aria-hidden="true"
                 />
                 {t(($) => $.wakeups.ended, { count: history.length })}

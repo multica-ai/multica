@@ -274,12 +274,12 @@ export function DaemonPanel({
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
           {/* Search */}
           <div className="relative w-56">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t(($) => $.desktop.daemon.search)}
-              className="h-7 w-full rounded-md border bg-background pl-7 pr-2 text-caption placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-7 w-full rounded-md border bg-background ps-7 pe-2 text-caption placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
@@ -300,7 +300,7 @@ export function DaemonPanel({
           </div>
 
           {/* Right-aligned actions */}
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ms-auto flex items-center gap-1">
             <Button
               variant="ghost"
               size="sm"
@@ -308,7 +308,7 @@ export function DaemonPanel({
               onClick={handleCopy}
               disabled={filtered.length === 0}
             >
-              <CopyIcon className="size-3.5 mr-1.5" />
+              <CopyIcon className="size-3.5 me-1.5" />
               {t(($) => $.desktop.daemon.copy)}
             </Button>
             <Button
@@ -318,7 +318,7 @@ export function DaemonPanel({
               onClick={handleClear}
               disabled={logs.length === 0}
             >
-              <Trash2 className="size-3.5 mr-1.5" />
+              <Trash2 className="size-3.5 me-1.5" />
               {t(($) => $.desktop.daemon.clear)}
             </Button>
           </div>
@@ -375,7 +375,7 @@ export function DaemonPanel({
               total: logs.length,
             })}
             {logs.length === MAX_LOG_LINES && (
-              <span className="ml-1 text-muted-foreground">
+              <span className="ms-1 text-muted-foreground">
                 {t(($) => $.desktop.daemon.buffer_full)}
               </span>
             )}
@@ -537,7 +537,7 @@ function LogLineRow({
           )}
         </div>
         {expanded && hasFields && (
-          <div className="ml-1 mt-1 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-muted-foreground">
+          <div className="ms-1 mt-1 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-muted-foreground">
             {fieldEntries.map(([k, v]) => (
               <Fragment key={k}>
                 <span className="text-muted-foreground">{k}</span>
@@ -585,7 +585,7 @@ function GroupRows({
         <button
           type="button"
           onClick={onToggle}
-          className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          className="my-0.5 ms-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 bg-muted/30 px-2 py-0.5 text-micro italic text-muted-foreground hover:bg-muted/60 hover:text-foreground"
         >
           <span>···</span>
           <span>
@@ -621,7 +621,7 @@ function GroupRows({
       <button
         type="button"
         onClick={onToggle}
-        className="my-0.5 ml-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
+        className="my-0.5 ms-2 inline-flex w-fit items-center gap-2 rounded-xs border border-dashed border-muted-foreground/25 px-2 py-0.5 text-micro italic text-muted-foreground hover:text-foreground"
       >
         <span>···</span>
         <span>

@@ -75,7 +75,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
     });
 
   return (
-    <div className="flex flex-col gap-3 text-left">
+    <div className="flex flex-col gap-3 text-start">
       {/* Header */}
       <div className="flex items-start gap-3">
         <ActorAvatarBase

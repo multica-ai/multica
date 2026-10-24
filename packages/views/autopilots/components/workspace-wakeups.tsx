@@ -170,7 +170,7 @@ function SelectCell({ checked, visible, disabled, label, onChange }: {
   onChange: () => void;
 }) {
   return (
-    <TableCell className="w-8 pl-4 pr-0">
+    <TableCell className="w-8 ps-4 pe-0">
       <div className={cn(rowIntent, visible && "opacity-100")}>
         <Checkbox checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={label} />
       </div>
@@ -190,7 +190,7 @@ function SystemWakeupListRow({ row, busy }: { row: WorkspaceWakeup; busy: boolea
       : ti(($) => $.wakeups.system.title_all);
   return (
     <TableRow className="group/row">
-      <TableCell className="w-8 pl-4 pr-0" />
+      <TableCell className="w-8 ps-4 pe-0" />
       <IssueCell row={row} />
       <TriggerCell icon={ListChecks} label={title} />
       {row.agent_id ? (
@@ -203,7 +203,7 @@ function SystemWakeupListRow({ row, busy }: { row: WorkspaceWakeup; busy: boolea
       </TableCell>
       <TableCell className="text-muted-foreground">{t(($) => $.wakeups.until_issue_ends)}</TableCell>
       <RunsCell row={row} />
-      <TableCell className="w-px py-0 pr-4">
+      <TableCell className="w-px py-0 pe-4">
         <div className="flex min-h-11 items-center justify-end px-2">
           <Switch
             checked={row.enabled}
@@ -281,7 +281,7 @@ function WakeupListRow({
       </TableCell>
       <RunsCell row={row} />
       {/* The controls are 44px targets, so this cell sets the row height. */}
-      <TableCell className="w-px py-0 pr-4">
+      <TableCell className="w-px py-0 pe-4">
         <div
           className="flex items-center justify-end"
           title={
@@ -519,7 +519,7 @@ export function WorkspaceWakeups() {
         <Table className="min-w-[900px]">
           <TableHeader>
             <TableRow className="group/row">
-              <TableHead className="w-8 pl-4 pr-0">
+              <TableHead className="w-8 ps-4 pe-0">
                 <div className={cn(rowIntent, selecting && "opacity-100")}>
                   <Checkbox
                     disabled={!selectable.length || batch.isPending}
@@ -538,7 +538,7 @@ export function WorkspaceWakeups() {
               <TableHead>{t(($) => $.wakeups.source)}</TableHead>
               <TableHead>{t(($) => $.wakeups.ends)}</TableHead>
               <TableHead>{t(($) => $.wakeups.runs_7d)}</TableHead>
-              <TableHead className="w-px pr-6 text-right">{t(($) => $.wakeups.enabled)}</TableHead>
+              <TableHead className="w-px pe-6 text-end">{t(($) => $.wakeups.enabled)}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -613,15 +613,15 @@ export function WorkspaceWakeups() {
             );
           })}
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           <FilterSelect label={t(($) => $.wakeups.source)} value={filters.source} items={sources} disabled={batch.isPending} onChange={(source) => change({ source })} />
           <FilterSelect label={t(($) => $.wakeups.trigger)} value={filters.kind} items={kinds} disabled={batch.isPending} onChange={(kind) => change({ kind })} />
           <FilterSelect label={t(($) => $.wakeups.target_agent)} value={filters.agent_id} items={agents} disabled={batch.isPending} onChange={(agent_id) => change({ agent_id })} />
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               type="search"
-              className="h-8 w-52 pl-8"
+              className="h-8 w-52 ps-8"
               value={search}
               maxLength={256}
               disabled={batch.isPending}
@@ -657,7 +657,7 @@ export function WorkspaceWakeups() {
             </Button>
           </>
         )}
-        <span className="ml-auto tabular-nums">
+        <span className="ms-auto tabular-nums">
           {query.data && !query.isError
             ? t(($) => $.wakeups.results, {
                 count: query.data?.total ?? 0,

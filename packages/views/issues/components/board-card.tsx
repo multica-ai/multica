@@ -265,7 +265,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             </div>
           )}
           {showRightMeta && (
-            <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="ms-auto flex shrink-0 items-center gap-2">
               {showStartDate && (
                 canEdit ? (
                   <PickerWrapper className="flex shrink-0">

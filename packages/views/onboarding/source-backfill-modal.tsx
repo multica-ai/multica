@@ -328,7 +328,7 @@ function SourceBackfillDialogBody({
       <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t bg-muted/40 px-6 py-3">
         <span
           aria-live="polite"
-          className="mr-auto text-caption text-muted-foreground"
+          className="me-auto text-caption text-muted-foreground"
         >
           {t(($) => $.step_question.hint_pick)}
         </span>

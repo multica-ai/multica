@@ -117,7 +117,7 @@ export function DaemonSettingsTab() {
             onClick={handleReauth}
             disabled={reauthLoading}
           >
-            <LogIn className="size-3.5 mr-1.5" />
+            <LogIn className="size-3.5 me-1.5" />
             {t(($) => $.desktop.daemon.signin_again)}
           </Button>
         </div>

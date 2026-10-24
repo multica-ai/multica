@@ -160,24 +160,24 @@ function createMdxComponents(locale: SupportedLocale) {
     ),
     blockquote: (props: ComponentPropsWithoutRef<"blockquote">) => (
       <blockquote
-        className="my-6 border-l-2 border-[#0a0d12]/15 pl-5 text-[#0a0d12]/65 italic"
+        className="my-6 border-s-2 border-[#0a0d12]/15 ps-5 text-[#0a0d12]/65 italic"
         {...props}
       />
     ),
     ul: (props: ComponentPropsWithoutRef<"ul">) => (
       <ul
-        className="my-4 list-disc space-y-2 pl-6 marker:text-[#0a0d12]/30"
+        className="my-4 list-disc space-y-2 ps-6 marker:text-[#0a0d12]/30"
         {...props}
       />
     ),
     ol: (props: ComponentPropsWithoutRef<"ol">) => (
       <ol
-        className="my-4 list-decimal space-y-2 pl-6 marker:text-[#0a0d12]/40"
+        className="my-4 list-decimal space-y-2 ps-6 marker:text-[#0a0d12]/40"
         {...props}
       />
     ),
     li: (props: ComponentPropsWithoutRef<"li">) => (
-      <li className="pl-1" {...props} />
+      <li className="ps-1" {...props} />
     ),
     a: ({ href, ...props }: ComponentPropsWithoutRef<"a">) => {
       const className =
@@ -245,17 +245,17 @@ export default async function UseCasePage(props: { params: Promise<Params> }) {
                 <div className="mb-3 text-micro font-medium uppercase tracking-[0.14em] text-[#0a0d12]/40">
                   {text.tableOfContents}
                 </div>
-                <ul className="border-l border-[#0a0d12]/8">
+                <ul className="border-s border-[#0a0d12]/8">
                   {toc.map((item, i) => (
                     <li key={i}>
                       <a
                         href={item.url}
                         className={cn(
-                          "-ml-px block border-l border-transparent py-1.5 pl-4 text-label leading-snug transition-colors",
+                          "-ms-px block border-s border-transparent py-1.5 ps-4 text-label leading-snug transition-colors",
                           "hover:border-[#0a0d12]/40 hover:text-[#0a0d12]",
                           item.depth === 2
                             ? "font-medium text-[#0a0d12]/70"
-                            : "pl-7 text-caption text-[#0a0d12]/50",
+                            : "ps-7 text-caption text-[#0a0d12]/50",
                         )}
                       >
                         {item.title}

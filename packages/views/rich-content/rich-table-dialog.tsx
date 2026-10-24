@@ -99,7 +99,7 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
       id: ROW_NUMBER_COLUMN,
       header: "#",
       cell: ({ row }) => (
-        <span className="block text-right tabular-nums text-muted-foreground">
+        <span className="block text-end tabular-nums text-muted-foreground">
           {row.original.index + 1}
         </span>
       ),
@@ -129,7 +129,7 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
             />
           ),
           cell: ({ row }) => (
-            <div className={cn("rich-text-editor readonly whitespace-normal", numeric && "text-right tabular-nums")}>
+            <div className={cn("rich-text-editor readonly whitespace-normal", numeric && "text-end tabular-nums")}>
               {row.original.cells[index]}
             </div>
           ),
@@ -165,14 +165,14 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
         showCloseButton={false}
         className="flex h-[min(85dvh,56rem)] w-[min(72rem,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
       >
-        <div className="flex shrink-0 items-center gap-2 border-b border-border py-2 pr-2 pl-4">
-          <DialogTitle className="mr-auto text-body font-medium">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border py-2 pe-2 ps-4">
+          <DialogTitle className="me-auto text-body font-medium">
             {t(($) => $.table.expanded_title)}
           </DialogTitle>
           <div className="relative w-56 shrink-0">
             <Search
               aria-hidden
-              className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              className="pointer-events-none absolute top-1/2 inset-s-2 size-3.5 -translate-y-1/2 text-muted-foreground"
             />
             <Input
               type="text"
@@ -182,7 +182,7 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
               onChange={(event) => setFilter(event.target.value)}
               aria-label={t(($) => $.table.filter_placeholder)}
               placeholder={t(($) => $.table.filter_placeholder)}
-              className="h-7 pr-7 pl-7 text-caption"
+              className="h-7 pe-7 ps-7 text-caption"
             />
             {filter && (
               <IconButton
@@ -192,7 +192,7 @@ export function RichTableDialog({ model, open, onOpenChange, getMarkdown }: Rich
                 label={t(($) => $.table.clear_filter)}
                 tooltipSide="bottom"
                 onClick={() => setFilter("")}
-                className="absolute top-0.5 right-0.5 text-muted-foreground"
+                className="absolute top-0.5 inset-e-0.5 text-muted-foreground"
               >
                 <X className="size-3" />
               </IconButton>

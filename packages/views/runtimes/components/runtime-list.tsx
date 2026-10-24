@@ -408,7 +408,7 @@ export function CostCell({
 
   if (usage.length === 0) {
     return (
-      <div className="w-full text-right">
+      <div className="w-full text-end">
         <span className="text-caption text-faint-foreground">—</span>
       </div>
     );
@@ -825,7 +825,7 @@ export function RuntimeList({
               </ListGridCell>
               <ListGridCell className="hidden @2xl:flex">
                 {pending ? (
-                  <div className="w-full text-right">
+                  <div className="w-full text-end">
                     <span className="text-caption text-faint-foreground">—</span>
                   </div>
                 ) : (

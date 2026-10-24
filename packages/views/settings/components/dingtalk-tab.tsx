@@ -144,7 +144,7 @@ export function DingTalkConnectionLabel({
                     render={
                       <button
                         type="button"
-                        className="ml-1 min-w-0 cursor-help truncate rounded-sm text-left text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="ms-1 min-w-0 cursor-help truncate rounded-sm text-start text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {botIdentityText}
                       </button>
@@ -160,7 +160,7 @@ export function DingTalkConnectionLabel({
                 </Tooltip>
               </TooltipProvider>
             ) : (
-              <span className="ml-1 truncate text-foreground">
+              <span className="ms-1 truncate text-foreground">
                 {botIdentityText}
               </span>
             )}
@@ -176,7 +176,7 @@ export function DingTalkConnectionLabel({
                     render={
                       <button
                         type="button"
-                        className="-my-1 ml-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="-my-1 ms-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={permissionTooltip}
                       >
                         <Info className="size-3.5" aria-hidden="true" />
@@ -734,7 +734,7 @@ function InstallationRow({
             <h3 className="truncate text-title-sm font-medium text-pretty">
               {agentName}
               {!isActive && (
-                <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                <span className="ms-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                   {t(($) => $.dingtalk.revoked_badge)}
                 </span>
               )}
@@ -1047,14 +1047,14 @@ function DingTalkAgentBotStatusRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
       )}
       data-testid="dingtalk-agent-bot-status"
     >
       <DingTalkConnectionLabel showBotIdentity={false} />
       <ChevronRight
-        className="ml-auto h-3.5 w-3.5 shrink-0"
+        className="ms-auto h-3.5 w-3.5 shrink-0"
         aria-hidden="true"
       />
     </button>

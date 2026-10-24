@@ -61,7 +61,7 @@ export function ConversationStartersEditor({
 
   if (value.length === 0) {
     return (
-      <div className="flex min-h-10 items-center gap-2 rounded-lg border border-dashed py-1.5 pr-1.5 pl-3">
+      <div className="flex min-h-10 items-center gap-2 rounded-lg border border-dashed py-1.5 pe-1.5 ps-3">
         <MessageSquare
           className="size-3.5 shrink-0 text-muted-foreground"
           aria-hidden="true"
@@ -142,7 +142,7 @@ export function ConversationStartersEditor({
         ) : (
           <div
             key={index}
-            className="flex items-center gap-1 rounded-lg border bg-card py-1.5 pr-1.5 pl-3"
+            className="flex items-center gap-1 rounded-lg border bg-card py-1.5 pe-1.5 ps-3"
           >
             <div className="min-w-0 flex-1">
               <p className="truncate text-label font-medium">
@@ -180,7 +180,7 @@ export function ConversationStartersEditor({
             type="button"
             variant="ghost"
             size="xs"
-            className="-ml-1.5 text-muted-foreground"
+            className="-ms-1.5 text-muted-foreground"
             disabled={disabled || editingIncomplete}
             onClick={add}
           >

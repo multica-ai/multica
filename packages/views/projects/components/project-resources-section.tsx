@@ -384,18 +384,18 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       >
         {t(($) => $.resources.section_header)}
         <ChevronRight
-          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
+          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90 rtl:-rotate-90" : ""}`}
         />
       </button>
       {open && (
-        <div className="pl-2 space-y-1.5">
+        <div className="ps-2 space-y-1.5">
           {resources.length === 0 && (
             <p className="text-caption text-muted-foreground">
               {t(($) => $.resources.empty)}
             </p>
           )}
           {resources.length > 0 && (
-            <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+            <div className="max-h-64 space-y-1.5 overflow-y-auto pe-1">
               {resources.map((resource) => (
                 <ResourceRow
                   key={resource.id}
@@ -456,14 +456,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               {workspace?.repos && workspace.repos.length > 0 && (
                 <>
                   <div className="relative">
-                    <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Search className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="text"
                       value={repoSearch}
                       onChange={(e) => setRepoSearch(e.target.value)}
                       aria-label={t(($) => $.resources.repos_search_placeholder)}
                       placeholder={t(($) => $.resources.repos_search_placeholder)}
-                      className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                      className="h-8 w-full rounded-md border bg-transparent ps-7 pe-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
                     />
                   </div>
                   <div className="max-h-48 space-y-1 overflow-y-auto">
@@ -488,7 +488,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                             await handleAttach(repo.url);
                             setAddOpen(false);
                           }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption text-start hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
                         >
                           <FolderGit className="size-3.5" />
                           <span className="min-w-0 flex-1">
@@ -718,7 +718,7 @@ function ResourceRow({
         <Tooltip>
           <TooltipTrigger
             render={
-              <div className="flex items-center gap-1 pl-[1.375rem] text-micro text-muted-foreground">
+              <div className="flex items-center gap-1 ps-[1.375rem] text-micro text-muted-foreground">
                 <GitBranch className="size-3 shrink-0" />
                 <span className="truncate">
                   {ref.ref || t(($) => $.resources.ref_default_label)}

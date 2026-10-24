@@ -386,7 +386,7 @@ export function ChatThreadList({
             <span className={cn("min-w-0 flex-1 truncate text-body", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
               {titleText}
             </span>
-            <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
+            <span className="ms-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
           </div>
 
           {/* Line 2: preview + unread badge, or an inline confirm prompt */}
@@ -462,7 +462,7 @@ export function ChatThreadList({
             changes the row height (which was making the list jump). Keyboard
             focus reveals them too, so they are reachable without a mouse. */}
         {!isConfirmingAction && (
-          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
+          <div className="absolute inset-y-0 inset-e-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l rtl:bg-gradient-to-r from-accent from-40% to-transparent ps-10 pe-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
             {rowActions.map((action) => (
               <RowAction
                 key={action.key}
@@ -486,11 +486,11 @@ export function ChatThreadList({
         <button
           type="button"
           onClick={() => setView("history")}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-start text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           <ChevronLeft className="size-4 shrink-0" />
           <span className="truncate">{t(($) => $.list.archived_title)}</span>
-          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+          <span className="ms-auto shrink-0 tabular-nums text-muted-foreground">
             {archivedSessions.length}
           </span>
         </button>
@@ -504,7 +504,7 @@ export function ChatThreadList({
     <button
       type="button"
       onClick={() => setView("archived")}
-      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-start text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="flex size-9 shrink-0 items-center justify-center">
         <Archive className="size-4" />

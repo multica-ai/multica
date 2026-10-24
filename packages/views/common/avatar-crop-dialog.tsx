@@ -149,7 +149,7 @@ export function AvatarCropDialog({
                   onClick={() => setRotation((r) => (r + 90) % 360)}
                   disabled={busy}
                   aria-label={t(($) => $.avatar_crop.rotate)}
-                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
+                  className="absolute inset-e-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
                 >
                   <RotateCw className="h-4 w-4" />
                 </button>

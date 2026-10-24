@@ -653,7 +653,7 @@ export function InboxPage() {
     <button
       type="button"
       onClick={() => setView("inbox")}
-      className="flex w-full shrink-0 items-center gap-1.5 border-b px-3 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex w-full shrink-0 items-center gap-1.5 border-b px-3 py-2 text-start text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate">{t(($) => $.list.archived_title)}</span>
@@ -744,7 +744,7 @@ export function InboxPage() {
       variant="ghost"
       size="sm"
       onClick={() => setSelectedKey("")}
-      className="-ml-2 shrink-0 gap-1.5 text-muted-foreground"
+      className="-ms-2 shrink-0 gap-1.5 text-muted-foreground"
     >
       <ArrowLeft className="h-4 w-4" />
       {/* Back goes to the list the user came FROM, so the label has to
@@ -896,7 +896,7 @@ export function InboxPage() {
                   size="sm"
                   onClick={() => handleUnarchive(detailItem.id)}
                 >
-                  <ArchiveRestore className="mr-1.5 h-3.5 w-3.5" />
+                  <ArchiveRestore className="me-1.5 h-3.5 w-3.5" />
                   {t(($) => $.detail.unarchive)}
                 </Button>
               ) : (
@@ -905,7 +905,7 @@ export function InboxPage() {
                   size="sm"
                   onClick={() => handleArchive(detailItem.id)}
                 >
-                  <Archive className="mr-1.5 h-3.5 w-3.5" />
+                  <Archive className="me-1.5 h-3.5 w-3.5" />
                   {t(($) => $.detail.archive)}
                 </Button>
               )
@@ -987,7 +987,7 @@ export function InboxPage() {
           maxSize={INBOX_LIST_MAX_SIZE}
           groupResizeBehavior="preserve-pixel-size"
         >
-          <div className="flex flex-col border-r h-full">
+          <div className="flex flex-col border-e h-full">
             <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
               <Skeleton className="h-5 w-16" />
             </div>
@@ -1024,7 +1024,7 @@ export function InboxPage() {
         maxSize={INBOX_LIST_MAX_SIZE}
         groupResizeBehavior="preserve-pixel-size"
       >
-      <div className="flex flex-col border-r h-full">
+      <div className="flex flex-col border-e h-full">
         {listPanel}
       </div>
       </ResizablePanel>

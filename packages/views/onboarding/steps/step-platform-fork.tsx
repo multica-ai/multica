@@ -192,7 +192,7 @@ function ForkPrimary({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       className={cn(
-        "group flex items-center justify-between gap-4 rounded-xl bg-foreground px-6 py-5 text-left text-background transition-transform",
+        "group flex items-center justify-between gap-4 rounded-xl bg-foreground px-6 py-5 text-start text-background transition-transform",
         "hover:-translate-y-0.5",
       )}
     >
@@ -439,7 +439,7 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         <span className="font-medium text-foreground">
           {t(($) => $.step_platform.live_listening)}
         </span>
-        <span className="ml-auto font-mono text-caption tabular-nums text-muted-foreground">
+        <span className="ms-auto font-mono text-caption tabular-nums text-muted-foreground">
           {formatElapsed(elapsed)}
         </span>
       </div>

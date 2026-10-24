@@ -173,7 +173,7 @@ function DeliveryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-start text-body hover:bg-accent/30 transition-colors"
       >
         <StatusIcon
           className={cn(
@@ -204,7 +204,7 @@ function DeliveryRow({
             })}
           </Badge>
         )}
-        <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
+        <span className="w-32 shrink-0 text-end text-caption text-muted-foreground tabular-nums">
           {formatDate(delivery.received_at || delivery.created_at, locale)}
         </span>
       </button>
@@ -560,7 +560,7 @@ function ReplayButton({
     >
       <RotateCw
         className={cn(
-          "h-3.5 w-3.5 mr-1",
+          "h-3.5 w-3.5 me-1",
           replay.isPending && "animate-spin",
         )}
       />

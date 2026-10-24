@@ -103,7 +103,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .language-toggle {
   display: flex;
@@ -125,7 +125,7 @@ body {
   flex-direction: column;
   padding: 27px 12px 18px;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   min-height: 0;
   overflow: auto;
 }
@@ -325,7 +325,7 @@ body {
   flex-direction: column;
   min-height: 0;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-inline-start: 1px solid var(--border);
 }
 .color-selection {
   height: 5px;
@@ -476,8 +476,8 @@ body {
     padding: 22px 20px;
   }
   .canvas-toolbar {
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-inline-start: 20px;
+    padding-inline-end: 20px;
   }
   .preview-canvas {
     padding: 0 20px 20px;
@@ -498,7 +498,7 @@ body {
     position: fixed;
     top: 64px;
     bottom: 0;
-    left: 0;
+    inset-inline-start: 0;
     width: 210px;
     z-index: 20;
     box-shadow: var(--floating-shadow);
@@ -548,7 +548,7 @@ body {
   }
   .lab-inspector {
     border-top: 1px solid var(--border);
-    border-left: 0;
+    border-inline-start: 0;
   }
   .workspace-heading p {
     max-width: 220px;
@@ -586,7 +586,7 @@ body {
   letter-spacing: -0.8px;
 }
 .button-intro h1 > span {
-  margin-left: 8px;
+  margin-inline-start: 8px;
   color: var(--muted-foreground);
   font-size: var(--text-title);
   font-weight: 400;
@@ -715,7 +715,7 @@ body {
   width: 100%;
   min-width: 590px;
   border-collapse: collapse;
-  text-align: left;
+  text-align: start;
 }
 .button-matrix th,
 .button-matrix td {
@@ -831,7 +831,7 @@ body {
   padding: 10px;
   gap: 9px;
   justify-content: flex-start;
-  text-align: left;
+  text-align: start;
 }
 .color-role-swatch {
   display: block;
@@ -883,7 +883,7 @@ body {
   height: auto;
   padding: 8px;
   justify-content: flex-start;
-  text-align: left;
+  text-align: start;
   gap: 9px;
 }
 .color-role-option[aria-pressed="true"] {
@@ -941,14 +941,14 @@ body {
 .color-hex-field > span {
   font-size: var(--text-micro);
   color: var(--muted-foreground);
-  padding-left: 10px;
+  padding-inline-start: 10px;
 }
 .color-hex-field input {
   border: none;
   box-shadow: none;
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  padding-left: 10px;
+  padding-inline-start: 10px;
 }
 .color-field-error {
   color: var(--destructive);
@@ -1032,7 +1032,7 @@ body {
 .color-advanced summary > span {
   font-size: var(--text-micro);
   color: var(--muted-foreground);
-  margin-left: auto;
+  margin-inline-start: auto;
   font-family: var(--font-mono);
 }
 .color-advanced[open] summary > svg {
@@ -1130,7 +1130,7 @@ body {
 .property-object > span {
   color: var(--muted-foreground);
   font-size: var(--text-micro);
-  padding-left: 24px;
+  padding-inline-start: 24px;
 }
 .property-section {
   padding: 14px 16px 16px;
@@ -1150,7 +1150,7 @@ body {
 .property-scope {
   font-size: var(--text-micro);
   color: var(--muted-foreground);
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .property-segments {
   display: flex;
@@ -1285,7 +1285,7 @@ body {
 }
 .property-color-row {
   width: 100%;
-  text-align: left;
+  text-align: start;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1327,7 +1327,7 @@ body {
   font-family: var(--font-mono);
   font-size: var(--text-micro);
   flex: 1;
-  text-align: left;
+  text-align: start;
 }
 .property-more-colors {
   margin-top: 12px;
@@ -1372,7 +1372,7 @@ body {
   font-size: var(--text-caption);
 }
 .property-popup-heading > span {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--muted-foreground);
   font-size: var(--text-micro);
 }
@@ -1397,7 +1397,7 @@ body {
   font-size: var(--text-caption);
 }
 .property-export > button > span {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--muted-foreground);
 }
 .property-changes-intro {
@@ -1427,7 +1427,7 @@ body {
   font-weight: 500;
 }
 .property-change header > span {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--muted-foreground);
   font-size: var(--text-micro);
 }
@@ -1520,6 +1520,9 @@ body {
 }
 .catalog-nav-heading .is-collapsed {
   transform: rotate(-90deg);
+}
+:where([dir="rtl"]) .catalog-nav-heading .is-collapsed {
+  transform: rotate(90deg);
 }
 .catalog-nav-items {
   display: grid;
@@ -1707,7 +1710,7 @@ body {
   margin-bottom: 16px;
 }
 .catalog-changes-actions > a {
-  margin-right: auto;
+  margin-inline-end: auto;
 }
 .catalog-changes .saved-heading {
   margin-top: 20px;
@@ -1768,7 +1771,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--text-caption);
   color: var(--muted-foreground);
 }
@@ -1908,7 +1911,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  text-align: left;
+  text-align: start;
   padding: 7px 7px 12px;
   gap: 5px;
   border-radius: 10px;
@@ -1971,7 +1974,7 @@ body {
   width: fit-content;
   padding: 6px 8px;
   border-radius: var(--radius-md);
-  text-align: left;
+  text-align: start;
   font-size: var(--text-caption);
   cursor: pointer;
 }
@@ -2237,7 +2240,7 @@ body {
   justify-content: space-between;
   min-height: 46px;
   flex-shrink: 0;
-  padding-left: 10px;
+  padding-inline-start: 10px;
   background: var(--surface);
   color: var(--muted-foreground);
   font-size: var(--text-caption);

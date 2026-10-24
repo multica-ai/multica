@@ -149,7 +149,7 @@ export function PluginHookMenuItems({ issueId, Item, Separator }: PluginHookMenu
                 may both contribute "Summarize", and a menu showing the same
                 word twice is a menu nobody can choose from. */}
             <span className="truncate">{action.hook.name}</span>
-            <span className="ml-auto truncate pl-3 text-caption text-muted-foreground">
+            <span className="ms-auto truncate ps-3 text-caption text-muted-foreground">
               {action.installation.name}
             </span>
           </Item>

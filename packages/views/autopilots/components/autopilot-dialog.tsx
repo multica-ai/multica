@@ -562,7 +562,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
         >
           {/* Left: Runbook */}
-          <div className="flex-none lg:flex-1 min-h-0 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r">
+          <div className="flex-none lg:flex-1 min-h-0 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-e">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 ref={titleEditorRef}
@@ -746,7 +746,7 @@ function SectionLabel({
     <div className="text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase mb-2">
       {children}
       {required === true && (
-        <span aria-hidden className="ml-0.5 text-destructive">
+        <span aria-hidden className="ms-0.5 text-destructive">
           *
         </span>
       )}
@@ -793,7 +793,7 @@ function AgentSection({
             aria-invalid={invalid || undefined}
             aria-describedby={invalid ? errorId : undefined}
             className={cn(
-              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-left",
+              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-start",
               "hover:bg-accent/40 transition-colors cursor-pointer",
               invalid && "border-destructive",
             )}
@@ -854,7 +854,7 @@ function OutputModeSection({
               type="button"
               onClick={() => onChange(key)}
               className={cn(
-                "w-full flex items-start gap-2.5 rounded-md border px-3 py-2 text-left cursor-pointer transition-colors",
+                "w-full flex items-start gap-2.5 rounded-md border px-3 py-2 text-start cursor-pointer transition-colors",
                 selected
                   ? "border-primary bg-primary/5"
                   : "bg-background hover:bg-accent/40",
@@ -914,7 +914,7 @@ function ProjectSection({
           <button
             type="button"
             className={cn(
-              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-left",
+              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-start",
               "hover:bg-accent/40 transition-colors cursor-pointer",
             )}
           >
@@ -988,7 +988,7 @@ function ScheduleEmptyState({ onAdd }: { onAdd: () => void }) {
         {t(($) => $.dialog.schedule_empty)}
       </p>
       <Button size="sm" variant="outline" className="mt-2.5" onClick={onAdd}>
-        <Plus className="size-3.5 mr-1" />
+        <Plus className="size-3.5 me-1" />
         {t(($) => $.dialog.schedule_add)}
       </Button>
     </div>

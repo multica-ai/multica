@@ -642,7 +642,7 @@ export function AgentCreatePanel({
             <ShortcutKeycaps
               shortcut={sendShortcut}
               decorative
-              className="ml-1 max-sm:hidden"
+              className="ms-1 max-sm:hidden"
               keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
@@ -904,12 +904,12 @@ export function AgentCreatePanel({
               four controls need ~383px of the 398px a 430px phone has left
               after padding, which reads as jammed and wraps outright below
               ~410px (MUL-6236).
-            - From `sm` up it is the original single flex row: `mr-auto` on the
+            - From `sm` up it is the original single flex row: `me-auto` on the
               attach group reproduces what `justify-between` did when the
               children were two wrapper divs, and `justify-self-end` goes
               inert on flex items. */}
         <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+          <div className="flex min-h-7 items-center gap-2 sm:me-auto">
             {/* Deliberately NOT disabled while uploading: each file is its
                 own queue entry, so queueing a second one is safe and waiting
                 for the first to land just to attach the next is busywork. */}

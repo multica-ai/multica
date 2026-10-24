@@ -13,6 +13,7 @@ describe("motion preview boundary", () => {
       scene: "motion",
       buttonScale: "default",
       locale: "en",
+      direction: "ltr",
     };
     for (const playbackSpeed of [1, 0.5, 0.25])
       expect(isPreviewSettings({ ...message, playbackSpeed })).toBe(true);

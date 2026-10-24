@@ -386,7 +386,7 @@ export function CreateAgentDialog({
                     }`}
                   >
                     <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="text-left">
+                    <div className="text-start">
                       <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
                       <div className="text-caption text-muted-foreground">
                         {VISIBILITY_DESCRIPTION.workspace}
@@ -403,7 +403,7 @@ export function CreateAgentDialog({
                     }`}
                   >
                     <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="text-left">
+                    <div className="text-start">
                       <div className="font-medium">{VISIBILITY_LABEL.private}</div>
                       <div className="text-caption text-muted-foreground">
                         {VISIBILITY_DESCRIPTION.private}

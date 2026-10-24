@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { captureException } from "@multica/core/analytics";
-import type { SupportedLocale } from "@multica/core/i18n";
+import { getDir, type SupportedLocale } from "@multica/core/i18n";
 import { resolveEmergencyLocale } from "./emergency-locale";
 import { HTML_LANG } from "@/lib/html-lang";
 
@@ -32,6 +32,7 @@ export default function GlobalError({
   return (
     <html
       lang={locale ? HTML_LANG[locale] : undefined}
+      dir={locale ? getDir(locale) : undefined}
       suppressHydrationWarning
     >
       <body

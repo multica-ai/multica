@@ -91,7 +91,7 @@ function SortableRow({
       <span className="min-w-0 flex-1 truncate text-body">
         {item.label}
         {item.kind === "builtin" && (
-          <span className="ml-1.5 text-caption text-muted-foreground">
+          <span className="ms-1.5 text-caption text-muted-foreground">
             {t(($) => $.view_bar.builtin_tag)}
           </span>
         )}

@@ -4,8 +4,17 @@ import { CatalogNavigation } from "./catalog-navigation";
 import { CatalogContent } from "./catalog-content";
 import { LabI18nProvider } from "./lab-i18n";
 import { loadLocale, LOCALE_STORAGE_KEY, type LabLocale } from "./locale";
+import { DIRECTION_STORAGE_KEY, loadDirection } from "./direction";
+import type { TextDirection } from "@multica/core/i18n";
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowDownToLine,
   Check,
@@ -27,6 +36,10 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DirectionProvider,
+  useDirection,
+} from "@multica/ui/components/ui/direction";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -85,6 +98,7 @@ function PreviewFrame({
 }) {
   const { t, i18n } = useTranslation("uiLab");
   const locale: LabLocale = i18n.language === "zh-Hans" ? "zh" : "en";
+  const direction = useDirection();
   const ref = useRef<HTMLIFrameElement>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const send = useCallback(() => {
@@ -96,12 +110,22 @@ function PreviewFrame({
         scene,
         buttonScale,
         locale,
+        direction,
         playbackSpeed,
         selectedColor,
       } satisfies PreviewSettings,
       location.origin,
     );
-  }, [draft, theme, scene, buttonScale, locale, playbackSpeed, selectedColor]);
+  }, [
+    draft,
+    theme,
+    scene,
+    buttonScale,
+    locale,
+    direction,
+    playbackSpeed,
+    selectedColor,
+  ]);
   useEffect(() => {
     const onReady = (event: MessageEvent<{ type?: string }>) => {
       if (
@@ -131,7 +155,7 @@ function PreviewFrame({
             ? t(($) => $.lab.preview.source)
             : t(($) => $.lab.preview.preview)}
         </span>
-        <span className="ml-auto">
+        <span className="ms-auto">
           {theme === "light"
             ? t(($) => $.lab.theme.light)
             : t(($) => $.lab.theme.dark)}
@@ -194,9 +218,20 @@ const routeSnapshot = () => window.location.hash;
 
 export function App() {
   const [locale, setLocale] = useState(loadLocale);
+  const [direction, setDirection] = useState(loadDirection);
+  useLayoutEffect(() => {
+    document.documentElement.dir = direction;
+  }, [direction]);
   return (
     <LabI18nProvider locale={locale}>
-      <Workbench locale={locale} onLocaleChange={setLocale} />
+      <DirectionProvider direction={direction}>
+        <Workbench
+          locale={locale}
+          onLocaleChange={setLocale}
+          direction={direction}
+          onDirectionChange={setDirection}
+        />
+      </DirectionProvider>
     </LabI18nProvider>
   );
 }
@@ -204,9 +239,13 @@ export function App() {
 function Workbench({
   locale,
   onLocaleChange,
+  direction,
+  onDirectionChange,
 }: {
   locale: LabLocale;
   onLocaleChange: (locale: LabLocale) => void;
+  direction: TextDirection;
+  onDirectionChange: (direction: TextDirection) => void;
 }) {
   const { t } = useTranslation("uiLab");
   const [session] = useState(loadSession);
@@ -300,11 +339,12 @@ function Workbench({
     try {
       localStorage.setItem(STORAGE_KEY, encodeSession({ draft, designs }));
       localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      localStorage.setItem(DIRECTION_STORAGE_KEY, direction);
       setStorageError(false);
     } catch {
       setStorageError(true);
     }
-  }, [draft, designs, locale]);
+  }, [draft, designs, locale, direction]);
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 4000);
@@ -453,6 +493,19 @@ function Workbench({
               </Button>
             ))}
           </div>
+          {/* Direction is independent of the language, so it sits apart. */}
+          <span className="header-separator" />
+          <Button
+            size="sm"
+            variant={direction === "rtl" ? "secondary" : "ghost"}
+            aria-pressed={direction === "rtl"}
+            title={t(($) => $.lab.direction.rtl)}
+            onClick={() =>
+              onDirectionChange(direction === "rtl" ? "ltr" : "rtl")
+            }
+          >
+            RTL
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -568,7 +621,7 @@ function Workbench({
                   ? t(($) => $.lab.preview.changeCount, { count })
                   : t(($) => $.lab.preview.unchanged)}
               </span>
-              <div className="ml-auto flex gap-1">
+              <div className="ms-auto flex gap-1">
                 <Button
                   variant={original ? "secondary" : "ghost"}
                   size="sm"

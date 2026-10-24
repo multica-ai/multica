@@ -383,7 +383,7 @@ function ActorSubContent({
               <UserMinus className="size-3.5 text-muted-foreground" />
               {t(($) => $.filters.no_assignee)}
               {(noAssigneeCount ?? 0) > 0 && (
-                <span className="ml-auto text-caption text-muted-foreground">
+                <span className="ms-auto text-caption text-muted-foreground">
                   {noAssigneeCount}
                 </span>
               )}
@@ -411,7 +411,7 @@ function ActorSubContent({
                   <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                   <span className="truncate">{m.name}</span>
                   {count > 0 && (
-                    <span className="ml-auto text-caption text-muted-foreground">
+                    <span className="ms-auto text-caption text-muted-foreground">
                       {count}
                     </span>
                   )}
@@ -442,7 +442,7 @@ function ActorSubContent({
                   <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                   <span className="truncate">{a.name}</span>
                   {count > 0 && (
-                    <span className="ml-auto text-caption text-muted-foreground">
+                    <span className="ms-auto text-caption text-muted-foreground">
                       {count}
                     </span>
                   )}
@@ -473,7 +473,7 @@ function ActorSubContent({
                   <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
                   <span className="truncate">{s.name}</span>
                   {count > 0 && (
-                    <span className="ml-auto text-caption text-muted-foreground">
+                    <span className="ms-auto text-caption text-muted-foreground">
                       {count}
                     </span>
                   )}
@@ -551,7 +551,7 @@ function ProjectSubContent({
             <FolderMinus className="size-3.5 text-muted-foreground" />
             {t(($) => $.filters.no_project)}
             {noProjectCount > 0 && (
-              <span className="ml-auto text-caption text-muted-foreground">
+              <span className="ms-auto text-caption text-muted-foreground">
                 {noProjectCount}
               </span>
             )}
@@ -574,7 +574,7 @@ function ProjectSubContent({
               <ProjectIcon project={p} size="sm" />
               <span className="truncate">{p.title}</span>
               {count > 0 && (
-                <span className="ml-auto text-caption text-muted-foreground">
+                <span className="ms-auto text-caption text-muted-foreground">
                   {count}
                 </span>
               )}
@@ -683,7 +683,7 @@ function LabelSubContent({
               <HoverCheck checked={checked} />
               <LabelChip label={l} />
               {count > 0 && (
-                <span className="ml-auto text-caption text-muted-foreground">
+                <span className="ms-auto text-caption text-muted-foreground">
                   {count}
                 </span>
               )}
@@ -985,7 +985,7 @@ function PropertyFilterOptions({
           <HoverCheck checked={hasNoValue} />
           <span className="truncate">{noValueOption.name}</span>
           {noneCount > 0 && (
-            <span className="ml-auto text-caption text-muted-foreground">{noneCount}</span>
+            <span className="ms-auto text-caption text-muted-foreground">{noneCount}</span>
           )}
         </DropdownMenuCheckboxItem>
       </>
@@ -1018,7 +1018,7 @@ function PropertyFilterOptions({
             )}
             <span className="truncate">{option.name}</span>
             {count > 0 && (
-              <span className="ml-auto text-caption text-muted-foreground">
+              <span className="ms-auto text-caption text-muted-foreground">
                 {count}
               </span>
             )}
@@ -1117,7 +1117,7 @@ function DateSubContent({
               </Button>
             }
           />
-          <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
+          <PopoverContent align="start" side="inline-end" className="w-auto gap-0 p-0">
             <Calendar
               mode="range"
               selected={range}
@@ -1359,7 +1359,7 @@ export function IssuesHeader({
 
         <div className="flex shrink-0 items-center gap-1">
           {agentRunningFilter && (
-            <span className="mr-1 hidden text-caption text-muted-foreground md:inline">
+            <span className="me-1 hidden text-caption text-muted-foreground md:inline">
               {t(($) => $.agent_activity.filter_active_label)}
             </span>
           )}
@@ -1591,7 +1591,7 @@ export function IssueFilterMenu({
                       />
                       {option.label}
                       {count > 0 && (
-                        <span className="ml-auto text-caption text-muted-foreground">
+                        <span className="ms-auto text-caption text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}
                         </span>
                       )}
@@ -1634,7 +1634,7 @@ export function IssueFilterMenu({
                       <PriorityIcon priority={p} />
                       {t(($) => $.priority[p])}
                       {count > 0 && (
-                        <span className="ml-auto text-caption text-muted-foreground">
+                        <span className="ms-auto text-caption text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}
                         </span>
                       )}

@@ -32,6 +32,7 @@ vi.mock("@multica/core/platform", () => ({
 }));
 
 vi.mock("@multica/core/i18n", () => ({
+  getDir: () => "ltr",
   pickLocale: () => "en",
 }));
 

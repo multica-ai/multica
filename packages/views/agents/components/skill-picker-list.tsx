@@ -81,12 +81,12 @@ export function SkillPickerList({
       {searchable && skills.length > 0 && (
         <div className="border-b p-2">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t(($) => $.create_dialog.skills_section.search_placeholder)}
-              className="h-8 pl-7 text-caption"
+              className="h-8 ps-7 text-caption"
             />
           </div>
         </div>
@@ -111,7 +111,7 @@ export function SkillPickerList({
                 onClick={() => onToggle(skill)}
                 aria-pressed={isSelected}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
+                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-start transition-colors",
                   isSelected ? "bg-accent" : "hover:bg-accent/50",
                 )}
               >

@@ -115,7 +115,7 @@ export function TimezonePicker({
       trigger={
         <>
           <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="flex-1 truncate text-left">{selectedCity}</span>
+          <span className="flex-1 truncate text-start">{selectedCity}</span>
           {selectedOffset && (
             <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
               {selectedOffset}
@@ -151,7 +151,7 @@ export function TimezonePicker({
                   <Check className="size-3.5 text-foreground" />
                 )}
               </span>
-              <span className="flex-1 truncate text-left">{cityLabel(tz)}</span>
+              <span className="flex-1 truncate text-start">{cityLabel(tz)}</span>
               {off && (
                 <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
                   {off}

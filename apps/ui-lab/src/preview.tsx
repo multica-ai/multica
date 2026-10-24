@@ -1,8 +1,9 @@
 import { LabI18nProvider } from "./lab-i18n";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, Check, Inbox, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { DirectionProvider } from "@multica/ui/components/ui/direction";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -231,7 +232,7 @@ function ComponentsScene() {
           <div className="mt-5 flex items-center gap-3 text-muted-foreground">
             <Inbox className="size-5" />
             <span className="text-body">{t(($) => $.gallery.type.empty)}</span>
-            <Check className="ml-auto size-4 text-success" />
+            <Check className="ms-auto size-4 text-success" />
           </div>
         </Specimen>
       </div>
@@ -246,9 +247,13 @@ export function Preview() {
     scene: "components",
     buttonScale: "default",
     locale: "en",
+    direction: "ltr",
     playbackSpeed: 1,
     selectedColor: "--brand",
   });
+  useLayoutEffect(() => {
+    document.documentElement.dir = settings.direction;
+  }, [settings.direction]);
   useEffect(() => {
     const receive = (event: MessageEvent<unknown>) => {
       if (
@@ -276,35 +281,37 @@ export function Preview() {
   }, [settings.scene]);
   return (
     <LabI18nProvider locale={settings.locale}>
-      <div className="preview-root">
-        <style>{previewCss(settings.draft)}</style>
-        {settings.scene === "colors" ? (
-          <ColorsScene
-            draft={settings.draft}
-            theme={settings.theme}
-            selected={settings.selectedColor}
-          />
-        ) : settings.scene === "components" ? (
-          <ComponentsScene />
-        ) : settings.scene === "button" ? (
-          <ButtonScene scale={settings.buttonScale} draft={settings.draft} />
-        ) : settings.scene === "dialog" || settings.scene === "motion" ? (
-          <DialogScene
-            key={settings.scene}
-            motion={settings.scene === "motion"}
-            draft={settings.draft}
-            speed={settings.playbackSpeed}
-          />
-        ) : settings.scene === "list" ? (
-          <ProductPreview key="list" scene="list" locale={settings.locale} />
-        ) : (
-          <ProductPreview
-            key="detail"
-            scene="detail"
-            locale={settings.locale}
-          />
-        )}
-      </div>
+      <DirectionProvider direction={settings.direction}>
+        <div className="preview-root">
+          <style>{previewCss(settings.draft)}</style>
+          {settings.scene === "colors" ? (
+            <ColorsScene
+              draft={settings.draft}
+              theme={settings.theme}
+              selected={settings.selectedColor}
+            />
+          ) : settings.scene === "components" ? (
+            <ComponentsScene />
+          ) : settings.scene === "button" ? (
+            <ButtonScene scale={settings.buttonScale} draft={settings.draft} />
+          ) : settings.scene === "dialog" || settings.scene === "motion" ? (
+            <DialogScene
+              key={settings.scene}
+              motion={settings.scene === "motion"}
+              draft={settings.draft}
+              speed={settings.playbackSpeed}
+            />
+          ) : settings.scene === "list" ? (
+            <ProductPreview key="list" scene="list" locale={settings.locale} />
+          ) : (
+            <ProductPreview
+              key="detail"
+              scene="detail"
+              locale={settings.locale}
+            />
+          )}
+        </div>
+      </DirectionProvider>
     </LabI18nProvider>
   );
 }

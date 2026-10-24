@@ -174,7 +174,7 @@ const NAV_ITEM_CLASS_NAME =
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => s.hasDraft());
   if (!hasDraft) return null;
-  return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
+  return <span className="absolute top-0 inset-e-0 size-1.5 rounded-full bg-brand" />;
 }
 
 /**
@@ -627,7 +627,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             workspace's own unread stays on the Inbox nav count
                             (below), so it is deliberately excluded here. */}
                         {(myInvitations.length > 0 || otherWorkspaceUnread) && (
-                          <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
+                          <span className="absolute -top-0.5 -inset-e-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
                       <span className="flex-1 truncate font-medium">
@@ -761,7 +761,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 </span>
                 <span>{t(($) => $.sidebar.new_issue)}</span>
                 {createIssueShortcut ? (
-                  <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />
+                  <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ms-auto" />
                 ) : null}
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -790,14 +790,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <CappedNumberFlow
                             value={unreadCount}
                             animated={false}
-                            className="ml-auto text-caption"
+                            className="ms-auto text-caption"
                           />
                         )}
                         {item.key === "chat" && chatUnreadCount > 0 && (
                           <CappedNumberFlow
                             value={chatUnreadCount}
                             animated={false}
-                            className="ml-auto text-caption"
+                            className="ms-auto text-caption"
                           />
                         )}
                       </SidebarMenuButton>
@@ -816,8 +816,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                 >
                   <span>{t(($) => $.sidebar.pinned_label)}</span>
-                  <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
-                  <span className="ml-auto text-micro text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{visiblePinned.length}</span>
+                  <ChevronRight className="!size-3 ms-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90 rtl:group-data-[panel-open]/trigger:-rotate-90" />
+                  <span className="ms-auto text-micro text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{visiblePinned.length}</span>
                 </SidebarGroupLabel>
                 <CollapsibleContent>
                   <SidebarGroupContent>
@@ -841,7 +841,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <SidebarMenuButton
                         size="sm"
                         aria-expanded={pinsExpanded}
-                        className="mt-0.5 pl-7 text-muted-foreground"
+                        className="mt-0.5 ps-7 text-muted-foreground"
                         onClick={() => setExpandedPinsWorkspaceId(pinsExpanded ? null : wsId ?? null)}
                       >
                         <span>

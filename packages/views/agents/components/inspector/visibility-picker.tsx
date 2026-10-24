@@ -62,7 +62,7 @@ export function VisibilityPicker({
         onClick={() => select("workspace")}
       >
         <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <div className="text-left">
+        <div className="text-start">
           <div className="font-medium">{VISIBILITY_LABEL.workspace}</div>
           <div className="text-caption text-muted-foreground">
             {VISIBILITY_DESCRIPTION.workspace}
@@ -74,7 +74,7 @@ export function VisibilityPicker({
         onClick={() => select("private")}
       >
         <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <div className="text-left">
+        <div className="text-start">
           <div className="font-medium">{VISIBILITY_LABEL.private}</div>
           <div className="text-caption text-muted-foreground">
             {VISIBILITY_DESCRIPTION.private}

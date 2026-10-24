@@ -12,6 +12,7 @@ import {
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { cn } from "@multica/ui/lib/utils";
 import { UI_EASE_OUT, UI_MOTION_DURATION } from "@multica/ui/lib/motion";
+import { isRtl } from "@multica/ui/lib/direction";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -148,7 +149,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
       aria-label={t(($) => $.peek.panel_label)}
       data-issue-peek=""
       className={cn(
-        "absolute right-2 top-2 z-30 flex w-[min(var(--issue-peek-width),calc(100%-1rem))] flex-col overflow-hidden",
+        "absolute inset-e-2 top-2 z-30 flex w-[min(var(--issue-peek-width),calc(100%-1rem))] flex-col overflow-hidden",
         "rounded-xl bg-background shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
         // Stops above the chat launcher, which owns the dashboard's
         // bottom-right corner — the panel's composer would sit under it.
@@ -278,11 +279,19 @@ function IssuePeekFollow({
     card.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     const scroller = card.closest<HTMLElement>("[data-board-scroller]");
     // offsetLeft, not the panel's rect: on the first frame the rect is still
-    // shifted by the slide-in animation.
+    // shifted by the slide-in animation. The panel sits on the inline end, so
+    // in RTL it covers the card from the left and the board scrolls leftward.
     const panelLeft = host.getBoundingClientRect().left + panel.offsetLeft;
-    const covered = card.getBoundingClientRect().right - (panelLeft - 16);
+    const cardRect = card.getBoundingClientRect();
+    const rtl = isRtl(host);
+    const covered = rtl
+      ? panelLeft + panel.offsetWidth + 16 - cardRect.left
+      : cardRect.right - (panelLeft - 16);
     if (scroller && covered > 0) {
-      scroller.scrollBy?.({ left: covered, behavior: reduceMotion ? "auto" : "smooth" });
+      scroller.scrollBy?.({
+        left: rtl ? -covered : covered,
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
     }
   }, [issueId, position, panelRef, reduceMotion]);
 
@@ -334,12 +343,12 @@ function IssuePeekNav() {
           />
           <TooltipContent side="bottom">
             {label}
-            <ShortcutKeycaps shortcut={shortcut} decorative className="ml-1.5" />
+            <ShortcutKeycaps shortcut={shortcut} decorative className="ms-1.5" />
           </TooltipContent>
         </Tooltip>
       ))}
       {position && (
-        <span className="ml-1 text-caption tabular-nums text-muted-foreground">
+        <span className="ms-1 text-caption tabular-nums text-muted-foreground">
           {`${position.index} / ${position.total}`}
         </span>
       )}
@@ -384,7 +393,7 @@ function IssuePeekTrailingActions({ issueId }: { issueId: string }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">
           {t(($) => $.peek.close)}
-          <ShortcutKeycaps shortcut={CLOSE_KEY} decorative className="ml-1.5" />
+          <ShortcutKeycaps shortcut={CLOSE_KEY} decorative className="ms-1.5" />
         </TooltipContent>
       </Tooltip>
     </>

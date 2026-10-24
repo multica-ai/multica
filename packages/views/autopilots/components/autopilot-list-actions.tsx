@@ -106,7 +106,7 @@ export function DeleteAutopilotsDialog({
           >
             {deleting ? (
               <>
-                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                <Loader2 className="me-1 size-3.5 animate-spin" />
                 {t(($) => $.actions.delete_dialog.deleting)}
               </>
             ) : (
@@ -245,7 +245,7 @@ export function AutopilotBatchToolbar({
       {/* Anchored to the page root (relative), NOT the viewport — see the
           skills batch toolbar for the rationale. */}
       <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
+        <div className="me-1 flex items-center gap-1.5 border-e ps-1 pe-2">
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
@@ -267,7 +267,7 @@ export function AutopilotBatchToolbar({
             size="sm"
             onClick={() => setStatus(rows, "paused")}
           >
-            <Pause className="mr-1 size-3.5" />
+            <Pause className="me-1 size-3.5" />
             {t(($) => $.actions.pause)}
           </Button>
         )}
@@ -277,7 +277,7 @@ export function AutopilotBatchToolbar({
             size="sm"
             onClick={() => setStatus(rows, "active")}
           >
-            <Play className="mr-1 size-3.5" />
+            <Play className="me-1 size-3.5" />
             {t(($) => $.actions.resume)}
           </Button>
         )}
@@ -287,7 +287,7 @@ export function AutopilotBatchToolbar({
           className="text-destructive hover:text-destructive"
           onClick={() => setDeleteOpen(true)}
         >
-          <Trash2 className="mr-1 size-3.5" />
+          <Trash2 className="me-1 size-3.5" />
           {t(($) => $.actions.delete)}
         </Button>
       </div>

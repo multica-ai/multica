@@ -374,7 +374,7 @@ function IssueFieldsMatrix() {
       <table className="w-full text-body">
         <thead>
           <tr className="border-b border-surface-border bg-muted/20 text-caption font-medium text-muted-foreground">
-            <th scope="col" className="px-4 py-2 text-left font-medium">
+            <th scope="col" className="px-4 py-2 text-start font-medium">
               {t(($) => $.preferences.issue_fields.field)}
             </th>
             <th scope="col" className="w-32 px-4 py-2 text-center font-medium">
@@ -391,7 +391,7 @@ function IssueFieldsMatrix() {
             const quickSupported = (QUICK_CREATE_FIELDS as readonly string[]).includes(field);
             return (
               <tr key={field}>
-                <th scope="row" className="px-4 py-2.5 text-left font-normal">
+                <th scope="row" className="px-4 py-2.5 text-start font-normal">
                   {fieldLabel}
                 </th>
                 <td className="px-4 py-2.5 text-center">
@@ -502,7 +502,7 @@ function TimezoneRow() {
             <button
               type="button"
               aria-label={t(($) => $.preferences.timezone.title)}
-              className="flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-transparent pl-2.5 pr-2 text-left text-body outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50"
+              className="flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-transparent ps-2.5 pe-2 text-start text-body outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50"
             />
           }
         >

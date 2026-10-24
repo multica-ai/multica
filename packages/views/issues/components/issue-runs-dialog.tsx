@@ -232,7 +232,7 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
         {/* Cache reads are most of an agent's tokens; without the share the
             total reads as far more fresh work than it was. */}
         {priced && hit != null && (
-          <span className="ml-1.5 text-caption text-muted-foreground">
+          <span className="ms-1.5 text-caption text-muted-foreground">
             · {t(($) => $.runs_timeline.tokens_cached, { percent: percent(hit) })}
           </span>
         )}
@@ -246,7 +246,7 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
         <span className="text-title-sm font-medium">
           {formatDuration(timeline.agentMs / 1000, UNDER_A_SECOND)}
         </span>
-        <span className="ml-1.5 text-caption text-muted-foreground">
+        <span className="ms-1.5 text-caption text-muted-foreground">
           · {t(($) => $.runs_timeline.elapsed_note, {
             duration: formatDuration(timeline.elapsedMs / 1000, UNDER_A_SECOND),
           })}
@@ -255,7 +255,7 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
       <Stat label={t(($) => $.runs_timeline.stat_runs)}>
         <span className="text-title-sm font-medium">{timeline.runs.length}</span>
         {breakdown.length > 0 && (
-          <span className="ml-1.5 text-caption text-muted-foreground">
+          <span className="ms-1.5 text-caption text-muted-foreground">
             · {breakdown.join(" · ")}
           </span>
         )}
@@ -434,7 +434,7 @@ function RunActivityChart({
         <span className="text-caption text-muted-foreground">
           {t(($) => $.runs_timeline.unit_run)} · {stackLabel}
         </span>
-        <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
+        <div className="ms-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
           {series.map((s) => (
             <span key={s.key} className="flex items-center gap-1.5">
               <span aria-hidden className={cn("size-2 rounded-xs", s.swatch)} />
@@ -570,7 +570,7 @@ function RunActivityChart({
           {yTicks.map((v) => (
             <span
               key={v}
-              className="absolute left-1 -translate-y-1/2 text-muted-foreground"
+              className="absolute inset-s-1 -translate-y-1/2 text-muted-foreground"
               style={{ top: `${(1 - v / yMax) * 100}%` }}
             >
               {formatValue(v)}
@@ -733,8 +733,8 @@ const COL = {
   agent: "w-24 shrink-0",
   model: "w-24 shrink-0",
   status: "w-20 shrink-0",
-  tokens: "w-14 shrink-0 text-right",
-  cost: "w-14 shrink-0 text-right",
+  tokens: "w-14 shrink-0 text-end",
+  cost: "w-14 shrink-0 text-end",
   actions: "w-14 shrink-0",
   toggle: "w-6 shrink-0",
 } as const;
@@ -783,7 +783,7 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
               <span className="font-medium uppercase tracking-wider text-foreground">
                 {dayLabel(group.dayMs)}
               </span>
-              <span className="ml-auto tabular-nums">
+              <span className="ms-auto tabular-nums">
                 {[
                   t(($) => $.runs_timeline.day_runs, { count: group.runs.length }),
                   group.agentMs > 0 ? formatDuration(group.agentMs / 1000, UNDER_A_SECOND) : null,
@@ -942,7 +942,7 @@ function RunListRow({ run, issueId }: { run: TimelineRun; issueId: string }) {
                 onClick={() => setExpanded((v) => !v)}
                 className="flex size-6 items-center justify-center rounded-xs text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
               >
-                <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
+                <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", expanded && "rotate-90 rtl:-rotate-90")} />
               </button>
             }
           />
@@ -974,7 +974,7 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
         : undefined;
 
   return (
-    <div id={id} className="grid grid-cols-1 gap-x-8 gap-y-4 px-3 pt-2 pb-4 pl-[4.5rem] text-caption md:grid-cols-[minmax(0,1fr)_16rem]">
+    <div id={id} className="grid grid-cols-1 gap-x-8 gap-y-4 px-3 pt-2 pb-4 ps-[4.5rem] text-caption md:grid-cols-[minmax(0,1fr)_16rem]">
       {usage && breakdown ? (
         <div className="min-w-0">
           <div className="mb-2 text-micro font-medium uppercase tracking-wider text-muted-foreground">
@@ -1004,8 +1004,8 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
             ))}
             <span />
             <span className="font-medium">{t(($) => $.runs_timeline.detail_total)}</span>
-            <span className="text-right font-medium">{formatTokens(usage.tokens)}</span>
-            <span className="w-14 text-right font-semibold">{formatUsd(usage.cost)}</span>
+            <span className="text-end font-medium">{formatTokens(usage.tokens)}</span>
+            <span className="w-14 text-end font-semibold">{formatUsd(usage.cost)}</span>
             <span />
           </div>
         </div>
@@ -1066,9 +1066,9 @@ function RunDetailPart({
     <>
       <span aria-hidden className={cn("size-2 rounded-xs", swatch)} />
       <span className="truncate text-muted-foreground">{label}</span>
-      <span className="text-right">{formatTokens(tokens)}</span>
-      <span className="w-14 text-right font-medium">{formatUsd(cost)}</span>
-      <span className="w-10 text-right text-faint-foreground">{share}</span>
+      <span className="text-end">{formatTokens(tokens)}</span>
+      <span className="w-14 text-end font-medium">{formatUsd(cost)}</span>
+      <span className="w-10 text-end text-faint-foreground">{share}</span>
     </>
   );
 }

@@ -162,7 +162,7 @@ describe("IssueStatusesTab", () => {
     expect(add).toHaveClass("size-[var(--button-height-sm)]", "shrink-0", "[@media(pointer:coarse)]:size-11");
     for (const name of ["in_review", "QA"]) {
       const action = screen.getByLabelText(en.issue_statuses.actions.open.replace("{{name}}", name));
-      expect(action.closest(".group\\/row")).toHaveClass("pr-4");
+      expect(action.closest(".group\\/row")).toHaveClass("pe-4");
       expect(action).toHaveClass("size-[var(--button-height-sm)]", "shrink-0", "[@media(pointer:coarse)]:size-11");
     }
   });

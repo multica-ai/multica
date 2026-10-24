@@ -81,7 +81,7 @@ export function WebhookPayloadPreview({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-caption hover:bg-accent/30 transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2 text-start text-caption hover:bg-accent/30 transition-colors"
       >
         <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="font-medium">
@@ -91,7 +91,7 @@ export function WebhookPayloadPreview({
           {event ?? t(($) => $.webhook_payload.unknown_event)}
         </code>
         {receivedAt && (
-          <span className="ml-auto shrink-0 text-muted-foreground">
+          <span className="ms-auto shrink-0 text-muted-foreground">
             {receivedAt}
           </span>
         )}

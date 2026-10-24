@@ -73,9 +73,13 @@ function pointer(target: EventTarget, type: string, clientX: number) {
   });
 }
 
-function setup() {
+function setup({ dir }: { dir?: "rtl" } = {}) {
   const onSizingChange = vi.fn();
-  render(<ResizableTable onSizingChange={onSizingChange} />);
+  render(
+    <div dir={dir}>
+      <ResizableTable onSizingChange={onSizingChange} />
+    </div>,
+  );
   const handle = screen.getByRole("separator", {
     name: "Resize Status column",
   });
@@ -115,6 +119,17 @@ describe("DataTable column resize", () => {
     pointer(handle, "pointerdown", 100);
     pointer(window, "pointermove", 110);
     pointer(window, "pointerup", 110);
+
+    expect(onSizingChange).toHaveBeenCalledWith({ status: 210, owner: 120 });
+  });
+
+  it("widens the column when dragged toward the inline end in RTL", () => {
+    // The handle sits on the inline-end edge, which is the left edge in RTL.
+    const { onSizingChange, handle } = setup({ dir: "rtl" });
+
+    pointer(handle, "pointerdown", 100);
+    pointer(window, "pointermove", 90);
+    pointer(window, "pointerup", 90);
 
     expect(onSizingChange).toHaveBeenCalledWith({ status: 210, owner: 120 });
   });
@@ -278,6 +293,36 @@ describe("DataTable column resize", () => {
         '[data-slot="data-table-pinned-shadow"]',
       )!.style.left,
     ).toBe("200px");
+  });
+
+  it("places the shadow from the right edge once scrolled in RTL", () => {
+    render(
+      <div dir="rtl">
+        <ResizableTable onSizingChange={vi.fn()} pinFirstColumn />
+      </div>,
+    );
+
+    const scroller = document.querySelector<HTMLElement>(".overflow-auto")!;
+    const edge = document.querySelector<HTMLElement>(
+      "thead th[data-pinned-edge]",
+    )!;
+    // The frozen block hugs the right edge of the scroller in RTL.
+    edge.getBoundingClientRect = () =>
+      ({ left: 660, right: 900, width: 240 }) as DOMRect;
+    scroller.getBoundingClientRect = () =>
+      ({ left: 40, right: 900, width: 860 }) as DOMRect;
+
+    // RTL scrollLeft is negative once the content scrolls toward the end.
+    scroller.scrollLeft = -120;
+    act(() => {
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+
+    const shadow = document.querySelector<HTMLElement>(
+      '[data-slot="data-table-pinned-shadow"]',
+    )!;
+    expect(shadow.style.right).toBe("240px");
+    expect(shadow.style.left).toBe("");
   });
 
   it("covers the viewport with a cursor layer only while dragging", () => {

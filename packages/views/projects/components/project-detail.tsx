@@ -268,7 +268,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               render={
                 <button
                   type="button"
-                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                  className="text-display-sm cursor-pointer rounded-lg p-1 -ms-1 hover:bg-accent/60 transition-colors"
                   aria-label={t(($) => $.detail.icon_tooltip)}
                 >
                   {project.icon || "📁"}
@@ -305,9 +305,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
           {t(($) => $.detail.section_properties)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90 rtl:-rotate-90" : ""}`} />
         </button>
-        {propertiesOpen && <div className="space-y-0.5 pl-2">
+        {propertiesOpen && <div className="space-y-0.5 ps-2">
           <PropRow label={t(($) => $.table.status)}>
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -323,7 +323,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
                     <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
                     <span>{statusLabels[s]}</span>
-                    {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
+                    {s === project.status && <Check className="ms-auto h-3.5 w-3.5" />}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -344,7 +344,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
                     <PriorityIcon priority={p} />
                     <span>{priorityLabels[p]}</span>
-                    {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
+                    {p === project.priority && <Check className="ms-auto h-3.5 w-3.5" />}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -445,12 +445,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               onClick={() => setProgressOpen(!progressOpen)}
             >
               {t(($) => $.detail.section_progress)}
-              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90" : ""}`} />
+              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90 rtl:-rotate-90" : ""}`} />
             </button>
-            {progressOpen && <div className="pl-2 flex items-center gap-3">
+            {progressOpen && <div className="ps-2 flex items-center gap-3">
               <div className="relative h-2 flex-1 rounded-full bg-muted overflow-hidden">
                 <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all"
+                  className="absolute inset-y-0 inset-s-0 rounded-full bg-emerald-500 transition-all"
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -470,9 +470,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           onClick={() => setDescriptionOpen(!descriptionOpen)}
         >
           {t(($) => $.detail.section_description)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${descriptionOpen ? "rotate-90" : ""}`} />
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${descriptionOpen ? "rotate-90 rtl:-rotate-90" : ""}`} />
         </button>
-        {descriptionOpen && <div className="pl-2">
+        {descriptionOpen && <div className="ps-2">
           <ContentEditor
             ref={descEditorRef}
             key={projectId}
@@ -598,7 +598,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         )}
         {isMobile && (
           <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-            <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+            <SheetContent side="end" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
               {sidebarContent}
             </SheetContent>
           </Sheet>

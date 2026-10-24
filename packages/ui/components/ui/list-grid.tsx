@@ -125,7 +125,7 @@ function ListGridHeaderCell({
           sorted
             ? "font-medium text-foreground"
             : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-          align === "right" ? "-mr-1.5 flex-row-reverse pl-1 pr-1.5" : "-ml-1.5 pl-1.5 pr-1",
+          align === "right" ? "-me-1.5 flex-row-reverse ps-1 pe-1.5" : "-ms-1.5 ps-1.5 pe-1",
         )}
       >
         {children}

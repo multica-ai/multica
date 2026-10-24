@@ -106,7 +106,7 @@ export function DeliverablesOverview({
         <DialogContent
           showCloseButton={false}
           style={NO_DRAG}
-          className="dark top-0 left-0 flex h-dvh max-h-none w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-black/95 p-0 text-foreground shadow-none ring-0 backdrop-blur-xl sm:max-w-none"
+          className="dark top-0 inset-s-0 flex h-dvh max-h-none w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-black/95 p-0 text-foreground shadow-none ring-0 backdrop-blur-xl sm:max-w-none"
         >
           <OverviewBody
             identifier={identifier}
@@ -206,7 +206,7 @@ function OverviewBody({
       {/* Three columns keep the filters centered on the window; on a phone
           they drop to a row of their own under the title. */}
       <header
-        className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 py-2 pl-3 pr-2 sm:h-14 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:py-0"
+        className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 py-2 ps-3 pe-2 sm:h-14 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:py-0"
         style={DRAG}
       >
         <div className="flex min-w-0 items-center gap-2.5">
@@ -325,7 +325,7 @@ function CommentGroup({
         {onLocate && (
           <button
             type="button"
-            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-caption text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            className="ms-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-caption text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             onClick={onLocate}
           >
             <MessageSquareText className="size-3.5" />
@@ -349,7 +349,7 @@ function FileTile({ file, onOpen }: { file: DeliverableFile; onOpen: () => void 
     latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : "",
   ].filter(Boolean);
   return (
-    <button type="button" className="group min-w-0 text-left" onClick={onOpen} title={latest.filename}>
+    <button type="button" className="group min-w-0 text-start" onClick={onOpen} title={latest.filename}>
       <span className="block aspect-[16/10] overflow-hidden rounded-lg ring-1 ring-border transition-shadow group-hover:ring-foreground/40 group-focus-visible:ring-2 group-focus-visible:ring-ring">
         <DeliverableThumbnail attachment={latest} className="size-full" />
       </span>

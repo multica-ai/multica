@@ -280,7 +280,7 @@ function InvitationsShell({ children }: { children: ReactNode }) {
       <Button
         variant="ghost"
         size="sm"
-        className="absolute top-16 right-12 text-muted-foreground hover:text-destructive"
+        className="absolute top-16 inset-e-12 text-muted-foreground hover:text-destructive"
         onClick={logout}
       >
         <LogOut />

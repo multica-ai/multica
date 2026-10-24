@@ -467,7 +467,7 @@ function Disclosure({
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-start transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <Icon aria-hidden="true" className="size-3.5 text-muted-foreground" />
         <span className="flex-1 text-label font-medium">{title}</span>
@@ -478,7 +478,7 @@ function Disclosure({
           aria-hidden="true"
           className={cn(
             "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
+            open && "rotate-90 rtl:-rotate-90",
           )}
         />
       </button>

@@ -82,13 +82,13 @@ export function ResourceLabelPicker({
       />
       <PopoverContent align="end" className="w-72 p-2">
         <div className="relative mb-2">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t(($) => $.resource_picker.search)}
-            className="h-8 pl-8 text-body"
+            className="h-8 ps-8 text-body"
           />
         </div>
         <div className="max-h-64 space-y-0.5 overflow-y-auto">
@@ -101,7 +101,7 @@ export function ResourceLabelPicker({
                 onClick={() =>
                   isSelected ? detach.mutate(label.id) : attach.mutate(label.id)
                 }
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-body hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-body hover:bg-accent"
               >
                 <span
                   className="size-2.5 shrink-0 rounded-full"

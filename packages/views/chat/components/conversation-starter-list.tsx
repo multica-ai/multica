@@ -29,7 +29,7 @@ export function useFallbackConversationStarters(): AgentConversationStarter[] {
 }
 
 const ROW_CLASS =
-  "w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left text-body text-foreground";
+  "w-full rounded-lg border border-border bg-card px-3 py-2.5 text-start text-body text-foreground";
 
 /**
  * The stack of starter buttons in a chat's empty state.

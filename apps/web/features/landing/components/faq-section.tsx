@@ -27,7 +27,7 @@ export function FAQSection() {
               <button
                 type="button"
                 onClick={() => setOpenIndex(openIndex === i ? null : i)}
-                className="flex w-full items-start justify-between gap-4 py-6 text-left"
+                className="flex w-full items-start justify-between gap-4 py-6 text-start"
               >
                 <span className="text-title-sm font-semibold leading-snug text-[#0a0d12] sm:text-title">
                   {faq.question}
@@ -59,7 +59,7 @@ export function FAQSection() {
               >
                 {/* inert keeps links in a collapsed answer out of the tab order. */}
                 <div className="overflow-hidden" inert={openIndex !== i}>
-                  <p className="pb-6 pr-12 text-body leading-[1.7] text-[#0a0d12]/56 sm:text-body-lg">
+                  <p className="pb-6 pe-12 text-body leading-[1.7] text-[#0a0d12]/56 sm:text-body-lg">
                     <InlineLinks text={faq.answer} />
                   </p>
                 </div>

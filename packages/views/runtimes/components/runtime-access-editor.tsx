@@ -152,7 +152,7 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
           type="button"
           disabled={disabled}
           onClick={() => setPickerOpen(true)}
-          className="group flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-caption text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none"
+          className="group flex w-full items-center gap-2 rounded-md px-1 py-1 text-start text-caption text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none"
         >
           <span className="flex shrink-0 -space-x-1.5">
             {recipients.slice(0, 4).map((member) => (
@@ -164,7 +164,7 @@ export function RuntimeAccessEditor({ runtime }: { runtime: AgentRuntime }) {
               ? recipients.map((member) => member.name).join(", ")
               : t(($) => $.detail.visibility_members_count, { count: persisted.length })}
           </span>
-          <span className="ml-auto shrink-0 font-medium text-foreground">
+          <span className="ms-auto shrink-0 font-medium text-foreground">
             {t(($) => $.detail.visibility_members_edit)}
           </span>
         </button>

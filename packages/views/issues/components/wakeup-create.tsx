@@ -114,7 +114,7 @@ export function WakeupCreate({
         <Plus aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent
-        side="left"
+        side="inline-start"
         align="start"
         sideOffset={12}
         className="w-[420px] max-w-[calc(100vw-2rem)] gap-0 p-4"
@@ -355,7 +355,7 @@ export function WakeupCreateForm({
             <ShortcutKeycaps
               shortcut={sendShortcut}
               decorative
-              className="ml-1 max-sm:hidden"
+              className="ms-1 max-sm:hidden"
               keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}

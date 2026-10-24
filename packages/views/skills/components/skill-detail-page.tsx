@@ -325,7 +325,7 @@ function SkillIdentity({
             {skill.name}
           </h1>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted-foreground sm:ml-auto">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted-foreground sm:ms-auto">
           {originLabel && (
             <span className="inline-flex min-w-0 items-center gap-1.5">
               {/* Same three-way split as the list's Source column: runtime,
@@ -617,7 +617,7 @@ function FilesTab({
         aria-orientation="vertical"
         aria-label={t(($) => $.detail.files.list_aria)}
         className={cn(
-          "shrink-0 border-b border-surface-border py-3 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
+          "shrink-0 border-b border-surface-border py-3 md:w-52 md:overflow-y-auto md:border-b-0 md:border-e md:py-4",
           PAGE_GUTTER,
         )}
       >
@@ -675,7 +675,7 @@ function FilesTab({
           <span className="truncate font-mono text-caption text-muted-foreground">
             {selectedPath}
           </span>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="ms-auto flex shrink-0 items-center gap-1">
             {isMd && (
               // The second segment is named for what it does for THIS viewer:
               // "Edit" when the pane it opens accepts typing, "Plain text"
@@ -1349,7 +1349,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           aria-live="polite"
           className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 animate-in items-center gap-1 rounded-lg border bg-background px-2 py-1.5 fade-in slide-in-from-bottom-2 shadow-lg max-md:above-chat-launcher"
         >
-          <div className="mr-1 flex items-center border-r pl-1 pr-2">
+          <div className="me-1 flex items-center border-e ps-1 pe-2">
             <span className="whitespace-nowrap text-caption text-muted-foreground">
               {t(($) => $.detail.save_bar.changed_summary, {
                 parts: changedParts.join(" · "),

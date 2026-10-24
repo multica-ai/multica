@@ -126,7 +126,7 @@ export function InboxListItem({
       onContextMenu={
         openContextMenu ? (e) => openContextMenu(item, e) : undefined
       }
-      className={`group flex w-full cursor-default select-none items-center gap-3 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
+      className={`group flex w-full cursor-default select-none items-center gap-3 rounded-md px-2 py-2.5 text-start outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
         isSelected
           ? "bg-accent"
           : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"

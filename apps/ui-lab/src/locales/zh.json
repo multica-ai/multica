@@ -69,6 +69,9 @@
     "language": {
       "label": "语言"
     },
+    "direction": {
+      "rtl": "从右到左布局"
+    },
     "panels": {
       "expandLeft": "展开左侧栏",
       "collapseLeft": "折叠左侧栏",

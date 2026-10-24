@@ -104,7 +104,7 @@ export function Leaderboard({
   // Active column gets foreground text; others stay muted. Helps the user
   // see "this is what the bar is measuring" at a glance.
   const colClass = (key: LeaderboardSort) =>
-    `text-right ${sortBy === key ? "text-foreground" : "text-muted-foreground"}`;
+    `text-end ${sortBy === key ? "text-foreground" : "text-muted-foreground"}`;
 
   const getCoverageText = (
     unreportedTaskCount: number,
@@ -293,24 +293,24 @@ export function Leaderboard({
                       />
                     </div>
                     <div
-                      className={`text-right text-caption tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                      className={`text-end text-caption tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
                       {tokenText}
                     </div>
                     <div
-                      className={`text-right tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
+                      className={`text-end tabular-nums ${sortBy === "cost" ? "text-body font-medium" : "text-caption text-muted-foreground"}`}
                     >
                       {costText}
                     </div>
                     <div
-                      className={`text-right text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                      className={`text-end text-caption tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
                       {isDeletedBucket
                         ? "—"
                         : formatDuration(row.seconds, lessThanMinuteLabel)}
                     </div>
                     <div
-                      className={`text-right text-caption tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                      className={`text-end text-caption tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
                     >
                       {isDeletedBucket ? "—" : row.taskCount}
                     </div>

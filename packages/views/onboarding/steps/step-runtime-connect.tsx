@@ -379,7 +379,7 @@ function FoundView({
         <RefreshButton
           onClick={onRefresh}
           refreshing={refreshing}
-          className="ml-auto"
+          className="ms-auto"
         />
       </div>
 
@@ -542,7 +542,7 @@ function EmptyCard({
       onClick={onAction}
       disabled={busy}
       aria-busy={busy}
-      className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/30 disabled:pointer-events-none"
+      className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-start transition-colors hover:border-foreground/30 hover:bg-muted/30 disabled:pointer-events-none"
     >
       <div className="min-w-0">
         <div className="text-body font-medium text-foreground">{title}</div>

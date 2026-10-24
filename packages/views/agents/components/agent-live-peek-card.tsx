@@ -83,7 +83,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
   const archivedVisual = availabilityConfig.archived;
 
   return (
-    <div className="flex flex-col gap-3 text-left">
+    <div className="flex flex-col gap-3 text-start">
       {/* Header — avatar + name. */}
       <div className="flex items-start gap-3">
         <ActorAvatarBase
@@ -193,7 +193,7 @@ function CurrentIssueRow({
             className="min-w-0 truncate text-brand hover:underline"
             title={`${issue.identifier} ${issue.title}`}
           >
-            <span className="mr-1 font-mono text-micro">{issue.identifier}</span>
+            <span className="me-1 font-mono text-micro">{issue.identifier}</span>
             <span>{issue.title}</span>
           </AppLink>
         ) : (

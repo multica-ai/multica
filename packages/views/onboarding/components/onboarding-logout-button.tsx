@@ -34,8 +34,8 @@ export function OnboardingLogoutButton({
       size="sm"
       className={cn(
         inline
-          ? "-ml-2 w-fit shrink-0 text-muted-foreground hover:text-foreground"
-          : "fixed right-8 top-8 z-50 text-muted-foreground hover:text-destructive",
+          ? "-ms-2 w-fit shrink-0 text-muted-foreground hover:text-foreground"
+          : "fixed inset-e-8 top-8 z-50 text-muted-foreground hover:text-destructive",
       )}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       onClick={logout}

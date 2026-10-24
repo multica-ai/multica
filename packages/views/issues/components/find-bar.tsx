@@ -59,7 +59,7 @@ export function FindBar({
       data-find-ignore
       role="search"
       className={cn(
-        "flex items-center gap-1 rounded-lg border bg-popover/95 p-1 pl-2 shadow-md backdrop-blur supports-[backdrop-filter]:bg-popover/80",
+        "flex items-center gap-1 rounded-lg border bg-popover/95 p-1 ps-2 shadow-md backdrop-blur supports-[backdrop-filter]:bg-popover/80",
         className,
       )}
     >
@@ -74,7 +74,7 @@ export function FindBar({
         aria-label={t(($) => $.detail.find.placeholder)}
         className="h-7 w-44 border-0 bg-transparent px-1 shadow-none focus-visible:ring-0"
       />
-      <span className="min-w-[3.5rem] shrink-0 whitespace-nowrap text-right text-caption tabular-nums text-muted-foreground">
+      <span className="min-w-[3.5rem] shrink-0 whitespace-nowrap text-end text-caption tabular-nums text-muted-foreground">
         {countLabel}
       </span>
       <div className="flex items-center">

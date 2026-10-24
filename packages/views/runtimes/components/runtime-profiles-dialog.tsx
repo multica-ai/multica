@@ -272,7 +272,7 @@ function CatalogList({
   );
 
   return (
-    <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
+    <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-e">
       <div className="flex shrink-0 items-center justify-between border-b bg-background px-4 py-3">
         <h3 className="text-body font-medium">
           {t(($) => $.profiles.list_title)}
@@ -319,7 +319,7 @@ function CatalogList({
           <section aria-labelledby="runtime-profile-builtin-section">
             <button
               type="button"
-              className="flex w-full items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex w-full items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2.5 text-start transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-expanded={builtinsOpen}
               aria-controls="runtime-profile-builtin-list"
               onClick={() =>
@@ -428,7 +428,7 @@ function CatalogRow({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "flex w-full min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "flex w-full min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active && "bg-accent",
         !active && !isBuiltin && "hover:bg-accent/50",
         isBuiltin && !active && "text-muted-foreground hover:bg-muted/40",
@@ -684,7 +684,7 @@ function ProfileFormView({
                 key={option}
                 type="button"
                 onClick={() => onPickFamily(option)}
-                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-start text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ProviderLogo provider={option} className="h-4 w-4 shrink-0" />
                 <span className="truncate capitalize">

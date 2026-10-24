@@ -60,7 +60,7 @@ export function DocumentSections({ sections }: { sections: DocumentSection[] }) 
         </p>
       ))}
       {section.bullets && (
-        <ul className="mt-4 list-disc space-y-2 pl-5 text-body-lg leading-[1.8] text-[#0a0d12]/70 marker:text-[#0a0d12]/30">
+        <ul className="mt-4 list-disc space-y-2 ps-5 text-body-lg leading-[1.8] text-[#0a0d12]/70 marker:text-[#0a0d12]/30">
           {section.bullets.map((b, i) => (
             <li key={i}>
               <InlineLinks text={b} />

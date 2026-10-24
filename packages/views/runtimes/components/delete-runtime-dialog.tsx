@@ -544,10 +544,10 @@ function PresenceCell({ presence }: { presence: AgentPresenceDetail | undefined 
           ? t(($) => $.detail.delete_dialog.cascade.table.workload_idle)
           : null}
         {presence.workload === "working" && (
-          <wl.icon className={`mr-1 inline size-3 align-[-2px] animate-spin ${wl.textClass}`} />
+          <wl.icon className={`me-1 inline size-3 align-[-2px] animate-spin ${wl.textClass}`} />
         )}
         {presence.workload === "queued" && (
-          <wl.icon className={`mr-1 inline size-3 align-[-2px] ${wl.textClass}`} />
+          <wl.icon className={`me-1 inline size-3 align-[-2px] ${wl.textClass}`} />
         )}
         {presence.workload === "working" &&
           t(($) => $.detail.delete_dialog.cascade.table.workload_working)}

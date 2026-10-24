@@ -197,7 +197,7 @@ export function CodeTab() {
                 </span>
               </span>
             }
-            description={githubDetail ? <span className="block pl-12">{githubDetail}</span> : undefined}
+            description={githubDetail ? <span className="block ps-12">{githubDetail}</span> : undefined}
           >
             {canManageGitHub ? (
               <span className="flex items-center gap-1">

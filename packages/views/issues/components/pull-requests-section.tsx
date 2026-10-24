@@ -67,7 +67,7 @@ export function PullRequestsSection({
               {count}
             </span>
           ) : null}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90 rtl:-rotate-90" : ""}`} />
         </button>
         {supported ? (
           <>
@@ -81,7 +81,7 @@ export function PullRequestsSection({
         ) : null}
       </div>
       {open && (
-        <div className="pl-2">
+        <div className="ps-2">
           <PullRequestList issueId={issueId} identifier={identifier} />
         </div>
       )}

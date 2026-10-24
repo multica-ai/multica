@@ -179,7 +179,7 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
 
   if (!canManageProject) {
     return (
-      <span title={name} className="-ml-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
+      <span title={name} className="-ms-1 inline-flex min-w-0 items-center gap-1.5 px-1 py-0.5 text-caption">
         <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate font-medium">{name}</span>
       </span>
@@ -195,7 +195,7 @@ export function ProjectWorkflowControl({ project }: { project: Project }) {
             <button
               type="button"
               title={handoffLabel ? `${name} · ${handoffLabel}` : name}
-              className="-ml-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
+              className="-ms-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
             >
               <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
               {/* Only the name competes for the narrow sidebar row (MUL-8119):

@@ -125,7 +125,7 @@ interface ThreadMinimapProps {
   scrollContainerEl: HTMLElement | null;
   /** Called with a thread root id or a reply id. */
   onJump: (commentId: string) => void;
-  /** Positioning within the page (e.g. `absolute right-3 top-12 bottom-0`) — owned by the caller, like FindBar. */
+  /** Positioning within the page (e.g. `absolute inset-e-3 top-12 bottom-0`) — owned by the caller, like FindBar. */
   className?: string;
 }
 
@@ -277,7 +277,7 @@ function MinimapTick({
           // the scrollbar. The 100ms ease-out doubles as smoothing between
           // pointer samples and as the settle on leave. Reply ticks are half
           // the length of thread ticks and share their colors.
-          "h-0.5 origin-right rounded-full transition-[scale,background-color] duration-100 ease-out",
+          "h-0.5 origin-right rtl:origin-left rounded-full transition-[scale,background-color] duration-100 ease-out",
           isReply ? "w-1.5" : "w-3",
           inViewport ? "bg-foreground/70" : "bg-muted-foreground/30",
           !isHighlighted && "group-hover/tick:bg-foreground",
@@ -604,7 +604,7 @@ export function ThreadMinimap({
           onPointerLeave={scheduleClose}
           onFocusCapture={cancelClose}
           onBlurCapture={scheduleClose}
-          className="pointer-events-auto absolute right-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
+          className="pointer-events-auto absolute inset-e-8 top-1/2 max-h-[calc(100%-3rem)] w-80 max-w-[calc(100vw-4rem)] -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl bg-popover p-2 text-body text-popover-foreground shadow-lg ring-1 ring-foreground/10"
         >
           {/* One <li> per item, replies included, so row index === item index. */}
           <ul>
@@ -625,11 +625,11 @@ export function ThreadMinimap({
                   // tying them to the thread row above.
                   <li
                     key={item.id}
-                    className="relative ml-3 before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-surface-border"
+                    className="relative ms-3 before:absolute before:inset-y-0 before:inset-s-0 before:w-px before:bg-surface-border"
                   >
                     <button
                       {...rowProps}
-                      className="flex w-full items-center gap-2 rounded-md py-1 pl-3 pr-3 text-left text-label text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
+                      className="flex w-full items-center gap-2 rounded-md py-1 ps-3 pe-3 text-start text-label text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
                     >
                       <span className="inline-flex shrink-0" aria-hidden="true">
                         {avatarFor(item.entry, "xs")}
@@ -658,7 +658,7 @@ export function ThreadMinimap({
                   <button
                     {...rowProps}
                     aria-description={participantNames.join(", ") || undefined}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-left text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-3 py-2 text-start text-body text-muted-foreground transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-active:font-medium data-active:text-brand"
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-1.5">
                       <span className="truncate">{title}</span>
@@ -707,14 +707,14 @@ export function ThreadMinimap({
                         }
                         toggleThreadReplies(thread.id);
                       }}
-                      className="flex h-7 shrink-0 items-center gap-0.5 rounded-md pl-1.5 pr-1 text-micro tabular-nums text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-7 shrink-0 items-center gap-0.5 rounded-md ps-1.5 pe-1 text-micro tabular-nums text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {thread.replies.length}
                       <ChevronRight
                         aria-hidden="true"
                         className={cn(
                           "size-3.5 transition-transform duration-150 ease-out motion-reduce:transition-none",
-                          !folded && "rotate-90",
+                          !folded && "rotate-90 rtl:-rotate-90",
                         )}
                       />
                     </button>

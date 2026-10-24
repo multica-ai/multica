@@ -360,7 +360,7 @@ function Insight({
       <dd className="mt-0.5 truncate text-body font-medium tabular-nums">
         {value}
         {sub != null && (
-          <span className="ml-1.5 text-caption font-normal text-muted-foreground">
+          <span className="ms-1.5 text-caption font-normal text-muted-foreground">
             {sub}
           </span>
         )}

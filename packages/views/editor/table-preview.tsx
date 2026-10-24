@@ -148,7 +148,7 @@ export function TablePreview({ text, delimiter }: TablePreviewProps) {
       id: ROW_NUMBER_COLUMN,
       header: "#",
       cell: ({ row }) => (
-        <span className="block text-right tabular-nums text-muted-foreground">
+        <span className="block text-end tabular-nums text-muted-foreground">
           {row.index + 1}
         </span>
       ),
@@ -176,7 +176,7 @@ export function TablePreview({ text, delimiter }: TablePreviewProps) {
             <span
               className={cn(
                 "block truncate",
-                columnInfo[index]?.numeric && "text-right tabular-nums",
+                columnInfo[index]?.numeric && "text-end tabular-nums",
               )}
               title={value}
             >

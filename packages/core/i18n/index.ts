@@ -17,4 +17,6 @@ export type {
 } from "./types";
 export { DEFAULT_LOCALE, SUPPORTED_LOCALES } from "./types";
 export { matchLocale, pickLocale } from "./pick-locale";
+export { getDir } from "./direction";
+export type { TextDirection } from "./direction";
 export { LOCALE_COOKIE } from "./browser-cookie-adapter";

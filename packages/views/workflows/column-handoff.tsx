@@ -49,7 +49,7 @@ export function ColumnHandoff({
           label ? (
             <button
               type="button"
-              className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-full border border-surface-border bg-background/70 py-0.5 pl-0.5 pr-2 text-caption transition-colors hover:bg-accent"
+              className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-full border border-surface-border bg-background/70 py-0.5 ps-0.5 pe-2 text-caption transition-colors hover:bg-accent"
               aria-label={t(($) => $.workflows.hands_off_to, { name: label })}
               title={t(($) => $.workflows.hands_off_to, { name: label })}
             >

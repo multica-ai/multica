@@ -294,7 +294,7 @@ export function WorkspaceTab() {
 
   const readOnly = membersFetched && !canManageWorkspace;
   const readOnlyText = (value: string) => (
-    <p className="whitespace-pre-wrap break-words text-body text-foreground sm:text-right">
+    <p className="whitespace-pre-wrap break-words text-body text-foreground sm:text-end">
       {value || <span className="text-faint-foreground">—</span>}
     </p>
   );

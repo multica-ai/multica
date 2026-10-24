@@ -44,10 +44,10 @@ const buttonVariants = cva(
       },
       size: {
         default:
-          "h-[var(--button-height-default)] gap-[var(--button-gap-default)] px-[var(--button-padding-default)] has-data-[icon=inline-end]:pr-[max(0px,calc(var(--button-padding-default)-0.125rem))] has-data-[icon=inline-start]:pl-[max(0px,calc(var(--button-padding-default)-0.125rem))]",
-        xs: "h-[var(--button-height-xs)] gap-[var(--button-gap-xs)] rounded-md px-[var(--button-padding-xs)] text-caption in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-[max(0px,calc(var(--button-padding-xs)-0.125rem))] has-data-[icon=inline-start]:pl-[max(0px,calc(var(--button-padding-xs)-0.125rem))] [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-[var(--button-height-sm)] gap-[var(--button-gap-sm)] rounded-md px-[var(--button-padding-sm)] text-label in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-[max(0px,calc(var(--button-padding-sm)-0.25rem))] has-data-[icon=inline-start]:pl-[max(0px,calc(var(--button-padding-sm)-0.25rem))] [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-[var(--button-height-lg)] gap-[var(--button-gap-lg)] px-[var(--button-padding-lg)] has-data-[icon=inline-end]:pr-[calc(var(--button-padding-lg)+0.125rem)] has-data-[icon=inline-start]:pl-[calc(var(--button-padding-lg)+0.125rem)]",
+          "h-[var(--button-height-default)] gap-[var(--button-gap-default)] px-[var(--button-padding-default)] has-data-[icon=inline-end]:pe-[max(0px,calc(var(--button-padding-default)-0.125rem))] has-data-[icon=inline-start]:ps-[max(0px,calc(var(--button-padding-default)-0.125rem))]",
+        xs: "h-[var(--button-height-xs)] gap-[var(--button-gap-xs)] rounded-md px-[var(--button-padding-xs)] text-caption in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pe-[max(0px,calc(var(--button-padding-xs)-0.125rem))] has-data-[icon=inline-start]:ps-[max(0px,calc(var(--button-padding-xs)-0.125rem))] [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-[var(--button-height-sm)] gap-[var(--button-gap-sm)] rounded-md px-[var(--button-padding-sm)] text-label in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pe-[max(0px,calc(var(--button-padding-sm)-0.25rem))] has-data-[icon=inline-start]:ps-[max(0px,calc(var(--button-padding-sm)-0.25rem))] [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-[var(--button-height-lg)] gap-[var(--button-gap-lg)] px-[var(--button-padding-lg)] has-data-[icon=inline-end]:pe-[calc(var(--button-padding-lg)+0.125rem)] has-data-[icon=inline-start]:ps-[calc(var(--button-padding-lg)+0.125rem)]",
         icon: "size-[var(--button-height-default)]",
         "icon-xs":
           "size-[var(--button-height-xs)] rounded-md in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",

@@ -27,7 +27,7 @@ describe("IssueTableGroupRow", () => {
     );
 
     const group = screen.getByRole("button", { name: /Backlog\s*13/ });
-    expect(group).toHaveClass("sticky", "left-4", "w-fit");
+    expect(group).toHaveClass("sticky", "inset-s-4", "w-fit");
 
     await user.click(group);
     expect(onToggle).toHaveBeenCalledOnce();

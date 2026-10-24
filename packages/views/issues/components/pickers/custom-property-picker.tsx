@@ -317,7 +317,7 @@ export function CustomPropertyValueInput({
                 clear();
                 setOpen(false);
               }}
-              className="flex w-full items-center gap-3 border-b px-3 py-2 text-left text-body transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-3 border-b px-3 py-2 text-start text-body transition-colors hover:bg-accent"
             >
               <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
                 {t(($) => $.pickers.custom_property.none)}

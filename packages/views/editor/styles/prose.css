@@ -48,6 +48,12 @@
   text-align: start;
 }
 
+/* A placeholder is UI copy, not content: it follows the page direction, so
+   an untranslated placeholder in an RTL page does not drift to the left. */
+.rich-text-editor :is(.is-editor-empty:first-child, [data-editor-placeholder]) {
+  unicode-bidi: normal;
+}
+
 /* Headings — compact but with clear visual hierarchy */
 .rich-text-editor h1 {
   font-size: var(--text-display-sm);
@@ -352,7 +358,7 @@
 
 .rich-text-editor th,
 .rich-text-editor td {
-  text-align: left;
+  text-align: start;
   vertical-align: top;
   padding: 0.5rem 0.75rem;
   /* Chinese text may break between any two characters, so a column of it
@@ -448,15 +454,15 @@
   content: "";
   position: absolute;
   inset-block: 0;
-  left: 3px;
+  inset-inline-start: 3px;
   width: 2px;
   background: transparent;
   transition: background-color 100ms;
 }
 
 .rich-text-editor .rich-table-resize-handle[data-edge="end"]::after {
-  left: auto;
-  right: 0;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
 }
 
 .rich-text-editor .rich-table-resize-handle:hover::after,
@@ -477,7 +483,7 @@
   display: block;
   position: absolute;
   top: 0.375rem;
-  right: 0.625rem;
+  inset-inline-end: 0.625rem;
   padding: 0.125rem 0.375rem;
   border-radius: var(--radius-sm);
   background: var(--primary);
@@ -497,8 +503,8 @@
 
 /* Blockquotes */
 .rich-text-editor blockquote {
-  border-left: 3px solid color-mix(in srgb, var(--muted-foreground) 30%, transparent);
-  padding-left: 0.75rem;
+  border-inline-start: 3px solid color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+  padding-inline-start: 0.75rem;
   margin: 0.625rem 0;
   color: var(--muted-foreground);
   font-style: italic;
@@ -520,7 +526,7 @@
 .rich-text-editor blockquote blockquote {
   margin-top: 0.25rem;
   margin-bottom: 0.25rem;
-  border-left-color: color-mix(in srgb, var(--muted-foreground) 15%, transparent);
+  border-inline-start-color: color-mix(in srgb, var(--muted-foreground) 15%, transparent);
 }
 
 /* Horizontal rules */

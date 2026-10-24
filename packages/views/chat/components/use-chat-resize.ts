@@ -85,6 +85,10 @@ export function useChatResize(
     (e: React.PointerEvent, dir: DragDir) => {
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      // The window is anchored to the inline end, so its resize edge is the
+      // inline start: dragging away from the window grows it in either direction.
+      const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
+      const inlineSign = rtl ? -1 : 1;
 
       dragRef.current = {
         startX: e.clientX,
@@ -103,7 +107,7 @@ export function useChatResize(
 
         const rawW =
           dir === "left" || dir === "corner"
-            ? d.startW - (ev.clientX - d.startX)
+            ? d.startW - inlineSign * (ev.clientX - d.startX)
             : d.startW;
         const rawH =
           dir === "top" || dir === "corner"
@@ -128,7 +132,7 @@ export function useChatResize(
       const cursorMap: Record<DragDir, string> = {
         left: "col-resize",
         top: "row-resize",
-        corner: "nw-resize",
+        corner: rtl ? "ne-resize" : "nw-resize",
       };
       document.body.style.cursor = cursorMap[dir];
       document.body.style.userSelect = "none";

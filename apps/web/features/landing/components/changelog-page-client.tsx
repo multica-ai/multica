@@ -188,7 +188,7 @@ export function ChangelogPageClient() {
             <aside className="hidden lg:block">
               <nav
                 aria-label={t.changelog.toc}
-                className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-8 pr-2"
+                className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto pb-8 pe-2"
               >
                 <h3 className="text-micro font-semibold uppercase tracking-[0.14em] text-[#0a0d12]/50">
                   {t.changelog.toc}
@@ -197,13 +197,13 @@ export function ChangelogPageClient() {
                 <div className="relative mt-5">
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-[4px] top-7 bottom-2 w-px bg-[#0a0d12]/10"
+                    className="pointer-events-none absolute inset-s-[4px] top-7 bottom-2 w-px bg-[#0a0d12]/10"
                   />
 
                   <ol className="space-y-5">
                     {groups.map((group) => (
                       <li key={group.key}>
-                        <p className="ml-6 text-micro font-semibold uppercase tracking-[0.12em] text-[#0a0d12]/45">
+                        <p className="ms-6 text-micro font-semibold uppercase tracking-[0.12em] text-[#0a0d12]/45">
                           {monthYearLabel(group.year, group.month, locale)}
                         </p>
 
@@ -219,7 +219,7 @@ export function ChangelogPageClient() {
                                   onClick={jumpTo(release.version)}
                                   aria-current={isActive ? "true" : undefined}
                                   className={[
-                                    "group relative flex items-center gap-3 rounded-md py-1 pr-2 text-label transition-colors",
+                                    "group relative flex items-center gap-3 rounded-md py-1 pe-2 text-label transition-colors",
                                     isActive
                                       ? "text-[#0a0d12]"
                                       : "text-[#0a0d12]/55 hover:text-[#0a0d12]/80",
@@ -236,7 +236,7 @@ export function ChangelogPageClient() {
                                   />
                                   <span
                                     className={[
-                                      "w-[1.25rem] shrink-0 text-right tabular-nums",
+                                      "w-[1.25rem] shrink-0 text-end tabular-nums",
                                       isActive
                                         ? "font-semibold"
                                         : "font-medium",

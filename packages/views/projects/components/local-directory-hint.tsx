@@ -83,7 +83,7 @@ export function LocalDirectoryHint({
             {/* Where the work ends up. Only worktree mode needs saying: in
                 place, the answer is the directory already named above. */}
             {isWorktree && (
-              <div className="pl-5 opacity-80">
+              <div className="ps-5 opacity-80">
                 {t(($) => $.resources.chat_hint_worktree_note)}
               </div>
             )}

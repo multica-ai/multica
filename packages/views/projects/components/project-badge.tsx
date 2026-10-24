@@ -40,7 +40,7 @@ export function ProjectStatusBadge({ project, handleUpdate, triggerClassName, al
           <DropdownMenuItem key={s} onClick={() => handleUpdate({ status: s as ProjectStatus })}>
             <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
             <span>{statusLabels[s]}</span>
-            {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
+            {s === project.status && <Check className="ms-auto h-3.5 w-3.5" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -70,7 +70,7 @@ export function ProjectPriorityBadge({ project, handleUpdate, triggerClassName, 
           <DropdownMenuItem key={p} onClick={() => handleUpdate({ priority: p as ProjectPriority })}>
             <PriorityIcon priority={p} />
             <span>{priorityLabels[p]}</span>
-            {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
+            {p === project.priority && <Check className="ms-auto h-3.5 w-3.5" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

@@ -9,7 +9,7 @@ import { Check } from "lucide-react";
 // one implementation.
 
 export const FILTER_ITEM_CLASS =
-  "group/fitem pr-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
+  "group/fitem pe-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";
 
 export function HoverCheck({ checked }: { checked: boolean }) {
   return (

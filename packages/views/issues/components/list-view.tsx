@@ -448,7 +448,7 @@ function ListViewImpl({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="max-w-2xl rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10 rounded-md border border-border bg-card px-4 py-2">
-            <span className="text-caption text-muted-foreground mr-2">{activeIssue.identifier}</span>
+            <span className="text-caption text-muted-foreground me-2">{activeIssue.identifier}</span>
             <span className="text-body">{activeIssue.title}</span>
           </div>
         ) : null}
@@ -597,7 +597,7 @@ function StatusAccordionItem({
             : ""
         }`}
       >
-        <div className="pl-3 flex items-center">
+        <div className="ps-3 flex items-center">
           <input
             type="checkbox"
             checked={allSelected}
@@ -614,12 +614,12 @@ function StatusAccordionItem({
             className="cursor-pointer accent-primary"
           />
         </div>
-        <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none cursor-pointer">
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
+        <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-start outline-none cursor-pointer">
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90 rtl:group-aria-expanded/trigger:-rotate-90" />
           <StatusHeading status={status} count={page.total} />
         </Accordion.Trigger>
         {onCreateIssue && !statusCatalog.entryOf(status)?.archived_at && (
-          <div className="pr-2">
+          <div className="pe-2">
             {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
             <DeferredTooltip
               content={t(($) => $.list.add_issue_tooltip)}

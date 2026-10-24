@@ -186,7 +186,7 @@ function DefaultWorkflowRow({ projects }: { projects: Project[] }) {
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+      className="flex w-full items-center gap-4 px-4 py-3.5 text-start transition-colors hover:bg-accent/40"
       onClick={() => document.getElementById("status-library")?.scrollIntoView({ behavior: "smooth", block: "start" })}
     >
       <div className="min-w-0 flex-1 space-y-2">
@@ -223,7 +223,7 @@ function WorkflowRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-accent/40"
+      className="flex w-full items-center gap-4 px-4 py-3.5 text-start transition-colors hover:bg-accent/40"
     >
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex flex-wrap items-center gap-2">

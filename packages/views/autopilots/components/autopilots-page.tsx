@@ -874,7 +874,7 @@ export function AutopilotsPage() {
                   <button
                     key={tpl.id}
                     type="button"
-                    className="flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/40"
+                    className="flex items-start gap-3 rounded-lg border p-3 text-start transition-colors hover:bg-accent/40"
                     onClick={() => openCreate(tpl)}
                   >
                     <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
@@ -896,7 +896,7 @@ export function AutopilotsPage() {
               className="mt-4"
               onClick={() => openCreate()}
             >
-              <Plus className="mr-1 h-3.5 w-3.5" />
+              <Plus className="me-1 h-3.5 w-3.5" />
               {t(($) => $.page.start_blank)}
             </Button>
           </div>

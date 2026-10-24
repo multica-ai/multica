@@ -135,7 +135,7 @@ export function WorkflowFlowSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[440px] overflow-y-auto p-5 sm:max-w-[440px]">
+      <SheetContent side="end" className="w-[440px] overflow-y-auto p-5 sm:max-w-[440px]">
         <SheetHeader className="p-0">
           <SheetTitle>{t(($) => $.workflows.flow.title, { workflow: workflow.name })}</SheetTitle>
           <SheetDescription>
@@ -197,7 +197,7 @@ function FlowRow({
         disabled={!accepts}
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left disabled:cursor-default"
+        className="flex w-full items-center gap-2 px-3 py-2 text-start disabled:cursor-default"
       >
         <StatusIcon
           status={statusKey}
@@ -220,7 +220,7 @@ function FlowRow({
         {accepts && (
           <ChevronRight
             aria-hidden
-            className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
+            className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90 rtl:-rotate-90")}
           />
         )}
       </button>

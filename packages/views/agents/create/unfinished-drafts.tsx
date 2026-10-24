@@ -49,7 +49,7 @@ export function UnfinishedDraftsBanner({
         type="button"
         onClick={openOrPick}
         className={cn(
-          "mb-5 flex w-full items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-left transition-colors",
+          "mb-5 flex w-full items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-start transition-colors",
           "hover:border-primary/40 hover:bg-accent/30",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
@@ -86,7 +86,7 @@ export function UnfinishedDraftsBanner({
                   onResume(session.session_id);
                 }}
                 className={cn(
-                  "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+                  "flex w-full items-start gap-3 rounded-lg border p-3 text-start transition-colors",
                   "hover:border-primary/40 hover:bg-accent/30",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
@@ -120,7 +120,7 @@ export function UnfinishedDraftsBanner({
 function DraftTimestamp({ at }: { at: string }) {
   const timeAgo = useTimeAgo();
   return (
-    <span className="ml-auto shrink-0 text-micro text-muted-foreground">
+    <span className="ms-auto shrink-0 text-micro text-muted-foreground">
       {timeAgo(at)}
     </span>
   );

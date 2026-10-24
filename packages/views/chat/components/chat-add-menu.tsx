@@ -93,7 +93,7 @@ export function ChatAddMenu({
                   >
                     <ProjectIcon project={project} size="md" />
                     <span className="min-w-0 flex-1 truncate">{project.title}</span>
-                    {project.id === projectId && <Check className="ml-auto" />}
+                    {project.id === projectId && <Check className="ms-auto" />}
                   </DropdownMenuItem>
                 ))}
                 {projects.length === 0 && (

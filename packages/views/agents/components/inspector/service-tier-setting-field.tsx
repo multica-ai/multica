@@ -124,7 +124,7 @@ function ServiceTierPicker({
       triggerRender={
         <button
           type="button"
-          className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-start text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           aria-label={triggerTitle}
         />
       }
@@ -150,7 +150,7 @@ function ServiceTierPicker({
           selected={tier.id === value}
           onClick={() => void select(tier.id)}
         >
-          <span className="block min-w-0 flex-1 text-left">
+          <span className="block min-w-0 flex-1 text-start">
             <span className="truncate text-label font-medium">
               {tier.name}
             </span>
@@ -167,7 +167,7 @@ function ServiceTierPicker({
           <button
             type="button"
             onClick={() => void select("")}
-            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-start text-caption text-muted-foreground transition-colors hover:bg-accent/50"
           >
             {t(($) => $.pickers.service_tier_clear)}
           </button>

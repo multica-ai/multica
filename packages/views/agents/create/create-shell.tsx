@@ -63,7 +63,7 @@ export function AgentCreateShell({
           <p className="truncate text-caption text-muted-foreground">{step}</p>
         </div>
         {chips || stepIndex ? (
-          <div className="ml-auto hidden items-center gap-4 text-caption text-muted-foreground sm:flex">
+          <div className="ms-auto hidden items-center gap-4 text-caption text-muted-foreground sm:flex">
             {chips ? <div className="flex items-center gap-2">{chips}</div> : null}
             {stepIndex ? <CreateStepper active={stepIndex} /> : null}
           </div>

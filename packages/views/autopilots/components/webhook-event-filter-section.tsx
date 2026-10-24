@@ -54,7 +54,7 @@ export function WebhookEventFilterSection({
           rel="noopener noreferrer"
           aria-label={t(($) => $.dialog.event_filter_docs_link_label)}
           title={t(($) => $.dialog.event_filter_docs_link_label)}
-          className="ml-0.5 inline-flex items-center text-faint-foreground hover:text-foreground transition-colors"
+          className="ms-0.5 inline-flex items-center text-faint-foreground hover:text-foreground transition-colors"
         >
           <ExternalLink className="size-3" />
         </a>
@@ -80,7 +80,7 @@ export function WebhookEventFilterSection({
                   type="button"
                   onClick={() => removeFilter(idx)}
                   aria-label={t(($) => $.dialog.event_filter_remove_label)}
-                  className="ml-auto rounded-xs p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  className="ms-auto rounded-xs p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
                   <X className="size-3" />
                 </button>

@@ -106,7 +106,7 @@ function Children({
   const remaining = entries.length - shown;
 
   return (
-    <ul className={cn(depth > 1 && "ml-[7px] border-l border-border pl-3")}>
+    <ul className={cn(depth > 1 && "ms-[7px] border-s border-border ps-3")}>
       {entries.slice(0, shown).map(([key, item]) => (
         <Node
           key={key}
@@ -120,7 +120,7 @@ function Children({
         <li>
           <button
             type="button"
-            className="ml-5 rounded-sm px-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            className="ms-5 rounded-sm px-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onClick={() => setShown((count) => count + PAGE_SIZE)}
           >
             {t(($) => $.attachment.tree_show_more, { count: remaining })}
@@ -150,7 +150,7 @@ function Node({
 
   if (!isContainer(value)) {
     return (
-      <li className="flex min-w-0 gap-1 pl-5">
+      <li className="flex min-w-0 gap-1 ps-5">
         <span className="shrink-0">
           {label}
           <span className="text-muted-foreground">:</span>
@@ -190,7 +190,7 @@ function ContainerNode({
 
   if (count === 0) {
     return (
-      <li className="pl-5">
+      <li className="ps-5">
         {label}
         <span className="text-muted-foreground">: {isArray ? "[]" : "{}"}</span>
       </li>
@@ -202,14 +202,14 @@ function ContainerNode({
       <button
         type="button"
         aria-expanded={open}
-        className="flex w-full min-w-0 items-center gap-1 rounded-sm text-left hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="flex w-full min-w-0 items-center gap-1 rounded-sm text-start hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         onClick={() => setOpen((next) => !next)}
       >
         <ChevronRight
           aria-hidden
           className={cn(
             "size-4 shrink-0 text-muted-foreground transition-transform duration-100",
-            open && "rotate-90",
+            open && "rotate-90 rtl:-rotate-90",
           )}
         />
         <span className="shrink-0">

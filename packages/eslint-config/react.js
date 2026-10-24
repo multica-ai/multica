@@ -1,6 +1,7 @@
 import baseConfig from "./base.js";
 import reactPlugin from "eslint-plugin-react";
 import reactHooksPlugin from "eslint-plugin-react-hooks";
+import logicalDirection from "./logical-direction.js";
 
 /** @type {import("eslint").Linter.Config[]} */
 export default [
@@ -27,6 +28,14 @@ export default [
     plugins: { "react-hooks": reactHooksPlugin },
     rules: {
       ...reactHooksPlugin.configs["recommended-latest"].rules,
+    },
+  },
+  {
+    files: ["**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}"],
+    plugins: { multica: logicalDirection },
+    rules: {
+      "multica/logical-direction": "error",
     },
   },
 ];

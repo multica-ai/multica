@@ -161,7 +161,7 @@ function SortablePanelRow({
         type="button"
         onClick={onSelect}
         className={cn(
-          "flex min-w-0 flex-1 items-center gap-1.5 text-left text-body",
+          "flex min-w-0 flex-1 items-center gap-1.5 text-start text-body",
           active && "font-medium",
         )}
       >

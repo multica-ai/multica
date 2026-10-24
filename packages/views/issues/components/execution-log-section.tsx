@@ -180,12 +180,12 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
           <span className="truncate">{t(($) => $.execution_log.section)}</span>
           <ChevronRight
             className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
-              open ? "rotate-90" : ""
+              open ? "rotate-90 rtl:-rotate-90" : ""
             }`}
           />
         </button>
         {activeTasks.length > 0 && (
-          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-info">
+          <span className="ms-auto inline-flex shrink-0 items-center gap-1 text-info">
             <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
             <span className="font-mono text-caption tabular-nums">{activeTasks.length}</span>
           </span>
@@ -197,7 +197,7 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
         />
       </div>
       {open && (
-        <div className="space-y-0.5 pl-2">
+        <div className="space-y-0.5 ps-2">
           {activeTasks.map((task) => (
             <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
           ))}
@@ -226,7 +226,7 @@ export function ExecutionLogSection({ issueId, identifier, issueTitle }: Executi
             <Maximize2 aria-hidden className="size-3 shrink-0 text-muted-foreground" />
             <span className="truncate">{t(($) => $.execution_log.open_timeline)}</span>
             {hiddenCount > 0 && (
-              <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+              <span className="ms-auto shrink-0 text-muted-foreground tabular-nums">
                 {t(($) => $.execution_log.more_runs, { count: hiddenCount })}
               </span>
             )}
@@ -345,7 +345,7 @@ function RunCostBars({ timeline, onOpen }: { timeline: RunTimeline; onOpen: () =
               aria-label={t(($) => $.execution_log.strip_aria)}
             />
           }
-          className="relative block w-full rounded-xs text-left"
+          className="relative block w-full rounded-xs text-start"
         >
           <span aria-hidden className="flex items-end gap-0.5" style={{ height: BAR_HEIGHT }}>
             {Array.from({ length: emptySlots }, (_, i) => (
@@ -473,7 +473,7 @@ export function IssueRunsTotal({
       <TooltipTrigger
         render={<button type="button" onClick={onOpen} />}
         className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption tabular-nums transition-colors hover:bg-accent/70 ${
-          alone ? "ml-auto" : ""
+          alone ? "ms-auto" : ""
         }`}
       >
         <span className={`text-muted-foreground ${narrowTier}`}>
@@ -589,7 +589,7 @@ export function ActiveTaskRow({
         <button
           type="button"
           onClick={onJump}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-xs text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch rounded-xs text-start outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {triggerText}
           <TaskCommentCoverage task={task} />

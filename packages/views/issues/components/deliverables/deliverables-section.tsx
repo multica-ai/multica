@@ -58,10 +58,10 @@ export function DeliverablesSection({
         <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
           {files.length}
         </span>
-        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90 rtl:-rotate-90" : ""}`} />
       </button>
       {open && (
-        <div className="pl-2">
+        <div className="ps-2">
           {images.length > 0 && (
             <div className="mb-1.5 grid grid-cols-3 gap-1.5">
               {images.map((file) => (
@@ -91,7 +91,7 @@ export function DeliverablesSection({
           ))}
           <button
             type="button"
-            className="mt-0.5 flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+            className="mt-0.5 flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-start text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
             onClick={onOpenOverview}
           >
             <LayoutGrid className="size-3.5 shrink-0" />
@@ -122,7 +122,7 @@ function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }
   return (
     <button
       type="button"
-      className="group flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-left text-caption transition-colors hover:bg-accent/50"
+      className="group flex w-[calc(100%+1rem)] -mx-2 items-center gap-2 rounded-md px-2 py-1 text-start text-caption transition-colors hover:bg-accent/50"
       title={latest.filename}
       aria-label={versionedName(file, t)}
       onClick={onOpen}
@@ -130,7 +130,7 @@ function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }
       <Icon className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 truncate">{latest.filename}</span>
       {file.versions.length > 1 && <VersionBadge version={file.versions.length} />}
-      <span className="ml-auto shrink-0 pl-2 text-micro tabular-nums text-muted-foreground">
+      <span className="ms-auto shrink-0 ps-2 text-micro tabular-nums text-muted-foreground">
         {latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : null}
       </span>
     </button>

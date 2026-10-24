@@ -406,7 +406,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
                 onClick={() => openResult(position)}
                 onMouseMove={() => setActiveResult(position)}
                 className={cn(
-                  "w-full rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+                  "w-full rounded-lg px-3 py-2 text-start transition-colors focus-visible:outline-2 focus-visible:outline-ring",
                   position === activeResult
                     ? "bg-surface-selected text-surface-selected-foreground"
                     : "hover:bg-surface-hover",
@@ -433,7 +433,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:flex-row">
-      <aside className="shrink-0 border-b border-surface-border md:flex md:w-60 md:flex-col md:border-b-0 md:border-r">
+      <aside className="shrink-0 border-b border-surface-border md:flex md:w-60 md:flex-col md:border-b-0 md:border-e">
         <div className="flex h-16 shrink-0 items-center gap-1 px-4 md:px-5">
           <CollapsedNavTrigger />
           <h1 className="text-title font-semibold tracking-tight">
@@ -469,7 +469,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         <div className="relative mx-3 mb-3 hidden shrink-0 md:block">
           <Search
             aria-hidden="true"
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
           />
           <input
             type="search"
@@ -499,7 +499,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             placeholder={t(($) => $.page.search)}
             aria-label={t(($) => $.page.search)}
             aria-controls={query ? "settings-search-results" : undefined}
-            className="h-8 w-full rounded-lg border border-input bg-transparent pl-8 pr-8 text-body outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
+            className="h-8 w-full rounded-lg border border-input bg-transparent ps-8 pe-8 text-body outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
           />
           {query ? (
             <TooltipHint label={t(($) => $.page.search_clear)}>
@@ -507,7 +507,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
                 type="button"
                 onClick={() => setQuery("")}
                 aria-label={t(($) => $.page.search_clear)}
-                className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+                className="absolute inset-e-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
               >
                 <X className="size-3.5" aria-hidden="true" />
               </button>
@@ -537,7 +537,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
                     </span>
                     <span className="truncate">{group.label}</span>
                     {group.tag ? (
-                      <span className="ml-auto shrink-0 truncate text-micro font-medium text-muted-foreground">
+                      <span className="ms-auto shrink-0 truncate text-micro font-medium text-muted-foreground">
                         {group.tag}
                       </span>
                     ) : null}

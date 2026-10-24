@@ -302,10 +302,10 @@ function ReplyInput({
           >
             {/* <p> under rich-text-editor: same type metrics as the real
                 editor's empty paragraph — no height jump on swap. */}
-            <p className="text-muted-foreground">{placeholderText}</p>
+            <p data-editor-placeholder className="text-muted-foreground">{placeholderText}</p>
           </div>
         )}
-        <div className="absolute bottom-0 left-0 right-24 min-w-0">
+        <div className="absolute bottom-0 inset-s-0 inset-e-24 min-w-0">
           <CommentTriggerChips
             recipients={recipients}
             blocked={triggerPreview.blocked}
@@ -314,7 +314,7 @@ function ReplyInput({
             onActionChange={setAction}
           />
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1">
+        <div className="absolute bottom-0 inset-e-0 flex items-center gap-1">
           <FileUploadButton
             size="sm"
             multiple

@@ -296,11 +296,11 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
               exact type metrics (line-height 1.625 from prose.css), so the
               shell→editor swap doesn't shift layout. */}
           <div className="rich-text-editor text-body">
-            <p className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
+            <p data-editor-placeholder className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
           </div>
         </div>
       )}
-      <div className="absolute bottom-1 left-2 right-28 min-w-0">
+      <div className="absolute bottom-1 inset-s-2 inset-e-28 min-w-0">
         <CommentTriggerChips
           recipients={recipients}
           blocked={triggerPreview.blocked}
@@ -309,7 +309,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           onActionChange={setAction}
         />
       </div>
-      <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+      <div className="absolute bottom-1 inset-e-1.5 flex items-center gap-1">
         <FileUploadButton
           size="sm"
           multiple

@@ -7,6 +7,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import { getDir } from "@multica/core/i18n";
 import { HTML_LANG } from "@/lib/html-lang";
 import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
 import {
@@ -132,6 +133,7 @@ export default async function RootLayout({
   return (
     <html
       lang={HTML_LANG[locale]}
+      dir={getDir(locale)}
       suppressHydrationWarning
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >

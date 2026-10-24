@@ -103,8 +103,8 @@ export function ClearablePillButton({
         type="button"
         disabled={disabled}
         className={cn(
-          "flex h-full min-w-0 items-center gap-1.5 overflow-hidden pl-2.5 cursor-pointer",
-          clearable ? "pr-1" : "pr-2.5",
+          "flex h-full min-w-0 items-center gap-1.5 overflow-hidden ps-2.5 cursor-pointer",
+          clearable ? "pe-1" : "pe-2.5",
           "disabled:cursor-not-allowed",
         )}
         {...props}
@@ -120,7 +120,7 @@ export function ClearablePillButton({
               e.stopPropagation();
               onClear?.();
             }}
-            className="flex h-full shrink-0 items-center pl-0.5 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+            className="flex h-full shrink-0 items-center ps-0.5 pe-2 text-muted-foreground hover:text-foreground cursor-pointer"
           >
             <XIcon className="size-3" />
           </button>

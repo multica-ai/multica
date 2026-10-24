@@ -72,8 +72,8 @@ describe("TablePreview", () => {
     renderWithI18n(<TablePreview text={"name,qty\na,1\nb,2.5\n"} delimiter="," />);
     const qty = document.querySelector("tbody td[data-column-id='c1'] span");
     const name = document.querySelector("tbody td[data-column-id='c0'] span");
-    expect(qty).toHaveClass("text-right");
-    expect(name).not.toHaveClass("text-right");
+    expect(qty).toHaveClass("text-end");
+    expect(name).not.toHaveClass("text-end");
   });
 
   it("reads a semicolon-separated CSV and a TSV", () => {

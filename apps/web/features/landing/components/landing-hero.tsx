@@ -51,7 +51,7 @@ export function LandingHero() {
               >
                 {t.hero.talkToSales}
                 <ArrowRight
-                  className="size-4 transition-transform group-hover:translate-x-0.5"
+                  className="size-4 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
                   aria-hidden
                 />
               </Link>
@@ -86,7 +86,7 @@ function WorksWithRow({ label, href }: { label: string; href: string }) {
       >
         {label}
         <ArrowRight
-          className="size-3.5 transition-transform group-hover:translate-x-0.5"
+          className="size-3.5 transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
           aria-hidden
         />
       </Link>

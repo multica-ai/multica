@@ -162,7 +162,7 @@ export function RuntimePicker({
       >
         <PopoverTrigger
           disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-start text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           {runtimesLoading ? (
             <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
@@ -210,14 +210,14 @@ export function RuntimePicker({
         >
           {showSearch && (
             <div className="relative mb-1 shrink-0">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t(($) => $.create_dialog.runtime_search_placeholder)}
-                className="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-2 text-body outline-none focus:ring-1 focus:ring-ring"
+                className="w-full rounded-md border border-border bg-background py-1.5 ps-8 pe-2 text-body outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           )}
@@ -261,7 +261,7 @@ export function RuntimePicker({
                             onSelect(device.id);
                             setOpen(false);
                           }}
-                          className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${
+                          className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-start text-body transition-colors ${
                             disabled
                               ? "cursor-not-allowed opacity-50"
                               : device.id === selectedRuntimeId

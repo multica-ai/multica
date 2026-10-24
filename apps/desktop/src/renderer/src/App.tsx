@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
-import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
+import { getDir, pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useWorkspaceList } from "@multica/core/workspace";
@@ -10,6 +10,7 @@ import { useHasOnboarded } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { DirectionProvider } from "@multica/ui/components/ui/direction";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
@@ -431,6 +432,7 @@ export default function App() {
   // with the Chinese-first fallback stack before the override kicks in.
   useLayoutEffect(() => {
     document.documentElement.lang = HTML_LANG[locale];
+    document.documentElement.dir = getDir(locale);
   }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
@@ -453,39 +455,41 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      {runtimeConfigResult.ok ? (
-        <CoreProvider
-          apiBaseUrl={runtimeConfigResult.config.apiUrl}
-          wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={
-            windowContext.kind === "main" ? handleDaemonLogout : undefined
-          }
-          onSessionExpired={
-            windowContext.kind === "main" ? handleSessionExpired : undefined
-          }
-          identity={identity}
-          locale={locale}
-          resources={resources}
-          localeAdapter={localeAdapter}
-        >
-          <DesktopAuthSessionBridge />
-          {windowContext.kind === "main" && <DiagnosticRouteReporter />}
-          {windowContext.kind === "main" && (
-            <DesktopClientUsageReporter
-              apiUrl={runtimeConfigResult.config.apiUrl}
-            />
-          )}
-          {windowContext.kind === "issue" ? (
-            <IssueWindowContent />
-          ) : (
-            <AppContent />
-          )}
-        </CoreProvider>
-      ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
-      )}
-      <Toaster />
-      {windowContext.kind === "main" && <UpdateNotification />}
+      <DirectionProvider direction={getDir(locale)}>
+        {runtimeConfigResult.ok ? (
+          <CoreProvider
+            apiBaseUrl={runtimeConfigResult.config.apiUrl}
+            wsUrl={runtimeConfigResult.config.wsUrl}
+            onLogout={
+              windowContext.kind === "main" ? handleDaemonLogout : undefined
+            }
+            onSessionExpired={
+              windowContext.kind === "main" ? handleSessionExpired : undefined
+            }
+            identity={identity}
+            locale={locale}
+            resources={resources}
+            localeAdapter={localeAdapter}
+          >
+            <DesktopAuthSessionBridge />
+            {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+            {windowContext.kind === "main" && (
+              <DesktopClientUsageReporter
+                apiUrl={runtimeConfigResult.config.apiUrl}
+              />
+            )}
+            {windowContext.kind === "issue" ? (
+              <IssueWindowContent />
+            ) : (
+              <AppContent />
+            )}
+          </CoreProvider>
+        ) : (
+          <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+        )}
+        <Toaster />
+        {windowContext.kind === "main" && <UpdateNotification />}
+      </DirectionProvider>
     </ThemeProvider>
   );
 }

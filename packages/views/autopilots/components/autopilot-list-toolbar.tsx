@@ -189,7 +189,7 @@ export function AutopilotListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
+    <span className="ms-auto ps-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
@@ -245,7 +245,7 @@ export function AutopilotListToolbar({
               {AUTOPILOT_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
+                  <span className="ms-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>
@@ -300,7 +300,7 @@ export function AutopilotListToolbar({
                     role="button"
                     tabIndex={-1}
                     aria-label={t(($) => $.toolbar.clear_filters)}
-                    className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
+                    className="-me-1 ms-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();

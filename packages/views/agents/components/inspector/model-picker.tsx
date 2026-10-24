@@ -170,7 +170,7 @@ export function ModelPicker({
           type="button"
           className={
             variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-start text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
               : CHIP_CLASS
           }
           aria-label={triggerTitle}
@@ -240,9 +240,9 @@ export function ModelPicker({
                 HTML5) and triggers the browser-default centering quirk
                 that pushes descendants off-axis (model IDs floated to the
                 center instead of left-aligning under their labels). Use
-                `<span block text-left>` to keep layout deterministic —
+                `<span block text-start>` to keep layout deterministic —
                 matches the fix already applied in thinking-picker.tsx. */}
-            <span className="block min-w-0 flex-1 text-left">
+            <span className="block min-w-0 flex-1 text-start">
               <span className="block truncate text-label font-medium">{m.label}</span>
               {m.label !== m.id && (
                 <span className="mt-0.5 block truncate font-mono text-micro leading-snug text-muted-foreground">
@@ -284,7 +284,7 @@ export function ModelPicker({
           <button
             type="button"
             onClick={() => void select("")}
-            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-start text-caption text-muted-foreground transition-colors hover:bg-accent/50"
           >
             {t(($) => $.pickers.model_clear)}
           </button>

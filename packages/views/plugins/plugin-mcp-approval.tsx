@@ -121,7 +121,7 @@ export function PluginMCPApproval({
                 >
                   <span className="font-mono">{tool.name}</span>
                   {tool.drifted ? (
-                    <Badge variant="destructive" className="ml-2">
+                    <Badge variant="destructive" className="ms-2">
                       {t(($) => $.plugins.mcp.drifted)}
                     </Badge>
                   ) : null}

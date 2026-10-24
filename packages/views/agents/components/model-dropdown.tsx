@@ -165,7 +165,7 @@ export function ModelDropdown({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={disabled}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-start text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -219,7 +219,7 @@ export function ModelDropdown({
                       type="button"
                       key={m.id}
                       onClick={() => select(m.id)}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body transition-colors ${
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-body transition-colors ${
                         m.id === value ? "bg-accent" : "hover:bg-accent/50"
                       }`}
                     >
@@ -286,7 +286,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select(trimmedSearch)}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body text-primary transition-colors hover:bg-accent/50"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-body text-primary transition-colors hover:bg-accent/50"
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span className="truncate">
@@ -299,7 +299,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select("")}
-                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-start text-caption text-muted-foreground transition-colors hover:bg-accent/50"
               >
                 {t(($) => $.model_dropdown.clear_full)}
               </button>

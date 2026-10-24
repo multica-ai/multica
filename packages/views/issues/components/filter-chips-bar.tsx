@@ -601,7 +601,7 @@ function ChipSpan({ chip }: { chip: FilterChip }) {
     // first gains a value; value changes inside it re-render without
     // re-animating. No exit animation — unmount presence isn't worth the
     // machinery for a 150ms nicety.
-    <span className="flex h-6 max-w-72 items-center gap-1.5 rounded-md bg-background pl-2 pr-1 text-caption shadow-xs animate-in fade-in-0 zoom-in-95 duration-150">
+    <span className="flex h-6 max-w-72 items-center gap-1.5 rounded-md bg-background ps-2 pe-1 text-caption shadow-xs animate-in fade-in-0 zoom-in-95 duration-150">
       <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
         {chip.icon}
         <span>{chip.label}</span>
@@ -677,7 +677,7 @@ export function FilterChipsBar({
       {chips.map((chip) => (
         <ChipSpan key={chip.key} chip={chip} />
       ))}
-      <span className="ml-auto flex items-center gap-1.5">
+      <span className="ms-auto flex items-center gap-1.5">
         <Button
           variant="ghost"
           size="sm"

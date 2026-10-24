@@ -3,10 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
   "exports": {
     "./base": "./base.js",
     "./react": "./react.js",
-    "./next": "./next.js"
+    "./next": "./next.js",
+    "./logical-direction": "./logical-direction.js"
   },
   "dependencies": {
     "@eslint/js": "^9.28.0",

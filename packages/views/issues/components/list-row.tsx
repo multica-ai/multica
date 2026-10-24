@@ -144,7 +144,7 @@ function ListRowContent({
               </span>
             )}
             {showLabels && (
-              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+              <span className="ms-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
                 {labels.slice(0, 3).map((label) => (
                   <LabelChip key={label.id} label={label} />
                 ))}
@@ -156,7 +156,7 @@ function ListRowContent({
               </span>
             )}
             {cardCustomProperties.length > 0 && (
-              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+              <span className="ms-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
                 {cardCustomProperties.slice(0, 3).map((property) => (
                   <span
                     key={property.id}

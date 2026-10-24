@@ -57,7 +57,7 @@
 .image-toolbar {
   position: absolute;
   top: 0.5rem;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   display: flex;
   gap: 1px;
   padding: 0.25rem;

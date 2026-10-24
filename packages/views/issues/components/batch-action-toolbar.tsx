@@ -240,7 +240,7 @@ export function BatchActionToolbar({
                 },
               }}
             >
-        <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
+        <div className="flex items-center gap-1.5 ps-1 pe-2 border-e me-1">
           <span className="text-body font-medium">{t(($) => $.batch.selected, { count })}</span>
           <button
             type="button"
@@ -298,7 +298,7 @@ export function BatchActionToolbar({
           onClick={() => setDeleteOpen(true)}
           className="text-destructive hover:text-destructive"
         >
-          <Trash2 className="size-3.5 mr-1" />
+          <Trash2 className="size-3.5 me-1" />
           {t(($) => $.batch.delete)}
         </Button>
             </motion.div>

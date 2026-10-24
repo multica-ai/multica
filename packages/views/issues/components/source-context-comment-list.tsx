@@ -57,11 +57,11 @@ export function SourceContextCommentList({
         return (
           <li
             key={comment.id}
-            className="border-l-2 pl-3 transition-colors duration-150 hover:border-l-foreground/50"
+            className="border-s-2 ps-3 transition-colors duration-150 hover:border-s-foreground/50"
           >
             <div
               className={cn(
-                changeKind && "-my-1 -mr-2 rounded-md px-2 py-1.5",
+                changeKind && "-my-1 -me-2 rounded-md px-2 py-1.5",
                 changeKind === "added" && "bg-success/5",
                 changeKind === "changed" && "bg-amber-500/5",
                 changeKind === "deleted" && "bg-destructive/5",

@@ -147,7 +147,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     task={task} items={items} agentName={name} isLive={active} finalFocus={logFromKeyboard}
     contentState={isPending ? <p role="status" className="text-body text-muted-foreground">{t(($) => $.inline_run.loading)}</p>
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
-        <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
+        <button className="ms-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
       </div> : undefined} />;
   const stopButton = active && <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
     label={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
@@ -199,8 +199,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           </Tooltip> : <span className="truncate" title={statusText}>{statusText}</span>}
         </span>
         <button type="button"
-          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            showProgress ? "flex-1 text-body" : "ml-auto shrink-0",
+          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-start text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            showProgress ? "flex-1 text-body" : "ms-auto shrink-0",
             showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
           aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
           aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
@@ -210,7 +210,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
                 <RunActivitySummary summary={summary} /></>
             : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
-          <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
+          <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90 rtl:-rotate-90")} />
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
         {stopButton}
@@ -222,7 +222,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <RotateCcw /><span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{t(($) => $.execution_log.retry_task_tooltip)}</span>
         </Button>}
       </div>
-      <div className={cn(showIdentity && "pl-8")}>
+      <div className={cn(showIdentity && "ps-8")}>
         {replyTo}
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
         {needsAction && rawError && <p title={rawError}
@@ -232,7 +232,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
-            <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
+            <button className="ms-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button></div>}
           {!isPending && !isError && rows.length === 0 && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.empty)}</p>}
           {rows.length > visibleCount && <button type="button" className="py-1 text-caption text-muted-foreground hover:text-foreground"
             onClick={() => setVisibleCount((count) => count + 12)}>{t(($) => $.inline_run.show_earlier, { count: rows.length - visibleCount })}</button>}
@@ -345,9 +345,9 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
       {(grouped || call) && <span className="shrink-0 text-micro text-muted-foreground">
         {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : row.tool}
       </span>}
-      <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
+      <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90 rtl:-rotate-90")} />
     </summary>
-    {open && <div className="min-w-0 space-y-2 overflow-hidden pl-5.5">
+    {open && <div className="min-w-0 space-y-2 overflow-hidden ps-5.5">
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>
           {t(($) => $.inline_run.show_earlier, { count: row.steps.length - limit })}</button>}

@@ -104,7 +104,7 @@ export function HtmlPreviewSurface({
             <span id={titleId} className="sr-only">
               {title}
             </span>
-            <div className="absolute top-2 right-2 flex gap-1">
+            <div className="absolute top-2 inset-e-2 flex gap-1">
               {onReload && (
                 <Button
                   type="button"

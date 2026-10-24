@@ -746,7 +746,7 @@ export function ChatWindow() {
     "absolute z-50 flex flex-col overflow-hidden bg-surface-raised @container",
     isMobile
       ? "inset-x-0"
-      : "right-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+      : "inset-e-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
   );
   // Soft keyboards shrink only the *visual* viewport — the layout viewport
   // (and this panel's bottom-anchored parent) keeps its full height, so
@@ -1052,7 +1052,7 @@ export function AgentDropdown({
       triggerRender={
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
+          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ms-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
         />
       }
       trigger={
@@ -1399,12 +1399,12 @@ function SessionDropdown({
           handleRowActivationKey(e, () => handleSelectSession(session));
         }}
         className={cn(
-          "group/history-row relative flex min-h-11 min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-md py-1.5 pl-2 pr-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
+          "group/history-row relative flex min-h-11 min-w-0 cursor-default items-center gap-2 overflow-hidden rounded-md py-1.5 ps-2 pe-2 outline-none transition-colors hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:ring-1 focus-visible:ring-ring",
           isCurrent && "bg-accent/70",
           isConfirmingAction && "bg-destructive/5 hover:bg-destructive/5",
         )}
       >
-        {isCurrent && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-brand" />}
+        {isCurrent && <span className="absolute inset-s-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-brand" />}
         {agent ? (
           <ActorAvatar
             actorType="agent"

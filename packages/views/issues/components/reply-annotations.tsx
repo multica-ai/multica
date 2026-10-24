@@ -41,7 +41,7 @@ export function ReplyAnnotations({ draftKey, annotations, disabled, onEditAnnota
             <div className="min-w-0 flex-1">
               <button type="button" disabled={disabled}
                 aria-label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
-                className="w-full rounded-sm p-1 text-left text-body hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                className="w-full rounded-sm p-1 text-start text-body hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
                 onClick={() => {
                   if (onEditAnnotation?.(annotation.id)) {
                     returningToSource.current = true;
@@ -49,7 +49,7 @@ export function ReplyAnnotations({ draftKey, annotations, disabled, onEditAnnota
                   }
                   else setUnavailable(annotation.id);
                 }}>
-                <blockquote className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-border pl-2 text-muted-foreground">
+                <blockquote className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words border-s-2 border-border ps-2 text-muted-foreground">
                   {annotation.quote}
                 </blockquote>
                 {annotation.note && <p className="mt-1 whitespace-pre-wrap break-words">{annotation.note}</p>}

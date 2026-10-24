@@ -640,7 +640,7 @@ export function RepositoriesSection() {
             ) : null}
 
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={repositorySearch}
                 onChange={(event) => setRepositorySearch(event.target.value)}
@@ -650,7 +650,7 @@ export function RepositoriesSection() {
                 aria-label={t(
                   ($) => $.repositories.github_search_placeholder,
                 )}
-                className="pl-8"
+                className="ps-8"
               />
             </div>
           </div>
@@ -749,7 +749,7 @@ export function RepositoriesSection() {
           </div>
 
           <DialogFooter className="m-0 border-t bg-muted/30 px-6 py-4">
-            <p className="mr-auto text-caption text-muted-foreground">
+            <p className="me-auto text-caption text-muted-foreground">
               {t(($) => $.repositories.github_selected_count, {
                 count: selectedRepositories.size,
               })}

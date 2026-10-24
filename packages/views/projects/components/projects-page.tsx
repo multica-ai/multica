@@ -720,7 +720,7 @@ function ProjectBatchToolbar({
   return (
     <>
       <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
+        <div className="me-1 flex items-center gap-1.5 border-e ps-1 pe-2">
           <span className="text-body font-medium">
             {t(($) => $.page.selected, { count: rows.length })}
           </span>
@@ -748,7 +748,7 @@ function ProjectBatchToolbar({
               onClear();
             }}
           >
-            <Pin className="mr-1 size-3.5" />
+            <Pin className="me-1 size-3.5" />
             {t(($) => $.page.pin)}
           </Button>
         )}
@@ -759,7 +759,7 @@ function ProjectBatchToolbar({
             className="text-destructive hover:text-destructive"
             onClick={() => setConfirmDelete(true)}
           >
-            <Trash2 className="mr-1 size-3.5" />
+            <Trash2 className="me-1 size-3.5" />
             {t(($) => $.page.delete)}
           </Button>
         )}
@@ -935,7 +935,7 @@ export function ProjectsPage() {
 
   const showEmpty = !isLoading && projects.length === 0;
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
+    <span className="ms-auto ps-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
@@ -970,13 +970,13 @@ export function ProjectsPage() {
           <div className={PAGE_TOOLBAR}>
             <div className="flex min-w-0 items-center gap-2">
               <div className="relative hidden md:block">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   aria-label={t(($) => $.page.search_placeholder)}
                   placeholder={t(($) => $.page.search_placeholder)}
-                  className="h-8 w-56 pl-8 text-body"
+                  className="h-8 w-56 ps-8 text-body"
                 />
               </div>
               {(hasActiveFilters || search.trim().length > 0) && (
@@ -1019,7 +1019,7 @@ export function ProjectsPage() {
                           role="button"
                           tabIndex={-1}
                           aria-label={t(($) => $.toolbar.clear_filters)}
-                          className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
+                          className="-me-1 ms-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();

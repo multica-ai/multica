@@ -48,7 +48,7 @@ export function IssueDuplicateBanner({
   if (issue.status !== "cancelled" || !original) return null;
 
   return (
-    <div className="mb-4 flex items-center gap-1 rounded-md border bg-muted/40 py-1 pl-3 pr-1 text-body">
+    <div className="mb-4 flex items-center gap-1 rounded-md border bg-muted/40 py-1 ps-3 pe-1 text-body">
       <AppLink
         href={paths.issueDetail(original.id)}
         newTabTitle={original.identifier}
@@ -68,7 +68,7 @@ export function IssueDuplicateBanner({
         <span className="truncate font-medium underline-offset-4 group-hover:underline">
           {original.title}
         </span>
-        <ArrowRight className="ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+        <ArrowRight className="ms-auto h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
       </AppLink>
       <Button
         type="button"
@@ -108,10 +108,10 @@ export function IssueDuplicatesSection({ issueId }: { issueId: string }) {
         <span className="rounded-xs bg-muted px-1 text-micro font-medium tabular-nums text-muted-foreground">
           {duplicates.length}
         </span>
-        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+        <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${open ? "rotate-90 rtl:-rotate-90" : ""}`} />
       </button>
       {open && (
-        <div className="pl-2">
+        <div className="ps-2">
           {duplicates.map((duplicate) => (
             <AppLink
               key={duplicate.id}

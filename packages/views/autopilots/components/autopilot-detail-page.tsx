@@ -154,7 +154,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
       </span>
-      <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
+      <span className="w-32 shrink-0 text-end text-caption text-muted-foreground tabular-nums">
         {formatInTimeZone(run.triggered_at || run.created_at, undefined, i18n.language)}
       </span>
       {syntheticTask && !run.issue_id && (
@@ -228,7 +228,7 @@ function SkippedRunsGroup({
     <div className="border-t bg-muted/20">
       <button
         type="button"
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-start text-body hover:bg-accent/30 transition-colors"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
       >
@@ -241,7 +241,7 @@ function SkippedRunsGroup({
           {t(($) => $.run.skipped_group.summary, { count: runs.length })}
         </span>
         {latestRun && (
-          <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
+          <span className="w-32 shrink-0 text-end text-caption text-muted-foreground tabular-nums">
             {formatInTimeZone(latestRun.triggered_at || latestRun.created_at, undefined, i18n.language)}
           </span>
         )}
@@ -816,7 +816,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         leaf={
           <>
             <h1 className="min-w-0 truncate text-body font-medium text-foreground">{autopilot.title}</h1>
-            <div className="ml-1 flex items-center gap-1.5 shrink-0">
+            <div className="ms-1 flex items-center gap-1.5 shrink-0">
               <Switch
                 size="sm"
                 checked={autopilot.status === "active"}
@@ -843,7 +843,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           canWrite ? (
             <>
               <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
-                <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+                <Pencil className="h-3.5 w-3.5 sm:me-1" />
                 <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
               </Button>
               <Button
@@ -854,9 +854,9 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
               >
                 {triggerAutopilot.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 sm:me-1 animate-spin" />
                 ) : (
-                  <Play className="h-3.5 w-3.5 sm:mr-1" />
+                  <Play className="h-3.5 w-3.5 sm:me-1" />
                 )}
                 <span className="hidden sm:inline">
                   {triggerAutopilot.isPending
@@ -986,7 +986,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               </h2>
               {canWrite && (
                 <Button size="sm" variant="outline" onClick={() => setTriggerDialogOpen(true)}>
-                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  <Plus className="h-3.5 w-3.5 me-1" />
                   {t(($) => $.detail.add_trigger)}
                 </Button>
               )}
@@ -1043,7 +1043,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 {t(($) => $.detail.section_danger)}
               </h2>
               <Button size="sm" variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
-                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                <Trash2 className="h-3.5 w-3.5 me-1" />
                 {t(($) => $.detail.delete_button)}
               </Button>
             </section>

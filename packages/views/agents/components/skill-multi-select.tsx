@@ -53,7 +53,7 @@ export function SkillMultiSelect({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="mt-1.5 flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+          className="mt-1.5 flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-3 text-start transition-colors hover:border-primary/40 hover:bg-accent/40"
         >
           <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1 truncate text-body text-muted-foreground">
@@ -75,7 +75,7 @@ export function SkillMultiSelect({
         <div className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {label}
           {selectedIds.size > 0 ? (
-            <span className="ml-2 text-muted-foreground">({selectedIds.size})</span>
+            <span className="ms-2 text-muted-foreground">({selectedIds.size})</span>
           ) : null}
         </div>
         <Button

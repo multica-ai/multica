@@ -553,7 +553,7 @@ function MentionRow({
       <button
         type="button"
         ref={buttonRef}
-        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-caption transition-colors ${
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-start text-caption transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         } ${isClosed ? "opacity-60" : ""}`}
         onClick={onSelect}
@@ -593,7 +593,7 @@ function MentionRow({
       <button
         type="button"
         ref={buttonRef}
-        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-caption transition-colors ${
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-start text-caption transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         }`}
         onClick={onSelect}
@@ -610,7 +610,7 @@ function MentionRow({
           )}
         </span>
         {projectStatusCfg && (
-          <span className={`${projectStatusCfg.dotColor} ml-auto size-1.5 shrink-0 rounded-full`} />
+          <span className={`${projectStatusCfg.dotColor} ms-auto size-1.5 shrink-0 rounded-full`} />
         )}
       </button>
     );
@@ -627,7 +627,7 @@ function MentionRow({
       aria-label={
         disabledMessage ? `${item.label}: ${disabledMessage}` : undefined
       }
-      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-caption transition-colors ${
+      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-start text-caption transition-colors ${
         selected ? "bg-accent" : disabledMessage ? "" : "hover:bg-accent/50"
       } ${disabledMessage ? "cursor-not-allowed opacity-50" : ""}`}
       onClick={onSelect}
@@ -642,12 +642,12 @@ function MentionRow({
         {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
       </span>
       {item.type === "agent" && (
-        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">
+        <Badge variant="outline" className="ms-auto text-micro h-4 px-1.5">
           {t(($) => $.mention.agent_badge)}
         </Badge>
       )}
       {item.type === "squad" && (
-        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">
+        <Badge variant="outline" className="ms-auto text-micro h-4 px-1.5">
           {t(($) => $.mention.squad_badge)}
         </Badge>
       )}

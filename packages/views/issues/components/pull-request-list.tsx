@@ -124,7 +124,7 @@ export function PullRequestList({
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="block w-[calc(100%+1rem)] -mx-2 rounded-md px-2 py-1.5 text-left text-micro text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            className="block w-[calc(100%+1rem)] -mx-2 rounded-md px-2 py-1.5 text-start text-micro text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
           >
             {expanded
               ? t(($) => $.detail.pull_request_card_show_less)
@@ -215,7 +215,7 @@ function PullRequestRowMenu({ pr, actions }: { pr: GitHubPullRequest; actions: R
             variant="ghost"
             size="icon-xs"
             label={t(($) => $.pr_automation.row_menu)}
-            className="absolute top-0.5 right-0 opacity-0 group-hover/pr:opacity-100 group-focus-within/pr:opacity-100 data-popup-open:opacity-100 [@media(pointer:coarse)]:opacity-100"
+            className="absolute top-0.5 inset-e-0 opacity-0 group-hover/pr:opacity-100 group-focus-within/pr:opacity-100 data-popup-open:opacity-100 [@media(pointer:coarse)]:opacity-100"
           >
             <MoreHorizontal />
           </IconButton>
@@ -446,7 +446,7 @@ function PullRequestRow({
         >
           <StateIcon className={cn("mt-px size-3.5 shrink-0", cfg.className)} />
           <div className="min-w-0 flex-1">
-            <p className={cn("truncate text-caption font-medium", actions ? "pr-5" : null)}>
+            <p className={cn("truncate text-caption font-medium", actions ? "pe-5" : null)}>
               {stripIssueKeyFromTitle(pr.title, identifier)}
             </p>
             <div className="mt-1 flex items-center gap-2">
@@ -471,7 +471,7 @@ function PullRequestRow({
             {verdict.kind === "failed" ? <PullRequestProblems verdict={verdict} stale={stale} /> : null}
           </div>
         </TooltipTrigger>
-        <TooltipContent side="left" align="start" className="flex-col items-start gap-0.5">
+        <TooltipContent side="inline-start" align="start" className="flex-col items-start gap-0.5">
           <span className="font-medium">{pr.title}</span>
           <span className="text-muted-foreground">
             {pr.repo_owner}/{pr.repo_name}#{pr.number}
@@ -528,7 +528,7 @@ function VerdictPill({
       data-testid="pull-request-verdict"
       title={title ?? pill.title}
       className={cn(
-        inline ? null : "ml-auto",
+        inline ? null : "ms-auto",
         "inline-flex h-4.5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-micro font-medium tabular-nums",
         TONE_CLASS[pill.tone],
         stale ? "opacity-60" : null,
@@ -568,7 +568,7 @@ function PullRequestProblems({
         </li>
       ))}
       {remaining > 0 ? (
-        <li className="py-px pl-4.5 text-muted-foreground">
+        <li className="py-px ps-4.5 text-muted-foreground">
           {t(($) => $.detail.pull_request_checks_more, { count: remaining })}
         </li>
       ) : null}

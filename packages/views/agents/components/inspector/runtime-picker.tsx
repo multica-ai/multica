@@ -158,7 +158,7 @@ export function RuntimePicker({
         <span className="min-w-0 truncate font-mono">{combinedLabel}</span>
         {selected && (
           <span
-            className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
+            className={`ms-auto h-1.5 w-1.5 shrink-0 rounded-full ${
               isOnline ? "bg-success" : "bg-muted-foreground/40"
             }`}
           />
@@ -251,7 +251,7 @@ export function RuntimePicker({
           type="button"
           className={
             variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-start text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
               : CHIP_CLASS
           }
           aria-label={triggerTitle}
@@ -299,7 +299,7 @@ export function RuntimePicker({
           )}
           {selected && (
             <span
-              className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
+              className={`ms-auto h-1.5 w-1.5 shrink-0 rounded-full ${
                 isOnline ? "bg-success" : "bg-muted-foreground/40"
               }`}
             />
@@ -320,7 +320,7 @@ export function RuntimePicker({
             type="button"
             onClick={() => setMachineId(null)}
             aria-label={t(($) => $.pickers.runtime_back_to_machines)}
-            className="flex w-full items-center gap-2 px-2 py-2 text-left text-body transition-colors hover:bg-muted/60"
+            className="flex w-full items-center gap-2 px-2 py-2 text-start text-body transition-colors hover:bg-muted/60"
           >
             <ChevronLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate font-medium">
@@ -420,7 +420,7 @@ export function RuntimePicker({
               type="button"
               data-picker-item
               onClick={() => setMachineId(machine.id)}
-              className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-body transition-colors hover:bg-accent"
+              className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-start text-body transition-colors hover:bg-accent"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">

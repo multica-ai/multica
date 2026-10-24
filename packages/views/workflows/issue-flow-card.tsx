@@ -44,7 +44,7 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
         render={
           <button
             type="button"
-            className="-ml-1 inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
+            className="-ms-1 inline-flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors hover:bg-accent data-popup-open:bg-accent"
           >
             <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate text-foreground">{workflow.name}</span>

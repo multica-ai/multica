@@ -45,7 +45,7 @@ export function JoinDiscordCard() {
         href={DISCORD_URL}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex h-8 items-center gap-2 rounded-md px-2 pr-8 text-body text-muted-foreground ring-sidebar-ring outline-hidden transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:ring-2"
+        className="flex h-8 items-center gap-2 rounded-md px-2 pe-8 text-body text-muted-foreground ring-sidebar-ring outline-hidden transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:ring-2"
       >
         <DiscordIcon className="size-4 shrink-0" />
         <span className="truncate">
@@ -59,7 +59,7 @@ export function JoinDiscordCard() {
           type="button"
           aria-label={t(($) => $.sidebar.discord_card.dismiss)}
           onClick={dismiss}
-          className="absolute inset-y-0 right-1 my-auto flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 group-hover/discord:opacity-100 [@media(hover:none)]:opacity-100"
+          className="absolute inset-y-0 inset-e-1 my-auto flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 group-hover/discord:opacity-100 [@media(hover:none)]:opacity-100"
         >
           <X className="size-3.5" />
         </button>

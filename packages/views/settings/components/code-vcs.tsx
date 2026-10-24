@@ -180,7 +180,7 @@ export function VCSConnectionRows() {
             </span>
           }
           description={
-            <span className="block break-all pl-12">
+            <span className="block break-all ps-12">
               {t(($) => $.vcs.connected_as, { login: c.account_login })}
             </span>
           }
@@ -234,7 +234,7 @@ export function VCSConnectionRows() {
             </span>
           }
           description={
-            connectDetail ? <span className="block pl-12">{connectDetail}</span> : undefined
+            connectDetail ? <span className="block ps-12">{connectDetail}</span> : undefined
           }
         >
           {canManage ? (

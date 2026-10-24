@@ -238,7 +238,7 @@ function ConfigField({
     <div className="min-w-0">
       <div className="text-caption font-medium">
         {field.label}
-        {field.required ? <span className="ml-1 text-destructive">*</span> : null}
+        {field.required ? <span className="ms-1 text-destructive">*</span> : null}
       </div>
       {field.description ? (
         <p className="mt-0.5 text-caption text-muted-foreground">{field.description}</p>
@@ -534,7 +534,7 @@ function PublishedPackage({
               <Button
                 size="sm"
                 variant="ghost"
-                className="ml-auto"
+                className="ms-auto"
                 disabled={!canManage || busy}
                 onClick={() => onReview(version.id)}
               >

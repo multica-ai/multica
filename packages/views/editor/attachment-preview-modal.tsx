@@ -839,7 +839,7 @@ function PreviewPanel({
       {/* Three columns so the counter stays centered on the window while a
           long filename truncates before reaching it. */}
       <header
-        className="dark @container grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 pl-3 pr-2 text-foreground"
+        className="dark @container grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 ps-3 pe-2 text-foreground"
         style={surface === "viewer" ? DRAG : undefined}
       >
         <div className="flex min-w-0 items-center gap-2.5">
@@ -1069,7 +1069,7 @@ function PreviewPanel({
           // A column beside the stage rather than a layer over it: the file
           // re-fits into what is left instead of hiding under the panel.
           <aside
-            className="dark w-80 max-w-[45vw] shrink-0 overflow-y-auto border-l border-border bg-background/40 text-foreground"
+            className="dark w-80 max-w-[45vw] shrink-0 overflow-y-auto border-s border-border bg-background/40 text-foreground"
             aria-label={t(($) => $.attachment.info)}
           >
             {info.content}
@@ -1106,7 +1106,7 @@ function ChromeButton({
       label={label}
       shortcut={
         shortcut ? (
-          <ShortcutKeycaps shortcut={createShortcutChord(shortcut)} decorative className="ml-1.5" />
+          <ShortcutKeycaps shortcut={createShortcutChord(shortcut)} decorative className="ms-1.5" />
         ) : undefined
       }
       side="bottom"
@@ -1200,7 +1200,7 @@ function SequenceButton({
         type="button"
         className={cn(
           "dark absolute top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-secondary/80 text-foreground transition-colors enabled:hover:bg-secondary disabled:opacity-30",
-          side === "prev" ? "left-3" : "right-3",
+          side === "prev" ? "inset-s-3" : "inset-e-3",
         )}
         aria-label={label}
         disabled={!onClick}

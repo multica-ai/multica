@@ -90,7 +90,7 @@ export function StepProgressBar({
           disabled={backDisabled}
           label={t(($) => $.common.back)}
           tooltipSide="bottom"
-          className="-ml-2 shrink-0"
+          className="-ms-2 shrink-0"
           style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
         >
           <ArrowLeft />
@@ -225,7 +225,7 @@ export function StepSidebar({
                           <span className="sr-only">{index + 1}</span>
                         )}
                       </StepperIndicator>
-                      <div className="min-w-0 flex-1 text-left">
+                      <div className="min-w-0 flex-1 text-start">
                         <StepperTitle
                           className={cn(
                             "transition-colors",
@@ -254,14 +254,14 @@ export function StepSidebar({
                         <button
                           type="button"
                           onClick={() => onStepChange(stepId)}
-                          className="flex w-full items-start gap-3 rounded-md pb-6 text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="flex w-full items-start gap-3 rounded-md pb-6 text-start transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           {body}
                         </button>
                       ) : (
                         <div
                           className={cn(
-                            "flex w-full items-start gap-3 text-left",
+                            "flex w-full items-start gap-3 text-start",
                             !isLast && "pb-6",
                           )}
                         >
@@ -275,7 +275,7 @@ export function StepSidebar({
                       {!isLast ? (
                         <StepperSeparator
                           className={cn(
-                            "absolute left-2 top-6 -order-1 m-0 w-px -translate-x-1/2",
+                            "absolute inset-s-2 top-6 -order-1 m-0 w-px -translate-x-1/2 rtl:translate-x-1/2",
                             // StepperSeparator hardcodes a 3rem height for
                             // vertical navs, which overshot the row and drew
                             // the line straight through the next indicator.

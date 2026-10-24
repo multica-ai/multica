@@ -146,7 +146,7 @@ export const SlashCommandList = forwardRef<
             ref={(el) => {
               itemRefs.current[index] = el;
             }}
-            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-caption transition-colors ${
+            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-start text-caption transition-colors ${
               selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
             }`}
             onClick={() => selectItem(index)}

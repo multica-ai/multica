@@ -36,7 +36,7 @@ back for review. Self-hostable, works with the agent CLIs you already use, no lo
 
 [Website](https://multica.ai) · [Docs](https://multica.ai/docs) · [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Download](https://multica.ai/download) · [Vision](VISION.md) · [Self-Hosting](SELF_HOSTING.md) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
 
-**English | [简体中文](README.zh.md)**
+**English | [简体中文](README.zh.md) | [العربية](README.ar.md)**
 
 </div>
 

@@ -124,7 +124,7 @@ export function RevisionConflictCompare({
       <div className="mt-2 overflow-hidden rounded-md border bg-background/70">
         <div className="grid grid-cols-2 border-b bg-muted/40 font-medium text-muted-foreground">
           <div className="min-w-0 px-3 py-1.5">{serverLabel}</div>
-          <div className="min-w-0 border-l px-3 py-1.5">{localLabel}</div>
+          <div className="min-w-0 border-s px-3 py-1.5">{localLabel}</div>
         </div>
         <div
           data-revision-diff-scroll
@@ -136,7 +136,7 @@ export function RevisionConflictCompare({
               className="grid grid-cols-2 border-b last:border-b-0"
             >
               <DiffCell side="server" line={row.server} />
-              <div className="min-w-0 border-l">
+              <div className="min-w-0 border-s">
                 <DiffCell side="local" line={row.local} />
               </div>
             </div>
@@ -150,7 +150,7 @@ export function RevisionConflictCompare({
             {/* px-3 matches the label cells above, so each button's left
                 edge lands on the same vertical line as its column header. */}
             <div className="min-w-0 px-3 py-2">{serverAction}</div>
-            <div className="min-w-0 border-l px-3 py-2">{localAction}</div>
+            <div className="min-w-0 border-s px-3 py-2">{localAction}</div>
           </div>
         ) : null}
       </div>

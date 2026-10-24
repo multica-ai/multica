@@ -235,7 +235,7 @@ function BalanceCard() {
           <div className="space-y-1 text-body">
             <div className="text-display-sm font-semibold tabular-nums">
               {balance.data?.balance_credit.toLocaleString(locale) ?? 0}
-              <span className="ml-1 text-body font-normal text-muted-foreground">
+              <span className="ms-1 text-body font-normal text-muted-foreground">
                 {t(($) => $.balance.credits_suffix)}
               </span>
             </div>
@@ -343,9 +343,9 @@ function BuyAndPortalSection() {
             onClick={() => void handlePortal()}
           >
             {createPortal.isPending ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
-              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+              <ExternalLink className="me-1.5 h-3.5 w-3.5" />
             )}
             {t(($) => $.buy.open_portal)}
           </Button>
@@ -391,7 +391,7 @@ function TierButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="rounded-md border bg-background p-3 text-left transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
+      className="rounded-md border bg-background p-3 text-start transition hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
     >
       <div className="flex items-center justify-between">
         <div className="text-body font-medium">{display}</div>
@@ -460,7 +460,7 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
       <div className="flex items-center justify-between gap-2">
         <span className="text-caption font-medium">
           {row.tx_type}
-          <span className="ml-1.5 rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
+          <span className="ms-1.5 rounded-xs bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {row.source}
           </span>
         </span>
@@ -542,7 +542,7 @@ function BatchRow({ row }: { row: BillingBatch }) {
       <div className="flex items-center justify-between gap-2">
         <span className="text-caption font-medium">
           {row.source_type}
-          <span className="ml-1.5 font-mono text-micro text-muted-foreground">
+          <span className="ms-1.5 font-mono text-micro text-muted-foreground">
             {t(($) => $.batches.id_suffix, { id: row.id.slice(0, 8) })}
           </span>
         </span>
@@ -613,7 +613,7 @@ function TopupRow({ row }: { row: BillingTopup }) {
         <span className="text-caption font-medium">
           {row.tier_id || row.id.slice(0, 8)}
           <span
-            className={`ml-1.5 rounded-xs px-1.5 py-0.5 font-mono text-micro ${
+            className={`ms-1.5 rounded-xs px-1.5 py-0.5 font-mono text-micro ${
               row.status === "credited"
                 ? "bg-green-500/10 text-green-700 dark:text-green-400"
                 : row.status === "failed" || row.status === "canceled"

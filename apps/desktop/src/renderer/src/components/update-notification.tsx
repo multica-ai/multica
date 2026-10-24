@@ -28,11 +28,11 @@ export function UpdateNotification() {
   if (dismissed) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-border bg-background p-4 shadow-lg animate-in slide-in-from-bottom-2 fade-in duration-300">
+    <div className="fixed bottom-4 inset-e-4 z-50 w-80 rounded-lg border border-border bg-background p-4 shadow-lg animate-in slide-in-from-bottom-2 fade-in duration-300">
       <button
         type="button"
         onClick={() => setDismissed(true)}
-        className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+        className="absolute top-2 inset-e-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
       >
         <X className="size-3.5" />
       </button>

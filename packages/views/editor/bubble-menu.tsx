@@ -134,7 +134,7 @@ function MarkButton({
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8}>
         {label}
-        <ShortcutKeycaps shortcut={shortcut} className="ml-1.5" />
+        <ShortcutKeycaps shortcut={shortcut} className="ms-1.5" />
       </TooltipContent>
     </Tooltip>
   );
@@ -297,7 +297,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
           >
             <item.icon className="size-3.5" />
             {item.label}
-            {item.active && <Check className="ml-auto size-3.5" />}
+            {item.active && <Check className="ms-auto size-3.5" />}
           </button>
         ))}
       </PopoverContent>
@@ -350,7 +350,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
           }}
         >
           <List className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.bullet_list)}
-          {isBullet && <Check className="ml-auto size-3.5" />}
+          {isBullet && <Check className="ms-auto size-3.5" />}
         </button>
         <button
           type="button"
@@ -362,7 +362,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
           }}
         >
           <ListOrdered className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.ordered_list)}
-          {isOrdered && <Check className="ml-auto size-3.5" />}
+          {isOrdered && <Check className="ms-auto size-3.5" />}
         </button>
         <button
           type="button"
@@ -374,7 +374,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
           }}
         >
           <ListTodo className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.task_list)}
-          {isTask && <Check className="ml-auto size-3.5" />}
+          {isTask && <Check className="ms-auto size-3.5" />}
         </button>
       </PopoverContent>
     </Popover>

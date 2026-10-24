@@ -212,7 +212,7 @@ export function ChooseRuntimePage({
             <div className="relative w-full sm:w-60">
               <Search
                 aria-hidden="true"
-                className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
               />
               <Input
                 ref={searchRef}
@@ -224,9 +224,9 @@ export function ChooseRuntimePage({
                 }}
                 placeholder={t(($) => $.creation_studio.runtime_step.search_placeholder)}
                 aria-label={t(($) => $.creation_studio.runtime_step.search_placeholder)}
-                className="h-8 pl-8 pr-8"
+                className="h-8 ps-8 pe-8"
               />
-              <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-xs border bg-muted px-1 text-micro text-muted-foreground">
+              <kbd className="pointer-events-none absolute inset-e-2 top-1/2 -translate-y-1/2 rounded-xs border bg-muted px-1 text-micro text-muted-foreground">
                 /
               </kbd>
             </div>

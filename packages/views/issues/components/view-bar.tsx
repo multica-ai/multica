@@ -428,7 +428,7 @@ export function ViewBar({
       <div
         ref={measureRef}
         aria-hidden
-        className="pointer-events-none invisible absolute left-0 top-0 flex flex-nowrap items-center gap-1"
+        className="pointer-events-none invisible absolute inset-s-0 top-0 flex flex-nowrap items-center gap-1"
       >
         {visible.map((item) => (
           <span key={item.barItemId} className="inline-flex">

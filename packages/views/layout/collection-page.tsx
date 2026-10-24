@@ -54,7 +54,7 @@ export function CollectionPageHeader({
           </span>
         ) : null}
         {description || learnMore ? (
-          <p className="ml-2 hidden min-w-0 truncate text-caption text-muted-foreground md:block">
+          <p className="ms-2 hidden min-w-0 truncate text-caption text-muted-foreground md:block">
             {description}
             {learnMore ? (
               <>

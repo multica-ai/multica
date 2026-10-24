@@ -576,6 +576,9 @@ export function MermaidDiagram({
               a user who was only trying to look at the rest of a wide chart. */}
           <div
             ref={scrollRef}
+            // Zoom and drag-to-scroll do scrollLeft maths on a diagram that is
+            // laid out left-to-right, so the scroller stays LTR in RTL pages.
+            dir="ltr"
             className="mermaid-diagram-scroll"
             style={{ maxHeight: MERMAID_PREVIEW_MAX_HEIGHT_PX }}
             {...dragToScroll}

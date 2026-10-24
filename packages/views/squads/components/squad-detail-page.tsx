@@ -212,7 +212,7 @@ export function SquadDetailPage() {
         actions={
           canManage ? (
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmArchive(true)}>
-              <Trash2 className="size-3.5 mr-1" />
+              <Trash2 className="size-3.5 me-1" />
               {t(($) => $.inspector.archive_button)}
             </Button>
           ) : null
@@ -393,7 +393,7 @@ function SquadNameEditor({
         <button
           type="button"
           {...triggerProps}
-          className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded-xs px-1 text-left text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
+          className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded-xs px-1 text-start text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
         >
           <span>{value}</span>
           <Pencil className="h-3.5 w-3.5 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
@@ -550,7 +550,7 @@ function AddMemberDialog({
           <div>
             <Label className="text-caption text-muted-foreground">{t(($) => $.add_member_dialog.label_member)}</Label>
             <Popover open={pickerOpen} onOpenChange={(v) => { setPickerOpen(v); if (!v) setPickerFilter(""); }}>
-              <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1 text-left text-body transition-colors hover:bg-muted">
+              <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1 text-start text-body transition-colors hover:bg-muted">
                 {target ? (
                   <ActorAvatar actorType={target.type} actorId={target.id} size="sm" />
                 ) : (
@@ -701,7 +701,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
     <button
       type="button"
       onClick={() => setEditing(true)}
-      className="text-caption text-muted-foreground mt-0.5 text-left hover:text-foreground transition-colors"
+      className="text-caption text-muted-foreground mt-0.5 text-start hover:text-foreground transition-colors"
     >
       {value || <span className="italic opacity-60">{t(($) => $.role_editor.empty)}</span>}
     </button>
@@ -842,7 +842,7 @@ function SquadDescriptionEditor({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded-xs px-1 text-left text-caption leading-relaxed transition-colors hover:bg-accent/50"
+        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded-xs px-1 text-start text-caption leading-relaxed transition-colors hover:bg-accent/50"
       >
         {value ? (
           <span className="text-muted-foreground">{value}</span>
@@ -1134,12 +1134,12 @@ function SquadMembersTab({
                 render={<AppLink href={createAgentHref} />}
                 nativeButton={false}
               >
-                <Plus className="size-3.5 mr-1.5" />
+                <Plus className="size-3.5 me-1.5" />
                 {t(($) => $.members_tab.create_agent_button)}
               </Button>
             )}
             <Button size="sm" variant="outline" onClick={onAddMemberClick}>
-              <Plus className="size-3.5 mr-1.5" />
+              <Plus className="size-3.5 me-1.5" />
               {t(($) => $.members_tab.add_member_button)}
             </Button>
           </div>

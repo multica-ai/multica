@@ -172,7 +172,7 @@ function RuntimeMachineFilterItem({
       onClick={onClick}
       data-active={active || undefined}
       data-testid={active ? "agents-runtime-filter-active" : undefined}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-caption transition-colors ${
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-start text-caption transition-colors ${
         active
           ? "bg-accent text-accent-foreground"
           : "text-foreground hover:bg-muted/60 data-highlighted:bg-muted/60"

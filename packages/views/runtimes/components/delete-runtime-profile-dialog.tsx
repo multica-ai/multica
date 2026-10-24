@@ -91,7 +91,7 @@ export function DeleteRuntimeProfileDialog({
           <AlertDialogTitle className="font-sans text-title-sm font-semibold">
             {t(($) => $.profiles.delete_dialog.title)}
           </AlertDialogTitle>
-          <AlertDialogDescription className="mt-1 text-left text-body leading-5 text-pretty">
+          <AlertDialogDescription className="mt-1 text-start text-body leading-5 text-pretty">
             {t(($) => $.profiles.delete_dialog.description, {
               name: profile.display_name,
             })}

@@ -282,7 +282,7 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
               }
             }} />
             <div className="flex items-center justify-end gap-1 px-1 pb-1">
-              {editingExisting && <IconButton variant="ghost" size="icon-sm" className="mr-auto text-muted-foreground hover:text-destructive"
+              {editingExisting && <IconButton variant="ghost" size="icon-sm" className="me-auto text-muted-foreground hover:text-destructive"
                 label={t(($) => $.reply.annotations.remove, { number: annotations.findIndex((a) => a.id === editing.id) + 1 })}
                 onClick={() => {
                   useCommentDraftStore.getState().removeAnnotation(draftKey, editing.id);

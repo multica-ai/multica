@@ -120,13 +120,13 @@ export function KeyboardShortcutsTab() {
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1 sm:max-w-sm">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t(($) => $.shortcuts.search_placeholder)}
             aria-label={t(($) => $.shortcuts.search_placeholder)}
-            className="pl-8"
+            className="ps-8"
           />
         </div>
         <Button
@@ -347,11 +347,11 @@ function ShortcutRow({
           </IconButton>
         </div>
         {errorText ? (
-          <span role="alert" className="max-w-72 text-right text-caption text-destructive">
+          <span role="alert" className="max-w-72 text-end text-caption text-destructive">
             {errorText}
           </span>
         ) : recording ? (
-          <span className="text-right text-micro text-muted-foreground">
+          <span className="text-end text-micro text-muted-foreground">
             {t(($) => $.shortcuts.record_hint)}
           </span>
         ) : null}

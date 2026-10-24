@@ -777,10 +777,10 @@ function CostByList({
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div className="text-right text-caption tabular-nums text-muted-foreground">
+            <div className="text-end text-caption tabular-nums text-muted-foreground">
               {formatTokens(row.tokens)}
             </div>
-            <div className="text-right text-body font-medium tabular-nums">
+            <div className="text-end text-body font-medium tabular-nums">
               ${row.cost.toFixed(2)}
             </div>
           </div>
@@ -805,7 +805,7 @@ function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
         className="inline-flex items-center gap-1 text-caption text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronRight
-          className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`}
+          className={`h-3 w-3 transition-transform ${open ? "rotate-90 rtl:-rotate-90" : ""}`}
         />
         {t(($) => $.usage.daily_breakdown_toggle)}
       </button>
@@ -831,10 +831,10 @@ function DailyBreakdownTable({ usage }: { usage: RuntimeUsage[] }) {
       <div className="grid grid-cols-[100px_1fr_80px_80px_80px_80px] gap-2 border-b px-3 py-2 text-caption font-medium text-muted-foreground">
         <div>{t(($) => $.usage.table_date)}</div>
         <div>{t(($) => $.usage.table_model)}</div>
-        <div className="text-right">{t(($) => $.usage.table_input)}</div>
-        <div className="text-right">{t(($) => $.usage.table_output)}</div>
-        <div className="text-right">{t(($) => $.usage.table_cache_r)}</div>
-        <div className="text-right">{t(($) => $.usage.table_cache_w)}</div>
+        <div className="text-end">{t(($) => $.usage.table_input)}</div>
+        <div className="text-end">{t(($) => $.usage.table_output)}</div>
+        <div className="text-end">{t(($) => $.usage.table_cache_r)}</div>
+        <div className="text-end">{t(($) => $.usage.table_cache_w)}</div>
       </div>
       <div className="max-h-64 overflow-y-auto divide-y">
         {[...byDate.entries()].map(([date, rows]) =>
@@ -845,16 +845,16 @@ function DailyBreakdownTable({ usage }: { usage: RuntimeUsage[] }) {
             >
               <div className="text-muted-foreground">{date}</div>
               <div className="truncate font-mono">{row.model}</div>
-              <div className="text-right tabular-nums">
+              <div className="text-end tabular-nums">
                 {formatTokens(row.input_tokens)}
               </div>
-              <div className="text-right tabular-nums">
+              <div className="text-end tabular-nums">
                 {formatTokens(row.output_tokens)}
               </div>
-              <div className="text-right tabular-nums">
+              <div className="text-end tabular-nums">
                 {formatTokens(row.cache_read_tokens)}
               </div>
-              <div className="text-right tabular-nums">
+              <div className="text-end tabular-nums">
                 {formatTokens(row.cache_write_tokens)}
               </div>
             </div>

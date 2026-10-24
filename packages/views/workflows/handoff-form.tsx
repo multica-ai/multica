@@ -262,7 +262,7 @@ function ScopeOption({
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
-        "flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
+        "flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-start transition-colors",
         selected ? "bg-background shadow-xs ring-1 ring-surface-border" : "hover:bg-accent/60",
       )}
     >
@@ -334,7 +334,7 @@ export function HandoffFields({
                 aria-checked={selected}
                 disabled={!canEdit}
                 onClick={() => choose(option.mode)}
-                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left disabled:cursor-default"
+                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-start disabled:cursor-default"
               >
                 <RadioDot selected={selected} />
                 <span className="min-w-0">
@@ -343,7 +343,7 @@ export function HandoffFields({
                 </span>
               </button>
               {selected && option.mode !== "none" && (
-                <div className="px-3 pb-3 pl-9">
+                <div className="px-3 pb-3 ps-9">
                   <HandlerPicker
                     kind={option.mode}
                     value={step.handler}
@@ -446,7 +446,7 @@ function HandlerPicker({
           type="button"
           disabled={disabled}
           aria-label={placeholder}
-          className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-background px-2.5 text-left text-body disabled:cursor-default"
+          className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-background px-2.5 text-start text-body disabled:cursor-default"
         />
       }
       trigger={

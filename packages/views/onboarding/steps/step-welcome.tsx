@@ -172,7 +172,7 @@ export function StepWelcome({
           fills the viewport edge-to-edge. `justify-center` inside
           centers the mock cards vertically, mirroring the left
           column's copy-center layout. */}
-      <div className="hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
+      <div className="hidden border-s bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
         <DragStrip />
         <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
           <WelcomeIllustration />
@@ -214,7 +214,7 @@ function WelcomeIllustration() {
         }
       />
       <MockActivityCard
-        className="-translate-x-5 -rotate-[1.2deg]"
+        className="-translate-x-5 rtl:translate-x-5 -rotate-[1.2deg]"
         actor={{
           kind: "agent",
           name: t(($) => $.welcome.illustration.card2_actor_name),
@@ -225,7 +225,7 @@ function WelcomeIllustration() {
         status="in_progress"
       />
       <MockActivityCard
-        className="translate-x-8 rotate-[1.6deg]"
+        className="translate-x-8 rtl:-translate-x-8 rotate-[1.6deg]"
         actor={{
           kind: "agent",
           name: t(($) => $.welcome.illustration.card3_actor_name),
@@ -237,7 +237,7 @@ function WelcomeIllustration() {
         timestamp={t(($) => $.welcome.illustration.card3_timestamp)}
       />
       <MockActivityCard
-        className="-translate-x-6 -rotate-[0.8deg]"
+        className="-translate-x-6 rtl:translate-x-6 -rotate-[0.8deg]"
         actor={{
           kind: "agent",
           name: t(($) => $.welcome.illustration.card4_actor_name),
@@ -248,7 +248,7 @@ function WelcomeIllustration() {
         status="in_review"
       />
       <MockActivityCard
-        className="translate-x-6 rotate-[1deg]"
+        className="translate-x-6 rtl:-translate-x-6 rotate-[1deg]"
         actor={{
           kind: "agent",
           name: t(($) => $.welcome.illustration.card5_actor_name),

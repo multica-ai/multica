@@ -249,7 +249,7 @@ function RunDetailRow({
         <button
           type="button"
           onClick={onCopy}
-          className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+          className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded-xs px-1 py-0.5 text-start transition-colors hover:bg-accent/60"
         >
           <span className="text-muted-foreground">{label}</span>
           <span className="flex min-w-0 items-start gap-1.5">
@@ -1124,7 +1124,7 @@ export function AgentTranscriptDialog({
               className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
             />
           </label>
-          <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
+          <span className="ms-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
             {activeFilterKeys.length > 0 || trimmedQuery.length > 0
               ? t(($) => $.transcript.steps_filtered, {
                   shown: filteredSteps.length,
@@ -1147,7 +1147,7 @@ export function AgentTranscriptDialog({
                 <Filter className="h-3 w-3" />
                 <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
                 {activeFilterKeys.length > 0 && (
-                  <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
+                  <span className="ms-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
                     {activeFilterKeys.length}
                   </span>
                 )}
@@ -1427,7 +1427,7 @@ function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?
   const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
   return (
     <span
-      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      className="w-11 shrink-0 pt-0.5 text-end font-mono text-micro tabular-nums text-faint-foreground"
       title={startedAt ? new Date(startedAt).toLocaleString(locale) : undefined}
     >
       {label}
@@ -1450,7 +1450,7 @@ function DurationCell({ ms, pending }: { ms?: number; pending?: boolean }) {
     <StepDuration
       ms={ms}
       unknownLabel={t(($) => $.transcript.step_duration_unknown)}
-      className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      className="w-12 shrink-0 pt-0.5 text-end font-mono text-micro tabular-nums text-faint-foreground"
     />
   );
 }
@@ -1498,7 +1498,7 @@ function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageS
       <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
       <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
       <StepIcon step={row} className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1 pr-2">
+      <div className="min-w-0 flex-1 pe-2">
         <RichContent
           content={row.item.content ?? ""}
           density="compact"
@@ -1547,7 +1547,7 @@ function StepRow({
       onClick={() => onSelect(row.seq)}
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors",
+        "group flex w-full items-start gap-2 px-4 py-1.5 text-start transition-colors",
         selected ? "bg-brand/8" : "hover:bg-accent/40",
         row.kind === "error" && "bg-destructive/5",
       )}
@@ -1616,7 +1616,7 @@ function GroupRow({
         type="button"
         onClick={() => onToggleGroup(row.seq)}
         aria-expanded={expanded}
-        className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
+        className="group flex w-full items-start gap-2 px-4 py-1.5 text-start transition-colors hover:bg-accent/40"
       >
         <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
         <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
@@ -1624,7 +1624,7 @@ function GroupRow({
           aria-hidden
           className={cn(
             "mt-1 h-3 w-3 shrink-0 text-faint-foreground transition-transform",
-            expanded && "rotate-90",
+            expanded && "rotate-90 rtl:-rotate-90",
           )}
         />
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
@@ -1641,14 +1641,14 @@ function GroupRow({
         <DurationCell ms={row.durationMs} />
       </button>
       {expanded && (
-        <div className="ml-[4.4rem] border-l pl-3">
+        <div className="ms-[4.4rem] border-s ps-3">
           {row.steps.map((step) => (
             <button
               key={step.seq}
               type="button"
               onClick={() => onSelect(step.seq)}
               className={cn(
-                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-left text-micro transition-colors",
+                "flex w-full items-baseline gap-2 rounded-xs px-2 py-1 text-start text-micro transition-colors",
                 selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
               )}
             >
@@ -1656,12 +1656,12 @@ function GroupRow({
                 {callSummary(step, summaryLabels) || step.tool}
               </span>
               {step.durationMs === undefined ? (
-                <span className="ml-auto shrink-0" />
+                <span className="ms-auto shrink-0" />
               ) : (
                 <StepDuration
                   ms={step.durationMs}
                   unknownLabel={t(($) => $.transcript.step_duration_unknown)}
-                  className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground"
+                  className="ms-auto shrink-0 font-mono tabular-nums text-faint-foreground"
                 />
               )}
             </button>
@@ -1743,7 +1743,7 @@ function StepInspector({
           : t(($) => $.transcript.kind_error);
 
   return (
-    <aside className="flex w-[26rem] shrink-0 flex-col border-l bg-muted/25">
+    <aside className="flex w-[26rem] shrink-0 flex-col border-s bg-muted/25">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-label font-semibold">{title}</span>

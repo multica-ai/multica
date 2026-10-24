@@ -121,7 +121,7 @@ export function InstructionsTab({
       <div className="rounded-xl border bg-card transition-[border-color,box-shadow] has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-3 has-[textarea:focus-visible]:ring-ring/50">
         <div className="flex h-11 items-center gap-3 border-b px-2">
           {hasSystemLayer ? (
-            <span className="pl-1 text-label font-medium">{fieldLabel}</span>
+            <span className="ps-1 text-label font-medium">{fieldLabel}</span>
           ) : null}
           <SettingsViewTabs<EditorMode>
             label={t(($) => $.tab_body.instructions.mode_aria)}
@@ -132,7 +132,7 @@ export function InstructionsTab({
             value={mode}
             onChange={setMode}
           />
-          <span className="ml-auto pr-1 text-caption tabular-nums text-muted-foreground">
+          <span className="ms-auto pe-1 text-caption tabular-nums text-muted-foreground">
             {t(($) => $.tab_body.instructions.char_count, {
               count: [...value].length,
             })}
@@ -166,7 +166,7 @@ export function InstructionsTab({
           </div>
         )}
 
-        <div className="sticky bottom-0 flex min-h-12 items-center gap-2 rounded-b-xl border-t bg-card py-2 pr-2 pl-4">
+        <div className="sticky bottom-0 flex min-h-12 items-center gap-2 rounded-b-xl border-t bg-card py-2 pe-2 ps-4">
           {isDirty ? (
             <span className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
               <span
@@ -176,7 +176,7 @@ export function InstructionsTab({
               {t(($) => $.tab_body.common.unsaved_changes)}
             </span>
           ) : null}
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ms-auto flex items-center gap-1.5">
             {isDirty ? (
               <Button
                 size="sm"

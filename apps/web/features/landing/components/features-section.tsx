@@ -201,7 +201,7 @@ function TeammatesVisual() {
               if (entry.type === "activity") {
                 return (
                   <div key={i} className="px-4 flex items-center text-caption text-muted-foreground">
-                    <div className="mr-2 flex w-4 shrink-0 justify-center">
+                    <div className="me-2 flex w-4 shrink-0 justify-center">
                       {entry.statusIcon ? (
                         <StatusIcon status={entry.statusIcon} className="h-4 w-4 shrink-0" />
                       ) : (
@@ -211,7 +211,7 @@ function TeammatesVisual() {
                     <div className="flex min-w-0 flex-1 items-center gap-1">
                       <span className="shrink-0 font-medium">{entry.name}</span>
                       <span className="truncate">{entry.action}</span>
-                      <span className="ml-auto shrink-0">{entry.time}</span>
+                      <span className="ms-auto shrink-0">{entry.time}</span>
                     </div>
                   </div>
                 );
@@ -224,7 +224,7 @@ function TeammatesVisual() {
                     <span className="text-body font-medium">{entry.name}</span>
                     <span className="text-caption text-muted-foreground">{entry.time}</span>
                   </div>
-                  <p className="mt-1 pl-8 text-body leading-relaxed text-muted-foreground">
+                  <p className="mt-1 ps-8 text-body leading-relaxed text-muted-foreground">
                     {entry.content}
                   </p>
                 </div>
@@ -234,14 +234,14 @@ function TeammatesVisual() {
         </div>
 
         {/* Properties sidebar */}
-        <div className="w-[220px] shrink-0 overflow-hidden border-l">
+        <div className="w-[220px] shrink-0 overflow-hidden border-s">
           <div className="p-4 space-y-4">
             <div>
               <div className="flex items-center gap-1 text-caption font-medium mb-2">
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90" />
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rotate-90 rtl:-rotate-90" />
                 Properties
               </div>
-              <div className="space-y-0.5 pl-2">
+              <div className="space-y-0.5 ps-2">
                 {/* Status — clickable with dropdown */}
                 <div className="relative">
                   <PropRow label="Status">
@@ -255,7 +255,7 @@ function TeammatesVisual() {
                     </button>
                   </PropRow>
                   {statusOpen && (
-                    <div className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border bg-popover shadow-md">
+                    <div className="absolute inset-s-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border bg-popover shadow-md">
                       {statusCycle.map((s) => (
                         <button
                           type="button"
@@ -268,7 +268,7 @@ function TeammatesVisual() {
                         >
                           <StatusIcon status={s} className="h-3.5 w-3.5 shrink-0" />
                           {BUILT_IN_STATUS_LABEL[s]}
-                          {s === status && <Check className="ml-auto h-3.5 w-3.5" />}
+                          {s === status && <Check className="ms-auto h-3.5 w-3.5" />}
                         </button>
                       ))}
                     </div>
@@ -288,7 +288,7 @@ function TeammatesVisual() {
                     </button>
                   </PropRow>
                   {priorityOpen && (
-                    <div className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border bg-popover shadow-md">
+                    <div className="absolute inset-s-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border bg-popover shadow-md">
                       {priorityCycle.map((p) => (
                         <button
                           type="button"
@@ -301,7 +301,7 @@ function TeammatesVisual() {
                         >
                           <PriorityIcon priority={p} />
                           {PRIORITY_CONFIG[p].label}
-                          {p === priority && <Check className="ml-auto h-3.5 w-3.5" />}
+                          {p === priority && <Check className="ms-auto h-3.5 w-3.5" />}
                         </button>
                       ))}
                     </div>
@@ -345,7 +345,7 @@ function TeammatesVisual() {
                   >
                     <UserMinus className="h-3.5 w-3.5" />
                     <span>Unassigned</span>
-                    {!assignee.type && <Check className="ml-auto h-3.5 w-3.5" />}
+                    {!assignee.type && <Check className="ms-auto h-3.5 w-3.5" />}
                   </button>
                 </div>
                 <div className="px-3 py-0.5">
@@ -364,7 +364,7 @@ function TeammatesVisual() {
                     >
                       <MockAvatar type="member" initials={m.initials} size={16} />
                       <span>{m.name}</span>
-                      {assignee.id === m.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      {assignee.id === m.id && <Check className="ms-auto h-3.5 w-3.5" />}
                     </button>
                   ))}
                 </div>
@@ -386,7 +386,7 @@ function TeammatesVisual() {
                         <Bot className="size-2.5" />
                       </div>
                       <span>{a.name}</span>
-                      {assignee.id === a.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      {assignee.id === a.id && <Check className="ms-auto h-3.5 w-3.5" />}
                     </button>
                   ))}
                 </div>
@@ -450,7 +450,7 @@ function AutonomousVisual() {
               <Loader2 className="h-3 w-3 animate-spin text-info" />
               Agent is working
             </div>
-            <span className="ml-auto text-caption tabular-nums text-muted-foreground">7m 17s</span>
+            <span className="ms-auto text-caption tabular-nums text-muted-foreground">7m 17s</span>
             <span className="text-caption text-muted-foreground">10 tool calls</span>
           </div>
 
@@ -467,7 +467,7 @@ function AutonomousVisual() {
                     className="flex w-full items-center gap-2 rounded-xs px-2 py-1 text-caption hover:bg-info/5 transition-colors"
                     onClick={() => setExpanded(isExpanded ? null : i)}
                   >
-                    <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
+                    <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-90 rtl:-rotate-90")} />
                     <Brain className="h-3 w-3 shrink-0 text-info/60" />
                     <span className="truncate italic text-muted-foreground">{item.content}</span>
                   </button>
@@ -482,7 +482,7 @@ function AutonomousVisual() {
                     className="flex w-full items-center gap-2 rounded-xs px-2 py-1 text-caption hover:bg-info/5 transition-colors"
                     onClick={() => setExpanded(isExpanded ? null : i)}
                   >
-                    <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
+                    <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-90 rtl:-rotate-90")} />
                     <span className="shrink-0 font-semibold">{item.tool}</span>
                     <span className="truncate text-muted-foreground">{item.summary}</span>
                   </button>
@@ -497,7 +497,7 @@ function AutonomousVisual() {
                   className="flex w-full items-center gap-2 rounded-xs px-2 py-1 text-caption hover:bg-accent/50 transition-colors"
                   onClick={() => setExpanded(isExpanded ? null : i)}
                 >
-                  <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
+                  <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", isExpanded && "rotate-90 rtl:-rotate-90")} />
                   <span className="shrink-0 text-muted-foreground">result:</span>
                   <span className="truncate text-muted-foreground">{item.preview}</span>
                 </button>
@@ -520,7 +520,7 @@ function AutonomousVisual() {
                 <span className={task.status === "running" ? "font-medium" : "text-muted-foreground"}>
                   {task.title}
                 </span>
-                <span className="ml-auto text-muted-foreground tabular-nums">{task.duration}</span>
+                <span className="ms-auto text-muted-foreground tabular-nums">{task.duration}</span>
               </div>
             ))}
           </div>
@@ -556,7 +556,7 @@ function SkillsVisual() {
     <div className="relative aspect-video overflow-hidden rounded-lg border bg-background text-foreground shadow-2xl">
       <div className="flex h-full">
         {/* Skills list panel */}
-        <div className="w-[200px] shrink-0 border-r flex flex-col">
+        <div className="w-[200px] shrink-0 border-e flex flex-col">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-caption font-semibold">Skills</span>
             <button type="button" className="rounded-xs p-0.5 text-muted-foreground hover:bg-accent transition-colors">
@@ -569,7 +569,7 @@ function SkillsVisual() {
                 type="button"
                 key={skill.name}
                 className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors",
+                  "flex w-full items-center gap-2.5 px-3 py-2.5 text-start transition-colors",
                   i === selectedSkill ? "bg-accent" : "hover:bg-accent/50",
                 )}
                 onClick={() => setSelectedSkill(i)}
@@ -592,13 +592,13 @@ function SkillsVisual() {
           <div className="flex items-center gap-2 border-b px-4 py-2.5">
             <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="text-body font-medium">{mockSkills[selectedSkill]?.name}</span>
-            <span className="ml-2 text-caption text-muted-foreground">{mockSkills[selectedSkill]?.description}</span>
+            <span className="ms-2 text-caption text-muted-foreground">{mockSkills[selectedSkill]?.description}</span>
           </div>
 
           {/* File browser */}
           <div className="flex flex-1 min-h-0">
             {/* File tree */}
-            <div className="w-44 shrink-0 border-r">
+            <div className="w-44 shrink-0 border-e">
               <div className="flex items-center justify-between border-b px-3 py-1.5">
                 <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Files</span>
               </div>
@@ -616,7 +616,7 @@ function SkillsVisual() {
                   >
                     {f.isDir ? (
                       <>
-                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", f.open && "rotate-90")} />
+                        <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", f.open && "rotate-90 rtl:-rotate-90")} />
                         {f.open ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
                       </>
                     ) : f.icon === "md" ? (
@@ -654,7 +654,7 @@ function SkillsVisual() {
                       <p className="font-semibold text-foreground">Write Migration</p>
                       <p>Generate a SQL migration file based on the requested schema changes. Validates against the current database state and generates both up and down migrations.</p>
                       <p className="font-medium text-foreground">Steps</p>
-                      <ol className="list-decimal pl-4 space-y-0.5">
+                      <ol className="list-decimal ps-4 space-y-0.5">
                         <li>Analyze the current schema from migrations/</li>
                         <li>Generate migration SQL with proper ordering</li>
                         <li>Validate with sqlc compile</li>
@@ -820,7 +820,7 @@ function RuntimesVisual() {
     <div className="relative aspect-video overflow-hidden rounded-lg border bg-background text-foreground shadow-2xl">
       <div className="flex h-full">
         {/* Runtime list */}
-        <div className="w-[200px] shrink-0 border-r flex flex-col">
+        <div className="w-[200px] shrink-0 border-e flex flex-col">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-caption font-semibold">Runtimes</span>
           </div>
@@ -1023,7 +1023,7 @@ export function FeaturesSection() {
                   key={f.label}
                   onClick={() => scrollToPanel(i)}
                   className={cn(
-                    "group flex items-center gap-3 rounded-lg px-4 py-3 text-left text-micro font-semibold tracking-[0.12em] transition-colors",
+                    "group flex items-center gap-3 rounded-lg px-4 py-3 text-start text-micro font-semibold tracking-[0.12em] transition-colors",
                     i === activeIndex
                       ? "text-[#0a0d12]"
                       : "text-[#0a0d12]/36 hover:text-[#0a0d12]/60",

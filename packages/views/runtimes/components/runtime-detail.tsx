@@ -347,7 +347,7 @@ function HeroCard({
           >
             <ChevronRight
               className={`h-3 w-3 transition-transform ${
-                showDetails ? "rotate-90" : ""
+                showDetails ? "rotate-90 rtl:-rotate-90" : ""
               }`}
             />
             {t(($) => $.detail.technical_details)}

@@ -57,8 +57,12 @@ export function getCellStyle<TData>(
   return {
     width,
     position: "sticky",
-    left: isPinned === "left" ? `${column.getStart("left")}px` : undefined,
-    right: isPinned === "right" ? `${column.getAfter("right")}px` : undefined,
+    // TanStack's "left" / "right" pins are the first / last columns, which
+    // sit on the inline start / end edge in either direction.
+    insetInlineStart:
+      isPinned === "left" ? `${column.getStart("left")}px` : undefined,
+    insetInlineEnd:
+      isPinned === "right" ? `${column.getAfter("right")}px` : undefined,
     zIndex: 1,
   };
 }

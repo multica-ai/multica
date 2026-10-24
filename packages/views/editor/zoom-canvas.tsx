@@ -62,7 +62,7 @@ function ToolbarButton({
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8}>
         {label}
-        {shortcut && <ShortcutKeycaps shortcut={shortcut} className="ml-1.5" />}
+        {shortcut && <ShortcutKeycaps shortcut={shortcut} className="ms-1.5" />}
       </TooltipContent>
     </Tooltip>
   );

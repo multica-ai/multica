@@ -59,7 +59,7 @@ export function InstructionsEditor({
         <button
           type="button"
           onClick={expand}
-          className="mt-1.5 flex w-full items-start gap-2.5 rounded-lg border bg-card px-3 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+          className="mt-1.5 flex w-full items-start gap-2.5 rounded-lg border bg-card px-3 py-3 text-start transition-colors hover:border-primary/40 hover:bg-accent/40"
         >
           <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">

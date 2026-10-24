@@ -761,7 +761,7 @@ export function ScheduleEditor({
               onClick={() => setCronEditing(true)}
               // The pencil is decoration; this is the name a screen reader hears.
               aria-label={t(($) => $.schedule_editor.cron_click_to_edit)}
-              className="flex w-full items-center gap-1.5 text-left hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+              className="flex w-full items-center gap-1.5 text-start hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
             >
               {/* Closed, the readback shows only the editable text — the zone
                   is already on screen in the picker above, and a self-prefixed
@@ -953,10 +953,10 @@ function EveryTimeControls({
           wide as its longest option — so the field never has to be sized against
           text it cannot see. */}
       <InputGroup className="min-w-0">
-        {/* pl-2.5, not the addon's default pl-2: this row sits directly above the
+        {/* ps-2.5, not the addon's default ps-2: this row sits directly above the
             day select, and the two read as one column only if their first
             character starts at the same x. A Select trigger pads to 2.5. */}
-        <InputGroupAddon className="pl-2.5">
+        <InputGroupAddon className="ps-2.5">
           {t(($) => $.schedule_editor.every_prefix)}
         </InputGroupAddon>
         <NumberField
@@ -999,7 +999,7 @@ function EveryTimeControls({
         >
           <InputGroupSelectTrigger
             aria-label={t(($) => $.schedule_editor.a11y.interval_unit)}
-            className="pr-2.5"
+            className="pe-2.5"
           >
             <SelectValue>
               {unitItems.find((item) => item.value === time.unit)?.label}
@@ -1007,7 +1007,7 @@ function EveryTimeControls({
           </InputGroupSelectTrigger>
           {/* min-w-[7rem]: below the component's 144px default, which the two
               short options don't need — but not so far that "minutes" and its
-              check mark (the item's pr-8) lose room. */}
+              check mark (the item's pe-8) lose room. */}
           <SelectContent className="min-w-[7rem]">
             {unitItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>
@@ -1036,9 +1036,9 @@ function EveryTimeControls({
           still greys out, from the fieldset around the whole block. */}
       <InputGroup className="min-w-fit has-disabled:bg-transparent has-disabled:opacity-100 dark:has-disabled:bg-input/30">
         {/* Leads the box, not focusable: the fields after it take the focus and
-            the group's border. pr-0 lets the start field's own padding set the
+            the group's border. pe-0 lets the start field's own padding set the
             icon-to-digit gap, so it matches the gap between the two ends. */}
-        <InputGroupAddon className="pl-2 pr-0">
+        <InputGroupAddon className="ps-2 pe-0">
           <Clock className="size-3.5 text-muted-foreground" />
         </InputGroupAddon>
         <InputGroupTimeInput

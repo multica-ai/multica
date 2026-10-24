@@ -231,8 +231,8 @@ export function DraftDefinitionFields() {
 
       {/* Display defaults: captured already; expandable for fine-tuning. */}
       <Collapsible>
-        <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md -mx-1 px-1 py-1 text-left hover:bg-muted/60">
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]:rotate-90" />
+        <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md -mx-1 px-1 py-1 text-start hover:bg-muted/60">
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]:rotate-90 rtl:group-data-[panel-open]:-rotate-90" />
           <span className="text-caption font-medium">
             {t(($) => $.save_view.display_defaults)}
           </span>
@@ -241,7 +241,7 @@ export function DraftDefinitionFields() {
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-out data-starting-style:h-0 data-ending-style:h-0">
-          <div className="space-y-3 pt-2 pl-5">
+          <div className="space-y-3 pt-2 ps-5">
             <div className="flex items-center gap-3">
               <Label className={ROW_LABEL}>{t(($) => $.save_view.layout_label)}</Label>
               <Select
@@ -754,7 +754,7 @@ export function SaveViewDialog({
             </div>
           )}
           {scope.kind === "my" && (
-            <p className="pl-19 text-caption text-muted-foreground">
+            <p className="ps-19 text-caption text-muted-foreground">
               {t(($) => $.save_view.my_private_note)}
             </p>
           )}

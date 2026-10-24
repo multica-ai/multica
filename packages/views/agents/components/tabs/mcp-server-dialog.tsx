@@ -375,8 +375,8 @@ export function McpServerDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5">
-            <DialogHeader className="shrink-0 border-b border-surface-border px-6 py-6 pr-14 sm:px-8 sm:pr-16">
+      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:inset-e-5">
+            <DialogHeader className="shrink-0 border-b border-surface-border px-6 py-6 pe-14 sm:px-8 sm:pe-16">
               <DialogTitle>
                 {replacementMode
                   ? t(($) => $.tab_body.mcp_config.dialog_replace_title, {
@@ -477,7 +477,7 @@ export function McpServerDialog({
                                 type="button"
                                 aria-pressed={selected}
                                 className={cn(
-                                  "flex min-h-16 items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors",
+                                  "flex min-h-16 items-center gap-3 rounded-lg border px-4 py-3 text-start transition-colors",
                                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                   selected
                                     ? "border-primary bg-accent/50"

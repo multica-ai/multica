@@ -120,10 +120,10 @@ The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice
 
 `issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
 
-| Entity | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| Entity | en | zh-Hans | ja | ko | fr | ar |
+| --- | --- | --- | --- | --- | --- | --- |
+| the tracked unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** | **Tâche** | **مهمة** |
+| one agent execution record (`task` in API / DB) | **Run** | **运行** | **実行** | **실행** | **Exécution** | **تنفيذ** |
 
 Both concepts are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word. `Task` is no longer a user-facing product noun for an agent run; it remains only as the established internal identifier.
 
@@ -325,6 +325,105 @@ When the glossary doesn't cover a term, look at:
 2. `packages/views/locales/zh-Hans/auth.json` and `editor.json` — JSON structure + selector API patterns
 3. `packages/views/auth/login-page.tsx` — component-level selector API call site
 4. `packages/views/settings/components/preferences-tab.tsx` — language switcher reference
+
+## 4. Arabic glossary and RTL
+
+Arabic (`ar`) is the first right-to-left locale. The core rule from section 2 applies unchanged: translate the everyday noun, keep Multica-specific identifiers in lowercase English. `issue` becomes **مهمة** and a run becomes **تنفيذ**; they must never share a word.
+
+### Concepts
+
+| English | Arabic |
+| --- | --- |
+| Issue | مهمة |
+| Run (agent execution) | تنفيذ |
+| Workspace | مساحة العمل |
+| Agent | وكيل |
+| Squad | فريق |
+| Skill | مهارة |
+| Project | مشروع |
+| Autopilot | أتمتة |
+| Daemon | `daemon` |
+| Runtime | `runtime` |
+| Inbox | صندوق الوارد |
+| Comment | تعليق |
+| Reply | رد |
+| Notifications | الإشعارات |
+| Member | عضو |
+| Label | وسم |
+| Settings | الإعدادات |
+| Onboarding | الإعداد الأولي |
+
+`daemon` and `runtime` are technical terms and stay lowercase English. Unlike the other locales, `skill` is translated as **مهارة**.
+
+### Generic UI words
+
+| English | Arabic |
+| --- | --- |
+| Invite / Invitation | دعوة |
+| Search | بحث |
+| Email | البريد الإلكتروني |
+| Password | كلمة المرور |
+| Sign in / Log in | تسجيل الدخول |
+| Sign up | إنشاء حساب |
+| Sign out / Log out | تسجيل الخروج |
+| Save / Cancel / Delete | حفظ / إلغاء / حذف |
+| Confirm / Continue / Back | تأكيد / متابعة / رجوع |
+| Edit / New / Create / Add | تعديل / جديد / إنشاء / إضافة |
+| Remove / Send / Open / Close | إزالة / إرسال / فتح / إغلاق |
+| Preview / Download / Upload | معاينة / تنزيل / رفع |
+| Done / Loading... | تم / جارٍ التحميل... |
+| Profile / Account / Appearance | الملف الشخصي / الحساب / المظهر |
+| Theme / Language | السمة / اللغة |
+| Light / Dark / System | فاتح / داكن / حسب النظام |
+| Active / Archived | نشط / مؤرشف |
+| Status / Priority | الحالة / الأولوية |
+| Assignee / Reporter | المكلّف / المُبلِّغ |
+| Description / Title | الوصف / العنوان |
+| Date / Time | التاريخ / الوقت |
+| Today / Yesterday / Tomorrow | اليوم / أمس / غداً |
+| Empty / Failed / Success | فارغ / فشل / نجاح |
+| Error / Warning | خطأ / تحذير |
+
+### Identifiers and mixed text
+
+- Roles and status enums stay lowercase English, wrapped as `code`: "تحتاج إلى صلاحية `owner`", "تم التحويل إلى `in_progress`".
+- Brands, acronyms, issue keys (`MUL-123`), URLs and code never get translated or reversed. Put a single space between Latin text and the surrounding Arabic.
+- Keep punctuation outside `{{var}}` placeholders, and render interpolated user content (names, titles) inside `<bdi>` so a Latin value cannot reorder the sentence around it.
+
+### Voice and punctuation
+
+- Modern Standard Arabic, formal register, masculine imperative on buttons (حفظ، إلغاء، حذف). No diacritics and no tatweel.
+- Arabic punctuation: `،` `؛` `؟`. Keep `.` and `!`, and straight double quotes `"..."` and three dots `...` to match the English source.
+- Digits are Western (`0-9`), including dates and counts (`ar-u-nu-latn`).
+
+### Plurals and counts
+
+Arabic has six plural forms. Every key that has `_one` / `_other` in English needs `_zero`, `_one`, `_two`, `_few`, `_many` and `_other`. `few` and `many` follow the last two digits: `few` is 3–10, 103–110, …; `many` is 11–99, 111–199, …; `other` is 100–102, 200–202, … and fractions:
+
+```json
+// ar/issues.json
+{
+  "issue_count_zero": "لا توجد مهام",
+  "issue_count_one": "مهمة واحدة",
+  "issue_count_two": "مهمتان",
+  "issue_count_few": "{{count}} مهام",
+  "issue_count_many": "{{count}} مهمة",
+  "issue_count_other": "{{count}} مهمة"
+}
+```
+
+### RTL in code
+
+- `<html dir>` comes from `getDir(locale)` in `@multica/core/i18n`; never hard-code a direction in a component.
+- Use logical Tailwind utilities: `ms-* me-* ps-* pe-* inset-s-* inset-e-* border-s border-e rounded-s rounded-e text-start text-end`. Do not use `ml-* mr-* pl-* pr-* left-* right-*` or `text-left` / `text-right`, nor the legacy `start-*` / `end-*` aliases. `multica/logical-direction` reports all of them.
+- Utilities with no logical form (`origin-left`, `bg-gradient-to-l`) need an `rtl:` counterpart in the same class list: `bg-gradient-to-l rtl:bg-gradient-to-r`. The lint rule enforces it.
+- Centering with `left-1/2 -translate-x-1/2` is direction-neutral and stays physical. Every other `translate-x` is physical too (a switch thumb, a hover nudge, an offset), so pair it with an `rtl:` counterpart of the opposite sign: `data-checked:translate-x-4 rtl:data-checked:-translate-x-4`. The lint rule does not catch these.
+- `Sidebar` and `Sheet` take `side="start" | "end"`; popovers, tooltips and menus take `inline-start` / `inline-end`.
+- Directional lucide icons (arrows, chevrons, corners, lists, send, log in / out, panels) mirror automatically under `[dir="rtl"]`; see `packages/ui/styles/base.css`. Do not add `rtl:rotate-180` to them, because that flips them back. A mirrored icon that also rotates needs the opposite rotation: `rotate-90 rtl:-rotate-90`.
+- Pointer deltas and `scrollLeft` are physical. Horizontal maths in JS uses `isRtl`, `inlineSign`, `getInlineScroll` and `setInlineScroll` from `@multica/ui/lib/direction`.
+- Inline `style` objects are not linted. Use `insetInlineStart`, `paddingInlineStart` and the like, unless the value is physical on purpose.
+- Visuals positioned from data (Gantt, run timeline, cost chart, Mermaid diagrams) and the desktop window chrome next to the macOS traffic lights are `dir="ltr"` islands. Icons inside an island do not mirror. Code blocks stay left-to-right.
+- In CSS use `margin-inline-*`, `padding-inline-*`, `inset-inline-*`, `border-inline-*` and `text-align: start | end`.
 
 ---
 

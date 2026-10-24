@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@multica/ui/components/ui/table";
 import { columnSizeVar, getCellStyle } from "@multica/ui/lib/data-table";
+import { getInlineScroll, inlineSign, isRtl } from "@multica/ui/lib/direction";
 import { cn } from "@multica/ui/lib/utils";
 
 // Pointer travel that turns a press on the resize handle into a drag. Matches
@@ -220,6 +221,9 @@ export function DataTable<TData>({
 
       const startX = event.clientX;
       const handleEl = event.currentTarget;
+      // The handle sits on the inline-end edge, so dragging toward the
+      // inline end widens the column in either direction.
+      const sign = inlineSign(handleEl);
       const { pointerId } = event;
       const headerCell = handleEl.closest("th");
       // The rendered width, not column.getSize(): the drag has to continue from
@@ -232,7 +236,7 @@ export function DataTable<TData>({
       let frozen: ColumnSizingState | null = null;
 
       const handlePointerMove = (pointerEvent: PointerEvent) => {
-        const delta = pointerEvent.clientX - startX;
+        const delta = (pointerEvent.clientX - startX) * sign;
         // Nothing is committed below the threshold, so a press on its own can
         // no longer pin a column at the width the stretch happened to give it.
         if (!frozen && Math.abs(delta) < RESIZE_DRAG_THRESHOLD) return;
@@ -327,16 +331,24 @@ export function DataTable<TData>({
 
   // Where the frozen block ends, in the scroll container's own coordinates.
   const [pinnedEdge, setPinnedEdge] = React.useState<number | null>(null);
+  const [rtl, setRtl] = React.useState(false);
 
   React.useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
     const sync = () => {
-      setIsScrolledHorizontally(element.scrollLeft > 0);
+      const rightToLeft = isRtl(element);
+      setRtl(rightToLeft);
+      setIsScrolledHorizontally(getInlineScroll(element) > 0);
       const edge = element.querySelector("thead th[data-pinned-edge]");
+      // Distance from the container's inline-start edge to the frozen
+      // block's inline-end edge.
       setPinnedEdge(
         edge
-          ? edge.getBoundingClientRect().right -
+          ? rightToLeft
+            ? element.getBoundingClientRect().right -
+              edge.getBoundingClientRect().left
+            : edge.getBoundingClientRect().right -
               element.getBoundingClientRect().left
           : null,
       );
@@ -472,7 +484,7 @@ export function DataTable<TData>({
                       // muted with background to preserve the same visual tone
                       // as muted/30 without introducing alpha.
                       className={cn(
-                        "relative h-8 overflow-hidden border-r px-4 py-2 text-caption uppercase tracking-wider text-muted-foreground last:border-r-0",
+                        "relative h-8 overflow-hidden border-e px-4 py-2 text-caption uppercase tracking-wider text-muted-foreground last:border-e-0",
                         isPinned &&
                           "bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))]",
                       )}
@@ -495,7 +507,7 @@ export function DataTable<TData>({
                             tabIndex={0}
                             className={cn(
                               // The line sits exactly on the column's own
-                              // border (hence -right-px, since `right-0` would
+                              // border (hence -inset-e-px, since `inset-e-0` would
                               // land just inside it and read as a double rule)
                               // and recolours it. Three states have to stay
                               // apart on one hairline: at rest it is the faint
@@ -504,14 +516,14 @@ export function DataTable<TData>({
                               // brightening rather than fading, so the edge
                               // being moved stays the most definite thing on
                               // screen even once the pointer leaves the handle.
-                              // right-0, never a negative offset: the <th> is
+                              // inset-e-0, never a negative offset: the <th> is
                               // overflow-hidden and clips at its padding edge,
                               // so anything nudged out to sit on the border
                               // itself is simply not painted. The bar lands
                               // just inside the rule instead, and at 2px it
                               // stays legible next to it.
-                              "absolute top-0 right-0 h-full w-2 cursor-col-resize touch-none select-none outline-none",
-                              "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-transparent after:transition-colors after:duration-100",
+                              "absolute top-0 inset-e-0 h-full w-2 cursor-col-resize touch-none select-none outline-none",
+                              "after:absolute after:inset-y-0 after:inset-e-0 after:w-0.5 after:bg-transparent after:transition-colors after:duration-100",
                               "hover:after:bg-brand/60 focus-visible:after:bg-brand/60",
                               resizingColumnId === header.column.id &&
                                 "after:bg-brand after:transition-none",
@@ -558,9 +570,8 @@ export function DataTable<TData>({
           data-slot="data-table-pinned-shadow"
           className="pointer-events-none absolute inset-y-0 w-3"
           style={{
-            left: `${pinnedEdge}px`,
-            background:
-              "linear-gradient(to right, color-mix(in oklab, var(--foreground) 7%, transparent), transparent)",
+            [rtl ? "right" : "left"]: `${pinnedEdge}px`,
+            background: `linear-gradient(to ${rtl ? "left" : "right"}, color-mix(in oklab, var(--foreground) 7%, transparent), transparent)`,
           }}
         />
       )}
@@ -684,7 +695,7 @@ function DataTableBody<TData>({
               // Pinned cells need an opaque bg + group-hover so they cover
               // content scrolling beneath them and follow row hover state.
               className={cn(
-                "overflow-hidden border-r px-4 py-2 last:border-r-0",
+                "overflow-hidden border-e px-4 py-2 last:border-e-0",
                 isPinned &&
                   "bg-background group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]",
               )}

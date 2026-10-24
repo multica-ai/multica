@@ -3,7 +3,12 @@
 import { useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
-import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
+import {
+  getDir,
+  type LocaleResources,
+  type SupportedLocale,
+} from "@multica/core/i18n";
+import { DirectionProvider } from "@multica/ui/components/ui/direction";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
 import { WebScrollRestorationProvider } from "@/platform/scroll-restoration";
@@ -79,9 +84,11 @@ export function WebProviders({
       localeAdapter={localeAdapter}
       syncUserLocale={syncUserLocale}
     >
-      <WebNavigationProvider>
-        <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
-      </WebNavigationProvider>
+      <DirectionProvider direction={getDir(locale)}>
+        <WebNavigationProvider>
+          <WebScrollRestorationProvider>{children}</WebScrollRestorationProvider>
+        </WebNavigationProvider>
+      </DirectionProvider>
     </CoreProvider>
   );
 }

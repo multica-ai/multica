@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { useDirection } from "@multica/ui/components/ui/direction";
 import {
   useNavigationInputBindings,
   useTabHistory,
@@ -72,7 +73,10 @@ function useNativeNavigationGestures() {
 function MainTopBar({ sidebarMounted }: { sidebarMounted: boolean }) {
   const { state, isCompact } = useSidebar();
   const sidebarHidden = !sidebarMounted || state === "collapsed" || isCompact;
-  const toolbarClearance: React.CSSProperties["paddingLeft"] = sidebarHidden
+  // The toolbar stays on the physical left (see WindowToolbar). In RTL the
+  // sidebar is on the right, so this bar always clears the whole toolbar.
+  const rtl = useDirection() === "rtl";
+  const toolbarClearance: React.CSSProperties["paddingLeft"] = sidebarHidden || rtl
     ? WINDOW_TOOLBAR_CLEARANCE
     : `max(0px, calc(${WINDOW_TOOLBAR_CLEARANCE}px - var(--sidebar-live-width, var(--sidebar-width))))`;
 
@@ -88,10 +92,11 @@ function MainTopBar({ sidebarMounted }: { sidebarMounted: boolean }) {
     >
       <div
         aria-hidden
-        className="absolute inset-y-0 right-0"
+        className="absolute inset-y-0"
         style={
           {
             left: toolbarClearance,
+            right: 0,
             WebkitAppRegion: "drag",
           } as React.CSSProperties
         }
@@ -107,7 +112,7 @@ function MainTopBar({ sidebarMounted }: { sidebarMounted: boolean }) {
 }
 
 // The canvas hugs the expanded sidebar with a hairline gap. When the sidebar
-// leaves the main flow, the left margin must grow to mirror the fixed mr-2 so
+// leaves the main flow, the start margin must grow to mirror the fixed me-2 so
 // the floating canvas sits symmetrically inside the window frame.
 function MainCanvas({
   children,
@@ -124,7 +129,7 @@ function MainCanvas({
   return (
     <motion.div
       animate={{ marginLeft: sidebarHidden ? 8 : 2 }}
-      className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 rounded-xl bg-page-canvas ring-1 ring-surface-border shadow-[var(--surface-shadow)]"
+      className="relative flex flex-1 min-h-0 flex-col overflow-hidden me-2 mb-2 rounded-xl bg-page-canvas ring-1 ring-surface-border shadow-[var(--surface-shadow)]"
       initial={false}
       transition={toolbarMotion}
     >

@@ -117,7 +117,7 @@ export function LandingHeader({
       {isMenuOpen ? (
         <div
           className={cn(
-            "absolute left-4 right-4 top-[calc(100%+8px)] z-50 rounded-(--landing-radius-menu) border p-2 shadow-[0_18px_60px_rgba(0,0,0,0.18)] backdrop-blur-xl md:hidden",
+            "absolute inset-s-4 inset-e-4 top-[calc(100%+8px)] z-50 rounded-(--landing-radius-menu) border p-2 shadow-[0_18px_60px_rgba(0,0,0,0.18)] backdrop-blur-xl md:hidden",
             variant === "dark"
               ? "border-white/14 bg-[#070a10]/95 text-white"
               : "border-[#0a0d12]/10 bg-white text-[#0a0d12]",

@@ -87,7 +87,7 @@ export function OnboardingStarterCards({
                 aria-label={card.title}
                 onClick={() => void handlePick(card)}
                 className={cn(
-                  "group flex flex-col overflow-clip rounded-xl border bg-card text-left transition-colors",
+                  "group flex flex-col overflow-clip rounded-xl border bg-card text-start transition-colors",
                   "hover:border-brand/40 hover:bg-accent/40",
                   "disabled:pointer-events-none disabled:opacity-55",
                 )}

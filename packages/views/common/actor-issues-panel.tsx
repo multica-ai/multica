@@ -62,12 +62,12 @@ function ActorIssuesHeader({
     >
       <div className="flex items-center gap-3">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t(($) => $.actor_issues.search_placeholder)}
-            className="h-8 w-64 pl-8 text-body"
+            className="h-8 w-64 ps-8 text-body"
           />
         </div>
         <div className="flex items-center gap-1">

@@ -143,7 +143,7 @@ export function DynamicBlock({
         className,
       )}
     >
-      <div className="flex h-9 items-center gap-2 border-b pr-1.5 pl-3">
+      <div className="flex h-9 items-center gap-2 border-b pe-1.5 ps-3">
         <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
         {/* With no title, the kind name stands in and the chip would repeat it. */}
         <span
@@ -175,7 +175,7 @@ export function DynamicBlock({
         >
           <TabsList
             aria-label={t(($) => $.dynamic_block.view)}
-            className="mr-1 shrink-0 gap-0.5 rounded-md p-0.5 group-data-horizontal/tabs:h-[26px]"
+            className="me-1 shrink-0 gap-0.5 rounded-md p-0.5 group-data-horizontal/tabs:h-[26px]"
           >
             <TabsTrigger value="preview" className="rounded-sm px-2 text-caption">
               {t(($) => $.dynamic_block.preview)}

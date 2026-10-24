@@ -112,7 +112,7 @@ function AgentPickerRow({
       onClick={() => onToggle(agent)}
       aria-pressed={selected}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors",
+        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-start transition-colors",
         hasAll
           ? "opacity-50"
           : selected
@@ -206,7 +206,7 @@ function AgentGroup({
   return (
     <Collapsible defaultOpen={defaultOpen}>
       <CollapsibleTrigger className="group/trigger flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-accent/50">
-        <ChevronRight className="size-3 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
+        <ChevronRight className="size-3 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90 rtl:group-data-[panel-open]/trigger:-rotate-90" />
         <span>{label}</span>
         <span className="text-muted-foreground">{agents.length}</span>
       </CollapsibleTrigger>
@@ -327,12 +327,12 @@ export function AddToAgentDialog({
 
         {hasAnyAgent && (
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t(($) => $.actions.search_placeholder)}
-              className="h-8 pl-7 text-caption"
+              className="h-8 ps-7 text-caption"
             />
           </div>
         )}
@@ -778,7 +778,7 @@ export function SkillBatchToolbar({
       onClick={() => setUpdateOpen(true)}
       className={cn(updatable.length === 0 && "pointer-events-none")}
     >
-      <RotateCw className="mr-1 size-3.5" />
+      <RotateCw className="me-1 size-3.5" />
       {t(($) => $.actions.update)}
     </Button>
   );
@@ -794,7 +794,7 @@ export function SkillBatchToolbar({
         !allDeletable && "pointer-events-none",
       )}
     >
-      <Trash2 className="mr-1 size-3.5" />
+      <Trash2 className="me-1 size-3.5" />
       {t(($) => $.actions.delete)}
     </Button>
   );
@@ -806,7 +806,7 @@ export function SkillBatchToolbar({
           list's own center. Same rule for every future list page's batch
           toolbar. */}
       <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
+        <div className="me-1 flex items-center gap-1.5 border-e ps-1 pe-2">
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
           </span>
@@ -823,7 +823,7 @@ export function SkillBatchToolbar({
         </div>
 
         <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)}>
-          <Plus className="mr-1 size-3.5" />
+          <Plus className="me-1 size-3.5" />
           {t(($) => $.actions.add_to_agent)}
         </Button>
 

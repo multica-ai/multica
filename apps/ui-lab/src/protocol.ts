@@ -1,3 +1,5 @@
+import type { TextDirection } from "@multica/core/i18n";
+import { isTextDirection } from "./direction";
 import { isLabLocale, type LabLocale } from "./locale";
 import {
   isDraft,
@@ -37,6 +39,7 @@ export type PreviewSettings = {
   scene: Scene;
   buttonScale: ButtonScale;
   locale: LabLocale;
+  direction: TextDirection;
   playbackSpeed: number;
   selectedColor: ColorToken;
 };
@@ -49,6 +52,7 @@ export function isPreviewSettings(value: unknown): value is PreviewSettings {
     scenes.some((scene) => scene.id === data.scene) &&
     buttonScales.some((scale) => scale === data.buttonScale) &&
     isLabLocale(data.locale) &&
+    isTextDirection(data.direction) &&
     isColorToken(data.selectedColor) &&
     playbackSpeeds.some((speed) => speed === data.playbackSpeed) &&
     isDraft(data.draft)

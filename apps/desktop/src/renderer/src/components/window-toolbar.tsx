@@ -7,6 +7,7 @@ import {
   type PointerEventHandler,
 } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { useDirection } from "@multica/ui/components/ui/direction";
 import {
   SidebarTrigger,
   useSidebar,
@@ -178,7 +179,10 @@ export function WindowToolbar() {
   const { t } = useT("layout");
   const { state: sidebarState, isCompact } = useSidebar();
   const sidebarHidden = sidebarState === "collapsed" || isCompact;
-  const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
+  // In RTL the sidebar moves to the right, away from the traffic lights, so
+  // the toolbar no longer spans a sidebar column.
+  const rtl = useDirection() === "rtl";
+  const toolbarWidth: React.CSSProperties["width"] = sidebarHidden || rtl
     ? WINDOW_TOOLBAR_CLEARANCE
     : `max(var(--sidebar-live-width, var(--sidebar-width)), ${WINDOW_TOOLBAR_CLEARANCE}px)`;
   const {
@@ -254,10 +258,13 @@ export function WindowToolbar() {
   );
 
   return (
+    // The macOS traffic lights stay at the physical top left, so this chrome
+    // keeps its left-to-right layout next to them in RTL pages too.
     <div
+      dir="ltr"
       data-slot="window-toolbar"
       data-sidebar-resize-consumer
-      className="fixed left-0 top-0 z-30 flex h-10 shrink-0 items-center pr-3"
+      className="fixed inset-s-0 top-0 z-30 flex h-10 shrink-0 items-center pe-3"
       style={
         {
           WebkitAppRegion: "drag",

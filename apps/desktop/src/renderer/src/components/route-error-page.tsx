@@ -96,7 +96,7 @@ function DesktopNotFoundPage() {
           type="button"
           onClick={() => useTabStore.getState().closeActiveTab()}
         >
-          <X className="mr-2 h-4 w-4" aria-hidden="true" />
+          <X className="me-2 h-4 w-4" aria-hidden="true" />
           Close tab
         </Button>
       </div>
@@ -137,7 +137,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
           variant="outline"
           onClick={() => useTabStore.getState().reloadActiveTab()}
         >
-          <RotateCw className="mr-2 h-4 w-4" aria-hidden="true" />
+          <RotateCw className="me-2 h-4 w-4" aria-hidden="true" />
           Reload tab
         </Button>
         {recoveryRoute ? (
@@ -160,7 +160,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
           variant="outline"
           onClick={() => useTabStore.getState().closeActiveTab()}
         >
-          <X className="mr-2 h-4 w-4" aria-hidden="true" />
+          <X className="me-2 h-4 w-4" aria-hidden="true" />
           Close tab
         </Button>
         <Button
@@ -172,7 +172,7 @@ function DesktopUnexpectedErrorPage({ error }: { error: unknown }) {
             })
           }
         >
-          <Send className="mr-2 h-4 w-4" aria-hidden="true" />
+          <Send className="me-2 h-4 w-4" aria-hidden="true" />
           Report error
         </Button>
       </div>

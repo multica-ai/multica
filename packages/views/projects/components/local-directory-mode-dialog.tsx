@@ -204,7 +204,7 @@ function ModeOption({
       onClick={onSelect}
       // Selection is carried by border + ring rather than a background tint so
       // it stays legible while hovered — hover only moves the background.
-      className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
+      className={`flex w-full items-start gap-3 rounded-lg border p-3 text-start transition-colors ${
         selected
           ? "border-primary ring-1 ring-primary"
           : "border-border hover:bg-muted/50"

@@ -63,7 +63,7 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
   const memberCount = squad.member_count ?? memberPreview.length;
 
   return (
-    <div className="group flex flex-col gap-3 text-left">
+    <div className="group flex flex-col gap-3 text-start">
       <div className="flex items-start gap-3">
         <ActorAvatarBase
           name={squad.name}
@@ -85,7 +85,7 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
         {!isArchived && (
           <AppLink
             href={p.squadDetail(squad.id)}
-            className="mr-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
+            className="me-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
           >
             {t(($) => $.profile_card.detail_link)}
           </AppLink>
@@ -133,7 +133,7 @@ function MembersList({
     <div className="flex flex-col gap-1.5 text-caption">
       <span className="text-muted-foreground">
         {t(($) => $.profile_card.members_section)}
-        <span className="ml-1 tabular-nums">· {memberCount}</span>
+        <span className="ms-1 tabular-nums">· {memberCount}</span>
       </span>
       <div className="flex flex-col gap-0.5">
         {visible.map((m) => {

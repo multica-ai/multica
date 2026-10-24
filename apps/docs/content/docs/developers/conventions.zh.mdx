@@ -118,10 +118,10 @@ Multica 的产品名词分两类：
 
 `issue` 是这个「用户提出、智能体去做的事」的英文产品名。在英文之外的每种语言里，它就是当地最日常的那个「任务」词：
 
-| 实体 | en | zh-Hans | ja | ko | fr |
-| --- | --- | --- | --- | --- | --- |
-| 提交出来的一件事（`issue`） | Issue | **任务** | **タスク** | **태스크** | **Tâche** |
-| 智能体的一次执行记录（API / DB 中为 `task`） | **Run** | **运行** | **実行** | **실행** | **Exécution** |
+| 实体 | en | zh-Hans | ja | ko | fr | ar |
+| --- | --- | --- | --- | --- | --- | --- |
+| 提交出来的一件事（`issue`） | Issue | **任务** | **タスク** | **태스크** | **Tâche** | **مهمة** |
+| 智能体的一次执行记录（API / DB 中为 `task`） | **Run** | **运行** | **実行** | **실행** | **Exécution** | **تنفيذ** |
 
 这两个概念用户都看得到，而且**不是一回事** —— 一个任务下面可以有多次运行。任何一种语言都不能把两者写成同一个词。`Task` 不再是智能体单次运行的用户侧产品名，只保留为已经稳定的内部标识符。
 
@@ -323,6 +323,105 @@ description 默认省略。添加前先问：**没有这句话，用户会误解
 2. `packages/views/locales/zh-Hans/auth.json` 和 `editor.json` —— JSON 结构 + selector API 用法参考
 3. `packages/views/auth/login-page.tsx` —— 组件层 selector API 调用参考
 4. `packages/views/settings/components/preferences-tab.tsx` —— 语言切换器参考
+
+## 4. 阿拉伯语术语与 RTL
+
+阿拉伯语（`ar`）是第一个从右到左的语言。第 2 节的核心规则不变：日常名词完整翻译，Multica 专有标识符保持小写英文。`issue` 译为 **مهمة**，一次运行译为 **تنفيذ**，两者不能用同一个词。
+
+### 概念词
+
+| English | 阿拉伯语 |
+| --- | --- |
+| Issue | مهمة |
+| Run (agent execution) | تنفيذ |
+| Workspace | مساحة العمل |
+| Agent | وكيل |
+| Squad | فريق |
+| Skill | مهارة |
+| Project | مشروع |
+| Autopilot | أتمتة |
+| Daemon | `daemon` |
+| Runtime | `runtime` |
+| Inbox | صندوق الوارد |
+| Comment | تعليق |
+| Reply | رد |
+| Notifications | الإشعارات |
+| Member | عضو |
+| Label | وسم |
+| Settings | الإعدادات |
+| Onboarding | الإعداد الأولي |
+
+`daemon` 和 `runtime` 是技术术语，保持小写英文。`skill` 与其他语言不同，译为 **مهارة**。
+
+### 通用 UI 词
+
+| English | 阿拉伯语 |
+| --- | --- |
+| Invite / Invitation | دعوة |
+| Search | بحث |
+| Email | البريد الإلكتروني |
+| Password | كلمة المرور |
+| Sign in / Log in | تسجيل الدخول |
+| Sign up | إنشاء حساب |
+| Sign out / Log out | تسجيل الخروج |
+| Save / Cancel / Delete | حفظ / إلغاء / حذف |
+| Confirm / Continue / Back | تأكيد / متابعة / رجوع |
+| Edit / New / Create / Add | تعديل / جديد / إنشاء / إضافة |
+| Remove / Send / Open / Close | إزالة / إرسال / فتح / إغلاق |
+| Preview / Download / Upload | معاينة / تنزيل / رفع |
+| Done / Loading... | تم / جارٍ التحميل... |
+| Profile / Account / Appearance | الملف الشخصي / الحساب / المظهر |
+| Theme / Language | السمة / اللغة |
+| Light / Dark / System | فاتح / داكن / حسب النظام |
+| Active / Archived | نشط / مؤرشف |
+| Status / Priority | الحالة / الأولوية |
+| Assignee / Reporter | المكلّف / المُبلِّغ |
+| Description / Title | الوصف / العنوان |
+| Date / Time | التاريخ / الوقت |
+| Today / Yesterday / Tomorrow | اليوم / أمس / غداً |
+| Empty / Failed / Success | فارغ / فشل / نجاح |
+| Error / Warning | خطأ / تحذير |
+
+### 标识符与混排
+
+- 角色名和状态名保持小写英文，并用 `code` 包裹："تحتاج إلى صلاحية `owner`"、"تم التحويل إلى `in_progress`"。
+- 品牌名、缩写、任务编号（`MUL-123`）、URL 和代码不翻译、不反转。拉丁文本与阿拉伯文之间留一个空格。
+- 标点放在 `{{var}}` 占位符之外；插入的用户内容（名称、标题）用 `<bdi>` 包裹，避免拉丁文值打乱整句顺序。
+
+### 语气与标点
+
+- 现代标准阿拉伯语，正式语体，按钮用阳性祈使句（حفظ、إلغاء、حذف）。不加变音符号，不用拉长符（tatweel）。
+- 阿拉伯语标点：`،` `؛` `؟`。`.` 与 `!` 保持不变；引号用直双引号 `"..."`，省略号用三个点 `...`，与英文源文一致。
+- 数字使用西方数字（`0-9`），日期和计数也一样（`ar-u-nu-latn`）。
+
+### 复数与计数
+
+阿拉伯语有六种复数形式。英文中带 `_one` / `_other` 的每个 key，都需要 `_zero`、`_one`、`_two`、`_few`、`_many` 和 `_other`。`few` 与 `many` 看最后两位数：`few` 是 3–10、103–110……；`many` 是 11–99、111–199……；`other` 是 100–102、200–202……以及小数：
+
+```json
+// ar/issues.json
+{
+  "issue_count_zero": "لا توجد مهام",
+  "issue_count_one": "مهمة واحدة",
+  "issue_count_two": "مهمتان",
+  "issue_count_few": "{{count}} مهام",
+  "issue_count_many": "{{count}} مهمة",
+  "issue_count_other": "{{count}} مهمة"
+}
+```
+
+### 代码中的 RTL
+
+- `<html dir>` 由 `@multica/core/i18n` 的 `getDir(locale)` 决定，组件内不要写死方向。
+- 使用逻辑 Tailwind 工具类：`ms-* me-* ps-* pe-* inset-s-* inset-e-* border-s border-e rounded-s rounded-e text-start text-end`。不要使用 `ml-* mr-* pl-* pr-* left-* right-*` 或 `text-left` / `text-right`，也不要使用旧别名 `start-*` / `end-*`。`multica/logical-direction` 会报告这些写法。
+- 没有逻辑写法的工具类（`origin-left`、`bg-gradient-to-l`）需要在同一个 class 列表里补 `rtl:` 对应值：`bg-gradient-to-l rtl:bg-gradient-to-r`。lint 规则会检查。
+- `left-1/2 -translate-x-1/2` 这种居中写法与方向无关，保持物理写法。其他 `translate-x` 同样是物理方向（开关滑块、悬停位移、偏移量），需要补一个符号相反的 `rtl:` 对应值：`data-checked:translate-x-4 rtl:data-checked:-translate-x-4`。lint 规则不会检查这类写法。
+- `Sidebar` 和 `Sheet` 的 `side` 取 `"start" | "end"`；popover、tooltip 和菜单取 `inline-start` / `inline-end`。
+- 带方向的 lucide 图标（箭头、chevron、转角、列表、发送、登录/退出、面板）在 `[dir="rtl"]` 下自动镜像，见 `packages/ui/styles/base.css`。不要再给它们加 `rtl:rotate-180`，否则会被翻回去。镜像后还要旋转的图标需要反向旋转：`rotate-90 rtl:-rotate-90`。
+- 指针位移和 `scrollLeft` 是物理方向。JS 中的水平计算使用 `@multica/ui/lib/direction` 的 `isRtl`、`inlineSign`、`getInlineScroll` 和 `setInlineScroll`。
+- 内联 `style` 对象不受 lint 检查。使用 `insetInlineStart`、`paddingInlineStart` 等写法，除非数值本来就是物理方向。
+- 按数据定位的图形（Gantt、运行时间线、费用图表、Mermaid 图）以及 macOS 红绿灯旁边的桌面窗口栏都是 `dir="ltr"` 区域，区域内的图标不镜像。代码块保持从左到右。
+- CSS 中使用 `margin-inline-*`、`padding-inline-*`、`inset-inline-*`、`border-inline-*` 和 `text-align: start | end`。
 
 ---
 

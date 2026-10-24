@@ -221,13 +221,13 @@ function ProjectResultRow({
           <HighlightText text={project.title} query={query} />
         </span>
         <span
-          className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
+          className={`ms-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
         >
           {projectStatusLabels[status] ?? project.status}
         </span>
       </div>
       {project.match_source === "description" && project.matched_snippet && (
-        <div className="flex items-start gap-2 pl-[26px]">
+        <div className="flex items-start gap-2 ps-[26px]">
           <span className="text-caption text-muted-foreground truncate">
             <HighlightText text={project.matched_snippet} query={query} />
           </span>
@@ -277,7 +277,7 @@ function IssueResultRow({
         />
       </div>
       {issue.matched_description_snippet && (
-        <div className="flex items-start gap-2 pl-[26px]">
+        <div className="flex items-start gap-2 ps-[26px]">
           <FileText className="size-3 shrink-0 text-muted-foreground mt-0.5" />
           <span className="text-caption text-muted-foreground truncate">
             <HighlightText
@@ -288,7 +288,7 @@ function IssueResultRow({
         </div>
       )}
       {issue.matched_comment_snippet && (
-        <div className="flex items-start gap-2 pl-[26px]">
+        <div className="flex items-start gap-2 ps-[26px]">
           <MessageSquare className="size-3 shrink-0 text-muted-foreground mt-0.5" />
           <span className="text-caption text-muted-foreground truncate">
             <HighlightText text={issue.matched_comment_snippet} query={query} />
@@ -427,7 +427,7 @@ export function SearchCommand() {
       theme === value ? (
         <Check
           aria-label={t(($) => $.commands.current_theme_aria)}
-          className="ml-auto size-4 shrink-0 text-muted-foreground"
+          className="ms-auto size-4 shrink-0 text-muted-foreground"
         />
       ) : undefined;
 

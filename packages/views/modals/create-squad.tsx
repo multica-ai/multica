@@ -299,7 +299,7 @@ function LeaderPicker({
             if (!v) setFilter("");
           }}
         >
-          <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-muted">
+          <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-start text-body transition-colors hover:bg-muted">
             {selected ? (
               <ActorAvatar actorType="agent" actorId={selected.id} size="sm" showStatusDot />
             ) : (
@@ -478,7 +478,7 @@ function AdditionalMembersPicker({
               aria-expanded={open}
               aria-controls="squad-member-listbox"
               tabIndex={0}
-              className="flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-start text-body transition-colors hover:bg-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               {value.length === 0 ? (
                 <>

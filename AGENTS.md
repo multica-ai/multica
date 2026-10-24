@@ -107,6 +107,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - For `pnpm ui:add @reui/<name>`, decline overwrite prompts. Keep `REUI_LICENSE_KEY` in the environment, never in repo files. Adapt vendored primitives into `packages/ui/components/ui/` and compositions into `packages/views/`.
 - Use shared semantic tokens in `packages/ui/styles/`. Typography uses the role-named `--text-*` scale in `packages/ui/styles/tokens.css`, not Tailwind's default size ramp.
 - Selected states remain identifiable on hover. Handle overflow, long text, and scrolling deliberately; avoid unnecessary local state and dividers.
+- Layouts must mirror under `dir="rtl"` without changing LTR: use logical utilities (`ms-*`, `inset-s-*`, `text-end`), which `multica/logical-direction` enforces. For `translate-x`, icons, JS horizontal maths, and data-positioned visuals, follow "RTL in code" in [conventions.mdx](apps/docs/content/docs/developers/conventions.mdx).
 
 ## Testing
 

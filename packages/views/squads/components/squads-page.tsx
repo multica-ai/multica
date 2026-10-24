@@ -302,7 +302,7 @@ function ArchiveSquadDialog({
           >
             {archive.isPending ? (
               <>
-                <Loader2 className="mr-1 size-3.5 animate-spin" />
+                <Loader2 className="me-1 size-3.5 animate-spin" />
                 {t(($) => $.archive_dialog.archiving)}
               </>
             ) : (
@@ -482,7 +482,7 @@ function SquadListToolbar({
     (filters.creators.length > 0 ? 1 : 0);
   const hasActiveFilters = activeFilterCount > 0;
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
+    <span className="ms-auto ps-3 text-caption text-muted-foreground">{n}</span>
   );
   const SCOPE_LABELS: Record<SquadsScope, string> = {
     mine: t(($) => $.scope.mine),
@@ -544,7 +544,7 @@ function SquadListToolbar({
               {SQUAD_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
+                  <span className="ms-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>
@@ -593,7 +593,7 @@ function SquadListToolbar({
                   role="button"
                   tabIndex={-1}
                   aria-label={t(($) => $.toolbar.clear_filters)}
-                  className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
+                  className="-me-1 ms-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();

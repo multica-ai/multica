@@ -61,7 +61,7 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
                 />
                 <CircleCheck
                   aria-hidden="true"
-                  className="absolute -bottom-1 -right-1 size-5 rounded-full bg-background text-success"
+                  className="absolute -bottom-1 -inset-e-1 size-5 rounded-full bg-background text-success"
                 />
               </span>
             )}
@@ -153,7 +153,7 @@ function DoneAction({
   onClick?: () => void;
 }) {
   const className = cn(
-    "group flex w-full items-center gap-3 rounded-lg border bg-card px-4 py-3 text-left",
+    "group flex w-full items-center gap-3 rounded-lg border bg-card px-4 py-3 text-start",
     "transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     "disabled:pointer-events-none disabled:opacity-50",
     primary && "border-primary/30 bg-primary/[0.03]",
@@ -171,7 +171,7 @@ function DoneAction({
       <span className="min-w-0 flex-1 text-body font-medium">{title}</span>
       <ArrowRight
         aria-hidden="true"
-        className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5"
       />
     </>
   );

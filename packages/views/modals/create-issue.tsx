@@ -660,7 +660,7 @@ export function ManualCreatePanel({
               </div>
               <span className="text-body font-medium">{t(($) => $.create_issue.toast_created)}</span>
             </div>
-            <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
+            <div className="flex items-center gap-2 text-body text-muted-foreground ms-7">
               <StatusIcon
                 status={issue.status}
                 icon={iconOf(issue.status)}
@@ -675,7 +675,7 @@ export function ManualCreatePanel({
                 would throw here. */}
             <button
               type="button"
-              className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
+              className="ms-7 mt-2 text-body text-primary hover:underline cursor-pointer"
               onClick={() => {
                 router.push(p.issueDetail(issue.id));
                 toast.dismiss(toastId);
@@ -776,14 +776,14 @@ export function ManualCreatePanel({
                     {t(($) => $.create_issue.toast_duplicate_title)}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
+                <div className="flex items-center gap-2 text-body text-muted-foreground ms-7">
                   <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
                 </div>
                 {/* See the created-issue toast above: toast content lives
                     outside NavigationProvider, so this stays a button. */}
                 <button
                   type="button"
-                  className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
+                  className="ms-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
                     router.push(p.issueDetail(dup.issue.id));
                     toast.dismiss(toastId);
@@ -941,7 +941,7 @@ export function ManualCreatePanel({
             <ShortcutKeycaps
               shortcut={sendShortcut}
               decorative
-              className="ml-1 max-sm:hidden"
+              className="ms-1 max-sm:hidden"
               keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
@@ -1240,7 +1240,7 @@ export function ManualCreatePanel({
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
-                    className="flex items-center gap-1.5 py-1 pl-2.5 cursor-pointer"
+                    className="flex items-center gap-1.5 py-1 ps-2.5 cursor-pointer"
                   >
                     <ArrowUp className="size-3 text-muted-foreground" />
                     <span>
@@ -1251,7 +1251,7 @@ export function ManualCreatePanel({
                     <button
                       type="button"
                       onClick={() => updateParent(undefined)}
-                      className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      className="p-1 pe-2 text-muted-foreground hover:text-foreground cursor-pointer"
                       aria-label={t(($) => $.create_issue.remove_parent_aria)}
                     >
                       <XIcon className="size-3" />
@@ -1267,7 +1267,7 @@ export function ManualCreatePanel({
                   key={c.id}
                   className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
                 >
-                  <div className="flex items-center gap-1.5 py-1 pl-2.5">
+                  <div className="flex items-center gap-1.5 py-1 ps-2.5">
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>
@@ -1277,7 +1277,7 @@ export function ManualCreatePanel({
                       onClick={() =>
                         setChildIssues((prev) => prev.filter((x) => x.id !== c.id))
                       }
-                      className="p-1 pr-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      className="p-1 pe-2 text-muted-foreground hover:text-foreground cursor-pointer"
                       aria-label={t(($) => $.create_issue.remove_subissue_aria, { identifier: c.identifier })}
                     >
                       <XIcon className="size-3" />
@@ -1386,7 +1386,7 @@ export function ManualCreatePanel({
                             {Object.prototype.hasOwnProperty.call(
                               propertyValues,
                               property.id,
-                            ) && <Check className="ml-auto size-3.5" />}
+                            ) && <Check className="ms-auto size-3.5" />}
                           </DropdownMenuItem>
                         ))}
                       </DropdownMenuSubContent>
@@ -1473,7 +1473,7 @@ export function ManualCreatePanel({
                 TooltipContent is portaled, so the Create button stays a direct
                 grid child in both branches below. */}
             <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+              <div className="flex min-h-7 items-center gap-2 sm:me-auto">
                 <FileUploadButton
                   size="sm"
                   multiple

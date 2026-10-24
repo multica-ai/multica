@@ -227,7 +227,7 @@ export function IssueActionsMenuItems({
               />
               {option.label}
               {issue.status === option.key && (
-                <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
+                <span className="ms-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}
@@ -250,7 +250,7 @@ export function IssueActionsMenuItems({
                 {t(($) => $.priority[p])}
               </span>
               {issue.priority === p && (
-                <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
+                <span className="ms-auto text-caption text-muted-foreground">{"✓"}</span>
               )}
             </P.Item>
           ))}

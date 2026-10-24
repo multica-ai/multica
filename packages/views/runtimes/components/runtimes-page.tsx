@@ -636,13 +636,13 @@ function RuntimesToolbar({
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="relative min-w-0 flex-1 sm:flex-none">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Search className="pointer-events-none absolute inset-s-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           aria-label={t(($) => $.page.search_placeholder)}
           placeholder={t(($) => $.page.search_placeholder)}
-          className="h-8 w-full pl-8 text-body sm:w-64"
+          className="h-8 w-full ps-8 text-body sm:w-64"
         />
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -788,7 +788,7 @@ function RowChevron() {
     <ListGridCell className="justify-end">
       <ChevronRight
         aria-hidden="true"
-        className="size-4 text-faint-foreground transition-transform group-hover/row:translate-x-0.5 group-hover/row:text-muted-foreground"
+        className="size-4 text-faint-foreground transition-transform group-hover/row:translate-x-0.5 rtl:group-hover/row:-translate-x-0.5 group-hover/row:text-muted-foreground"
       />
     </ListGridCell>
   );
@@ -865,7 +865,7 @@ function MachineRow({
             dot={
               <HealthDot
                 health={machine.health}
-                className="absolute -bottom-0.5 -right-0.5 ring-2 ring-card"
+                className="absolute -bottom-0.5 -inset-e-0.5 ring-2 ring-card"
               />
             }
           >
@@ -948,7 +948,7 @@ function QoderRow({
           tile={
             <RowTile
               dot={
-                <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-warning ring-2 ring-card" />
+                <span className="absolute -bottom-0.5 -inset-e-0.5 size-2 rounded-full bg-warning ring-2 ring-card" />
               }
             >
               {logo}
@@ -1005,7 +1005,7 @@ function QoderRow({
             dot={
               <span
                 className={cn(
-                  "absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card",
+                  "absolute -bottom-0.5 -inset-e-0.5 size-2 rounded-full ring-2 ring-card",
                   dotTone,
                 )}
               />

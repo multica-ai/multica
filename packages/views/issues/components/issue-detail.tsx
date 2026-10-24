@@ -779,7 +779,7 @@ function ActivityBlock({
         return (
           <div key={entry.id} className="text-caption text-muted-foreground">
             <div className="flex items-center">
-              <div className="mr-2 flex w-4 shrink-0 justify-center">{leadIcon}</div>
+              <div className="me-2 flex w-4 shrink-0 justify-center">{leadIcon}</div>
               <div className="flex min-w-0 flex-1 items-center gap-1">
                 {/* The platform's own entries read as a sentence without an actor. */}
                 {!(isWakeup && entry.actor_type === "system") && (
@@ -796,7 +796,7 @@ function ActivityBlock({
                   />
                 </span>
                 {chip && (
-                  <span className="ml-auto inline-flex max-w-48 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+                  <span className="ms-auto inline-flex max-w-48 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                     {chip}
                   </span>
                 )}
@@ -807,7 +807,7 @@ function ActivityBlock({
                 )}
                 <Tooltip>
                   <TooltipTrigger render={
-                    <span className={cn("shrink-0 cursor-default", !chip && "ml-auto")}>
+                    <span className={cn("shrink-0 cursor-default", !chip && "ms-auto")}>
                       {timeAgo(entry.created_at)}
                     </span>
                   } />
@@ -815,7 +815,7 @@ function ActivityBlock({
                 </Tooltip>
               </div>
             </div>
-            {handoff && <div className="ml-6"><TimelineHandoff details={details} /></div>}
+            {handoff && <div className="ms-6"><TimelineHandoff details={details} /></div>}
           </div>
         );
       })}
@@ -1200,14 +1200,14 @@ export function IssueNotFound({
       {(leading || trailing) && (
         <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
           {leading}
-          {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
+          {trailing && <div className="ms-auto flex shrink-0 items-center gap-1">{trailing}</div>}
         </div>
       )}
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-body text-muted-foreground">
         <p>{t(($) => $.detail.not_found)}</p>
         {showBackLink && (
           <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
-            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+            <ChevronLeft className="me-1 h-3.5 w-3.5" />
             {t(($) => $.detail.back)}
           </Button>
         )}
@@ -1241,7 +1241,7 @@ export function IssueDetailSkeleton({
             <Skeleton className="h-4 w-24" />
           </>
         )}
-        {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
+        {trailing && <div className="ms-auto flex shrink-0 items-center gap-1">{trailing}</div>}
       </div>
       <div className="flex flex-1 min-h-0">
         {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
@@ -1270,7 +1270,7 @@ export function IssueDetailSkeleton({
           </div>
         </div>
         {sidebar && (
-          <div className="hidden md:block w-80 border-l p-4 space-y-5">
+          <div className="hidden md:block w-80 border-s p-4 space-y-5">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex items-center gap-2">
                 <Skeleton className="h-3 w-16 shrink-0" />
@@ -2738,9 +2738,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
           {t(($) => $.detail.section_properties)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90 rtl:-rotate-90" : ""}`} />
         </button>
-        {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+        {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 ps-2">
           {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker
@@ -2957,9 +2957,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
             {t(($) => $.detail.section_parent_issue)}
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90 rtl:-rotate-90" : ""}`} />
           </button>
-          {parentIssueOpen && <div className="pl-2">
+          {parentIssueOpen && <div className="ps-2">
             <div className="flex items-center gap-0.5 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors group">
               <AppLink
                 href={paths.issueDetail(parentIssue.id)}
@@ -3025,9 +3025,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
           {t(($) => $.detail.section_details)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90 rtl:-rotate-90" : ""}`} />
         </button>
-        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 ps-2">
           <PropRow label={t(($) => $.detail.prop_created_by)}>
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
@@ -3214,7 +3214,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         {find.open && (
           <FindBar
             find={find}
-            className={cn("absolute top-14 z-30", isMobile ? "right-4" : "right-10")}
+            className={cn("absolute top-14 z-30", isMobile ? "inset-e-4" : "inset-e-10")}
           />
         )}
         <BreadcrumbHeader
@@ -3479,7 +3479,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               {parentChildIssues.length > 0 && (() => {
                 const done = parentChildIssues.filter((c) => issueBehavesAs(c, "done")).length;
                 return (
-                  <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                  <span className="ms-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
                     <ProgressRing done={done} total={parentChildIssues.length} size={11} />
                     <span className="tabular-nums text-micro font-medium">
                       {done}/{parentChildIssues.length}
@@ -3627,7 +3627,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     <ChevronDown
                       className={cn(
                         "h-3.5 w-3.5 text-muted-foreground transition-transform",
-                        subIssuesCollapsed && "-rotate-90",
+                        subIssuesCollapsed && "-rotate-90 rtl:rotate-90",
                       )}
                     />
                     <span>{t(($) => $.detail.sub_issues_label)}</span>
@@ -3650,13 +3650,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     onChange={handleToggleSelectAllChildren}
                     aria-label={t(($) => $.detail.select_all_sub_issues_aria)}
                     className={cn(
-                      "ml-1 cursor-pointer accent-primary transition-opacity",
+                      "ms-1 cursor-pointer accent-primary transition-opacity",
                       someChildrenSelected
                         ? "opacity-100"
                         : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
                     )}
                   />
-                  <div className="ml-auto flex items-center gap-0.5">
+                  <div className="ms-auto flex items-center gap-0.5">
                     <SubIssueDisplayPopover workspaceProperties={activeWorkspaceProperties} />
                     <Tooltip>
                       <TooltipTrigger
@@ -3960,7 +3960,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
         {/* Thread quick-jump rail — rides the scroll container's right edge,
             next to the scrollbar, where the pointer already is while
-            scrolling (MUL-4522). right-3 is the inset that works in both
+            scrolling (MUL-4522). inset-e-3 is the inset that works in both
             scrollbar modes: it clears a classic scrollbar's ~11px gutter,
             and the rail's own 20px width lands it exactly on the content
             column's px-8 padding when the gutter is 0 (overlay scrollbars),
@@ -3973,7 +3973,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             threads={minimapThreads}
             scrollContainerEl={scrollContainerEl}
             onJump={jumpToMinimapTarget}
-            className="absolute bottom-0 right-3 top-12"
+            className="absolute bottom-0 inset-e-3 top-12"
           />
         )}
       </div>
@@ -4015,7 +4015,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
+          <SheetContent side="end" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
             {sidebarContent}
           </SheetContent>
         </Sheet>

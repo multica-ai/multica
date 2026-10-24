@@ -325,7 +325,7 @@ function IssueSurfaceContent({
                 className="mt-1"
                 onClick={() => controller.openCreateIssue()}
               >
-                <Plus className="size-3.5 mr-1.5" />
+                <Plus className="size-3.5 me-1.5" />
                 {t(($) => $.detail.empty_issues_new_button)}
               </Button>
             </div>

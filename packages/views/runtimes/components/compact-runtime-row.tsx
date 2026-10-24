@@ -36,7 +36,7 @@ export function CompactRuntimeRow({
       disabled={disabled}
       aria-pressed={selected}
       className={cn(
-        "flex w-full flex-row items-center gap-3 rounded-lg border bg-card p-4 text-left transition-colors",
+        "flex w-full flex-row items-center gap-3 rounded-lg border bg-card p-4 text-start transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:pointer-events-none disabled:opacity-60",
         selected

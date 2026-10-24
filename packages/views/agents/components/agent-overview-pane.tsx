@@ -417,7 +417,7 @@ export function AgentOverviewPane({
                 nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
             <aside
               className={cn(
-                "shrink-0 overflow-x-auto border-b border-surface-border py-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
+                "shrink-0 overflow-x-auto border-b border-surface-border py-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-e md:py-4",
                 PAGE_GUTTER,
               )}
             >
@@ -437,7 +437,7 @@ export function AgentOverviewPane({
                       aria-selected={active}
                       onClick={() => requestView(tab.id)}
                       className={cn(
-                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
+                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-start text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
                         active
                           ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
                           : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",

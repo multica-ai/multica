@@ -207,7 +207,7 @@ function InstallationRow({
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
-              <span className="ml-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <span className="ms-2 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.wecom.revoked_badge)}
               </span>
             )}
@@ -485,14 +485,14 @@ function WecomAgentBotStatusRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-caption text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
       )}
       data-testid="wecom-agent-bot-status"
     >
       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
       <span className="truncate">{t(($) => $.wecom.agent_bot_connected_label)}</span>
-      <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0" />
+      <ChevronRight className="ms-auto h-3.5 w-3.5 shrink-0" />
     </button>
   );
 }

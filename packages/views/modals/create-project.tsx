@@ -124,7 +124,7 @@ function RepoUrlText({
     <Tooltip>
       <TooltipTrigger
         render={
-          <span className={cn("min-w-0 flex-1 text-left", className)}>
+          <span className={cn("min-w-0 flex-1 text-start", className)}>
             <span className="block truncate">{githubShortLabel(url)}</span>
             {label && (
               <span className="block truncate text-micro text-muted-foreground">
@@ -533,7 +533,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 render={
                   <button
                     type="button"
-                    className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                    className="text-display-sm cursor-pointer rounded-lg p-1 -ms-1 hover:bg-accent/60 transition-colors"
                     aria-label={t(($) => $.create_project.icon_tooltip)}
                   >
                     {icon || "📁"}
@@ -812,14 +812,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   {workspaceRepos.length > 0 ? (
                     <>
                       <div className="relative">
-                        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Search className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                         <input
                           type="text"
                           value={repoSearch}
                           onChange={(e) => setRepoSearch(e.target.value)}
                           aria-label={t(($) => $.create_project.repos_search_placeholder)}
                           placeholder={t(($) => $.create_project.repos_search_placeholder)}
-                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                          className="h-8 w-full rounded-md border bg-transparent ps-7 pe-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
                         />
                       </div>
                       <div className="max-h-48 space-y-1 overflow-y-auto">
@@ -941,7 +941,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                             </button>
                           </div>
                           {editingRefFor === url && (
-                            <div className="pl-5">
+                            <div className="ps-5">
                               <GithubRefField
                                 value={repoRefs[url] ?? ""}
                                 onChange={(next) => setRepoRef(url, next)}

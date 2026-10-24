@@ -399,7 +399,7 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
           would make the space above the table taller than the space below. */}
       <div
         {...chrome}
-        className="rich-table-toolbar absolute right-0 bottom-full flex h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/table:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+        className="rich-table-toolbar absolute inset-e-0 bottom-full flex h-6 items-center gap-0.5 opacity-0 transition-opacity group-hover/table:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100"
       >
         {resized && (
           <button type="button" onClick={resetWidths} className={cn(toolbarButton, "px-1.5 text-caption")}>
@@ -477,14 +477,14 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
         {overflow.start && (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-px left-px w-3 rounded-l-[var(--radius)]"
+            className="pointer-events-none absolute inset-y-px inset-s-px w-3 rounded-s-[var(--radius)]"
             style={{ background: `linear-gradient(to right, ${SCROLL_SHADOW}, transparent)` }}
           />
         )}
         {overflow.end && (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-y-px right-px w-3 rounded-r-[var(--radius)]"
+            className="pointer-events-none absolute inset-y-px inset-e-px w-3 rounded-e-[var(--radius)]"
             style={{ background: `linear-gradient(to left, ${SCROLL_SHADOW}, transparent)` }}
           />
         )}

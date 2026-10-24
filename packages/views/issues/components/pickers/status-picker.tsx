@@ -240,7 +240,7 @@ function StepHandoffHint({ step, project }: { step: IssueWorkflowStep | undefine
   const actor = stepHandlerActor(step, project);
   const text = t(($) => $.workflows.hands_off_to, { name: handler });
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-caption text-muted-foreground" title={text}>
+    <span className="ms-auto flex shrink-0 items-center gap-1 ps-2 text-caption text-muted-foreground" title={text}>
       <span className="sr-only">{text}</span>
       <CornerDownRight aria-hidden className="size-3 shrink-0" />
       {actor ? (

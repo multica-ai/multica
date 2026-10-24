@@ -34,7 +34,7 @@ export function CreateAgentFooter({
 }) {
   const { t } = useT("agents");
   return (
-    <div className="pe-chat-launcher sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 py-3 pl-5 backdrop-blur">
+    <div className="pe-chat-launcher sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 py-3 ps-5 backdrop-blur">
       {error ? (
         <p
           role="alert"
@@ -47,7 +47,7 @@ export function CreateAgentFooter({
         <Button
           type="button"
           variant="ghost"
-          className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+          className="ms-auto shrink-0 text-muted-foreground hover:text-foreground"
           onClick={onDiscard}
           disabled={creating || discarding}
         >
@@ -56,7 +56,7 @@ export function CreateAgentFooter({
       ) : null}
       <Button
         type="button"
-        className={cn("shrink-0", !onDiscard && "ml-auto")}
+        className={cn("shrink-0", !onDiscard && "ms-auto")}
         onClick={onCreate}
         disabled={!canCreate}
       >

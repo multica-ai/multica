@@ -738,7 +738,7 @@ function StepCard({
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
-        className={cn("min-w-0 flex-1 text-left", off && "opacity-60")}
+        className={cn("min-w-0 flex-1 text-start", off && "opacity-60")}
       >
         <span className="flex h-5 items-center gap-2">
           {"status_key" in column ? (
@@ -861,7 +861,7 @@ function StepDetail({
           <IconButton
             variant="ghost"
             size="icon-sm"
-            className="ml-auto text-muted-foreground"
+            className="ms-auto text-muted-foreground"
             label={t(($) => $.workflows.editor.remove)}
             onClick={onRemove}
           >

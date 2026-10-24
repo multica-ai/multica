@@ -15,6 +15,10 @@ The interface defaults to English. Use EN / 中文 in the header to switch the
 workbench and all previews together. The browser remembers your language; switching
 languages preserves design overrides, saved schemes, and local sample edits.
 
+**RTL**, set apart next to the language switch, flips the workbench and every
+preview to right-to-left so mirrored layouts can be reviewed. It does not change
+the language, and the browser remembers it too.
+
 ## Catalog structure
 
 The overview links to six modules: Foundations, Components, Patterns, Product,

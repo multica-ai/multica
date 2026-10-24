@@ -233,8 +233,8 @@ function createComponents(
       li: ({ children }) => <li className="my-0.5">{children}</li>,
       // Plain tables
       table: ({ children }) => <table className="my-2 font-mono text-body">{children}</table>,
-      th: ({ children }) => <th className="text-left pr-4">{children}</th>,
-      td: ({ children }) => <td className="pr-4">{children}</td>
+      th: ({ children }) => <th className="text-start pe-4">{children}</th>,
+      td: ({ children }) => <td className="pe-4">{children}</td>
     }
   }
 
@@ -266,7 +266,7 @@ function createComponents(
           {children}
         </ul>
       ),
-      ol: ({ children }) => <ol className="my-2 space-y-1 pl-6 list-decimal">{children}</ol>,
+      ol: ({ children }) => <ol className="my-2 space-y-1 ps-6 list-decimal">{children}</ol>,
       li: ({ children }) => <li>{children}</li>,
       // Clean tables
       table: ({ children }) => (
@@ -276,7 +276,7 @@ function createComponents(
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
       th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
+        <th className="text-start py-2 px-3 font-semibold text-muted-foreground">{children}</th>
       ),
       td: ({ children }) => <td className="py-2 px-3 border-b border-border/50">{children}</td>,
       // Headings - H1/H2 same size, differentiated by weight
@@ -289,7 +289,7 @@ function createComponents(
       ),
       // Blockquotes
       blockquote: ({ children }) => (
-        <blockquote className="border-l-2 border-muted-foreground/30 pl-3 my-2 text-muted-foreground italic">
+        <blockquote className="border-s-2 border-muted-foreground/30 ps-3 my-2 text-muted-foreground italic">
           {children}
         </blockquote>
       ),
@@ -326,7 +326,7 @@ function createComponents(
         {children}
       </ul>
     ),
-    ol: ({ children }) => <ol className="my-3 space-y-1.5 pl-6 list-decimal">{children}</ol>,
+    ol: ({ children }) => <ol className="my-3 space-y-1.5 ps-6 list-decimal">{children}</ol>,
     li: ({ children }) => <li className="leading-relaxed">{children}</li>,
     // Beautiful tables
     table: ({ children }) => (
@@ -336,7 +336,7 @@ function createComponents(
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-body">{children}</th>,
+    th: ({ children }) => <th className="text-start py-3 px-4 font-semibold text-body">{children}</th>,
     td: ({ children }) => <td className="py-3 px-4 text-body">{children}</td>,
     tr: ({ children }) => <tr className="hover:bg-muted/30 transition-colors">{children}</tr>,
     // Rich headings
@@ -348,7 +348,7 @@ function createComponents(
     h4: ({ children }) => <h4 className="text-body font-semibold mt-3 mb-1">{children}</h4>,
     // Styled blockquotes
     blockquote: ({ children }) => (
-      <blockquote className="border-l-4 border-foreground/30 bg-muted/30 pl-4 pr-3 py-2 my-3 rounded-r-md">
+      <blockquote className="border-s-4 border-foreground/30 bg-muted/30 ps-4 pe-3 py-2 my-3 rounded-e-md">
         {children}
       </blockquote>
     ),
@@ -360,7 +360,7 @@ function createComponents(
             type="checkbox"
             checked={checked}
             readOnly
-            className="mr-2 rounded-xs border-muted-foreground"
+            className="me-2 rounded-xs border-muted-foreground"
           />
         )
       }
