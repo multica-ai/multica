@@ -28,9 +28,8 @@ type stubAPIClientWithRecorder struct {
 	bindingErr     error
 	// threadSendErr, when non-nil, is returned by SendInteractiveCard /
 	// SendTextMessage only when the call carries a thread ReplyTarget.
-	// Used to exercise the shared classified fallback on the immediate
-	// replies. The attempt is still recorded so tests can count the
-	// thread attempt plus any chat-level fallback.
+	// Used to exercise classified errors on immediate replies. Attempts
+	// are recorded so tests can detect a misplaced chat-level fallback.
 	threadSendErr error
 }
 
@@ -755,16 +754,13 @@ func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
 }
 
 // threadedInboundMsg builds an inbound message that originated inside a
-// Lark topic, so the replier targets the thread (and can fall back).
+// Lark topic, so the replier targets the thread.
 func threadedInboundMsg(chatID ChatID) InboundMessage {
 	return InboundMessage{ChatID: chatID, MessageID: "om_trigger", ThreadID: "omt_topic", SenderOpenID: "ou_user"}
 }
 
-// TestLarkOutcomeReplierIssueCreatedThreadFallback verifies the /issue
-// confirmation reuses the Patcher's classified fallback: a thread reply
-// rejected with a "topic cannot receive this" Lark error retries once at
-// the chat level so the confirmation is not lost.
-func TestLarkOutcomeReplierIssueCreatedThreadFallback(t *testing.T) {
+// A rejected /issue confirmation must stay in its original topic.
+func TestLarkOutcomeReplierIssueCreatedThreadDoesNotFallback(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	stub := &stubAPIClientWithRecorder{configured: true, threadSendErr: errThreadReplyClassified}
@@ -787,14 +783,11 @@ func TestLarkOutcomeReplierIssueCreatedThreadFallback(t *testing.T) {
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
-	if len(stub.textOut) != 2 {
-		t.Fatalf("expected thread attempt + chat-level fallback (2 sends); got %d", len(stub.textOut))
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected one thread attempt and no chat-level send; got %d", len(stub.textOut))
 	}
-	if !stub.textOut[0].ReplyTarget.IsSet() {
-		t.Errorf("first attempt should be the thread reply; got %+v", stub.textOut[0].ReplyTarget)
-	}
-	if stub.textOut[1].ReplyTarget.IsSet() {
-		t.Errorf("fallback attempt must be chat-level; got %+v", stub.textOut[1].ReplyTarget)
+	if got := stub.textOut[0].ReplyTarget; got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected only the original thread reply; got %+v", got)
 	}
 }
 
@@ -831,9 +824,8 @@ func TestLarkOutcomeReplierIssueCreatedNoFallbackOnAmbiguous(t *testing.T) {
 	}
 }
 
-// TestLarkOutcomeReplierNoticeThreadFallback verifies the offline /
-// archived notice card shares the same classified fallback.
-func TestLarkOutcomeReplierNoticeThreadFallback(t *testing.T) {
+// A rejected topic notice must not appear as a top-level group card.
+func TestLarkOutcomeReplierNoticeThreadDoesNotFallback(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	stub := &stubAPIClientWithRecorder{configured: true, threadSendErr: errThreadReplyClassified}
@@ -850,14 +842,11 @@ func TestLarkOutcomeReplierNoticeThreadFallback(t *testing.T) {
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
-	if len(stub.interactiveOut) != 2 {
-		t.Fatalf("expected thread attempt + chat-level fallback (2 cards); got %d", len(stub.interactiveOut))
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected one thread attempt and no chat-level card; got %d", len(stub.interactiveOut))
 	}
-	if !stub.interactiveOut[0].ReplyTarget.IsSet() {
-		t.Errorf("first attempt should be the thread reply; got %+v", stub.interactiveOut[0].ReplyTarget)
-	}
-	if stub.interactiveOut[1].ReplyTarget.IsSet() {
-		t.Errorf("fallback attempt must be chat-level; got %+v", stub.interactiveOut[1].ReplyTarget)
+	if got := stub.interactiveOut[0].ReplyTarget; got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected only the original thread reply; got %+v", got)
 	}
 }
 
