@@ -393,3 +393,111 @@ func TestSearchIndexBootstrapReadsShedLoadWhenSaturated(t *testing.T) {
 	testutil.Call(t, testHandler.GetSearchIndexSnapshot,
 		searchIndexRequest(http.MethodGet, "/api/search-index/snapshot", wsID, nil)).Want(http.StatusServiceUnavailable)
 }
+
+func chatSessionIDs(sessions []SearchIndexChatSession) []string {
+	out := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, s.ID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func chatMessageIDs(messages []SearchIndexChatMessage) []string {
+	out := make([]string, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, m.ID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Chat sync (migration 589): sessions and messages copy per creator, kickoff
+// context stays out, and a session delete tombstones the session instead of
+// each cascaded message.
+func TestSearchIndexSyncsChatSessionsAndMessages(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	wsID, agentID, otherUserID := chatSearchWorkspace(t)
+	session := dbfx.ChatSession(t, agentID, testutil.Cols{"workspace_id": wsID, "title": "Deploy chat"})
+	doomed := dbfx.ChatSession(t, agentID, testutil.Cols{"workspace_id": wsID, "title": "To delete"})
+	foreign := dbfx.ChatSession(t, agentID, testutil.Cols{"workspace_id": wsID, "creator_id": otherUserID})
+
+	first := insertChatMessageAt(t, session, "user", "deploy the api tonight", "now() - interval '2 hours'")
+	second := insertChatMessageAt(t, session, "assistant", "the api is live", "now() - interval '1 hour'")
+	doomedMessage := insertChatMessageAt(t, doomed, "user", "delete me with the session", "now() - interval '30 minutes'")
+	dbfx.Insert(t, "chat_message", testutil.Cols{
+		"chat_session_id": session,
+		"role":            "user",
+		"content":         "kickoff onboarding marker",
+		"created_at":      testutil.Raw("now()"),
+		"message_kind":    "onboarding_kickoff",
+	})
+	insertChatMessageAt(t, foreign, "user", "another member's api note", "now()")
+
+	manifest := searchIndexManifest(t, wsID)
+	wantBytes := int64(len("deploy the api tonight") + len("the api is live") + len("delete me with the session"))
+	if manifest.TextBytes != wantBytes {
+		t.Fatalf("manifest text_bytes = %d, want %d (own messages only, no kickoff, no other member's)", manifest.TextBytes, wantBytes)
+	}
+
+	// One message per page exercises the second cursor without depending on
+	// random UUID order.
+	seen := []string{}
+	after := ""
+	for pages := 0; ; pages++ {
+		if pages > 5 {
+			t.Fatal("snapshot did not terminate")
+		}
+		path := "/api/search-index/snapshot?limit=1"
+		if after != "" {
+			path += "&after_message_id=" + after
+		}
+		page := testutil.Decode[SearchIndexSnapshotResponse](t, testHandler.GetSearchIndexSnapshot,
+			searchIndexRequest(http.MethodGet, path, wsID, nil), http.StatusOK)
+		if wantSessions := 2; pages == 0 {
+			if len(page.Sessions) != wantSessions {
+				t.Fatalf("first page sessions = %v, want the member's two", chatSessionIDs(page.Sessions))
+			}
+		} else if len(page.Sessions) != 0 {
+			t.Fatalf("later page sessions = %v, want none (first page only)", chatSessionIDs(page.Sessions))
+		}
+		seen = append(seen, chatMessageIDs(page.Messages)...)
+		after = page.NextAfterMessageID
+		if page.Done {
+			break
+		}
+	}
+	assertIDs(t, "snapshot messages across pages", seen, []string{first, second, doomedMessage})
+
+	// Nothing was written after the manifest snapshot.
+	quiet := searchIndexChanges(t, wsID, manifest.Cursor, 100)
+	if len(quiet.Sessions)+len(quiet.Messages)+len(quiet.Deleted.Sessions)+len(quiet.Deleted.Messages) != 0 {
+		t.Fatalf("changes right after the manifest = sessions %v messages %v, want none", quiet.Sessions, quiet.Messages)
+	}
+
+	dbfx.Exec(t, `UPDATE chat_message SET content = 'the api is live everywhere' WHERE id = $1`, second)
+	dbfx.Exec(t, `DELETE FROM chat_message WHERE id = $1`, first)
+	dbfx.Exec(t, `DELETE FROM chat_session WHERE id = $1`, doomed)
+
+	changes := searchIndexChanges(t, wsID, quiet.Cursor, 100)
+	if got := chatMessageIDs(changes.Messages); fmt.Sprint(got) != fmt.Sprint(sortedIDs(second)) {
+		t.Fatalf("upserted messages = %v, want the edited one only", got)
+	}
+	if m := changes.Messages[0]; m.Content != "the api is live everywhere" {
+		t.Fatalf("upserted message content = %q, want the edited text", m.Content)
+	}
+	assertIDs(t, "deleted messages", changes.Deleted.Messages, []string{first})
+	assertIDs(t, "deleted sessions", changes.Deleted.Sessions, []string{doomed})
+	for _, id := range changes.Deleted.Messages {
+		if id == doomedMessage {
+			t.Fatal("a session delete must tombstone the session, not each cascaded message")
+		}
+	}
+
+	settled := searchIndexChanges(t, wsID, changes.Cursor, 100)
+	if len(settled.Sessions)+len(settled.Messages)+len(settled.Deleted.Sessions)+len(settled.Deleted.Messages) != 0 {
+		t.Fatalf("second catch-up = %+v, want nothing new", settled)
+	}
+}
