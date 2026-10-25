@@ -6492,6 +6492,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
 	"muse":       "Muse Code",
+	"zcode":      "ZCode",
 	"zeroclaw":   "ZeroClaw",
 }
 

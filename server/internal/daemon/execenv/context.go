@@ -415,6 +415,8 @@ func skillsDirPath(workDir, provider string) string {
 		return filepath.Join(workDir, ".minimax", "skills")
 	case "devin":
 		return filepath.Join(workDir, ".devin", "skills")
+	case "zcode":
+		return filepath.Join(workDir, ".zcode", "skills")
 	case "muse":
 		// Muse's native project root: https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/
 		return filepath.Join(workDir, ".agents", "skills")

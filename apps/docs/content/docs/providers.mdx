@@ -49,6 +49,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
 
@@ -113,3 +114,10 @@ For creating and binding skills, see [Skills](/skills).
 - [Create and configure an agent](/agents-create) — model and thinking-effort settings.
 - [Install AI coding tools](/install-agent-runtime) — install and detection steps.
 - [Daemon and runtimes](/daemon-runtimes) — runtime registration and concurrency.
+
+## ZCode
+
+ZCode uses its native NDJSON `app-server` protocol for session creation, resumption, cancellation, model discovery, thinking levels, and MCP. Tasks run in yolo mode without interactive tool approval. Reasoning choices come from the runtime model catalog; creating an agent preserves the selected model's default level.
+
+On macOS the daemon also discovers ZCode Desktop's bundled Node entry point; Node.js must be installed. Enabled desktop API-key/Coding Plan connections are imported into a process-private temporary provider configuration, which is removed on exit without changing the original files. Start Plan identity tokens are not API keys and this account-authentication path is not supported. Configure a working API connection in ZCode Desktop if discovery returns no models.
+
