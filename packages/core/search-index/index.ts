@@ -2,6 +2,7 @@ export {
   forgetLocalSearchIndex,
   getLocalSearchIndex,
   isLocalSearchReady,
+  searchChatMessages,
   searchIssues,
   searchProjects,
   wipeLocalSearchIndex,
