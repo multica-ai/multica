@@ -76,6 +76,17 @@ func TestDispatchReworkConcurrentReplayAndTerminal(t *testing.T) {
 	if err != nil || !replay.Replayed || util.UUIDToString(replay.Task.ID) != ids[0] || replay.Task.Status != "completed" {
 		t.Fatalf("terminal replay = %#v, %v", replay, err)
 	}
+	next := reworkRequest(agentID, "correction-v2", "Use the next correction package.")
+	next.ActorUserID = request.ActorUserID
+	next.SourceTaskID = replay.Task.ID
+	continued, err := svc.DispatchRework(context.Background(), util.MustParseUUID(issueID), workspaceID, next, nil)
+	if err != nil || continued.Replayed || continued.Task.ID == replay.Task.ID || continued.Task.RerunOfTaskID != replay.Task.ID {
+		t.Fatalf("new correction did not continue the exact terminal source: %#v, %v", continued, err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM issue_rework_dispatch_receipt WHERE issue_id=$1`, issueID)
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id=$1`, continued.Task.ID)
+	})
 }
 
 // TestDispatchReworkConcurrentReplayWithBoundedPool catches pool reads hidden
@@ -153,6 +164,11 @@ func TestDispatchReworkRejectsMismatchAndActiveWork(t *testing.T) {
 	changed.PayloadSHA256 = reworkPayloadSHA256(changed.Instruction)
 	if _, err := svc.DispatchRework(context.Background(), util.MustParseUUID(issueID), workspaceID, changed, nil); !errors.Is(err, ErrReworkDispatchMismatch) {
 		t.Fatalf("payload mismatch: %v", err)
+	}
+	changedSource := request
+	changedSource.SourceTaskID = seedRerunTask(t, pool, agentID, runtimeID, issueID, "completed")
+	if _, err := svc.DispatchRework(context.Background(), util.MustParseUUID(issueID), workspaceID, changedSource, nil); !errors.Is(err, ErrReworkDispatchMismatch) {
+		t.Fatalf("source run mismatch: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), `UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1`, first.Task.ID); err != nil {
 		t.Fatal(err)

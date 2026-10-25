@@ -99,6 +99,10 @@ func (h *Handler) GetReworkDispatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	key := strings.TrimSpace(chi.URLParam(r, "operationKey"))
 	if key == "" {
 		writeError(w, http.StatusBadRequest, "operation_key required")
@@ -113,16 +117,14 @@ func (h *Handler) GetReworkDispatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "load rework dispatch")
 		return
 	}
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
 	workspaceID := uuidToString(issue.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	agent, err := h.Queries.GetAgent(r.Context(), receipt.AgentID)
 	if err != nil || !h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID) {
-		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		// Match an unknown key so lack of invoke access cannot reveal whether
+		// another operator has already dispatched this correction package.
+		writeError(w, http.StatusNotFound, "rework dispatch not found")
 		return
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), receipt.TaskID)

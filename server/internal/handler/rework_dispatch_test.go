@@ -4,10 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 type reworkDispatchHTTPResponse struct {
@@ -17,28 +17,22 @@ type reworkDispatchHTTPResponse struct {
 	Replayed bool `json:"replayed"`
 }
 
-func dispatchReworkRequest(t *testing.T, userID, issueID string, body map[string]any) *httptest.ResponseRecorder {
+func dispatchReworkRequest(t *testing.T, userID, issueID string, body map[string]any) *testutil.Response {
 	t.Helper()
-	w := httptest.NewRecorder()
 	req := newRequestAs(userID, http.MethodPost, "/api/issues/"+issueID+"/rework-dispatch", body)
-	testHandler.DispatchRework(w, withURLParam(req, "id", issueID))
-	return w
+	return testutil.Call(t, testHandler.DispatchRework, testutil.WithURLParams(req, "id", issueID))
 }
 
-func getReworkDispatchRequest(t *testing.T, userID, issueID, key string) *httptest.ResponseRecorder {
+func getReworkDispatchRequest(t *testing.T, userID, issueID, key string) *testutil.Response {
 	t.Helper()
-	w := httptest.NewRecorder()
 	req := newRequestAs(userID, http.MethodGet, "/api/issues/"+issueID+"/rework-dispatch/"+key, nil)
-	testHandler.GetReworkDispatch(w, withURLParams(req, "id", issueID, "operationKey", key))
-	return w
+	return testutil.Call(t, testHandler.GetReworkDispatch, testutil.WithURLParams(req, "id", issueID, "operationKey", key))
 }
 
-func decodeReworkDispatch(t *testing.T, w *httptest.ResponseRecorder) reworkDispatchHTTPResponse {
+func decodeReworkDispatch(t *testing.T, w *testutil.Response) reworkDispatchHTTPResponse {
 	t.Helper()
 	var out reworkDispatchHTTPResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
-		t.Fatalf("decode rework dispatch response: %v: %s", err, w.Body.String())
-	}
+	w.JSON(&out)
 	return out
 }
 
@@ -81,9 +75,7 @@ func TestReworkDispatchHTTPIdempotencyAndBoundaries(t *testing.T) {
 		"payload_sha256": digest,
 	}
 	first := dispatchReworkRequest(t, testUserID, issueID, body)
-	if first.Code != http.StatusAccepted {
-		t.Fatalf("first dispatch: got %d: %s", first.Code, first.Body.String())
-	}
+	first.Want(http.StatusAccepted)
 	created := decodeReworkDispatch(t, first)
 	if created.Replayed || created.Task.ID == "" {
 		t.Fatalf("first dispatch = %#v, want a new task", created)
@@ -98,18 +90,14 @@ func TestReworkDispatchHTTPIdempotencyAndBoundaries(t *testing.T) {
 	}
 
 	replay := dispatchReworkRequest(t, testUserID, issueID, body)
-	if replay.Code != http.StatusAccepted {
-		t.Fatalf("replayed dispatch: got %d: %s", replay.Code, replay.Body.String())
-	}
+	replay.Want(http.StatusAccepted)
 	replayed := decodeReworkDispatch(t, replay)
 	if !replayed.Replayed || replayed.Task.ID != created.Task.ID {
 		t.Fatalf("replayed dispatch = %#v, want task %s", replayed, created.Task.ID)
 	}
 
 	lookup := getReworkDispatchRequest(t, testUserID, issueID, "http-correction-v1")
-	if lookup.Code != http.StatusOK {
-		t.Fatalf("dispatch lookup: got %d: %s", lookup.Code, lookup.Body.String())
-	}
+	lookup.Want(http.StatusOK)
 	if got := decodeReworkDispatch(t, lookup).Task.ID; got != created.Task.ID {
 		t.Fatalf("lookup task = %s, want %s", got, created.Task.ID)
 	}
@@ -121,9 +109,7 @@ func TestReworkDispatchHTTPIdempotencyAndBoundaries(t *testing.T) {
 		"instruction":    "A different package must not reuse this key.",
 		"payload_sha256": reworkPayloadSHA256ForHandler("A different package must not reuse this key."),
 	}
-	if w := dispatchReworkRequest(t, testUserID, issueID, mismatch); w.Code != http.StatusConflict {
-		t.Fatalf("payload mismatch: got %d: %s", w.Code, w.Body.String())
-	}
+	dispatchReworkRequest(t, testUserID, issueID, mismatch).Want(http.StatusConflict)
 	otherAgentID := createHandlerTestAgent(t, "rework-http-other-agent", nil)
 	agentMismatch := map[string]any{
 		"operation_key":  "http-correction-v1",
@@ -132,9 +118,7 @@ func TestReworkDispatchHTTPIdempotencyAndBoundaries(t *testing.T) {
 		"instruction":    instruction,
 		"payload_sha256": digest,
 	}
-	if w := dispatchReworkRequest(t, testUserID, issueID, agentMismatch); w.Code != http.StatusConflict {
-		t.Fatalf("agent mismatch: got %d: %s", w.Code, w.Body.String())
-	}
+	dispatchReworkRequest(t, testUserID, issueID, agentMismatch).Want(http.StatusConflict)
 	badDigest := map[string]any{
 		"operation_key":  "bad-digest",
 		"agent_id":       agentID,
@@ -142,9 +126,7 @@ func TestReworkDispatchHTTPIdempotencyAndBoundaries(t *testing.T) {
 		"instruction":    instruction,
 		"payload_sha256": "not-a-sha256",
 	}
-	if w := dispatchReworkRequest(t, testUserID, issueID, badDigest); w.Code != http.StatusBadRequest {
-		t.Fatalf("bad digest: got %d: %s", w.Code, w.Body.String())
-	}
+	dispatchReworkRequest(t, testUserID, issueID, badDigest).Want(http.StatusBadRequest)
 	active := map[string]any{
 		"operation_key":  "http-correction-v2",
 		"agent_id":       agentID,
@@ -160,23 +142,15 @@ func TestReworkDispatchHTTPIdempotencyAndBoundaries(t *testing.T) {
 	// real workspace header must not reveal or dispatch it.
 	otherWorkspaceID := dbfx.Workspace(t, "Rework other workspace", "rework-other-workspace")
 	dbfx.Member(t, otherWorkspaceID, testUserID, "member")
-	w := httptest.NewRecorder()
 	req := newRequest(http.MethodGet, "/api/issues/"+issueID+"/rework-dispatch/http-correction-v1", nil)
 	req.Header.Set("X-Workspace-ID", otherWorkspaceID)
-	testHandler.GetReworkDispatch(w, withURLParams(req, "id", issueID, "operationKey", "http-correction-v1"))
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace lookup: got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetReworkDispatch, testutil.WithURLParams(req, "id", issueID, "operationKey", "http-correction-v1")).Want(http.StatusNotFound)
 
 	if _, err := testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, created.Task.ID); err != nil {
 		t.Fatalf("delete recorded task: %v", err)
 	}
-	if w := getReworkDispatchRequest(t, testUserID, issueID, "http-correction-v1"); w.Code != http.StatusGone {
-		t.Fatalf("lookup missing recorded task: got %d: %s", w.Code, w.Body.String())
-	}
-	if w := dispatchReworkRequest(t, testUserID, issueID, body); w.Code != http.StatusGone {
-		t.Fatalf("replay missing recorded task: got %d: %s", w.Code, w.Body.String())
-	}
+	getReworkDispatchRequest(t, testUserID, issueID, "http-correction-v1").Want(http.StatusGone)
+	dispatchReworkRequest(t, testUserID, issueID, body).Want(http.StatusGone)
 }
 
 func TestReworkDispatchHTTPReplayRechecksInvokePermission(t *testing.T) {
@@ -207,23 +181,19 @@ func TestReworkDispatchHTTPReplayRechecksInvokePermission(t *testing.T) {
 		"instruction":    instruction,
 		"payload_sha256": reworkPayloadSHA256ForHandler(instruction),
 	}
-	if w := dispatchReworkRequest(t, testUserID, issueID, body); w.Code != http.StatusAccepted {
-		t.Fatalf("initial permitted dispatch: got %d: %s", w.Code, w.Body.String())
-	}
+	dispatchReworkRequest(t, testUserID, issueID, body).Want(http.StatusAccepted)
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET permission_mode = 'private' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("revoke invoke permission: %v", err)
 	}
-	if w := dispatchReworkRequest(t, testUserID, issueID, body); w.Code != http.StatusForbidden {
-		t.Fatalf("replay after revoke: got %d: %s", w.Code, w.Body.String())
-	}
-	if w := getReworkDispatchRequest(t, testUserID, issueID, "permission-recheck"); w.Code != http.StatusForbidden {
-		t.Fatalf("lookup after revoke: got %d: %s", w.Code, w.Body.String())
+	dispatchReworkRequest(t, testUserID, issueID, body).Want(http.StatusForbidden)
+	denied := getReworkDispatchRequest(t, testUserID, issueID, "permission-recheck").Want(http.StatusNotFound)
+	unknown := getReworkDispatchRequest(t, testUserID, issueID, "unknown-rework-key").Want(http.StatusNotFound)
+	if denied.Text() != unknown.Text() {
+		t.Fatalf("denied and unknown GET responses differ: denied=%s unknown=%s", denied.Text(), unknown.Text())
 	}
 	// The private agent's owner remains allowed after the other member's grant
 	// is revoked, proving the deny is an invoke re-check rather than receipt loss.
-	if w := getReworkDispatchRequest(t, ownerID, issueID, "permission-recheck"); w.Code != http.StatusOK {
-		t.Fatalf("lookup as private-agent owner: got %d: %s", w.Code, w.Body.String())
-	}
+	getReworkDispatchRequest(t, ownerID, issueID, "permission-recheck").Want(http.StatusOK)
 }
 
 func reworkPayloadSHA256ForHandler(instruction string) string {
