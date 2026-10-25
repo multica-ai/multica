@@ -17,7 +17,7 @@ import { HighlightText } from "./highlight-text";
 import { useIssueTargetWriter } from "./issue-target";
 import { usePalette } from "./palette-context";
 import { CommandGroupView, CommandRow, PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
-import { ActorRow, AgentPresenceText, IssueResultRow, ObjectRow, ProjectResultRow } from "./result-rows";
+import { ActorRow, AgentPresenceText, ChatMessageResultRow, IssueResultRow, ObjectRow, ProjectResultRow } from "./result-rows";
 import { DelegateGroup } from "./delegate/delegate-group";
 import type { DelegateActor, IssueTarget } from "./types";
 import type { BestMatch, RootModel } from "./use-root-model";
@@ -278,11 +278,16 @@ export function RootView({
       ),
     });
   }
-  if (objects.chats.length > 0) {
+  // One Chats group holds both kinds of hit: sessions whose title matched
+  // client-side, then server-indexed message hits naming their conversation.
+  // Session titles keep their client score; message rows rank with the other
+  // server-only rows.
+  const chatMessages = server.results.messages;
+  if (objects.chats.length > 0 || chatMessages.length > 0) {
     groups.push({
       key: "chats",
       type: "chats",
-      score: objects.chats[0]!.score,
+      score: Math.max(objects.chats[0]?.score ?? 0, model.liveChatMessageScore),
       node: (
         <PaletteGroup key="chats" heading={t(($) => $.groups.chats)}>
           {objects.chats.map(({ item: session }) => (
@@ -293,6 +298,21 @@ export function RootView({
               title={session.title}
               query={query}
               onSelect={() => palette.navigate(p.chatSession(session.id))}
+            />
+          ))}
+          {chatMessages.map((message) => (
+            <ChatMessageResultRow
+              key={`chat:${message.id}`}
+              message={message}
+              query={server.results.query}
+              disabled={server.stale}
+              onSelect={() =>
+                // Open the conversation on that message; the chat page
+                // consumes and strips the params.
+                palette.navigate(
+                  `${p.chat()}?session=${message.chat_session_id}&message=${message.id}`,
+                )
+              }
             />
           ))}
         </PaletteGroup>

@@ -29,7 +29,7 @@ class FakeTab implements PortLike {
         op === "manifest"
           ? await this.server.manifest()
           : op === "snapshot"
-            ? await this.server.snapshot(params.afterNumber ?? 0, params.limit ?? 200)
+            ? await this.server.snapshot(params.afterNumber ?? 0, params.afterMessageId ?? "", params.limit ?? 200)
             : await this.server.changes(params.cursor ?? "");
       this.send({ type: "fetch-result", id: message.id, ok: true, data });
     })();

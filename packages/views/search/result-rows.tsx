@@ -13,6 +13,7 @@ import type {
 import type {
   Issue,
   ProjectStatus,
+  SearchChatMessageResult,
   SearchIssueResult,
   SearchProjectResult,
 } from "@multica/core/types";
@@ -24,7 +25,7 @@ import { ProjectIcon } from "../projects/components/project-icon";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
-import { ROW_CLASS, RowHint } from "./rows";
+import { ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
 
 function IssueAssigneeAvatar({
   assigneeType,
@@ -149,6 +150,52 @@ export function IssueResultRow({
           <MessageSquare className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           <span className="truncate text-caption text-muted-foreground">
             <HighlightText text={commentSnippet} query={query} />
+          </span>
+        </div>
+      )}
+    </CommandPrimitive.Item>
+  );
+}
+
+/**
+ * A chat message hit names its conversation; selecting it opens that
+ * conversation and locates the message.
+ */
+export function ChatMessageResultRow({
+  message,
+  query,
+  disabled,
+  onSelect,
+}: {
+  message: SearchChatMessageResult;
+  query: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  const { t: tChat } = useT("chat");
+  const title = message.session.title.trim() || tChat(($) => $.window.untitled);
+  return (
+    <CommandPrimitive.Item
+      value={`chat:${message.chat_session_id}:${message.id}`}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={cn(ROW_CLASS, "flex-col items-stretch gap-0.5")}
+    >
+      <div className="flex min-h-7 items-center gap-2.5">
+        <MessageSquare className={ROW_ICON_CLASS} />
+        <span className="min-w-0 flex-1 truncate">
+          <HighlightText text={title} query={query} />
+        </span>
+        {message.session.status === "archived" && (
+          <span className="shrink-0 text-caption text-muted-foreground">
+            {tChat(($) => $.list.archived_title)}
+          </span>
+        )}
+      </div>
+      {message.matched_snippet && (
+        <div className={SNIPPET_CLASS}>
+          <span className="truncate text-caption text-muted-foreground">
+            <HighlightText text={message.matched_snippet} query={query} />
           </span>
         </div>
       )}
