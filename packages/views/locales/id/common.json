@@ -1,0 +1,132 @@
+{
+  "avatar_upload": {
+    "change": "Ubah avatar",
+    "remove": "Hapus",
+    "select_image": "Silakan pilih berkas gambar.",
+    "updated": "Avatar berhasil diperbarui",
+    "failed": "Gagal mengunggah avatar",
+    "upload_image": "Unggah gambar",
+    "emoji_label": "Emoji",
+    "more_emojis": "Lebih banyak emoji…",
+    "emoji_loading": "Memuat…"
+  },
+  "avatar_crop": {
+    "title": "Edit avatar",
+    "zoom": "Perbesar/perkecil",
+    "zoom_in": "Perbesar",
+    "zoom_out": "Perkecil",
+    "rotate": "Putar",
+    "reset": "Atur ulang",
+    "cancel": "Batal",
+    "apply": "Simpan",
+    "uploading": "Mengunggah…",
+    "loading": "Memuat…",
+    "load_failed": "Gagal memuat gambar"
+  },
+  "color_picker": {
+    "saturation": "Saturasi dan kecerahan",
+    "hue": "Rona warna",
+    "hex": "Warna hex",
+    "eyedropper": "Pilih warna dari layar",
+    "presets": "Preset",
+    "random": "Acak"
+  },
+  "save": "Simpan",
+  "cancel": "Batal",
+  "delete": "Hapus",
+  "confirm": "Konfirmasi",
+  "loading": "Memuat...",
+  "time": {
+    "just_now": "baru saja",
+    "minutes_ago": "{{count}}m lalu",
+    "hours_ago": "{{count}}j lalu",
+    "days_ago": "{{count}}h lalu"
+  },
+  "lark_bind": {
+    "page_title": "Hubungkan akun Lark Anda",
+    "redeeming": "Menukar token penghubung…",
+    "needs_auth_description": "Masuk ke Multica untuk menyelesaikan penghubungan. Token pada tautan ini menghubungkan akun Lark Anda ke pengguna Multica ini, jadi Anda harus masuk terlebih dahulu.",
+    "sign_in": "Masuk",
+    "done_title": "Anda telah terhubung.",
+    "done_description": "Pesan Anda selanjutnya ke Bot di Lark akan langsung diteruskan ke Agent. Anda dapat menutup tab ini.",
+    "error_title": "Gagal menyelesaikan penghubungan",
+    "error_admin_hint": "Jika ini terus terjadi, minta admin ruang kerja untuk mengirim ulang tautan penghubung dari Lark.",
+    "error_missing_token": "Tautan ini tidak memiliki token penghubung. Minta Bot mengirim tautan baru di Lark.",
+    "error_expired": "Tautan penghubung ini tidak valid atau sudah kedaluwarsa (tautan berlaku selama 15 menit). Minta Bot mengirim tautan baru.",
+    "error_already_bound": "Akun Lark ini sudah terhubung ke pengguna Multica lain. Pemindahan akun harus melalui pemutusan hubungan eksplisit terlebih dahulu.",
+    "error_not_member": "Anda masuk dengan akun Multica yang bukan anggota ruang kerja ini.",
+    "error_unknown": "Terjadi kesalahan. Coba lagi, dan jika masalah berlanjut, hubungi admin ruang kerja."
+  },
+  "slack_bind": {
+    "page_title": "Tautkan akun Slack Anda",
+    "redeeming": "Menautkan akun Anda…",
+    "needs_auth_description": "Masuk ke Multica untuk menyelesaikan penautan. Token pada tautan ini menghubungkan akun Slack Anda ke pengguna Multica ini, jadi Anda harus masuk terlebih dahulu.",
+    "sign_in": "Masuk",
+    "done_title": "Anda telah tertaut.",
+    "done_description": "Pesan Anda selanjutnya ke bot di Slack akan langsung diteruskan ke agent. Anda dapat menutup tab ini.",
+    "error_title": "Gagal menyelesaikan penautan",
+    "error_admin_hint": "Jika ini terus terjadi, kirim pesan lagi ke bot di Slack untuk mendapatkan tautan baru.",
+    "error_missing_token": "Tautan ini tidak memiliki token. Kirim pesan lagi ke bot di Slack untuk mendapatkan tautan baru.",
+    "error_expired": "Tautan ini tidak valid atau sudah kedaluwarsa (tautan berlaku selama 15 menit). Kirim pesan lagi ke bot untuk mendapatkan tautan baru.",
+    "error_already_bound": "Akun Slack ini sudah tertaut ke pengguna Multica lain. Pemindahan akun harus melalui pemutusan hubungan eksplisit terlebih dahulu.",
+    "error_not_member": "Anda masuk dengan akun Multica yang bukan anggota ruang kerja ini.",
+    "error_unknown": "Terjadi kesalahan. Coba lagi, dan jika masalah berlanjut, hubungi admin ruang kerja."
+  },
+  "dingtalk_bind": {
+    "page_title": "Tautkan akun DingTalk Anda",
+    "redeeming": "Menautkan akun Anda…",
+    "needs_auth_description": "Masuk ke Multica untuk menyelesaikan penautan. Token pada tautan ini menghubungkan akun DingTalk Anda ke pengguna Multica ini, jadi Anda harus masuk terlebih dahulu.",
+    "sign_in": "Masuk",
+    "done_title": "Anda telah tertaut.",
+    "done_description": "Pesan Anda selanjutnya ke bot di DingTalk akan langsung diteruskan ke agent. Anda dapat menutup tab ini.",
+    "error_title": "Gagal menyelesaikan penautan",
+    "error_admin_hint": "Jika ini terus terjadi, kirim pesan lagi ke bot di DingTalk untuk mendapatkan tautan baru.",
+    "error_missing_token": "Tautan ini tidak memiliki token. Kirim pesan lagi ke bot di DingTalk untuk mendapatkan tautan baru.",
+    "error_expired": "Tautan ini tidak valid atau sudah kedaluwarsa (tautan berlaku selama 15 menit). Kirim pesan lagi ke bot untuk mendapatkan tautan baru.",
+    "error_already_bound": "Akun DingTalk ini sudah tertaut ke pengguna Multica lain. Pemindahan akun harus melalui pemutusan hubungan eksplisit terlebih dahulu.",
+    "error_not_member": "Anda masuk dengan akun Multica yang bukan anggota ruang kerja ini.",
+    "error_unknown": "Terjadi kesalahan. Coba lagi, dan jika masalah berlanjut, hubungi admin ruang kerja."
+  },
+  "telegram_bind": {
+    "page_title": "Tautkan akun Telegram Anda",
+    "redeeming": "Menautkan akun Anda…",
+    "needs_auth_description": "Masuk ke Multica untuk menyelesaikan penautan. Token pada tautan ini menghubungkan akun Telegram Anda ke pengguna Multica ini, jadi Anda harus masuk terlebih dahulu.",
+    "sign_in": "Masuk",
+    "done_title": "Anda telah tertaut.",
+    "done_description": "Pesan Anda selanjutnya ke bot di Telegram akan langsung diteruskan ke agent. Anda dapat menutup tab ini.",
+    "error_title": "Gagal menyelesaikan penautan",
+    "error_admin_hint": "Jika ini terus terjadi, kirim pesan lagi ke bot di Telegram untuk mendapatkan tautan baru.",
+    "error_missing_token": "Tautan ini tidak memiliki token. Kirim pesan lagi ke bot di Telegram untuk mendapatkan tautan baru.",
+    "error_expired": "Tautan ini tidak valid atau sudah kedaluwarsa (tautan berlaku selama 15 menit). Kirim pesan lagi ke bot untuk mendapatkan tautan baru.",
+    "error_already_bound": "Akun Telegram ini sudah tertaut ke pengguna Multica lain. Pemindahan akun harus melalui pemutusan hubungan eksplisit terlebih dahulu.",
+    "error_not_member": "Anda masuk dengan akun Multica yang bukan anggota ruang kerja ini.",
+    "error_unknown": "Terjadi kesalahan. Coba lagi, dan jika masalah berlanjut, hubungi admin ruang kerja."
+  },
+  "expandable_description": {
+    "expand": "Tampilkan lebih banyak",
+    "collapse": "Tampilkan lebih sedikit"
+  },
+  "wecom_bind": {
+    "page_title": "Tautkan akun Multica Anda",
+    "redeeming": "Menautkan akun Anda…",
+    "needs_auth_description": "Masuk ke Multica untuk menyelesaikan penautan. Token pada tautan ini menghubungkan identitas WeCom Anda ke pengguna Multica ini, jadi Anda harus masuk terlebih dahulu.",
+    "sign_in": "Masuk",
+    "done_title": "Anda telah tertaut.",
+    "done_description": "Pesan Anda selanjutnya ke smart bot di WeCom akan langsung diteruskan ke agent. Anda dapat menutup tab ini.",
+    "error_title": "Gagal menyelesaikan penautan",
+    "error_admin_hint": "Jika ini terus terjadi, kirim pesan lagi ke bot di WeCom untuk mendapatkan tautan baru.",
+    "error_missing_token": "Tautan ini tidak memiliki token. Kirim pesan lagi ke bot di WeCom untuk mendapatkan tautan baru.",
+    "error_expired": "Tautan ini tidak valid atau sudah kedaluwarsa (tautan berlaku selama 15 menit). Kirim pesan lagi ke bot untuk mendapatkan tautan baru.",
+    "error_already_bound": "Identitas WeCom ini sudah tertaut ke pengguna Multica lain. Pemindahan akun harus melalui pemutusan hubungan eksplisit terlebih dahulu.",
+    "error_not_member": "Anda masuk dengan akun Multica yang bukan anggota ruang kerja ini.",
+    "error_unknown": "Terjadi kesalahan. Coba lagi, dan jika masalah berlanjut, hubungi admin ruang kerja."
+  },
+  "not_found": {
+    "title": "Halaman tidak ditemukan",
+    "description": "Halaman yang Anda cari tidak ada atau telah dipindahkan.",
+    "back_to_multica": "Kembali ke Multica"
+  },
+  "navigation": {
+    "open_in_new_tab": "Buka di tab baru"
+  }
+}

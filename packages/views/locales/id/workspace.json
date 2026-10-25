@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "Nama Ruang Kerja",
+    "name_placeholder": "Ruang Kerja Saya",
+    "url_label": "URL Ruang Kerja",
+    "url_placeholder": "ruang-kerja-saya",
+    "submit": "Buat ruang kerja",
+    "submitting": "Membuat...",
+    "errors": {
+      "slug_format": "Hanya huruf kecil, angka, dan tanda hubung",
+      "slug_taken": "URL ruang kerja itu sudah digunakan.",
+      "slug_reserved": "URL ruang kerja itu dicadangkan dan tidak dapat digunakan.",
+      "slug_conflict_toast": "Pilih URL ruang kerja yang berbeda",
+      "create_failed": "Gagal membuat ruang kerja"
+    }
+  },
+  "new_page": {
+    "back": "Kembali",
+    "log_out": "Keluar",
+    "title": "Selamat datang di Multica",
+    "description": "Satu ruang kerja tempat Anda dan rekan tim AI Anda bekerja bersisian — mengambil tugas, meninggalkan komentar, berbagi konteks yang sama.",
+    "invite_hint": "Anda dapat mengundang rekan tim setelah ruang kerja Anda siap."
+  },
+  "creation_disabled": {
+    "title": "Pembuatan ruang kerja dinonaktifkan",
+    "description": "Instance Multica ini tidak mengizinkan pembuatan ruang kerja baru. Minta administrator Anda untuk mengundang Anda ke ruang kerja yang sudah ada."
+  },
+  "no_access": {
+    "title": "Ruang kerja tidak tersedia",
+    "description": "Ruang kerja ini tidak ada atau Anda tidak memiliki akses.",
+    "go_to_workspaces": "Buka ruang kerja saya",
+    "sign_in_different": "Masuk sebagai pengguna lain"
+  }
+}

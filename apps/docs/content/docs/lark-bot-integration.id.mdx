@@ -1,0 +1,95 @@
+---
+title: Bot Feishu
+description: Hubungkan agent ke Feishu dan serahkan pekerjaan langsung dari DM atau obrolan grup.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Hubungkan agent Multica sebagai Bot Feishu, maka anggota tim dapat mengirim DM kepadanya di Feishu, @-mention di grup, atau menggunakan `/issue` untuk membuat tugas. Percakapan dan catatan eksekusi tetap disimpan ke ruang kerja Multica.
+
+Setiap Bot dipetakan ke tepat satu agent. Untuk menggunakan beberapa agent di Feishu, hubungkan satu Bot untuk masing-masing.
+
+## Hubungkan Bot
+
+Pemilik agent serta pemilik dan admin ruang kerja dapat memulai koneksi:
+
+1. Buka **Agents** dan pilih agent yang akan dihubungkan ke Feishu.
+2. Buka **Integrations** dan klik **Bind to Feishu**.
+3. Pindai kode QR dengan Feishu dan konfirmasi otorisasinya.
+4. Kembali ke Multica. Setelah halaman menunjukkan **Connected to Feishu**, Bot siap digunakan.
+
+
+Kode QR adalah kredensial sekali pakai; jika kedaluwarsa, buat kode baru. Agent yang sudah terhubung tidak lagi menampilkan titik masuk pemindaian; untuk mengganti nama Bot atau menyesuaikan izinnya, klik **Manage in Feishu**.
+
+<Callout type="info">
+Koneksi baru saat ini hanya dibuka untuk Feishu Tiongkok daratan. Koneksi Lark internasional yang sudah ada tetap berfungsi dan masih dapat dikelola.
+</Callout>
+
+## Penggunaan pertama
+
+Saat pertama kali anggota mengirim pesan ke Bot, mereka menerima tautan pengikatan akun:
+
+1. Buka tautan tersebut dan masuk ke Multica.
+2. Konfirmasi akun ruang kerja yang akan ditautkan.
+3. Kembali ke Feishu dan kirim ulang pesannya.
+
+Hanya setelah pengikatan selesai, Multica dapat mengonfirmasi anggota ruang kerja mana yang mengirim suatu pesan. Non-anggota tidak dapat menggunakan Bot.
+
+## Menyerahkan pekerjaan ke agent di Feishu
+
+### Pesan langsung
+
+Kirim pesan langsung ke Bot. Pesan beruntun tetap berada dalam percakapan Multica yang sama, dan balasan agent dikirim kembali ke percakapan itu.
+
+### Obrolan grup
+
+Tambahkan Bot ke grup terlebih dahulu, lalu `@Bot` dan jelaskan apa yang Anda perlukan. Bot hanya merespons pesan yang secara eksplisit @-mention dirinya; saat berjalan, Bot mengacu pada konteks terkini yang dapat dibacanya dalam sesi saat ini.
+
+### Buat tugas
+
+Kirim:
+
+```text
+/issue Fix the redirect after login
+Safari stays on the login page after a successful sign-in.
+```
+
+Baris pertama menjadi judul dan sisanya menjadi deskripsi. Mengirim `/issue` saja tidak membuat apa pun; Bot akan membalas dengan format yang diperlukan.
+
+## Kelola koneksi
+
+Buka **Settings → Messaging → Lark** untuk melihat Bot yang terhubung di ruang kerja. Pemilik dan admin ruang kerja dapat memutuskan koneksinya di sini; pemilik agent juga dapat mengelola Bot miliknya sendiri dari halaman **Integrations** agent tersebut.
+
+Setelah diputuskan, Bot berhenti menerima pesan baru. Percakapan dan catatan audit yang sudah ada tidak dihapus.
+
+## Pengaturan hosting mandiri
+
+Multica Cloud tidak memerlukan konfigurasi tambahan. Deployment yang dihosting sendiri harus terlebih dahulu mengatur kunci yang digunakan untuk mengenkripsi kredensial Bot:
+
+```dotenv
+MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Buat kunci seperti ini:
+
+```bash
+openssl rand -base64 32
+```
+
+Restart API server, lalu hubungkan Bot dari halaman **Integrations** agent tersebut. Simpan kunci ini untuk jangka panjang: jika dirotasi atau hilang, kredensial yang ada tidak dapat lagi didekripsi dan Bot harus dihubungkan ulang.
+
+`MULTICA_LARK_HTTP_BASE_URL` dan `MULTICA_LARK_CALLBACK_BASE_URL` hanya ada untuk deployment khusus seperti proxy dan pengujian; biarkan tidak diset dalam operasi normal.
+
+## Pemecahan masalah
+
+- **Tidak ada tombol bind**: pastikan akun saat ini adalah pemilik agent atau pemilik/admin ruang kerja, dan periksa apakah kunci self-hosting sudah dikonfigurasi.
+- **Kode QR kedaluwarsa**: tutup dialognya dan mulai ulang koneksi.
+- **Bot meminta pengikatan akun**: buka tautan pengikatan dan masuk dengan akun Multica untuk ruang kerja tersebut.
+- **Bot tidak berjalan**: periksa apakah agent diarsipkan dan apakah [runtime](/daemon-runtimes) yang digunakannya online.
+- **Bot sama sekali tidak pernah membalas**: app harus mendorong event melalui koneksi panjang — Multica tidak memiliki endpoint webhook. Di konsol developer Feishu/Lark, buka **Events & Callbacks → Event Configuration** dan pastikan metode subscription adalah koneksi panjang bukan request URL, bahwa `im.message.receive_v1` disubscribe, dan bahwa versi app yang membawa konfigurasi tersebut sudah dipublikasikan (dan disetujui, jika tenant mereview rilis). App yang diset ke request URL tetap bisa terhubung, tetap menampilkan Connected, dan secara diam-diam tidak menerima apa pun.
+
+## Langkah selanjutnya
+
+- [Integrasi obrolan](/channels) — perbandingan platform, isolasi sesi, dan mekanisme pengikatan akun.
+- [Obrolan](/chat) — model percakapan dan eksekusi di balik Bot.
+- [Tugas](/issues) — unit kerja yang dibuat oleh `/issue`.

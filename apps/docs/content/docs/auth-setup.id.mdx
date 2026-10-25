@@ -1,0 +1,164 @@
+---
+title: Masuk dan pendaftaran
+description: Konfigurasikan kode verifikasi email, sign-in Google, dan siapa yang dapat mendaftar.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica membuat pengguna masuk dengan kode verifikasi email secara default; OAuth Google dapat ditambahkan di atasnya. Pengguna yang sudah ada selalu dapat masuk kembali — pembatasan pendaftaran hanya menentukan apakah akun baru dapat dibuat.
+
+## Kode verifikasi email
+
+Setelah pengguna memasukkan alamat email, Multica mengirimkan kode verifikasi 6 digit. Kode tersebut berlaku selama 10 menit; setelah terverifikasi, browser menerima cookie sign-in.
+
+Email dapat dikirim melalui Resend atau SMTP. Saat kedua layanan dikonfigurasi, `SMTP_HOST` memiliki prioritas.
+
+### Menggunakan Resend
+
+1. Verifikasi domain pengirim dan buat API key di [Resend](https://resend.com/).
+2. Atur:
+
+   ```dotenv
+   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+   RESEND_FROM_EMAIL=noreply@example.com
+   ```
+
+3. Restart service API.
+
+`RESEND_FROM_EMAIL` harus milik domain yang sudah diverifikasi di Resend.
+
+### Menggunakan SMTP
+
+Minimal, atur host dan alamat pengirim:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=<password>
+SMTP_FROM_EMAIL=noreply@example.com
+```
+
+Mode koneksi yang umum:
+
+| Skenario | Konfigurasi |
+|---|---|
+| Relay anonim internal | `SMTP_PORT=25`, biarkan username dan password kosong |
+| STARTTLS | `SMTP_PORT=587`; secara default akan upgrade ke TLS saat server mendukungnya |
+| Implicit TLS | `SMTP_PORT=465`, atau atur `SMTP_TLS=implicit` secara eksplisit |
+
+Jika `SMTP_FROM_EMAIL` tidak diatur, nilainya akan fallback ke `RESEND_FROM_EMAIL`. Private CA atau sertifikat self-signed mengharuskan Anda menambahkan CA tersebut ke trust store container; `SMTP_TLS_INSECURE=true` melewati verifikasi sertifikat dan hanya boleh digunakan sementara pada jaringan internal yang terpercaya.
+
+Beberapa relay yang ketat juga mensyaratkan nama EHLO yang valid:
+
+```dotenv
+SMTP_EHLO_NAME=mail.example.com
+```
+
+### Perilaku tanpa layanan email
+
+Server tetap berjalan, tetapi kode verifikasi dan tautan undangan hanya dituliskan ke log; tidak ada email yang dikirim. Ini cocok untuk development lokal, bukan produksi.
+
+Log startup menyatakan apakah mode saat ini adalah `Resend API`, `SMTP relay`, atau `DEV mode`.
+
+## Kode verifikasi lokal yang fixed
+
+Automated test lokal dapat mengatur kode verifikasi yang fixed:
+
+```dotenv
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+Kode harus 6 digit. Kode fixed ini diabaikan saat `APP_ENV=production`.
+
+<Callout type="warning">
+Jangan mengaktifkan kode fixed pada instance yang dapat diakses publik. Kombinasi untuk produksi adalah `APP_ENV=production` dengan `MULTICA_DEV_VERIFICATION_CODE` yang kosong.
+</Callout>
+
+## Sign-in Google
+
+1. Buat client OAuth 2.0 di [Google Cloud Console](https://console.cloud.google.com/).
+2. Tambahkan callback URL frontend Multica ke **Authorized redirect URIs**:
+
+   ```text
+   https://multica.example.com/auth/callback
+   ```
+
+3. Atur:
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+   ```
+
+4. Restart service API.
+
+URL di Google Console dan di `GOOGLE_REDIRECT_URI` harus sama persis, termasuk protokol, port, dan trailing slash. Setelah dikonfigurasi, halaman sign-in menampilkan tombol sign-in Google; image frontend tidak perlu dibangun ulang (rebuild).
+
+## Pembatasan pendaftaran
+
+Tiga variabel bersama-sama menentukan apakah akun baru dapat dibuat:
+
+| Variabel | Efek |
+|---|---|
+| `ALLOWED_EMAILS` | Alamat email lengkap yang diizinkan untuk mendaftar, dipisahkan koma |
+| `ALLOWED_EMAIL_DOMAINS` | Domain email yang diizinkan untuk mendaftar, dipisahkan koma |
+| `ALLOW_SIGNUP` | Apakah pendaftaran diizinkan saat tidak ada allowlist yang dikonfigurasi; default `true` |
+
+Urutan evaluasinya adalah:
+
+1. Email cocok dengan `ALLOWED_EMAILS` — izinkan.
+2. Atau domainnya cocok dengan `ALLOWED_EMAIL_DOMAINS` — izinkan.
+3. Jika tidak ada allowlist yang dikonfigurasi dan `ALLOW_SIGNUP=true` — izinkan.
+4. Jika tidak, bila email memiliki undangan Ruang Kerja yang masih pending dan belum kedaluwarsa — izinkan.
+5. Selain itu — tolak.
+
+Konfigurasi umum:
+
+```dotenv
+# Company domain and invited users
+ALLOW_SIGNUP=false
+ALLOWED_EMAIL_DOMAINS=company.com
+
+# Also admit one external collaborator
+ALLOWED_EMAILS=partner@example.net
+```
+
+<Callout type="info">
+Kedua allowlist juga berfungsi sebagai daftar pengecualian eksplisit saat `ALLOW_SIGNUP=false`.
+</Callout>
+
+## Undangan dan pembatasan pendaftaran
+
+Undangan Ruang Kerja yang masih pending dan belum kedaluwarsa mengizinkan alamat email tersebut untuk membuat akun meskipun `ALLOW_SIGNUP=false` atau alamat itu tidak cocok dengan `ALLOWED_EMAILS` maupun `ALLOWED_EMAIL_DOMAINS`. Pengecualian ini juga berlaku saat `ALLOW_SIGNUP=true` dengan allowlist yang dikonfigurasi: allowlist bukan batas mutlak terhadap pengguna yang sudah diundang.
+
+Pengguna yang sudah ada tetap dapat masuk. Pengguna baru tanpa entri allowlist yang cocok atau tanpa pendaftaran terbuka membutuhkan undangan yang masih pending dan belum kedaluwarsa; undangan yang hilang, kedaluwarsa, sudah diterima, ditolak, atau dicabut tidak memberikan izin pendaftaran. Undangan diperiksa saat meminta kode login dan sekali lagi saat membuat akun, termasuk melalui sign-in Google.
+
+Anda tidak perlu menambahkan undangan biasa ke `ALLOWED_EMAILS` atau me-restart server. Undangan tersebut tetap harus diterima melalui alur undangan normal untuk bergabung dengan Ruang Kerja.
+
+Mencabut sebuah undangan tidak menghapus akun yang sudah dibuat menggunakan undangan itu, dan tidak mencegah akun yang sudah ada tersebut untuk masuk.
+
+## Masa berlaku session
+
+Session bersifat sliding. Masa berlaku di bawah ini adalah batas **idle**, bukan hitungan mundur dari saat sign-in: begitu sebuah session turun di bawah setengah dari masa berlakunya, request berikutnya akan menerbitkan ulang session itu dengan masa berlaku penuh kembali, sehingga akun yang digunakan secara terus-menerus tidak pernah di-sign-out sesuai jadwal. Tidak ada batas absolut.
+
+Batas ini bersifat satu arah. Sebuah session hanya diterbitkan ulang setelah melewati titik tengahnya, sehingga session yang terakhir digunakan saat sisa masa berlakunya masih lebih dari setengah tidak akan diperpanjang — jeda idle yang selalu dapat dilalui adalah setengah dari nilai di bawah, bukan seluruhnya.
+
+Sesuaikan dengan `AUTH_TOKEN_TTL`, yang menerima Go duration atau bilangan bulat positif dalam detik:
+
+```dotenv
+AUTH_TOKEN_TTL=720h
+```
+
+Nilai minimumnya adalah `60s`; nilai yang lebih singkat akan dibatasi (clamped) naik ke nilai itu dan mencatat warning saat startup. Di bawah nilai itu, kadens pembaruan (renewal) yang diturunkan server akan jatuh di bawah batas yang diterapkan client padanya, dan client akan memeriksa pembaruan lebih jarang daripada waktu session tersebut dapat bertahan.
+
+Restart service API setelah mengubahnya. Nilai ini berlaku untuk session yang diterbitkan atau diterbitkan ulang setelahnya — karena session bersifat sliding, session yang sudah ada akan mengikuti masa berlaku baru pada saat berikutnya session itu diterbitkan ulang.
+
+## Langkah selanjutnya
+
+- [Variabel lingkungan](/environment-variables) — referensi variabel lengkap.
+- [Autentikasi dan token](/auth-tokens) — sign-in session dan jenis token.
+- [Anggota dan role](/members-roles) — undangan dan role.
+</content>

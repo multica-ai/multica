@@ -1,0 +1,99 @@
+---
+title: Perbandingan alat pengkodean AI
+description: Bandingkan alat pengkodean AI yang didukung Multica, dan bagaimana model, MCP, sesi, dan skill berbeda satu sama lain.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica tidak menggantikan alat pengkodean AI yang Anda gunakan. Sebuah runtime menjalankan tool yang sudah terinstal dan sudah masuk di komputer tersebut, lalu menulis progres dan hasil kembali ke tugas.
+
+Jika Anda sudah menggunakan salah satu tool ini, Anda biasanya dapat tetap memakainya seperti sekarang. Empat hal yang perlu dipertimbangkan saat memilih:
+
+- apakah sudah terinstal di komputer tersebut;
+- model mana yang dapat digunakan akun Anda;
+- apakah Multica perlu mengonfigurasi MCP untuknya;
+- skill mana yang ingin digunakan ulang oleh tim.
+
+Langkah instalasi ada di [Instal alat pengkodean AI](/install-agent-runtime).
+
+## Tool yang didukung
+
+| Tool | Perintah yang dideteksi | Resumpsi sesi | MCP terkelola Multica | Jalur injeksi skill |
+|---|---|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | — | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | per-run workspace `skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | — |
+
+"MCP terkelola Multica" berarti Anda dapat mendefinisikan server MCP di konfigurasi agent dan Multica meneruskannya ke tool tersebut sebelum sebuah eksekusi berjalan. Ini tidak berarti tool tersebut tidak memiliki cara lain untuk mengonfigurasi MCP.
+
+## Sumber model
+
+Saat Anda membuat sebuah agent, daftar model berasal dari runtime yang bersangkutan. Beberapa tool menampilkan sekumpulan nama model yang tetap; yang lain mengembalikan model yang tersedia berdasarkan konfigurasi lokal, akun yang masuk, dan hak subscription.
+
+Jika Anda tidak memilih sebuah model, Multica menggunakan default milik tool itu sendiri. Jika daftarnya kosong, pastikan runtime-nya online dan tool-nya sudah masuk, lalu segarkan daftar model.
+
+QwenPaw dan MiniMax Code adalah pengecualian: keduanya tidak menerima model yang dipilih dari Multica, sehingga pemilihnya tidak aktif dan menampilkan "Managed by runtime". Pilih model di konfigurasi tool itu sendiri. Daftar model yang kosong di sana memang wajar dan bukan tanda bahwa runtime-nya offline.
+
+DeepSeek Harness menampilkan katalog modelnya dari runtime itu sendiri (`dsh --profile multica --list-models`). ID model-nya menggunakan bentuk `provider/model` (misalnya `deepseek-official/deepseek-chat`), jadi pilih id lengkapnya dari daftar tersebut.
+
+<Callout type="info">
+Tool yang berbeda dapat menggunakan nama model yang berbeda. Setelah beralih alat pengkodean AI, nilai model sebelumnya tidak valid di tool yang baru dan perlu dipilih ulang.
+</Callout>
+
+## Resumpsi sesi
+
+Semua tool yang ditandai ✓ mendukung melanjutkan sesi yang sudah ada pada eksekusi selanjutnya. Prasyaratnya adalah sesi aslinya masih ada dan eksekusi tersebut dijalankan oleh sebuah runtime yang dapat menjangkaunya. MiniMax Code 0.1.2 tidak mengiklankan kemampuan memuat sesi lewat ACP, sehingga Multica memulai sesi MCode baru untuk eksekusi selanjutnya.
+
+Multica menyimpan identifier sesi yang dikembalikan tool tersebut. Saat pekerjaan berikutnya berlanjut pada tugas yang sama, runtime mencoba melanjutkan sesi itu; jika tidak dapat, runtime membuat sesi baru dan melanjutkan. Pi menyimpan path file sesi lokal, sehingga lebih bergantung pada komputer dan file aslinya.
+
+Aturan percobaan ulang dan resumpsi sesi ada di [Eksekusi](/tasks#percobaan-ulang-manual).
+
+## Konfigurasi MCP
+
+Antigravity, GitHub Copilot CLI, DevEco Code, dan Pi belum membaca konfigurasi MCP pada sebuah agent, sehingga field tersebut tidak ditampilkan saat membuat agent untuk tool-tool itu.
+
+<Callout type="warning">
+Perintah, argumen, dan environment variable server MCP disimpan di server bersama konfigurasi agent. Jangan menuliskan kredensial lokal yang tidak perlu Anda bagikan ke dalam konfigurasi tersebut.
+</Callout>
+
+## Injeksi skill
+
+Sebelum sebuah eksekusi dimulai, Multica menulis skill yang terikat pada agent tersebut ke jalur-jalur pada tabel di atas, sehingga setiap tool menemukannya lewat mekanisme bawaannya sendiri.
+
+Skill yang sudah ada di repositori tidak pernah ditimpa. Pada tabrakan nama, Multica menggunakan nama direktori berbeda untuk salinan yang diinjeksikan; setelah eksekusi selesai, Multica hanya membersihkan file yang dibuatnya sendiri.
+
+Codex, Hermes, dan OpenClaw ditangani sedikit berbeda:
+
+- Codex menggunakan `CODEX_HOME` per-eksekusi, sehingga skill tidak pernah ditulis ke direktori Codex tingkat sistem.
+- Hermes menggunakan `HERMES_HOME` per-eksekusi. Konfigurasi lokal yang sudah ada masih dapat dibaca, tetapi skill yang terikat dan data sesi diisolasi per eksekusi. Isolasi ini hanya berlaku saat agent memiliki skill yang terikat; eksekusi tanpa skill yang terikat menggunakan home Hermes asli komputer tersebut.
+- OpenClaw menggunakan `skills/` di bawah direktori kerja eksekusi saat ini, dan konfigurasi per-eksekusinya menetapkan direktori tersebut sebagai workspace.
+
+Untuk membuat dan mengikat skill, lihat [Skills](/skills).
+
+## Langkah selanjutnya
+
+- [Buat dan konfigurasikan agent](/agents-create) — pengaturan model dan thinking-effort.
+- [Instal alat pengkodean AI](/install-agent-runtime) — langkah instalasi dan deteksi.
+- [Daemon dan runtime](/daemon-runtimes) — registrasi runtime dan konkurensi.

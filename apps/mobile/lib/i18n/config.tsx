@@ -45,6 +45,7 @@ function matchSupportedLocale(candidates: string[]): SupportedLocale {
     }
     if (lowered.startsWith("zh")) return "zh-Hans";
     if (lowered.startsWith("en")) return "en";
+    if (lowered.startsWith("id")) return "id";
   }
   return DEFAULT_LOCALE;
 }
@@ -72,7 +73,12 @@ export function MobileI18nProvider({ children }: { children: ReactNode }) {
     void SecureStore.getItemAsync(LOCALE_STORAGE_KEY)
       .then((stored) => {
         if (cancelled || !stored) return;
-        if (stored !== "system" && stored !== "en" && stored !== "zh-Hans") {
+        if (
+          stored !== "system" &&
+          stored !== "en" &&
+          stored !== "zh-Hans" &&
+          stored !== "id"
+        ) {
           return;
         }
         setPreferenceState(stored);

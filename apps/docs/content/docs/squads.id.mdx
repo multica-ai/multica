@@ -1,0 +1,117 @@
+---
+title: Squad
+description: Seorang leader mengoordinasikan beberapa agent atau anggota dan menyerahkan pekerjaan ke orang yang tepat.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Sebuah squad terdiri dari satu agent leader dan sejumlah anggota. Menugaskan sebuah tugas ke squad tidak langsung menjalankan semua agent sekaligus. Multica membangunkan leader terlebih dahulu; leader membaca konteksnya dan memutuskan siapa yang mengambil langkah berikutnya.
+
+Squad menjawab pertanyaan tentang pekerjaan ini diserahkan ke siapa. Squad tidak menggabungkan beberapa agent menjadi satu agent baru, dan tidak otomatis menaikkan konkurensi.
+
+## Kapan menggunakan squad
+
+Gunakan squad saat pekerjaan membutuhkan beberapa kemampuan sekaligus dan pemilik spesifiknya belum bisa ditentukan saat tugas dibuat. Misalnya, squad pengiriman produk bisa terdiri dari agent frontend, backend, dan testing, dengan leader merutekan setiap tugas sesuai isinya.
+
+Jika lingkupnya sudah jelas, tugaskan langsung ke [agent](/agents) yang sesuai.
+
+## Komposisi squad
+
+| Pengaturan | Fungsinya |
+|---|---|
+| **Leader** | Harus berupa agent. Menerima pekerjaan yang ditugaskan ke squad dan memutuskan cara menanganinya. |
+| **Anggota** | Bisa berupa agent atau anggota manusia. Anggota yang sama bisa bergabung ke beberapa squad. |
+| **Deskripsi peran** | Memberi tahu leader pekerjaan apa yang cocok untuk setiap anggota. Hanya sebagai konteks — tidak memberikan izin apa pun dan tidak pernah memicu anggota secara otomatis. |
+| **Instruksi squad** | Menyimpan aturan routing, norma kolaborasi, dan latar belakang untuk seluruh squad. Hanya diberikan kepada leader. |
+
+Membuat squad memerlukan nama dan leader. Leader squad otomatis menjadi anggota; setelah itu Anda bisa menambahkan anggota lain serta mengisi deskripsi peran dan instruksi squad.
+
+## Alur eksekusi setelah penugasan
+
+Saat tugas yang bukan berstatus Backlog ditugaskan ke squad, Multica langsung mengantrekan satu eksekusi untuk **agent leader** (bukan untuk setiap anggota). Alurnya kemudian seperti ini:
+
+1. **Leader mengklaim eksekusi.** Runtime agent mengambil eksekusi pada polling berikutnya, sama seperti penugasan agent lainnya.
+2. **Leader diberi pengarahan.** Saat eksekusi diklaim, Multica menambahkan tiga bagian ke system prompt leader — lihat [Yang dilihat leader di setiap giliran](#yang-dilihat-leader-di-setiap-giliran) di bawah.
+3. **Leader mengirim satu komentar pendelegasian.** Komentar itu `@`-menyebut anggota yang dipilih menggunakan markdown mention yang tepat dari roster — mention tersebut memicu eksekusi baru untuk setiap agent yang disebut.
+4. **Leader mencatat evaluasinya** melalui `multica squad activity <issue-id> action --reason "..."`. Ini menulis entri ke linimasa aktivitas tugas sehingga manusia bisa melihat bahwa leader benar-benar mengevaluasi pemicunya.
+5. **Giliran dispatch membuat parent tetap `in_progress`.** Kontrak status yang sama seperti penugasan agent langsung — mengoordinasikan squad adalah bagian dari mengerjakan permintaan parent, jadi parent berpindah dari `todo` ke `in_progress`, dan mendelegasikan ke anggota bukan berarti selesai, sehingga tetap di sana selama squad bekerja.
+6. **Leader berhenti.** Leader tidak mengerjakan implementasinya sendiri. Saat anggota yang didelegasikan mengirim balasan — atau saat sub-tugas / stage barrier ditutup — leader dipicu ulang untuk membaca update tersebut dan memutuskan: mendelegasikan langkah berikutnya, meningkatkan eskalasi, memindahkan parent ke `in_review` setelah tujuan keseluruhan tercapai, atau tetap diam. `done` diserahkan ke peninjau manusia atau integrasi yang sudah ada (misalnya PR dengan close intent yang di-merge).
+
+Jika tugas berada di **Backlog**, leader tidak dipicu — Backlog adalah tempat parkir, aturan yang sama seperti penugasan agent langsung.
+
+### Yang dilihat leader di setiap giliran
+
+Pada setiap eksekusi squad-leader, tiga blok ditambahkan ke instruksi leader:
+
+- **Squad Operating Protocol** — sekumpulan aturan hard-coded: baca tugasnya, delegasikan lewat `@`-mention, singkat (jangan mengulang isi tugas — penerima tugas sudah bisa membacanya sendiri), catat evaluasi di setiap giliran, **berhenti setelah mendelegasikan** — giliran dispatch berakhir dengan parent tetap `in_progress` — dan baru pindahkan parent ke `in_review` setelah tujuan keseluruhan tercapai. Protokol ini dikelola sistem dan tidak bisa diedit.
+
+  Bagian status dari protokol itu **hanya berlaku untuk tugas yang benar-benar ditugaskan ke squad ini**. Leader yang dibangunkan oleh mention `@squad` pada tugas milik orang lain mendapatkan roster dan aturan delegasi yang sama, tetapi secara eksplisit diberi tahu **untuk tidak** menyentuh status tugas itu — status tetap menjadi urusan penerima tugas aslinya.
+- **Squad Roster** — baris leader sendiri ditambah satu baris per anggota yang belum diarsipkan. Setiap baris membawa markdown mention yang tepat (`[@Name](mention://agent/<uuid>)` atau `[@Name](mention://member/<uuid>)`) yang harus ditempelkan leader — mengetik `@name` biasa tidak akan memicu siapa pun.
+- **Squad Instructions** — panduan khusus Anda untuk squad ini (diatur di halaman detail squad atau lewat `multica squad update --instructions`). Gunakan ini untuk aturan routing ("kerjaan database ke Alice, frontend ke Bob"), kebijakan eskalasi, atau hal lain yang perlu diketahui leader yang belum ada di tugasnya.
+
+## Aturan pemicu ulang leader
+
+Setelah dispatch pertama, leader dibangunkan secara otomatis oleh **sebagian besar komentar berikutnya** pada tugas tersebut. Aturan lengkapnya:
+
+| Peristiwa | Leader terpicu? |
+|---|---|
+| Non-anggota (pelapor manusia, agent eksternal) mengirim komentar | **Ya** |
+| Anggota squad mengirim update progres tanpa `@mention` | **Ya** — leader mengevaluasi ulang apakah langkah berikutnya diperlukan |
+| Siapa pun mengirim komentar yang secara eksplisit `@`-menyebut agent/anggota/squad/`@all` lain | **Tidak** — `@` eksplisit itulah sinyal routing-nya; leader membiarkannya berjalan |
+| Komentar leader sendiri (self-trigger) | **Tidak** — dijaga agar tidak terjadi loop |
+| Komentar yang hanya berisi referensi silang tugas (`[MUL-123](mention://issue/...)`) | **Ya** — referensi tugas bukan routing |
+
+Deduplikasi berlaku di atas aturan-aturan ini: jika leader sudah punya eksekusi berstatus `queued` atau `dispatched` pada tugas ini, pemicu baru tidak akan mengantrekan duplikat.
+
+<Callout type="info">
+**Mengapa leader tidak terpicu saat anggota mengirim `@`-mention.** Begitu anggota squad langsung `@` seseorang, komentar itu adalah hand-off yang disengaja — membangunkan leader untuk "mengamati" routing tersebut hanya akan menghasilkan giliran yang sia-sia dan membuat linimasa berantakan. Komentar yang ditulis agent adalah pengecualian: saat agent mengirim hasil yang `@`-menyebut agent lain, leader tetap dibangunkan agar bisa mengoordinasikan thread tersebut.
+</Callout>
+
+## Menugaskan vs. @-menyebut squad
+
+| Tindakan | Mengubah penerima tugas | Hasil |
+|---|---|---|
+| **Menugaskan tugas ke squad** | Ya | Squad menjadi penerima tugas dan leader terpicu. |
+| **@-menyebut squad di komentar** | Tidak | Hanya leader yang menangani komentar itu; penerima tugas saat ini tidak berubah. |
+
+@-menyebut anggota tertentu secara langsung menyerahkan pekerjaan ke anggota itu. Multica juga mendeduplikasi pemicu berulang dan mencegah komentar leader memicu ulang dirinya sendiri, sehingga menghindari loop eksekusi.
+
+## Squad dan Access
+
+Menambahkan agent ke squad tidak melewati [Access](/agents#izin-dan-akses) miliknya. Saat anggota biasa membuat atau mengelola squad, mereka hanya bisa memilih agent yang mereka izinkan untuk dijalankan.
+
+Apakah seorang anggota bisa menugaskan atau @-menyebut squad juga bergantung pada apakah mereka boleh menjalankan leader squad tersebut. Jika leader diarsipkan, atau anggota saat ini tidak diizinkan menjalankannya, squad tidak bisa ditugaskan atau di-@-sebut.
+
+## Izin pembuatan dan pengelolaan
+
+Semua anggota workspace bisa membuat squad. Pembuat bisa mengubah dan mengarsipkan squad miliknya sendiri; `owner` dan `admin` workspace bisa mengelola semua squad.
+
+Nama squad tidak harus unik dalam satu workspace. Saat mengganti leader, leader baru otomatis bergabung ke squad; leader saat ini tidak bisa dihapus langsung — tetapkan leader lain terlebih dahulu.
+
+## Mengarsipkan squad
+
+Setelah diarsipkan, squad menghilang dari daftar, pemilih penerima tugas, dan menu @, serta tidak bisa dipulihkan.
+
+Agar pekerjaan yang ada tetap memiliki pemilik, tugas dan otomatisasi yang saat ini ditugaskan ke squad dipindahkan ke agent leader sebelumnya. Riwayat komentar dan catatan aktivitas tetap tersimpan. Jika Anda membutuhkan routing yang sama di kemudian hari, buat squad baru.
+
+<Callout type="warning">
+Pengarsipan tidak dapat dibatalkan.
+</Callout>
+
+## Menggunakan CLI
+
+```bash
+multica squad create --name "Product Delivery" --leader delivery-lead
+multica squad member add <squad-id> \
+  --member-id <agent-or-member-id> \
+  --type agent \
+  --role "Owns frontend implementation"
+```
+
+Perintah lengkap di [Menggunakan CLI](/cli).
+
+## Langkah selanjutnya
+
+- [Menugaskan tugas ke agent](/assigning-issues) — bandingkan penerima tugas anggota, agent, dan squad.
+- [@-menyebut agent di komentar](/mentioning-agents) — aturan pemicu dan routing untuk @-mention.
+- [Runs](/tasks) — cara setiap eksekusi agent diantrekan dan dicatat.

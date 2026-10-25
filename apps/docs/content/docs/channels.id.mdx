@@ -1,0 +1,114 @@
+---
+title: Integrasi obrolan
+description: Hubungkan agent Multica ke Feishu, Lark, Slack, DingTalk, WeCom, atau Telegram dan gunakan agent tersebut dari alat obrolan yang sudah digunakan tim Anda.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Integrasi obrolan memungkinkan tim mengajukan pertanyaan ke agent, @-mention agent di obrolan grup, atau membuat tugas dari jendela obrolan — tanpa membuka Multica.
+
+Feishu/Lark, Slack, DingTalk, WeCom, dan Telegram didukung saat ini. Platform-platform ini berbagi mekanisme sesi, identitas, dan eksekusi yang sama, tetapi cara instalasinya berbeda.
+
+## Pilih platform
+
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
+|---|---|---|---|---|---|
+| Instalasi | Buat kode QR di Multica dan otorisasi dengan memindainya menggunakan Feishu | Buat app di Slack, lalu tempel dua token ke Multica | Buat internal app dan robot Stream-mode, lalu tempel AppKey dan AppSecret-nya ke Multica | Buat smart bot dengan koneksi panjang diaktifkan di konsol admin WeCom, lalu tempel Bot ID dan Secret-nya ke Multica | Buat Bot dengan @BotFather, lalu tempel token-nya ke Multica |
+| DM ke agent | Didukung | Didukung | Didukung | Didukung | Didukung |
+| Grup atau kanal | Dipicu dengan @-mention Bot | Dipicu dengan @-mention Bot | Dipicu dengan @-mention Bot | Dipicu dengan @-mention Bot | Dipicu dengan @-mention atau membalas Bot |
+| Buat tugas | Perintah pesan `/issue`; membuat tugas langsung dari input Anda | Perintah slash `/issue`; agent menyusun deskripsi sebelum membuat | Perintah pesan `/issue`; membuat tugas langsung dari input Anda | Perintah pesan `/issue`; membuat tugas langsung dari input Anda | Perintah pesan `/issue`; membuat tugas langsung dari input Anda |
+| Mulai Obrolan baru | `/new [message]` | DM: `/new [message]`; kanal/thread: `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
+| Hapus konteks Obrolan saat ini | `/clear [message]` | DM: `/clear [message]`; kanal/thread: `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
+| Koneksi | Koneksi panjang platform | Socket Mode | Stream mode | Koneksi panjang platform | Long polling `getUpdates` |
+
+Koneksi baru saat ini hanya dibuka untuk Feishu Tiongkok daratan; koneksi Lark internasional yang sudah ada tetap berfungsi dan masih dapat dikelola.
+
+Setiap Bot terikat pada satu agent Multica. Untuk menggunakan beberapa agent pada platform obrolan yang sama, hubungkan Bot terpisah untuk masing-masing.
+
+DingTalk, WeCom, dan Telegram [dipelihara oleh komunitas](/community-maintained): ketiganya dirilis di setiap versi, tetapi tidak memiliki SLA dukungan resmi. Laporkan masalah di [GitHub issues](https://github.com/multica-ai/multica/issues).
+
+WeCom saat ini hanya menangani pesan teks. Pesan suara, gambar, dan file mendapat balasan singkat yang menjelaskan hal ini, dan tidak diteruskan ke agent.
+
+Telegram meneruskan foto, file, video, dan audio ke agent sebagai lampiran, dan mengirim balik file yang dihasilkan agent ke dalam obrolan, jika server telah mengonfigurasi object storage; tanpa itu, media mendapat balasan singkat tidak didukung yang sama seperti sebelumnya. Stiker dan pesan non-file lainnya mendapat balasan tersebut dan tidak diteruskan ke agent.
+
+Panduan langkah demi langkah:
+
+- [Integrasi Bot Feishu / Lark](/lark-bot-integration)
+- [Integrasi Bot Slack](/slack-bot-integration)
+- [Integrasi Bot DingTalk](/dingtalk-bot-integration)
+- [Integrasi Bot Telegram](/telegram-bot-integration)
+
+## Bagaimana pesan diproses
+
+1. Multica mencocokkan Bot dengan ruang kerja dan agent-nya.
+2. Di grup atau kanal, hanya pesan yang secara eksplisit @-mention Bot yang diteruskan; DM tidak memerlukan mention.
+3. Multica memverifikasi pengikatan akun pengirim dan keanggotaan ruang kerja.
+4. Pesan tersebut masuk ke sesi [obrolan agent](/chat), dan sebuah eksekusi dibuat.
+5. Balasan agent dikirim kembali ke DM atau thread asal.
+
+Pesan kanal yang tidak @-mention Bot tidak pernah memicu agent dan tidak ditambahkan ke konteks percakapannya.
+
+Pesan biasa mengikuti alur ini. `/issue` adalah perintah, bukan giliran obrolan: Multica mengirim balik hasilnya ke platform asal tetapi tidak menambahkan perintah tersebut ke Obrolan Multica. Slash command native Slack tetap berjalan melalui alur pembuatan tugas asinkron terpisahnya.
+
+## Kontrol percakapan
+
+`/new` membuat Obrolan Multica baru dan merutekan pesan berikutnya dari percakapan eksternal tersebut ke Obrolan baru itu. `/new <message>` membuat Obrolan dan menggunakan pesan tersebut sebagai giliran pertamanya. Obrolan sebelumnya tetap tersimpan dan dapat digunakan di Multica.
+
+`/clear` tetap berada di Obrolan Multica saat ini tetapi memulai konteks baru yang terlihat oleh agent. Riwayat Obrolan lengkap tetap tersedia di Multica, sementara agent tidak dapat mengambil pesan dari sebelum batas tersebut. `/clear <message>` menggunakan pesan tersebut sebagai giliran pertama dalam konteks baru; `/clear` tanpa pesan berlaku untuk pesan nyata berikutnya.
+
+Di Slack, `/new` dan `/clear` adalah slash command native dalam DM. Payload slash command native tidak mengidentifikasi thread kanal, jadi gunakan `@Multica /new [message]` atau `@Multica /clear [message]` di dalam thread tujuan.
+
+## Isolasi sesi
+
+- Feishu/Lark memisahkan sesi berdasarkan obrolan; pesan berikutnya dalam obrolan yang sama melanjutkan sesi yang sama.
+- Slack memisahkan DM berdasarkan kanal; dalam satu kanal, setiap thread memiliki sesinya sendiri.
+- DingTalk memisahkan sesi berdasarkan percakapan; setiap DM atau grup melanjutkan sesinya sendiri.
+- WeCom memisahkan sesi berdasarkan obrolan; setiap DM atau obrolan grup melanjutkan sesinya sendiri.
+- Telegram memisahkan sesi berdasarkan obrolan; topik forum diisolasi berdasarkan topik.
+
+Tindak lanjut dalam kanal masih memerlukan @-mention baru. Agent hanya menerima pesan yang dialamatkan kepadanya — agent tidak pernah membaca seluruh riwayat kanal secara otomatis.
+
+## Pengikatan akun
+
+Saat pertama kali anggota mengirim pesan ke Bot, mereka menerima tautan pengikatan akun. Setelah masuk ke Multica, akun platform tersebut ditautkan ke keanggotaan mereka di ruang kerja saat ini.
+
+Multica hanya menjalankan agent setelah pengikatan selesai. Setiap pesan memeriksa ulang pengikatan akun dan keanggotaan ruang kerja; setelah meninggalkan ruang kerja, Bot tidak lagi dapat digunakan untuk menjangkaunya.
+
+<Callout type="info">
+Pengikatan akun hanya mengonfirmasi siapa pengirimnya. Anggota lain di platform obrolan tidak otomatis ditambahkan ke ruang kerja Multica.
+</Callout>
+
+## Kelola koneksi
+
+Pemilik dan admin ruang kerja dapat menghubungkan atau memutuskan Bot; untuk Bot Feishu/Lark, menghubungkan dan memutuskan juga terbuka bagi pemilik agent. Anggota biasa dapat melihat integrasi yang terhubung dan menggunakan agent yang dapat mereka akses.
+
+Setelah diputuskan, Bot berhenti menerima pesan baru. Percakapan Multica dan catatan eksekusi yang sudah ada tetap disimpan.
+
+## Hosting mandiri
+
+Deployment yang dihosting sendiri harus mengonfigurasi kunci enkripsi 32-byte untuk setiap platform sebelum Multica membuka titik masuk koneksinya:
+
+```dotenv
+MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Kunci-kunci ini mengenkripsi kredensial Bot yang tersimpan. Lihat [Variabel lingkungan](/environment-variables) untuk cara membuat, menyimpan, dan merotasinya. Multica Cloud sudah mengonfigurasi ini.
+
+Satu-satunya jalur keluar WeCom adalah WebSocket yang dipegang oleh satu proses, sehingga apa yang terjadi pada balasan yang dihasilkan di replika yang *berbeda* bergantung pada relay realtime:
+
+- **Mode relay sharded atau dual** (`REDIS_URL` diset — default jika menggunakan Redis): balasan diteruskan ke replika yang memegang koneksi dan terkirim. WeCom multi-replika didukung.
+- **Mode relay legacy, atau tanpa Redis**: balasan dibuang. Jalankan backend yang mengaktifkan WeCom sebagai replika tunggal dalam konfigurasi ini.
+
+Dalam setiap mode, balasan yang dihasilkan saat *tidak ada* replika yang memegang koneksi aktif (semua sedang reconnect) tidak terkirim. Ini dihitung sebagai `multica_wecom_outbound_dropped_total{reason="no_live_connection"}` oleh replika yang merutekannya, sehingga ukuran jendela waktu tersebut dapat diukur; jika kehilangan ini tidak dapat diterima, replika tunggal tetap menjadi deployment yang paling konservatif.
+
+## Langkah selanjutnya
+
+- [Integrasi Bot Feishu / Lark](/lark-bot-integration) — hubungkan agent dengan memindai kode QR.
+- [Integrasi Bot Slack](/slack-bot-integration) — buat app Slack dan tempel token-nya ke Multica.
+- [Integrasi Bot DingTalk](/dingtalk-bot-integration) — buat robot Stream-mode dan tempel kredensialnya ke Multica.
+- [Integrasi Bot Telegram](/telegram-bot-integration) — buat Bot dengan @BotFather dan tempel token-nya ke Multica.
+- [Obrolan](/chat) — model percakapan dan eksekusi di balik setiap Bot.

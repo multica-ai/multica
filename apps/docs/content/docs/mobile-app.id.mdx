@@ -1,0 +1,96 @@
+---
+title: Aplikasi mobile (iOS)
+description: Instal Multica di iPhone Anda dari source code, dan hubungkan ke Cloud atau instance self-hosted.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Klien iOS Multica belum tersedia di App Store. Anda dapat membangun versi Release dari repository source code publik di Mac dan menginstalnya di iPhone Anda sendiri. Belum ada klien Android saat ini.
+
+Aplikasi yang terinstal terhubung ke Multica Cloud secara default; masuk dengan akun Anda yang sudah ada. Ruang kerja, tugas, komentar, dan riwayat eksekusi semuanya tersimpan di server — tidak ada yang perlu disinkronkan secara manual dari web atau Desktop.
+
+## Prasyarat
+
+Anda memerlukan:
+
+- sebuah Mac dengan Xcode terinstal;
+- Apple ID yang sudah masuk di **Xcode → Settings → Accounts**;
+- sebuah iPhone yang terhubung melalui USB;
+- Developer Mode diaktifkan di iPhone pada **Settings → Privacy & Security**;
+- Node.js, pnpm, dan Git.
+
+Jika Xcode atau environment pengembangan on-device belum disiapkan, selesaikan dulu [konfigurasi environment perangkat iOS](https://docs.expo.dev/get-started/set-up-your-environment/) dari Expo.
+
+## Menginstal ke iPhone Anda
+
+Clone repository dan instal dependency:
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+```
+
+Lalu jalankan dari root repository:
+
+```bash
+pnpm ios:mobile:device:prod:release
+```
+
+Ini akan membangun versi Release tanpa dependency Metro dan menginstalnya di iPhone yang terhubung. Build pertama akan mengunduh dependency iOS dan mengompilasi React Native; build berikutnya akan memakai ulang cache Xcode.
+
+Jika iPhone mencegah aplikasi untuk dibuka, percayai (trust) sertifikat developer di **Settings → General → VPN & Device Management**.
+
+## Batas 7 hari untuk signing gratis
+
+Aplikasi yang ditandatangani dengan Apple ID gratis hanya berfungsi selama 7 hari. Setelah masa itu berakhir, sambungkan kembali iPhone ke Mac Anda dan jalankan ulang command build yang sama untuk menandatangani ulang.
+
+Build yang ditandatangani dengan akun Apple Developer Program tetap valid lebih lama dan juga dapat digunakan untuk TestFlight serta distribusi reguler. Dengan jenis signing apa pun, data di sisi server tidak akan pernah hilang akibat instal ulang atau penandatanganan ulang.
+
+## Kegagalan signing
+
+Jika Xcode melaporkan `No matching provisioning profiles found`, bundle identifier default mungkin bukan milik Apple ID Anda. Ganti ke reverse-domain name yang Anda kendalikan sendiri, lalu build ulang:
+
+```bash
+export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
+pnpm ios:mobile:device:prod:release
+```
+
+Nilai ini hanya perlu tersedia di Apple Developer team Anda; nilai ini tidak memengaruhi akun atau ruang kerja Multica Anda.
+
+## Memperbarui
+
+Build iOS yang diinstal sendiri tidak memperbarui secara otomatis. Tarik (pull) kode terbaru, perbarui dependency, dan build ulang:
+
+```bash
+git pull --ff-only
+pnpm install
+pnpm ios:mobile:device:prod:release
+```
+
+## Menghubungkan ke instance self-hosted
+
+Build Release menanamkan alamat API ke dalam aplikasi. `apps/mobile/.env.production` sudah di-commit dengan nilai default publik multica.ai, sehingga clone baru akan langsung di-build terhadap production tanpa perubahan apa pun.
+
+Untuk terhubung ke instance self-hosted, salin `apps/mobile/.env.production.example` menjadi `apps/mobile/.env.production.local` lalu edit salinannya:
+
+```dotenv
+EXPO_PUBLIC_API_URL=https://api.example.com
+EXPO_PUBLIC_WEB_URL=https://app.example.com
+```
+
+File `.local` menimpa nilai default yang di-commit per key dan sudah di-gitignore, sehingga endpoint pribadi tidak pernah masuk ke repository. `EXPO_PUBLIC_API_URL` wajib diisi. `EXPO_PUBLIC_WEB_URL` menjalankan entri seperti "Copy link" dan "Open on web". Atur keduanya di salinan tersebut: key yang tidak Anda isi akan kembali ke default multica.ai, sehingga entri tersebut akan membuka multica.ai alih-alih instance Anda.
+
+Jalankan ulang command build setelah mengedit. iPhone harus dapat menjangkau alamat API tersebut; saat menggunakan alamat LAN, jangan menuliskan `localhost` — di iPhone, alamat tersebut akan mengarah ke ponsel itu sendiri.
+
+<Callout type="warning">
+Mengedit `.env.production` secara langsung mengubah konfigurasi production dari checkout saat ini. Simpan nilai pribadi Anda di `.env.production.local` yang sudah di-gitignore.
+</Callout>
+
+Untuk pengembangan mobile, penggunaan Simulator, atau koneksi ke staging, lihat [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) di repository.
+
+## Langkah selanjutnya
+
+- [Quickstart](/cloud-quickstart) — menyelesaikan eksekusi pertama Anda.
+- [Aplikasi desktop](/desktop-app) — tab desktop dan daemon bawaan.
+- [Pemecahan masalah](/troubleshooting) — mendiagnosis masalah koneksi dan eksekusi.

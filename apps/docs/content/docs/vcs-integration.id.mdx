@@ -1,0 +1,95 @@
+---
+title: Penyedia Git mandiri
+description: Hubungkan instance Forgejo, Gitea, atau GitLab yang dihosting sendiri per ruang kerja sehingga pull/merge request yang membawa identifier tugas di nama branch atau judulnya, atau setelah kata kunci penutup di isinya, otomatis tertaut ke tugas tersebut, memindahkannya ke status pilihan ruang kerja saat di-merge, dan menampilkan status CI.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+**Hanya Multica yang dihosting sendiri.** Integrasi ini hanya tersedia ketika Anda
+menjalankan Multica sendiri; integrasi ini tidak ditawarkan di Multica Cloud. "Self-hosted"
+di sini berarti **Multica**-nya yang dihosting sendiri — biasanya agar dapat menjangkau
+instance Git di jaringan Anda sendiri. Operator server harus mengaktifkannya
+(`MULTICA_VCS_INTEGRATION_ENABLED=true`) dan mengatur `MULTICA_VCS_SECRET_KEY`;
+sebelum itu, bagian ini tidak muncul di Settings → Code.
+</Callout>
+
+Multica terhubung ke penyedia Git yang dihosting sendiri per ruang kerja: **Forgejo**, **Gitea**, atau **GitLab**. Setelah terhubung, setiap pull request (GitLab: merge request) yang nama branch atau judulnya berisi identifier tugas (misalnya `MUL-123`), atau isinya menyebutkan identifier setelah kata kunci penutup (`Closes MUL-123`), **otomatis tertaut** ke [tugas](/issues) tersebut dan muncul di bawah **Pull requests** pada sidebar tugas. Ketika semua PR yang tertaut ke tugas tersebut sudah di-merge, tugas tersebut berpindah ke status yang dipilih ruang kerja (**Done** secara default). CI untuk head commit ditampilkan sebagai bar check pada card.
+
+Penyedia-penyedia ini berjalan berdampingan dengan GitHub: satu ruang kerja dapat menggunakan kombinasi apa pun.
+
+<Callout type="info">
+Berbeda dari GitHub, penyedia-penyedia ini tidak memiliki model "App". Setiap ruang kerja menyimpan URL instance-nya sendiri beserta access token, dan mendaftarkan webhook pada repositori atau organisasinya. Token dan webhook secret dienkripsi saat disimpan (at rest).
+</Callout>
+
+## Prasyarat (server)
+
+Aktifkan integrasi ini untuk deployment ini. Secara default nonaktif, sehingga bagian ini tetap tersembunyi sampai Anda mengatur:
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+File `docker compose` resmi untuk self-hosting (`docker-compose.selfhost.yml`) sudah mengatur ini untuk Anda.
+
+Lalu atur kunci 32-byte yang dienkode base64 agar server dapat mengenkripsi kredensial yang tersimpan. Tanpa itu, formulir connect dinonaktifkan.
+
+```sh
+openssl rand -base64 32
+```
+
+```sh
+MULTICA_VCS_SECRET_KEY=<base64 32-byte key>
+```
+
+Keduanya diperlukan: switch menentukan apakah fitur ini ditawarkan, dan kunci mengenkripsi token serta webhook secret yang tersimpan. Connect, webhook, dan rotate semuanya memerlukan keduanya.
+
+Atur `MULTICA_PUBLIC_URL` ke base URL publik server agar Multica dapat menampilkan webhook URL yang siap ditempel. Tanpa itu, UI hanya menampilkan path webhook dan Anda menambahkan sendiri origin-nya.
+
+## Hubungkan sebuah ruang kerja
+
+1. Buat access token di penyedia Anda dengan akses baca ke repositori yang ingin dicerminkan:
+   - **Forgejo / Gitea**: Settings → Applications.
+   - **GitLab**: personal access token (atau group/project) dengan scope `read_api`.
+2. Di Multica, buka **Settings → Code**, lalu klik **Connect** pada baris **Self-hosted Git**.
+3. Pilih **provider**, masukkan URL instance (misalnya `https://forgejo.example.com`) dan access token-nya, lalu **Connect**. Multica memvalidasi token tersebut terhadap instance sebelum menyimpannya.
+4. Salin **webhook URL** dan **webhook secret** yang ditampilkan setelah terhubung.
+
+<Callout type="warn">
+Webhook secret hanya ditampilkan satu kali. Salin sebelum meninggalkan halaman tersebut. Menghubungkan ulang instance yang sama akan merotasi token dan secret-nya.
+</Callout>
+
+### Instance dengan CA privat
+
+Jika **Connect** melaporkan bahwa sertifikat penyedia tersebut "is signed by a certificate authority this server does not trust", sertifikat HTTPS instance tersebut berasal dari CA internal (atau self-signed) yang tidak dipercaya oleh server Multica. Operator server menambahkan CA tersebut ke trust store backend: dengan Helm, atur `backend.extraCACerts.configMap`; dengan Docker Compose, mount CA tersebut dan atur `SSL_CERT_DIR`. Lihat [Sertifikat CA privat](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#private-ca-certificates-optional) untuk langkah-langkahnya.
+
+Multica tidak memiliki opsi untuk melewati verifikasi sertifikat, karena permintaan connect membawa access token Anda. Jika pesan tersebut menyebutkan bahwa sertifikat tidak cocok dengan nama host, atau gagal verifikasi (misalnya, sudah kedaluwarsa), perbaiki sertifikatnya sendiri; mempercayai CA tidak akan membantu.
+
+## Daftarkan webhook
+
+Pada repositori (atau organisasi/group, untuk mencakup setiap repo):
+
+**Forgejo / Gitea** — Settings → Webhooks → Add Webhook → Forgejo/Gitea:
+
+- **Target URL**: webhook URL dari langkah sebelumnya.
+- **HTTP method** `POST`, **content type** `application/json`.
+- **Secret**: webhook secret (digunakan untuk memverifikasi HMAC `X-Gitea-Signature`).
+- **Trigger events**: pilih **Pull Request**, dan **Commit Status** untuk mencerminkan CI.
+
+**GitLab** — Settings → Webhooks:
+
+- **URL**: webhook URL.
+- **Secret token**: webhook secret (dikirim sebagai `X-Gitlab-Token` dan dibandingkan secara verbatim).
+- **Triggers**: aktifkan **Merge request events**, dan **Pipeline events** untuk mencerminkan CI.
+
+Multica mengautentikasi setiap pengiriman terhadap secret yang tersimpan, sehingga webhook tanpa secret yang cocok akan ditolak.
+
+## Apa yang dicerminkan
+
+- **Pull / merge request** — status open, closed, merged, dan draft, author, branch, dan (jika disediakan oleh penyedia) statistik diff.
+- **Tautan tugas** — identifier di judul atau branch menautkan PR ke tugas, demikian pula identifier setelah kata kunci penutup di isinya; sekadar disebutkan di isi tidak menautkan apa pun. Setelah semua PR yang tertaut ke tugas sudah di-merge — baik di GitHub maupun penyedia yang dihosting sendiri — tugas tersebut berpindah ke status yang dipilih ruang kerja, dengan pengaturan dan aturan yang sama seperti [GitHub](/github-integration#kapan-pr-yang-di-merge-memindahkan-tugas). Halaman ini menampilkan pengaturan **After PRs merge, move the issue to** yang sama setelah sebuah penyedia terhubung.
+- **CI** — commit status Forgejo/Gitea dan pipeline GitLab diagregasikan menjadi bar check passed/failed/pending untuk head commit.
+
+## Agent membuka pull request
+
+Membuat PR tidak memerlukan konfigurasi penyedia apa pun di Multica. Agent melakukan checkout repositori di runtime dan mendorong (push) branch serta membuka PR menggunakan kredensial Git milik host runtime itu sendiri. Agar agent dapat bekerja dengan sebuah penyedia, pastikan host daemon dapat mengautentikasi ke sana — misalnya SSH deploy key, atau token di credential helper Git milik host tersebut — dan tambahkan URL repositorinya seperti biasa. Checkout repositori bekerja dengan URL Git apa pun, sehingga tidak diperlukan wiring khusus penyedia.

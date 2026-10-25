@@ -1,0 +1,48 @@
+---
+title: Cara kerja Multica
+description: Multica mencatat dan mengoordinasikan pekerjaan; komputer yang terhubung mengeksekusinya.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Ketika Anda menugaskan sebuah Tugas ke seorang Agent, Multica membuat sebuah Eksekusi yang akan diklaim oleh runtime pada komputer yang terhubung. Runtime tersebut memanggil alat coding AI lokal dan menulis progres serta hasil kembali ke Tugas aslinya.
+
+## Alur lengkap sebuah Eksekusi
+
+![Diagram sebuah Eksekusi: di sebelah kiri, area Multica mencatat dan menjadwalkan — sebuah Tugas memicu pembuatan Eksekusi; di sebelah kanan, pada area "komputer Anda", daemon mengklaim Eksekusi, menjalankan alat coding AI, serta membaca dan menulis working directory; pesan progres mengalir kembali secara real time ke log eksekusi, dan daemon menulis hasil akhir kembali ke Tugas](/images/docs/how-a-run-works.webp)
+
+1. **Tugas menyediakan konteks.** Tugas menyimpan deskripsi pekerjaan, diskusi, dan Penerima Tugas. Saat ditugaskan ke seorang Agent, sistem menggunakan instructions, model, skill, dan konfigurasi runtime Agent tersebut.
+2. **Multica membuat Eksekusi.** Eksekusi tersebut masuk ke antrean; jika tidak ada runtime yang online, ia akan menunggu di sana.
+3. **Sebuah runtime mengklaim Eksekusi.** Runtime yang online pada komputer yang terhubung mengklaim Eksekusi tersebut dan memanggil alat coding AI yang dikonfigurasikan untuk digunakan oleh Agent.
+4. **Alat coding AI mengeksekusi secara lokal.** Alat tersebut membaca working directory, menjalankan command, dan menghasilkan hasil.
+5. **Hasil ditulis kembali ke Tugas.** Progres, komentar, dan hasil muncul di timeline dan log eksekusi Tugas tersebut.
+
+Untuk daftar lengkap Tugas, Agent, Eksekusi, dan runtime serta bagaimana hubungannya, lihat [Konsep inti](/concepts).
+
+## Batas data dan eksekusi
+
+| Multica | Komputer yang terhubung |
+|---|---|
+| Ruang Kerja, Tugas, Komentar, dan status | Alat coding AI dan kredensialnya |
+| Konfigurasi Agent dan skill | Direktori kode dan file lokal |
+| Status Eksekusi, catatan, dan hasil | Perubahan file aktual dan eksekusi command |
+
+Batas ini sama baik di Multica Cloud maupun pada deployment self-hosted.
+
+<Callout type="warning">
+Satu pengecualian: apa pun yang disimpan ke `custom_env` milik Agent disimpan di server Multica dan diteruskan ke runtime pada saat eksekusi. Jangan menaruh secret di `custom_env` yang tidak boleh meninggalkan komputer Anda.
+</Callout>
+
+## Bagaimana Agent dipicu
+
+Agent tidak pernah memulai pekerjaan dengan sendirinya — setiap Eksekusi dipicu oleh sebuah aksi eksplisit: menugaskan sebuah Tugas, me-mention Agent dengan @ dalam sebuah Komentar, mengajaknya Obrolan langsung, atau Otomatisasi. Untuk cara memilih di antara keempatnya dan aturan yang mereka bagi, lihat [Libatkan Agent untuk bekerja](/triggering-agents).
+
+## Penyelesaian Eksekusi dan penyelesaian Tugas
+
+Ketika log eksekusi menunjukkan Completed, itu hanya berarti satu Eksekusi telah berakhir. Tugas tersebut masih dapat menerima diskusi lebih lanjut, penambahan requirement, atau pemicu Agent lainnya. Apakah Tugas tersebut sudah selesai bergantung pada progres aktual pekerjaan dan statusnya.
+
+## Langkah selanjutnya
+
+- [Daemon dan runtime](/daemon-runtimes) — bagaimana komputer terhubung ke Multica, dan apa yang terjadi saat runtime online atau offline.
+- [Eksekusi](/tasks) — status Eksekusi, percobaan ulang, dan aturan pembatalan.
+- [Tugaskan Tugas ke Agent](/assigning-issues) — cara berkolaborasi yang paling umum.
