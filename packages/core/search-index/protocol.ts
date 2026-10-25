@@ -1,4 +1,4 @@
-import type { SearchIssuesResponse, SearchProjectsResponse } from "../types";
+import type { SearchChatMessagesResponse, SearchIssuesResponse, SearchProjectsResponse } from "../types";
 import type { IssueSearchParams } from "./engine";
 
 /** Messages between a tab and the search index worker (MUL-7754). */
@@ -23,7 +23,7 @@ export type TabMessage =
   | { type: "close" }
   | { type: "poke" }
   | { type: "ping" }
-  | { type: "search"; id: number; kind: "issues" | "projects"; params: IssueSearchParams }
+  | { type: "search"; id: number; kind: "issues" | "projects" | "messages"; params: IssueSearchParams }
   | { type: "fetch-result"; id: number; ok: true; data: unknown }
   | { type: "fetch-result"; id: number; ok: false; status?: number; message: string }
   | { type: "wipe"; id: number }
@@ -40,7 +40,7 @@ export type WorkerMessage =
       id: number;
       op: FetchOp;
       workspaceSlug: string;
-      params: { afterNumber?: number; cursor?: string; limit?: number };
+      params: { afterNumber?: number; afterMessageId?: string; cursor?: string; limit?: number };
     }
-  | { type: "search-result"; id: number; result: SearchIssuesResponse | SearchProjectsResponse | null }
+  | { type: "search-result"; id: number; result: SearchIssuesResponse | SearchProjectsResponse | SearchChatMessagesResponse | null }
   | { type: "wiped"; id: number };

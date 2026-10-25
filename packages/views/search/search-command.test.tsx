@@ -363,6 +363,7 @@ describe("SearchCommand", () => {
     apiFns.set("getBaseUrl", vi.fn(() => "http://127.0.0.1:8080"));
     apiFns.set("searchIssues", vi.fn(() => Promise.resolve({ issues: [], total: 0 })));
     apiFns.set("searchProjects", vi.fn(() => Promise.resolve({ projects: [], total: 0 })));
+    apiFns.set("searchChatMessages", vi.fn(() => Promise.resolve({ messages: [] })));
     mockPush.mockReset();
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
@@ -677,6 +678,52 @@ describe("SearchCommand", () => {
       expect(
         screen.getByText((_, el) => !!el?.textContent?.includes("migrate away from HTML") && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
+    });
+
+    it("lists chat message hits and navigates to the conversation on the message", async () => {
+      const user = userEvent.setup();
+      api("searchChatMessages").mockResolvedValue({
+        messages: [
+          {
+            id: "msg-1",
+            chat_session_id: "sess-1",
+            role: "user",
+            content: "deploy the payment service",
+            created_at: "2026-01-01T00:00:00Z",
+            match_source: "content",
+            matched_snippet: "deploy the payment service",
+            session: { id: "sess-1", agent_id: "agent-1", title: "Deploy chat", status: "active" },
+          },
+          {
+            id: "msg-2",
+            chat_session_id: "sess-2",
+            role: "assistant",
+            content: "the payment plan is ready",
+            created_at: "2026-01-01T00:00:01Z",
+            match_source: "content",
+            matched_snippet: "the payment plan is ready",
+            session: { id: "sess-2", agent_id: "agent-1", title: "", status: "archived" },
+          },
+        ],
+      });
+      renderSearch();
+      await user.type(input(), "payment");
+
+      await waitFor(() => expect(renderedValues()).toContain("chat:sess-1:msg-1"), { timeout: 2000 });
+      expect(renderedHeadings()).toContain("Chats");
+      expect(screen.getByText("Deploy chat")).toBeInTheDocument();
+      // An untitled session falls back to the chat namespace's label, the same
+      // one the thread list uses.
+      expect(screen.getByText("New chat")).toBeInTheDocument();
+      expect(screen.getByText("Archived")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "deploy the payment service" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByText("Deploy chat"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/chat?session=sess-1&message=msg-1");
+      expect(useSearchStore.getState().open).toBe(false);
     });
   });
 
