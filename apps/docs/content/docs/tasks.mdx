@@ -79,7 +79,27 @@ Changing an issue's assignee or status does not stop a run that has already star
 
 Transient faults — a runtime going briefly offline, a daemon restart, an execution timeout, or a network interruption in the AI coding tool — can trigger an automatic retry. A regular run executes at most twice by default; tool network interruptions get up to three attempts.
 
-Errors returned by the agent itself are usually not retried automatically. Expired credentials, exhausted quota, misconfiguration, or a model unable to complete the request all need the cause fixed first, followed by a manual retry.
+Errors returned by the agent itself are usually not retried automatically. Expired credentials, billing problems, unknown quota reset times, misconfiguration, or a model unable to complete the request need the cause fixed first, followed by a manual retry. A known quota window can use the opt-in recovery below.
+
+### Opt-in quota window recovery
+
+For a GLM five-hour usage-window error that includes a reset time, you can enable one delayed retry on the **same runtime and session**. Set the agent's runtime config to include both keys below, preserving any existing runtime config fields:
+
+```json
+{"quota_auto_resume":true,"quota_reset_timezone":"Asia/Shanghai"}
+```
+
+For an agent with no other runtime config, the CLI command is:
+
+```bash
+multica agent update <agent-id> --runtime-config '{"quota_auto_resume":true,"quota_reset_timezone":"Asia/Shanghai"}'
+```
+
+If the agent already has runtime config fields, include them in the JSON passed to `--runtime-config`; the flag replaces the full object.
+
+`quota_reset_timezone` is an IANA timezone for the provider's reset notice, which has no UTC offset. Use the timezone that applies to your provider account; an absent or invalid timezone leaves the run failed for manual retry. The local daemon converts the notice to UTC and sends only the reset timestamp to Multica, not provider credentials. The agent must have a resumable session, its retry budget must be enabled, and the reset must be between one minute and eight days away. The delayed retry starts 30 seconds after the reported reset; a second quota failure stops the automatic chain. You can stop a deferred run from the execution log.
+
+This setting does not switch runtimes, models, or provider accounts. Generic `402` billing errors, rate limits without a recognized reset, and Autopilot run-only tasks keep their existing behavior.
 
 An Autopilot's **run only** mode does not retry automatically, to avoid overlapping with the next scheduled run. The **create issue** mode produces regular issue runs, so infrastructure failures still retry under the rules above. Both modes show their final result in the Autopilot run history.
 
@@ -109,7 +129,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `provider_auth_or_access` | Model provider authentication failed or access denied (401/403) | Sign in again in that AI coding tool, or check the API key |
-| `provider_quota_limit` | Quota or balance exhausted (402) | Top up or switch accounts |
+| `provider_quota_limit` | Quota window or balance exhausted | With a known reset and opt-in, waits once; otherwise check the account and retry manually |
 | `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Retry later |
 | `provider_server_error` | Model provider server error (5xx) | Retry later |
 | `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
@@ -165,8 +185,9 @@ Automatic retry covers only the transient faults below, and only applies to runs
 | Codex stalled with no meaningful output | 2 by default |
 | Skill bundle download failure | 2 by default (the agent process has not started at this point; already-downloaded bundles come from the local cache) |
 | Tool network interruption | Up to 3; the final attempt starts after a delay of about 5 seconds |
+| Known GLM quota-window reset, with agent opt-in and a resumable session | One deferred retry on the same runtime, after the reported reset |
 
-All other failure reasons (auth, quota, configuration, model, and so on) never retry automatically; fix the cause first, then retry manually.
+All other failure reasons (auth, unknown or billing quota, configuration, model, and so on) require a manual retry after the cause is fixed.
 
 ## Next steps
 

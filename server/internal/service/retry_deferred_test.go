@@ -349,3 +349,99 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestFailTaskQuotaResetOptIn(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id=$1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, reason, config, session   string
+		hint, missingRollout, wantChild bool
+		attempt, maxAttempts            int32
+	}{
+		{"known reset and opt-in", "agent_error.provider_quota_limit", `{"quota_auto_resume":true}`, "src-session", true, false, true, 1, 2},
+		{"opted out", "agent_error.provider_quota_limit", `{}`, "src-session", true, false, false, 1, 2},
+		{"unknown reset", "agent_error.provider_quota_limit", `{"quota_auto_resume":true}`, "src-session", false, false, false, 1, 2},
+		{"billing refusal", "agent_error.provider_auth_or_access", `{"quota_auto_resume":true}`, "src-session", true, false, false, 1, 2},
+		{"no resumable session", "agent_error.provider_quota_limit", `{"quota_auto_resume":true}`, "", true, false, false, 1, 2},
+		{"missing session rollout", "agent_error.provider_quota_limit", `{"quota_auto_resume":true}`, "src-session", true, true, false, 1, 2},
+		{"second failure stops", "agent_error.provider_quota_limit", `{"quota_auto_resume":true}`, "src-session", true, false, false, 2, 3},
+		{"retry disabled", "agent_error.provider_quota_limit", `{"quota_auto_resume":true}`, "src-session", true, false, false, 1, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE agent SET runtime_config=$2::jsonb WHERE id=$1`, agentID, tc.config); err != nil {
+				t.Fatal(err)
+			}
+			var parentID pgtype.UUID
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id)
+				VALUES ($1,$2,$3,'running',0,$4,$5,$6) RETURNING id
+			`, agentID, runtimeID, issueID, tc.attempt, tc.maxAttempts, tc.session).Scan(&parentID); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1`, parentID)
+			})
+			var hint *time.Time
+			if tc.hint {
+				reset := time.Now().Add(3 * time.Hour)
+				hint = &reset
+			}
+			if _, _, err := svc.FailTaskWithTransitionAndQuotaReset(ctx, parentID, "quota refusal", tc.session, "", "", tc.reason, tc.missingRollout, "", "", hint); err != nil {
+				t.Fatalf("FailTaskWithTransitionAndQuotaReset: %v", err)
+			}
+			var count int
+			var status string
+			var fireAt pgtype.Timestamptz
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*), COALESCE(max(status),''), max(fire_at)
+				FROM agent_task_queue WHERE parent_task_id=$1
+			`, parentID).Scan(&count, &status, &fireAt); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantChild {
+				if count != 1 || status != "deferred" || !fireAt.Valid || fireAt.Time.Before(*hint) {
+					t.Errorf("child count=%d status=%q fire_at=%v, want one deferred child at reset", count, status, fireAt)
+				}
+				var childID pgtype.UUID
+				var childRuntime, childSession string
+				if err := pool.QueryRow(ctx, `SELECT id, runtime_id::text, session_id FROM agent_task_queue WHERE parent_task_id=$1`, parentID).Scan(&childID, &childRuntime, &childSession); err != nil {
+					t.Fatal(err)
+				}
+				if childRuntime != runtimeID || childSession != tc.session {
+					t.Fatalf("retry runtime/session = %s/%q, want %s/%q", childRuntime, childSession, runtimeID, tc.session)
+				}
+				if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET fire_at=now()-interval '1 second' WHERE id=$1`, childID); err != nil {
+					t.Fatal(err)
+				}
+				claimed, err := svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+				if err != nil || claimed == nil || claimed.ID != childID {
+					t.Fatalf("due retry claim = %+v, err=%v; want child %s", claimed, err, util.UUIDToString(childID))
+				}
+			} else if count != 0 {
+				t.Errorf("child count=%d, want 0", count)
+			}
+		})
+	}
+}
+
+func TestQuotaRetryEligibleRejectsRetiredSession(t *testing.T) {
+	parent := db.AgentTaskQueue{
+		Attempt: 1, MaxAttempts: 2,
+		IssueID:   pgtype.UUID{Valid: true},
+		SessionID: pgtype.Text{String: "old-session", Valid: true},
+	}
+	if quotaRetryEligible(parent, "", "old-session", false) {
+		t.Fatal("retired session must not be resumed after quota reset")
+	}
+	if !quotaRetryEligible(parent, "new-session", "old-session", false) {
+		t.Fatal("a new, non-retired session remains eligible")
+	}
+}
