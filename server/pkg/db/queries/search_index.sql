@@ -1,6 +1,9 @@
 -- Local search index sync (MUL-7754). Web and Desktop copy the issue, comment,
 -- and project text of a workspace, then catch up through search_index_change.
--- Snapshots are exchanged as pg_snapshot text; see migration 561.
+-- Snapshots are exchanged as pg_snapshot text; see migration 561. Chat sessions
+-- and their messages (migration 589) are copied per creator: a session is
+-- readable only by its creator (loadChatSessionForUser), so chat queries take
+-- creator_id alongside workspace_id.
 
 -- name: GetSearchIndexManifest :one
 -- Taken before any snapshot page, so every write the pages might miss is newer
@@ -33,7 +36,15 @@ SELECT
     (SELECT COALESCE(sum(octet_length(content)), 0) FROM visible_comment)::bigint AS comment_bytes,
     (SELECT count(*) FROM visible_project)::bigint AS project_count,
     (SELECT COALESCE(sum(octet_length(title) + COALESCE(octet_length(description), 0)), 0)
-        FROM visible_project)::bigint AS project_bytes;
+        FROM visible_project)::bigint AS project_bytes,
+    (SELECT count(*) FROM chat_message m
+        JOIN chat_session s ON s.id = m.chat_session_id, ws
+        WHERE s.workspace_id = ws.id AND s.creator_id = @creator_id::uuid
+          AND m.message_kind <> 'onboarding_kickoff')::bigint AS chat_message_count,
+    (SELECT COALESCE(sum(octet_length(m.content)), 0) FROM chat_message m
+        JOIN chat_session s ON s.id = m.chat_session_id, ws
+        WHERE s.workspace_id = ws.id AND s.creator_id = @creator_id::uuid
+          AND m.message_kind <> 'onboarding_kickoff')::bigint AS chat_message_bytes;
 
 -- name: GetSearchIndexCurrentSnapshot :one
 SELECT pg_current_snapshot()::text AS snapshot;
@@ -70,6 +81,41 @@ ORDER BY id;
 -- name: ListSearchIndexProjectsByIDs :many
 SELECT * FROM project
 WHERE workspace_id = @workspace_id AND id = ANY(@ids::uuid[]);
+
+-- name: ListSearchIndexChatSessions :many
+-- Every session of the creator, on the first snapshot page (like projects): a
+-- member's session count is bounded, and the client needs each hit's session
+-- for its title and agent.
+SELECT id, agent_id, title, status FROM chat_session
+WHERE workspace_id = @workspace_id AND creator_id = @creator_id
+ORDER BY id;
+
+-- name: ListSearchIndexChatMessagesPage :many
+-- Pages by the primary key so the copy is a full scan in bounded pages,
+-- independent of message timestamps. The kind filter hides product-authored
+-- context the conversation itself never shows (visibleChatMessages).
+SELECT m.id, m.chat_session_id, m.role, m.content, m.created_at
+FROM chat_message m
+JOIN chat_session s ON s.id = m.chat_session_id
+WHERE s.workspace_id = @workspace_id AND s.creator_id = @creator_id
+  AND m.message_kind <> 'onboarding_kickoff'
+  AND m.id > @after_id
+ORDER BY m.id
+LIMIT @page_limit;
+
+-- name: ListSearchIndexChatSessionsByIDs :many
+-- Creator-scoped like the page reads: a change row for another member's
+-- session resolves to nothing and is reported as deleted, a no-op there.
+SELECT id, agent_id, title, status FROM chat_session
+WHERE workspace_id = @workspace_id AND creator_id = @creator_id AND id = ANY(@ids::uuid[]);
+
+-- name: ListSearchIndexChatMessagesByIDs :many
+SELECT m.id, m.chat_session_id, m.role, m.content, m.created_at
+FROM chat_message m
+JOIN chat_session s ON s.id = m.chat_session_id
+WHERE s.workspace_id = @workspace_id AND s.creator_id = @creator_id
+  AND m.message_kind <> 'onboarding_kickoff'
+  AND m.id = ANY(@ids::uuid[]);
 
 -- name: SearchIndexSinceIsPruned :one
 -- True when retention pruning may have removed a change the client has not
