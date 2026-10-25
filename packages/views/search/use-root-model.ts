@@ -6,7 +6,7 @@ import { useFeatureEnabled } from "@multica/core/config";
 import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
-import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import type { SearchChatMessageResult, SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
@@ -88,6 +88,7 @@ export interface RootModel {
   partitioned: ReturnType<typeof partitionAggregatedSearchResults>;
   liveIssueScore: number;
   liveProjectScore: number;
+  liveChatMessageScore: number;
   bestMatch: BestMatch | null;
   recent: RecentItem[];
   newCommands: PaletteCommand[];
@@ -145,6 +146,10 @@ export function mergeDocHits(
 
 export function projectScore(project: SearchProjectResult, q: string): number {
   return Math.max(scoreText(project.title, q), SERVER_ONLY_SCORE);
+}
+
+export function chatMessageScore(message: SearchChatMessageResult, q: string): number {
+  return Math.max(scoreText(message.session.title, q), SERVER_ONLY_SCORE);
 }
 
 function maxScore(entries: readonly { score: number }[]) {
@@ -265,6 +270,10 @@ export function useRootModel(
       (max, project) => Math.max(max, projectScore(project, resultsQ)),
       0,
     );
+    const liveChatMessageScore = results.messages.reduce(
+      (max, message) => Math.max(max, chatMessageScore(message, resultsQ)),
+      0,
+    );
 
     const people = scope === "all" || scope === "people";
     const visibleObjects: ObjectHits = {
@@ -322,6 +331,7 @@ export function useRootModel(
       objectCount > 0 ||
       results.issues.length > 0 ||
       results.projects.length > 0 ||
+      results.messages.length > 0 ||
       pages.length > 0 ||
       commands.length > 0 ||
       contextGroups.length > 0;
@@ -354,6 +364,7 @@ export function useRootModel(
       partitioned,
       liveIssueScore,
       liveProjectScore,
+      liveChatMessageScore,
       bestMatch,
       recent,
       newCommands: globalCommands.filter((command) => command.primary),
