@@ -947,6 +947,19 @@ type IssueReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IssueReworkDispatchReceipt struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	OperationKey  string             `json:"operation_key"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	PayloadSha256 string             `json:"payload_sha256"`
+	Instruction   string             `json:"instruction"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	SourceTaskID  pgtype.UUID        `json:"source_task_id"`
+	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueSourceContext struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

@@ -268,6 +268,8 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
 | | `usage <issue-id>` | View aggregated token usage | |
 | | `rerun <id>` | Re-enqueue a run for the current assignee | |
+| | `dispatch-rework <id>` | Atomically dispatch one named corrective pass and preserve the exact source run's work directory; retries with the same key return the original run | `--operation-key`, `--agent-id`, `--source-run`, `--instruction` / `--instruction-stdin` / `--instruction-file` |
+| | `rework-dispatch-status <id>` | Reconcile a previously requested corrective pass without dispatching another one | `--operation-key` |
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | |
 | | `status <id> <status>` | Change project status | |

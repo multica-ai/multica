@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,130 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type ReworkDispatchRequest struct {
+	OperationKey  string `json:"operation_key"`
+	AgentID       string `json:"agent_id"`
+	SourceTaskID  string `json:"source_task_id"`
+	Instruction   string `json:"instruction"`
+	PayloadSHA256 string `json:"payload_sha256"`
+}
+
+// DispatchRework creates or reconciles a single explicitly named corrective
+// pass. It is intentionally not an alias for POST /rerun.
+func (h *Handler) DispatchRework(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	var req ReworkDispatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	agentID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+	if !ok {
+		return
+	}
+	sourceTaskID, ok := parseUUIDOrBadRequest(w, req.SourceTaskID, "source_task_id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actorUserID := memberActorUserID(actorType, actorID)
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	canInvoke := func(agent db.Agent) bool {
+		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+	}
+	result, err := h.TaskService.DispatchRework(r.Context(), issue.ID, issue.WorkspaceID, service.ReworkDispatchRequest{
+		OperationKey: strings.TrimSpace(req.OperationKey), Instruction: req.Instruction,
+		PayloadSHA256: strings.ToLower(req.PayloadSHA256), ExpectedAgentID: agentID, ActorUserID: actorUserID,
+		SourceTaskID: sourceTaskID,
+	}, canInvoke)
+	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+	if errors.Is(err, service.ErrIssueInTriage) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
+		return
+	}
+	if errors.Is(err, service.ErrInvalidReworkDispatch) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrReworkDispatchConflict) || errors.Is(err, service.ErrReworkDispatchMismatch) || errors.Is(err, service.ErrReworkDispatchTarget) || errors.Is(err, service.ErrReworkDispatchSource) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrReworkDispatchMissingTask) {
+		writeJSON(w, http.StatusGone, map[string]any{"error": "recorded rework task is unavailable", "code": "recorded_task_unavailable", "run_id": uuidToString(result.Task.ID), "operation_key": req.OperationKey})
+		return
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "rework dispatch target not found")
+		return
+	}
+	if err != nil {
+		slog.Warn("rework dispatch failed", "issue_id", issue.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "rework dispatch failed")
+		return
+	}
+	resp := taskToResponse(result.Task, workspaceID)
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusAccepted, map[string]any{"task": resp, "replayed": result.Replayed})
+}
+
+// GetReworkDispatch reconciles a known operation key without dispatching it.
+func (h *Handler) GetReworkDispatch(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	key := strings.TrimSpace(chi.URLParam(r, "operationKey"))
+	if key == "" {
+		writeError(w, http.StatusBadRequest, "operation_key required")
+		return
+	}
+	receipt, err := h.Queries.GetIssueReworkDispatchReceipt(r.Context(), db.GetIssueReworkDispatchReceiptParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, OperationKey: key})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "rework dispatch not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "load rework dispatch")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	agent, err := h.Queries.GetAgent(r.Context(), receipt.AgentID)
+	if err != nil || !h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+	task, err := h.Queries.GetAgentTask(r.Context(), receipt.TaskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusGone, map[string]any{"error": "recorded rework task is unavailable", "code": "recorded_task_unavailable", "run_id": uuidToString(receipt.TaskID), "operation_key": receipt.OperationKey})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "load rework task")
+		return
+	}
+	resp := taskToResponse(task, workspaceID)
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusOK, map[string]any{"task": resp, "operation_key": receipt.OperationKey, "payload_sha256": receipt.PayloadSha256, "source_task_id": uuidToString(receipt.SourceTaskID)})
+}
 
 // RecoverOrphanedTasks is called by the daemon at startup for each runtime
 // it owns. It atomically fails any dispatched/running tasks the server still

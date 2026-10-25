@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -455,6 +456,14 @@ var issueRerunCmd = &cobra.Command{
 	RunE:  runIssueRerun,
 }
 
+var issueDispatchReworkCmd = &cobra.Command{
+	Use: "dispatch-rework <id>", Short: "Atomically dispatch one idempotent corrective pass", Args: exactArgs(1), RunE: runIssueDispatchRework,
+}
+
+var issueReworkDispatchStatusCmd = &cobra.Command{
+	Use: "rework-dispatch-status <id>", Short: "Read a corrective dispatch receipt", Args: exactArgs(1), RunE: runIssueReworkDispatchStatus,
+}
+
 var issueCancelTaskCmd = &cobra.Command{
 	Use:   "cancel-task <run-id>",
 	Short: "Cancel an in-progress or queued run (interrupts in-flight agent)",
@@ -591,6 +600,8 @@ func init() {
 	issueCmd.AddCommand(issueRunMessagesCmd)
 	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
+	issueCmd.AddCommand(issueDispatchReworkCmd)
+	issueCmd.AddCommand(issueReworkDispatchStatusCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueSearchCmd)
 
@@ -713,6 +724,16 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+	issueDispatchReworkCmd.Flags().String("operation-key", "", "Stable correction-package operation key")
+	issueDispatchReworkCmd.Flags().String("agent-id", "", "UUID of the directly assigned agent")
+	issueDispatchReworkCmd.Flags().String("source-run", "", "UUID of the exact terminal source run whose work directory is preserved")
+	issueDispatchReworkCmd.Flags().String("instruction", "", "Frozen corrective instruction")
+	issueDispatchReworkCmd.Flags().Bool("instruction-stdin", false, "Read corrective instruction from stdin")
+	issueDispatchReworkCmd.Flags().String("instruction-file", "", "Read corrective instruction from a UTF-8 file")
+	issueDispatchReworkCmd.Flags().Bool("allow-external-file", false, "Allow instruction-file outside the current working directory")
+	issueDispatchReworkCmd.Flags().String("output", "json", "Output format: table or json")
+	issueReworkDispatchStatusCmd.Flags().String("operation-key", "", "Stable correction-package operation key")
+	issueReworkDispatchStatusCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
 	issueCancelTaskCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCancelTaskCmd.Flags().String("issue", "", "Issue ID/key to scope short run ID prefix resolution")
@@ -2966,6 +2987,74 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 	}
 	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
 	fmt.Fprintf(os.Stdout, "Re-enqueued run %s on agent %s\n", strVal(task, "id"), agent)
+	return nil
+}
+
+func runIssueDispatchRework(cmd *cobra.Command, args []string) error {
+	key, _ := cmd.Flags().GetString("operation-key")
+	agentID, _ := cmd.Flags().GetString("agent-id")
+	sourceRun, _ := cmd.Flags().GetString("source-run")
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(agentID) == "" || strings.TrimSpace(sourceRun) == "" {
+		return errors.New("--operation-key, --agent-id and --source-run are required")
+	}
+	instruction, _, err := resolveTextFlag(cmd, "instruction")
+	if err != nil {
+		return fmt.Errorf("resolve instruction: %w", err)
+	}
+	if instruction == "" {
+		return errors.New("--instruction, --instruction-stdin, or --instruction-file is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	digest := sha256.Sum256([]byte(instruction))
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/rework-dispatch", map[string]any{
+		"operation_key": key, "agent_id": agentID, "source_task_id": sourceRun, "instruction": instruction, "payload_sha256": fmt.Sprintf("%x", digest[:]),
+	}, &result); err != nil {
+		return fmt.Errorf("dispatch rework: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	task, _ := result["task"].(map[string]any)
+	fmt.Fprintf(os.Stdout, "Rework dispatch run %s (replayed=%v)\n", strVal(task, "id"), result["replayed"])
+	return nil
+}
+
+func runIssueReworkDispatchStatus(cmd *cobra.Command, args []string) error {
+	key, _ := cmd.Flags().GetString("operation-key")
+	if strings.TrimSpace(key) == "" {
+		return errors.New("--operation-key is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/rework-dispatch/"+url.PathEscape(key), &result); err != nil {
+		return fmt.Errorf("get rework dispatch: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	task, _ := result["task"].(map[string]any)
+	fmt.Fprintf(os.Stdout, "Rework dispatch run %s: %s\n", strVal(task, "id"), strVal(task, "status"))
 	return nil
 }
 

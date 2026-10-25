@@ -95,6 +95,13 @@ WHERE workspace_id = sqlc.arg('workspace_id')
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockIssueForReworkDispatch :one
+-- Every ordinary issue-task insert takes KEY SHARE here through
+-- lock_task_owner_rows. FOR UPDATE serializes the dispatch decision with it.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: GetIssueMetadataInWorkspace :one
 -- Reloads the committed metadata snapshot after a conditional mutation
 -- returns no rows, without fetching the rest of the issue payload.
@@ -477,6 +484,9 @@ LIMIT 1;
 -- cross-tenant leak the #1661 guard above exists to prevent.
 WITH target AS (
     SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+),
+cleared_rework_receipts AS (
+ DELETE FROM issue_rework_dispatch_receipt WHERE issue_id IN (SELECT target.id FROM target)
 ),
 cleared_wakeup_receipts AS (
  DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target))
