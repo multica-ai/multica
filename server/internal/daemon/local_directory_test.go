@@ -33,7 +33,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	tmp := t.TempDir()
 
 	t.Run("no resources returns nil", func(t *testing.T) {
-		got, err := findLocalDirectoryAssignment(nil, thisDaemon)
+		got, err := findLocalDirectoryAssignment(nil, thisDaemon, "")
 		if err != nil || got != nil {
 			t.Fatalf("expected (nil, nil), got (%+v, %v)", got, err)
 		}
@@ -42,7 +42,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	t.Run("other daemon is skipped", func(t *testing.T) {
 		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: otherDaemon})},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err != nil || got != nil {
 			t.Fatalf("expected (nil, nil), got (%+v, %v)", got, err)
 		}
@@ -51,7 +51,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	t.Run("non-matching type is skipped", func(t *testing.T) {
 		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://x"}`)},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err != nil || got != nil {
 			t.Fatalf("expected (nil, nil), got (%+v, %v)", got, err)
 		}
@@ -60,7 +60,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	t.Run("matching daemon returns assignment", func(t *testing.T) {
 		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -75,10 +75,82 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 		}
 	})
 
+	t.Run("exact agent binding wins over daemon default regardless of order", func(t *testing.T) {
+		exactPath := t.TempDir()
+		for _, resources := range [][]ProjectResourceData{
+			{
+				{ID: "default", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
+				{ID: "exact", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: exactPath, DaemonID: thisDaemon, AgentID: "agent-a"})},
+			},
+			{
+				{ID: "exact", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: exactPath, DaemonID: thisDaemon, AgentID: "agent-a"})},
+				{ID: "default", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
+			},
+		} {
+			got, err := findLocalDirectoryAssignment(resources, thisDaemon, "agent-a")
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if got == nil || got.AbsPath != filepath.Clean(exactPath) || got.Ref.AgentID != "agent-a" {
+				t.Fatalf("assignment = %+v, want exact agent binding", got)
+			}
+		}
+	})
+
+	t.Run("other agents fall back to daemon default", func(t *testing.T) {
+		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
+			{ID: "other", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: t.TempDir(), DaemonID: thisDaemon, AgentID: "agent-b"})},
+			{ID: "default", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
+		}, thisDaemon, "agent-a")
+		if err != nil || got == nil || got.AbsPath != filepath.Clean(tmp) {
+			t.Fatalf("assignment = %+v, err = %v; want daemon default", got, err)
+		}
+	})
+
+	t.Run("agent-specific bindings coexist without a default", func(t *testing.T) {
+		aPath := t.TempDir()
+		bPath := t.TempDir()
+		resources := []ProjectResourceData{
+			{ID: "a", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: aPath, DaemonID: thisDaemon, AgentID: "agent-a"})},
+			{ID: "b", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: bPath, DaemonID: thisDaemon, AgentID: "agent-b"})},
+		}
+		got, err := findLocalDirectoryAssignment(resources, thisDaemon, "agent-b")
+		if err != nil || got == nil || got.AbsPath != filepath.Clean(bPath) {
+			t.Fatalf("agent-b assignment = %+v, err = %v", got, err)
+		}
+		got, err = findLocalDirectoryAssignment(resources, thisDaemon, "agent-c")
+		if err != nil || got != nil {
+			t.Fatalf("unbound agent assignment = %+v, err = %v; want nil", got, err)
+		}
+	})
+
+	t.Run("agent bindings to symlink aliases retain one realpath lock key", func(t *testing.T) {
+		realDir := t.TempDir()
+		alias := filepath.Join(t.TempDir(), "workspace-link")
+		if err := os.Symlink(realDir, alias); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		resources := []ProjectResourceData{
+			{ID: "a", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: realDir, DaemonID: thisDaemon, AgentID: "agent-a"})},
+			{ID: "b", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: alias, DaemonID: thisDaemon, AgentID: "agent-b"})},
+		}
+		a, err := findLocalDirectoryAssignment(resources, thisDaemon, "agent-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := findLocalDirectoryAssignment(resources, thisDaemon, "agent-b")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.RealPath != b.RealPath {
+			t.Fatalf("real paths differ: %q != %q", a.RealPath, b.RealPath)
+		}
+	})
+
 	t.Run("missing daemon_id is rejected", func(t *testing.T) {
 		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp})},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err == nil {
 			t.Fatalf("expected error for missing daemon_id")
 		}
@@ -87,7 +159,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	t.Run("relative path is rejected", func(t *testing.T) {
 		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: "relative/path", DaemonID: thisDaemon})},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err == nil {
 			t.Fatalf("expected error for relative path")
 		}
@@ -96,22 +168,22 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	t.Run("malformed ref json fails", func(t *testing.T) {
 		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: json.RawMessage(`{not json`)},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err == nil {
 			t.Fatalf("expected error for malformed json")
 		}
 	})
 
 	t.Run("two local_directory rows on this daemon fail fast", func(t *testing.T) {
-		// Server-side findLocalDirectoryConflict enforces one
-		// local_directory per (project, daemon). If two rows are
+		// Server-side findLocalDirectoryConflict enforces one default
+		// local_directory per (project, daemon). If two default rows are
 		// somehow present (older API client, direct DB writes), the
 		// daemon must refuse to guess which directory to execute in.
 		tmp2 := t.TempDir()
 		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
 			{ID: "r2", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp2, DaemonID: thisDaemon})},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err == nil {
 			t.Fatalf("expected error for two local_directory rows pinned to this daemon")
 		}
@@ -128,7 +200,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
 			{ID: "r2", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: otherDaemon})},
-		}, thisDaemon)
+		}, thisDaemon, "")
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
