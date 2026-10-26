@@ -55,6 +55,14 @@ const concurrentRequestLimitWitness = "concurrent request limit"
 
 var httpForbiddenCodeRe = regexp.MustCompile(`(^|[^0-9a-z])403([^0-9a-z]|$)`)
 
+// Require a provider reason/code field, rather than a bare token that could
+// name a source file, configuration key, or a different filtering outcome.
+var providerContentFilterRe = regexp.MustCompile(`(?:^|[^a-z0-9_])(?:finish_reason|reason|code)["']?\s*[:=]\s*["']?content_filter(?:$|[\s"'},;\]])`)
+
+func isProviderContentFilter(lower string) bool {
+	return providerContentFilterRe.MatchString(lower)
+}
+
 // isUsageLimit403 is shared by Classify and NormalizeDaemonReason so new and
 // old daemons land on the same reason.
 func isUsageLimit403(lower string) bool {
@@ -62,7 +70,7 @@ func isUsageLimit403(lower string) bool {
 }
 
 // Classify maps a free-form error string from the agent runtime / CLI
-// to one of the 14 agent_error.* sub-reasons. Always returns a valid
+// to an agent_error.* sub-reason. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
 // empty input.
 //
@@ -127,6 +135,11 @@ func Classify(rawError string) Reason {
 	// the bare 403 auth rule, or valid credentials get blamed.
 	case isUsageLimit403(lower):
 		return ReasonAgentProviderQuotaLimit
+
+	// An explicit content-policy result is terminal even when the CLI wraps
+	// it in a generic stream-disconnection or process-exit error.
+	case isProviderContentFilter(lower):
+		return ReasonAgentProviderContentFilter
 
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
@@ -603,6 +616,15 @@ var legacyUsageLimit403Reasons = map[string]bool{
 	"agent_error":                           true,
 }
 
+// Older clients classified a filtered incomplete response from its generic
+// stream/process wrapper. Preserve specific platform, auth, and quota reasons.
+var legacyContentFilterReasons = map[string]bool{
+	string(ReasonAgentProviderNetwork): true,
+	string(ReasonAgentProcessFailure):  true,
+	string(ReasonAgentUnknown):         true,
+	"agent_error":                      true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -625,6 +647,9 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	}
 	if legacyUsageLimit403Reasons[reason] && isUsageLimit403(strings.ToLower(rawError)) {
 		return ReasonAgentProviderQuotaLimit
+	}
+	if legacyContentFilterReasons[reason] && isProviderContentFilter(strings.ToLower(rawError)) {
+		return ReasonAgentProviderContentFilter
 	}
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {

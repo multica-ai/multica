@@ -65,6 +65,7 @@
       "runtime_cli_timeout": "本機 OpenClaw CLI 沒能在超時時間內響應，這次執行沒有啟動。這是本地啟動超時，不是網路問題——除非 CLI 變快或調大超時（MULTICA_OPENCLAW_CLI_TIMEOUT），否則重試也不會成功。",
       "environment_prepare_failed": "執行智慧體的那臺機器沒能把這次執行準備好，任務沒有啟動。下方的原始錯誤會說明是哪一步失敗——常見的是磁碟空間、權限、目錄仍被佔用，或本地配置讀不出來。與智慧體和模型廠商無關。",
       "provider_network": "與模型服務的連線中斷，回覆沒能完成。檢查網路後重試。",
+      "provider_content_filter": "供應商的內容政策攔截了請求或回覆。請檢查請求和上下文後再嘗試。",
       "provider_auth_or_access": "智慧體的模型帳號登入已失效。重新登入後再試。",
       "provider_quota_limit": "智慧體的模型帳號額度已用盡。充值或更換帳號後再試。",
       "provider_capacity_or_rate_limit": "模型服務繁忙或觸發了限流。稍後再試。",

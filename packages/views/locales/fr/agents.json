@@ -1015,6 +1015,7 @@
       "agent_error_provider_capacity_or_rate_limit": "Limite de requêtes du fournisseur atteinte",
       "agent_error_provider_server_error": "Erreur du serveur du fournisseur",
       "agent_error_provider_network": "Erreur réseau lors de la connexion au fournisseur",
+      "agent_error_provider_content_filter": "La politique de contenu du fournisseur a bloqué la requête ou la réponse",
       "agent_error_process_failure": "Le processus de l'agent a planté",
       "agent_error_empty_or_unparseable_output": "L'agent n'a renvoyé aucun résultat exploitable",
       "agent_error_agent_timeout": "Délai de l'agent dépassé",

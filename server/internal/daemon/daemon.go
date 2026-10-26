@@ -9442,6 +9442,7 @@ func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.T
 func freshSessionMayHelp(errText string) bool {
 	switch taskfailure.Classify(errText) {
 	case taskfailure.ReasonAgentProviderNetwork,
+		taskfailure.ReasonAgentProviderContentFilter,
 		taskfailure.ReasonAgentProviderCapacityOrRateLimit,
 		taskfailure.ReasonAgentProviderQuotaLimit,
 		taskfailure.ReasonAgentProviderServerError,

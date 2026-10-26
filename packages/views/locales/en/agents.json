@@ -1015,6 +1015,7 @@
       "agent_error_provider_capacity_or_rate_limit": "Rate limited by provider",
       "agent_error_provider_server_error": "Provider server error",
       "agent_error_provider_network": "Network error reaching provider",
+      "agent_error_provider_content_filter": "Provider content policy blocked the request or response",
       "agent_error_process_failure": "Agent process crashed",
       "agent_error_empty_or_unparseable_output": "Agent returned no usable output",
       "agent_error_agent_timeout": "Agent timed out",
