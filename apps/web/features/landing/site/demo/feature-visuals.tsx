@@ -55,7 +55,7 @@ function Screen({ children }: { children: ReactNode }) {
   );
 }
 
-function Header({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
+export function Header({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
     <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
       <Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -79,7 +79,7 @@ function Marks({ names }: { names: string[] }) {
   );
 }
 
-function Chip({ actor }: { actor: Actor }) {
+export function Chip({ actor }: { actor: Actor }) {
   return (
     <span className="flex min-w-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2 pl-0.5 text-caption">
       <Avatar actor={actor} size={16} />
@@ -126,7 +126,7 @@ function RuntimeRow({ runtime }: { runtime: Runtime }) {
   );
 }
 
-function GroupBand({ title, count }: { title: string; count: number }) {
+export function GroupBand({ title, count }: { title: string; count: number }) {
   return (
     <div className="flex h-8 items-center gap-2 border-b border-border bg-muted/40 px-4 text-caption">
       <span className="font-semibold">{title}</span>

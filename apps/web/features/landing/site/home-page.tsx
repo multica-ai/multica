@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, Check, ChevronRight } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
@@ -19,7 +19,14 @@ import { CUSTOMER_LOGOS } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
 import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
-import { AgentVisual, ConnectVisual, ReviewVisual } from "./demo/how-it-works-visuals";
+import {
+  DigestAfter,
+  DigestBefore,
+  PipelineAfter,
+  PipelineBefore,
+  TabsAfter,
+  TabsBefore,
+} from "./demo/before-after-visuals";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
 
@@ -29,8 +36,8 @@ export function HomePage() {
       <Hero />
       <LogoWall />
       <div className="site-rails">
+        <BeforeAfter />
         <Features />
-        <HowItWorks />
         <Deploy />
         <Customers />
         <FAQSection />
@@ -254,71 +261,134 @@ function FeatureCard({ id, title, body, visual: Visual, alt }: (typeof FEATURES)
   );
 }
 
-const STEPS: { title: string; body: string; link: { label: string; href: string }; visual: ComponentType; alt: string }[] = [
+type Scene = { body: string; alt: string; visual: ComponentType };
+
+const STORIES: { id: string; title: string; metric: [string, string]; before: Scene; after: Scene }[] = [
   {
-    title: "Connect your machines",
-    body: "Run multica setup on a laptop or a server and it finds the coding agents already installed there. No machine to spare? Run them in Multica Cloud.",
-    link: { label: "Explore Runtimes", href: productHref("runtimes") },
-    visual: ConnectVisual,
-    alt: "A terminal running multica setup, which signs in, finds Claude Code, Codex, and Cursor, and brings the laptop online",
+    id: "board",
+    title: "Thirty agents, thirty tabs",
+    metric: ["30 tabs", "1 board"],
+    before: {
+      body: "Every agent runs in its own terminal tab. You spend the day cycling through them, and a question waits in the one you aren’t looking at.",
+      alt: "A terminal with four agent tabs open and 26 more hidden, and a two-hour-old prompt in another tab asking whether to apply a migration",
+      visual: TabsBefore,
+    },
+    after: {
+      body: "Every agent’s work is an issue on one shared board. You see who is on what, and anything waiting on you stands out.",
+      alt: "The Issues list grouped by status: one issue blocked and waiting for you, three in progress with agents working, one in review",
+      visual: TabsAfter,
+    },
   },
   {
-    title: "Add agents to your team",
-    body: "Give an agent a name, a runtime, instructions, and skills. It shows up in the assignee picker right next to your teammates.",
-    link: { label: "Explore Agents", href: productHref("agents") },
-    visual: AgentVisual,
-    alt: "The Create agent form filled in for Backend Agent, which then appears in the assignee picker beside team members",
+    id: "digest",
+    title: "The work nobody has time to do",
+    metric: ["Spot checks", "every conversation"],
+    before: {
+      body: "Thousands of support conversations come in every day. Someone spot-checks a few dozen, and the rest are never read.",
+      alt: "A spreadsheet of 2,418 support conversations where only 40 are marked reviewed",
+      visual: DigestBefore,
+    },
+    after: {
+      body: "An autopilot reads every conversation overnight and files what needs fixing. You review the digest in the morning.",
+      alt: "A daily support digest where Content Agent read all 2,418 conversations, grouped them into three themes, and filed two issues, reviewed by Mia Chen at 09:12",
+      visual: DigestAfter,
+    },
   },
   {
-    title: "Assign work and review",
-    body: "Assign an issue and the agent takes it from there: it reports progress, opens a pull request, and waits for your review before anything merges.",
-    link: { label: "Explore Issues", href: productHref("issues") },
-    visual: ReviewVisual,
-    alt: "An issue where Backend Agent runs, opens a pull request with passing checks, and a teammate approves and merges it",
+    id: "pipeline",
+    title: "A process that waits on people",
+    metric: ["About 2 weeks", "about 3 days"],
+    before: {
+      body: "Analyze, fix, evaluate, release. Each step waits for someone to notice it’s their turn, so one fix takes about two weeks.",
+      alt: "A chat thread from Monday to the next Thursday where each step of a fix waits for the next person to pick it up",
+      visual: PipelineBefore,
+    },
+    after: {
+      body: "Agents hand each step to the next, and people step in only to approve. The same fix ships in about three days.",
+      alt: "An issue timeline where agents find the cause, open a pull request, and run 1,204 eval cases, then Mia Chen approves the release on day 3",
+      visual: PipelineAfter,
+    },
   },
 ];
 
-function HowItWorks() {
+function BeforeAfter() {
   return (
     <Section>
       <Container>
         <SectionHeader
-          title={
-            <>
-              <span className="text-site-muted">From setup to merged PR,</span>
-              <br />
-              your agents work like teammates.
-            </>
-          }
+          title="What changes when agents join your team"
+          lead="Three stories from teams that moved their agent work into Multica."
         />
-        <ol className="mt-site-step flex flex-col gap-site-step">
-          {STEPS.map((step, index) => (
-            <li key={step.title} className="grid items-end gap-8 md:grid-cols-2 md:gap-16">
-              <div className={cn(index % 2 === 1 && "md:order-2")}>
-                <p className="font-site-mono text-site-label text-site-muted tabular-nums">
-                  {String(index + 1).padStart(2, "0")}
-                </p>
-                <h3 className="mt-4 font-site-display text-site-title text-site-ink">{step.title}</h3>
-                <p className="mt-1 max-w-[28rem] text-site-body text-site-muted">{step.body}</p>
-                <Link
-                  href={step.link.href}
-                  className={cn(
-                    "mt-4 inline-flex items-center gap-1 rounded-site-control text-site-body text-site-ink transition-colors hover:text-site-ink-secondary",
-                    focusRing,
-                  )}
-                >
-                  {step.link.label}
-                  <ChevronRight className="size-4" aria-hidden />
-                </Link>
-              </div>
-              <div role="img" aria-label={step.alt} className="relative aspect-[4/3] overflow-hidden rounded-site-panel bg-site-sunken">
-                <step.visual />
-              </div>
-            </li>
+        <ol className="mt-site-block flex flex-col gap-site-step">
+          {STORIES.map((story) => (
+            <Story key={story.id} {...story} />
           ))}
         </ol>
       </Container>
     </Section>
+  );
+}
+
+function Story({ id, title, metric: [from, to], before, after }: (typeof STORIES)[number]) {
+  const ref = useRef<HTMLLIElement>(null);
+  const [seen, setSeen] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const intersection = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        setSeen(true);
+        intersection.disconnect();
+      },
+      { threshold: 0.3 },
+    );
+    intersection.observe(el);
+    return () => intersection.disconnect();
+  }, []);
+
+  return (
+    <li ref={ref}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <h3 className="font-site-display text-site-title text-site-ink">{title}</h3>
+        <p className="text-site-small text-site-muted tabular-nums">
+          {from} <span aria-hidden>→</span>
+          <span className="sr-only">to</span> <span className="text-site-ink">{to}</span>
+        </p>
+      </div>
+      <div className="mt-6 grid gap-x-site-grid-col gap-y-8 md:grid-cols-2">
+        <StoryPanel label="Before" scene={before} />
+        <StoryPanel label="With Multica" scene={after} frost={id} revealed={seen} />
+      </div>
+    </li>
+  );
+}
+
+function StoryPanel({ label, scene, frost, revealed = true }: { label: string; scene: Scene; frost?: string; revealed?: boolean }) {
+  const Visual = scene.visual;
+  return (
+    <figure>
+      <div
+        role="img"
+        aria-label={scene.alt}
+        data-frost={frost}
+        className={cn("relative aspect-[16/10] overflow-hidden rounded-site-panel", frost ? "site-frost" : "bg-site-sunken")}
+      >
+        <div
+          className={cn(
+            "absolute inset-0 transition-[opacity,translate] delay-150 duration-700 ease-out motion-reduce:transition-none",
+            !revealed && "translate-y-3 opacity-0 motion-reduce:translate-y-0 motion-reduce:opacity-100",
+          )}
+        >
+          <Visual />
+        </div>
+      </div>
+      <figcaption className="mt-4">
+        <p className={cn("font-site-mono text-site-label uppercase", frost ? "text-site-ink" : "text-site-muted")}>{label}</p>
+        <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{scene.body}</p>
+      </figcaption>
+    </figure>
   );
 }
 
