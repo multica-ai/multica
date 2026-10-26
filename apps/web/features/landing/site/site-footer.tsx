@@ -28,7 +28,7 @@ export function SiteFooter() {
   const groups = useMemo(() => buildFooterGroups(docsHrefForLocale(locale)), [locale]);
 
   return (
-    <footer className="border-t border-site-line bg-site-canvas text-site-ink">
+    <footer className="border-t border-site-rule bg-site-canvas text-site-ink">
       <Container className="grid gap-site-block py-site-section lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:gap-16">
         <div>
           <Link href="/" aria-label="Multica home" className={cn("inline-flex items-center rounded-sm", focusRing)}>

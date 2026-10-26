@@ -19,7 +19,7 @@ export function Container({ className, ...props }: ComponentProps<"div">) {
 export function Section({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
-      className={cn("border-t border-site-line py-site-section", className)}
+      className={cn("border-t border-site-rule py-site-section", className)}
       {...props}
     />
   );

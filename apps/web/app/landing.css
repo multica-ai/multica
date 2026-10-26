@@ -31,6 +31,7 @@
     --color-site-faint: var(--site-faint);
     --color-site-line: var(--site-line);
     --color-site-line-strong: var(--site-line-strong);
+    --color-site-rule: var(--site-rule);
     --color-site-accent: var(--site-accent);
     --color-site-agent: var(--site-agent);
     --color-site-inverse: var(--site-inverse);
@@ -120,6 +121,7 @@
     --site-faint: oklch(0.606 0.016 285.938);
     --site-line: oklch(0.925 0.004 286.32);
     --site-line-strong: oklch(0.871 0.006 286.286);
+    --site-rule: oklch(0.953 0.003 286.32);
     --site-accent: oklch(0.59 0.18 250);
     --site-agent: oklch(0.8 0.165 68);
     --site-inverse: oklch(0.141 0.005 285.823);
@@ -191,7 +193,7 @@
         position: absolute;
         inset-block: 0;
         inset-inline: var(--site-rail);
-        border-inline: 1px solid var(--site-line);
+        border-inline: 1px solid var(--site-rule);
         pointer-events: none;
     }
 
@@ -206,7 +208,7 @@
         top: -3px;
         width: 5px;
         height: 5px;
-        background-color: var(--site-muted);
+        background-color: var(--site-line-strong);
         pointer-events: none;
     }
 

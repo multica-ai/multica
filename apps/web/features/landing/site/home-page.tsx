@@ -277,7 +277,7 @@ function Agents() {
               <span className="flex size-7 items-center text-site-muted">
                 <Mark className={size ?? "size-6"} />
               </span>
-              <span className="text-site-small text-site-muted">{name}</span>
+              <span className="text-site-body text-site-muted">{name}</span>
             </li>
           ))}
         </ul>
