@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, Check, ChevronsLeftRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Check, ChevronsLeftRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
@@ -16,6 +16,7 @@ import {
   focusRing,
 } from "./primitives";
 import { HERO_PROVIDERS } from "../components/provider-marks";
+import { docsHrefForLocale, useLocale } from "../i18n";
 import { CUSTOMER_LOGOS } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
@@ -256,6 +257,8 @@ const POPULAR_AGENTS = ["Claude Code", "Codex", "Cursor", "GitHub Copilot", "Ope
 
 function Agents() {
   const agents = POPULAR_AGENTS.map((name) => HERO_PROVIDERS.find((provider) => provider.name === name)!);
+  const { locale } = useLocale();
+  const docsHref = docsHrefForLocale(locale);
   return (
     <Section>
       <Container>
@@ -281,6 +284,10 @@ function Agents() {
             </li>
           ))}
         </ul>
+        <ActionLink href={`${docsHref}/providers`} tone="ghost" className="mt-8 ml-1 md:mt-10 md:ml-2">
+          All 27 agents
+          <ArrowUpRight className="size-4" aria-hidden />
+        </ActionLink>
       </Container>
     </Section>
   );
