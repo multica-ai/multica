@@ -454,8 +454,8 @@ func buildQuickCreatePrompt(task Task) string {
 // previous turn's --parent UUID.
 func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
-	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	b.WriteString("Comment update\n\n")
+	fmt.Fprintf(&b, "Issue ID: %s\nComment ID: %s\n\n", task.IssueID, task.TriggerCommentID)
 	// A real resume: the latest turn's session comes back. Shared by the
 	// edited-comment notes (MUL-8218) and the reading pointers below.
 	resumed := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
@@ -475,12 +475,13 @@ func buildCommentPrompt(task Task, provider string) string {
 		// that run's transcript is what this session resumes. Say which version
 		// is current; the work already done is not undone by the edit.
 		editedSinceResume := resumed && task.TriggerCommentEditedAt != ""
+		fmt.Fprintf(&b, "Comment author: %s\n", authorLabel)
 		if editedSinceResume {
-			fmt.Fprintf(&b, "[EDITED COMMENT] %s edited a comment after your previous run in this session started. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
+			b.WriteString("Comment change: edited after the previous run in this session started.\n")
 		} else {
-			fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
+			b.WriteString("Comment change: new.\n")
 		}
-		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
+		fmt.Fprintf(&b, "\nRequest:\n\n> %s\n\n", strings.ReplaceAll(task.TriggerCommentContent, "\n", "\n> "))
 		if editedSinceResume {
 			b.WriteString(buildEditedTriggerNote(task))
 		}
@@ -494,7 +495,7 @@ func buildCommentPrompt(task Task, provider string) string {
 		// the ids.
 		if len(task.CoalescedComments) > 0 {
 			editedCoalesced := 0
-			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
+			fmt.Fprintf(&b, "Additional comments: %d, listed with their own author and thread. Address all included comments.\n\n", len(task.CoalescedComments))
 			for _, cc := range task.CoalescedComments {
 				authorLabel := "A user"
 				if cc.AuthorType == "system" {
@@ -559,7 +560,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			//     which is independent of where these ids sit.
 			// It is also not a precise fetch in the other direction: the window
 			// carries the trigger comment and unrelated comments too.
-			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address every one of them, not just the one above: %s. They may be in DIFFERENT threads, so do not assume they share the triggering thread.\n\n",
+			fmt.Fprintf(&b, "Additional comments (%d): %s. These comments may belong to different threads. Read each before replying.\n\n",
 				len(task.CoalescedCommentIDs), strings.Join(task.CoalescedCommentIDs, ", "))
 			if task.NewCommentsSince != "" {
 				fmt.Fprintf(&b, "Start with `multica issue comment list %s --since %s --compact --output json`. Treat that as a candidate window, not a guarantee — it also carries unrelated comments, and a retried run can carry ids older than the window. Check every id above against the result.\n\n",

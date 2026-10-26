@@ -12,7 +12,7 @@ func TestWakeupPromptPreservesInstructionAndDeliveryThread(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Contains(p, "[NEW COMMENT]") || strings.Contains(p, "old instruction") {
+	if strings.Contains(p, "Comment update") || strings.Contains(p, "[NEW COMMENT]") || strings.Contains(p, "old instruction") {
 		t.Fatal("replayed the old comment instead of the wakeup")
 	}
 }
