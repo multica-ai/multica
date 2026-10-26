@@ -689,6 +689,10 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 			content: "[<script>Agent</script>@](mention://agent/" + uuid + ")",
 		},
 		{
+			name:    "template content cannot make an agent label visible",
+			content: "[<template>Agent</template>@](mention://agent/" + uuid + ")",
+		},
+		{
 			name:    "reference link cannot trigger an agent",
 			content: "[@Agent][target]\n\n[target]: mention://agent/" + uuid,
 		},

@@ -34,8 +34,8 @@ name there. The `@` prefix is optional; issue references commonly omit it:
 Only canonical inline links with visible label text count as mentions. Empty
 or invisible labels, reference links, images, autolinks, titles, and
 angle-bracket destinations are not mention triggers. Use the shape above.
-Text removed by HTML sanitization, such as script contents, does not make a
-label visible; neither does an `@` prefix on its own.
+Text removed by HTML sanitization, such as script contents, and inert template
+contents do not make a label visible; neither does an `@` prefix on its own.
 
 Code examples are inert as mentions. This includes inline code, multiline code
 spans, indented code, and backtick or tilde fenced blocks inside lists,

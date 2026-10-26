@@ -106,6 +106,42 @@ func TestParseMentions(t *testing.T) {
 			content: "[<script>Agent</script>@](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
 		},
 		{
+			name:    "template content is not a visible label",
+			content: "[<template>Agent</template>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "template content cannot turn an at prefix into a visible label",
+			content: "[<template>Agent</template>@](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "uppercase template with attributes is ignored",
+			content: `[<TEMPLATE data-label="Agent"><span>Agent</span></TEMPLATE>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)`,
+		},
+		{
+			name:    "self closing template still hides following label text",
+			content: "[<template/>Agent](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+		},
+		{
+			name:    "visible label after nested templates still triggers",
+			content: "[<template><template>hidden</template></template>Bob](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "visible label before template still triggers",
+			content: "[Bob<template>hidden</template>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "literal template in code label stays visible",
+			content: "[`<template>Agent</template>`](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "escaped template label stays visible",
+			content: "[&lt;template&gt;Agent&lt;/template&gt;](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
 			name:    "uppercase script with attributes is ignored",
 			content: `[<SCRIPT type="text/plain">Agent</SCRIPT>](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)`,
 		},

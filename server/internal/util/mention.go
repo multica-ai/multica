@@ -184,9 +184,11 @@ func renderedMentionLabelText(link *ast.Link, source []byte) string {
 	var label strings.Builder
 	var collect func(*nethtml.Node)
 	collect = func(n *nethtml.Node) {
-		// markdownSanitizeSchema inherits defaultSchema.strip = ["script"].
+		// markdownSanitizeSchema strips scripts. parse5 stores template
+		// contents in a separate fragment, so sanitization also drops them
+		// when unwrapping the template. x/net/html keeps them as children.
 		// Other disallowed tags, such as style, are unwrapped, keeping text.
-		if n.Type == nethtml.ElementNode && n.Data == "script" {
+		if n.Type == nethtml.ElementNode && (n.Data == "script" || n.Data == "template") {
 			return
 		}
 		if n.Type == nethtml.TextNode {
