@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentType, CSSProperties } from "react";
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -18,6 +18,7 @@ import { CUSTOMER_LOGOS } from "./customer-logos";
 import { RuntimesVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { AutopilotsFigure, ChatFigure, SkillsFigure } from "./demo/figure-visuals";
 import { HeroBoard } from "./demo/hero-board";
+import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
 import { AgentVisual, ConnectVisual, ReviewVisual } from "./demo/how-it-works-visuals";
 import { CtaBand, SitePage } from "./site-page";
 import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
@@ -57,12 +58,9 @@ function Hero() {
           Announcement placeholder
           <ArrowRight className="size-3.5 text-site-muted" aria-hidden />
         </Link>
-        <h1 className="mt-5 font-site-display text-site-heading text-site-ink text-balance">
-          Your next ten hires won’t be human
-        </h1>
+        <HeroHeadline />
         <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">
-          Placeholder tagline. Assign issues to coding agents, review their work, and scale the team — on
-          your machines or in the cloud.
+          One workspace to assign, track, and review work across all your agents — you stay in control.
         </p>
         <div className="mt-6 flex flex-wrap gap-2.5">
           <ActionLink href={ctaHref} size="lg">
@@ -80,6 +78,73 @@ function Hero() {
       </Container>
     </section>
   );
+}
+
+const HERO_AGENTS = ["Claude Code", "Codex", "Hermes", "OpenCode"] as const;
+const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 2400);
+
+function HeroHeadline() {
+  const { ref, step } = useStoryLoop(HERO_AGENT_HOLDS, 0);
+  const measures = useRef<(HTMLSpanElement | null)[]>([]);
+  const [widths, setWidths] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    const items = measures.current.filter((el): el is HTMLSpanElement => el !== null);
+    const measure = () => setWidths(items.map((el) => el.getBoundingClientRect().width));
+    const resize = new ResizeObserver(measure);
+    items.forEach((el) => resize.observe(el));
+    return () => resize.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref}>
+      <h1 className="mt-5 font-site-display text-site-heading text-site-ink">
+        <span className="sr-only">
+          Turn {HERO_AGENTS.slice(0, -1).join(", ")}, or {HERO_AGENTS.at(-1)} into a teammate. Build a team of
+          humans and agents.
+        </span>
+        <span aria-hidden className="block text-balance">
+          Turn{" "}
+          <span
+            className="relative inline-grid overflow-hidden py-[0.08em] -my-[0.08em] align-bottom transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+            style={{ width: widths?.[step] }}
+          >
+            {HERO_AGENTS.map((name, index) => {
+              const previous = (step - 1 + HERO_AGENTS.length) % HERO_AGENTS.length;
+              return (
+                <span
+                  key={name}
+                  ref={(el) => {
+                    measures.current[index] = el;
+                  }}
+                  className={cn(
+                    "col-start-1 row-start-1 inline-flex w-max items-center gap-[0.2em] whitespace-nowrap transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+                    index === step
+                      ? "translate-y-0 opacity-100"
+                      : index === previous
+                        ? "-translate-y-[70%] opacity-0"
+                        : "translate-y-[70%] opacity-0",
+                  )}
+                >
+                  <ProviderMark name={name} />
+                  {name}
+                </span>
+              );
+            })}
+          </span>{" "}
+          into a teammate.
+        </span>
+        <span aria-hidden className="block text-balance text-site-muted">
+          Build a team of humans and agents.
+        </span>
+      </h1>
+    </div>
+  );
+}
+
+function ProviderMark({ name }: { name: string }) {
+  const Mark = PROVIDER_MARKS.get(name);
+  return Mark ? <Mark className="size-[0.78em] shrink-0" /> : null;
 }
 
 function LogoWall() {
