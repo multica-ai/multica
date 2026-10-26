@@ -272,6 +272,10 @@
     --frost-image: url("/images/frost/skills.webp");
 }
 
+.site-frost[data-frost="changelog"] {
+    --frost-image: url("/images/frost/changelog.webp");
+}
+
 .site-frost[data-frost="board"] {
     --frost-image: url("/images/frost/board.webp");
 }

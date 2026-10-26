@@ -89,7 +89,7 @@ function groupByMonth(entries: readonly Release[]): MonthGroup[] {
   return groups;
 }
 
-function anchorId(version: string) {
+export function anchorId(version: string) {
   return `release-${version.replace(/\./g, "-")}`;
 }
 

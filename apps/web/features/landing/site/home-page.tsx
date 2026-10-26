@@ -2,15 +2,17 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronsLeftRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronRight, ChevronsLeftRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { FAQSection } from "../components/faq-section";
+import { anchorId } from "../components/changelog-page-client";
 import {
   ActionLink,
   Container,
+  Eyebrow,
   Section,
   SectionHeader,
   focusRing,
@@ -42,6 +44,7 @@ export function HomePage() {
         <BeforeAfter />
         <Features />
         <Agents />
+        <Updates />
         <FAQSection />
         <CtaBand />
       </div>
@@ -286,6 +289,79 @@ function Agents() {
           All 27 agents
           <ArrowUpRight className="size-4" aria-hidden />
         </ActionLink>
+      </Container>
+    </Section>
+  );
+}
+
+const UPDATE_COUNT = 7;
+
+/** Release titles list their changes ("A, B, and C"); the home page leads with the first and counts the rest. */
+function releaseHeadline(title: string) {
+  const [headline = title, ...rest] = title.split(/, (?:and )?/);
+  return { headline, more: rest.length };
+}
+
+function Updates() {
+  const { t, locale } = useLocale();
+  const releases = t.changelog.entries.slice(0, UPDATE_COUNT);
+  const latest = releases[0];
+  const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" });
+  const dateLabel = (date: string) => day.format(new Date(`${date}T00:00:00Z`));
+  if (!latest) return null;
+
+  return (
+    <Section>
+      <Container className="grid gap-site-block lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-16">
+        <div className="flex flex-col justify-between gap-site-block">
+          <SectionHeader eyebrow="Changelog" title="Recently shipped." />
+          <Link
+            href={`/changelog#${anchorId(latest.version)}`}
+            data-frost="changelog"
+            className={cn(
+              "site-frost group hidden max-w-[20rem] flex-col gap-8 rounded-site-card p-5 lg:flex",
+              focusRing,
+            )}
+          >
+            <span className="relative text-site-small text-site-ink-secondary">Latest · {dateLabel(latest.date)}</span>
+            <span className="relative">
+              <span className="block font-site-display text-site-heading text-site-ink">v{latest.version}</span>
+              <span className="mt-1 block text-site-body text-site-ink-secondary">{releaseHeadline(latest.title).headline}</span>
+            </span>
+          </Link>
+        </div>
+        <div>
+          <ul className="divide-y divide-site-line border-y border-site-line">
+            {releases.map((release) => (
+              <li key={release.version}>
+                <Link
+                  href={`/changelog#${anchorId(release.version)}`}
+                  className={cn(
+                    "group grid grid-cols-[4rem_minmax(0,1fr)_auto] items-baseline gap-4 py-4 text-site-body sm:grid-cols-[5rem_minmax(0,1fr)_4rem_auto]",
+                    focusRing,
+                  )}
+                >
+                  <span className="text-site-muted tabular-nums">{dateLabel(release.date)}</span>
+                  <span className="line-clamp-2 text-site-ink sm:truncate">
+                    {releaseHeadline(release.title).headline}
+                    {releaseHeadline(release.title).more > 0 ? (
+                      <span className="text-site-muted"> +{releaseHeadline(release.title).more} more</span>
+                    ) : null}
+                  </span>
+                  <span className="text-site-small text-site-muted tabular-nums max-sm:hidden">v{release.version}</span>
+                  <ChevronRight
+                    aria-hidden
+                    className="size-4 self-center text-site-muted transition-transform group-hover:translate-x-0.5"
+                  />
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <ActionLink href="/changelog" tone="ghost" className="mt-6 -ml-3">
+            All releases
+            <ArrowRight className="size-4" aria-hidden />
+          </ActionLink>
+        </div>
       </Container>
     </Section>
   );
