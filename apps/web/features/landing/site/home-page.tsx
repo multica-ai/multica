@@ -103,7 +103,7 @@ function HeroHeadline() {
         </span>
         <span aria-hidden className="block text-balance">
           Turn{" "}
-          <span className="relative inline-flex rounded-full bg-brand/5 px-[0.36em]">
+          <span className="relative inline-flex rounded-full bg-brand/5 px-[0.36em] [--border-beam-width:1.5px]">
             <span
               className="inline-grid overflow-hidden transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
               style={{ width: widths?.[step] }}
