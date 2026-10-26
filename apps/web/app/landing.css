@@ -184,6 +184,12 @@
     background-position: 8px 8px;
 }
 
+/* Code blocks scroll sideways on narrow screens; keep their bar thin. */
+.site-code {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--site-ink) 20%, transparent) transparent;
+}
+
 /* Page frame: on wide screens two hairline rails run down the page halfway
    into the gutter, and a dot marks each place a section's top hairline
    crosses them. `100%` resolves against each full-bleed box, so the rails

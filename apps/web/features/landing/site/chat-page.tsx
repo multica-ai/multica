@@ -107,11 +107,15 @@ function Journey() {
           title="What happens to a message"
           lead="Every Bot follows the same path, whichever platform it lives on."
         />
-        <ol className="relative mt-site-block grid gap-8 lg:grid-cols-5 lg:gap-6">
-          <span aria-hidden className="absolute top-[7px] right-0 left-0 h-px bg-site-line max-lg:hidden" />
-          <span aria-hidden className="absolute top-0 bottom-0 left-[7px] w-px bg-site-line lg:hidden" />
+        <ol className="mt-site-block grid gap-8 lg:grid-cols-5 lg:gap-6">
           {JOURNEY.map((step, index) => (
             <li key={step.title} className="relative flex gap-5 lg:flex-col lg:gap-6">
+              {index < JOURNEY.length - 1 ? (
+                <span
+                  aria-hidden
+                  className="absolute top-[25px] -bottom-[26px] left-[7px] w-px bg-site-line lg:top-[7px] lg:right-[-1rem] lg:bottom-auto lg:left-[23px] lg:h-px lg:w-auto"
+                />
+              ) : null}
               <span
                 aria-hidden
                 className={cn(

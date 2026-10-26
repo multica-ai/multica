@@ -1,7 +1,7 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
-import { Check, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { Check, Copy, type LucideIcon } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Container, Eyebrow, focusRing } from "./primitives";
 import { AdvanceLine, useAutoAdvance } from "./auto-advance";
@@ -239,12 +239,66 @@ export function CheckList({ items, className }: { items: ReactNode[]; className?
   );
 }
 
-/** A command or config file set in the page's own type, for copy a reader may paste. */
-export function CodeBlock({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
+export type CodeVariant = { label: string; code: string };
+
+/**
+ * A command or config file set in the page's own type, for text a reader may
+ * paste. With more than one variant (one per platform, say) the caption turns
+ * into tabs. The copy button copies the variant on show, comments included.
+ */
+export function CodeBlock({ variants, className }: { variants: CodeVariant[]; className?: string }) {
+  const [active, setActive] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const resetRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(resetRef.current), []);
+  const current = variants[active] ?? variants[0]!;
+
+  const copy = () => {
+    if (!navigator.clipboard) return;
+    void navigator.clipboard.writeText(current.code).then(() => {
+      setCopied(true);
+      clearTimeout(resetRef.current);
+      resetRef.current = setTimeout(() => setCopied(false), 1600);
+    });
+  };
+
   return (
-    <figure className={cn("overflow-hidden rounded-site-card border border-site-line bg-site-surface", className)}>
-      <figcaption className="border-b border-site-line px-4 py-2.5 text-site-small text-site-muted">{title}</figcaption>
-      <pre className="overflow-x-auto px-4 py-4 font-site-mono text-[0.8125rem] leading-6 text-site-ink">{children}</pre>
+    <figure className={cn("min-w-0 overflow-hidden rounded-site-card border border-site-line bg-site-surface", className)}>
+      <figcaption className="flex h-11 items-center gap-1 border-b border-site-line pr-1.5 pl-4 text-site-small text-site-muted">
+        {variants.length > 1 ? (
+          <span className="-ml-2.5 flex min-w-0 flex-1 gap-1">
+            {variants.map((variant, index) => (
+              <button
+                key={variant.label}
+                type="button"
+                aria-pressed={index === active}
+                onClick={() => setActive(index)}
+                className={cn(
+                  "h-8 rounded-site-control px-2.5 whitespace-nowrap transition-colors",
+                  focusRing,
+                  index === active ? "bg-site-sunken text-site-ink" : "hover:text-site-ink",
+                )}
+              >
+                {variant.label}
+              </button>
+            ))}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">{current.label}</span>
+        )}
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={copied ? "Copied" : `Copy ${current.label}`}
+          className={cn(
+            "relative flex size-8 shrink-0 items-center justify-center rounded-site-control transition-[color,background-color,scale] before:absolute before:-inset-1.5 hover:bg-site-hover hover:text-site-ink active:scale-[0.96]",
+            focusRing,
+          )}
+        >
+          {copied ? <Check className="size-4 text-site-ink" aria-hidden /> : <Copy className="size-4" aria-hidden />}
+        </button>
+      </figcaption>
+      <pre className="site-code overflow-x-auto px-4 py-4 font-site-mono text-[0.8125rem] leading-6 text-site-ink">{current.code}</pre>
     </figure>
   );
 }

@@ -292,7 +292,7 @@ function WorkspaceRow({ name, initial, tabs, active, current }: { name: string; 
 export function TabsVisual() {
   return (
     <div className="flex w-[420px] flex-col gap-3">
-      <WorkspaceRow name="Acme Labs" initial="A" tabs={ACME_TABS.slice(0, 2)} active={1} current />
+      <WorkspaceRow name="Acme Labs" initial="A" tabs={ACME_TABS.slice(0, 3)} active={1} current />
       <WorkspaceRow name="Mia’s workspace" initial="M" tabs={PERSONAL_TABS} active={1} />
     </div>
   );

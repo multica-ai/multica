@@ -65,7 +65,7 @@ function Hero() {
         </>
       }
       frost="cloud"
-      label="The Runtimes page at multica.ai: Qoder Cloud Agents online with two runs going and one queued, Cursor Cloud Agents and Claude Managed Agents coming soon, and two of the team's machines. Over it, Backend Agent works an issue on Qoder Cloud Agents and opens a linked pull request."
+      label="The Runtimes page at multica.ai: Qoder Cloud Agents online with two runs going and one queued, Cursor Cloud Agents and Claude Managed Agents coming soon, and two of the team’s machines. Over it, Backend Agent works an issue on Qoder Cloud Agents and opens a linked pull request."
     >
       <CloudScene />
     </SurfaceHero>

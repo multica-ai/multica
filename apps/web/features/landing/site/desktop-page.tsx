@@ -78,7 +78,7 @@ const HIGHLIGHTS: { title: string; body: string; points: string[]; visual: Compo
       "Multica links open in a tab instead of the browser",
     ],
     visual: TabsVisual,
-    label: "Two workspaces, Acme Labs with three tabs and Mia’s workspace with two, each keeping its own pinned Inbox and open issues.",
+    label: "Two workspaces, each keeping its own tabs: Acme Labs with its pinned Inbox, issue ACM-152, and a chat with Backend Agent; Mia’s workspace with its Inbox and MIA-12.",
   },
 ];
 
@@ -186,6 +186,11 @@ function Downloads() {
   );
 }
 
+const DESKTOP_CONFIG = `{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}`;
+
 function SelfHosted() {
   const docsHref = useDesktopDocsHref();
   return (
@@ -204,12 +209,7 @@ function SelfHosted() {
             <ArrowUpRight className="size-4" aria-hidden />
           </ActionLink>
         </div>
-        <CodeBlock title="~/.multica/desktop.json">
-          {`{
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com"
-}`}
-        </CodeBlock>
+        <CodeBlock variants={[{ label: "~/.multica/desktop.json", code: DESKTOP_CONFIG }]} />
       </Container>
     </Section>
   );

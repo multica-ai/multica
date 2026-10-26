@@ -5,7 +5,7 @@ import { docsHrefForLocale, useLocale } from "../i18n";
 import { ActionLink, Container, Section, SectionHeader } from "./primitives";
 import { AgentSessionVisual, CliScene } from "./demo/cli-visuals";
 import { CtaBand, SitePage } from "./site-page";
-import { CheckList, CodeBlock, SurfaceHero } from "./surface-kit";
+import { CheckList, CodeBlock, SurfaceHero, type CodeVariant } from "./surface-kit";
 
 export function CliPage() {
   return (
@@ -38,7 +38,7 @@ function Hero() {
       lead="The multica command connects a computer as a runtime, then lets you, a script, or another coding agent work with issues, comments, and agents from the shell."
       actions={
         <>
-          <ActionLink href={`${docsHref}#installation`} size="lg">
+          <ActionLink href="#install" size="lg">
             Install the CLI
           </ActionLink>
           <ActionLink href={`${docsHref}#command-reference`} size="lg" tone="secondary">
@@ -55,30 +55,37 @@ function Hero() {
   );
 }
 
-const INSTALL: { title: string; body: string; file: string; code: string }[] = [
+const INSTALL: { title: string; body: string; code: CodeVariant[] }[] = [
   {
     title: "Install it",
-    body: "One line on macOS and Linux, or Homebrew if you have it. Windows installs from PowerShell.",
-    file: "macOS / Linux",
-    code: "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash\n\n# or\nbrew install multica-ai/tap/multica",
+    body: "One line in a terminal on macOS and Linux, or in PowerShell on Windows. Homebrew works too.",
+    code: [
+      { label: "macOS / Linux", code: "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash" },
+      { label: "Windows", code: "irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex" },
+      { label: "Homebrew", code: "brew install multica-ai/tap/multica" },
+    ],
   },
   {
     title: "Connect the computer",
-    body: "Setup saves the server, signs you in through the browser, and starts the daemon. Self-hosted? Pass your server’s address.",
-    file: "Terminal",
-    code: "multica setup\n\n# self-hosted\nmultica setup self-host --server-url https://api.example.com",
+    body: "Setup saves the server, signs you in through the browser, and starts the daemon. Running your own Multica? Give it your server’s addresses.",
+    code: [
+      { label: "Multica Cloud", code: "multica setup" },
+      {
+        label: "Self-hosted",
+        code: "multica setup self-host \\\n  --server-url https://api.example.com \\\n  --app-url https://app.example.com",
+      },
+    ],
   },
   {
     title: "Check it’s running",
-    body: "The daemon reports the coding tools it found. Your computer is now a runtime you can assign agents to.",
-    file: "Terminal",
-    code: "multica daemon status\nmultica daemon logs --follow",
+    body: "See who you’re signed in as and which coding tools the daemon found. Your computer is now a runtime you can assign agents to.",
+    code: [{ label: "Terminal", code: "multica auth status\nmultica daemon status" }],
   },
 ];
 
 function Install() {
   return (
-    <Section>
+    <Section id="install" className="scroll-mt-site-header">
       <Container>
         <SectionHeader title="A runtime in three commands" />
         <ol className="mt-site-block flex flex-col">
@@ -96,7 +103,7 @@ function Install() {
                   <p className="mt-site-stack max-w-[26rem] text-site-body text-site-muted text-pretty">{step.body}</p>
                 </span>
               </div>
-              <CodeBlock title={step.file}>{step.code}</CodeBlock>
+              <CodeBlock variants={step.code} />
             </li>
           ))}
         </ol>
@@ -112,8 +119,10 @@ const COMMANDS: { name: string; body: string }[] = [
   { name: "squad", body: "Group agents under a leader that routes the work" },
   { name: "autopilot", body: "Schedule recurring work and trigger runs by hand" },
   { name: "skill", body: "Import, search, and edit the skills agents share" },
+  { name: "repo", body: "List the workspace’s repositories and check one out" },
   { name: "workspace", body: "Switch workspaces and invite members" },
-  { name: "daemon · runtime", body: "Start, stop, and inspect the computers agents run on" },
+  { name: "daemon", body: "Start, stop, and read the logs of the daemon on this computer" },
+  { name: "runtime", body: "List the workspace’s runtimes, their usage, and their activity" },
 ];
 
 function Commands() {
@@ -163,7 +172,7 @@ function AgentDriven() {
           <CheckList
             className="mt-6"
             items={[
-              "Reads issues and threads without burning tokens",
+              "Reads long threads a page at a time, not all at once",
               "Writes comments through a file, never a mangled one-liner",
               "Knows which actions start runs or notify people",
               "Acts with your login and permissions, nothing more",

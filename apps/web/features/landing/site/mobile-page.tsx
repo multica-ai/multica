@@ -36,7 +36,6 @@ function useMobileDocsHref() {
 }
 
 function Hero() {
-  const docsHref = useMobileDocsHref();
   const ctaHref = useDashboardCtaHref();
   return (
     <SurfaceHero
@@ -46,7 +45,7 @@ function Hero() {
       lead="The iOS app opens the same workspace as the web and Desktop. Reply to an agent waiting on you, follow its runs, or start a chat, wherever you are."
       actions={
         <>
-          <ActionLink href={docsHref} size="lg">
+          <ActionLink href="#install" size="lg">
             Install on iPhone
           </ActionLink>
           <ActionLink href={ctaHref} size="lg" tone="secondary">
@@ -158,10 +157,15 @@ function Everything() {
   );
 }
 
+const BUILD_COMMANDS = `git clone https://github.com/multica-ai/multica.git
+cd multica
+pnpm install
+pnpm ios:mobile:device:prod:release`;
+
 function Install() {
   const docsHref = useMobileDocsHref();
   return (
-    <Section>
+    <Section id="install" className="scroll-mt-site-header">
       <Container className="grid items-start gap-site-block lg:grid-cols-2 lg:gap-16">
         <div>
           <h2 className="font-site-display text-site-heading text-balance">
@@ -185,12 +189,7 @@ function Install() {
             <ArrowUpRight className="size-4" aria-hidden />
           </ActionLink>
         </div>
-        <CodeBlock title="Terminal">
-          {`git clone https://github.com/multica-ai/multica.git
-cd multica
-pnpm install
-pnpm ios:mobile:device:prod:release`}
-        </CodeBlock>
+        <CodeBlock variants={[{ label: "Terminal", code: BUILD_COMMANDS }]} />
       </Container>
     </Section>
   );
