@@ -20,12 +20,6 @@ An issue is Multica's basic unit for organizing work: a feature, a bug, an inves
 
 ![Issue detail: description, discussion, properties on the right, and the execution log](/images/docs/quickstart-run-result.webp)
 
-## Workflow handoffs with saved descriptions
-
-When a workflow assigns an agent on entry to a status, one issue update can save a description and enter that status. The saved issue must retain the workflow-selected assignee, and the resulting run must target that agent. No later comment or mention is needed to invoke the agent. This also applies to description updates in a batch. Explicit assignee fields override the workflow handler, so an update assigning a member does not invoke the automatic agent handler. Re-selecting an unchanged status does not create another workflow handoff.
-
-This is a single API request, not a guarantee of crash-atomic persistence and dispatch: a server failure between saving an issue and enqueueing its run can still interrupt delivery.
-
 ## Create an issue
 
 Create one from the **Issues** page or inside a project — a title is enough, and every other property can be filled in later.
