@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Check, ChevronsLeftRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronsLeftRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { useAuthStore } from "@multica/core/auth";
@@ -31,7 +31,7 @@ import {
   TabsBefore,
 } from "./demo/before-after-visuals";
 import { CtaBand, SitePage } from "./site-page";
-import { PLACEHOLDER_PAGES, productHref } from "./sitemap";
+import { PLACEHOLDER_PAGES } from "./sitemap";
 
 export function HomePage() {
   return (
@@ -42,8 +42,6 @@ export function HomePage() {
         <BeforeAfter />
         <Features />
         <Agents />
-        <Deploy />
-        <Customers />
         <FAQSection />
         <CtaBand />
       </div>
@@ -507,77 +505,5 @@ function CompareStage({ story, className }: { story: (typeof STORIES)[number]; c
         </span>
       </div>
     </div>
-  );
-}
-
-const DEPLOY_OPTIONS = [
-  {
-    title: "Multica Cloud",
-    body: "Placeholder: hosted by us, ready in minutes.",
-    points: ["Placeholder point", "Placeholder point", "Placeholder point"],
-    href: productHref("cloud"),
-  },
-  {
-    title: "Self-hosted",
-    body: "Placeholder: run the whole platform on your own infrastructure.",
-    points: ["Placeholder point", "Placeholder point", "Placeholder point"],
-    href: productHref("self-hosting"),
-  },
-];
-
-function Deploy() {
-  return (
-    <Section>
-      <Container>
-        <SectionHeader title="Run it where your code lives" lead="Placeholder: cloud or self-hosted, same product." />
-        <div className="mt-site-block grid gap-site-grid-col md:grid-cols-2">
-          {DEPLOY_OPTIONS.map((option) => (
-            <div key={option.title} className="flex flex-col rounded-site-card border border-site-line bg-site-surface p-6 lg:p-8">
-              <h3 className="text-site-card text-site-ink">{option.title}</h3>
-              <p className="mt-site-stack text-site-body text-site-muted">{option.body}</p>
-              <ul className="mt-6 flex flex-col gap-2.5">
-                {option.points.map((point, index) => (
-                  <li key={index} className="flex items-center gap-2.5 text-site-body text-site-ink-secondary">
-                    <Check className="size-4 text-site-muted" aria-hidden />
-                    {point}
-                  </li>
-                ))}
-              </ul>
-              <ActionLink href={option.href} tone="secondary" className="mt-8 self-start">
-                Learn more
-              </ActionLink>
-            </div>
-          ))}
-        </div>
-      </Container>
-    </Section>
-  );
-}
-
-function Customers() {
-  return (
-    <Section>
-      <Container>
-        <SectionHeader title="Teams shipping with Multica" lead="Placeholder: customer proof once logos and quotes are approved." />
-        <div className="mt-site-block grid gap-site-grid-col md:grid-cols-3">
-          {[0, 1, 2].map((index) => (
-            <figure key={index} className="flex flex-col justify-between gap-10 rounded-site-card border border-site-line bg-site-surface p-6">
-              <blockquote className="text-site-card text-site-ink">“Customer quote placeholder.”</blockquote>
-              <figcaption className="flex items-center gap-3">
-                <span aria-hidden className="size-9 rounded-site-control bg-site-sunken" />
-                <span className="text-site-body">
-                  <span className="block text-site-ink">Name placeholder</span>
-                  <span className="block text-site-muted">Title, Company</span>
-                </span>
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-        <ActionLink href="/customers" tone="ghost" className="mt-6">
-          All customer stories
-          <ArrowRight className="size-4" aria-hidden />
-        </ActionLink>
-      </Container>
-    </Section>
   );
 }
