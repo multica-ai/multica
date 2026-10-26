@@ -218,67 +218,71 @@
     }
 }
 
-/* Feature cards: a frosted colour field. Soft pools of light over a base
-   tone, a diagonal sheen, fine film grain on top, and a darker floor that
-   keeps the card's white copy readable. The noise tile is drawn at half its
-   size so each grain lands near one device pixel. Content inside must be
-   positioned to paint above the grain. */
+/* Feature cards: a frosted field in three layers under the content. A
+   heavily blurred crop of the brand illustrations, film grain blended over it
+   (the tile is drawn at 1:1 device pixels and never smoothed, so the grain
+   stays fine), and an eased scrim rising from the bottom that keeps the white
+   copy readable. Content inside must be positioned to paint above the layers. */
 .site-frost {
     position: relative;
     overflow: hidden;
-    background-color: var(--frost-base);
+    background-color: var(--site-inverse);
     background-image:
-        linear-gradient(to top, color-mix(in oklab, var(--frost-deep) 85%, transparent), transparent 42%),
-        linear-gradient(118deg, transparent 30%, rgb(255 255 255 / 0.16) 47%, transparent 62%),
-        radial-gradient(60% 55% at 12% 8%, var(--frost-light), transparent 75%),
-        radial-gradient(55% 70% at 95% 30%, var(--frost-mid), transparent 72%),
-        radial-gradient(70% 60% at 25% 100%, var(--frost-deep), transparent 75%);
+        linear-gradient(
+            to top,
+            rgb(0 0 0 / 0.42) 0%,
+            rgb(0 0 0 / 0.408) 10%,
+            rgb(0 0 0 / 0.376) 20%,
+            rgb(0 0 0 / 0.329) 30%,
+            rgb(0 0 0 / 0.272) 40%,
+            rgb(0 0 0 / 0.21) 50%,
+            rgb(0 0 0 / 0.148) 60%,
+            rgb(0 0 0 / 0.091) 70%,
+            rgb(0 0 0 / 0.044) 80%,
+            rgb(0 0 0 / 0.012) 90%,
+            transparent 100%
+        ),
+        var(--frost-image);
+    background-position: center;
+    background-size: cover;
 }
 
 .site-frost::before {
     content: "";
     position: absolute;
     inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    background-size: 90px 90px;
+    background-image: url("/images/frost/noise.webp");
+    background-size: 256px 256px;
+    image-rendering: pixelated;
     mix-blend-mode: overlay;
-    opacity: 0.35;
+    opacity: 0.4;
     pointer-events: none;
 }
 
-.site-frost[data-frost="slate"] {
-    --frost-base: oklch(0.56 0.035 245);
-    --frost-light: oklch(0.82 0.03 220);
-    --frost-mid: oklch(0.64 0.05 265);
-    --frost-deep: oklch(0.3 0.04 262);
+@media (min-resolution: 2dppx) {
+    .site-frost::before {
+        background-size: 128px 128px;
+    }
 }
 
-.site-frost[data-frost="ember"] {
-    --frost-base: oklch(0.62 0.1 45);
-    --frost-light: oklch(0.86 0.07 75);
-    --frost-mid: oklch(0.6 0.15 28);
-    --frost-deep: oklch(0.34 0.08 22);
+.site-frost[data-frost="runtimes"] {
+    --frost-image: url("/images/frost/runtimes.webp");
 }
 
-.site-frost[data-frost="sage"] {
-    --frost-base: oklch(0.57 0.04 175);
-    --frost-light: oklch(0.83 0.035 150);
-    --frost-mid: oklch(0.62 0.05 205);
-    --frost-deep: oklch(0.31 0.035 195);
+.site-frost[data-frost="workflows"] {
+    --frost-image: url("/images/frost/workflows.webp");
 }
 
-.site-frost[data-frost="dusk"] {
-    --frost-base: oklch(0.54 0.06 295);
-    --frost-light: oklch(0.82 0.04 325);
-    --frost-mid: oklch(0.6 0.08 268);
-    --frost-deep: oklch(0.29 0.05 285);
+.site-frost[data-frost="chat"] {
+    --frost-image: url("/images/frost/chat.webp");
 }
 
-.site-frost[data-frost="sand"] {
-    --frost-base: oklch(0.62 0.045 75);
-    --frost-light: oklch(0.87 0.035 90);
-    --frost-mid: oklch(0.6 0.06 50);
-    --frost-deep: oklch(0.33 0.035 55);
+.site-frost[data-frost="autopilots"] {
+    --frost-image: url("/images/frost/autopilots.webp");
+}
+
+.site-frost[data-frost="skills"] {
+    --frost-image: url("/images/frost/skills.webp");
 }
 
 .site-agent-pill {

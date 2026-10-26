@@ -187,16 +187,13 @@ function LogoWall() {
   );
 }
 
-type Frost = "slate" | "ember" | "sage" | "dusk" | "sand";
-
-const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType; frost: Frost }[] = [
+const FEATURES: { id: string; title: string; body: string; alt: string; visual: ComponentType }[] = [
   {
     id: "runtimes",
     title: "Runtimes",
     body: "Run agents on your laptop, your servers, or managed cloud sandboxes. One command connects a machine and finds the coding agents on it.",
     alt: "The Runtimes list with a MacBook, a Linux server, and Multica Cloud online with their coding agents, and a note that a teammate's Mac mini just connected",
     visual: RuntimesVisual,
-    frost: "slate",
   },
   {
     id: "workflows",
@@ -204,7 +201,6 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     body: "Give every status an owner. Moving an issue to the next step hands it to that step’s agent or teammate.",
     alt: "A Ship a feature workflow: Spec handled by Lead Agent, Build by Backend Agent, Code review by QA Agent, Approve by Mia Chen, then Shipped, with an issue just handed to Backend Agent",
     visual: WorkflowVisual,
-    frost: "ember",
   },
   {
     id: "chat",
@@ -212,7 +208,6 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     body: "Mention an agent in Slack, Lark, or Telegram. It reads the thread, files the issue, and starts work.",
     alt: "A chat message asking Backend Agent about failing CSV exports, the agent's reply, and the issue it filed",
     visual: ChatVisual,
-    frost: "sage",
   },
   {
     id: "autopilots",
@@ -220,7 +215,6 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     body: "Upgrades, triage, and reports file themselves on a schedule and land with the right agent.",
     alt: "Three autopilots with their schedules and agents, and an issue one of them just filed",
     visual: AutopilotsVisual,
-    frost: "dusk",
   },
   {
     id: "skills",
@@ -228,7 +222,6 @@ const FEATURES: { id: string; title: string; body: string; alt: string; visual: 
     body: "Write down how your team does something once. Every agent follows it.",
     alt: "A Write release notes skill with three rules, used by four agents",
     visual: SkillsVisual,
-    frost: "sand",
   },
 ];
 
@@ -260,12 +253,12 @@ function FeatureCard({
   title,
   body,
   visual: Visual,
+  id,
   alt,
-  frost,
   className,
 }: (typeof FEATURES)[number] & { className: string }) {
   return (
-    <div data-frost={frost} className={cn("site-frost flex flex-col rounded-site-panel", className)}>
+    <div data-frost={id} className={cn("site-frost flex flex-col rounded-site-panel", className)}>
       <div role="img" aria-label={alt} className="relative flex flex-1 flex-col">
         <Visual />
       </div>
