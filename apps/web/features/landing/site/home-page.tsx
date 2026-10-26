@@ -73,7 +73,7 @@ function Hero() {
         </Link>
         <HeroHeadline />
         <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">
-          One workspace to assign, track, and review work across all your agents — you stay in control.
+          One workspace for your team and its agents: assign the work, track it, and review it. You stay in control.
         </p>
         <div className="mt-6 flex flex-wrap gap-2.5">
           <ActionLink href={ctaHref} size="lg">
@@ -111,8 +111,7 @@ function HeroHeadline() {
     <div ref={ref}>
       <h1 className="mt-5 font-site-display text-site-heading text-site-ink">
         <span className="sr-only">
-          Turn {HERO_AGENTS.slice(0, -1).join(", ")}, or {HERO_AGENTS.at(-1)} into a teammate. Build a team of
-          humans and agents.
+          Turn {HERO_AGENTS.slice(0, -1).join(", ")}, or {HERO_AGENTS.at(-1)} into a teammate.
         </span>
         <span aria-hidden className="block text-balance">
           Turn{" "}
@@ -140,9 +139,6 @@ function HeroHeadline() {
             <BorderBeam />
           </span>{" "}
           into a teammate.
-        </span>
-        <span aria-hidden className="hidden text-balance text-site-muted sm:block">
-          Build a team of humans and agents.
         </span>
       </h1>
     </div>
