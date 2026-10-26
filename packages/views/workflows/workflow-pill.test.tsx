@@ -11,6 +11,7 @@ function workflow(id: string, name: string, isDefault: boolean): IssueWorkflow {
     name,
     description: "",
     is_default: isDefault,
+    owner_id: null,
     steps: [],
     project_ids: [],
     created_at: "",

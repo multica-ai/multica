@@ -6,7 +6,7 @@
  * Cancel/dismiss flow: header Cancel + iOS drag-down gesture both check
  * dirty state and pop an Alert if there are unsaved edits.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -41,16 +41,14 @@ export default function EditProject() {
   const [icon, setIcon] = useState("");
   const [seeded, setSeeded] = useState(false);
 
-  // Seed local state once detail lands. Effect (not setState-in-render)
-  // so we don't accidentally retrigger on every parent re-render — the
-  // `seeded` guard makes it idempotent.
-  useEffect(() => {
-    if (!detail.data || seeded) return;
+  // Seed once when data arrives, before committing the form. Background
+  // refetches must not overwrite edits already in progress.
+  if (detail.data && !seeded) {
     setTitle(detail.data.title);
     setDescription(detail.data.description ?? "");
     setIcon(detail.data.icon ?? "");
     setSeeded(true);
-  }, [detail.data, seeded]);
+  }
 
   const dirty = useMemo(() => {
     if (!detail.data) return false;

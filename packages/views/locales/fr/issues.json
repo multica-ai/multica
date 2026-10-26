@@ -206,6 +206,8 @@
     "grouping_section": "Regroupement",
     "ordering_section": "Tri",
     "card_properties_section": "Propriétés des cartes",
+    "columns_section": "Colonnes",
+    "columns_locked_by_filter": "Retirez le filtre d’état pour afficher ou masquer des colonnes.",
     "ascending_title": "Croissant",
     "descending_title": "Décroissant",
     "newest_first": "Plus récents d'abord",
@@ -363,18 +365,13 @@
     "toggle_collapse": "Replier ou déplier le couloir"
   },
   "board": {
-    "hidden_columns_label": "Colonnes masquées",
     "hide_column": "Masquer la colonne",
-    "show_column": "Afficher la colonne",
     "add_issue_tooltip": "Ajouter une tâche",
     "empty_column": "Aucune tâche",
     "empty_grouping": "Aucune tâche correspondante",
     "no_value": "Aucune valeur",
     "ordered_by": "Tableau trié par {{field}}",
-    "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne.",
-    "filter_to_status": "Filtrer sur cet état",
-    "outside_workflow": "Hors du workflow de ce tableau",
-    "workflow_columns_note": "Les colonnes viennent du workflow du tableau ; hors projet, les vues utilisent Default."
+    "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne."
   },
   "peek": {
     "panel_label": "Aperçu de la tâche",
@@ -728,6 +725,7 @@
     "retry_failed": "Échec de la relance de l'exécution",
     "retry_blocked": "Non relancée — vous n'avez pas la permission d'utiliser cet agent",
     "transcript_tooltip": "Voir la transcription",
+    "jump_to_run": "Aller à l'exécution",
     "cancel_failed": "Échec de l'annulation de l'exécution",
     "trigger_retry": "Relance",
     "trigger_retry_attempt": "Relance n° {{attempt}}",
@@ -1297,6 +1295,7 @@
       "children_stage": "Étape {{stage}}",
       "pr_checks": "Fin de la CI",
       "pr_merged": "Fusion",
+      "pr_conflicts": "Conflits de fusion",
       "choose_issue": "Choisir une tâche",
       "pick_issue_title": "Suivre une tâche",
       "pick_issue_description": "Réveille l’agent quand cette tâche atteint l’état choisi.",
@@ -1354,6 +1353,7 @@
       "children_stage": "Quand les sous-tâches de l’étape {{stage}} sont terminées",
       "pr_checks": "Quand la CI d’une PR liée se termine",
       "pr_merged": "Quand une PR liée est fusionnée",
+      "pr_conflicts": "Quand une PR liée a des conflits de fusion",
       "other_done": "Quand {{issue}} est terminée",
       "other_ended": "Quand {{issue}} est terminée ou annulée",
       "other_in_review": "Quand {{issue}} passe en revue",
@@ -1376,6 +1376,7 @@
       "children_stage": "Attend l’étape {{stage}}",
       "pr_checks": "Attend la CI",
       "pr_merged": "Attend la fusion de la PR",
+      "pr_conflicts": "Surveille les conflits de fusion",
       "other_done": "Attend {{issue}}",
       "other_ended": "Attend la fin de {{issue}}",
       "other_in_review": "Attend la revue de {{issue}}",
@@ -1546,7 +1547,7 @@
       "instructions": "Instructions de passage",
       "instructions_placeholder": "Que doit-il se passer à cette étape ?",
       "next": "Une fois terminé, passer à",
-      "back": "Si des changements sont nécessaires, revenir à",
+      "back": "En cas de rejet, renvoyer à",
       "none_option": "Non défini",
       "save": "Enregistrer",
       "create": "Créer",
@@ -1561,6 +1562,7 @@
       "copy_name": "Copie de {{name}}",
       "more": "Plus d’actions",
       "steps_hint": "Faites glisser pour réordonner les colonnes du milieu. Backlog et Blocked sont facultatives. Un nouveau statut est créé à l’enregistrement.",
+      "status_needs_admin": "{{names}} seraient de nouveaux statuts. Seuls les administrateurs de l’espace peuvent ajouter des statuts : retirez ces colonnes ou demandez d’abord à un administrateur de les ajouter.",
       "reorder": "Réordonner {{name}}",
       "card_hand_to": "Confier à",
       "card_then": "puis → {{status}}",
@@ -1574,7 +1576,7 @@
       "target_squad": "Squad · le leader répartit",
       "target_member": "Membre",
       "instructions_hint": "Envoyées au responsable avec cette exécution, avec la description et les commentaires de la tâche.",
-      "next_hint": "Inscrit dans les consignes du responsable pour qu’il sache quel état vient ensuite. Le système n’avance jamais l’état à la fin d’une exécution.",
+      "next_hint": "C’est le responsable qui déplace le ticket, et il ne le renvoie que pour une reprise, pas pour un blocage. La fin d’une exécution ne change jamais l’état.",
       "preview_brief": "Aperçu des consignes de l’agent",
       "preview_title": "Consignes de l’étape « {{status}} »",
       "preview_description": "Ce que reçoit l’exécution du responsable quand une tâche entre dans cette étape. Pas besoin d’enregistrer pour prévisualiser.",
@@ -1590,8 +1592,7 @@
       "step_off": "Désactivé : ce workflow n’utilise pas ce statut. Activez-le dans la liste des étapes pour l’utiliser.",
       "status_new_hint": "Nouveau statut. Il sera ajouté à la bibliothèque de statuts à l’enregistrement.",
       "no_other_status": "Tous les statuts sont déjà des étapes.",
-      "no_handoff_step": "Cette étape ne relaie pas : le responsable ne change pas et aucune exécution ne démarre.",
-      "new_step_handoff": "Enregistrez d’abord le workflow ; le nouveau statut pourra relayer ensuite."
+      "no_handoff_step": "Cette étape ne relaie pas : le responsable ne change pas et aucune exécution ne démarre."
     },
     "mapping": {
       "title": "Déplacer les tâches vers {{name}}",
@@ -1634,6 +1635,7 @@
     },
     "picker": {
       "header": "{{workflow}} · selon le projet « {{project}} »",
+      "header_no_project": "Statuts {{workflow}} · sans projet",
       "footer": "Seuls les états du workflow de cette tâche sont affichés. À droite : à qui elle est confiée en entrant dans l’état."
     },
     "confirm": {
@@ -1674,8 +1676,7 @@
     },
     "detail": {
       "follows_project": "(selon le projet)",
-      "card_title": "{{workflow}} · selon {{project}}",
-      "card_hint": "Le workflow du projet décide de ces colonnes et transferts."
+      "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",
     "handoff": {
@@ -1684,7 +1685,7 @@
       "next_default": "Colonne suivante ({{status}})",
       "saved": "Passage de relais enregistré",
       "error": "Impossible d’enregistrer le passage de relais",
-      "read_only": "Les transferts appartiennent au workflow ; les administrateurs de l’espace les modifient.",
+      "read_only": "Les transferts appartiennent au workflow ; son propriétaire et les administrateurs de l’espace les modifient.",
       "to": "Confier à",
       "members": "Membres",
       "mode_none": "Pas de relais",

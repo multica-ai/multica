@@ -84,7 +84,8 @@ export interface IssueSurfaceController {
   sort: IssueSortParam;
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  /** Columns the viewer can show or hide from Display, in column order. */
+  columnStatuses: IssueStatus[];
   /** Exact server counts plus cursor controls for List/status Board. */
   statusPagination?: IssueStatusPagination;
   /** Exact group catalog plus independent row cursors for Assignee/Property

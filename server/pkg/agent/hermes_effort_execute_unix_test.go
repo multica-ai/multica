@@ -33,9 +33,15 @@ while IFS= read -r line; do
     *'"method":"session/new"'*|*'"method":"session/resume"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":` + sessionResult + `}\n' "$id"
       ;;
+    *'"configId":"model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"thought_level","currentValue":"low","options":[{"value":"low"},{"value":"high"}]}]}}\n' "$id"
+      ;;
     *'"method":"session/set_config_option"'*)
       requested=$(printf '%s' "$line" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
       printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"reasoning_effort","currentValue":"%s","options":[{"value":"low"},{"value":"medium"},{"value":"high"}]}]}}\n' "$id" "$requested"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
@@ -127,5 +133,16 @@ func TestHermesExecuteSendsNothingForHermesAgent(t *testing.T) {
 	}
 	if !strings.Contains(rpcLog, `"method":"session/prompt"`) {
 		t.Errorf("the turn should still have prompted; log:\n%s", rpcLog)
+	}
+}
+
+// TestHermesExecuteUsesSwitchedModelEffort covers a runtime whose set_model
+// response is empty: the level must be applied from the options re-read through
+// the session's model selector, not from the pre-switch session state.
+func TestHermesExecuteUsesSwitchedModelEffort(t *testing.T) {
+	session := `{"sessionId":"ses-hermes","configOptions":[{"id":"model","currentValue":"initial","options":[{"value":"initial"},{"value":"other-model"}]}]}`
+	rpcLog := runHermesEffortTurn(t, session, "high", ExecOptions{Model: "other-model"})
+	if !strings.Contains(rpcLog, `"configId":"thought_level","sessionId":"ses-hermes","value":"high"`) {
+		t.Fatalf("switched model effort was not applied; log:\n%s", rpcLog)
 	}
 }

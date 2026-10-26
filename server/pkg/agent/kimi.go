@@ -540,7 +540,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				fallbackModel: fallbackModel,
 			}); failed {
 				finalStatus = "failed"
-				finalError = "kimi turn failed"
+				finalError = "kimi turn failed: runtime did not record error details (error category unknown)"
 				if turnErr != "" {
 					finalError = fmt.Sprintf("kimi turn failed: %s", turnErr)
 				}
@@ -794,10 +794,39 @@ const kimiTurnEndedRecordType = "agent.turn.ended"
 // Turn ids alternate between number and string across kimi builds, so they
 // are deliberately not modeled — only the outcome and diagnostic matter.
 type kimiWireTurnEnd struct {
-	Type         string `json:"type"`
-	Outcome      string `json:"outcome"`
-	ErrorMessage string `json:"errorMessage"`
-	Time         int64  `json:"time"`
+	Type         string          `json:"type"`
+	Outcome      string          `json:"outcome"`
+	ErrorMessage json.RawMessage `json:"errorMessage"`
+	Time         int64           `json:"time"`
+}
+
+// kimiWireErrorMessage accepts string diagnostics and structured error payloads.
+// An unsupported diagnostic shape must not hide an otherwise valid failed turn.
+// Only code/message are surfaced; details may contain private provider context.
+func kimiWireErrorMessage(raw json.RawMessage) string {
+	text := func(value json.RawMessage) string {
+		var s string
+		if err := json.Unmarshal(value, &s); err != nil {
+			return ""
+		}
+		s = strings.TrimSpace(sanitizeAgentDiagnostic(s))
+		if s == "[object Object]" {
+			return ""
+		}
+		return s
+	}
+	var payload struct {
+		Code    json.RawMessage `json:"code"`
+		Message json.RawMessage `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return text(raw)
+	}
+	code, message := text(payload.Code), text(payload.Message)
+	if code == "" {
+		return message
+	}
+	return strings.TrimSpace(fmt.Sprintf("[%s] %s", code, message))
 }
 
 // scanKimiMainTurnFailure reports whether the main agent's wire log recorded
@@ -862,7 +891,7 @@ func kimiWireTurnFailure(path string, scan kimiUsageScan) (string, bool) {
 				// the raw string and the shared redact.Text, so it takes
 				// the same sanitize pass as every child-process diagnostic
 				// before this reaches Result.Error (review on #9057).
-				detail = sanitizeAgentDiagnostic(record.ErrorMessage)
+				detail = kimiWireErrorMessage(record.ErrorMessage)
 				found = true
 			}
 		}

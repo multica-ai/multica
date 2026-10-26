@@ -46,6 +46,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
@@ -527,17 +528,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <div className="px-5 pb-2 shrink-0">
           <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
-                  title={t(($) => $.create_project.icon_tooltip)}
-                >
-                  {icon || "📁"}
-                </button>
-              }
-            />
+            <TooltipHint label={t(($) => $.create_project.icon_tooltip)}>
+              <PopoverTrigger
+                render={
+                  <button
+                    type="button"
+                    className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                    aria-label={t(($) => $.create_project.icon_tooltip)}
+                  >
+                    {icon || "📁"}
+                  </button>
+                }
+              />
+            </TooltipHint>
             <PopoverContent align="start" className="w-auto p-0">
               <EmojiPicker
                 onSelect={(emoji) => {
@@ -985,14 +988,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                             {selectedLocalPath}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={clearLocalDirectory}
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label={t(($) => $.create_project.local_clear)}
-                        >
-                          <XIcon className="size-3" />
-                        </button>
+                        <TooltipHint label={t(($) => $.create_project.local_clear)}>
+                          <button
+                            type="button"
+                            onClick={clearLocalDirectory}
+                            className="text-muted-foreground hover:text-foreground"
+                            aria-label={t(($) => $.create_project.local_clear)}
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        </TooltipHint>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Popover open={localModeOpen} onOpenChange={setLocalModeOpen}>

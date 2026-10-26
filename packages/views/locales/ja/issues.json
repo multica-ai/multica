@@ -202,6 +202,8 @@
     "grouping_section": "グループ化",
     "ordering_section": "並び替え",
     "card_properties_section": "カードのプロパティ",
+    "columns_section": "列",
+    "columns_locked_by_filter": "列を表示・非表示にするには、ステータスの絞り込みを解除してください。",
     "ascending_title": "昇順",
     "descending_title": "降順",
     "newest_first": "新しい順",
@@ -359,18 +361,13 @@
     "toggle_collapse": "レーンの開閉"
   },
   "board": {
-    "hidden_columns_label": "非表示の列",
     "hide_column": "列を非表示",
-    "show_column": "列を表示",
     "add_issue_tooltip": "タスクを追加",
     "empty_column": "タスクなし",
     "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード",
-    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。",
-    "filter_to_status": "このステータスで絞り込む",
-    "outside_workflow": "このボードのワークフローにはありません",
-    "workflow_columns_note": "ボードの列はワークフローで決まります。プロジェクト外のビューは Default を使います。"
+    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
   },
   "peek": {
     "panel_label": "タスクのプレビュー",
@@ -700,6 +697,7 @@
     "retry_failed": "実行を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
+    "jump_to_run": "実行に移動",
     "cancel_failed": "実行をキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",
@@ -1254,6 +1252,7 @@
       "children_stage": "ステージ {{stage}}",
       "pr_checks": "CI 終了",
       "pr_merged": "マージ",
+      "pr_conflicts": "マージコンフリクト発生",
       "choose_issue": "タスクを選択",
       "pick_issue_title": "見守るタスク",
       "pick_issue_description": "このタスクが選んだ状態になったらエージェントを起こします。",
@@ -1309,6 +1308,7 @@
       "children_stage": "ステージ {{stage}} のサブタスクがすべて終わったとき",
       "pr_checks": "関連 PR の CI が終わったとき",
       "pr_merged": "関連 PR がマージされたとき",
+      "pr_conflicts": "関連 PR にマージコンフリクトが発生したとき",
       "other_done": "{{issue}} が完了したとき",
       "other_ended": "{{issue}} が完了またはキャンセルされたとき",
       "other_in_review": "{{issue}} がレビュー中になったとき",
@@ -1331,6 +1331,7 @@
       "children_stage": "ステージ {{stage}} 待ち",
       "pr_checks": "CI 待ち",
       "pr_merged": "PR のマージ待ち",
+      "pr_conflicts": "マージコンフリクトを監視中",
       "other_done": "{{issue}} の完了待ち",
       "other_ended": "{{issue}} の終了待ち",
       "other_in_review": "{{issue}} のレビュー待ち",
@@ -1491,7 +1492,7 @@
       "instructions": "引き継ぎの指示",
       "instructions_placeholder": "このステップで何をしますか？",
       "next": "完了したら移動",
-      "back": "修正が必要なら戻す先",
+      "back": "差し戻す先",
       "none_option": "指定しない",
       "save": "保存",
       "create": "作成",
@@ -1505,6 +1506,7 @@
       "copy_name": "{{name}} のコピー",
       "more": "その他の操作",
       "steps_hint": "ドラッグで中間の列を並べ替えます。Backlog と Blocked は任意です。新しいステータスは保存時に作成されます。",
+      "status_needs_admin": "{{names}} は新しいステータスになります。ステータスを追加できるのはワークスペース管理者のみです。これらの列を削除するか、先に管理者にステータスの追加を依頼してください。",
       "reorder": "「{{name}}」を並べ替え",
       "card_hand_to": "引き継ぎ先",
       "card_then": "完了後 → {{status}}",
@@ -1518,7 +1520,7 @@
       "target_squad": "スクワッド · リーダーが割り振り",
       "target_member": "メンバー",
       "instructions_hint": "今回の実行の指示として処理者に送られ、タスクの説明やコメントと一緒にコンテキストになります。",
-      "next_hint": "処理者が受け取る説明に書き込まれ、次にどのステータスへ変えるかを伝えます。実行が終わってもシステムはステータスを自動で進めません。",
+      "next_hint": "ステータスを変えるのは処理者です。差し戻しはやり直しが必要なときだけで、ブロッカーには使いません。実行が終わってもステータスは自動で変わりません。",
       "preview_brief": "エージェントが受け取る説明をプレビュー",
       "preview_title": "「{{status}}」ステップの説明",
       "preview_description": "タスクがこのステップに入ったとき、処理者の実行が受け取る内容です。プレビューに保存は不要です。",
@@ -1534,8 +1536,7 @@
       "step_off": "オフ：このワークフローはこのステータスを使いません。左のリストでオンにすると使えます。",
       "status_new_hint": "新しいステータスです。保存時にステータスライブラリに追加されます。",
       "no_other_status": "すべてのステータスがすでにステップです。",
-      "no_handoff_step": "このステップは引き継ぎません。入っても担当者は変わらず、実行も始まりません。",
-      "new_step_handoff": "先にワークフローを保存してください。保存後に新しいステータスの引き継ぎを設定できます。"
+      "no_handoff_step": "このステップは引き継ぎません。入っても担当者は変わらず、実行も始まりません。"
     },
     "mapping": {
       "title": "タスクを「{{name}}」に移動",
@@ -1571,6 +1572,7 @@
     },
     "picker": {
       "header": "{{workflow}} · プロジェクト「{{project}}」に従う",
+      "header_no_project": "{{workflow}} のステータス · プロジェクトなし",
       "footer": "このタスクのワークフローのステータスだけを表示しています。右側はそのステータスに入ったときの引き継ぎ先です。"
     },
     "confirm": {
@@ -1609,8 +1611,7 @@
     },
     "detail": {
       "follows_project": "（プロジェクトに従う）",
-      "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う",
-      "card_hint": "これらの列と引き継ぎはプロジェクトのワークフローで決まります。"
+      "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う"
     },
     "list_separator": "、",
     "handoff": {
@@ -1619,7 +1620,7 @@
       "next_default": "次の列（{{status}}）",
       "saved": "引き継ぎを保存しました",
       "error": "引き継ぎを保存できませんでした",
-      "read_only": "引き継ぎはワークフローに属し、ワークスペース管理者が変更します。",
+      "read_only": "引き継ぎはワークフローに属し、ワークフローのオーナーとワークスペース管理者が変更します。",
       "to": "引き継ぎ先",
       "members": "メンバー",
       "mode_none": "引き継がない",

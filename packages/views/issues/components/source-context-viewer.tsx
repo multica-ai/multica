@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { Issue, IssueSourceContext, SourceContextCommentSnapshot } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -223,32 +224,30 @@ export function SourceContextBadge({
               }).format(new Date(current.captured_at))}
             </DialogDescription>
             <div className="absolute right-3 top-3 flex items-center gap-1">
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => viewerExpanded
+                label={t(($) => viewerExpanded
                   ? $.source_context.viewer_restore
                   : $.source_context.viewer_expand)}
-                title={t(($) => viewerExpanded
-                  ? $.source_context.viewer_restore
-                  : $.source_context.viewer_expand)}
+                tooltipSide="bottom"
                 aria-pressed={viewerExpanded}
                 onClick={() => setViewerExpanded((value) => !value)}
               >
                 {viewerExpanded
                   ? <Minimize2 className="size-4" aria-hidden />
                   : <Maximize2 className="size-4" aria-hidden />}
-              </Button>
+              </IconButton>
               {current.anchor_comment_state === "available"
                 && current.can_open_current_source === true
                 && current.current_source && (
-                <Button
+                <IconButton
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t(($) => $.source_context.open_current)}
-                  title={t(($) => $.source_context.open_current)}
+                  label={t(($) => $.source_context.open_current)}
+                  tooltipSide="bottom"
                   onClick={() => {
                     void refresh().then((fresh) => {
                       if (fresh) openCurrent(fresh);
@@ -256,18 +255,18 @@ export function SourceContextBadge({
                   }}
                 >
                   <LocateFixed className="size-4" aria-hidden />
-                </Button>
+                </IconButton>
               )}
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t(($) => $.source_context.viewer_close)}
-                title={t(($) => $.source_context.viewer_close)}
+                label={t(($) => $.source_context.viewer_close)}
+                tooltipSide="bottom"
                 onClick={() => setViewerOpen(false)}
               >
                 <XIcon className="size-4" aria-hidden />
-              </Button>
+              </IconButton>
             </div>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6">
@@ -300,15 +299,12 @@ export function SourceContextBadge({
                       {t(($) => $.source_context.label_spacing)}
                       {issueAttachmentSummary}
                       {recognizedIssueAttachmentChangeCount > 0 && (
-                        <Button
+                        <IconButton
                           type="button"
                           variant="ghost"
                           size="icon-sm"
                           className="-my-1 ml-1 size-6 align-middle text-muted-foreground hover:text-foreground"
-                          aria-label={t(($) => issueAttachmentDetailsOpen
-                            ? $.source_context.hide_issue_attachment_details
-                            : $.source_context.show_issue_attachment_details)}
-                          title={t(($) => issueAttachmentDetailsOpen
+                          label={t(($) => issueAttachmentDetailsOpen
                             ? $.source_context.hide_issue_attachment_details
                             : $.source_context.show_issue_attachment_details)}
                           aria-expanded={issueAttachmentDetailsOpen}
@@ -321,7 +317,7 @@ export function SourceContextBadge({
                             )}
                             aria-hidden
                           />
-                        </Button>
+                        </IconButton>
                       )}
                     </p>
                   )}

@@ -22,6 +22,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
 
 /**
  * What a row may offer beyond selection. Absent for read-only viewers, so the
@@ -217,32 +218,37 @@ function TreeNodeItem({
       </button>
       {actions && (
         <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <button
-                ref={menuButtonRef}
-                type="button"
-                aria-label={t(($) => $.file_tree.actions.label, {
-                  path: node.path,
-                })}
-                // Hidden until the row is hovered or something inside it holds
-                // focus, so a rail of ten files is not a rail of ten buttons.
-                // after:-inset-1 widens the hit area past the 20px glyph.
-                //
-                // `relative` is load-bearing, not decoration: it makes THIS
-                // button the containing block for that ::after. Without it the
-                // pseudo-element resolves against the row (the nearest
-                // positioned ancestor), so the invisible hit area covered the
-                // whole row and — being absolutely positioned, hence painted
-                // above the in-flow name button — swallowed every click on the
-                // file name. Selecting a supporting file opened this menu
-                // instead (MUL-5654). opacity-0 does not opt out of hit
-                // testing, so the row was unclickable even before hover.
-                className="relative mr-1 shrink-0 rounded-xs p-0.5 text-faint-foreground opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </button>
+          <DeferredTooltip
+            content={t(($) => $.file_tree.actions.label, { path: node.path })}
+            trigger={
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    ref={menuButtonRef}
+                    type="button"
+                    aria-label={t(($) => $.file_tree.actions.label, {
+                      path: node.path,
+                    })}
+                    // Hidden until the row is hovered or something inside it holds
+                    // focus, so a rail of ten files is not a rail of ten buttons.
+                    // after:-inset-1 widens the hit area past the 20px glyph.
+                    //
+                    // `relative` is load-bearing, not decoration: it makes THIS
+                    // button the containing block for that ::after. Without it the
+                    // pseudo-element resolves against the row (the nearest
+                    // positioned ancestor), so the invisible hit area covered the
+                    // whole row and — being absolutely positioned, hence painted
+                    // above the in-flow name button — swallowed every click on the
+                    // file name. Selecting a supporting file opened this menu
+                    // instead (MUL-5654). opacity-0 does not opt out of hit
+                    // testing, so the row was unclickable even before hover.
+                    className="relative mr-1 shrink-0 rounded-xs p-0.5 text-faint-foreground opacity-0 transition-opacity after:absolute after:-inset-1 hover:text-foreground group-hover/row:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </button>
+                }
+              />
             }
           />
           <DropdownMenuContent align="end" className="w-36">

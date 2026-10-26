@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { mockNativeDialog } from "./test-utils/native-dialog";
 
@@ -159,6 +160,88 @@ describe("HtmlBlockPreview — errors", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View source" }));
     expect(screen.getByTestId("code-block-static").textContent).toBe("<script>boom()</script>");
+  });
+});
+
+describe("HtmlBlockPreview — reload", () => {
+  it("reloads only the requested frame and restarts height measurement after a script error", () => {
+    render(
+      <>
+        <HtmlBlockPreview html="<p>first</p>" title="First" />
+        <HtmlBlockPreview html="<p>second</p>" title="Second" />
+      </>,
+    );
+    const frames = document.querySelectorAll("iframe");
+    const first = frames[0]!;
+    const second = frames[1]!;
+    const block = first.closest('[data-dynamic-block="html"]') as HTMLElement;
+    for (const height of [200, 300, 400, 500]) post(first, { type: "height", height });
+    post(first, { type: "error", message: "Network unavailable" });
+    expect(within(block).getByRole("alert").textContent).toContain("Network unavailable");
+    const staleWindow = first.contentWindow;
+    const srcDoc = first.getAttribute("srcdoc");
+
+    fireEvent.click(within(block).getByRole("button", { name: "Reload" }));
+
+    const fresh = block.querySelector("iframe")!;
+    expect(fresh).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+    expect(second.isConnected).toBe(true);
+    expect(fresh.getAttribute("srcdoc")).toBe(srcDoc);
+    expect(fresh.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(within(block).queryByRole("alert")).toBeNull();
+    expect(within(block).getByText("Rendering...")).toBeTruthy();
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", {
+        source: staleWindow,
+        data: { [HTML_BLOCK_MESSAGE_KEY]: 1, type: "error", message: "Stale error" },
+      }));
+    });
+    expect(within(block).queryByRole("alert")).toBeNull();
+    post(fresh, { type: "height", height: 600 });
+    expect(fresh.parentElement?.style.height).toBe("600px");
+    expect(within(block).queryByText("Rendering...")).toBeNull();
+  });
+
+  it("waits for the reloaded document before restarting the missing-bridge timeout", () => {
+    vi.useFakeTimers();
+    try {
+      render(<HtmlBlockPreview html="<p>no bridge reports</p>" />);
+      fireEvent.load(inlineFrame());
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByText("Rendering...")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.getByText("Rendering...")).toBeTruthy();
+      fireEvent.load(inlineFrame());
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByText("Rendering...")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reloads inside the same enlarged surface and retains source selection on close", () => {
+    render(<HtmlBlockPreview html="<p>hi</p>" />);
+    const original = inlineFrame();
+    fireEvent.click(screen.getByRole("tab", { name: "Source" }));
+    const source = screen.getByTestId("code-block-static");
+    expect(screen.getByRole("button", { name: "Reload" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Fullscreen" }));
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reload" }));
+
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    const fresh = dialog.querySelector("iframe");
+    expect(fresh).not.toBe(original);
+    expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    expect(source.isConnected).toBe(true);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("tab", { name: "Source" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+    expect(inlineFrame()).toBe(fresh);
   });
 });
 

@@ -110,7 +110,7 @@ describe("WorkflowHandoffForm", () => {
       updated_at: "",
     }) as IssueWorkflow;
 
-  function renderForm(wf: IssueWorkflow) {
+  function renderForm(wf: IssueWorkflow, canCopyForProject = true) {
     mutateAsync.mockReset().mockResolvedValue({ ...wf, name: "Delivery (Payments)" });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(agentListOptions("ws-1").queryKey, [{ id: "agent-1", name: "Builder", archived_at: null }] as never);
@@ -118,7 +118,13 @@ describe("WorkflowHandoffForm", () => {
     qc.setQueryData(projectListOptions("ws-1").queryKey, { projects: PROJECTS } as never);
     renderWithI18n(
       <QueryClientProvider client={qc}>
-        <WorkflowHandoffForm workflow={wf} statusKey="in_progress" canEdit project={PROJECTS[0]} />
+        <WorkflowHandoffForm
+          workflow={wf}
+          statusKey="in_progress"
+          canEdit
+          canCopyForProject={canCopyForProject}
+          project={PROJECTS[0]}
+        />
       </QueryClientProvider>,
     );
   }
@@ -128,6 +134,16 @@ describe("WorkflowHandoffForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose an agent" }));
     fireEvent.click(await screen.findByText("Builder"));
   }
+
+  it("saves for every project when the editor may not switch this project's workflow", async () => {
+    renderForm(workflow(["p-pay", "p-orders"]), false);
+    await handToBuilder();
+    expect(screen.queryByText("Where should this change apply?")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => expect(mutateAsync).toHaveBeenCalled());
+    expect(mutateAsync.mock.calls[0]![0].copyForProjectId).toBeUndefined();
+  });
 
   it("asks where a change to a shared workflow applies, and can keep it to this project", async () => {
     renderForm(workflow(["p-pay", "p-orders"]));

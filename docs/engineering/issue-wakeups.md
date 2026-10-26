@@ -579,7 +579,7 @@ the scheduler evaluates:
 | `issue_field` | `field=label`, `label_id` | it has that label |
 | `issue_field` | `field=property`, `property_id`, `value` | the property's stored value equals `value` |
 | `children_done` | optional `stage` | every sub-issue (or every one up to that stage) is closed |
-| `pull_request` | `event=checks_finished` or `merged` | a linked PR's checks finished on its current head, or it merged |
+| `pull_request` | `event=checks_finished`, `merged` or `conflicts` | a linked PR's checks finished on its current head, it merged, or an open GitHub PR is `CONFLICTING` on its current head |
 | `other_issue` | `issue_id`, `state=done`, `ended` or `in_review` | another issue in the workspace reaches that state |
 
 A condition rule stays `kind=event`. Validation derives the same-issue events
@@ -592,6 +592,26 @@ fires again only after the predicate turned false or its facts changed (a new PR
 head's result, another sub-issue set). States already true at registration fire
 on the first check; finished checks from before registration are ignored. The
 watched issue's identifier is stored in the condition for display.
+
+`conflicts` reads the GitHub API snapshot (`api_mergeable`) and counts only a
+snapshot fetched for the PR's current head, so a verdict from before a push
+never fires. Its key is `pr_id@head:conflicting` (PR numbers and heads repeat
+across forks). GitHub reports
+`UNKNOWN` while it recomputes mergeability; on the same head that keeps the
+previous verdict, so a continuous rule is not woken twice for one conflict.
+Self-hosted VCS rows store no mergeability; a rule linked only to them records
+a diagnostic. For every linked-PR condition, a run starts only when some PR
+key occurs more often than in `condition_state` (checks and merged keys carry
+only the PR number, so same-numbered PRs from two repositories share one); a
+PR leaving the set (resolved, closed, unlinked) only updates
+`condition_state`, so it does not wake the agent again for the PRs that stayed. A base-branch move sends no event for the PR, so the snapshot
+pipeline keeps watched PRs (linked to an issue with an enabled `conflicts`
+rule) fresh: the 10-minute sweep re-fetches them once their snapshot is older
+than 5 minutes even when decided, rotating an address cursor like the
+undecided sweep so repeatedly failing fetches cannot starve the rest, and a merged `pull_request` webhook
+re-fetches the repository's other watched open PRs after 30 seconds and 3
+minutes. No migration is involved; older clients show the rule without a
+condition label.
 
 **Runaway protection.** Repeating event rules default to `max_fires=20`
 (1–1000, any repeating rule may set it); the run that reaches the cap is

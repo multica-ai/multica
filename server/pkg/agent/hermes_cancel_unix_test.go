@@ -63,9 +63,25 @@ func TestHermesCancelFakePeer(t *testing.T) {
 				time.Sleep(30 * time.Second)
 			}
 		case "session/new":
-			respond(map[string]any{"sessionId": "ses_cancel_target"})
+			if mode == "waiting_refresh" || mode == "blocked_refresh" {
+				respond(map[string]any{
+					"sessionId": "ses_cancel_target",
+					"configOptions": []map[string]any{{
+						"id": "model", "currentValue": "initial",
+						"options": []map[string]any{{"value": "initial"}, {"value": "other-model"}},
+					}},
+				})
+			} else {
+				respond(map[string]any{"sessionId": "ses_cancel_target"})
+			}
 			if mode == "blocked_prompt" {
 				record(`{"fake":"not_reading"}`)
+				time.Sleep(30 * time.Second)
+			}
+		case "session/set_model":
+			respond(map[string]any{})
+			if mode == "blocked_refresh" {
+				record(`{"fake":"not_reading_refresh"}`)
 				time.Sleep(30 * time.Second)
 			}
 		case "session/prompt":
@@ -159,6 +175,13 @@ func startHermesCancelFake(t *testing.T, ctx context.Context, mode string, timeo
 	}
 	prompt := "test prompt"
 	opts := ExecOptions{Cwd: dir, Timeout: timeout}
+	if mode == "waiting_refresh" || mode == "blocked_refresh" {
+		opts.Model = "other-model"
+		opts.ThinkingLevel = "high"
+	}
+	if mode == "blocked_refresh" {
+		opts.Model = strings.Repeat("m", 1<<20)
+	}
 	if mode == "blocked_setup" {
 		opts.Model = strings.Repeat("m", 1<<20)
 	}
@@ -264,7 +287,8 @@ func assertHermesCancelWire(t *testing.T, path string, wantCancel, requireEOF bo
 			t.Errorf("cross-session cancel: %q", params.SessionID)
 		}
 	}
-	t.Logf("deterministic fake ACP peer log:\n%s", raw)
+	display := strings.ReplaceAll(string(raw), strings.Repeat("m", 1<<20), "<1 MiB model>")
+	t.Logf("deterministic fake ACP peer log (large model values abbreviated):\n%s", display)
 	if wantCancel {
 		if count != 1 || (requireEOF && (eofAt < 0 || cancelAt >= eofAt)) {
 			t.Fatalf("want exactly one same-session cancel BEFORE EOF, got count=%d cancelAt=%d eofAt=%d; fake peer log:\n%s", count, cancelAt, eofAt, raw)
@@ -329,6 +353,71 @@ func TestHermesBlockedTransportCancellation(t *testing.T) {
 			// An unread/full pipe cannot promise delivery; it must still close
 			// and join both the blocked writer and the cancel sender in bounds.
 			assertHermesCancelWire(t, logPath, false, false)
+		})
+	}
+}
+
+// A direct c.request callback can observe cancellation while waiting for a
+// response, but cannot interrupt a full pipe while writing the model refresh.
+func TestHermesCancellationDuringModelOptionRefresh(t *testing.T) {
+	for _, mode := range []string{"waiting_refresh", "blocked_refresh"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			session, logPath := startHermesCancelFake(t, ctx, mode, 0)
+			finished := false
+			t.Cleanup(func() {
+				if finished {
+					return
+				}
+				// Release the intentionally stalled peer even on a regression, so
+				// a failed assertion cannot orphan the fixture or its pipe readers.
+				cancel()
+				raw, err := os.ReadFile(logPath + ".pid")
+				if err == nil {
+					if pid, err := strconv.Atoi(string(raw)); err == nil {
+						_ = syscall.Kill(pid, syscall.SIGKILL)
+					}
+				}
+				finishHermesCancelFake(t, session)
+			})
+			waitHermesCancelLog(t, logPath, `"method":"session/set_model"`)
+			if mode == "waiting_refresh" {
+				waitHermesCancelLog(t, logPath, `"configId":"model"`)
+			} else {
+				waitHermesCancelLog(t, logPath, `"fake":"not_reading_refresh"`)
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var stacks strings.Builder
+					_ = pprof.Lookup("goroutine").WriteTo(&stacks, 2)
+					if strings.Contains(stacks.String(), "(*hermesClient).writeLine") &&
+						strings.Contains(stacks.String(), "acpOptionsAfterModelSwitch") {
+						t.Log("model refresh reached a blocked transport writer")
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("fixture never blocked the model refresh writer")
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
+			cancel()
+			finishHermesCancelFake(t, session)
+			finished = true
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), `"method":"session/prompt"`) {
+				t.Fatal("prompt sent after cancellation during model refresh")
+			}
+			assertHermesCancelWire(t, logPath, false, mode == "waiting_refresh")
+			var stacks strings.Builder
+			_ = pprof.Lookup("goroutine").WriteTo(&stacks, 2)
+			if strings.Contains(stacks.String(), "(*hermesBackend).Execute.func") {
+				t.Errorf("Hermes lifecycle/reader/writer goroutine leaked:\n%s", stacks.String())
+			}
+			t.Log("session channels closed; peer reaping and request cleanup checked")
 		})
 	}
 }

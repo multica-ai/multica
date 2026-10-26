@@ -43,6 +43,7 @@ import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/
 import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
 import { useLocale, useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -394,40 +395,46 @@ export function LarkAgentBindButton({
         className={cn("flex flex-wrap items-center gap-2", className)}
         data-testid="lark-agent-bind-buttons"
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDialogRegion("feishu")}
-          disabled={!agentId}
-          title={
+        <TooltipHint
+          label={
             agentName
               ? t(($) => $.lark.bind_button_feishu_title, { agent: agentName })
               : undefined
           }
-          data-testid="lark-agent-bind-feishu"
         >
-          <ExternalLink className="h-3 w-3" />
-          {t(($) => $.lark.bind_button_feishu)}
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogRegion("feishu")}
+            disabled={!agentId}
+            data-testid="lark-agent-bind-feishu"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t(($) => $.lark.bind_button_feishu)}
+          </Button>
+        </TooltipHint>
         {/* MUL-3083: Lark (international) bind entry is temporarily hidden —
             see LARK_INTL_CONNECT_ENABLED. Mainland Feishu (above) is
             unaffected. */}
         {LARK_INTL_CONNECT_ENABLED && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDialogRegion("lark")}
-            disabled={!agentId}
-            title={
+          <TooltipHint
+            label={
               agentName
                 ? t(($) => $.lark.bind_button_lark_title, { agent: agentName })
                 : undefined
             }
-            data-testid="lark-agent-bind-lark"
           >
-            <ExternalLink className="h-3 w-3" />
-            {t(($) => $.lark.bind_button_lark)}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDialogRegion("lark")}
+              disabled={!agentId}
+              data-testid="lark-agent-bind-lark"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {t(($) => $.lark.bind_button_lark)}
+            </Button>
+          </TooltipHint>
         )}
       </div>
       {dialogRegion && (
@@ -574,20 +581,21 @@ function LarkAgentBotConnectedBadge({
           </span>
           <span className="truncate">{t(($) => $.lark.agent_bot_connected_label)}</span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.lark.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.lark.disconnect)}
-          data-testid="lark-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.lark.disconnecting)
-            : t(($) => $.lark.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.lark.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.lark.disconnect)}
+            data-testid="lark-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.lark.disconnecting)
+              : t(($) => $.lark.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       {/* Row 2: secondary "Manage in Lark" link to the Bot's dev-console

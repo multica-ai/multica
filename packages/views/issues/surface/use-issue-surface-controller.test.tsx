@@ -1275,7 +1275,7 @@ describe("useIssueSurfaceController", () => {
       expect.objectContaining({ status: "cancelled", limit: 50, offset: 0 }),
     );
     expect(result.current.visibleStatuses).not.toContain("cancelled");
-    expect(result.current.hiddenStatuses).toContain("cancelled");
+    expect(result.current.columnStatuses).toContain("cancelled");
   });
 
   it("keeps cancelled issues out of the default visible surface", async () => {
@@ -1325,9 +1325,9 @@ describe("useIssueSurfaceController", () => {
     // is a normal status the filter can exclude, not an unlockable bucket.
     expect(result.current.visibleStatuses).toEqual(["todo"]);
     expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
-    // cancelled participates in show/hide like the rest — hidden here because
-    // the active filter excludes it.
-    expect(result.current.hiddenStatuses).toContain("cancelled");
+    // cancelled participates in show/hide like the rest: the filter hides it
+    // without dropping it from the columns Display offers.
+    expect(result.current.columnStatuses).toContain("cancelled");
   });
 
   it("treats a cancelled-only filter like any other narrowing status filter", async () => {

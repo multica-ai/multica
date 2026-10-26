@@ -31,6 +31,7 @@ import type {
 } from "@multica/core/types";
 import { findQuickActionTemplateToken } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -341,13 +342,13 @@ export function QuickActionsTab() {
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
-                          <Button
+                          <IconButton
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={t(($) => $.quick_actions.actions_open, { name: action.name })}
+                            label={t(($) => $.quick_actions.actions_open, { name: action.name })}
                           >
                             <MoreHorizontal className="size-4" />
-                          </Button>
+                          </IconButton>
                         }
                       />
                       <DropdownMenuContent align="end">
