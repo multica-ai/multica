@@ -38,6 +38,7 @@
     "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
+    "./runtimes/components/provider-logo": "./runtimes/components/provider-logo.tsx",
     "./billing": "./billing/index.ts",
     "./dashboard": "./dashboard/index.ts",
     "./squads": "./squads/index.ts",

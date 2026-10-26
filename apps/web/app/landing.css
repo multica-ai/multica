@@ -283,6 +283,10 @@
     --frost-image: url("/images/frost/changelog.webp");
 }
 
+.site-frost[data-frost="cloud"] {
+    --frost-image: url("/images/frost/cloud.webp");
+}
+
 .site-frost[data-frost="board"] {
     --frost-image: url("/images/frost/board.webp");
 }

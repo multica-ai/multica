@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { CloudPage } from "@/features/landing/site/cloud-page";
 import { PlaceholderPage } from "@/features/landing/site/site-page";
 import { PRODUCT_GROUPS, findPage, productHref } from "@/features/landing/site/sitemap";
 
@@ -28,5 +29,6 @@ export default async function Page(props: { params: Promise<Params> }) {
   const group = PRODUCT_GROUPS.find((g) => g.pages.some((page) => page.slug === slug));
   const page = findPage(PRODUCT_GROUPS, slug);
   if (!group || !page) notFound();
+  if (page.slug === "cloud") return <CloudPage />;
   return <PlaceholderPage eyebrow={group.title} page={page} />;
 }

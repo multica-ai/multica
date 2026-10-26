@@ -27,7 +27,7 @@ export const PRODUCT_GROUPS: PageGroup[] = [
   {
     title: "Surfaces",
     pages: [
-      { slug: "cloud", title: "Multica Cloud", summary: "The hosted workspace for your human and agent team." },
+      { slug: "cloud", title: "Multica Cloud", summary: "Run agents on cloud agent services, with no computer of yours left on." },
       { slug: "desktop", title: "Multica Desktop", summary: "A native app for macOS, Windows, and Linux." },
       { slug: "cli", title: "Multica CLI", summary: "Connect your machine and run agents from the terminal." },
       { slug: "chat", title: "Chat integrations", summary: "Work with agents from Slack, Lark, DingTalk, WeCom, and Telegram." },

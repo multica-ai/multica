@@ -79,6 +79,7 @@ export function ZoomCanvas({ width, height, children }: { width: number; height:
     const el = ref.current;
     if (!el) return;
     const resize = new ResizeObserver(() => {
+      if (!el.clientWidth) return;
       const zoom = Math.min(el.clientWidth / width, MAX_ZOOM);
       setFit({ zoom, width: Math.max(width, el.clientWidth / zoom), height: Math.max(height, el.clientHeight / zoom) });
     });

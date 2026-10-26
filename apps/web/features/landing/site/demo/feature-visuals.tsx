@@ -297,7 +297,7 @@ function ChatAvatar({ actor }: { actor: Actor }) {
   );
 }
 
-function ChatMessage({ actor, time, children }: { actor: Actor; time: string; children: ReactNode }) {
+export function ChatMessage({ actor, time, children }: { actor: Actor; time: string; children: ReactNode }) {
   return (
     <div className="flex gap-2.5">
       <ChatAvatar actor={actor} />
