@@ -335,6 +335,21 @@
     fill: color-mix(in oklab, var(--site-agent) 70%, var(--site-ink));
 }
 
+.site-agent-pill {
+    background-color: oklch(0.965 0.022 var(--site-pill-hue));
+    border-color: oklch(0.89 0.05 var(--site-pill-hue));
+    color: oklch(0.45 0.12 var(--site-pill-hue));
+    transition-property: background-color, border-color, color;
+    transition-duration: 500ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-agent-pill {
+        transition: none;
+    }
+}
+
 @theme {
     --animate-site-hop: site-hop 800ms cubic-bezier(0.45, 0, 0.25, 1) both;
 

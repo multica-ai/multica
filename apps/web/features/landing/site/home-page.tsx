@@ -82,6 +82,8 @@ function Hero() {
 
 const HERO_AGENTS = ["Claude Code", "Codex", "Hermes", "OpenCode"] as const;
 const HERO_AGENT_HOLDS = HERO_AGENTS.map(() => 2400);
+// OKLCH hue per agent, in HERO_AGENTS order.
+const HERO_AGENT_HUES = [40, 255, 155, 300];
 
 function HeroHeadline() {
   const { ref, step } = useStoryLoop(HERO_AGENT_HOLDS, 0);
@@ -106,35 +108,33 @@ function HeroHeadline() {
         <span aria-hidden className="block text-balance">
           Turn{" "}
           <span
-            className="relative inline-grid overflow-hidden py-[0.08em] -my-[0.08em] align-bottom transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-            style={{ width: widths?.[step] }}
+            className="site-agent-pill inline-flex rounded-[0.18em] border px-[0.2em]"
+            style={{ "--site-pill-hue": HERO_AGENT_HUES[step] } as CSSProperties}
           >
-            {HERO_AGENTS.map((name, index) => {
-              const previous = (step - 1 + HERO_AGENTS.length) % HERO_AGENTS.length;
-              return (
+            <span
+              className="inline-grid overflow-hidden transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+              style={{ width: widths?.[step] }}
+            >
+              {HERO_AGENTS.map((name, index) => (
                 <span
                   key={name}
                   ref={(el) => {
                     measures.current[index] = el;
                   }}
                   className={cn(
-                    "col-start-1 row-start-1 inline-flex w-max items-center gap-[0.2em] whitespace-nowrap transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
-                    index === step
-                      ? "translate-y-0 opacity-100"
-                      : index === previous
-                        ? "-translate-y-[70%] opacity-0"
-                        : "translate-y-[70%] opacity-0",
+                    "col-start-1 row-start-1 inline-flex w-max items-center gap-[0.2em] whitespace-nowrap transition-[opacity,filter] ease-out motion-reduce:transition-none",
+                    index === step ? "opacity-100 blur-none delay-150 duration-300" : "opacity-0 blur-[3px] duration-150",
                   )}
                 >
                   <ProviderMark name={name} />
                   {name}
                 </span>
-              );
-            })}
+              ))}
+            </span>
           </span>{" "}
           into a teammate.
         </span>
-        <span aria-hidden className="block text-balance text-site-muted">
+        <span aria-hidden className="hidden text-balance text-site-muted sm:block">
           Build a team of humans and agents.
         </span>
       </h1>
