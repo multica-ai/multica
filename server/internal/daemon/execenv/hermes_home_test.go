@@ -829,3 +829,21 @@ func mustWrite(t *testing.T, path, content string) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+func TestHermesCatalogRootsAgreeWithTaskOverlay(t *testing.T) {
+	sharedHome := t.TempDir()
+	env := map[string]string{"HERMES_HOME": sharedHome, "TEAM_SKILLS": filepath.Join(sharedHome, "team")}
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "skills:\n  external_dirs: ['relative', '${TEAM_SKILLS}', '${HERMES_HOME}/more', 'relative']\n")
+	overlay := filepath.Join(t.TempDir(), "overlay")
+	if _, err := prepareHermesHome(overlay, sharedHome, false, []SkillContextForEnv{{Name: "Bound", Content: "bound"}}, env, "", "", testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := HermesSkillRoots(sharedHome, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := hermesExternalDirs(t, filepath.Join(overlay, "config.yaml"))
+	if strings.Join(roots, "\n") != strings.Join(got, "\n") {
+		t.Fatalf("catalog=%v execution=%v", roots, got)
+	}
+}

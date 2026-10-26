@@ -82,7 +82,7 @@ const (
 // can have POST, heartbeat and poll land on different nodes and still agree
 // on the request's state.
 type LocalSkillListStore interface {
-	Create(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error)
+	Create(ctx context.Context, input LocalSkillListRequestInput) (*RuntimeLocalSkillListRequest, error)
 	Get(ctx context.Context, id string) (*RuntimeLocalSkillListRequest, error)
 	// HasPending is a cheap read-only probe that reports whether the runtime
 	// has at least one pending request. Callers on the hot path (e.g. the
@@ -201,18 +201,28 @@ type RuntimeLocalMcpServerSummary struct {
 	Enabled   bool   `json:"enabled"`
 }
 
+// LocalSkillListRequestInput pins an agent catalog to the configuration at
+// enqueue time. Empty AgentID explicitly selects the runtime-default catalog.
+type LocalSkillListRequestInput struct {
+	RuntimeID      string
+	AgentID        string
+	AgentUpdatedAt string
+}
+
 type RuntimeLocalSkillListRequest struct {
-	ID           string                         `json:"id"`
-	RuntimeID    string                         `json:"runtime_id"`
-	Status       RuntimeLocalSkillRequestStatus `json:"status"`
-	Skills       []RuntimeLocalSkillSummary     `json:"skills,omitempty"`
-	Supported    bool                           `json:"supported"`
-	McpServers   []RuntimeLocalMcpServerSummary `json:"mcp_servers,omitempty"`
-	McpSupported bool                           `json:"mcp_supported"`
-	Error        string                         `json:"error,omitempty"`
-	CreatedAt    time.Time                      `json:"created_at"`
-	UpdatedAt    time.Time                      `json:"updated_at"`
-	RunStartedAt *time.Time                     `json:"-"`
+	AgentID        string                         `json:"agent_id,omitempty"`
+	AgentUpdatedAt string                         `json:"agent_updated_at,omitempty"`
+	ID             string                         `json:"id"`
+	RuntimeID      string                         `json:"runtime_id"`
+	Status         RuntimeLocalSkillRequestStatus `json:"status"`
+	Skills         []RuntimeLocalSkillSummary     `json:"skills,omitempty"`
+	Supported      bool                           `json:"supported"`
+	McpServers     []RuntimeLocalMcpServerSummary `json:"mcp_servers,omitempty"`
+	McpSupported   bool                           `json:"mcp_supported"`
+	Error          string                         `json:"error,omitempty"`
+	CreatedAt      time.Time                      `json:"created_at"`
+	UpdatedAt      time.Time                      `json:"updated_at"`
+	RunStartedAt   *time.Time                     `json:"-"`
 }
 
 type RuntimeLocalSkillImportRequest struct {
@@ -250,7 +260,7 @@ func NewInMemoryLocalSkillListStore() *InMemoryLocalSkillListStore {
 	return &InMemoryLocalSkillListStore{requests: make(map[string]*RuntimeLocalSkillListRequest)}
 }
 
-func (s *InMemoryLocalSkillListStore) Create(_ context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
+func (s *InMemoryLocalSkillListStore) Create(_ context.Context, input LocalSkillListRequestInput) (*RuntimeLocalSkillListRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -261,12 +271,14 @@ func (s *InMemoryLocalSkillListStore) Create(_ context.Context, runtimeID string
 	}
 
 	req := &RuntimeLocalSkillListRequest{
-		ID:        randomID(),
-		RuntimeID: runtimeID,
-		Status:    RuntimeLocalSkillPending,
-		Supported: true,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:             randomID(),
+		RuntimeID:      input.RuntimeID,
+		AgentID:        input.AgentID,
+		AgentUpdatedAt: input.AgentUpdatedAt,
+		Status:         RuntimeLocalSkillPending,
+		Supported:      true,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	s.requests[req.ID] = req
 	return req, nil
@@ -592,6 +604,52 @@ type runtimeIDAndWorkspace struct {
 	ownerID     string
 }
 
+func (h *Handler) requireLocalSkillAgentAccess(w http.ResponseWriter, r *http.Request, rt runtimeIDAndWorkspace, agentID string) (db.Agent, bool) {
+	a, ok := h.loadAgentForUser(w, r, agentID)
+	if !ok {
+		return db.Agent{}, false
+	}
+	if uuidToString(a.WorkspaceID) != rt.workspaceID || !a.RuntimeID.Valid || uuidToString(a.RuntimeID) != rt.runtimeID {
+		writeError(w, http.StatusConflict, "agent is not assigned to this runtime")
+		return db.Agent{}, false
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), rt.workspaceID)
+	if !h.canAccessPrivateAgent(r.Context(), a, actorType, actorID, rt.workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this agent")
+		return db.Agent{}, false
+	}
+	return a, true
+}
+
+// pendingLocalSkillList resolves secret-bearing agent settings only when
+// dispatching to its assigned daemon. They are never stored in the catalog.
+func (h *Handler) pendingLocalSkillList(ctx context.Context, req *RuntimeLocalSkillListRequest) (*protocol.DaemonHeartbeatPendingLocalSkills, error) {
+	pending := &protocol.DaemonHeartbeatPendingLocalSkills{ID: req.ID}
+	if req.AgentID == "" {
+		return pending, nil
+	}
+	a, err := h.Queries.GetAgent(ctx, parseUUID(req.AgentID))
+	if err != nil {
+		return nil, errors.New("agent is unavailable; refresh the catalog")
+	}
+	if !a.RuntimeID.Valid || uuidToString(a.RuntimeID) != req.RuntimeID || a.UpdatedAt.Time.UTC().Format(time.RFC3339Nano) != req.AgentUpdatedAt {
+		return nil, errors.New("agent configuration changed; refresh the catalog")
+	}
+	scope := &protocol.LocalSkillAgentScope{AgentID: req.AgentID}
+	if len(a.CustomArgs) > 0 {
+		if err := json.Unmarshal(a.CustomArgs, &scope.CustomArgs); err != nil {
+			return nil, errors.New("invalid agent arguments")
+		}
+	}
+	if len(a.CustomEnv) > 0 {
+		if err := json.Unmarshal(a.CustomEnv, &scope.CustomEnv); err != nil {
+			return nil, errors.New("invalid agent environment")
+		}
+	}
+	pending.AgentScope = scope
+	return pending, nil
+}
+
 func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
@@ -603,7 +661,20 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	req, err := h.LocalSkillListStore.Create(r.Context(), rt.runtimeID)
+	input := LocalSkillListRequestInput{RuntimeID: rt.runtimeID}
+	if agentID := r.URL.Query().Get("agent_id"); agentID != "" {
+		if rt.provider != "hermes" {
+			writeError(w, http.StatusBadRequest, "agent-scoped discovery is only supported for Hermes")
+			return
+		}
+		a, ok := h.requireLocalSkillAgentAccess(w, r, rt, agentID)
+		if !ok {
+			return
+		}
+		input.AgentID = uuidToString(a.ID)
+		input.AgentUpdatedAt = a.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	req, err := h.LocalSkillListStore.Create(r.Context(), input)
 	if err != nil {
 		slog.Warn("enqueue local skills request failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request")
@@ -632,6 +703,16 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if req.AgentID != "" {
+		a, ok := h.requireLocalSkillAgentAccess(w, r, rt, req.AgentID)
+		if !ok {
+			return
+		}
+		if a.UpdatedAt.Time.UTC().Format(time.RFC3339Nano) != req.AgentUpdatedAt {
+			writeError(w, http.StatusConflict, "agent configuration changed; refresh the catalog")
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, req)
 }
 
@@ -746,6 +827,7 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 	}
 
 	var body struct {
+		AgentID      string                         `json:"agent_id"`
 		Status       string                         `json:"status"`
 		Skills       []RuntimeLocalSkillSummary     `json:"skills"`
 		Supported    *bool                          `json:"supported"`
@@ -758,6 +840,10 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if body.Status == "completed" && body.AgentID != req.AgentID {
+		body.Status = "failed"
+		body.Error = "daemon did not honor the agent skill scope; update the daemon and refresh"
+	}
 	if body.Status == "completed" {
 		supported := true
 		if body.Supported != nil {
