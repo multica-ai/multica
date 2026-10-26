@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -82,7 +83,14 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				if tt.IsAidoOwner && !aidoOwnerRequestAllowed(r, queries, tt) {
+				// Current binding is authoritative even for legacy/raced tokens
+				// whose persisted scope bit was never narrowed. Fail closed on DB errors.
+				_, bindingErr := queries.GetAIDOwnerBinding(r.Context(), tt.AgentID)
+				if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
+					http.Error(w, `{"error":"task capability unavailable"}`, http.StatusServiceUnavailable)
+					return
+				}
+				if (tt.IsAidoOwner || bindingErr == nil) && !aidoOwnerRequestAllowed(r, queries, tt) {
 					http.Error(w, `{"error":"AIDO task capability denied"}`, http.StatusForbidden)
 					return
 				}

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/jackc/pgx/v5/pgtype"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,102 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// Exercise both transaction orders with independent connections. A timeout
+// bounds failures; pg_blocking_pids proves the second operation actually waits.
+func TestAIDOwnerConcurrentBindingMint(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, bindingFirst := range []bool{true, false} {
+		t.Run(fmt.Sprint("binding-first=", bindingFirst), func(t *testing.T) {
+			agentID := createHandlerTestAgent(t, "scope-race", []byte("[]"))
+			runtimeID := handlerTestRuntimeID(t)
+			var taskID string
+			if err := testPool.QueryRow(ctx, `INSERT INTO agent_task_queue(agent_id,runtime_id,status) VALUES($1,$2,'running') RETURNING id`, agentID, runtimeID).Scan(&taskID); err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := auth.GenerateAgentTaskToken()
+			a, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Rollback(ctx)
+			b, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer b.Rollback(ctx)
+			var pid int
+			if err := b.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				t.Fatal(err)
+			}
+			bind := func(q *db.Queries) error {
+				_, err := q.CreateAIDOwnerBinding(ctx, db.CreateAIDOwnerBindingParams{AgentID: parseUUID(agentID), RuntimeID: parseUUID(runtimeID)})
+				return err
+			}
+			mint := func(q *db.Queries) error {
+				_, err := q.CreateTaskToken(ctx, db.CreateTaskTokenParams{TokenHash: auth.HashToken(raw), TaskID: parseUUID(taskID), AgentID: parseUUID(agentID), WorkspaceID: parseUUID(testWorkspaceID), UserID: parseUUID(testUserID), ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}})
+				return err
+			}
+			first, second := bind, mint
+			if !bindingFirst {
+				first, second = mint, bind
+			}
+			if err := first(testHandler.Queries.WithTx(a)); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- second(testHandler.Queries.WithTx(b)) }()
+			blocked := false
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				if err := testPool.QueryRow(ctx, `SELECT cardinality(pg_blocking_pids($1))>0`, pid).Scan(&blocked); err != nil {
+					break
+				}
+				if blocked {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			// Always release and collect the concurrent operation before reporting.
+			commitErr := a.Commit(ctx)
+			secondErr := <-done
+			if !blocked {
+				t.Error("second operation escaped transaction serialization")
+			}
+			if commitErr != nil || secondErr != nil {
+				t.Fatal(commitErr, secondErr)
+			}
+			if err := b.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			token, err := testHandler.Queries.GetTaskTokenByHash(ctx, auth.HashToken(raw))
+			if err != nil || !token.IsAidoOwner {
+				t.Fatal("raced token retained broad scope", err)
+			}
+			req := httptest.NewRequest("GET", "/api/issues", nil)
+			req.Header.Set("Authorization", "Bearer "+raw)
+			w := httptest.NewRecorder()
+			middleware.Auth(testHandler.Queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })).ServeHTTP(w, req)
+			if w.Code != 403 {
+				t.Fatal("raced token escaped", w.Code)
+			}
+			t.Log("second transaction blocked; committed token scoped=true; GET /api/issues=403")
+			stale, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = stale.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`)
+			if err == nil {
+				err = mint(testHandler.Queries.WithTx(stale))
+			}
+			_ = stale.Rollback(ctx)
+			if err == nil || !strings.Contains(err.Error(), "READ COMMITTED") {
+				t.Fatal("stale-snapshot mint did not fail closed", err)
+			}
+		})
+	}
+}
 
 func TestAIDOwnerTaskCapabilityBoundary(t *testing.T) {
 	ctx := context.Background()
@@ -113,6 +210,28 @@ func TestAIDOwnerTaskCapabilityBoundary(t *testing.T) {
 	}
 	ownAttachment, otherAttachment := attachment(ownSession), attachment(otherSession)
 	pass := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }
+	// Simulate a legacy token left broad by migration 135's mint race.
+	// Only this isolated fixture transaction bypasses the sticky-scope trigger.
+	legacyTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacyTx.Rollback(ctx)
+	if _, err := legacyTx.Exec(ctx, `ALTER TABLE task_token DISABLE TRIGGER aido_token_scope_guard`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyTx.Exec(ctx, `UPDATE task_token SET is_aido_owner=false WHERE token_hash=$1`, auth.HashToken(scopedToken)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyTx.Exec(ctx, `ALTER TABLE task_token ENABLE TRIGGER aido_token_scope_guard`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacyTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w := invoke(scopedToken, "GET", "/api/issues", nil, pass); w.Code != 403 {
+		t.Fatal("legacy false scope escaped current binding", w.Code)
+	}
 	for _, path := range []string{"/api/tasks/" + ownTask + "/messages", "/api/attachments/" + ownAttachment + "/download"} {
 		if w := invoke(scopedToken, "GET", path, nil, pass); w.Code != 200 {
 			t.Fatalf("own read %s %d", path, w.Code)
