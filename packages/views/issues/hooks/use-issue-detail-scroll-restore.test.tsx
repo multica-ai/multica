@@ -18,11 +18,13 @@ function Harness({
   ready = true,
   disabled = false,
   overrideTop,
+  pendingImage = false,
 }: {
   restoreKey: string;
   ready?: boolean;
   disabled?: boolean;
   overrideTop?: number;
+  pendingImage?: boolean;
 }) {
   const [scrollContainerEl, setScrollContainerEl] =
     useState<HTMLDivElement | null>(null);
@@ -42,6 +44,9 @@ function Harness({
       style={{ height: 100, overflowY: "auto" }}
     >
       <div style={{ height: 2000 }} />
+      {pendingImage ? (
+        <img data-testid="description-image" src="/e2e-description.svg" alt="" />
+      ) : null}
     </div>
   );
 }
@@ -233,6 +238,69 @@ describe("useIssueDetailScrollRestore", () => {
     expect(scroller.scrollTop).toBe(520);
   });
 
+  it("keeps restoring while a late attachment image is still loading", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+
+    setScroll(scroller, 520);
+    rerender(<Harness restoreKey={issueB} />);
+    rerender(<Harness restoreKey={issueA} pendingImage />);
+    expect(scroller.scrollTop).toBe(520);
+
+    const image = getByTestId("description-image") as HTMLImageElement;
+    let imageComplete = false;
+    Object.defineProperty(image, "complete", {
+      configurable: true,
+      get: () => imageComplete,
+    });
+
+    flushNextAnimationFrame();
+    flushNextAnimationFrame();
+    flushNextAnimationFrame();
+
+    // Attachment metadata swaps the image URL after the first decode and the
+    // re-decode moves scrollTop; the pending image keeps the restore alive
+    // through that second layout pass.
+    scroller.scrollTop = 214;
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(520);
+
+    // Once the image settles the loop releases, so a later write wins.
+    imageComplete = true;
+    flushNextAnimationFrame();
+    scroller.scrollTop = 214;
+    flushNextAnimationFrame();
+    expect(scroller.scrollTop).toBe(214);
+  });
+
+  it("stops a held restore when the user scrolls during the hold", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+
+    setScroll(scroller, 520);
+    rerender(<Harness restoreKey={issueB} />);
+    rerender(<Harness restoreKey={issueA} pendingImage />);
+
+    const image = getByTestId("description-image") as HTMLImageElement;
+    Object.defineProperty(image, "complete", {
+      configurable: true,
+      get: () => false,
+    });
+
+    flushNextAnimationFrame();
+
+    fireEvent.wheel(scroller);
+    scroller.scrollTop = 214;
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(214);
+  });
+
   it("cancels a pending restore retry when the issue key changes", () => {
     const issueA = nextKey("issue-a");
     const issueB = nextKey("issue-b");
@@ -307,6 +375,28 @@ describe("useIssueDetailScrollRestore", () => {
 
     rerender(<Harness restoreKey={issueA} overrideTop={340} />);
     flushNextAnimationFrame();
+    expect(scroller.scrollTop).toBe(340);
+  });
+
+  it("preserves a retained surface offset and accepts a later memento", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+    setScroll(scroller, 500);
+
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      get: () => 0,
+    });
+    scroller.scrollTop = 0;
+    rerender(<Harness restoreKey={issueB} />);
+
+    rerender(<Harness restoreKey={issueA} />);
+    expect(scroller.scrollTop).toBe(500);
+
+    rerender(<Harness restoreKey={issueA} overrideTop={340} />);
     expect(scroller.scrollTop).toBe(340);
   });
 
