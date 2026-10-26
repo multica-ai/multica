@@ -31,6 +31,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
+import { queueConstraintPhrase } from "../queue-wait-copy";
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
@@ -135,7 +136,15 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : current?.kind === "thinking" ? thinkingPreview(current.item.content, formatText) || t(($) => $.inline_run.thinking)
     : current?.kind === "error" ? t(($) => $.inline_run.error)
     : t(($) => $.inline_run.waiting_response);
-  const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
+  // A queued run names the constraint the last claim poll recorded (#8551);
+  // without one (older server, no attribution yet) it keeps the plain copy.
+  // The status chip already announces "Queued" (sr-only while progress shows),
+  // so the summary line carries only the constraint phrase itself — prefixing
+  // it would read the same state twice. The phrase is a snapshot, not a live
+  // verdict — see queue-wait-copy.ts.
+  const queueConstraint = task.status === "queued" ? queueConstraintPhrase(task.queue_constraint, t) : undefined;
+  const summary = task.status === "queued"
+    ? queueConstraint ?? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : activitySummary;

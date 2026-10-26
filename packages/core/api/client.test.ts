@@ -1135,6 +1135,33 @@ describe("ApiClient", () => {
     expect(tasks[2]?.usage?.[0]?.output_tokens).toBe(0);
   });
 
+  it("keeps task runs when the queue wait constraint is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            // A queued run with a known constraint passes it through.
+            { id: "task-1", status: "queued", queue_constraint: "agent_capacity" },
+            // Not a string — must degrade to "absent", not drop the run.
+            { id: "task-2", status: "queued", queue_constraint: 7 },
+            // An older server that never sends the field.
+            { id: "task-3", status: "queued" },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1");
+
+    expect(tasks).toHaveLength(3);
+    expect(tasks[0]?.queue_constraint).toBe("agent_capacity");
+    expect(tasks[1]?.queue_constraint).toBeUndefined();
+    expect(tasks[2]?.queue_constraint).toBeUndefined();
+  });
+
   it("keeps agent detail task history on the lightweight endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

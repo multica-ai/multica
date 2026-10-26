@@ -3587,7 +3587,10 @@ func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.
 // ClaimTask atomically claims the next queued task for an agent on its current
 // runtime, respecting max_concurrent_tasks.
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	return s.claimTask(ctx, agentID, pgtype.UUID{}, claimScope{claimPath: claimPathAgent})
+	// The agent path holds no candidate rows, so it contributes no
+	// queue-wait attribution (route B writes only from the poll loops).
+	task, _, err := s.claimTask(ctx, agentID, pgtype.UUID{}, claimScope{claimPath: claimPathAgent})
+	return task, err
 }
 
 // claimTask is the runtime-scoped claim primitive used by daemon poll paths.
@@ -3595,19 +3598,21 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 // agent's currently bound runtime. Scoping the SQL claim itself prevents an
 // offline candidate on runtime A from causing the same agent's task on runtime
 // B to be dispatched and then dropped by the caller's runtime guard.
-func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.UUID, scope claimScope) (*db.AgentTaskQueue, error) {
+func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.UUID, scope claimScope) (claimed *db.AgentTaskQueue, attempt claimAttempt, err error) {
 	start := time.Now()
 	outcome := "unknown"
 	var getAgentMs, countRunningMs, claimAgentMs, reanchorMs, updateStatusMs, dispatchMs int64
-	var claimed *db.AgentTaskQueue
 	var reclaimCheckAfter time.Time
 	var decisionDetail claimDecisionDetail
 	defer func() {
 		s.maybeLogClaimSlow(agentID, outcome, start, getAgentMs, countRunningMs, claimAgentMs, reanchorMs, updateStatusMs, dispatchMs)
 		s.recordClaimDecision(agentID, runtimeID, outcome, scope, decisionDetail)
+		// Surface the attempt to the poll loops for queue-wait attribution
+		// (route B): claimTask itself never holds the candidate task ids.
+		attempt = claimAttempt{Outcome: outcome}
 	}()
 
-	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+	err = s.runInTx(ctx, func(qtx *db.Queries) error {
 		t0 := time.Now()
 		agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
 		getAgentMs = time.Since(t0).Milliseconds()
@@ -3693,10 +3698,10 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		if outcome == "unknown" {
 			outcome = "error_transaction"
 		}
-		return nil, err
+		return nil, attempt, err
 	}
 	if claimed == nil {
-		return nil, nil
+		return nil, attempt, nil
 	}
 	s.trackTaskForReclaim(*claimed, reclaimCheckAfter)
 
@@ -3717,7 +3722,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 	dispatchMs = time.Since(t0).Milliseconds()
 
 	outcome = "claimed"
-	return claimed, nil
+	return claimed, attempt, nil
 }
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
@@ -3838,11 +3843,18 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	triedAgents := map[string]struct{}{}
 	// Candidate rows per agent, counted before the loop so each claimTask call
 	// can report whether the runtime saw work for that agent (the #8551
-	// attribution split between candidates_blocked and no_candidates).
+	// attribution split between candidates_blocked and no_candidates). The
+	// same pass keeps the rows themselves (poll order preserved) so the
+	// queue-wait attribution below can address them.
 	candidatesByAgent := make(map[string]int, len(tasks))
+	agentCandidates := make(map[string][]db.AgentTaskQueue, len(tasks))
 	for i := range tasks {
-		candidatesByAgent[util.UUIDToString(tasks[i].AgentID)]++
+		agentKey := util.UUIDToString(tasks[i].AgentID)
+		candidatesByAgent[agentKey]++
+		agentCandidates[agentKey] = append(agentCandidates[agentKey], tasks[i])
 	}
+	// Final claimTask outcome per attempted agent, keyed the same way.
+	attempts := make(map[string]claimAttempt, len(tasks))
 	var claimed *db.AgentTaskQueue
 	for _, candidate := range tasks {
 		agentKey := util.UUIDToString(candidate.AgentID)
@@ -3852,7 +3864,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
-		task, err := s.claimTask(ctx, candidate.AgentID, runtimeID, claimScope{
+		task, attempt, err := s.claimTask(ctx, candidate.AgentID, runtimeID, claimScope{
 			claimPath:  claimPathRuntime,
 			candidates: candidatesByAgent[agentKey],
 		})
@@ -3861,6 +3873,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			outcome = "error_claim"
 			return nil, err
 		}
+		attempts[agentKey] = attempt
 		if task != nil && task.RuntimeID == runtimeID {
 			claimed = task
 			break
@@ -3880,6 +3893,11 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			"candidates", len(tasks),
 		)
 	}
+
+	// Persist why the still-queued candidates are waiting (route B). After the
+	// loop, never inside a claim transaction; the error return above skips it
+	// and lets the next poll re-evaluate.
+	s.recordQueueWaitReasons(ctx, agentCandidates, attempts)
 
 	return claimed, nil
 }
@@ -4217,11 +4235,17 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// per-(issue, agent) serialization, capacity caps, and dispatch side effects.
 	triedAgents := make(map[string]struct{}, len(candidates))
 	// Candidate rows per agent for the claim-decision scope; see the singular
-	// path above for why it is counted before the loop.
+	// path above for why it is counted before the loop. The rows themselves
+	// (poll order preserved) feed the queue-wait attribution below.
 	candidatesByAgent := make(map[string]int, len(candidates))
+	agentCandidates := make(map[string][]db.AgentTaskQueue, len(candidates))
 	for i := range candidates {
-		candidatesByAgent[util.UUIDToString(candidates[i].AgentID)]++
+		agentKey := util.UUIDToString(candidates[i].AgentID)
+		candidatesByAgent[agentKey]++
+		agentCandidates[agentKey] = append(agentCandidates[agentKey], candidates[i])
 	}
+	// Final claimTask outcome per attempted agent, keyed the same way.
+	attempts := make(map[string]claimAttempt, len(candidates))
 	for i := range candidates {
 		if len(claimed) >= maxTasks {
 			slog.Debug("batch claim: reached max tasks",
@@ -4236,7 +4260,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 		triedAgents[agentKey] = struct{}{}
 
-		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID, claimScope{
+		task, attempt, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID, claimScope{
 			claimPath:  claimPathBatch,
 			candidates: candidatesByAgent[agentKey],
 		})
@@ -4253,6 +4277,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			}
 			return nil, fmt.Errorf("claim task: %w", err)
 		}
+		attempts[agentKey] = attempt
 		if task == nil {
 			continue
 		}
@@ -4268,6 +4293,12 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 		claimed = append(claimed, *task)
 	}
+
+	// Persist why the still-queued candidates are waiting (route B). The two
+	// partial-success returns above skip it by design — the next poll
+	// re-evaluates — and candidates never attempted (maxTasks cap) get no
+	// attribution: daemon_capacity evidence stays out of v1.
+	s.recordQueueWaitReasons(ctx, agentCandidates, attempts)
 
 	return claimed, nil
 }

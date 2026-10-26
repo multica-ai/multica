@@ -379,6 +379,23 @@ describe("InlineCommentRun", () => {
     expect(api.listTaskMessages).not.toHaveBeenCalled();
   });
 
+  it("names the constraint holding a queued run back", () => {
+    setup(task({ status: "queued", queue_constraint: "agent_capacity" }));
+    expect(screen.getByText("the agent is at its concurrency limit")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for an available agent.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the plain queued copy without attribution and for unknown constraints", () => {
+    setup(task({ status: "queued" }));
+    expect(screen.getByText("Waiting for an available agent.")).toBeInTheDocument();
+  });
+
+  it("keeps the plain queued copy for a constraint this build does not know", () => {
+    setup(task({ status: "queued", queue_constraint: "some_future_value" }));
+    expect(screen.getByText("Waiting for an available agent.")).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("some_future_value");
+  });
+
   it.each(["queued", "running"] as const)("confirms stopping the specific %s run before its reply", async (state) => {
     vi.mocked(api.cancelTask).mockResolvedValue(task({ status: "cancelled" }));
     setup(task({ status: state }));

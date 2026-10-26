@@ -2041,6 +2041,11 @@ export const AgentTaskSchema = z.object({
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
   failure_reason: z.string().optional(),
+  // Why the last claim poll left this run queued (#8551): agent_capacity,
+  // attempted_unclaimed, agent_rebound, agent_unbound. Servers gate it on
+  // status === "queued"; malformed values degrade to "absent" so the row
+  // keeps today's queued copy instead of losing the run.
+  queue_constraint: z.string().optional().catch(undefined),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
   autopilot_run_id: z.string().optional(),

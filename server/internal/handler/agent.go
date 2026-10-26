@@ -437,6 +437,13 @@ type AgentTaskResponse struct {
 	Result             any                      `json:"result"`
 	Error              *string                  `json:"error"`
 	FailureReason      string                   `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	// QueueConstraint is why the last claim poll left this task queued
+	// (#8551 display half): agent_capacity, attempted_unclaimed, agent_rebound,
+	// or agent_unbound. Emitted only while status is 'queued' — the claim
+	// clears the column on the way out of the queue, mirroring wait_reason's
+	// lifecycle. Absent on older servers and on tasks with no attribution,
+	// which the client renders as today's bare queued copy.
+	QueueConstraint string `json:"queue_constraint,omitempty"`
 	Attempt            int32                    `json:"attempt"`
 	MaxAttempts        int32                    `json:"max_attempts"`
 	ParentTaskID       *string                  `json:"parent_task_id,omitempty"`
@@ -859,6 +866,14 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
 	}
+	// Gate the wait attribution on the status it describes, mirroring
+	// waitReasonForStatus: a reason on a non-queued row is a leftover from a
+	// previous wait (claim clears it, but terminal transitions don't have to)
+	// and must not read as a live constraint.
+	queueConstraint := ""
+	if t.Status == "queued" && t.QueueWaitReason.Valid {
+		queueConstraint = strings.TrimSpace(t.QueueWaitReason.String)
+	}
 	workDir := ""
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
@@ -898,6 +913,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,
+		QueueConstraint:        queueConstraint,
 		BranchName:             branchName,
 		Attempt:                t.Attempt,
 		MaxAttempts:            t.MaxAttempts,

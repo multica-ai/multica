@@ -740,7 +740,12 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    -- queue_wait_reason is cleared on the way out of 'queued' (same discipline
+    -- as wait_reason on StartAgentTask) so a later read can't conflate
+    -- "currently waiting on X" with "previously waited on X". Readers gate on
+    -- status='queued' as a second defense.
+    queue_wait_reason = NULL
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = @agent_id
@@ -788,6 +793,23 @@ WHERE id = (
     FOR UPDATE SKIP LOCKED
 )
 RETURNING *;
+
+-- name: UpdateQueueWaitReasons :exec
+-- Persists why this claim poll left the listed tasks queued (#8551 display
+-- half). One statement per poll, VALUES-joined, guarded twice against no-op
+-- writes: the caller diffs against the candidate row's current value first
+-- and skips the statement entirely, and the IS DISTINCT FROM filter keeps a
+-- concurrent write from re-dirtying rows that already hold the reason. The
+-- status='queued' fence keeps the write from landing on a row another poll
+-- just claimed.
+UPDATE agent_task_queue AS t
+SET queue_wait_reason = v.reason
+FROM (
+    SELECT unnest(@task_ids::uuid[]) AS task_id, unnest(@reasons::text[]) AS reason
+) AS v
+WHERE t.id = v.task_id
+  AND t.status = 'queued'
+  AND t.queue_wait_reason IS DISTINCT FROM v.reason;
 
 -- name: SetTaskDeliveredCommentIDs :one
 -- Replace (rather than append to) the delivery receipt for this claim. A stale
@@ -2176,7 +2198,7 @@ WHERE atq.runtime_id = $1
             OR r.visibility = 'private'
         )
   )
-ORDER BY atq.priority DESC, atq.created_at ASC;
+ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC;
 
 -- name: CancelSupersededDeferredRetriesForRuntimes :many
 -- Cancels deferred auto-retry rows that a newer active task has already
@@ -2297,7 +2319,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
             OR r.visibility = 'private'
         )
   )
-ORDER BY atq.priority DESC, atq.created_at ASC;
+ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC;
 
 -- name: NextDeferredTaskFireAtForRuntimes :one
 -- Returns the next future deferred task for a daemon's authorized runtime set,

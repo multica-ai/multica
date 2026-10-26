@@ -340,6 +340,14 @@ export interface AgentTask {
   // coarse values; `string & {}` admits the rest without collapsing the
   // hints.
   failure_reason?: TaskFailureReason | (string & {}) | "";
+  /**
+   * Why the last claim poll left this run queued (#8551): "agent_capacity",
+   * "attempted_unclaimed", "agent_rebound", or "agent_unbound". Sent only
+   * while status is "queued" — the backend clears it on claim — and omitted
+   * by older backends or runs with no attribution, where the UI keeps the
+   * plain queued copy.
+   */
+  queue_constraint?: string;
   /** The input comment was edited or deleted, invalidating this run. */
   cancelled_by_comment_change?: boolean;
   /** Present on cancellations recorded by a backend with actor provenance. */
