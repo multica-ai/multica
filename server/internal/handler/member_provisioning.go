@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -64,7 +65,7 @@ type provisionedMember struct {
 	user              db.User
 	member            db.Member
 	status            string
-	revokedInvitation string
+	revokedInvitation *db.WorkspaceInvitation
 }
 
 // ProvisionMembers pre-creates users and workspace memberships for a bounded
@@ -184,9 +185,11 @@ func (h *Handler) ProvisionMembers(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resp.Summary.AlreadyMember++
 		}
-		if provisioned.revokedInvitation != "" {
+		if inv := provisioned.revokedInvitation; inv != nil {
 			h.publish(protocol.EventInvitationRevoked, workspaceID, "member", actorID, map[string]any{
-				"invitation_id": provisioned.revokedInvitation,
+				"invitation_id":   uuidToString(inv.ID),
+				"invitee_email":   inv.InviteeEmail,
+				"invitee_user_id": uuidToPtr(inv.InviteeUserID),
 			})
 		}
 		resp.Results = append(resp.Results, result)
@@ -231,6 +234,10 @@ func (h *Handler) provisionWorkspaceMember(r *http.Request, workspaceID pgtype.U
 }
 
 func (h *Handler) provisionWorkspaceMemberOnce(r *http.Request, workspaceID pgtype.UUID, email, role, name string) (provisionedMember, error) {
+	if auth.IsTemporarilyDisabledUserEmail(email) {
+		return provisionedMember{}, auth.ErrTemporarilyDisabledUser
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		return provisionedMember{}, err
@@ -258,6 +265,8 @@ func (h *Handler) provisionWorkspaceMemberOnce(r *http.Request, workspaceID pgty
 			return provisionedMember{}, err
 		}
 		createdUser = true
+	} else if auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
+		return provisionedMember{}, auth.ErrTemporarilyDisabledUser
 	}
 
 	member, memberErr := qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
@@ -283,14 +292,17 @@ func (h *Handler) provisionWorkspaceMemberOnce(r *http.Request, workspaceID pgty
 		}
 	}
 
-	if createdUser {
+	// Like AcceptInvitation, attaching a membership completes onboarding
+	// atomically. MarkUserOnboarded preserves an existing completion time.
+	// An already-member retry must leave the user's timestamps untouched.
+	if status != ProvisionMemberStatusAlreadyMember {
 		user, err = qtx.MarkUserOnboarded(r.Context(), user.ID)
 		if err != nil {
 			return provisionedMember{}, err
 		}
 	}
 
-	revokedInvitation := ""
+	var revokedInvitation *db.WorkspaceInvitation
 	invitation, err := qtx.GetPendingInvitationByEmail(r.Context(), db.GetPendingInvitationByEmailParams{
 		WorkspaceID:  workspaceID,
 		InviteeEmail: email,
@@ -299,7 +311,7 @@ func (h *Handler) provisionWorkspaceMemberOnce(r *http.Request, workspaceID pgty
 		if _, err := qtx.RevokeInvitation(r.Context(), invitation.ID); err != nil {
 			return provisionedMember{}, err
 		}
-		revokedInvitation = uuidToString(invitation.ID)
+		revokedInvitation = &invitation
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return provisionedMember{}, err
 	}
@@ -327,6 +339,9 @@ func (h *Handler) provisioningEmailAllowed(email string) bool {
 }
 
 func provisionMemberPublicError(err error) string {
+	if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+		return auth.TemporarilyDisabledUserError
+	}
 	if errors.Is(err, errProvisioningEmailNotAllowed) {
 		return err.Error()
 	}

@@ -56,9 +56,10 @@ func TestProvisionMembersExistingUserAddedWithoutProfileMutation(t *testing.T) {
 	}
 	var name string
 	var after time.Time
-	dbfx.QueryRow(t, `SELECT name, updated_at FROM "user" WHERE id=$1`, userID).Scan(&name, &after)
-	if name != "Original" || !before.Equal(after) {
-		t.Fatal("existing profile was mutated")
+	var onboardingRecorded bool
+	dbfx.QueryRow(t, `SELECT name, updated_at, onboarded_at IS NOT NULL AND onboarded_at = updated_at FROM "user" WHERE id=$1`, userID).Scan(&name, &after, &onboardingRecorded)
+	if name != "Original" || !onboardingRecorded || after.Before(before) {
+		t.Fatal("existing name changed or attachment onboarding bookkeeping is incorrect")
 	}
 }
 

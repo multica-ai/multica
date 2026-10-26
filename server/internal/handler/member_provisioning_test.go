@@ -173,7 +173,7 @@ func TestProvisionMembers_CreatesSeedUsersAndMemberships(t *testing.T) {
 		`, email, testWorkspaceID).Scan(&gotRole, &onboarded); err != nil {
 			t.Fatalf("load provisioned member %s: %v", email, err)
 		}
-		if gotRole != wantRole || onboarded != (email == newEmail) {
+		if gotRole != wantRole || !onboarded {
 			t.Fatalf("member %s: role=%q onboarded=%v", email, gotRole, onboarded)
 		}
 	}
